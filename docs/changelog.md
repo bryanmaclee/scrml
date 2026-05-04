@@ -2,13 +2,82 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files). Eleven dispatches landed in S53 (4 architectural fixes + 4 mechanical paperwork + DOC-E-RENAME + P4 CLI + AST-SHAPE-RENAME); **+85 tests vs S52 close, 0 regressions across all 11 dispatches**. F-ENGINE-001 RESOLVED + F-CHANNEL-003 FULLY RESOLVED + NR AUTHORITATIVE + state-type-routing.ts disposed + engine rename arc COMPLETE (keyword + TAB type-decl synthesis + internal vars + SPEC worked examples + error codes + user-facing docs + AST shape) + `scrml migrate` CLI shipped (Migrations 1+2). 44 commits past S52 close, all pushed. S51 was the systemic silent-failure sweep session: 12 dispatches (2 deep-dives + 10 fix dispatches) shipped in a single day, closing 9 P0s + many P1/P2s. Net +184 tests, 0 regressions across all dispatch waves. The validation principle (S49) is now mechanically realized for M1/M3/M4/M5/M6/M11 mechanisms; UVB (Unified Validation Bundle) closed 4 silent-failure mechanisms in one focused dispatch.
+Current baseline (2026-05-04 after S55 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files) — **UNCHANGED from S53 close**. Zero compiler/code changes this session — S55 was a pure deliberation session that closed the v0.next architectural design arc.
+
+Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files). Eleven dispatches landed in S53 (4 architectural fixes + 4 mechanical paperwork + DOC-E-RENAME + P4 CLI + AST-SHAPE-RENAME); **+85 tests vs S52 close, 0 regressions across all 11 dispatches**. F-ENGINE-001 RESOLVED + F-CHANNEL-003 FULLY RESOLVED + NR AUTHORITATIVE + state-type-routing.ts disposed + engine rename arc COMPLETE (keyword + TAB type-decl synthesis + internal vars + SPEC worked examples + error codes + user-facing docs + AST shape) + `scrml migrate` CLI shipped (Migrations 1+2). 44 commits past S52 close, all pushed. S51 was the systemic silent-failure sweep session: 12 dispatches (2 deep-dives + 10 fix dispatches) shipped in a single day, closing 9 P0s + many P1/P2s. Net +184 tests, 0 regressions across all dispatch waves. The validation principle (S49) is now mechanically realized for M1/M3/M4/M5/M6/M11 mechanisms; UVB (Unified Validation Bundle) closed 4 silent-failure mechanisms in one focused dispatch.
 
 **Backfill note:** S40, S41, S42 entries are missing from this log — captured in hand-offs + git log. S43 + S44 + S45 + S46 + S47 + S48 + S49 entries below; full backfill is open content todo.
 
 ---
 
 ## Recently Landed
+
+### 2026-05-04 (S55 CLOSED — **PIVOTAL session, massive wrap, deliberation arc complete**; 0 tests, 0 compiler changes, but the v0.next language design is locked)
+
+S55 opened by recovering from an S54 interrupt (the v0.next deliberation pipeline had completed Phase 0 synthesis + Phase 1+2 dives DD5-DD10 + Phase 3 DD5 debate, then crashed). User authorized a mode shift away from the dive/debate cadence in favor of direct PA-user discussion of the open-questions list surfaced by the v0.next-Mario design artifact. The session ran one sustained discussion thread; **21 architectural moves were locked**, the **north star ("UI as a fully-handled state machine") was articulated**, and at session end the **migration design surface dissolved entirely** when the user clarified there are no production scrml adopters (all current code is throwaway experimental).
+
+**Architectural moves catalog at S55 close (21 total):** Moves 1-6 + 8 from S54 synthesis; Moves 9-20 added/refined in S55. Move 7 (multi-close `<///>`) DROPPED — handled by 6nz editor auto-expansion (cross-repo message dropped). Move 21 (two-phase migration) DROPPED — no users to migrate.
+
+**Decisions locked S55 (verbatim user inputs preserved in `scrml-support/user-voice-scrmlTS.md` Session 55):**
+
+- **Move 9 (no debate):** bare-variant `marioState = .Small` parses as qualified when LHS/parameter type known. TS-shape inference.
+- **Move 10:** positional binding `<state a b c> = (1,2,3)` legal only when state's shape is fixed by predefined enum/match/engine type. Compiler-gated.
+- **V5-strict (Move 3 revised):** `@` is canonical, NOT sugar. Bare names in expressions are LOCALS only. Two-form access (`<v>` structural + `@v` canonical). C9 rescinded — `@` is not JS-framework concession; framework precedent was correct.
+- **Move 11:** scoped hoisting (Position D) + lint warning on out-of-order use + `pinned` per-declaration opt-out keyword (upgrades lint to error). TDZ-1 model — no user-visible TDZ window.
+- **Move 7 DROPPED:** multi-close shorthand → 6nz editor auto-expansion. General principle: ergonomic shortcuts that fail readability test belong in editor, not grammar.
+- **Move 12:** engine validates direct writes via `rule=` contract. `@marioState = .Big` silent-validated; throws on invalid; compile-time check inside state-child bodies.
+- **Move 13:** `.advance(.X)` explicit-throws variant for assert-must-work transitions. `.tryAdvance` (silent no-op) explicitly rejected — silent failures hide bugs.
+- **Move 14:** `effect=` attribute (single-target one-shot) + `<onTransition to/from once if=...>` structural element (multi-target / attribute-bearing). On-leave default semantics. Lifecycle elements `<onEnter>`/`<onLeave>` skipped — covered by `<onTransition from/to>`.
+- **State-children-as-sugar refinement:** `<Small rule=...>{body}</>` is sugar over `if=(@engineVar == .ThisVariant)` + rule= contract. Bodies optional. Mixed engines (some bodied, some bare) legal.
+- **Snippets handle shared chrome** — no `<chrome>` template, no `<*>` matcher. Existing language mechanism suffices.
+- **Move 15:** `:`-shorthand for single-expression body when no `</>` closer present. `<tag attrs> : expr`. Bare body otherwise (canonical HTML semantics preserved). Mandatory whitespace around `:`.
+- **`W-LIFECYCLE-CANDIDATE` lint (opt-out):** boolean state in 3+ structural `if=` sites flags as enum-engine-promotion candidate. Lifecycle-as-engine is the design pattern. Connection to "exhaustively provable" goal — booleans defeat the prover; enum-engines enable it.
+- **Move 16:** auto-derived var name = lowercase-first-run of `for=` type. `var=` attribute for override / disambiguation.
+- **Move 17:** `initial=` attribute required on non-derived engines (lint warns if omitted, defaults to first state-child). Forbidden on derived engines.
+- **Move 18:** engine `<EngineName/>` use-site lives only for cross-file mount; same-file decl-IS-mount; multi-instance marinates.
+- **Move 19:** channel shape under v0.next: file-level (NOT inside `<program>`); drops `@shared` modifier; auto-declares variable per Move 16; V5-strict body.
+- **Schemas unchanged** — principled exception survives.
+- **Move 20:** components stay distinct from engines (Position 1 from multi-instance thread). Components are multi-instance vehicle; engines/channels/schemas are singleton-by-design. Heuristic: app-lifecycle/singleton → engine; widget/reusable/per-instance → component.
+- **Move 21 DROPPED at session end** — no migration story; v0.next IS scrml.
+
+**The north star (proposed §1.4 of synthesis, captured S55):**
+> the UI of an application SHOULD be a fully handled state machine (engine in scrml case). but development is a process
+
+The structural shape of the UI tree IS the structural shape of the application's state. With the process clause: apps don't START at the north star; they EVOLVE toward it. Compiler nudges (lint), kickstarter teaches the destination, language doesn't ENFORCE the shape. Connection to S54's "exhaustively provable" goal: enum-engines enable structural exhaustiveness checking; booleans-as-lifecycle defeat it.
+
+**THE PIVOTAL CORRECTION — no migration:**
+> there is NO ONE writing anything but purely experamental scrml, 100% throw-away code, we dont need to worry about any of that. we just need to fix the compiler, kickstarter, turorial, docs, etc.
+
+This collapsed Move 21, dropped the v0.compat coexistence design, and reframed implementation as "fix scrml to be what it should be" rather than "migrate the world to a new version." Implementation work surface named: compiler + SPEC + PIPELINE + kickstarter + tutorial + examples + samples + self-host + stdlib + LSP/editors + articles. Multi-month effort. Implementation phase opens at S56.
+
+**Files written this session:**
+
+scrml-support:
+- `user-voice-scrmlTS.md` — Session 55 entry appended (~14 verbatim quotes + interpretations; ~+450 lines)
+- `docs/deep-dives/v0next-s55-deliberation-outcomes-2026-05-04.md` — NEW clean decisions ledger
+- `docs/deep-dives/v0next-mario-design-2026-05-04.scrml` — header annotation marking 11 superseded constructs (V5-strict, Move 7 dropped, etc.)
+- `docs/deep-dives/phase-2-dispatch-briefs-2026-05-03.md` + 3 `progress-dd5/dd6/dd7-...-2026-05-03.md` — S54 leftover untracked artifacts, committed at this wrap as historical preservation
+
+scrmlTS (this wrap commit):
+- `hand-off.md` — S55 close fat hand-off (289 lines)
+- `handOffs/hand-off-56.md` — pre-save mirror of hand-off.md (forensic preservation)
+- `master-list.md` — S55 close inventory update
+- `docs/changelog.md` — this entry
+
+6nz (cross-repo outbox):
+- `6NZ/handOffs/incoming/2026-05-04-0958-scrmlTS-to-6nz-multi-close-editor-option.md` — request for editor-side `<//>` auto-expansion since Move 7 dropped from language
+
+**Open queue at S55 close (substantially shrunk):**
+- Tagline refresh — design polish, not blocking
+- Components props/slots/lifecycle internals — sub-thread under Move 20, design AS implementation proceeds
+- Mario design file regen under post-S55 rules — useful canonical reference, not blocking
+- Self-host migration plan — operational, not design
+
+**Carry-forward findings (deferred into implementation phase):** ast.machineDecls file-level container rename + 3 small S54 dispositions (scrml migrate / SPEC §39.8 collision, SPEC-INDEX.md `E-MACHINE-DIVERGENCE` typo) + pre-S52 findings (F-COMPONENT-003, F-PARSER-ASI sweep, W5a/b, W7, W8, W9-11). Most folded into v0.next implementation; some may be obsoleted; triage at implementation-phase planning.
+
+**Push state:** scrmlTS at this wrap commit pending push; scrml-support at user-voice + outcomes-doc + Mario annotation + S54 leftovers commit pending push. Push authorization pending user greenlight at S56 open.
+
+**Authorization scopes:** "no holds barred" S54 framing was scoped to S55 (deliberation) by hand-off-55 — DOES NOT carry into S56. "PIVOTAL wrap" authorization is for THIS WRAP only. S56 implementation work needs its own authorization scope.
 
 ### 2026-05-03 (S53 CLOSED — fixit session, fat wrap, push complete; engine rename arc complete + 4 architectural fixes; 11 dispatches landed, +85 tests, 0 regressions)
 
