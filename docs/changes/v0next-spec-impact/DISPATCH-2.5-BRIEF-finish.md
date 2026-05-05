@@ -20,43 +20,47 @@ D2's lone real commit (§17 Tier 0 framing) is already cherry-picked to main as 
 
 ---
 
-## §1 ABSOLUTELY NON-NEGOTIABLE — TOOL-USE MANDATE (hardened from D1.5/D2 lessons)
+## §1 ABSOLUTELY NON-NEGOTIABLE — TOOL-USE MANDATE (REVISED FOR D2.6)
 
-This is the dispatch's primary tool-use rule. Read it. Then read it again.
+This dispatch is `scrml-dev-pipeline` whose tool set is `Read / Write / Glob / Bash / Agent`. **`Edit` is NOT available.** A previous attempt halted on this realization (correctly, given the prior brief's wording). This revision specifies the brief-compliant pattern using the tools you actually have.
 
-### What you MUST do
+### What you MUST do — the Read+Write pattern
 
-- **Modify `compiler/SPEC.md` exclusively via the `Edit` tool.** ONE Edit call per atomic change — typically one subsection or one error-code addition per Edit call.
-- **For each new subsection,** the `old_string` should be a stable anchor (e.g., the next-sibling subsection header you're inserting before, plus enough context for uniqueness) and `new_string` is the anchor PLUS your new content prepended.
-- **For modifications to existing subsection text,** narrow the `old_string` until it's unique. If `old_string` is not unique, add more surrounding context.
+To modify `compiler/SPEC.md`:
+
+1. **Read the full current SPEC.md** at the start of the dispatch. You may Read in chunks (it is ~22k lines) but you must Read every chunk that bounds your edits before making any changes.
+2. **Plan one atomic change at a time** (one subsection insertion, one error-code row added, one cross-ref fix).
+3. **Construct the new full-file content** in your working memory by mentally substituting the change into the file you read. Do NOT write a patch file; do NOT generate a diff; just plan the new full content.
+4. **Use the `Write` tool ONCE per atomic change** to write the entire updated SPEC.md back. Yes, full-file overwrite — that is the supported pattern when Edit is unavailable.
+5. **Immediately after each Write, verify by grep:** run `grep -n '<your new section header>' compiler/SPEC.md` to confirm the change persisted. If grep fails, re-Read the file and try again.
+6. **Commit immediately after the verified Write.** Don't batch.
+7. **Re-Read the file before the NEXT change.** Don't trust your in-memory copy across multiple Writes — Read fresh each time. This is critical: small in-memory drift on a 22k-line file becomes an invisible regression.
+
+This is exactly how D1.5 successfully landed §6 / §11 fold / §34 / INDEX regen. It works. It is brief-compliant.
 
 ### What you MUST NOT do
 
-- **DO NOT write patch files.** No `*.patch`, no `*.diff`, no temporary files in the worktree intended to be applied later. The previous D2 attempt wasted hours generating malformed patches.
-- **DO NOT use `git apply`** (gated; will deny). DO NOT use `git apply --3way`, `git apply --check`, or any variant.
-- **DO NOT use `python3`, `sed`, `awk`, `node -e`, `perl -e`, heredoc shell scripts**, or any other tool that invokes a script to modify files. They are all gated.
-- **DO NOT use `Write`** to overwrite SPEC.md. Write is for NEW files only (e.g., `progress-dispatch-2.5.md`).
+- **DO NOT write patch files.** No `*.patch`, no `*.diff`, no temporary files intended to be applied later. The original D2 attempt wasted hours on malformed patches.
+- **DO NOT use `git apply`** in any form. Gated.
+- **DO NOT use `python3`, `sed`, `awk`, `node -e`, `perl -e`, heredoc shell scripts**, or any other tool that invokes a script to modify files. Gated.
 - **DO NOT use `>>` or `>` redirects** in Bash to modify SPEC.md.
-- **DO NOT batch many subsections into one mega-Edit** unless they are genuinely contiguous text. If you find yourself constructing an old_string longer than ~100 lines, you're doing it wrong — split into multiple Edit calls.
+- **DO NOT skip the post-Write grep verification.** It catches in-memory drift before it accumulates.
+- **DO NOT batch multiple subsection insertions into a single Write** (write one logical change, commit, re-Read, then write the next). Each Write must correspond to ONE atomic logical change so commits are reviewable.
 
 ### What Bash IS for
 
-Bash is for: `git` commands (status/log/show/diff/commit/checkout), `grep`, `head`, `tail`, `wc`, `cat`, `find` (read-only commands), `bun test`, `bun run`, and `bash scripts/update-spec-index.sh` (the SPEC-INDEX regeneration script).
+Bash is for: `git` (status/log/show/diff/commit/checkout/cherry-pick), `grep`, `head`, `tail`, `wc`, `cat`, `find` (read-only), `bun test`, `bun run`, and `bash scripts/update-spec-index.sh` (SPEC-INDEX regeneration script).
 
-Bash is NOT a substitute for Edit. Anytime you find yourself thinking "I'll just do this with sed / python / a patch file," STOP. Use Edit.
+Bash is NOT a substitute for Read+Write. Anytime you find yourself thinking "I'll just do this with sed / python / a patch file," STOP.
 
-### If Edit fails
+### If Write loses content (in-memory drift)
 
-If an Edit call fails because `old_string` is not unique:
-1. Read more of the surrounding context with the Read tool.
-2. Construct a NEW `old_string` with more context lines on either side.
-3. Retry the Edit.
-4. Do NOT pivot to a script-based approach. EVER. The previous attempt failed precisely because the agent pivoted to scripts when Edit got hard.
-
-If Edit fails because `old_string` doesn't match (whitespace difference, etc.):
-1. Read the target file at the correct line range to see the EXACT text.
-2. Construct `old_string` with the exact whitespace.
-3. Retry.
+If the post-Write grep finds an EXISTING section was lost (e.g., §6 is now missing because you forgot a chunk when constructing the in-memory copy):
+1. Run `git diff HEAD compiler/SPEC.md | head -200` to see what changed.
+2. If the change is unintended, run `git checkout -- compiler/SPEC.md` to revert the working tree.
+3. Re-Read the file in full or in larger chunks.
+4. Try again with more careful chunk handling.
+5. Do NOT commit a Write that lost content. The pre-commit hook may not catch silent deletions in a markdown spec file.
 
 ---
 
