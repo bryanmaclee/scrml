@@ -2,7 +2,9 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-04 after S55 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files) — **UNCHANGED from S53 close**. Zero compiler/code changes this session — S55 was a pure deliberation session that closed the v0.next architectural design arc.
+Current baseline (2026-05-04 after S56 close): **7,851 tests passing / 30 skipped / 0 failing** (per pre-commit hook, excluding browser tests; S55 historical record 8,576/40/0/426 including browser). **0 fails; UNCHANGED from S55 close.** Zero compiler/code changes this session — S56 was an implementation-prep session that produced 20 architectural locks (L1-L20), full kickstarter v2 rewrite under those locks, comprehensive Stage 0a impact assessment (446 lines), and ALL FOUR Stage 0b dispatch briefs pre-written (502 + 801 + 367 + 381 lines). The implementation phase is now dispatchable.
+
+Previous baseline (2026-05-04 after S55 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files) — **UNCHANGED from S53 close**. Zero compiler/code changes — S55 was a pure deliberation session that closed the v0.next architectural design arc.
 
 Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipped / 0 failing** (~29,789 expects across 426 files). Eleven dispatches landed in S53 (4 architectural fixes + 4 mechanical paperwork + DOC-E-RENAME + P4 CLI + AST-SHAPE-RENAME); **+85 tests vs S52 close, 0 regressions across all 11 dispatches**. F-ENGINE-001 RESOLVED + F-CHANNEL-003 FULLY RESOLVED + NR AUTHORITATIVE + state-type-routing.ts disposed + engine rename arc COMPLETE (keyword + TAB type-decl synthesis + internal vars + SPEC worked examples + error codes + user-facing docs + AST shape) + `scrml migrate` CLI shipped (Migrations 1+2). 44 commits past S52 close, all pushed. S51 was the systemic silent-failure sweep session: 12 dispatches (2 deep-dives + 10 fix dispatches) shipped in a single day, closing 9 P0s + many P1/P2s. Net +184 tests, 0 regressions across all dispatch waves. The validation principle (S49) is now mechanically realized for M1/M3/M4/M5/M6/M11 mechanisms; UVB (Unified Validation Bundle) closed 4 silent-failure mechanisms in one focused dispatch.
 
@@ -11,6 +13,41 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### 2026-05-04 (S56 CLOSED — implementation-prep session, 4 dispatchable briefs landed, kickstarter v2 fully L1-L20 compliant; 0 tests, 0 compiler changes, but the implementation phase is now dispatchable)
+
+S56 transitioned the v0.next arc from deliberation (closed at S55) to implementation-prep. Two arcs ran sequentially:
+
+**Arc 1 — Continuation deliberation (locks L11-L20).** PA drafted kickstarter v2 then surfaced 4 open clusters from §4 still-open list. User authorized push-on. Direct PA-user discussion mode produced 9 additional locks closing all four clusters (L11-L19) plus L20 addressing the S55-carryover `derived=` attribute grammar. Total S56 locks: L1-L20.
+
+**Arc 2 — Implementation-prep machinery.** Comprehensive Stage 0a SPEC + PIPELINE impact assessment (446 lines) maps every lock + active S55 move to specific SPEC sections with disposition + dependency-respecting rewrite order. ALL FOUR Stage 0b dispatch briefs pre-written: Dispatch 1 Foundation (502 lines, 14-27hr), Dispatch 2 Engines+Match+Validators (801 lines, 29-50hr — heaviest), Dispatch 3 Channels+Schema+Predicates (367 lines, 9-17hr), Dispatch 4 Cleanup+PIPELINE+SPEC-INDEX (381 lines, 18-33hr). Total Stage 0b: 70-127 hours distributed across 4 bounded dispatches with crash-recovery discipline (commit-each-meaningful-change + progress.md + worktree-isolation).
+
+Locks landed:
+- **L1 markup-as-first-class-value (PILLAR — held since scrml8 era)** — markup elements may sit anywhere expressions sit; the markup/value distinction collapses across the language. Surfaced via PA edge-case pushback; user immediately flagged as durable claim from pre-user-voice scrml8 era.
+- **L2 Variant C compound state with canonical access** — `<formRes>` structural-children, `@formRes.name` canonical access. Same V5-strict asymmetry as Tier 1, one level deeper.
+- **L3 decl-coupled-with-render-spec** — `<name req> = <input/>` declares cell + render-spec + validity contract together; `<name/>` in markup invokes the spec.
+- **L4 partial validator unification** — shared core (`req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) across loci; schema KEEPS SQL-mirror canonical (`not null`, `unique`, `references`); shared core is additive.
+- **L5 `is some` clarification** — coexists with `req` because they enforce different things: `is some` = exists at all; `req` = non-empty / meaningful (`""` is some but not req).
+- **L6 match Tier 0/1/2 ladder** — Tier 0 `if=` chains; Tier 1 `<match for=Type>` block-form (structural exhaustiveness, no transitions); Tier 2 `<engine for=Type initial=...>` (full deal). Promotion mechanical/additive.
+- **L7 match attributes** — rules legal but inert in `<match>` (lint W-MATCH-RULE-INERT); `effect=`/`<onTransition>` engine-only (E-MATCH-EFFECT-FORBIDDEN).
+- **L8 two match shapes** — block-form for markup-emit, JS-style for value-return; same exhaustiveness check, different output category.
+- **L9 `loose` flag dropped** — rules-in-match obviates; the `<match>` → `<engine>` swap IS the tightening event.
+- **L11 auto-derived validity surface (ε)** — both compound-level (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`) and per-field (`@x.field.isValid`, etc.) auto-synthesized for compounds with validators. Errors as `ValidationError` enum tags (NOT strings). All read-only.
+- **L12 4d four-level error-message resolution** — inline override / project-registered (scrml:data registerMessages) / scrml:data English defaults / `match` escape hatch. `messageFor(errorTag)` walks levels 1-3.
+- **L13 `<errors of=expr/>` first-class element** — composable per-field or compound rollup. `of=` always required; `all` attribute toggles full-list rendering; body override permitted.
+- **L14 cross-field validation** — no separate vocabulary; falls out of universal-core predicates with cross-cell expression args (`<confirm req eq(@signup.password)>`). Reactive recomputation via L11; circular deps caught at compile time.
+- **L15 `const <derived> = expr` (extended ALL-SCOPE)** — derived-cell decl is structural at every scope (not just in-compound). v1's `const @x` form superseded as pre-V5-strict.
+- **L16 multi-render via existing paths** — no override syntax; `${@x}` interpolation, component props, or secondary `const <derived>` markup cell.
+- **L17 binding-by-render-spec dispatch** — compiler chooses bind:value / bind:checked / bind:files / etc. by render-spec shape; writable cells require bindable render-specs (E-CELL-RENDER-SPEC-NOT-BINDABLE).
+- **L18 `reset(@cell)` keyword + `default=` attribute (γ semantics)** — language keyword (not stdlib); mutates in place; `default=` evaluates at reset time, else re-evaluate init expression. Reserved identifier.
+- **L19 multi-statement event handlers** — illegal inline; named function required for anything beyond bare-call / bare-assignment / bare-single-expression.
+- **L20 `derived=expr` engine attribute** — accepts any reactive expression of the engine's type (typically JS-style `match` block). Derived engines reject `rule=`, `initial=`, direct writes; `<onTransition>`/`effect=` fire on derived state changes; chained derivation legal with cycle detection.
+
+Plus:
+- **const-immutability semantics formalized** post-L15 alignment pass: reference-immutable YES (`@x = newval` is `E-DERIVED-WRITE`); value-immutable depends on RHS deps. Truly-frozen non-reactive constants drop the `<>` entirely (plain `const x = ...`). Open Q queued: `E-DERIVED-VALUE-MUTATE` on `@filteredItems.push(x)` (PA leans forbidden, not currently locked).
+- **PA.MD context-budget directive (PERMANENT)** — Opus 4.7 1M-context model; do NOT suggest wrap above ~50% remaining without real reason; default threshold ~15-20% remaining; wrap costs ~5-7% context; user-supplied budget signals authoritative. Captured at S56 user observation that PA was carrying earlier-Claude-era 200k-context heuristics.
+
+9 commits scrmlTS + 3 commits scrml-support, all pushed. Implementation phase dispatchable; S57's first move is "launch Dispatch 1 or do further planning" — user's call.
 
 ### 2026-05-04 (S55 CLOSED — **PIVOTAL session, massive wrap, deliberation arc complete**; 0 tests, 0 compiler changes, but the v0.next language design is locked)
 
