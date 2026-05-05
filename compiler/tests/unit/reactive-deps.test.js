@@ -175,8 +175,8 @@ describe("collectReactiveVarNames", () => {
         {
           kind: "logic",
           body: [
-            { kind: "reactive-decl", name: "count" },
-            { kind: "reactive-decl", name: "total" },
+            { kind: "state-decl", name: "count" },
+            { kind: "state-decl", name: "total" },
             { kind: "let-decl", name: "x" },
           ],
         },
@@ -194,7 +194,7 @@ describe("collectReactiveVarNames", () => {
           body: [
             {
               kind: "logic",
-              body: [{ kind: "reactive-decl", name: "nested" }],
+              body: [{ kind: "state-decl", name: "nested" }],
             },
           ],
         },
@@ -220,7 +220,7 @@ describe("collectReactiveVarNames", () => {
         nodes: [
           {
             kind: "logic",
-            body: [{ kind: "reactive-decl", name: "alt" }],
+            body: [{ kind: "state-decl", name: "alt" }],
           },
         ],
       },

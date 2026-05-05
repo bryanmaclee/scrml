@@ -85,7 +85,7 @@ function findAll(nodes, pred) {
 }
 
 function findReactiveDecls(ast) {
-  return findAll(ast.nodes, n => n.kind === "reactive-decl");
+  return findAll(ast.nodes, n => n.kind === "state-decl");
 }
 
 function findChannel(nodes) {
@@ -157,27 +157,27 @@ describe("shared-tab §1: tokenizer — @shared produces AT_IDENT '@shared' + ID
 describe("shared-tab §2–3: @shared count = 0 → reactive-decl isShared: true, name: 'count'", () => {
   test("produces a reactive-decl node", () => {
     const nodes = parseLogicBlock(`\${ @shared count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
   });
 
   test("reactive-decl has isShared: true", () => {
     const nodes = parseLogicBlock(`\${ @shared count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.isShared).toBe(true);
   });
 
   test("reactive-decl name is 'count' (not 'shared')", () => {
     const nodes = parseLogicBlock(`\${ @shared count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.isShared === true);
+    const decl = nodes.find(n => n.kind === "state-decl" && n.isShared === true);
     expect(decl).toBeDefined();
     expect(decl.name).toBe("count");
   });
 
   test("reactive-decl init contains '0'", () => {
     const nodes = parseLogicBlock(`\${ @shared count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.isShared === true);
+    const decl = nodes.find(n => n.kind === "state-decl" && n.isShared === true);
     expect(decl).toBeDefined();
     expect(decl.init).toContain("0");
   });
@@ -190,14 +190,14 @@ describe("shared-tab §2–3: @shared count = 0 → reactive-decl isShared: true
 describe("shared-tab §4: non-shared @count = 0 → reactive-decl WITHOUT isShared", () => {
   test("regular reactive decl has no isShared property", () => {
     const nodes = parseLogicBlock(`\${ @count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.name === "count");
+    const decl = nodes.find(n => n.kind === "state-decl" && n.name === "count");
     expect(decl).toBeDefined();
     expect(decl.isShared).toBeUndefined();
   });
 
   test("regular reactive decl name and init are correct", () => {
     const nodes = parseLogicBlock(`\${ @count = 0 }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.name === "count");
+    const decl = nodes.find(n => n.kind === "state-decl" && n.name === "count");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("count");
     expect(decl.init).toContain("0");
@@ -250,14 +250,14 @@ describe("shared-tab §5: @shared and non-shared declarations in separate blocks
 describe("shared-tab §6: @shared with string init → isShared: true", () => {
   test("@shared title = 'hello' → isShared: true, name: 'title'", () => {
     const nodes = parseLogicBlock(`\${ @shared title = "hello" }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.isShared === true);
+    const decl = nodes.find(n => n.kind === "state-decl" && n.isShared === true);
     expect(decl).toBeDefined();
     expect(decl.name).toBe("title");
   });
 
   test("@shared title = 'hello' → init contains the string value", () => {
     const nodes = parseLogicBlock(`\${ @shared title = "hello" }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.isShared === true);
+    const decl = nodes.find(n => n.kind === "state-decl" && n.isShared === true);
     expect(decl).toBeDefined();
     expect(decl.init).toContain("hello");
   });
@@ -307,7 +307,7 @@ describe("shared-tab §7: integration — <channel> with @shared → extractShar
 </>
 </>`;
     const { ast } = parseSource(source);
-    const decls = findAll(ast.nodes, n => n.kind === "reactive-decl" && n.isShared === true);
+    const decls = findAll(ast.nodes, n => n.kind === "state-decl" && n.isShared === true);
     expect(decls.length).toBeGreaterThan(0);
     expect(decls[0].name).toBe("count");
   });
@@ -361,7 +361,7 @@ describe("shared-tab §8: @shared in non-channel context → reactive-decl isSha
     // E-CHANNEL-002 is a codegen-time check. The AST builder always produces
     // isShared: true for any @shared decl, regardless of enclosing context.
     const nodes = parseLogicBlock(`\${ @shared msg = "hi" }`);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.isShared === true);
+    const decl = nodes.find(n => n.kind === "state-decl" && n.isShared === true);
     expect(decl).toBeDefined();
     expect(decl.name).toBe("msg");
   });

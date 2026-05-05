@@ -559,7 +559,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return `const ${node.name} = ${emitExprField(node.initExpr, constInit, _makeExprCtx(opts))};`;
     }
 
-    case "reactive-decl": {
+    case "state-decl": {
       // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
       // initializer was `?{...}.method()` (or bare `?{...}`), the AST
       // builder attached a structured `sqlNode` and set `init: ""` /

@@ -742,7 +742,7 @@ ${
                     if (node.kind == "let-decl" || node.kind == "const-decl") {
                         if (node.name) vars.add(node.name)
                     }
-                    if (node.kind == "reactive-decl" && node.name) {
+                    if (node.kind == "state-decl" && node.name) {
                         vars.add(node.name)
                         vars.add(`@${node.name}`)
                     }

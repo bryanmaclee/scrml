@@ -234,7 +234,7 @@ function makeTypeDecl(name, typeKind, raw, id = 1) {
 function makeReactiveDecl(name, init = null, id = 1) {
   return {
     id,
-    kind: "reactive-decl",
+    kind: "state-decl",
     name,
     init,
     span: span(0),

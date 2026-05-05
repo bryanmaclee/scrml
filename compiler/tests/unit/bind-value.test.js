@@ -1037,7 +1037,7 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
   }
 
   function makeReactiveDecl(name, init) {
-    return { kind: "reactive-decl", name, init, span: span(0) };
+    return { kind: "state-decl", name, init, span: span(0) };
   }
 
   test("§25.1 enum-typed @var on <select> generates Theme_toEnum coercion in change handler", () => {

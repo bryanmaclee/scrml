@@ -222,7 +222,7 @@ export function buildMachineBindingsMap(fileAST: any): Map<string, { engineName:
       if (!node || typeof node !== "object") continue;
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child && child.kind === "reactive-decl" && child.machineBinding) {
+          if (child && child.kind === "state-decl" && child.machineBinding) {
             const engineName: string = child.machineBinding;
             const machine = machineRegistry.get(engineName);
             if (machine && child.name) {

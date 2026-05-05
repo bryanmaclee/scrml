@@ -31,7 +31,14 @@ function findProjectRoot() {
 }
 
 function findMainProjectRoot() {
-  // For the JS original, we need the main worktree (which has all files)
+  // Prefer the local worktree if it has parser-workarounds.js (so that a
+  // cross-cut rename / refactor under development tests its own SUT, not the
+  // out-of-date main worktree's SUT). Fall back to main worktree if local is
+  // missing the file (some worktrees only modify .scrml without the JS).
+  const localRoot = findProjectRoot();
+  if (existsSync(resolve(localRoot, "compiler/src/codegen/compat/parser-workarounds.js"))) {
+    return localRoot;
+  }
   const gitEnv = { ...process.env };
   delete gitEnv.GIT_DIR;
   delete gitEnv.GIT_WORK_TREE;
@@ -45,7 +52,7 @@ function findMainProjectRoot() {
       }
     }
   } catch { /* fall through */ }
-  return findProjectRoot();
+  return localRoot;
 }
 
 const projectRoot = findMainProjectRoot();
@@ -236,7 +243,7 @@ describe("splitMergedStatements", () => {
   });
 
   test("reactive-decl also uses _scrml_reactive_set", () => {
-    const result = splitMergedStatements("count", "0", "reactive-decl");
+    const result = splitMergedStatements("count", "0", "state-decl");
     expect(result).toContain('_scrml_reactive_set("count", 0);');
   });
 

@@ -111,7 +111,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 1: <count> = 0 produces reactive-decl with structuralForm:true (anti-fragment)", () => {
     const src = `<program>\${ <count> = 0 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("count");
     expect(decls[0].init).toBe("0");
@@ -125,7 +125,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 2: <name> = \"\" produces reactive-decl (anti-fragment)", () => {
     const src = `<program>\${ <name> = "" }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("name");
     expect(decls[0].structuralForm).toBe(true);
@@ -136,7 +136,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 3: <items> = [] produces reactive-decl (anti-fragment)", () => {
     const src = `<program>\${ <items> = [] }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("items");
     expect(decls[0].structuralForm).toBe(true);
@@ -147,7 +147,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 4: <config> = {a:1} produces reactive-decl (anti-fragment)", () => {
     const src = `<program>\${ <config> = {a:1} }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("config");
     expect(decls[0].structuralForm).toBe(true);
@@ -158,7 +158,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 5: <doubled> = compute(input) produces reactive-decl with parsed initExpr", () => {
     const src = `<program>\${ <doubled> = compute(input) }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("doubled");
     expect(decls[0].init).toContain("compute");
@@ -171,7 +171,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 6: <count>=0 (no whitespace, fused >=) produces reactive-decl", () => {
     const src = `<program>\${ <count>=0 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("count");
     expect(decls[0].structuralForm).toBe(true);
@@ -182,7 +182,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 7: multiple <a>=0; <b>=1 produces two distinct reactive-decls", () => {
     const src = `<program>\${ <a> = 0; <b> = 1 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(2);
     const names = decls.map((d) => d.name).sort();
     expect(names).toEqual(["a", "b"]);
@@ -196,7 +196,7 @@ describe("A1a Step 2 — V5-strict <NAME>=expr decl recognition (Shape 1)", () =
   test("Case 8: mixed @x=0; <y>=1 — legacy and structural coexist", () => {
     const src = `<program>\${ @x = 0; <y> = 1 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(2);
     const xDecl = decls.find((d) => d.name === "x");
     const yDecl = decls.find((d) => d.name === "y");
@@ -215,7 +215,7 @@ describe("A1a Step 2 — V5-strict const <NAME>=expr derived (Shape 3)", () => {
   test("Case 9: const <doubled> = @count * 2 produces reactive-decl with isConst:true", () => {
     const src = `<program>\${ <count> = 0; const <doubled> = @count * 2 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(2);
     const doubled = decls.find((d) => d.name === "doubled");
     expect(doubled).toBeDefined();
@@ -230,7 +230,7 @@ describe("A1a Step 2 — V5-strict const <NAME>=expr derived (Shape 3)", () => {
   test("Case 10: const <name> = @first + @last (multi-dep) produces reactive-decl", () => {
     const src = `<program>\${ <first> = ""; <last> = ""; const <name> = @first + " " + @last }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(3);
     const nameDecl = decls.find((d) => d.name === "name");
     expect(nameDecl).toBeDefined();
@@ -250,7 +250,7 @@ describe("A1a Step 2 — Negative guards", () => {
     const { ast, errors } = parse(src);
     // No reactive-decl named `a` or `b` should be created (those are JS locals
     // in the function param list — not state cells).
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     const a = decls.find((d) => d.name === "a");
     const b = decls.find((d) => d.name === "b");
     expect(a).toBeUndefined();
@@ -266,7 +266,7 @@ describe("A1a Step 2 — Negative guards", () => {
     const src = `<program>\${ function f() { lift <span>hello</span> } }</program>`;
     const { ast } = parse(src);
     // No reactive-decl with name "span" should appear.
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     const spanDecl = decls.find((d) => d.name === "span");
     expect(spanDecl).toBeUndefined();
     // The function should still parse.
@@ -299,7 +299,7 @@ describe("A1a Step 2 — Negative guards", () => {
   test("Case 14: comparison chain a < b > c — no reactive-decl produced", () => {
     const src = `<program>\${ function f(a, b, c) { return (a < b) && (b > c) } }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(0);
   });
 
@@ -307,7 +307,7 @@ describe("A1a Step 2 — Negative guards", () => {
   test("Case 15: legacy @count=0 still produces reactive-decl (baseline preserved)", () => {
     const src = `<program>\${ @count = 0 }</program>`;
     const { ast } = parse(src);
-    const decls = findKind(ast, "reactive-decl");
+    const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(1);
     expect(decls[0].name).toBe("count");
     expect(decls[0].init).toBe("0");

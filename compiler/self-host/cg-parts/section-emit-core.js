@@ -1883,7 +1883,7 @@ export function emitLogicNode(node, opts = {}) {
       return `const ${node.name}${constInit ? ` = ${rewriteExpr(constInit)}` : ""};`;
     }
 
-    case "reactive-decl": {
+    case "state-decl": {
       const initStr = node.init ?? "undefined";
       const ctx = opts.encodingCtx;
       const encodedName = ctx ? ctx.encode(node.name) : node.name;

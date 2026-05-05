@@ -190,7 +190,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // was extracted to the server, emit the reactive_set on the client using
         // the server result. This handles `@entries = ?{SELECT...}` where the SQL
         // runs on the server and the result is passed back via the fetch response.
-        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "reactive-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
+        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
           lines.push(`  _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
         }
         // Skip additional server statements — they are batched into one server call.
@@ -209,7 +209,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
         // If this is the reactive assignment that receives the server result,
         // rewrite it to use the server result variable.
-        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "reactive-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
+        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
           lines.push(`  _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
         } else {
           const code = emitLogicNode(stmt, cpsOpts);

@@ -70,7 +70,7 @@ function makeLiftExpr(spanStart = 0, file = "/test/app.scrml") {
  */
 function makeReactiveDecl(name, init = "", spanStart = 0, file = "/test/app.scrml") {
   return {
-    kind: "reactive-decl",
+    kind: "state-decl",
     name,
     init,
     span: span(spanStart, file),
@@ -1292,9 +1292,9 @@ describe("T15 — derived value (const @var = expr) dependency tracking", () => 
       kind: "meta",
       body: [
         // @message = "changed" — parsed as reactive-decl in meta body
-        { kind: "reactive-decl", name: "message", init: '"changed"', span: span(60) },
+        { kind: "state-decl", name: "message", init: '"changed"', span: span(60) },
         // @theme = "light" — parsed as reactive-decl in meta body
-        { kind: "reactive-decl", name: "theme", init: '"light"', span: span(70) },
+        { kind: "state-decl", name: "theme", init: '"light"', span: span(70) },
       ],
       span: span(55),
     };

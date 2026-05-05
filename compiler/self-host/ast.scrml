@@ -880,7 +880,7 @@ ${
                     const nameTok = consume()
                     consume()
                     const result = collectExpr()
-                    return { id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: result.expr, initExpr: safeParseExprToNode(result.expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) }
+                    return { id: ++counter.next, kind: "state-decl", name: nameTok.text, init: result.expr, initExpr: safeParseExprToNode(result.expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) }
                 }
                 const result = collectExpr()
                 return { id: ++counter.next, kind: "bare-expr", expr: startTok.text + (result.expr ? " " + result.expr : ""), span: spanOf(startTok, peek()) }
@@ -952,7 +952,7 @@ ${
                 if (peek().text == "=" && peek(1) && peek(1).text != "=") {
                     consume()
                     const result = collectExpr()
-                    return { id: ++counter.next, kind: "reactive-decl", name, init: result.expr, initExpr: safeParseExprToNode(result.expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) }
+                    return { id: ++counter.next, kind: "state-decl", name, init: result.expr, initExpr: safeParseExprToNode(result.expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) }
                 }
 
                 // @set
@@ -1516,7 +1516,7 @@ ${
                     const nameTok = consume()
                     consume()
                     const result = collectExpr()
-                    nodes.push({ id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: result.expr, isShared: true, span: spanOf(startTok, peek()) })
+                    nodes.push({ id: ++counter.next, kind: "state-decl", name: nameTok.text, init: result.expr, isShared: true, span: spanOf(startTok, peek()) })
                     continue
                 }
                 const result = collectExpr()
@@ -1600,7 +1600,7 @@ ${
                     const result = collectExpr()
                     nodes.push({
                         id: ++counter.next,
-                        kind: "reactive-decl",
+                        kind: "state-decl",
                         name,
                         init: result.expr,
                         span: spanOf(startTok, peek()),

@@ -420,7 +420,7 @@ export function isServerOnlyNode(node: unknown): boolean {
 
   // Catch inline ?{} SQL sigil in let-decl / const-decl / reactive-decl init strings.
   // Phase 4d: ExprNode-first, string fallback
-  if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "reactive-decl") {
+  if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "state-decl") {
     const init = (n as any).initExpr ? emitStringFromTree((n as any).initExpr) : (typeof n.init === "string" ? n.init : "");
     if (SQL_SIGIL_PATTERN.test(init)) return true;
     if (ENV_PATTERN.test(init)) return true;
@@ -454,7 +454,7 @@ export function collectServerVarDecls(fileAST: FileAST): Node[] {
       if (!node || typeof node !== "object") continue;
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child && child.kind === "reactive-decl" && (child as any).isServer === true) {
+          if (child && child.kind === "state-decl" && (child as any).isServer === true) {
             result.push(child);
           }
         }

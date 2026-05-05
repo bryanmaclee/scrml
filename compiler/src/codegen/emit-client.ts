@@ -154,7 +154,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         break;
 
       // reactive-decl — @x = value. Uses _scrml_deep_reactive for object/array wrapping.
-      case "reactive-decl":
+      case "state-decl":
         chunks.add("deep_reactive");
         break;
 

@@ -44,12 +44,12 @@ function makeLogicBlock(body = [], s = span(0)) {
 
 /** Create a plain reactive-decl (no server modifier). */
 function makeReactiveDecl(name, init, s = span(0)) {
-  return { kind: "reactive-decl", name, init, span: s };
+  return { kind: "state-decl", name, init, span: s };
 }
 
 /** Create a server @var reactive-decl (isServer: true). */
 function makeServerReactiveDecl(name, init, s = span(0)) {
-  return { kind: "reactive-decl", name, init, isServer: true, span: s };
+  return { kind: "state-decl", name, init, isServer: true, span: s };
 }
 
 function makeRouteMap(entries = []) {

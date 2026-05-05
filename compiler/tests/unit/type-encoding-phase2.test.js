@@ -146,7 +146,7 @@ describe("emitLogicNode with EncodingContext", () => {
     const ctx = new EncodingContext({ enabled: true });
     const encoded = ctx.register("count", NUMBER_TYPE);
 
-    const node = { kind: "reactive-decl", name: "count", init: "0" };
+    const node = { kind: "state-decl", name: "count", init: "0" };
     const output = emitLogicNode(node, { encodingCtx: ctx });
     expect(output).toContain(JSON.stringify(encoded));
     expect(output).toContain("_scrml_reactive_set");
@@ -154,14 +154,14 @@ describe("emitLogicNode with EncodingContext", () => {
   });
 
   test("reactive-decl uses original name when ctx is null", () => {
-    const node = { kind: "reactive-decl", name: "count", init: "0" };
+    const node = { kind: "state-decl", name: "count", init: "0" };
     const output = emitLogicNode(node);
     expect(output).toContain('"count"');
   });
 
   test("reactive-decl uses original name when ctx is disabled", () => {
     const ctx = new EncodingContext({ enabled: false });
-    const node = { kind: "reactive-decl", name: "count", init: "0" };
+    const node = { kind: "state-decl", name: "count", init: "0" };
     const output = emitLogicNode(node, { encodingCtx: ctx });
     expect(output).toContain('"count"');
   });
@@ -246,7 +246,7 @@ describe("emitLogicNode with EncodingContext", () => {
     const encoded = ctx.register("count", NUMBER_TYPE);
     expect(encoded).toContain("$count");
 
-    const node = { kind: "reactive-decl", name: "count", init: "0" };
+    const node = { kind: "state-decl", name: "count", init: "0" };
     const output = emitLogicNode(node, { encodingCtx: ctx });
     expect(output).toContain("$count");
   });
@@ -267,7 +267,7 @@ describe("emitReactiveWiring with EncodingContext", () => {
         nodes: [
           {
             kind: "logic",
-            body: [{ kind: "reactive-decl", name: "score", init: "0" }],
+            body: [{ kind: "state-decl", name: "score", init: "0" }],
           },
         ],
       },
@@ -288,7 +288,7 @@ describe("emitReactiveWiring with EncodingContext", () => {
         nodes: [
           {
             kind: "logic",
-            body: [{ kind: "reactive-decl", name: "score", init: "0" }],
+            body: [{ kind: "state-decl", name: "score", init: "0" }],
           },
         ],
       },
@@ -430,7 +430,7 @@ describe("Encoding consistency", () => {
     const encoded = ctx.register("value", STRING_TYPE);
 
     // Logic node emits the _scrml_reactive_set
-    const logicNode = { kind: "reactive-decl", name: "value", init: '""' };
+    const logicNode = { kind: "state-decl", name: "value", init: '""' };
     const logicOutput = emitLogicNode(logicNode, { encodingCtx: ctx });
 
     // Event wiring emits _scrml_effect (auto-tracking handles encoded names)

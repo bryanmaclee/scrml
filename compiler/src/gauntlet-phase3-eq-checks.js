@@ -260,7 +260,7 @@ function collectBindings(ast, structFnSet) {
     if (!Array.isArray(nodes)) return;
     for (const n of nodes) {
       if (!n || typeof n !== "object") continue;
-      if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "reactive-decl") {
+      if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "state-decl") {
         recordBinding(n);
       }
       if (Array.isArray(n.body))       walk(n.body);

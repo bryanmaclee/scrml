@@ -533,7 +533,7 @@ describe("self-host parity: collectRuntimeVars", () => {
       nodes: [
         {
           kind: "logic",
-          body: [{ kind: "reactive-decl", name: "items" }],
+          body: [{ kind: "state-decl", name: "items" }],
         },
       ],
     };
@@ -655,7 +655,7 @@ describe("self-host parity: collectRuntimeVars", () => {
           kind: "logic",
           body: [
             makeLetDecl("a", "1"),
-            { kind: "reactive-decl", name: "items" },
+            { kind: "state-decl", name: "items" },
             makeFunctionDecl("init"),
             { kind: "for-stmt", variable: "it" },
           ],

@@ -469,7 +469,7 @@ describe("§13: @shared variables emit reactive sync subscriptions", () => {
   test("syncShared helper is emitted when @shared vars exist", () => {
     // Create a channel node with a reactive-decl child marked isShared
     const sharedDecl = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "count",
       isShared: true,
     };

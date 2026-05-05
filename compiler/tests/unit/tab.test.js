@@ -347,7 +347,7 @@ describe("logic blocks", () => {
 
   test("reactive @name produces reactive-decl node", () => {
     const node = firstNode("${ @counter = 0 }");
-    const decl = node.body.find(n => n.kind === "reactive-decl");
+    const decl = node.body.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
   });
 
@@ -965,7 +965,7 @@ describe("integration: canonical spec examples", () => {
 
   test("§6.1 reactive decl: @counter = 0", () => {
     const node = firstNode("${ @counter = 0 }");
-    const decl = node.body.find(n => n.kind === "reactive-decl");
+    const decl = node.body.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("counter");
   });
@@ -2122,7 +2122,7 @@ describe("nested reactive assignments", () => {
 
   test("simple @name = expr still produces reactive-decl", () => {
     const node = firstNode('${ @count = 0 }');
-    const decl = node.body.find(n => n.kind === "reactive-decl");
+    const decl = node.body.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("count");
   });

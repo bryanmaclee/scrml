@@ -187,7 +187,7 @@ export function splitMergedStatements(firstName, initStr, declType) {
 
         if (match) {
             const currentValue = match[1].trim()
-            if (currentType == "reactive" || currentType == "reactive-decl") {
+            if (currentType == "reactive" || currentType == "state-decl") {
                 statements.push(`_scrml_reactive_set(${JSON.stringify(currentName)}, ${rewriteExpr(currentValue)});`)
             } else {
                 statements.push(`${currentType} ${currentName} = ${rewriteExpr(currentValue)};`)
@@ -206,7 +206,7 @@ export function splitMergedStatements(firstName, initStr, declType) {
             const valueParts = splitBareExprStatements(finalValue)
             if (valueParts.length > 1) {
                 // First part is the actual variable value; rest are trailing statements
-                if (currentType == "reactive" || currentType == "reactive-decl") {
+                if (currentType == "reactive" || currentType == "state-decl") {
                     statements.push(`_scrml_reactive_set(${JSON.stringify(currentName)}, ${rewriteExpr(valueParts[0].trim())});`)
                 } else {
                     statements.push(`${currentType} ${currentName} = ${rewriteExpr(valueParts[0].trim())};`)
@@ -216,7 +216,7 @@ export function splitMergedStatements(firstName, initStr, declType) {
                     if (s) statements.push(`${rewriteExpr(s)};`)
                 }
             } else {
-                if (currentType == "reactive" || currentType == "reactive-decl") {
+                if (currentType == "reactive" || currentType == "state-decl") {
                     statements.push(`_scrml_reactive_set(${JSON.stringify(currentName)}, ${rewriteExpr(finalValue)});`)
                 } else {
                     statements.push(`${currentType} ${currentName} = ${rewriteExpr(finalValue)};`)

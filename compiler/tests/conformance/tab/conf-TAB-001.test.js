@@ -26,7 +26,7 @@ const VALID_KINDS = new Set([
   "function-decl",
   "bare-expr",
   "lift-expr",
-  "reactive-decl",
+  "state-decl",
   "let-decl",
   "const-decl",
   "import-decl",

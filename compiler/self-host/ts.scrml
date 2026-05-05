@@ -1029,7 +1029,7 @@ ${
                     scopeChain.bind(n.name, { kind: "variable", resolvedType: resolvedType })
                 }
 
-            } else if (nodeKind == "reactive-decl") {
+            } else if (nodeKind == "state-decl") {
                 resolvedType = tAsIs()
                 if (n.name) {
                     scopeChain.bind("@" + n.name, { kind: "reactive", resolvedType: resolvedType })

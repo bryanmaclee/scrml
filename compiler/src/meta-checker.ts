@@ -706,7 +706,7 @@ export function bodyMixesPhases(
       // compile-time block with `@counter += 1` would fall through to
       // meta-eval and crash with "Invalid character: '@'" instead of firing
       // E-META-005 at checker time.
-      if (node.kind === "reactive-decl" || node.kind === "sql") return true;
+      if (node.kind === "state-decl" || node.kind === "sql") return true;
 
       // S23 bug 2b: meta bodies are sometimes pre-parsed as a single
       // html-fragment node with .content holding the raw source (including
@@ -1934,7 +1934,7 @@ export function collectRuntimeVars(fileAST: MetaFileAST): Map<string, "reactive"
         if (node.kind === "lin-decl") {
           if (node.name) vars.set(node.name, "lin");
         }
-        if (node.kind === "reactive-decl" && node.name) {
+        if (node.kind === "state-decl" && node.name) {
           vars.set(node.name, "reactive");
           vars.set(`@${node.name}`, "reactive");
         }

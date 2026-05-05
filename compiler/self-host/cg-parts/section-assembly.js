@@ -124,7 +124,7 @@ export function emitFunctions(ctx) {
                     }
                     serverCallEmitted = true
                 }
-                if (cpsSplit.returnVarName && stmt.kind == "reactive-decl" && stmt.name == cpsSplit.returnVarName) {
+                if (cpsSplit.returnVarName && stmt.kind == "state-decl" && stmt.name == cpsSplit.returnVarName) {
                     lines.push("  _scrml_reactive_set(" + JSON.stringify(stmt.name) + ", _scrml_server_result);")
                 }
             } else {
@@ -137,7 +137,7 @@ export function emitFunctions(ctx) {
                     ))
                     continue
                 }
-                if (cpsSplit.returnVarName && stmt.kind == "reactive-decl" && stmt.name == cpsSplit.returnVarName) {
+                if (cpsSplit.returnVarName && stmt.kind == "state-decl" && stmt.name == cpsSplit.returnVarName) {
                     lines.push("  _scrml_reactive_set(" + JSON.stringify(stmt.name) + ", _scrml_server_result);")
                 } else {
                     const code = emitLogicNode(stmt, cpsOpts)
@@ -682,7 +682,7 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
                 for (const idx of cpsSplit.serverStmtIndices) {
                     if (idx < body.length) {
                         const stmt = body[idx]
-                        if (stmt && stmt.kind == "reactive-decl" && cpsSplit.returnVarName == stmt.name) {
+                        if (stmt && stmt.kind == "state-decl" && cpsSplit.returnVarName == stmt.name) {
                             const initExpr = rewriteServerExpr(stmt.init ?? "undefined")
                             lines.push("    const _scrml_cps_return = " + initExpr + ";")
                             continue
@@ -698,7 +698,7 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
                 if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
                     const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1]
                     const lastStmt = body[lastServerIdx]
-                    if (lastStmt && lastStmt.kind == "reactive-decl" && lastStmt.name == cpsSplit.returnVarName) {
+                    if (lastStmt && lastStmt.kind == "state-decl" && lastStmt.name == cpsSplit.returnVarName) {
                         lines.push("    return _scrml_cps_return;")
                     } else if (lastStmt && (lastStmt.kind == "let-decl" || lastStmt.kind == "const-decl")) {
                         lines.push("    return " + lastStmt.name + ";")
@@ -744,7 +744,7 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
                 for (const idx of cpsSplit.serverStmtIndices) {
                     if (idx < body.length) {
                         const stmt = body[idx]
-                        if (stmt && stmt.kind == "reactive-decl" && cpsSplit.returnVarName == stmt.name) {
+                        if (stmt && stmt.kind == "state-decl" && cpsSplit.returnVarName == stmt.name) {
                             const initExpr = rewriteServerExpr(stmt.init ?? "undefined")
                             lines.push("  const _scrml_cps_return = " + initExpr + ";")
                             continue
@@ -760,7 +760,7 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
                 if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
                     const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1]
                     const lastStmt = body[lastServerIdx]
-                    if (lastStmt && lastStmt.kind == "reactive-decl" && lastStmt.name == cpsSplit.returnVarName) {
+                    if (lastStmt && lastStmt.kind == "state-decl" && lastStmt.name == cpsSplit.returnVarName) {
                         lines.push("  return _scrml_cps_return;")
                     } else if (lastStmt && (lastStmt.kind == "let-decl" || lastStmt.kind == "const-decl")) {
                         lines.push("  return " + lastStmt.name + ";")
@@ -1378,7 +1378,7 @@ function detectRuntimeChunks(fileAST, ctx) {
                 chunks.add("lift")
                 break
 
-            case "reactive-decl":
+            case "state-decl":
                 chunks.add("deep_reactive")
                 break
 
@@ -2158,7 +2158,7 @@ export function runCG(input) {
         if (encodingCtx.enabled) {
             const topLevelLogic = analysis?.topLevelLogic ?? collectTopLevelLogicStatements(fileAST)
             for (const stmt of topLevelLogic) {
-                if (stmt.kind == "reactive-decl" && stmt.name) {
+                if (stmt.kind == "state-decl" && stmt.name) {
                     const type = fileAST.nodeTypes?.get(stmt.name) ?? { kind: "asIs", constraint: null }
                     encodingCtx.register(stmt.name, type)
                 }

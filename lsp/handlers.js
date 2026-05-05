@@ -426,7 +426,7 @@ export function extractAnalysisInfo(ast, analysis) {
           if (Array.isArray(node.body)) walkLogicNodes(node.body, parentStateType);
           break;
         }
-        case "reactive-decl": {
+        case "state-decl": {
           analysis.reactiveVars.push({
             name: node.name?.startsWith("@") ? node.name.slice(1) : node.name,
             span: node.span,
@@ -704,12 +704,12 @@ export function buildDocumentSymbols(ast, text) {
           children: [],
         };
       }
-      case "reactive-decl":
+      case "state-decl":
       case "reactive-derived-decl":
       case "reactive-debounced-decl": {
         const baseName = stmt.name?.startsWith("@") ? stmt.name.slice(1) : stmt.name;
         const detailMap = {
-          "reactive-decl": "@reactive" + (stmt.isShared ? " (shared)" : ""),
+          "state-decl": "@reactive" + (stmt.isShared ? " (shared)" : ""),
           "reactive-derived-decl": "@derived",
           "reactive-debounced-decl": `@debounced(${stmt.delay ?? 300})`,
         };

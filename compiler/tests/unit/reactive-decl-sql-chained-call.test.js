@@ -38,7 +38,7 @@
  *     has `sqlNode`, recurse into emitLogicNode(sqlNode, { boundary: server })
  *     and strip trailing `;` before composing `const _scrml_cps_return = …;`.
  *
- *   - emit-logic.ts case "reactive-decl": when `node.sqlNode` is present
+ *   - emit-logic.ts case "state-decl": when `node.sqlNode` is present
  *     AND `opts.boundary === "server"`, recurse into case "sql" and emit
  *     `_scrml_reactive_set("name", <sql>);`. (Server-only because
  *     `_scrml_sql` is server-only — E-CG-006 enforces.)
@@ -134,7 +134,7 @@ function findReactiveDeclByName(ast, name) {
   function walk(nodes) {
     for (const n of nodes ?? []) {
       if (!n) continue;
-      if (n.kind === "reactive-decl" && n.name === name) return n;
+      if (n.kind === "state-decl" && n.name === name) return n;
       for (const k of ["body", "consequent", "alternate", "children", "nodes"]) {
         const v = n[k];
         if (Array.isArray(v)) {
@@ -170,7 +170,7 @@ describe("§1 AST shape — @x = ?{...} produces sqlNode-bearing reactive-decl",
     expect(fn).toBeTruthy();
     expect(fn.body.length).toBe(1);
     const decl = fn.body[0];
-    expect(decl.kind).toBe("reactive-decl");
+    expect(decl.kind).toBe("state-decl");
     expect(decl.name).toBe("users");
     expect(decl.sqlNode).toBeTruthy();
     expect(decl.sqlNode.kind).toBe("sql");
@@ -249,7 +249,7 @@ describe("§3 Backwards compat — non-SQL reactive-decl still uses initExpr", (
 </program>`;
     const fn = findFn(runAst(src), "plain");
     const decl = fn.body[0];
-    expect(decl.kind).toBe("reactive-decl");
+    expect(decl.kind).toBe("state-decl");
     expect(decl.sqlNode).toBeFalsy();
     expect(decl.initExpr).toBeTruthy();
     expect(decl.init).toBe("42");
@@ -326,7 +326,7 @@ describe("§4 AST shape — typed + server + @shared modifiers each attach sqlNo
 describe("§5 emit-logic — reactive-decl + sqlNode (server boundary) wraps sql in reactive_set", () => {
   test("synthetic reactive-decl + sqlNode {.all()} emits _scrml_reactive_set with await sql`...`", () => {
     const node = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "rows",
       init: "",
       sqlNode: {
@@ -345,7 +345,7 @@ describe("§5 emit-logic — reactive-decl + sqlNode (server boundary) wraps sql
 
   test("synthetic reactive-decl + sqlNode {.get()} emits singleton-or-null wrap", () => {
     const node = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "user",
       init: "",
       sqlNode: {
@@ -512,7 +512,7 @@ describe("§10 RI — CPS-split detection for SQL-init reactive-decl still works
 describe("§11 CG client — bare @x = ?{...} suppresses empty-arg reactive_set", () => {
   test("synthetic reactive-decl + sqlNode (client boundary) emits comment, NOT _scrml_reactive_set", () => {
     const node = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "rows",
       init: "",
       sqlNode: {
@@ -531,7 +531,7 @@ describe("§11 CG client — bare @x = ?{...} suppresses empty-arg reactive_set"
 
   test("synthetic reactive-decl + sqlNode {.all()} (client boundary) — same suppression", () => {
     const node = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "users",
       init: "",
       sqlNode: {
@@ -550,7 +550,7 @@ describe("§11 CG client — bare @x = ?{...} suppresses empty-arg reactive_set"
     // The client-side suppression should still fire because the sqlNode short-circuit
     // is placed at the top of the post-server fallthrough.
     const node = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "x",
       init: "",
       sqlNode: { kind: "sql", query: "SELECT 1", chainedCalls: [] },

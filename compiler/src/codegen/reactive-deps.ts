@@ -134,7 +134,7 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
     for (const node of nodeList) {
       if (!node || typeof node !== "object") continue;
       const n = node as ASTNode;
-      if (n.kind === "reactive-decl" && n.name) {
+      if (n.kind === "state-decl" && n.name) {
         names.add(n.name as string);
       }
       // Bug 4 fix: derived reactive decls (`const @name = expr`) must be
@@ -384,7 +384,7 @@ function extractReactiveDepsFromBody(
       n.kind === "let-decl" ||
       n.kind === "const-decl" ||
       n.kind === "tilde-decl" ||
-      n.kind === "reactive-decl" ||
+      n.kind === "state-decl" ||
       n.kind === "reactive-derived-decl"
     ) {
       exprStr = (n as any).initExpr

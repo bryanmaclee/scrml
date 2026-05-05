@@ -779,7 +779,7 @@ function walkForReactiveDecls(nodes, variantToEnum, result) {
     if (node.kind == "logic" && Array.isArray(node.body)) {
       for (const stmt of node.body) {
         if (!stmt || typeof stmt != "object") continue;
-        if (stmt.kind == "reactive-decl" || stmt.kind == "reactive-derived-decl") {
+        if (stmt.kind == "state-decl" || stmt.kind == "reactive-derived-decl") {
           const varName = stmt.name ?? "";
           const init = typeof stmt.init == "string" ? stmt.init.trim() : "";
           if (!varName || !init) continue;
@@ -2142,7 +2142,7 @@ export function extractSharedVars(node) {
   function walkForShared(nodeList) {
     for (const n of nodeList) {
       if (!n || typeof n != "object") continue;
-      if (n.kind == "reactive-decl" && n.isShared === true) {
+      if (n.kind == "state-decl" && n.isShared === true) {
         shared.push(n.name ?? "");
       }
       if (Array.isArray(n.children)) walkForShared(n.children);

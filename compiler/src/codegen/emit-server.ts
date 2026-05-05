@@ -604,7 +604,7 @@ export function generateServerJs(
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const stmt = body[idx];
-            if (stmt && stmt.kind === "reactive-decl" && cpsSplit.returnVarName === stmt.name) {
+            if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
               // continuation is `@x = ?{...}.method()`, the AST builder attached
               // a structured `sqlNode` so we can route through emit-logic case
@@ -632,7 +632,7 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "reactive-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
             lines.push(`    return _scrml_cps_return;`);
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`    return ${lastStmt.name};`);
@@ -699,7 +699,7 @@ export function generateServerJs(
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const stmt = body[idx];
-            if (stmt && stmt.kind === "reactive-decl" && cpsSplit.returnVarName === stmt.name) {
+            if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): mirror of
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
@@ -724,7 +724,7 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "reactive-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
             lines.push(`  return _scrml_cps_return;`);
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`  return ${lastStmt.name};`);

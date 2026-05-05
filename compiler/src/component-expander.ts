@@ -1093,7 +1093,7 @@ function substitutePropsInLogicStmt(
     case "const-decl":
     case "tilde-decl":
     case "lin-decl":
-    case "reactive-decl":
+    case "state-decl":
     case "reactive-derived-decl":
     case "reactive-debounced-decl": {
       const n = stmt as LetDeclNode | ConstDeclNode | TildeDeclNode | LinDeclNode | ReactiveDeclNode | ReactiveDerivedDeclNode | ReactiveDebouncedDeclNode;
@@ -1103,7 +1103,7 @@ function substitutePropsInLogicStmt(
       // Reactive vars use @-prefix; we add both forms to be safe (if prop name is `count`,
       // a `@count` reactive declaration shadows further refs).
       if (n.name) {
-        if (n.kind === "reactive-decl" || n.kind === "reactive-derived-decl" || n.kind === "reactive-debounced-decl") {
+        if (n.kind === "state-decl" || n.kind === "reactive-derived-decl" || n.kind === "reactive-debounced-decl") {
           shadowed.add("@" + n.name);
         } else {
           shadowed.add(n.name);

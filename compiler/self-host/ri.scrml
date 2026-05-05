@@ -297,7 +297,7 @@ ${
                 return
             }
 
-            if (node.kind == "reactive-decl") {
+            if (node.kind == "state-decl") {
                 const init = node.init != null ? node.init : ""
 
                 // Trigger 1: server-only resource in the init expression
@@ -347,7 +347,7 @@ ${
         function visitNode(node) {
             if (!node || typeof node != "object") return null
 
-            if (node.kind == "reactive-decl") {
+            if (node.kind == "state-decl") {
                 return node
             }
 
@@ -415,7 +415,7 @@ ${
     }
 
     function isReactiveStatement(node) {
-        if (node.kind == "reactive-decl") return true
+        if (node.kind == "state-decl") return true
         if (node.kind == "bare-expr") {
             const expr = node.expr != null ? node.expr : ""
             if (/\B@[A-Za-z_$][A-Za-z0-9_$]*\s*=[^=]/.test(expr)) return true
@@ -498,7 +498,7 @@ ${
 
             const isReactiveServer =
                 isReactive &&
-                node.kind == "reactive-decl" &&
+                node.kind == "state-decl" &&
                 (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
                     hasServerOnlyResourceInInit(node))
 
@@ -530,7 +530,7 @@ ${
         let returnVarName = null
         for (const ri of reactiveServerIndices) {
             const node = body[ri]
-            if (node.kind == "reactive-decl" && node.name) {
+            if (node.kind == "state-decl" && node.name) {
                 returnVarName = node.name
                 break
             }

@@ -353,7 +353,7 @@ describe("§51.9 slice 2 — E-ENGINE-017 reject writes to projected vars", () =
   test("reactive-decl of a projected var name fires E-ENGINE-017", () => {
     const projectedVars = new Map([["ui", makeDerivedMachine()]]);
     const errors = [];
-    const nodes = [{ kind: "reactive-decl", name: "ui", span: span() }];
+    const nodes = [{ kind: "state-decl", name: "ui", span: span() }];
     rejectWritesToDerivedVars(nodes, projectedVars, errors, span());
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe("E-ENGINE-017");
@@ -390,7 +390,7 @@ describe("§51.9 slice 2 — E-ENGINE-017 reject writes to projected vars", () =
     const projectedVars = new Map([["ui", makeDerivedMachine()]]);
     const errors = [];
     const nodes = [
-      { kind: "reactive-decl", name: "order", span: span() },
+      { kind: "state-decl", name: "order", span: span() },
       { kind: "bare-expr", expr: "@order = 1", span: span() },
     ];
     rejectWritesToDerivedVars(nodes, projectedVars, errors, span());

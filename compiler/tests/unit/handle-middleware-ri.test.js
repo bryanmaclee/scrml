@@ -233,7 +233,7 @@ describe("RI-HANDLE-004: E-RI-002 suppressed for handle()", () => {
       spanStart: 10,
       body: [
         {
-          kind: "reactive-decl",
+          kind: "state-decl",
           name: "data",
           init: "resolve(request)",
           span: span(15),
@@ -253,7 +253,7 @@ describe("RI-HANDLE-004: E-RI-002 suppressed for handle()", () => {
       spanStart: 10,
       body: [
         {
-          kind: "reactive-decl",
+          kind: "state-decl",
           name: "data",
           init: "result",
           span: span(15),

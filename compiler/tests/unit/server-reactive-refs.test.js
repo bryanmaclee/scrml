@@ -74,7 +74,7 @@ function makeLetDecl(name, init, s = span(0)) {
 }
 
 function makeReactiveDecl(name, init, s = span(0)) {
-  return { kind: "reactive-decl", name, init, span: s };
+  return { kind: "state-decl", name, init, span: s };
 }
 
 function makeReturnStmt(expr, s = span(0)) {

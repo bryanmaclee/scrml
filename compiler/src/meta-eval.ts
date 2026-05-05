@@ -85,7 +85,7 @@ function bodyReferencesReactiveVars(body: LogicStatement[]): boolean {
       if (!node || typeof node !== "object") continue;
 
       // Reactive declarations: @name = expr
-      if ((node as ASTNode).kind === "reactive-decl") return true;
+      if ((node as ASTNode).kind === "state-decl") return true;
 
       // Phase 4d: ExprNode-first reactive ref detection, string fallback
       if ((node as ASTNode).kind === "bare-expr") {

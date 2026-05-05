@@ -390,7 +390,7 @@ describe("§8: Non-server-context meta → present in clientJs", () => {
 
   test("meta block with reactive set appears in clientJs", () => {
     const metaNode = makeMetaNode([
-      { kind: "reactive-decl", name: "count", init: "0", span: span(10) },
+      { kind: "state-decl", name: "count", init: "0", span: span(10) },
     ]);
     const result = runCGForFile([makeLogicBlock([metaNode])]);
 

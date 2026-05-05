@@ -430,7 +430,7 @@ export interface LinDeclNode extends BaseNode {
 
 /** A reactive declaration: `@name = expr`. */
 export interface ReactiveDeclNode extends BaseNode {
-  kind: "reactive-decl";
+  kind: "state-decl";
   /** Reactive variable name (without `@`). */
   name: string;
   /** @deprecated Phase 4d: use initExpr. */

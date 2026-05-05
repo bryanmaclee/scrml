@@ -2129,7 +2129,7 @@ export function rejectWritesToDerivedVars(
       const span = (n.span as Span | undefined) ?? fileSpan;
 
       // Reactive declaration of a projected var.
-      if (n.kind === "reactive-decl" && typeof n.name === "string" && projectedVars.has(n.name)) {
+      if (n.kind === "state-decl" && typeof n.name === "string" && projectedVars.has(n.name)) {
         report(n.name, span);
       }
 
@@ -4017,7 +4017,7 @@ function annotateNodes(
       // ------------------------------------------------------------------
       // Reactive declaration (`@name = expr`)
       // ------------------------------------------------------------------
-      case "reactive-decl": {
+      case "state-decl": {
         resolvedType = tAsIs();
         // §53.4 — If a type annotation is present and predicated, classify the assignment zone.
         const reactAnnot = (n as ASTNodeLike).typeAnnotation as string | undefined;
@@ -7720,7 +7720,7 @@ function processFile(
     const collectReactiveBindings = (nodes: ASTNodeLike[]): void => {
       for (const n of nodes) {
         if (!n || typeof n !== "object") continue;
-        if (n.kind === "reactive-decl" && n.name && (n as ASTNodeLike).machineBinding) {
+        if (n.kind === "state-decl" && n.name && (n as ASTNodeLike).machineBinding) {
           const mName = (n as ASTNodeLike).machineBinding as string;
           const m = machineRegistry.get(mName);
           if (m) reactiveBindings.set(n.name as string, m);
@@ -7748,7 +7748,7 @@ function processFile(
       for (const n of nodes) {
         if (!n || typeof n !== "object") continue;
         if (
-          (n.kind === "reactive-decl" || n.kind === "reactive-derived-decl" || n.kind === "reactive-debounced-decl") &&
+          (n.kind === "state-decl" || n.kind === "reactive-derived-decl" || n.kind === "reactive-debounced-decl") &&
           typeof n.name === "string"
         ) {
           declaredReactives.add(n.name);
@@ -8372,7 +8372,7 @@ function checkFnBodyProhibitions(
       //   - kind=bare-expr with assign ExprNode (parsed as `@x += value` — compound assignment)
       {
         // reactive-decl inside fn body = writing to an @var (always outer-scope)
-        if (stmt.kind === "reactive-decl") {
+        if (stmt.kind === "state-decl") {
           const varName = "@" + ((stmt.name as string) || "unknown");
           errors.push(new TSError(
             "E-FN-003",
@@ -8400,7 +8400,7 @@ function checkFnBodyProhibitions(
           }
         }
         // Text heuristic fallback: @identifier followed by assignment operator
-        if (!exprNode && stmt.kind !== "reactive-decl") {
+        if (!exprNode && stmt.kind !== "state-decl") {
           const exprText = (stmt as any).exprNode
             ? emitStringFromTree((stmt as any).exprNode as import("./types/ast.ts").ExprNode)
             : (typeof stmt.expr === "string" ? stmt.expr : "");

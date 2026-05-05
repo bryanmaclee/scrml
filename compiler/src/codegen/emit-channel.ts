@@ -198,7 +198,7 @@ export function extractSharedVars(node: any): string[] {
   function walkForShared(nodeList: any[]): void {
     for (const n of nodeList) {
       if (!n || typeof n !== "object") continue;
-      if (n.kind === "reactive-decl" && n.isShared === true) {
+      if (n.kind === "state-decl" && n.isShared === true) {
         shared.push(n.name ?? "");
       }
       if (Array.isArray(n.children)) walkForShared(n.children);

@@ -631,7 +631,7 @@ export function walkBodyForTriggers(
       return;
     }
 
-    if (node.kind === "reactive-decl") {
+    if (node.kind === "state-decl") {
       // @name = expr — reactive-decl IS an assignment to an @-prefixed identifier.
       // Also scan the init for server-only resources and callees.
       // Phase 4d: ExprNode-first, string fallback
@@ -707,7 +707,7 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
     if (!node || typeof node !== "object") return null;
 
     // reactive-decl is the canonical AT_IDENT assignment form.
-    if (node.kind === "reactive-decl") {
+    if (node.kind === "state-decl") {
       return node;
     }
 
@@ -797,7 +797,7 @@ export function analyzeCPSEligibility(
     // resource in init — CPS-eligible.
     const isReactiveServer =
       isReactive &&
-      node.kind === "reactive-decl" &&
+      node.kind === "state-decl" &&
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node));
 
@@ -838,7 +838,7 @@ export function analyzeCPSEligibility(
   let returnVarName: string | null = null;
   for (const ri of reactiveServerIndices) {
     const node = body[ri];
-    if (node.kind === "reactive-decl" && (node as any).name) {
+    if (node.kind === "state-decl" && (node as any).name) {
       returnVarName = (node as any).name;
       break;
     }
@@ -905,7 +905,7 @@ function hasServerOnlyResourceInInit(node: LogicStatement): boolean {
  * Check if a single statement node is a reactive assignment.
  */
 function isReactiveStatement(node: LogicStatement): boolean {
-  if (node.kind === "reactive-decl") return true;
+  if (node.kind === "state-decl") return true;
   if (node.kind === "bare-expr") {
     // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
     const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
@@ -1062,7 +1062,7 @@ function collectLocalNames(body: LogicStatement[]): Set<string> {
       case "lin-decl":
         if ((node as any).name) names.add((node as any).name);
         break;
-      case "reactive-decl":
+      case "state-decl":
       case "reactive-derived-decl":
       case "reactive-debounced-decl":
         if ((node as any).name) names.add((node as any).name);
@@ -1221,7 +1221,7 @@ function collectReferencedNames(body: LogicStatement[]): Set<string> {
       case "const-decl":
       case "tilde-decl":
       case "lin-decl":
-      case "reactive-decl":
+      case "state-decl":
       case "reactive-derived-decl":
       case "reactive-debounced-decl":
         walkExprOrString(n.initExpr, n.init);

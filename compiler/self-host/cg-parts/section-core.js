@@ -605,7 +605,7 @@ export function isServerOnlyNode(node) {
     }
 
     // Catch inline ?{} SQL sigil in let-decl / const-decl / reactive-decl init strings.
-    if (node.kind == "let-decl" || node.kind == "const-decl" || node.kind == "reactive-decl") {
+    if (node.kind == "let-decl" || node.kind == "const-decl" || node.kind == "state-decl") {
         const init = typeof node.init == "string" ? node.init : ""
         if (SQL_SIGIL_PATTERN.test(init)) return true
         if (ENV_PATTERN.test(init)) return true

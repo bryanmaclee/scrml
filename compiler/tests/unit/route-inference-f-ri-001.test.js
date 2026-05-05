@@ -84,7 +84,7 @@ function makeLetDecl(name, init, spanStart = 30, file = "/test/f-ri-001.scrml") 
 function makeReactiveDecl(name, init, spanStart = 40, file = "/test/f-ri-001.scrml") {
   return {
     id: spanStart,
-    kind: "reactive-decl",
+    kind: "state-decl",
     name,
     init,
     span: span(spanStart, file),
@@ -398,7 +398,7 @@ describe("§C — CPS still splits the canonical reactive-server pattern", () =>
     };
     const reactiveServerDecl = {
       id: 70,
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "users",
       init: "?{`SELECT id FROM users`}.all()",
       sqlNode,

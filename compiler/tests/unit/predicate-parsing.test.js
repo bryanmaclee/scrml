@@ -73,7 +73,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§1  @amount: number(>0) = 5 → reactive-decl with typeAnnotation 'number(>0)'", () => {
     const nodes = parseTopLogic("${ @amount: number(>0) = 5 }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("amount");
     expect(decl.typeAnnotation).toBe("number(>0)");
@@ -86,7 +86,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§2  @email: string(email) = '' → typeAnnotation 'string(email)'", () => {
     const nodes = parseTopLogic('${ @email: string(email) = "" }');
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("email");
     expect(decl.typeAnnotation).toBe("string(email)");
@@ -98,7 +98,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§3  @range: number(>0 && <10000) = input → balanced parens in predicate", () => {
     const nodes = parseTopLogic("${ @range: number(>0 && <10000) = input }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("range");
     // The annotation preserves the type and predicate; whitespace may be normalized by tokenizer
@@ -114,7 +114,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§4  @name: string(.length > 3) = '' → property predicate", () => {
     const nodes = parseTopLogic('${ @name: string(.length > 3) = "" }');
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("name");
     expect(decl.typeAnnotation).toBeDefined();
@@ -128,7 +128,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§5  @x: number(>0)[valid_x] = 1 → typeAnnotation includes label suffix", () => {
     const nodes = parseTopLogic("${ @x: number(>0)[valid_x] = 1 }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("x");
     expect(decl.typeAnnotation).toBeDefined();
@@ -142,7 +142,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§6  @cards = [] → reactive-decl WITHOUT typeAnnotation (backward compat)", () => {
     const nodes = parseTopLogic("${ @cards = [] }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("cards");
     expect(decl.typeAnnotation).toBeUndefined();
@@ -155,7 +155,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§7  server @price: number(>0) = 0 → isServer: true AND typeAnnotation", () => {
     const nodes = parseTopLogic("${ server @price: number(>0) = 0 }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("price");
     expect(decl.isServer).toBe(true);
@@ -187,7 +187,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§9  @count = 0 still works (regression)", () => {
     const nodes = parseTopLogic("${ @count = 0 }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("count");
     expect(decl.init).toBe("0");
@@ -201,7 +201,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§10 server @data = loadData() still works (regression)", () => {
     const nodes = parseTopLogic("${ server @data = loadData() }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.name).toBe("data");
     expect(decl.isServer).toBe(true);
@@ -236,7 +236,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
   test("§12 parseLogicBody while-loop @amount: number(>0) = 5 → typeAnnotation", () => {
     // <program>${...}</program> exercises the parseLogicBody outer while-loop directly
     const nodes = parseTopLogic("${ @amount: number(>0) = 5 }");
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.typeAnnotation).toBe("number(>0)");
   });
@@ -247,7 +247,7 @@ describe("§53 Inline Type Predicates — AST Parsing", () => {
 
   test("§13 parseLogicBody server @items: string(email) = '' → isServer + typeAnnotation", () => {
     const nodes = parseTopLogic('${ server @items: string(email) = "" }');
-    const decl = nodes.find(n => n.kind === "reactive-decl");
+    const decl = nodes.find(n => n.kind === "state-decl");
     expect(decl).toBeDefined();
     expect(decl.isServer).toBe(true);
     expect(decl.typeAnnotation).toBe("string(email)");

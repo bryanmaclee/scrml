@@ -55,7 +55,7 @@ function makeReactiveLogicBlock(reactiveDecls) {
   return {
     kind: "logic",
     body: reactiveDecls.map(({ name, init }) => ({
-      kind: "reactive-decl",
+      kind: "state-decl",
       name,
       init: init ?? "undefined",
       span: span(0),

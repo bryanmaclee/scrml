@@ -448,10 +448,10 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
     for (const node of list) {
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child.kind === "reactive-decl") result.push(child);
+          if (child.kind === "state-decl") result.push(child);
         }
       }
-      if (node.kind === "reactive-decl") result.push(node);
+      if (node.kind === "state-decl") result.push(node);
       if ("children" in node && Array.isArray((node as MarkupNode).children)) {
         visit((node as MarkupNode).children as ASTNode[]);
       }
@@ -661,7 +661,7 @@ function hasLiftAfter(
     if (stmt.kind === "sql") return false;
 
     // Another operation node (function-decl, reactive-decl, reactive-derived-decl) stops the scan
-    if (stmt.kind === "function-decl" || stmt.kind === "reactive-decl" || stmt.kind === "reactive-derived-decl") {
+    if (stmt.kind === "function-decl" || stmt.kind === "state-decl" || stmt.kind === "reactive-derived-decl") {
       return false;
     }
   }
@@ -1149,7 +1149,7 @@ export function runDG(input: DGInput): DGOutput {
           }
 
           // reactive-decl in function body = write
-          if (bodyNode.kind === "reactive-decl" && bodyNode.name) {
+          if (bodyNode.kind === "state-decl" && bodyNode.name) {
             const reactiveNodeId = reactiveVarNodeIds.get(bodyNode.name);
             if (reactiveNodeId) {
               edges.push({ from: fnDGNodeId, to: reactiveNodeId, kind: "writes" });
@@ -1511,7 +1511,7 @@ export function runDG(input: DGInput): DGOutput {
             // represent @var assignments (e.g. `@message = "changed"` is parsed as
             // reactive-decl with name="message"). The name field is not in exprFields
             // so sweepNodeForAtRefs misses it. Treat the name as an @var consumption.
-            if (c.kind === "reactive-decl" && typeof c.name === "string") {
+            if (c.kind === "state-decl" && typeof c.name === "string") {
               creditReader(c.name as string);
             }
             // §2e: html-fragment children of a runtime ^{} meta body carry their

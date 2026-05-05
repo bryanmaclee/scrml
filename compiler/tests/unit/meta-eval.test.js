@@ -162,7 +162,7 @@ describe("meta-eval", () => {
 
   test("§4 meta block with @var is left for runtime", () => {
     const body = [
-      { id: 10, kind: "reactive-decl", name: "count", init: "0", span: { file: "test.scrml", start: 0, end: 10, line: 1, col: 1 } },
+      { id: 10, kind: "state-decl", name: "count", init: "0", span: { file: "test.scrml", start: 0, end: 10, line: 1, col: 1 } },
       bareExpr('emit("<p></>")'),
     ];
 
@@ -212,7 +212,7 @@ describe("meta-eval", () => {
 
   test("§7 bodyReferencesReactiveVars detects reactive-decl", () => {
     const body = [
-      { kind: "reactive-decl", name: "count", init: "0" },
+      { kind: "state-decl", name: "count", init: "0" },
     ];
     expect(bodyReferencesReactiveVars(body)).toBe(true);
   });

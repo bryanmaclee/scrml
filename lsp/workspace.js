@@ -559,7 +559,7 @@ function matchLogicDecl(stmt, name) {
     case "function-decl":
       if (stmt.name === name) return { span: stmt.span, kind: "function" };
       break;
-    case "reactive-decl":
+    case "state-decl":
     case "reactive-derived-decl":
     case "reactive-debounced-decl": {
       const base = stmt.name?.startsWith("@") ? stmt.name.slice(1) : stmt.name;

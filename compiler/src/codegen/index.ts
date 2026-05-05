@@ -539,7 +539,7 @@ export function runCG(input: CgInput): CgOutput {
     if (encodingCtx.enabled) {
       const topLevelLogic = analysis?.topLevelLogic ?? collectTopLevelLogicStatements(fileAST);
       for (const stmt of topLevelLogic) {
-        if ((stmt as any).kind === "reactive-decl" && (stmt as any).name) {
+        if ((stmt as any).kind === "state-decl" && (stmt as any).name) {
           const type = (fileAST as any).nodeTypes?.get((stmt as any).name) ?? { kind: "asIs", constraint: null };
           encodingCtx.register((stmt as any).name, type);
         }
@@ -710,7 +710,7 @@ export function runCG(input: CgInput): CgOutput {
         if (!Array.isArray(children)) return;
         for (const child of children) {
           if (!child || typeof child !== "object") continue;
-          if (child.kind === "reactive-decl" && child.machineBinding && child.initialValue) {
+          if (child.kind === "state-decl" && child.machineBinding && child.initialValue) {
             const iv = child.initialValue;
             const variant =
               (iv.kind === "variant-literal" && typeof iv.variant === "string") ? iv.variant :

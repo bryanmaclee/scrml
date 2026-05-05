@@ -129,10 +129,10 @@ ${
             for (const node of list) {
                 if (node.kind == "logic" && Array.isArray(node.body)) {
                     for (const child of node.body) {
-                        if (child.kind == "reactive-decl") result.push(child)
+                        if (child.kind == "state-decl") result.push(child)
                     }
                 }
-                if (node.kind == "reactive-decl") result.push(node)
+                if (node.kind == "state-decl") result.push(node)
                 if (node.children && Array.isArray(node.children)) {
                     visit(node.children)
                 }
@@ -277,7 +277,7 @@ ${
 
             if (stmt.kind == "sql") return false
 
-            if (stmt.kind == "function-decl" || stmt.kind == "reactive-decl" || stmt.kind == "reactive-derived-decl") {
+            if (stmt.kind == "function-decl" || stmt.kind == "state-decl" || stmt.kind == "reactive-derived-decl") {
                 return false
             }
         }
@@ -678,7 +678,7 @@ ${
                             }
                         }
 
-                        if (bodyNode.kind == "reactive-decl" && bodyNode.name) {
+                        if (bodyNode.kind == "state-decl" && bodyNode.name) {
                             const reactiveNodeId = reactiveVarNodeIds.get(bodyNode.name)
                             if (reactiveNodeId) {
                                 edges.push({ from: fnDGNodeId, to: reactiveNodeId, kind: "writes" })

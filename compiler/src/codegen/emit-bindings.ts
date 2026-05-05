@@ -93,7 +93,7 @@ function walkForReactiveDecls(
     if (node.kind === "logic" && Array.isArray(node.body)) {
       for (const stmt of node.body) {
         if (!stmt || typeof stmt !== "object") continue;
-        if (stmt.kind === "reactive-decl" || stmt.kind === "reactive-derived-decl") {
+        if (stmt.kind === "state-decl" || stmt.kind === "reactive-derived-decl") {
           const varName: string = stmt.name ?? "";
           // Phase 4d: ExprNode-first, string fallback
           const init: string = (stmt as any).initExpr ? emitStringFromTree((stmt as any).initExpr).trim() : (typeof stmt.init === "string" ? stmt.init.trim() : "");
@@ -169,7 +169,7 @@ function walkForReactiveTypes(nodes: any[], result: Map<string, string>): void {
     if (node.kind === "logic" && Array.isArray(node.body)) {
       for (const stmt of node.body) {
         if (!stmt) continue;
-        if ((stmt.kind === "reactive-decl") && stmt.name && stmt.typeAnnotation) {
+        if ((stmt.kind === "state-decl") && stmt.name && stmt.typeAnnotation) {
           result.set(stmt.name, stmt.typeAnnotation as string);
         }
       }

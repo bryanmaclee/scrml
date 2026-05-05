@@ -86,7 +86,7 @@ export function collectReactiveVarNames(fileAST) {
         for (const node of nodeList) {
             if (!node || typeof node != "object") continue
             const n = node
-            if (n.kind == "reactive-decl" && n.name) {
+            if (n.kind == "state-decl" && n.name) {
                 names.add(n.name)
             }
             if (n.kind == "logic" && Array.isArray(n.body)) {

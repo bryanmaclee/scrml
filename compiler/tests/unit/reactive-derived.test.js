@@ -187,7 +187,7 @@ describe("collectDerivedVarNames", () => {
           body: [
             { kind: "reactive-derived-decl", name: "total" },
             { kind: "reactive-derived-decl", name: "display" },
-            { kind: "reactive-decl", name: "count" },  // not derived
+            { kind: "state-decl", name: "count" },  // not derived
           ],
         },
       ],

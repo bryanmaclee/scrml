@@ -2800,7 +2800,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * the chain, and return it. Caller attaches the returned node as
    * `sqlNode` on the reactive-decl AST node and sets `init: ""` /
    * omits `initExpr` so downstream consumers (batch-planner string scanner,
-   * emit-server CPS path, emit-logic case "reactive-decl") opt into the
+   * emit-server CPS path, emit-logic case "state-decl") opt into the
    * structured form instead of the broken sql-ref placeholder comment
    * that `safeParseExprToNode` would otherwise produce
    * (the placeholder shape is "(slash-star) sql-ref:N (star-slash)" — written
@@ -2861,7 +2861,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * - `>` followed by `:` (typed annotation) — Step 5/6
    * - `>` followed by `{` (compound block, Variant C) — Step 11
    *
-   * Returns the constructed `kind: "reactive-decl"` AST node on match (with
+   * Returns the constructed `kind: "state-decl"` AST node on match (with
    * `structuralForm: true` and, for Shape 3, `isConst: true`). Returns null
    * if the lookahead does not match — caller MUST fall through to existing
    * dispatch (markup-tag/html-fragment paths) without tokens consumed.
@@ -2922,7 +2922,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     const node = {
       id: ++counter.next,
-      kind: "reactive-decl",
+      kind: "state-decl",
       name,
       init: expr,
       initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
@@ -3052,7 +3052,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // reactive values. Without this hook, `const <doubled> = @count * 2`
       // falls through to the const-decl path with name="" and an empty body
       // (the `<` is unrecognized so the IDENT-collection at line below sees `<`).
-      // On match, returns a `kind: "reactive-decl"` node with `isConst: true`
+      // On match, returns a `kind: "state-decl"` node with `isConst: true`
       // and `structuralForm: true`. Step 4 will populate `shape: "derived"`.
       if (peek().kind === "PUNCT" && peek().text === "<") {
         const declNode = tryParseStructuralDecl(startTok, true);
@@ -3127,12 +3127,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // fix-cg-cps-return-sql-ref-placeholder: detect `server @x = ?{...}.method()`.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
-          const node = { id: ++counter.next, kind: "reactive-decl", name, init: "", sqlNode: _sqlInit, isServer: true, span: spanOf(startTok, peek()) };
+          const node = { id: ++counter.next, kind: "state-decl", name, init: "", sqlNode: _sqlInit, isServer: true, span: spanOf(startTok, peek()) };
           if (typeAnnotation) node.typeAnnotation = typeAnnotation;
           return node;
         }
         const { expr } = collectExpr();
-        const node = { id: ++counter.next, kind: "reactive-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isServer: true, span: spanOf(startTok, peek()) };
+        const node = { id: ++counter.next, kind: "state-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isServer: true, span: spanOf(startTok, peek()) };
         if (typeAnnotation) node.typeAnnotation = typeAnnotation;
         return node;
       }
@@ -3152,10 +3152,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // fix-cg-cps-return-sql-ref-placeholder: detect `@shared x = ?{...}.method()`.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
-          return { id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: "", sqlNode: _sqlInit, isShared: true, span: spanOf(startTok, peek()) };
+          return { id: ++counter.next, kind: "state-decl", name: nameTok.text, init: "", sqlNode: _sqlInit, isShared: true, span: spanOf(startTok, peek()) };
         }
         const { expr } = collectExpr();
-        return { id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) };
+        return { id: ++counter.next, kind: "state-decl", name: nameTok.text, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) };
       }
       // Malformed @shared — emit as bare-expr
       const { expr } = collectExpr();
@@ -3244,10 +3244,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // fix-cg-cps-return-sql-ref-placeholder: detect `@x: T = ?{...}.method()`.
           const _sqlInit = tryConsumeSqlInit();
           if (_sqlInit) {
-            return { id: ++counter.next, kind: "reactive-decl", name, init: "", sqlNode: _sqlInit, typeAnnotation, span: spanOf(startTok, peek()) };
+            return { id: ++counter.next, kind: "state-decl", name, init: "", sqlNode: _sqlInit, typeAnnotation, span: spanOf(startTok, peek()) };
           }
           const { expr } = collectExpr();
-          return { id: ++counter.next, kind: "reactive-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), typeAnnotation, span: spanOf(startTok, peek()) };
+          return { id: ++counter.next, kind: "state-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), typeAnnotation, span: spanOf(startTok, peek()) };
         }
         // Malformed — fall through to bare-expr
       }
@@ -3262,10 +3262,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `/* sql-ref:-1 */` — broken in both server CPS and client init contexts.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
-          return { id: ++counter.next, kind: "reactive-decl", name, init: "", sqlNode: _sqlInit, span: spanOf(startTok, peek()) };
+          return { id: ++counter.next, kind: "state-decl", name, init: "", sqlNode: _sqlInit, span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
-        return { id: ++counter.next, kind: "reactive-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) };
+        return { id: ++counter.next, kind: "state-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) };
       }
 
       // @set(@obj, "path", value) — explicit escape hatch
@@ -4127,7 +4127,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Recognized at expression-statement-start position. Without this hook,
     // `<count> = 0` is silently swallowed as `kind: "html-fragment"` raw text
     // (PARSER-AUDIT §F1c — the deceptive-success pattern). On match, returns
-    // a `kind: "reactive-decl"` node with `structuralForm: true`. On no-match,
+    // a `kind: "state-decl"` node with `structuralForm: true`. On no-match,
     // tokens are unconsumed and execution falls through to the default branch.
     if (tok.kind === "PUNCT" && tok.text === "<") {
       const declNode = tryParseStructuralDecl(tok, false);
@@ -4884,13 +4884,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // fix-cg-cps-return-sql-ref-placeholder: detect `server @x = ?{...}.method()`.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
-          const node = { id: ++counter.next, kind: "reactive-decl", name, init: "", sqlNode: _sqlInit, isServer: true, span: spanOf(startTok, peek()) };
+          const node = { id: ++counter.next, kind: "state-decl", name, init: "", sqlNode: _sqlInit, isServer: true, span: spanOf(startTok, peek()) };
           if (typeAnnotation) node.typeAnnotation = typeAnnotation;
           nodes.push(node);
           continue;
         }
         const { expr } = collectExpr();
-        const node = { id: ++counter.next, kind: "reactive-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isServer: true, span: spanOf(startTok, peek()) };
+        const node = { id: ++counter.next, kind: "state-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isServer: true, span: spanOf(startTok, peek()) };
         if (typeAnnotation) node.typeAnnotation = typeAnnotation;
         nodes.push(node);
         continue;
@@ -4912,11 +4912,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // fix-cg-cps-return-sql-ref-placeholder: detect `@shared x = ?{...}.method()`.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
-          nodes.push({ id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: "", sqlNode: _sqlInit, isShared: true, span: spanOf(startTok, peek()) });
+          nodes.push({ id: ++counter.next, kind: "state-decl", name: nameTok.text, init: "", sqlNode: _sqlInit, isShared: true, span: spanOf(startTok, peek()) });
           continue;
         }
         const { expr } = collectExpr();
-        nodes.push({ id: ++counter.next, kind: "reactive-decl", name: nameTok.text, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) });
+        nodes.push({ id: ++counter.next, kind: "state-decl", name: nameTok.text, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), isShared: true, span: spanOf(startTok, peek()) });
         continue;
       }
       // Malformed @shared — emit as bare-expr
@@ -5014,7 +5014,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (_sqlInit) {
             nodes.push({
               id: ++counter.next,
-              kind: "reactive-decl",
+              kind: "state-decl",
               name,
               init: "",
               sqlNode: _sqlInit,
@@ -5026,7 +5026,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const { expr } = collectExpr();
           nodes.push({
             id: ++counter.next,
-            kind: "reactive-decl",
+            kind: "state-decl",
             name,
             init: expr,
             initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
@@ -5050,7 +5050,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (_sqlInit) {
           nodes.push({
             id: ++counter.next,
-            kind: "reactive-decl",
+            kind: "state-decl",
             name,
             init: "",
             sqlNode: _sqlInit,
@@ -5061,7 +5061,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const { expr, span } = collectExpr();
         nodes.push({
           id: ++counter.next,
-          kind: "reactive-decl",
+          kind: "state-decl",
           name,
           init: expr,
           initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
@@ -5236,7 +5236,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Phase A1a Step 2 — Shape 3 derived: `const <derived> = expr` (V5-strict).
       // Top-level branch — mirrors the parseOneStatement Shape 3 hook above.
       // Per SPEC §6.6.1, `const <name> = expr` is the canonical declaration
-      // syntax for derived reactive values. Returns `kind: "reactive-decl"`
+      // syntax for derived reactive values. Returns `kind: "state-decl"`
       // with `isConst: true` and `structuralForm: true`. Step 4 will populate
       // `shape: "derived"`.
       if (peek().kind === "PUNCT" && peek().text === "<") {

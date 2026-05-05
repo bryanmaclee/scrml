@@ -19,16 +19,16 @@ describe("CONF-TAB-019: @variable assignment produces reactive-decl node", () =>
   test("@counter = 0 inside a logic block produces reactive-decl node", () => {
     const { ast } = run("${ @counter = 0; }");
     const logic = ast.nodes[0];
-    const rNode = logic.body.find((n) => n.kind === "reactive-decl");
+    const rNode = logic.body.find((n) => n.kind === "state-decl");
     expect(rNode).toBeDefined();
-    expect(rNode.kind).toBe("reactive-decl");
+    expect(rNode.kind).toBe("state-decl");
     expect(rNode.name).toBe("counter");
   });
 
   test("reactive-decl carries the initial value as a string in `init`", () => {
     const { ast } = run("${ @count = 0; }");
     const logic = ast.nodes[0];
-    const rNode = logic.body.find((n) => n.kind === "reactive-decl");
+    const rNode = logic.body.find((n) => n.kind === "state-decl");
     expect(rNode).toBeDefined();
     expect(rNode.init).toBeDefined();
     expect(typeof rNode.init).toBe("string");
@@ -38,7 +38,7 @@ describe("CONF-TAB-019: @variable assignment produces reactive-decl node", () =>
   test("reactive-decl has name without the @ sigil", () => {
     const { ast } = run("${ @myVar = 42; }");
     const logic = ast.nodes[0];
-    const rNode = logic.body.find((n) => n.kind === "reactive-decl");
+    const rNode = logic.body.find((n) => n.kind === "state-decl");
     expect(rNode).toBeDefined();
     expect(rNode.name).toBe("myVar");
     expect(rNode.name).not.toContain("@");
@@ -47,7 +47,7 @@ describe("CONF-TAB-019: @variable assignment produces reactive-decl node", () =>
   test("reactive-decl carries a valid span", () => {
     const { ast } = run("${ @x = 1; }");
     const logic = ast.nodes[0];
-    const rNode = logic.body.find((n) => n.kind === "reactive-decl");
+    const rNode = logic.body.find((n) => n.kind === "state-decl");
     expect(rNode.span).toBeDefined();
     expect(typeof rNode.span.start).toBe("number");
   });
@@ -55,7 +55,7 @@ describe("CONF-TAB-019: @variable assignment produces reactive-decl node", () =>
   test("multiple reactive declarations each produce a reactive-decl node", () => {
     const { ast } = run("${ @a = 1; @b = 2; @c = 3; }");
     const logic = ast.nodes[0];
-    const rNodes = logic.body.filter((n) => n.kind === "reactive-decl");
+    const rNodes = logic.body.filter((n) => n.kind === "state-decl");
     expect(rNodes.length).toBe(3);
     const names = rNodes.map((n) => n.name);
     expect(names).toContain("a");

@@ -167,14 +167,14 @@ describe("reactive-arrays §1: AST — reactive-decl produced for @arr = []", ()
   test("@items = [] produces reactive-decl node with name 'items'", () => {
     const { ast } = parse(`<div>\${ @items = [] }</div>`);
     const nodes = collectAllLogicNodes(ast);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const decl = nodes.find(n => n.kind === "state-decl" && n.name === "items");
     expect(decl).toBeDefined();
   });
 
   test("reactive-decl init field contains array brackets for empty array", () => {
     const { ast } = parse(`<div>\${ @items = [] }</div>`);
     const nodes = collectAllLogicNodes(ast);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const decl = nodes.find(n => n.kind === "state-decl" && n.name === "items");
     expect(decl).toBeDefined();
     // Init should contain brackets (may be "[ ]" or "[]" after tokenization)
     expect(decl.init).toMatch(/\[/);
@@ -192,14 +192,14 @@ describe("reactive-arrays §1: AST — reactive-decl produced for @arr = []", ()
     }</div>`;
     const { ast } = parse(source);
     const nodes = collectAllLogicNodes(ast);
-    const todosDecl = nodes.find(n => n.kind === "reactive-decl" && n.name === "todos");
+    const todosDecl = nodes.find(n => n.kind === "state-decl" && n.name === "todos");
     expect(todosDecl).toBeDefined();
   });
 
   test("@items = [1, 2, 3] produces reactive-decl with non-empty init", () => {
     const { ast } = parse(`<div>\${ @items = [1, 2, 3] }</div>`);
     const nodes = collectAllLogicNodes(ast);
-    const decl = nodes.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const decl = nodes.find(n => n.kind === "state-decl" && n.name === "items");
     expect(decl).toBeDefined();
     expect(decl.init).toContain("1");
     expect(decl.init).toContain("3");
@@ -251,7 +251,7 @@ describe("reactive-arrays §2: AST — spread-replace expression in reactive-dec
     const nodes = collectAllLogicNodes(ast);
     const fn = nodes.find(n => n.kind === "function-decl" && n.name === "addItem");
     expect(fn).toBeDefined();
-    const reassign = fn.body.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const reassign = fn.body.find(n => n.kind === "state-decl" && n.name === "items");
     expect(reassign).toBeDefined();
   });
 
@@ -265,7 +265,7 @@ describe("reactive-arrays §2: AST — spread-replace expression in reactive-dec
     const { ast } = parse(source);
     const nodes = collectAllLogicNodes(ast);
     const fn = nodes.find(n => n.kind === "function-decl" && n.name === "add");
-    const reassign = fn?.body?.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const reassign = fn?.body?.find(n => n.kind === "state-decl" && n.name === "items");
     expect(reassign).toBeDefined();
     // The spread operator (...) should be present in the init expression
     expect(reassign.init).toContain("...");
@@ -281,7 +281,7 @@ describe("reactive-arrays §2: AST — spread-replace expression in reactive-dec
     const { ast } = parse(source);
     const nodes = collectAllLogicNodes(ast);
     const fn = nodes.find(n => n.kind === "function-decl" && n.name === "add");
-    const reassign = fn?.body?.find(n => n.kind === "reactive-decl" && n.name === "items");
+    const reassign = fn?.body?.find(n => n.kind === "state-decl" && n.name === "items");
     expect(reassign).toBeDefined();
     // The init should contain a reference to @items (the source array)
     expect(reassign.init).toContain("@items");
@@ -296,7 +296,7 @@ describe("reactive-arrays §3: codegen — _scrml_reactive_set for array decl", 
   test("reactive-decl with [] init emits _scrml_reactive_set call", () => {
     const result = compile([
       makeLogicBlock([
-        { kind: "reactive-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
+        { kind: "state-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
       ]),
     ]);
     expect(result.errors).toHaveLength(0);
@@ -307,8 +307,8 @@ describe("reactive-arrays §3: codegen — _scrml_reactive_set for array decl", 
   test("multiple reactive array declarations produce multiple _scrml_reactive_set calls", () => {
     const result = compile([
       makeLogicBlock([
-        { kind: "reactive-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
-        { kind: "reactive-decl", name: "selected", init: "[ ]", span: span(0), id: 3 },
+        { kind: "state-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
+        { kind: "state-decl", name: "selected", init: "[ ]", span: span(0), id: 3 },
       ]),
     ]);
     expect(result.errors).toHaveLength(0);
@@ -330,7 +330,7 @@ describe("reactive-arrays §4: codegen — spread-replace @ref rewriting", () =>
       makeLogicBlock([
         makeFunctionDecl("addItem", [
           {
-            kind: "reactive-decl",
+            kind: "state-decl",
             name: "items",
             init: "[ ..._scrml_reactive_get ( \"items\" ) , { id : 1 } ]",
             span: span(0),
@@ -351,7 +351,7 @@ describe("reactive-arrays §4: codegen — spread-replace @ref rewriting", () =>
       makeLogicBlock([
         makeFunctionDecl("add", [
           {
-            kind: "reactive-decl",
+            kind: "state-decl",
             name: "list",
             // Raw @list reference — emitLogicNode uses rewriteExpr which replaces @ref
             init: "[ ...@list , \"newItem\" ]",
@@ -595,7 +595,7 @@ describe("reactive-arrays §9: codegen — @items.length emits reactive get", ()
   test("bare-expr @items.length emits _scrml_reactive_get reference", () => {
     const result = compile([
       makeLogicBlock([
-        { kind: "reactive-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
+        { kind: "state-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
         { kind: "bare-expr", expr: "@items . length", span: span(0), id: 3 },
       ]),
     ]);
@@ -607,7 +607,7 @@ describe("reactive-arrays §9: codegen — @items.length emits reactive get", ()
   test("reactive-decl for items followed by length expression compiles without error", () => {
     const result = compile([
       makeLogicBlock([
-        { kind: "reactive-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
+        { kind: "state-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
         { kind: "bare-expr", expr: "@items . length", span: span(0), id: 3 },
       ]),
     ]);
@@ -619,8 +619,8 @@ describe("reactive-arrays §9: codegen — @items.length emits reactive get", ()
     // it gets rewritten correctly
     const result = compile([
       makeLogicBlock([
-        { kind: "reactive-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
-        { kind: "reactive-decl", name: "count", init: "@items . length", span: span(0), id: 3 },
+        { kind: "state-decl", name: "items", init: "[ ]", span: span(0), id: 2 },
+        { kind: "state-decl", name: "count", init: "@items . length", span: span(0), id: 3 },
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");

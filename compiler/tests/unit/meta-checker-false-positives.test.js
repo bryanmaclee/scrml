@@ -400,7 +400,7 @@ function fp_makeForStmt(variable, iterable, body = [], id = 10) {
 }
 
 function fp_makeReactiveDecl(name, init = null, id = 10) {
-  return { id, kind: "reactive-decl", name, init, span: fp_span(0) };
+  return { id, kind: "state-decl", name, init, span: fp_span(0) };
 }
 
 describe("BUG-META-COMPTIME-VARS — compile-time outer const propagation", () => {

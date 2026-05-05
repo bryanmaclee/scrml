@@ -106,7 +106,7 @@ function makeBareExpr(expr, spanStart = 20, file = "/test/app.scrml") {
 }
 
 function makeReactiveDecl(name, init, spanStart = 40) {
-  return { kind: "reactive-decl", name, init, span: span(spanStart) };
+  return { kind: "state-decl", name, init, span: span(spanStart) };
 }
 
 function makeFileAST(filePath, fnNodes) {

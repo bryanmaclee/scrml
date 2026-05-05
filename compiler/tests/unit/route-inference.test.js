@@ -139,7 +139,7 @@ function makeLetDecl(name, init, spanStart = 30, file = "/test/app.scrml") {
 function makeReactiveDecl(name, init, spanStart = 40, file = "/test/app.scrml") {
   return {
     id: spanStart,
-    kind: "reactive-decl",
+    kind: "state-decl",
     name,
     init,
     span: span(spanStart, file),

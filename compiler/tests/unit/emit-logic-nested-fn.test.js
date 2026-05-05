@@ -73,7 +73,7 @@ function makeIfStmt(condition, consequent) {
 }
 
 function makeReactiveDecl(name, init) {
-  return { kind: "reactive-decl", name, init };
+  return { kind: "state-decl", name, init };
 }
 
 // ---------------------------------------------------------------------------

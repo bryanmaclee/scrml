@@ -71,5 +71,26 @@ Base: `d28f6f7` (Step 2 head)
 4. **Sub-pass D — documentation rename** — markdown files in scope (SPEC.md, PIPELINE.md, .claude/maps, audit + inventory docs, AST-CONTRACTS).
 5. **Validation** — full `bun run test`; expect 8,745 pass / 0 fail.
 
-**Atomic strategy chosen:** mass `sed -i` per-form. Scoped via `find` to source extensions only for sub-passes A/B/C; markdown for sub-pass D. Each sub-pass is one command, one verify, one commit.
+**Atomic strategy attempted:** mass `sed -i` per-form. **BLOCKED** — environment refused `find -exec sed -i`, `xargs sed -i`, even `perl -i`. Even `sed --version` is denied. Per system prompt, the prescribed alternative is the `Edit` tool. Switched to **per-file `Edit replace_all: true`** strategy. Slower (one Edit call per file), but each file is independently verified.
+
+### [09:08] Sub-pass A — `"reactive-decl"` → `"state-decl"` (double-quoted, load-bearing)
+
+**Strategy:** per-file `Edit replace_all: true` across all 67 files containing the literal.
+
+**Files modified (67):**
+- compiler/src/types/ast.ts
+- compiler/src/ast-builder.js
+- 11 self-host files (`compiler/self-host/*.scrml` + `cg-parts/*.js`)
+- 16 compiler/src + codegen modules
+- LSP (handlers.js, workspace.js)
+- stdlib/compiler/meta-checker.scrml
+- 36 test files (conformance, integration, unit, self-host)
+
+**Edge case during `Edit`:** 2 files (emit-predicates.ts, emit-sync.ts) returned "String to replace not found in file." `grep -c` confirmed 0 double-quoted occurrences in each — false positives from earlier grep result mixing categories. Skipped both for sub-pass A; their bare-text references will be handled in sub-pass C.
+
+**Defensive check:** `grep -rl '"reactive-decl"' ... --include=*.{js,ts,scrml}` post-Edit → **0 matches**. Conversely `grep -l '"state-decl"' ...` → 67 files (confirms 1:1 substitution).
+
+**Test pivot bug (caught + fixed):** `compiler/tests/self-host/bpp.test.js` line 238 originally contained `splitMergedStatements("count", "0", "reactive-decl")`. Test was renamed to `"state-decl"`. **However**, the test imports the JS SUT from `findMainProjectRoot()` (which prefers main worktree if it has `parser-workarounds.js`). The main worktree's JS file still says `"reactive-decl"` (rename hasn't merged). After test rename, worktree-test passed `"state-decl"` to a function that still checked `"reactive-decl"`, causing mismatch. Fix: changed `findMainProjectRoot` to **prefer the local worktree if it has the file**, falling back to main only when local is missing. Rationale: a cross-cut rename must test its own worktree's SUT, not stale main. Pre-existing logic was wrong for this kind of refactor.
+
+**Test results after Sub-pass A:** **8,745 pass / 43 skip / 0 fail / 8,788 tests** — exactly matching baseline. 0 regressions.
 

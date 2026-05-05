@@ -707,7 +707,7 @@ describe("emitMatchExpr — match-arm-block structured body nodes", () => {
     // Simulates: .Info => { @currentStep = Step.Info }
     // After AST builder fix, this produces a match-arm-block node with body array.
     const reactiveAssignNode = {
-      kind: "reactive-decl",
+      kind: "state-decl",
       name: "currentStep",
       init: "Step . Info",
     };
@@ -734,7 +734,7 @@ describe("emitMatchExpr — match-arm-block structured body nodes", () => {
   it("emits multiple match-arm-block variant arms as if / else if chain", () => {
     // Simulates: .Active => { @x = 1 }  .Inactive => { @x = 2 }
     const makeReactiveAssign = (name, val) => ({
-      kind: "reactive-decl",
+      kind: "state-decl",
       name,
       init: String(val),
     });
@@ -793,7 +793,7 @@ describe("emitMatchExpr — match-arm-block structured body nodes", () => {
           kind: "match-arm-block",
           variant: null,
           isWildcard: true,
-          body: [{ kind: "reactive-decl", name: "x", init: "0" }],
+          body: [{ kind: "state-decl", name: "x", init: "0" }],
         },
       ],
     };
@@ -842,7 +842,7 @@ describe("emitMatchExpr — match-arm-block structured body nodes", () => {
           kind: "match-arm-block",
           variant: "Active",
           isWildcard: false,
-          body: [{ kind: "reactive-decl", name: "x", init: "1" }],
+          body: [{ kind: "state-decl", name: "x", init: "1" }],
         },
         // Single expression arm (legacy bare-expr string path — unchanged)
         { kind: "bare-expr", expr: ".Inactive => 0" },
