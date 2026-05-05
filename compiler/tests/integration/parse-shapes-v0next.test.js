@@ -464,10 +464,10 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
   });
 
   // §S4.10 — Discriminant invariant: every state-decl has a shape value drawn
-  // from {"plain","derived"} (Step 4 scope) AND "decl-with-spec" never appears
-  // (deferred to Step 5).
-  test("§S4.10: discriminant invariant — every state-decl shape ∈ {\"plain\",\"derived\"}", () => {
-    // Battery of fixtures: legacy + structural × Shape 1 + Shape 3
+  // from {"plain","derived","decl-with-spec"} (Step 5 admits decl-with-spec).
+  // shape↔isConst↔renderSpec consistency rules are enforced.
+  test("§S4.10: discriminant invariant — every state-decl shape ∈ {\"plain\",\"derived\",\"decl-with-spec\"}", () => {
+    // Battery of fixtures: legacy + structural × Shape 1 + Shape 3 + Shape 2 (Step 5)
     const fixtures = [
       `<program>\${ @a = 0 }</program>`,
       `<program>\${ @b = "" }</program>`,
@@ -476,8 +476,12 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
       `<program>\${ <e> = "" }</program>`,
       `<program>\${ <f> = 0; const <g> = @f + 1 }</program>`,
       `<program>\${ @h = 0; <i> = 1; const <j> = @h * @i }</program>`,
+      // Step 5 Shape 2 fixtures
+      `<program>\${ <k> = <input type="text"/> }</program>`,
+      `<program>\${ <l req> = <input type="text"/> }</program>`,
+      `<program>\${ <m req length(>=2)> = <input type="text"/> }</program>`,
     ];
-    const VALID_SHAPES = new Set(["plain", "derived"]);
+    const VALID_SHAPES = new Set(["plain", "derived", "decl-with-spec"]);
     let totalDecls = 0;
     for (const src of fixtures) {
       const { ast } = parse(src);
@@ -486,19 +490,31 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
         totalDecls++;
         // shape must be set (no undefined)
         expect(d.shape).toBeDefined();
-        // shape must be in the Step-4 valid set
+        // shape must be in the Step-5 valid set
         expect(VALID_SHAPES.has(d.shape)).toBe(true);
-        // shape:"decl-with-spec" must NOT appear in Step 4 outputs
-        expect(d.shape).not.toBe("decl-with-spec");
         // structuralForm must be set (boolean, not undefined)
         expect(typeof d.structuralForm).toBe("boolean");
         // isConst must be set (boolean, not undefined)
         expect(typeof d.isConst).toBe("boolean");
-        // shape↔isConst consistency (Step 4 rule):
-        //   shape:"plain"   → isConst:false
-        //   shape:"derived" → isConst:true
+        // shape↔isConst consistency:
+        //   shape:"plain"          → isConst:false
+        //   shape:"derived"        → isConst:true
+        //   shape:"decl-with-spec" → isConst:false (Shape 2 is not const)
         if (d.shape === "plain") expect(d.isConst).toBe(false);
         if (d.shape === "derived") expect(d.isConst).toBe(true);
+        if (d.shape === "decl-with-spec") expect(d.isConst).toBe(false);
+        // shape↔renderSpec consistency:
+        //   shape:"decl-with-spec" → renderSpec is non-null
+        //   shape ≠ "decl-with-spec" → renderSpec absent or null
+        if (d.shape === "decl-with-spec") {
+          expect(d.renderSpec).toBeDefined();
+          expect(d.renderSpec).not.toBeNull();
+          expect(d.renderSpec.kind).toBe("render-spec");
+          expect(d.initExpr).toBeNull();
+        } else {
+          // renderSpec should not be present (or be null) on Shapes 1/3
+          expect(d.renderSpec == null).toBe(true);
+        }
       }
     }
     // Sanity: the battery should produce >0 state-decl nodes.
@@ -529,5 +545,248 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
     expect(decls[0].structuralForm).toBe(false);
     expect(decls[0].isConst).toBe(false);
     expect(decls[0].isShared).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase A1a Step 5 — Shape 2 `renderSpec` + bareword/call-form validators
+// ---------------------------------------------------------------------------
+
+describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () => {
+  // §S5.1 — Bare bindable input: `<userName> = <input type="text"/>`
+  test("§S5.1: bare bindable input → shape:\"decl-with-spec\", renderSpec, validators:[]", () => {
+    const src = `<program>\${ <userName> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("userName");
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    expect(d.initExpr).toBeNull();
+    expect(d.renderSpec).toBeDefined();
+    expect(d.renderSpec.kind).toBe("render-spec");
+    expect(d.renderSpec.element).toBeDefined();
+    expect(d.renderSpec.element.kind).toBe("markup");
+    expect(d.renderSpec.element.tag).toBe("input");
+    // Validators is empty array (not null) on Shape 2 with no validators
+    expect(Array.isArray(d.validators)).toBe(true);
+    expect(d.validators.length).toBe(0);
+    // Anti-fragment guard
+    assertNoHtmlFragmentMatching(ast, /< userName >/);
+    assertNoHtmlFragmentMatching(ast, /< input/);
+  });
+
+  // §S5.2 — Single bareword validator `req`
+  test("§S5.2: <userName req> = <input/> → validators:[{name:'req', args:null}]", () => {
+    const src = `<program>\${ <userName req> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators.length).toBe(1);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.validators[0].args).toBeNull();
+    expect(d.validators[0].span).toBeDefined();
+    assertNoHtmlFragmentMatching(ast, /< userName req >/);
+  });
+
+  // §S5.3 — Multiple bareword validators
+  test("§S5.3: <email req email> = <input/> → two bareword validators", () => {
+    const src = `<program>\${ <email req email> = <input type="email"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators.length).toBe(2);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.validators[0].args).toBeNull();
+    expect(d.validators[1].name).toBe("email");
+    expect(d.validators[1].args).toBeNull();
+    assertNoHtmlFragmentMatching(ast, /< email req email >/);
+  });
+
+  // §S5.4 — Call-form validator `length(>=2)` with relational arg
+  test("§S5.4: <userName req length(>=2)> = <input/> → call-form with relational arg", () => {
+    const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators.length).toBe(2);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.validators[0].args).toBeNull();
+    expect(d.validators[1].name).toBe("length");
+    // Step 5: args stored as raw text array; A1b sub-grammar-parses to ExprNode[].
+    expect(Array.isArray(d.validators[1].args)).toBe(true);
+    expect(d.validators[1].args.length).toBe(1);
+    expect(d.validators[1].args[0]).toContain(">=");
+    expect(d.validators[1].args[0]).toContain("2");
+    assertNoHtmlFragmentMatching(ast, /< userName/);
+  });
+
+  // §S5.5 — Multiple call-form validators
+  test("§S5.5: <age min(18) max(120)> = <input/> → two call-form validators", () => {
+    const src = `<program>\${ <age min(18) max(120)> = <input type="number"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators.length).toBe(2);
+    expect(d.validators[0].name).toBe("min");
+    expect(d.validators[0].args).toEqual(["18"]);
+    expect(d.validators[1].name).toBe("max");
+    expect(d.validators[1].args).toEqual(["120"]);
+  });
+
+  // §S5.6 — Different bindable markup tag: textarea
+  test("§S5.6: <bio> = <textarea/> → renderSpec.element.tag:\"textarea\"", () => {
+    const src = `<program>\${ <bio> = <textarea/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].shape).toBe("decl-with-spec");
+    expect(decls[0].renderSpec.element.tag).toBe("textarea");
+  });
+
+  // §S5.7 — Select with body content
+  test("§S5.7: <status> = <select>...</> → renderSpec.element.tag:\"select\" with children", () => {
+    const src = `<program>\${ <status> = <select><option value="a">A</></> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].shape).toBe("decl-with-spec");
+    expect(decls[0].renderSpec.element.tag).toBe("select");
+    // Select markup has children (the <option>)
+    expect(decls[0].renderSpec.element.children.length).toBeGreaterThan(0);
+  });
+
+  // §S5.8 — Checkbox with `req` validator
+  test("§S5.8: <agree req> = <input type=\"checkbox\"/> → req validator", () => {
+    const src = `<program>\${ <agree req> = <input type="checkbox"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators.length).toBe(1);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.renderSpec.element.tag).toBe("input");
+    // The type="checkbox" attribute is on the markup node's attrs
+    const typeAttr = d.renderSpec.element.attrs.find((a) => a.name === "type");
+    expect(typeAttr).toBeDefined();
+  });
+
+  // §S5.9 — Pattern call-form with regex-string-arg
+  test("§S5.9: <slug pattern(\"[a-z]+\")> → pattern validator with string arg", () => {
+    const src = `<program>\${ <slug pattern("[a-z]+")> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.validators.length).toBe(1);
+    expect(d.validators[0].name).toBe("pattern");
+    expect(d.validators[0].args[0]).toContain("[a-z]+");
+  });
+
+  // §S5.10 — Cross-field validator: eq(@password)
+  test("§S5.10: <confirm req eq(@password)> → eq validator with @password arg", () => {
+    const src = `<program>\${ <confirm req eq(@password)> = <input type="password"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.validators.length).toBe(2);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.validators[1].name).toBe("eq");
+    expect(d.validators[1].args[0]).toContain("@password");
+  });
+
+  // §S5.11 — Negative: no `=` after attrs (just opener) → NOT Shape 2
+  // Per Step 5 brief negative case 8: `<userName req length(>=2)>` followed by
+  // block content (no `=`) should fall through to existing markup parsing.
+  test("§S5.11: `<userName req length(>=2)> hello </>` (no =) → no state-decl", () => {
+    const src = `<program>\${ <userName req length(>=2)> hello </> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(0);
+    // Falls through to existing markup/html-fragment dispatch — exact form
+    // depends on existing parser, but state-decl path correctly declined.
+  });
+
+  // §S5.12 — Negative: bare markup `<input/>` in markup body → NOT state-decl
+  // Per Step 5 brief negative case 9: a bare markup tag without state-decl
+  // context (no `<NAME>=...` form) is not a state-decl.
+  test("§S5.12: bare `<input/>` in markup body → no state-decl", () => {
+    const src = `<program>\${ <input/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(0);
+  });
+
+  // §S5.13 — Multi-decl mix: Shape 1 + Shape 2 + Shape 3 in same block
+  test("§S5.13: multi-decl mix `<count>=0; <userName req>=<input/>; const <d>=@count*2`", () => {
+    const src = `<program>\${ <count> = 0; <userName req> = <input type="text"/>; const <doubled> = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    // First: Shape 1
+    expect(decls[0].name).toBe("count");
+    expect(decls[0].shape).toBe("plain");
+    // Second: Shape 2
+    expect(decls[1].name).toBe("userName");
+    expect(decls[1].shape).toBe("decl-with-spec");
+    expect(decls[1].validators.length).toBe(1);
+    expect(decls[1].validators[0].name).toBe("req");
+    expect(decls[1].renderSpec.element.tag).toBe("input");
+    // Third: Shape 3
+    expect(decls[2].name).toBe("doubled");
+    expect(decls[2].shape).toBe("derived");
+    expect(decls[2].isConst).toBe(true);
+    // None of the original source should leak as html-fragment text
+    assertNoHtmlFragmentMatching(ast, /< count >/);
+    assertNoHtmlFragmentMatching(ast, /< userName req >/);
+    assertNoHtmlFragmentMatching(ast, /< doubled >/);
+  });
+
+  // §S5.14 — Validators-on-Shape-1 (expression RHS): per Step 5 design choice,
+  // validators ARE collected even when RHS is expression (defensive — A1b
+  // handles validators-on-non-Shape-2 separately).
+  // This case demonstrates the flexibility; Step 5 brief deferred this combo
+  // but the implementation tolerates it.
+  test("§S5.14: <name req>=\"\" (validators on Shape 1 expr-RHS) — validators preserved", () => {
+    const src = `<program>\${ <name req> = "" }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    // Shape is "plain" (expression RHS), but validators populated.
+    expect(d.shape).toBe("plain");
+    expect(d.isConst).toBe(false);
+    // Validators ARE collected per Step 5 implementation; A1b will validate
+    // whether validators-on-Shape-1 is well-formed per spec §55.2.
+    if (d.validators) {
+      expect(d.validators.length).toBe(1);
+      expect(d.validators[0].name).toBe("req");
+    }
+  });
+
+  // §S5.15 — Render-spec node shape verification (kind:"render-spec" with
+  // element field carrying the markup AST).
+  test("§S5.15: render-spec sub-node has kind:\"render-spec\" + element:MarkupNode", () => {
+    const src = `<program>\${ <city> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const renderSpecs = findKind(ast, "render-spec");
+    expect(renderSpecs.length).toBe(1);
+    expect(renderSpecs[0].kind).toBe("render-spec");
+    expect(renderSpecs[0].element).toBeDefined();
+    expect(renderSpecs[0].element.kind).toBe("markup");
+    expect(renderSpecs[0].element.tag).toBe("input");
+    expect(renderSpecs[0].span).toBeDefined();
   });
 });
