@@ -13535,6 +13535,55 @@ The compiler builds a single dependency graph of all operations in the program. 
 
 The route analysis pass reads the dependency graph to determine, for each function, whether server escalation is required. The escalation triggers in Section 12.2 are evaluated against the graph.
 
+### 31.4 Validator predicate-arg dependency tracking (Stage 0b D4 — L14)
+
+**Added:** 2026-05-04 — formalises dependency tracking through validator predicate args, the basis for cross-field validation (§55.11).
+
+A validator predicate may take expression arguments that reference other reactive cells:
+
+```scrml
+<signup>
+    <password req length(>=8)> = <input type="password"/>
+    <confirm  req eq(@signup.password)> = <input type="password"/>
+</>
+```
+
+The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. When `@signup.password` changes, the `<confirm>`'s `isValid` rollup must recompute.
+
+**Normative statements:**
+
+- The dependency graph SHALL include an edge for every cell read inside a validator predicate's argument expression. The edge connects the cell's reactive node to the synthetic validity-surface node for the cell carrying the validator (cross-ref §55.5–§55.7 for the synthesised `isValid`/`errors` properties).
+- An expression argument may reference any reactive cell, derived cell, or function-call result. The compiler walks the expression tree at compile time to collect all transitive cell dependencies.
+- Cycle detection: if the graph contains a cycle through validator predicate-arg edges (cell A's validator reads cell B, cell B's validator reads cell A directly or transitively), the compiler emits `E-VALIDATOR-CIRCULAR-DEP` (§34) and rejects the program.
+- The dependency tracker uses the same machinery as the standard reactive dependency tracker; predicate-arg dependencies are not a separate subsystem.
+- Cross-field validation across different compounds is legal and tracked: `<a.x req eq(@b.y)>` is a legal cross-compound dependency.
+
+**Cross-references:**
+- §55.11 — cross-field validation via predicate args.
+- §55.11.2 — circular dependency detection (the error-emitting subsection).
+- §6.6 — derived-cell dependency rules (the same tracker is used).
+
+### 31.5 Derived-state expression dependency tracking (Stage 0b D4 — L15, L20)
+
+**Added:** 2026-05-04 — formalises dependency tracking for two derived-state forms:
+
+1. `const <derived>` cells (§6.6) — derived cell whose RHS is an expression of arbitrary reactive cells.
+2. Derived engines `<engine for=T derived=expr>` (§51.0.J) — engine whose variant is reactively recomputed from an expression of cells.
+
+**Normative statements:**
+
+- The dependency graph SHALL include edges for every reactive cell read inside a derived cell's RHS expression. When any referenced cell changes, the derived cell's value recomputes.
+- The same mechanism applies to derived engines: edges connect the cells referenced inside `derived=expr` to the engine's variant-update node. When any referenced cell changes, the engine's variant is reactively recomputed and downstream renders + transition handlers fire.
+- Derived-state expression dependencies are tracked at compile time. The compiler walks the RHS expression tree and registers every cell read as a dependency edge.
+- Cycle detection: a derived cell whose expression depends on itself directly or transitively is `E-DERIVED-CIRCULAR-DEP`. A derived engine whose `derived=expr` depends on the engine's own variant is `E-DERIVED-ENGINE-CIRCULAR` (§34, also cross-ref §51.0.J).
+- Function calls inside derived-state expressions: a function call's dependencies are the union of all reactive cell reads transitively reachable through the call. Pure functions (`fn`, §48) have no implicit reactive dependencies; reactive functions inherit their callees' dependencies.
+
+**Cross-references:**
+- §6.6 — derived cells (`const <derived>`).
+- §6.6.16 — in-compound derived values.
+- §6.6.17 — markup-typed derived cells.
+- §51.0.J — derived engines.
+
 ---
 
 ## 32. The `~` Keyword — Implicit Pipeline Accumulator
