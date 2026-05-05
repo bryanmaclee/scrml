@@ -1,0 +1,787 @@
+# Snapshot: 786 files; PASS=343, FAIL=443
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-010-struct-state-combo.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-002-params.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-005-mixed.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-003-string.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-006-array.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-007-siblings.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-015-search-input.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-009-dropdown.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-006-search-filter.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-react-wizard.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-021-component-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-018-timer.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-component-gen.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-type-001-custom.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-001-emit-html.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-008-self-closing.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-001-reflect-enum.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-002-transformed.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-005-boolean-expr.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-002-empty-css.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-004-layout.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-018-class-binding.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-007-while.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-012-reflect-callback-param.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-008-type-no-kind.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-004-only-comments.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-003-nested-markup.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-008-semantic-html.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-015-multiline.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-009-lists.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-003-runtime-var-error.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-002-if-else.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-channels/channel-shared-state-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-channels/channel-multiple-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-bare-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-throw-statement-075.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-failable-unhandled-call-078.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-multi-002.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-in-markup-interp-105.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lin-consume-inside-069.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-finally-074.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-cstyle-047.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-property-path-090.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-in-jsobj-053.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-nested-if-in-for-in-while-095.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-double-020.scrml	tab-errors: 2
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-redundant-else-102.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-orphan-018.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-failable-fn-076.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-self-write-085.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-top-level-080.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-object-iteration-052.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-multi-088.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-intermediate-014.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-markup-direct-040.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-optional-039.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-all-covered-042.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-complete-013.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-009.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-break-outside-loop-056.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-non-fn-094.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-chain-004.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-arm-after-else-extra-101.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-attr-chain-017.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-struct-037.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-assign-expr-106.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-dash-arrow-023.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-single-087.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-multi-lift-011.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-non-failable-077.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-061.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-block-arm-034.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-for-lift-098.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-else-008.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-no-scope-092.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-break-054.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-stmt-041.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-partial-012.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-single-082.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-triple-equals-007.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-return-038.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-asIs-103.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-if-orphan-019.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-union-types-015.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-positional-031.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-underscore-default-028.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-const-046.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-zero-args-093.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-bare-058.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-colon-arrow-024.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml	bs-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-outside-loop-057.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-narrow-010.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-old-syntax-089.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-bare-016.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-as-expr-bare-063.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-reactive-write-096.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-labeled-break-outer-065.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-label-108.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-let-045.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-bare-079.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-type-mismatch-arms-036.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-in-fn-062.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-without-key-primitive-100.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-nested-deep-107.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-sql-in-body-097.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-multi-083.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-fallthrough-072.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-show-compose-110.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-missing-label-066.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-double-paren-060.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-and-else-same-elem-021.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-064.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-continue-055.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-non-exhaustive-026.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-nested-if-070.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-guard-clause-035.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-bare-044.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-single-line-no-braces-006.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-duplicate-arm-030.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-crosses-fn-068.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-catch-073.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-given-in-arm-104.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-default-027.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-chain-after-unrelated-099.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-in-element-091.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-single-paren-059.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-empty-body-084.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-statement-071.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-mixed-arrows-025.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-void-081.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-duplicate-label-067.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-named-032.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-003.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-in-lift-043.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-fat-arrow-022.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-not-last-029.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-long-chain-005.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-019-gallery.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-011-enum-many-variants.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-007-fn-params.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-013-switch.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-004-string-ops.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-003-form-validation.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-014-type-before-markup.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-007-enum-simple.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-011-if-reactive.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-007-html-attrs.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-009-with-functions.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-010-theme-switcher.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-005-table-rows.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-007-with-index.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-002-projection.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-006-deep-nesting.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/payload-variants-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-015-complex-init.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-004-config.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-007-client-only.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-003-join.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-003-empty-meta.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-005-test-state.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/snippet-001-basic-slot.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-htmx-feedback.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-012-login.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-005-for-index.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-017-arrays.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-style-gen.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-008-mixed-closers.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/library-mode-types.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-elixir-chat.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-004-count.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-001-enum.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-007-special-chars.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-scope-001-undeclared.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-lin-001-unused.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-error-007-try.scrml	tab-errors: 2
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-fn-001-impure.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-eq-004-triple-eq.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-import-001-not-found.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-ux/err-type-026-match-in-markup.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-003-function.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/fail-in-control-flow-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/test-fails-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/failable-fn-match-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/test-fails-with-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/fail-basic-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/fail-in-non-failable-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/try-catch-001.scrml	tab-errors: 2
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/test-inside-function-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/test-basic-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/failable-propagate-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/error-effect-typed-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-error-test/failable-inline-catch-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-003-protect-multi.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-004-clean-config.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/when-001-basic-effect.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-012-nested-objects.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-001-inline.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/error-004-in-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-011-shopping-cart.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-003-tuple.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-013-method-calls.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-007-object.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-001-basic-constructor.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-004-data-table.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-008-nested-logic.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-002-reflect.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-013-blog.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-009-string-expr.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-011-with-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-005-multiple-types.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-010-nested-loops.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-004-reactive-mutation.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-show-expr.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-bun-admin.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-011-for-of-loop.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/predicate-number-range-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/encoded-names-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/debug-original-name-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/predicate-url-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/reactive-encoded-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-validation/predicate-email-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-004-for-array.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-010-complex.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-010-server.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/error-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-009-multiple.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-014-accordion.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-009-oninput.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-010-nested-context.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-ts-components.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-003-multiple-tests.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/ref-001-basic.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/machine-basic.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-009-nested-sql-in-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-008-form-handler.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-007-dnd-with-helpers.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-008-order-limit.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-016-notification.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/ref-003-attribute-access.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-001-basic-decl.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-002-reflect-struct.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-011-object-decl.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-002-multiple-props.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-005-tabs.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/ref-005-multiple-refs.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-008-test-enum.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-006-canvas-with-helpers.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-008-reflect-struct-form.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-002-todo.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-010-array-decl.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-002-multiple.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-010-create-table.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-005-insert.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-020-calculator.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-014-template-literal.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-002-card.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-007-reflect-enum-buttons.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-005-boolean.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-002-single-tag.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-002-const-decl.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/match-colon-arrow.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/match-001-nested-with-call.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/is-not-compound.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-conditional-markup.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/when-002-message-handler.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-rails-blog.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-006-url-in-attr.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/integration-001-stripe-mini.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/match-as-expression.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-004-self-closing.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-001-state-block.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/ref-004-with-state.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-004-enum-use.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-003-full-app.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-013-inferred-closers.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-scope-01.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-005-multiple.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-006-nested-if.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-005-const-binding.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-008-wizard.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-010-empty-array.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-005-nested.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-003-arithmetic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-015-combined.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-009-test-reactive.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/error-005-typed.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-010-multiple-state.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-010-css-in-markup.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-rust-orders.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-009-enum-in-state.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-006-update.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-012-pagination.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-006-reflect-unknown-type.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-013-nested-markup.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-008-default-values.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-007-test-function.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-017-color-picker.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/transition-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-012-multiple-events.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-005-deep-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-004-assert-equals.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-009-conditional-attr.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-010-table.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-006-state-with-tables.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-with-params-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-multiline-008.scrml	bs-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-named-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-after-markup-015.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-adjacent-015.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-pipe-002.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-derived-from-local-009.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-program-009.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-export-007.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-server-prefix-013.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-asymmetric-013.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-inside-program-013.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-lift-past-boundary-022.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-with-keyword-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-test-018.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-debounced-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-typed-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-vs-const-annotation-012.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-function-006.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-bare-011.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-payload-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-meta-016.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-typed-010.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-return-type-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-lift-014.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-type-annot-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-types.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-nested-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-type-annot-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-not-consumed-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-chained-ops-013.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-bare-006.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-not-007.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-bare-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-server-005.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-default-params-014.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-optimistic-008.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-multiline-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-export-009.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-type-mismatch-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-call-non-pure-function-015.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-pure-prefix-012.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-inside-function-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-param-009.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-union-type-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-chained-ops-009.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-branch-asymmetric-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-param-not-consumed-010.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-multiline-body-012.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-closure-double-008.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-file-level-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-not-exported-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-anonymous-010.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-sql-004.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-union-009.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-after-comment-011.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-dom-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-error-arm-020.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-reexport-008.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-error-arm-017.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-fn-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-inside-component-018.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-named-012.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-nondet-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-no-init-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-bad-prefix-016.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-mutates-reactive-003.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-bare-006.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-aliased-002.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-server-003.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-meta-019.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-explicit-hard-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-no-init-002.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-outside-logic-009.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-fn-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-export-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-loop-local-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-async-008.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-call-pure-function-021.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-array-type-005.scrml	bs-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-no-kind-alias-011.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-inside-meta-016.scrml	tab-errors: 2
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-throttled-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-component-010.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-export-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-typed-params-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-default-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-circular-020.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-vendor-013.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-using-keyword-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-stdlib-scrml-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-loop-outer-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-as-variable-name-011.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-nested-enum-008.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-double-consume-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-multiline-011.scrml	bs-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-component.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-type-mismatch-004.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-after-comment-014.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-markup-010.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-inside-logic-014.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-union-via-pipe-010.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-with-sql-002.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-branch-symmetric-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-struct-export-007.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-bare-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-012.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-bare-npm-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-function-008.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-duplicate-binding-010.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-inside-test-017.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-adjacent-decls-014.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-outer-mutation-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-export-015.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-bare-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-global-program-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-custom-props-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-media-query-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-tailwind-class-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-flat-and-scoped-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-supports-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-nested-selectors-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-empty-block-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-styles/css-multiple-blocks-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-014-multiple-attrs.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-004-conditional.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-012-for-lift-complex.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-006-test-sql.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-008-null.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-014-settings.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-directive-036.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-checked-030.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-default-children-060.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bad-rhs-038.scrml	tab-errors: 2
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-multiple-037.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-with-content-014.scrml	bs-errors: 2
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-whitespace-only-067.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-extract-keyword-051.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-for-markup-044.scrml	bs-errors: 3
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-canvas-004.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-interpolated-019.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onsubmit-025.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-entities-021.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-extra-prop-054.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-entities-text-022.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-boolean-016.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-group-031.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-closer-midline-070.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-closer-in-logic-008.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-non-snippet-063.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-in-lift-062.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-inline-markup-045.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-leading-space-009.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-missing-prop-053.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-interp-064.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-inline-def-052.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-conflict-035.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-onclick-tilde-decl-074.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-reactive-prop-056.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-boolean-as-string-017.scrml	tab-errors: 2
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-no-spread-061.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-dynamic-class-template-076.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-keyed-049.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-jsx-arrow-ghost-027.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-unsupported-attr-034.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-special-chars-077.scrml	tab-errors: 2
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-basic-059.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-style-flat-donut-041.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-value-046.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-string-015.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-value-text-029.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-img-012.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-props-dup-055.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-unknown-name-006.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-component-sql-071.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-static-042.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-fragmented-069.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-else-043.scrml	tab-errors: 2
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-template-005.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-non-reactive-033.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-outside-accumulation-072.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-mismatched-closer-007.scrml	bs-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-simple-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-braces-ghost-020.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-jsx-brace-ghost-057.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-br-010.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-textarea-no-closer-068.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-deep-nesting-075.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-conditional-048.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-duplicate-keys-050.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onclick-024.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-inferred-closer-002.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-jsx-logical-and-ghost-073.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bare-ident-039.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-input-013.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-nested-047.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-hr-011.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-path-032.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-logic-wrapper-028.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-oninput-026.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-className-ghost-040.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-after-markup-065.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-comment-inside-066.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-reactive-018.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-fn-non-event-023.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-tag-nested-003.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-015-heading-levels.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-012-mixed-content.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-011-badge.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/channel-basic.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-data-table.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-013-runtime-meta-dg002.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-008-for-in-markup.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/error-003-wildcard.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lin-001-basic-linear.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-012-struct-optional.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-013-return-value.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-loop-gen.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-004-canary-pattern.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-009-multiple-runtime-vars-error.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-009-server-fn.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-007-breadcrumb.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-005-attributes.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-005-dashboard.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-003-if-elseif.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-012-computed.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-015-user-list.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/multi-meta-source-order.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-001-state-with-tests.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lin-002-double-use.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-006-ternary.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-006-struct-nested.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-vue-datatable.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-003-nested-tags.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-002-typed-attrs.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-001-let-decl.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-003-button.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-013-tooltip.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/edge-001-empty-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-002-protect.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/machine-002-traffic-light.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-004-modal.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s79-theme-settings.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-014-form-state.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-014-nested-calls.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-show-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-013-type-with-reactive.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-006-nested-state.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/snippet-002-parametric.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-dotted-084.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-return-expr-092.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-cross-type-022.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-match-arm-cond-118.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-reactive-009.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-object-067.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-undeclared-082.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-while-077.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-mixed-062.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-attribute-quoted-111.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-decimal-046.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-property-path-096.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-numeric-014.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lt-049.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-enum-var-103.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-no-wildcard-102.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-is-057.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-given-arm-075.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-bare-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-undefined-forbidden-021.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-markup-as-attr-value-108.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-non-enum-004.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-bare-064.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-reactive-086.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-short-circuit-optional-099.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-no-params-071.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mul-043.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-strict-rewrite-018.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-in-interp-034.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-div-044.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-in-sql-bound-024.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-fn-return-116.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-computed-085.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-multi-095.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-plus-041.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-single-paren-079.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-bang-056.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mod-045.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-sql-098.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-plus-058.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-logic-interp-013.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-string-053.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-method-call-039.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-deep-method-chain-113.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-minus-042.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-multi-params-072.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-chain-087.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-reactive-068.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-compound-012.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-to-const-081.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-string-015.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-dash-arrow-074.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-reactive-038.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-on-optchain-109.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-optional-no-arms-076.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-bare-029.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-in-interp-030.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-deep-040.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-array-066.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-in-attr-089.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-paren-grouping-arith-100.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-bare-007.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-prefix-negation-027.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-expr-body-069.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-006.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-paren-call-011.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-when-guard-093.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-strict-rewrite-017.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-template-literal-060.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gte-052.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-function-field-119.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-arrow-variant-073.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-method-call-paren-010.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-arm-101.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-not-literal-036.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-025.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lte-050.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-shorthand-065.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-sql-interp-048.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-double-paren-078.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-fn-arg-expr-091.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-optchain-115.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-is-some-107.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-class-attr-003.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-bare-061.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-in-array-literal-120.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-single-094.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-or-055.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-nested-031.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-basic-033.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-not-rewrite-019.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-none-bare-008.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-negative-047.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-numeric-016.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-as-fn-args-110.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-for-arith-iterable-090.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-struct-deep-023.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-old-presence-guard-097.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-condition-032.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-to-non-optional-026.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-asis-warn-104.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-declaration-083.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-property-037.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-is-expr-117.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-is-not-not-105.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-on-sql-get-114.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-chained-080.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-reactive-002.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-chained-035.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gt-051.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-empty-063.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-in-array-literal-112.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-sql-088.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-null-forbidden-020.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-block-body-070.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-not-106.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-054.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-unknown-variant-005.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-mixed-type-059.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-004-instantiation.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-svelte-dashboard.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/helpers/canvas-setup.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/helpers/dnd-setup.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-010-struct-many-fields.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/type-002-struct.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-016-bind-value.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-001-counter.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/postgres-program-driver.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/state-003-constructor-with-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-003-onclick.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-002-with-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/server-004-server-func.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/error-002-multiple-arms.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-006-fn-shorthand.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-001-basic-select.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-006-alert.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-008-onsubmit.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-005-typography.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-go-contacts.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-009-empty-string.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/modern-005-ref-and-state.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/protect-001-basic-auth.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/css-003-custom-props.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-001-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-002-where.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-001-if-basic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-010-reflect-with-config.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-008-avatar.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/meta-005-nested-meta.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-011-form.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s79-calculator.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/test-002-with-logic.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/ref-002-in-logic.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/component-scoped-css.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/func-015-event-with-args.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-after-markup-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-reflect-outside-008.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-empty-block-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-phase-sep-005.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-scopeid-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-bun-eval-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-lin-capture-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-in-function-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-multiple-blocks-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-reflect-unknown-003.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-runtime-reactive-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-in-component-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-compile-time-pure-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-sql-runtime-007.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-cleanup-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-bindings-capture-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-002.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-lift-006.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-lin-double-consume-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-nested-deep-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-type-registry-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-match-in-meta-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-001.scrml	
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-002.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/comp-010-progress.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s79-counter-todo.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-009-expressions.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-015-try-catch.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-009-chat.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/control-014-break-continue.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/reactive-004-number.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/basic-001-empty.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/combined-007-crud.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/lift-006-list-items.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/logic-007-multiple-blocks.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-bound-params-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-conditional-where-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/server-var-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/protect-select-star-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-in-for-loop-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-multiline-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-get-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-in-handler-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-all-001.scrml	tab-errors: 1
+PASS	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/server-var-multiple-001.scrml	
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/server-func-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-nobatch-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-update-delete-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-transaction-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/protect-basic-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-run-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s20-sql/sql-duplicate-param-001.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/sql-007-delete.scrml	tab-errors: 1
+FAIL	/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a7891c1d7f3a9a860/samples/compilation-tests/gauntlet-s79-signup-form.scrml	tab-errors: 1

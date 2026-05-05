@@ -99,10 +99,22 @@ function classifyFile(filePath, agg) {
     agg.topLevelBlocked.push({ filePath, name, line: info.line, col: info.col, snippet: info.snippet });
   }
 
-  let decls = findKind(ast, "state-decl").filter((d) => d.structuralForm === false);
-  decls.sort((a, b) => (a.span?.start ?? 0) - (b.span?.start ?? 0));
-  const seenInsideNames = new Set();
-  for (const d of decls) {
+  // Two-pass over AST decls so LEGACY-COMPLEX names register as "decl-seen"
+  // ahead of any later plain @-form writes of the same name.
+  const allDecls = findKind(ast, "state-decl").filter((d) => d.structuralForm === false);
+  allDecls.sort((a, b) => (a.span?.start ?? 0) - (b.span?.start ?? 0));
+
+  // Pass 1: identify all names that have ANY decl (modifier, plain, etc.) in scope.
+  const namesWithModifierDecl = new Set();
+  for (const d of allDecls) {
+    if (d.isServer || d.isShared || d.isConst || (d.shape && d.shape !== "plain")) {
+      namesWithModifierDecl.add(d.name);
+    }
+  }
+
+  // Pass 2: classify each decl.
+  const seenPlainNames = new Set();
+  for (const d of allDecls) {
     const start = d.span?.start ?? -1;
     const line = d.span?.line ?? 0;
     const col = d.span?.col ?? 0;
@@ -116,10 +128,26 @@ function classifyFile(filePath, agg) {
     if (d.isServer || d.isShared || d.isConst || (d.shape && d.shape !== "plain")) {
       bucket = agg.legacyComplex;
     } else if (topLevelDecls.has(d.name)) {
+      // Already decl'd at top-level; this is a write.
       bucket = agg.write;
-    } else if (!seenInsideNames.has(d.name)) {
-      bucket = agg.declCandidate;
-      seenInsideNames.add(d.name);
+    } else if (namesWithModifierDecl.has(d.name)) {
+      // Name is decl'd via a modifier form elsewhere (server/shared/const);
+      // this plain @-form is a write, not a re-decl.
+      bucket = agg.write;
+    } else if (!seenPlainNames.has(d.name)) {
+      // No prior decl in scope; this IS the first appearance.
+      // HAIRY-SELF-REF guard: a decl line that references its own @-name in
+      // the init expression is a self-referential degenerate (e.g.,
+      // `@count = @count + 1` as the FIRST appearance). Such patterns do
+      // not have a sensible V5-strict structural rewrite — flag separately.
+      const selfRefRegex = new RegExp(`@${d.name}\\b`, "g");
+      const matches = (snippet.match(selfRefRegex) || []).length;
+      if (matches >= 2) {
+        bucket = agg.hairySelfRef;
+      } else {
+        bucket = agg.declCandidate;
+      }
+      seenPlainNames.add(d.name);
     } else {
       bucket = agg.write;
     }
@@ -148,6 +176,7 @@ for (const r of roots) walk(resolve(r), allFiles);
 const agg = {
   topLevelBlocked: [],
   declCandidate: [],
+  hairySelfRef: [],
   write: [],
   legacyComplex: [],
   readErr: [],
@@ -159,6 +188,7 @@ for (const f of allFiles) classifyFile(f, agg);
 console.log(`# Step 12 classifier: ${allFiles.length} .scrml files scanned`);
 console.log(`# topLevelBlocked: ${agg.topLevelBlocked.length}`);
 console.log(`# declCandidate:   ${agg.declCandidate.length}  <-- REWRITE THESE`);
+console.log(`# hairySelfRef:    ${agg.hairySelfRef.length}  <-- LEAVE (degenerate)`);
 console.log(`# write:           ${agg.write.length}`);
 console.log(`# legacyComplex:   ${agg.legacyComplex.length}`);
 console.log(`# readErr:         ${agg.readErr.length}`);
@@ -167,6 +197,11 @@ console.log("");
 console.log("# === DECL-CANDIDATE (REWRITE TARGETS) ===");
 for (const x of agg.declCandidate) {
   console.log(`DECL-CANDIDATE\t${x.filePath}\t${x.name}\tL${x.line}C${x.col}\t${x.snippet}`);
+}
+console.log("");
+console.log("# === HAIRY-SELF-REF (degenerate first-appearance with self-read; LEAVE) ===");
+for (const x of agg.hairySelfRef) {
+  console.log(`HAIRY-SELF-REF\t${x.filePath}\t${x.name}\tL${x.line}C${x.col}\t${x.snippet}`);
 }
 console.log("");
 console.log("# === LEGACY-COMPLEX (modifiers/Shape3 — LEAVE) ===");
