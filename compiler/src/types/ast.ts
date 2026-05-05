@@ -876,14 +876,35 @@ export interface GuardedExprNode extends BaseNode {
 // -- Module Declarations --
 
 /**
+ * A single import-list item with optional alias and modifier flags.
+ *
+ * S40 P3.A: parser emits `{imported, local}` so cross-file consumers can map an
+ * alias back to the original exported name.
+ *
+ * A1a Step 7: `pinned` carries the §6.10 identity-stability modifier from
+ * `import { foo pinned } from '...'`. A1b enforces semantic validity
+ * (`E-IMPORT-PINNED-INVALID` for non-cell-typed targets).
+ */
+export interface ImportSpecifier {
+  /** Original exported name in the source file. */
+  imported: string;
+  /** Local binding name in the importing file (alias or `imported` if no alias). */
+  local: string;
+  /** True when `pinned` bareword modifier follows the item. */
+  pinned: boolean;
+}
+
+/**
  * An import declaration: `import { Name } from './path'` or `import Name from './path'`.
  */
 export interface ImportDeclNode extends BaseNode {
   kind: "import-decl";
   /** Full raw import text. */
   raw: string;
-  /** Imported names. */
+  /** Imported names (parallel to `specifiers`, holds the imported name). */
   names: string[];
+  /** Per-item structured specifiers (named-import form only; empty for default imports). */
+  specifiers?: ImportSpecifier[];
   /** Source module path, or null if parse failed. */
   source: string | null;
   /** True for default imports (`import Name from ...`). */
