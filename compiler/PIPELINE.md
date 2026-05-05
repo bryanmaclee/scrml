@@ -1143,6 +1143,44 @@ identified in `docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md`.
 **Parallelism opportunity:** Yes — per-file after CE completes.
 **Dependencies:** CE (Stage 3.2) must complete for the file.
 
+### Stage 3.3 v0.next addendum (Pipeline 0.7.0 — SPEC §4.15 / §51 / §55 engineering target)
+
+**VP-1 attribute-allowlist additions for v0.next structural elements.**
+
+`compiler/src/attribute-registry.js` SHALL register attribute catalogues for the four scrml-defined structural elements (per SPEC §4.15 / §24.4):
+
+| Element | Attribute name | Value-shape | Required |
+|---|---|---|---|
+| `<engine>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
+| `<engine>` | `initial` | bare-variant `.X` or qualified `Type.X` (omitted when `derived=` is present) | conditional |
+| `<engine>` | `var` | identifier (override for auto-declared variable name) | no |
+| `<engine>` | `derived` | reactive expression of the engine's `for=Type` | no (mutually exclusive with `initial=` per E-DERIVED-ENGINE-NO-INITIAL) |
+| `<match>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
+| `<match>` | `on` | reactive expression of the match's `for=Type` | no (defaults to the auto-declared engine variable for `for=Type` if one exists) |
+| `<errors>` | `of` | reactive expression resolving to a cell with synthesised validity surface | yes |
+| `<errors>` | `all` | boolean attribute | no |
+| `<onTransition>` | `to` | bare-variant `.X` of the parent engine's `for=Type` | no |
+| `<onTransition>` | `from` | bare-variant `.X` of the parent engine's `for=Type` | no |
+| `<onTransition>` | `once` | boolean attribute | no |
+| `<onTransition>` | `if` | reactive expression returning a boolean | no |
+
+Unknown attributes on these elements emit `W-ATTR-001` (existing). `<onTransition>` outside `<engine>` emits `E-STRUCTURAL-ELEMENT-MISPLACED` from VP-2 (Post-CE invariant) — extending VP-2's invariant set.
+
+**VP-2 v0.next invariants (additions):**
+
+1. No `<onTransition>` element outside an `<engine>` parent. Cross-ref §51.0.H.
+2. No `<errors>` element with absent or non-resolvable `of=` attribute. Cross-ref §55.8.
+3. No `<engine>` declaration inside a component body. Cross-ref §51.0.K. Emits `E-COMPONENT-ENGINE-SCOPE`.
+4. No residual `<channel>` markup inside `<program>` body. Cross-ref §38.1. Emits `E-CHANNEL-INSIDE-PROGRAM` (already covered by D3; called out here for completeness).
+
+**VP-3 v0.next interpolation rules:**
+
+- `<engine for=...>`: `for=` attribute SHALL NOT contain `${...}` interpolation. Type names are static. Cross-ref §51.0.B.
+- `<match for=...>`: same.
+- `<errors of=...>`: `of=` MAY be a reactive expression including `${...}` indirectly via member access, but the attribute itself accepts a bare expression (no `${...}` template wrapping). The attribute-value parser produces an expression AST.
+
+**Performance budget:** <= 2 ms per file (existing 1 ms + 1 ms for v0.next attribute allowlist + structural-element checks).
+
 ---
 
 ## Stage 4: protect= Analyzer (PA)
@@ -1587,6 +1625,96 @@ table and a `scopeChain` for downstream use.
 **Performance budget:** <= 20 ms per file (runs per-file once PA and RI are complete).
 **Parallelism opportunity:** Yes — per-file, once PA and RI are complete.
 **Dependencies:** CE (Stage 3.2), PA, and RI must all be complete.
+
+### Stage 6 v0.next addendum (Pipeline 0.7.0 — SPEC §6 / §14 / §18 / §51 / §55 engineering target)
+
+**ResolvedType extensions:**
+
+The `ResolvedType` discriminated union extends with v0.next-specific kinds:
+
+```
+ResolvedType (v0.next additions)
+  | { kind: 'engine',           forType: ResolvedType (enum), varName: string, derived: boolean }
+  | { kind: 'engine-state-child', engine: ResolvedType (engine), variant: VariantDef }
+  | { kind: 'match-block',      forType: ResolvedType (enum), arms: MatchArmType[] }
+  | { kind: 'validity-surface', cell: ResolvedType, level: 'compound' | 'field' }   // synthesised
+```
+
+**Auto-synthesised validity surface type-checking:**
+
+For every cell with at least one validator (per SPEC §55.2), TS synthesises four read-only properties on the cell's type:
+
+| Property | Type | Notes |
+|---|---|---|
+| `isValid` | `boolean` | Compound rollup or per-field check |
+| `errors`  | `ValidationError[]` | Enum tags, NOT strings (cross-ref §55.9) |
+| `touched` | `boolean` | First interaction flag |
+| `submitted` | `boolean` | First-submit-attempted flag |
+
+For compound state with fields carrying validators, TS synthesises the same four properties on the compound itself (rollup) AND on each validator-carrying field. Reads against the synthesised properties resolve at TS time; writes against any synthesised property are `E-SYNTHESIZED-WRITE`.
+
+**`ValidationError` enum + `.Custom(tag)` extension:**
+
+`ValidationError` is a built-in enum (registered in `compiler/src/builtin-types.ts`). Variants:
+
+```
+type ValidationError:enum = {
+    Required,
+    TooShort(min: int),
+    TooLong(max: int),
+    PatternMismatch(pattern: string),
+    BelowMin(min: number),
+    AboveMax(max: number),
+    BelowGte(bound: number),
+    AboveLte(bound: number),
+    NotEqual(expected: any),
+    NotEqualTo(other: any),
+    NotIn(allowed: any[]),
+    EmailInvalid,
+    UrlInvalid,
+    NotNumeric,
+    NotInteger,
+    Custom(tag: string),
+}
+```
+
+`.Custom(tag: string)` is the user-extension variant. Per SPEC §55.9.
+
+**Render-spec validity classification:**
+
+A Shape 2 declaration's RHS markup element is classified by TS as:
+- **bindable** — `<input type="text|email|...">`, `<textarea>`, `<select>`, `<input type="checkbox|radio|file">`, or a component with a `bind:value` (or alternative bindable prop) declared.
+- **non-bindable** — any other markup element.
+
+`<x/>` render-by-tag use-sites of a non-bindable Shape 2 cell emit `E-CELL-RENDER-SPEC-NOT-BINDABLE`.
+
+**Engine `derived=expr` type compatibility:**
+
+Per SPEC §51.0.J, a derived engine's `derived=expr` SHALL be type-compatible with the engine's `for=Type`. TS validates this at the engine declaration and at each cell-reference inside `derived=expr`. Type incompatibility is `E-TYPE-001` with a clarifying message about derived-engine type compatibility.
+
+**Bare-variant inference type completion:**
+
+Per SPEC §14.10, TS resolves the qualifier on `EnumVariantRef { qualifier: null, variantName }` AST nodes from the position's expected type. The position's expected type is determined by:
+
+1. LHS type annotation (`<x>: T = .V` — fix to `T`).
+2. Cell's already-resolved type (`@cell = .V` where `@cell: T` — fix to `T`).
+3. Function parameter type (`f(.V)` where the parameter is typed `T`).
+4. Function return type (`return .V` where the function's return is `T`).
+5. Match on-expression type (`<match for=T>` — fix arm-pattern variants to `T`).
+6. Engine `for=` qualifier (`<engine for=T initial=.V>`).
+7. Other position with a fixed type.
+
+Ambiguity (multiple union members declare the same variant name, OR no type context) emits `E-VARIANT-AMBIGUOUS`.
+
+**Positional binding for predefined-shape:**
+
+Per SPEC §14.11, TS validates a positional initialiser against the predefined struct's field order at the declaration site. Field count mismatch and per-position type mismatch are `E-TYPE-001`.
+
+**Validators on derived cells (rejected):**
+
+Per SPEC §55.14, validators on `const <derived>` cells are forbidden. TS emits `E-DERIVED-WITH-VALIDATORS` at the declaration. Use a refinement type (`const <x>: number(>=0) = ...`) for compile-time predicate enforcement.
+
+**Performance budget:** <= 30 ms per file (existing 20 ms + 10 ms for synthesised validity surface + bare-variant inference + render-spec classification).
 
 ---
 
