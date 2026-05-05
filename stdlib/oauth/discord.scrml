@@ -1,0 +1,59 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:oauth/discord — Discord OAuth 2.0 preset
+    //
+    // Endpoints:
+    //   authorize    https://discord.com/oauth2/authorize
+    //   token        https://discord.com/api/oauth2/token
+    //   userinfo     https://discord.com/api/users/@me
+    //   revoke       https://discord.com/api/oauth2/token/revoke
+    //
+    // Notes:
+    //   - Discord uses SPACE-separated scopes (the OAuth 2.0 default), so the
+    //     core builds the scope param correctly out of the box.
+    //   - Common scopes: "identify", "email", "guilds", "guilds.members.read".
+    //     The default identify+email pair is the minimum for a "sign in with
+    //     Discord" button.
+    //   - PKCE supported; default on.
+    //   - Discord's `prompt=consent` forces re-consent on each authorize;
+    //     `prompt=none` skips the screen if already authorized for these
+    //     scopes. Default omitted (Discord's default behavior).
+    //
+    // Userinfo response shape (selected): { id, username, discriminator,
+    // global_name, avatar, email, verified, locale, mfa_enabled }.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build a Discord OAuth config.
+     *
+     * @param opts — {
+     *   clientId,        // required
+     *   clientSecret?,   // required for confidential clients; PKCE-only public allowed
+     *   redirectUri,     // required — must match a registered redirect URI
+     *   scopes?,         // default: ["identify","email"]
+     *   storage,         // required — put/get/del adapter
+     *   prompt?,         // optional — "consent" | "none"
+     * }
+     */
+    export function discordConfig(opts) {
+        if (!opts) throw new Error("[scrml:oauth/discord] opts required")
+        const extra = {}
+        if (opts.prompt) extra.prompt = opts.prompt
+
+        return {
+            clientId:        opts.clientId,
+            clientSecret:    opts.clientSecret,
+            redirectUri:     opts.redirectUri,
+            authorizeUrl:    "https://discord.com/oauth2/authorize",
+            tokenUrl:        "https://discord.com/api/oauth2/token",
+            userInfoUrl:     "https://discord.com/api/users/@me",
+            revocationUrl:   "https://discord.com/api/oauth2/token/revoke",
+            scopes:          opts.scopes || ["identify", "email"],
+            usePKCE:         true,
+            extraAuthParams: extra,
+            storage:         opts.storage,
+        }
+    }
+}
+</program>

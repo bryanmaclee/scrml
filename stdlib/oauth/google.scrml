@@ -1,0 +1,92 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:oauth/google — Google OAuth 2.0 / OpenID Connect preset
+    //
+    // Endpoints (Google Identity Platform, OIDC-compliant):
+    //   authorize    https://accounts.google.com/o/oauth2/v2/auth
+    //   token        https://oauth2.googleapis.com/token
+    //   userinfo     https://openidconnect.googleapis.com/v1/userinfo
+    //   revoke       https://oauth2.googleapis.com/revoke
+    //
+    // To receive a refresh_token Google requires:
+    //   access_type=offline AND prompt=consent (or first-time consent).
+    // The preset hard-codes both into extraAuthParams.
+    //
+    // Userinfo response shape (selected fields):
+    //   { sub, email, email_verified, name, picture, given_name, family_name,
+    //     locale, hd? }
+    //
+    // The id_token is a signed JWT with claims (sub, email, etc.). For
+    // signature verification call the caller's JWKS at
+    // https://www.googleapis.com/oauth2/v3/certs — out of scope for v0.2.0.
+    // For UNVERIFIED claim extraction use parseIdToken() below.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build a Google OAuth config.
+     *
+     * @param opts — {
+     *   clientId,                 // required
+     *   clientSecret,             // required for confidential clients (server)
+     *   redirectUri,              // required — must be registered in GCP console
+     *   scopes?,                  // default: ["openid","email","profile"]
+     *   storage,                  // required — put/get/del adapter
+     *   loginHint?,               // optional — prefill the email field
+     *   hostedDomain?,            // optional — restrict to a Workspace domain
+     * }
+     */
+    export function googleConfig(opts) {
+        if (!opts) throw new Error("[scrml:oauth/google] opts required")
+        const extra = {
+            access_type: "offline",
+            prompt:      "consent",
+        }
+        if (opts.loginHint)    extra.login_hint = opts.loginHint
+        if (opts.hostedDomain) extra.hd         = opts.hostedDomain
+
+        return {
+            clientId:        opts.clientId,
+            clientSecret:    opts.clientSecret,
+            redirectUri:     opts.redirectUri,
+            authorizeUrl:    "https://accounts.google.com/o/oauth2/v2/auth",
+            tokenUrl:        "https://oauth2.googleapis.com/token",
+            userInfoUrl:     "https://openidconnect.googleapis.com/v1/userinfo",
+            revocationUrl:   "https://oauth2.googleapis.com/revoke",
+            scopes:          opts.scopes || ["openid", "email", "profile"],
+            usePKCE:         true,
+            extraAuthParams: extra,
+            storage:         opts.storage,
+        }
+    }
+
+    /**
+     * Parse the claims from a Google id_token WITHOUT verifying the
+     * signature. Use this for non-security-critical reads (e.g., extracting
+     * the user's email when the access_token already authenticated them).
+     *
+     * For security-critical decisions (authentication of an unknown caller)
+     * verify the signature against Google's JWKS. Out of scope for v0.2.0.
+     *
+     * @param tokens — the object returned by exchangeCode()
+     * @returns object — claims (sub, email, ...) or null if no id_token
+     */
+    export function parseIdToken(tokens) {
+        if (!tokens || !tokens.idToken) return null
+        const parts = tokens.idToken.split(".")
+        if (parts.length !== 3) {
+            throw new Error("[scrml:oauth/google] parseIdToken: malformed JWT")
+        }
+        const payload = parts[1]
+        // base64url → base64
+        const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
+        const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4))
+        try {
+            const json = atob(b64 + pad)
+            return JSON.parse(json)
+        } catch (e) {
+            throw new Error("[scrml:oauth/google] parseIdToken: failed to decode payload")
+        }
+    }
+}
+</program>

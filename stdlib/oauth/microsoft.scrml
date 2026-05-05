@@ -1,0 +1,80 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:oauth/microsoft — Microsoft Identity Platform (Entra ID) preset
+    //
+    // Endpoints (v2.0 Microsoft Identity Platform):
+    //   authorize    https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
+    //   token        https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+    //   userinfo     https://graph.microsoft.com/oidc/userinfo
+    //   logout       https://login.microsoftonline.com/{tenant}/oauth2/v2.0/logout
+    //   (no RFC-7009 revocation; see below)
+    //
+    // Tenant — selects the audience:
+    //   "common"        — work, school, AND personal Microsoft accounts (multi-tenant)
+    //   "organizations" — work and school accounts only
+    //   "consumers"     — personal Microsoft accounts only
+    //   "<tenant-guid>" — a specific Entra ID tenant
+    //   "<domain>"      — a verified domain (e.g. "contoso.onmicrosoft.com")
+    //
+    // PKCE: required for SPAs and recommended for all client types. Default on.
+    //
+    // Refresh tokens: returned automatically when scope `offline_access` is
+    // requested. The preset adds it to the default scopes.
+    //
+    // Revocation: Entra does not expose a standard RFC-7009 revoke endpoint
+    // for individual tokens; access tokens are short-lived JWTs and are not
+    // revocable individually. Refresh tokens are revoked via the Graph API
+    // or admin actions. We leave revocationUrl unset.
+    //
+    // Userinfo response shape (OIDC, selected): { sub, name, given_name,
+    // family_name, picture, email }. For richer profile data, call
+    // https://graph.microsoft.com/v1.0/me with the access token.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build a Microsoft Identity OAuth config.
+     *
+     * @param opts — {
+     *   clientId,        // required — the Application (client) ID from Entra
+     *   clientSecret?,   // optional — confidential clients only; SPA must omit
+     *   redirectUri,     // required — must match the registered redirect URI
+     *   tenant?,         // default "common" — see tenant table above
+     *   scopes?,         // default ["openid","profile","email","offline_access"]
+     *   storage,         // required — put/get/del adapter
+     *   prompt?,         // optional — "login","consent","select_account","none"
+     *   loginHint?,      // optional — prefill username
+     *   domainHint?,     // optional — skip account picker by tenant hint
+     * }
+     */
+    export function microsoftConfig(opts) {
+        if (!opts) throw new Error("[scrml:oauth/microsoft] opts required")
+        const tenant = opts.tenant || "common"
+
+        const extra = {}
+        if (opts.prompt)     extra.prompt      = opts.prompt
+        if (opts.loginHint)  extra.login_hint  = opts.loginHint
+        if (opts.domainHint) extra.domain_hint = opts.domainHint
+
+        const base = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0`
+
+        return {
+            clientId:        opts.clientId,
+            clientSecret:    opts.clientSecret,
+            redirectUri:     opts.redirectUri,
+            authorizeUrl:    `${base}/authorize`,
+            tokenUrl:        `${base}/token`,
+            userInfoUrl:     "https://graph.microsoft.com/oidc/userinfo",
+            // Entra has no standard RFC 7009 revocation. Leave unset.
+            revocationUrl:   null,
+            scopes:          opts.scopes || ["openid", "profile", "email", "offline_access"],
+            usePKCE:         true,
+            extraAuthParams: extra,
+            storage:         opts.storage,
+            // Surface the tenant for callers that need to introspect or
+            // build logout URLs themselves.
+            tenant:          tenant,
+        }
+    }
+}
+</program>

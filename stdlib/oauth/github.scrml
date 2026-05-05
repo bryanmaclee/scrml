@@ -1,0 +1,72 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:oauth/github — GitHub OAuth Apps preset (classic)
+    //
+    // Endpoints:
+    //   authorize    https://github.com/login/oauth/authorize
+    //   token        https://github.com/login/oauth/access_token
+    //   userinfo     https://api.github.com/user
+    //   (no standard revocation endpoint — see below)
+    //
+    // Notes:
+    //   - This preset targets CLASSIC OAuth Apps (the simpler model).
+    //     GitHub Apps (a separate construct with fine-grained permissions
+    //     and JWT-bearer auth) are NOT supported by this preset.
+    //   - GitHub's token endpoint historically returned a urlencoded body
+    //     by default; setting `Accept: application/json` (which scrml:http
+    //     does because we ask for JSON) forces a JSON response. Verified
+    //     against the OAuth Apps docs as of 2026.
+    //   - PKCE: GitHub now supports PKCE for OAuth Apps (added 2023). We
+    //     enable it by default; it is harmless for confidential clients.
+    //   - No standard RFC-7009 revocation. To revoke, callers should use
+    //     GitHub's REST DELETE /applications/{client_id}/token (basic-auth'd
+    //     by clientId+clientSecret). Out of scope for the v0.2.0 preset —
+    //     `revoke()` will raise a clear error directing the caller.
+    //
+    // Userinfo response shape (selected): { id, login, avatar_url, name,
+    // email (may be null if private), public_repos, ... }
+    //
+    // To get the user's email when it's private, request scope `user:email`
+    // and call https://api.github.com/user/emails after exchangeCode.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build a GitHub OAuth-App config.
+     *
+     * @param opts — {
+     *   clientId,        // required
+     *   clientSecret,    // required (GitHub OAuth Apps are confidential clients)
+     *   redirectUri,     // required — must match the registered callback URL
+     *   scopes?,         // default: ["read:user","user:email"]
+     *   storage,         // required — put/get/del adapter
+     *   allowSignup?,    // optional — "true" | "false" (string per docs)
+     *   login?,          // optional — prefill username
+     * }
+     */
+    export function githubConfig(opts) {
+        if (!opts) throw new Error("[scrml:oauth/github] opts required")
+        const extra = {}
+        if (opts.allowSignup !== undefined) {
+            extra.allow_signup = opts.allowSignup ? "true" : "false"
+        }
+        if (opts.login) extra.login = opts.login
+
+        return {
+            clientId:        opts.clientId,
+            clientSecret:    opts.clientSecret,
+            redirectUri:     opts.redirectUri,
+            authorizeUrl:    "https://github.com/login/oauth/authorize",
+            tokenUrl:        "https://github.com/login/oauth/access_token",
+            userInfoUrl:     "https://api.github.com/user",
+            // No standard revocation endpoint — leave unset; revoke() will
+            // throw a clear error directing the caller to GitHub's REST API.
+            revocationUrl:   null,
+            scopes:          opts.scopes || ["read:user", "user:email"],
+            usePKCE:         true,
+            extraAuthParams: extra,
+            storage:         opts.storage,
+        }
+    }
+}
+</program>
