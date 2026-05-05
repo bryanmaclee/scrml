@@ -2354,6 +2354,17 @@ boundary must be audited against this list before integration.
 | Concurrent lift misordering | Two independent DG nodes in the same logic block both have `hasLift: true`; codegen would wrap them in `Promise.all`, producing non-deterministic accumulator order | DG `E-LIFT-001` (lift-checker Phase 2 sub-pass); blocks codegen |
 | SQL/server-context leak to client JS | SQL blocks, transaction blocks, or server-context meta blocks (those referencing `process.env`, `Bun.env`, `bun.eval()`, fs APIs) are emitted into `.client.js` output, exposing DB schema and server infrastructure to the browser | RI escalates containing functions to `'server'`; CG `E-CG-006` as defense-in-depth for nodes not caught by RI; `W-CG-001` for top-level SQL outside any function |
 | Pre-META AST consumed by DG | DG receives AST before META has applied compile-time splice results, causing DG to build a dependency graph over unevaluated meta blocks | META must complete before DG runs; DG input contract requires post-META AST |
+| Validator circular dependency (v0.next) | Two or more validators reference each other via cross-field predicate args; the validator dependency graph is cyclic | DG `E-VALIDATOR-CIRCULAR-DEP` (per SPEC §31.4 / §55.11.2) |
+| Derived-cell circular dependency (v0.next) | A `const <derived>` cell expression depends on itself directly or transitively | DG `E-DERIVED-CIRCULAR-DEP` (per SPEC §31.5) |
+| Derived-engine circular dependency (v0.next) | A `<engine derived=expr>` chain forms a cycle | DG `E-DERIVED-ENGINE-CIRCULAR` (per SPEC §51.0.J / §31.5) |
+| Engine state-child outside engine (v0.next) | A `<Variant>` state-child markup node appears outside an `<engine>` parent | NR routes via `resolvedCategory`; downstream stages reject mis-placed state-children |
+| `<onTransition>` outside engine (v0.next) | A `<onTransition>` element appears outside an `<engine>` parent | VP-2 (Stage 3.3) `E-STRUCTURAL-ELEMENT-MISPLACED` |
+| Synthesised property write (v0.next) | An assignment targets an auto-synthesised validity-surface property (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`) | TS `E-SYNTHESIZED-WRITE`; CG `E-CG-VALIDITY-WRITE` as defense-in-depth |
+| Engine variable shadow (v0.next) | A non-engine declaration uses the same name as an engine's auto-declared variable | NR `E-ENGINE-VAR-DUPLICATE`; resolved by `var=` override on the engine |
+| Bare-variant ambiguity (v0.next) | `.VariantName` appears in a position whose type cannot be uniquely resolved (multiple union members declare the same variant name, or no type context) | TS `E-VARIANT-AMBIGUOUS` |
+| Render-spec non-bindable use (v0.next) | A Shape 2 declaration (`<x req> = <markup>`) is used as `<x/>` render-by-tag but the render-spec markup is not a bindable form element | TS `E-CELL-RENDER-SPEC-NOT-BINDABLE`; CG defense-in-depth before bind injection |
+| Multi-statement bare-form handler (v0.next) | A bare-form event handler attribute value or `:`-shorthand body contains multiple statements | TAB `E-MULTI-STATEMENT-HANDLER` (parse-time) |
+| Engine in component body (v0.next) | A `<engine>` declaration appears inside a `const Card = <article>...</>` component definition | VP-2 (Stage 3.3) `E-COMPONENT-ENGINE-SCOPE` |
 
 ---
 
