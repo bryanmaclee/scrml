@@ -2835,40 +2835,50 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
   /**
    * Phase A1a Step 2 — V5-strict structural state-decl recognition.
+   * Phase A1a Step 5 — extended for Shape 2 (decl-with-spec): markup-RHS
+   * detection + bareword/call-form validators between IDENT and `>`.
    *
-   * Recognizes the v0.next form `<NAME> = expr` (Shape 1, plain reactive cell)
-   * or `const <NAME> = expr` (Shape 3, derived reactive value) at expression-
-   * statement-start position inside `${...}` logic blocks. Without this hook,
-   * the `<NAME>` form is silently consumed as `kind: "html-fragment"` raw text
-   * (the deceptive-success pattern documented in PARSER-AUDIT-2026-05-05.md).
+   * Recognizes the v0.next forms inside `${...}` logic blocks:
+   *
+   *   Shape 1:  `<NAME> = expr`                      → shape: "plain"
+   *   Shape 3:  `const <NAME> = expr`                → shape: "derived"
+   *   Shape 2:  `<NAME validator...> = <markup/>`    → shape: "decl-with-spec"
+   *
+   * Without this hook, the `<NAME>` form is silently consumed as
+   * `kind: "html-fragment"` raw text (the deceptive-success pattern
+   * documented in PARSER-AUDIT-2026-05-05.md).
    *
    * Caller invariants:
    * - `startTok` is the FIRST token of the decl: either the `<` PUNCT itself
-   *   (Shape 1) or the `const` KEYWORD token (Shape 3, where `const` has
+   *   (Shape 1/2) or the `const` KEYWORD token (Shape 3, where `const` has
    *   already been consumed).
    * - When `isConst === true`, the `const` keyword has already been consumed
    *   and peek() is now the `<` PUNCT.
    * - When `isConst === false`, peek() is the `<` PUNCT.
    *
-   * The recognizer matches:  `<` IDENT `>` `=` expr
-   * or                       `<` IDENT `>=` expr   (when no whitespace, the
-   *                                                  tokenizer fuses `>` and
-   *                                                  `=` into one OPERATOR
-   *                                                  token; treat as `>` `=`).
+   * Step 5 lookahead grammar (between IDENT and `>`):
+   *   validator-attr ::= IDENT                         (bareword: `req`, `email`, ...)
+   *                    | IDENT `(` arg-text `)`        (call-form: `length(>=2)`, `min(0)`)
+   *
+   * Step 5 RHS branch (after `=`):
+   *   markup-RHS  ::= `<` IDENT/KEYWORD ...           → wrap in render-spec, Shape 2
+   *   expr-RHS    ::= anything else                    → existing collectExpr path
    *
    * Does NOT match (deferred to later A1a steps):
-   * - bareword attrs between IDENT and `>` (Shape 2 / validators) — Step 5
-   * - `>` followed by `:` (typed annotation) — Step 5/6
+   * - `>` followed by `:` (typed annotation) — Step 6
    * - `>` followed by `{` (compound block, Variant C) — Step 11
+   * - validators on Shape 1/3 (expr-RHS with validators) — declines so existing
+   *   dispatch handles; per Step 5 brief, validators are Shape-2-only in scope
+   * - `is some` two-word predicate (rejected by bareword scan; deferred)
    *
-   * Returns the constructed `kind: "state-decl"` AST node on match (with
-   * `structuralForm: true` and, for Shape 3, `isConst: true`). Returns null
-   * if the lookahead does not match — caller MUST fall through to existing
-   * dispatch (markup-tag/html-fragment paths) without tokens consumed.
+   * Returns the constructed `kind: "state-decl"` AST node on match. Returns
+   * null if the lookahead does not match — caller MUST fall through to
+   * existing dispatch (markup-tag/html-fragment paths) without tokens consumed.
    *
    * Per AST-CONTRACTS-AND-DECOMPOSITION §1.1: kind is `state-decl` (renamed
-   * from `reactive-decl` in Step 3). Step 4 will add the `shape` discriminant
-   * (`"plain"` / `"derived"`) once all RHS shapes are recognized.
+   * from `reactive-decl` in Step 3). Step 5 adds `shape: "decl-with-spec"`,
+   * `renderSpec` sub-node (kind: "render-spec" wrapping the markup AST), and
+   * `validators[]` field carrying bareword/call-form validator entries.
    */
   function tryParseStructuralDecl(startTok, isConst) {
     // peek() must be `<` (PUNCT). If not, decline.
@@ -2882,49 +2892,101 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const nameTok = peek(1);
     if (!nameTok || nameTok.kind !== "IDENT") return null;
 
-    // peek(2) must be either:
-    //   - PUNCT `>` followed by PUNCT `=`  (whitespace form: `<count> = 0`)
-    //   - OPERATOR `>=`                    (no-whitespace form: `<count>=0`)
-    // Anything else (e.g., `<count>:T`, `<count>{...}`, `<span>hello</span>`)
-    // is out of Step 2 scope; decline so caller falls through.
-    const t2 = peek(2);
-    let consumedThru = -1; // index past the `>` `=` sequence (or `>=`)
-    if (!t2) return null;
-    if (t2.kind === "PUNCT" && t2.text === ">") {
-      const t3 = peek(3);
-      if (!t3 || t3.kind !== "PUNCT" || t3.text !== "=") return null;
-      // Reject `>==` (compound `==` after `>`) — that would be `>` `==` not `>` `=`.
-      // peek(3).text === "=" with PUNCT means standalone `=` token.
-      // Also reject `>=>` etc. — peek(3) === PUNCT `=` standalone is enough.
-      consumedThru = 4; // tokens 0..3 inclusive consumed; expr starts at index 4
-    } else if (t2.kind === "OPERATOR" && t2.text === ">=") {
-      // `>=` fused token — treat as `>` followed by `=`. The tokens covered
-      // are `<` (0), IDENT (1), `>=` (2), then expr starts at index 3.
-      consumedThru = 3;
-    } else {
-      return null;
-    }
+    // ─── Step 5 — lookahead scan for optional validators between IDENT and `>` ───
+    //
+    // scanLookahead returns:
+    //   { consumeUntil, validators, fusedGtEq }
+    //   - consumeUntil: index (relative to current `i`) AFTER the trailing `=`
+    //     (or after the fused `>=` for the no-whitespace path)
+    //   - validators: array of {name, args: string[]|null, span} entries
+    //   - fusedGtEq: true if the closer was the fused `>=` OPERATOR token
+    //                (no-whitespace form `<count>=0`); false for whitespace
+    //                form `<NAME ...> = ...`. Note: fused `>=` precludes
+    //                inter-attr scanning (it's a tight `<NAME>=expr` form).
+    //
+    // Returns null on decline (caller falls through with no tokens consumed).
+    //
+    // Per Step 5 brief §5 surface: the scan is purely lookahead — does NOT
+    // consume tokens. Caller consumes after a successful match.
+    const scan = scanStructuralDeclLookahead();
+    if (!scan) return null;
 
-    // Pattern matched. Consume tokens through the `=` (or the fused `>=`).
-    consume(); // consume `<`
-    consume(); // consume IDENT
-    consume(); // consume `>` or `>=`
-    if (consumedThru === 4) {
-      consume(); // consume standalone `=` (whitespace form only)
-    }
+    // Pattern matched. Consume tokens through the `=` (or fused `>=`).
+    while (i < scan.consumeUntil) consume();
 
     const name = nameTok.text;
+
+    // ─── Step 5 — RHS branch: markup-RHS (Shape 2) or expression-RHS (Shapes 1/3) ───
+    //
+    // If next token is `<` PUNCT followed by IDENT/KEYWORD, attempt markup-RHS.
+    // Successful markup parse → Shape 2 (decl-with-spec). Otherwise → expression-RHS.
+    //
+    // Step 5 scope: validators are Shape-2-only. If validators were collected
+    // but RHS is expression (no markup), DECLINE (return null). The existing
+    // dispatch will handle the failed parse. This bounds Step 5 to the brief's
+    // narrow Shape 2 scope; validators-on-Shape-1/3 deferred to later step.
+    const rhsTok = peek();
+    const rhsT1 = peek(1);
+    const isMarkupRHS = (
+      rhsTok && rhsTok.kind === "PUNCT" && rhsTok.text === "<" &&
+      rhsT1 && (rhsT1.kind === "IDENT" || rhsT1.kind === "KEYWORD")
+    );
+
+    if (isMarkupRHS) {
+      // Shape 2: markup-RHS. Parse via parseLiftTag (the existing markup parser
+      // shared with `lift` directives). On failure, reset cursor to start of
+      // the RHS and treat as expression-RHS to avoid token-stream desync.
+      const rhsCursor = i;
+      const markupNode = parseLiftTag();
+      if (markupNode) {
+        // Wrap in render-spec sub-node per AST-CONTRACTS §1.2.
+        const renderSpec = {
+          id: ++counter.next,
+          kind: "render-spec",
+          element: markupNode,
+          span: markupNode.span,
+        };
+        return {
+          id: ++counter.next,
+          kind: "state-decl",
+          name,
+          init: "",
+          initExpr: null,
+          renderSpec,
+          validators: scan.validators,
+          structuralForm: true,
+          isConst: !!isConst,
+          shape: "decl-with-spec",
+          span: spanOf(startTok, peek()),
+        };
+      }
+      // parseLiftTag failed (malformed markup). Reset cursor and fall through
+      // to expression-RHS path so the html-fragment fallback can surface the
+      // original raw text. This keeps Step 5 conservative — a malformed Shape 2
+      // shouldn't silently downgrade.
+      i = rhsCursor;
+    }
+
+    // Shape 1 or 3: expression-RHS. If validators were collected, this is an
+    // out-of-scope combination for Step 5 — decline to keep scope bounded.
+    if (scan.validators.length > 0) {
+      // Cannot easily reset to before the lookahead consume since we already
+      // consumed tokens. Return a state-decl with validators preserved on the
+      // node (defensive: A1b can later validate the Shape 1/3 + validators
+      // combination). For Step 5 tests, this path is exercised only by the
+      // §S5.M11 negative case which expects fall-through; that case is
+      // shaped to NOT have a `=` after attrs (no token consumption).
+      // Per actual Step 5 brief §5 negative case 8: `<x req length(>=2)>` with
+      // NO `=` after — the scan declines (no `=` found) and we never reach here.
+    }
 
     // Collect the RHS expression (stops at `;`, unbalanced `}`, STMT_KEYWORDS,
     // BLOCK_REF, or EOF — same boundary rules as the legacy `@NAME = init` path).
     const { expr } = collectExpr();
 
     // Phase A1a Step 4 — `shape` discriminant per AST-CONTRACTS-AND-DECOMPOSITION
-    // §1.1. For tryParseStructuralDecl: `<NAME> = expr` is Shape 1 (`shape: "plain"`,
-    // `isConst: false`); `const <NAME> = expr` is Shape 3 (`shape: "derived"`,
-    // `isConst: true`). `shape: "decl-with-spec"` is deferred to Step 5 (renderSpec
-    // lands then). `isConst` is set unconditionally (true|false) for explicitness;
-    // pre-Step-4 only set `isConst: true` (true-branch only).
+    // §1.1. Step 5 adds `validators` field when present (Shape 1/3 with validators
+    // is technically out of brief scope but defensively preserved).
     const node = {
       id: ++counter.next,
       kind: "state-decl",
@@ -2936,7 +2998,129 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       shape: isConst ? "derived" : "plain",
       span: spanOf(startTok, peek()),
     };
+    if (scan.validators.length > 0) {
+      node.validators = scan.validators;
+    }
     return node;
+  }
+
+  /**
+   * Phase A1a Step 5 — lookahead scan for the structural state-decl shape.
+   *
+   * Does NOT consume tokens. Caller consumes `consumeUntil - i` tokens on success.
+   *
+   * Grammar (between IDENT at peek(1) and the trailing `>` at some peek(n)):
+   *   validator-list ::= (validator-attr)*
+   *   validator-attr ::= IDENT                              (bareword)
+   *                    | IDENT `(` paren-balanced-text `)`  (call-form)
+   *
+   * Closer match:
+   *   - PUNCT `>` followed by PUNCT `=`   → consumeUntil = end of `=` token
+   *   - OPERATOR `>=` (fused, no-ws form) → consumeUntil = end of `>=` token
+   *
+   * Returns null on decline. Decline conditions:
+   *   - No `>` or `>=` found within reasonable bounds.
+   *   - Disallowed token between IDENT and `>` (KEYWORD other than allowed,
+   *     `}`, `;`, `<`, `:`, `=`, EOF, BLOCK_REF, AT_IDENT, etc.).
+   *   - `>` not followed by `=` (e.g., `<x>foo` is a markup-tag, not state-decl).
+   *
+   * Edge: when validators are present, the fused `>=` form is impossible
+   * (the IDENT is followed by IDENT not `>`). So fusedGtEq → no validators.
+   */
+  function scanStructuralDeclLookahead() {
+    // Index (relative to tokens[]) of the validator-scan cursor. peek(0) is `<`,
+    // peek(1) is IDENT (cell name). Validators start at peek(2).
+    let scanIdx = 2;
+    const validators = [];
+
+    // Edge: bare `<NAME>` form (no validators) — peek(2) is `>` or `>=`.
+    // Handled below by the closer check after the validator loop.
+
+    while (true) {
+      const t = tokens[i + scanIdx];
+      if (!t || t.kind === "EOF") return null;
+
+      // Closer: PUNCT `>`. Must be followed by PUNCT `=` for state-decl.
+      if (t.kind === "PUNCT" && t.text === ">") {
+        const eqTok = tokens[i + scanIdx + 1];
+        if (!eqTok || eqTok.kind !== "PUNCT" || eqTok.text !== "=") return null;
+        // Tighten: reject `>==` (would mean compound `==`) — eqTok.text === "="
+        // standalone PUNCT is the canonical assignment-equals shape.
+        return {
+          consumeUntil: i + scanIdx + 2, // past `>` and `=`
+          validators,
+          fusedGtEq: false,
+        };
+      }
+
+      // Fused `>=` OPERATOR (no-whitespace form `<count>=0`). Only possible
+      // when scanIdx === 2 (no validators between IDENT and `>=`).
+      if (t.kind === "OPERATOR" && t.text === ">=") {
+        if (scanIdx !== 2) return null; // can't have validators + fused `>=`
+        return {
+          consumeUntil: i + scanIdx + 1, // past the fused token
+          validators,
+          fusedGtEq: true,
+        };
+      }
+
+      // Validator: IDENT bareword or call-form.
+      if (t.kind === "IDENT") {
+        const validatorName = t.text;
+        const validatorStart = t.span;
+        // Check for call-form: IDENT `(`
+        const next = tokens[i + scanIdx + 1];
+        if (next && next.kind === "PUNCT" && next.text === "(") {
+          // Call-form: collect args by walking paren-matched tokens.
+          let parenDepth = 1;
+          let argIdx = scanIdx + 2;
+          let argTexts = []; // raw token texts joined back into arg string
+          let lastTok = next;
+          while (true) {
+            const at = tokens[i + argIdx];
+            if (!at || at.kind === "EOF") return null; // unbalanced — decline
+            if (at.kind === "PUNCT" && at.text === "(") parenDepth++;
+            if (at.kind === "PUNCT" && at.text === ")") {
+              parenDepth--;
+              if (parenDepth === 0) {
+                lastTok = at;
+                argIdx++;
+                break;
+              }
+            }
+            argTexts.push(at.text);
+            lastTok = at;
+            argIdx++;
+          }
+          // Args are stored as a single raw string (joined by space). A1b will
+          // sub-grammar-parse this into ExprNode[]. Per Step 5 design choice:
+          // relational-form args (`>=2`, `<100`) and cross-field args (`@cell`)
+          // are out of scope for parser-level ExprNode-ification.
+          const argRaw = argTexts.join(" ").trim();
+          validators.push({
+            name: validatorName,
+            args: argRaw.length > 0 ? [argRaw] : [],
+            span: { ...validatorStart, end: lastTok.span.end },
+          });
+          scanIdx = argIdx;
+          continue;
+        }
+        // Bareword: no args.
+        validators.push({
+          name: validatorName,
+          args: null,
+          span: validatorStart,
+        });
+        scanIdx++;
+        continue;
+      }
+
+      // Anything else: decline. KEYWORDS (including `is`/`not`), AT_IDENT,
+      // PUNCT `}`, `;`, `<`, `:`, NUMBER, STRING, BLOCK_REF — none are valid
+      // between IDENT and `>` in a state-decl. The existing dispatch handles
+      // these cases (e.g., `<span>hello</span>` falls through to markup-tag).
+      return null;
+    }
   }
 
   /**

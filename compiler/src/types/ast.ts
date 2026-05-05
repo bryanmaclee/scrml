@@ -455,6 +455,58 @@ export interface ReactiveDeclNode extends BaseNode {
    * Always set by ast-builder.
    */
   isConst?: boolean;
+  /**
+   * Phase A1a Step 5 — Shape 2 only. The render-spec sub-node wrapping the
+   * bindable markup RHS (e.g., `<input type="text"/>`). Present iff
+   * `shape === "decl-with-spec"`. Mutually exclusive with `initExpr`.
+   */
+  renderSpec?: RenderSpecNode | null;
+  /**
+   * Phase A1a Step 5 — Shape 2 validators field. Array of validator entries
+   * collected from bareword/call-form attributes between `<NAME` and `>`.
+   * Empty array `[]` for Shape 2 with no validators. Undefined for Shape 1/3.
+   *
+   * Per AST-CONTRACTS-AND-DECOMPOSITION §1.1, `args` is the parsed expression
+   * list (`ExprNode[]`). Step 5 stores args as raw text (`string[]`) for
+   * forwarding to A1b's sub-grammar parser; relational-form args (`>=2`)
+   * and cross-field args (`@cell`) are not standalone-parseable as JS.
+   */
+  validators?: ValidatorEntry[];
+}
+
+/**
+ * Phase A1a Step 5 — bareword/call-form validator on a state-decl.
+ *
+ * Bareword: `name` is the predicate identifier (`req`, `email`, `numeric`),
+ * `args` is null.
+ *
+ * Call-form: `name` is the predicate identifier (`length`, `min`, `eq`),
+ * `args` is an array of raw arg-text strings (Step 5 produces a single-element
+ * array containing the joined paren contents; A1b sub-grammar-parses to
+ * ExprNode[]).
+ */
+export interface ValidatorEntry {
+  /** Predicate name (e.g., "req", "length", "min", "pattern"). */
+  name: string;
+  /** Raw argument text(s); null for bareword validators. */
+  args: string[] | null;
+  /** Source span covering the validator (name + args region). */
+  span: Span;
+}
+
+/**
+ * Phase A1a Step 5 — `kind: "render-spec"` AST sub-node per
+ * AST-CONTRACTS-AND-DECOMPOSITION §1.2.
+ *
+ * Wraps a markup AST node as the bindable render-spec for a Shape 2 state-decl.
+ * Stable type-tag distinguishes "this markup is a render-spec for a state cell"
+ * from "this markup is a value being assigned to a state cell" (matters for
+ * A1b's bindable-classifier and A1c's bind:* dispatch).
+ */
+export interface RenderSpecNode extends BaseNode {
+  kind: "render-spec";
+  /** The bindable markup AST node (input/textarea/select). */
+  element: MarkupNode;
 }
 
 /** A derived reactive declaration: `const @name = expr`. */
