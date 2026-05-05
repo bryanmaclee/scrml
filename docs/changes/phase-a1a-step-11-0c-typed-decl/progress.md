@@ -399,8 +399,25 @@ verification, then deleted before any commit included them.
 WIP commits on `phase-a1a-step-11-0c-typed-decl`:
   - `2664297` — WIP: survey notes
   - `f176b70` — WIP: typed-decl recognizer + types + flip K11.X-D3 memorials
-  - (next) — WIP: §S11C positive + regression cases (10 tests)
-  - (next) — final: compile(a1a-step-11-0c) — typed-decl recognizer
+  - `4c50506` — WIP: tests — 10 §S11C cases (typed Shape 1/2/3 + Tier 3 + refinement)
+  - (final) — compile(a1a-step-11-0c): typed-decl recognizer
+
+## Step-11 close-out — divergence resolution status
+
+After Step 11.0c, all three Step 11 K11.X-DIVERGENCE divergences are
+RESOLVED:
+  - §K11.X-DIVERGENCE-1 (Variant C compound) — RESOLVED Step 11.0a → §K11.1A
+  - §K11.X-DIVERGENCE-2 (newline-separator) — RESOLVED Step 11.0b → §K11.2A
+  - §K11.X-DIVERGENCE-3 (typed-decl + Tier 3 positional) — RESOLVED Step 11.0c → §K11.3A
+
+The kickstarter v2 §3 corpus now parses to clean state-decl AST nodes
+end-to-end. All `TODO[step-11.0a/b/c]` markers in
+`kickstarter-v2-smoke.test.js` are flipped (zero remaining anti-test
+memorials for step-11 sub-steps).
+
+A1a Phase-A continues with: A1b (resolver/typer), A1c (codegen). The
+typed-decl AST shape produced here (state-decl with `typeAnnotation`
+field) is the input contract for both downstream phases.
 
 ## Tags
 
