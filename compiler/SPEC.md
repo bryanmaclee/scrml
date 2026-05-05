@@ -12059,6 +12059,8 @@ import { Phase, appPhase pinned } from './engines.scrml'
 
 ## 22. Metaprogramming
 
+**Reviewed for v0.next consistency (Stage 0b D4, 2026-05-04).** §22 is consistent with the v0.next framing — the `^{}` meta context's splicing rules (§22.4) already cover markup as one of the result-types coercible into a markup parent context. The L1 markup-as-value pillar (§1.4) reinforces this: a meta block that returns markup is producing a first-class value, and splicing into a markup parent renders it positionally. No spec changes required; existing semantics hold under v0.next.
+
 ### 22.1 Overview
 
 scrml supports metaprogramming through the `^{}` meta context. The meta context provides a
@@ -13439,6 +13441,8 @@ The `//` form is universal and works in all contexts. A developer who uses only 
 
 ## 28. Compiler Settings
 
+**Reviewed for v0.next consistency (Stage 0b D4, 2026-05-04).** v0.next adds new lint warnings that may benefit from suppression configs in larger codebases (especially `W-LIFECYCLE-CANDIDATE`, which can be noisy on an in-progress prototype). The v0.next additions (italicised below) are non-blocking lints; suppression entries are optional and default to enabled.
+
 The following compiler settings are defined in this version. Settings are specified in a compiler configuration file (format TBD) or on the command line.
 
 | Setting | Values | Default | Description |
@@ -13446,6 +13450,10 @@ The following compiler settings are defined in this version. Settings are specif
 | `verbose closers` | `on` / `off` | `off` | When `on`, normalizes all `</>` inferred closer forms to `</tagname>` in diagnostic output and error messages. Does not affect compiled output. |
 | `html-content-model` | `strict` / `warn` / `off` | `warn` | Controls how HTML content model violations are reported. See Section 28.1 for full semantics. |
 | name-mismatch warning | `warn` / `error` | `warn` | Whether a component name that misleadingly matches an HTML element produces a warning or an error. |
+| *`lint.lifecycle-candidate`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-LIFECYCLE-CANDIDATE` (booleans-as-lifecycle pattern detected — suggest engine). Default `warn`. May be set `off` per-project for prototype phases. |
+| *`lint.match-rule-inert`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-MATCH-RULE-INERT` (`rule=` annotation on a `<match>` block-form arm — annotation-only at Tier 1; engine `<engine>` is required for active rules). Default `warn`. |
+| *`lint.engine-initial-missing`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-ENGINE-INITIAL-MISSING` (`<engine for=T>` declared without `initial=`; compiler defaults to first variant). Default `warn`. |
+| *`lint.deprecated-machine`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-DEPRECATED-001` (`<machine>` keyword — `<engine>` is canonical post-v0.next). Default `warn`; teams in mid-migration may set `off` temporarily. |
 
 Additional settings will be defined as features are specified.
 
@@ -17328,6 +17336,16 @@ Whether continuous-push workers should also support a reactive binding form (`@p
 
 **Added:** 2026-04-05. Resolves ADR-001 open questions OQ-1 through OQ-4.
 Source: debate-confirmed resolutions, threat assessment `docs/research/threat-assessment-type-in-name.md`.
+
+**Reviewed for v0.next consistency (Stage 0b D4, 2026-05-04).** v0.next introduces three synthesized name surfaces: (a) auto-synthesized validity properties on cells with validators (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted` — §55.5–§55.7), (b) auto-declared engine variables (`@phaseMachine` from `<engine for=Phase>` per §51.0.C, M6), (c) derived engine variant-update nodes (§51.0.J, L20). Each of these rides on existing `kind` markers — no new kind characters are required:
+
+- Synthesized `isValid` (boolean) encodes as `kind=p` (primitive). Synthesized `errors` (array of `ValidationError`) encodes as `kind=a` (array of enum). Synthesized `touched` / `submitted` (booleans) encode as `kind=p`.
+- Auto-declared engine variables encode as `kind=t` (state) — the same kind as user-declared `<x>` cells, since the engine variable IS a reactive state cell typed to the engine's enum.
+- Derived engines encode as `kind=t` (state), same as plain engines; the `derived=expr` distinction is in the dependency graph, not the encoding kind.
+
+The hash input (canonical string per §47.1.4) for synthesized properties uses a deterministic suffix: `{cellName}.isValid`, `{cellName}.errors`, etc. The compiler's name-builder honours this convention so that runtime decoding via `reflect()` (§47.2) returns the developer-visible dotted form.
+
+No new error codes or kind markers required. The composition is ADDITIVE.
 
 All JavaScript variable names in compiled output SHALL use encoded names as specified in this section. The compiled JS is an IR; encoded names are correct and intentional. Source maps (PIPELINE.md §Stage 8) are the specified debugging path back to `.scrml` source.
 
@@ -22002,6 +22020,15 @@ promotion remains a P3-FOLLOW concern.
 ## 52. State Authority Declarations
 
 **Added:** 2026-04-08. Resolves debate-state-authority-2026-04-08.md (A-B Hybrid recommendation). Introduces two-tier model for declaring reactive variable authority (server vs. client-local), compiler-generated sync infrastructure, and authority boundary enforcement.
+
+**Reviewed for v0.next consistency (Stage 0b D4, 2026-05-04).** §52 composes cleanly with the v0.next framing:
+
+- **V5-strict access.** `@var` is the canonical expression access (§6.1). `server @var` annotation is on the declaration's authority modifier; the access form is unchanged. `<x>` structural form for declaration is also legal — `server <x> = init` with the `server` modifier preceding the structural form is the V5-strict-compatible variant.
+- **Auto-synthesized validity surface.** A cell with `server` authority MAY also carry validators. The validity surface (`@x.isValid`, `@x.errors` per §55.5–§55.7) is synthesised regardless of authority — the surface is computed client-side from the cell's current value. Server validators (§55.4 schema columns; §55.3 refinement-type predicates) are independent enforcement layers per §53.6.2.
+- **`protect=` on state cells / db blocks.** The `protect=` mechanism (§11 / §52.7) applies to db-typed authority cells; it composes with V5-strict because `protect=` is on the DB block (or the type-level authority declaration), not on the syntactic access form. Both `<x>` decl and `@x` access remain legal; the protected fields are simply absent from the client schema view.
+- **Channels (§38) and authority.** v0.next channels declared at file level use V5-strict body (`<x> = init` declares; `@x` reads/writes). The authority of a channel-declared cell is "channel-synced" — auto-synced across subscribed clients (§38.4). The `server` authority modifier IS NOT applicable inside a channel body (channel cells are wire-synced, not server-authoritative in the §52 sense). This is documented in §38.4 + the §38.4.1 v1→v0.next migration note.
+
+No spec changes required for §52 under v0.next. Existing semantics hold.
 
 ### 52.1 Motivation
 
