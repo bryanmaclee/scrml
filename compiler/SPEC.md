@@ -15440,6 +15440,100 @@ Signals that a column was previously named `identifier` in the database and shou
 - When a column in `< schema>` includes `rename from <old-name>`, and a column named `<old-name>` exists in the current database schema but a column named `<new-name>` does not, the compiler SHALL generate a `RENAME COLUMN` migration instead of a DROP + ADD pair.
 - If neither `<old-name>` exists in the current database nor `<new-name>` is a new column, `rename from` SHALL be a compile error (E-SCHEMA-007: rename source column does not exist in database).
 
+#### 39.5.7 Additive shared-core validator vocabulary (L4)
+
+**Added 2026-05-04 (S57 Stage 0b D3, L4).** Schema column constraints accept the **shared validator core vocabulary** (`req`, `length`, `pattern`, `min`, `max`, `gt`/`lt`/`gte`/`lte`, `eq`/`neq`, `oneOf`/`notIn`) as ADDITIVE forms alongside the SQL-mirror native constraints (`not null`, `unique`, `references`, `default`, `primary key`). The shared-core vocabulary is the same vocabulary used by state-cell validators (§55.2) and refinement-type predicates (§55.3, §53); applying it on a schema column lowers it to standard SQL DDL `CHECK` and `NOT NULL` constraints.
+
+**The SQL-mirror native vocabulary remains the canonical source-level form for the schema locus.** The shared-core vocabulary is purely additive — not a replacement, not a synonym map, not a bilingual schema. Adopters who think in SQL DDL keep writing `not null unique references(table.col)`; adopters who think in scrml validator vocabulary (especially when the same constraint applies in form state and DB) MAY use `req length(>=2)` etc. Both forms are legal; mixed forms (one column SQL-mirror, another column shared-core) are legal; pick per-readability.
+
+```scrml
+<schema>
+  users {
+    id:    integer primary key
+    email: text not null unique          // SQL-mirror — canonical
+    name:  text req length(>=2)          // shared-core — additive (L4)
+    age:   integer min(18) max(120)      // shared-core — additive (L4)
+    role:  text oneOf(['admin','editor','viewer'])
+                                          // shared-core — additive (L4)
+  }
+</>
+```
+
+**Cross-locus consistency note.** The same shared-core word fires in three contexts with three enforcement modes:
+
+| Locus | Enforcement | Failure mode |
+|---|---|---|
+| State-cell validator (§55.2) | Reactive UI gating | Form `isValid` false; submit blocked |
+| Refinement type (§53) | Compile-time + runtime boundary | Type error at decl; runtime error at boundary |
+| Schema column (here) | DBMS at INSERT/UPDATE | DB raises constraint violation |
+
+Cross-ref §55.1 for the universal-core predicate listing.
+
+#### 39.5.8 Lowering shared-core to standard SQL DDL
+
+The compiler lowers each shared-core predicate on a schema column to one or more standard SQL DDL constraint clauses on the generated `CREATE TABLE` (or `ALTER TABLE`) statement:
+
+| scrml predicate | Lowered SQL | Notes |
+|---|---|---|
+| `req` | `NOT NULL` (and, for non-numeric columns, an additional `CHECK (col != '')` to reject empty strings) | The empty-string check is omitted on `integer`/`real`/`boolean`/`timestamp` columns, where empty-string is not a representable value. |
+| `length(>=N)` | `CHECK (length(col) >= N)` | `length()` is the standard SQL string-length function (DBMS-portable for SQLite, Postgres, MySQL). For `blob` columns, it returns byte count. |
+| `length(>N)`, `length(<=N)`, `length(<N)`, `length(==N)`, `length(!=N)` | analogous `CHECK (length(col) <op> N)` | |
+| `pattern(/re/)` | `CHECK (col REGEXP 're')` (SQLite/MySQL) or `CHECK (col ~ 're')` (Postgres) | DBMS-dependent. The driver-resolution layer (§44 multi-database adaptation) selects the appropriate operator at lowering time. |
+| `min(n)` | `CHECK (col >= n)` | |
+| `max(n)` | `CHECK (col <= n)` | |
+| `gt(n)`, `lt(n)`, `gte(n)`, `lte(n)`, `eq(n)`, `neq(n)` | analogous `CHECK (col <op> n)` | When the predicate argument is a literal, lowered to a CHECK; when the argument is `@cell` (cross-field), lowered to a CHECK that references another column **only if** the other column is in the same table — cross-table cross-field is REJECTED at the schema locus. (Cross-field state-validator semantics differ from schema-column semantics; the schema is per-row.) |
+| `oneOf([v1, v2, ...])` | `CHECK (col IN (v1, v2, ...))` | The literal list is verbatim to the SQL `IN` clause. |
+| `notIn([v1, v2, ...])` | `CHECK (col NOT IN (v1, v2, ...))` | |
+
+**Normative statements:**
+
+- The compiler SHALL lower each shared-core predicate on a schema column to the SQL DDL form listed above. The lowering SHALL preserve scrml column-type semantics (text/integer/real/blob/boolean/timestamp).
+- The compiler SHALL emit driver-specific lowering when the standard SQL form differs across DBMS targets. The `?{}` multi-database adaptation pass (§44) determines the active driver at compile time and selects the lowering form accordingly.
+- Cross-field arguments in shared-core schema constraints (e.g., `<endDate gte(@startDate)>`) SHALL reference only columns in the same table. Cross-table cross-field SHALL be a compile error (E-SCHEMA-005 family — invalid CHECK constraint).
+- The shared-core `req` predicate on a schema column SHALL lower to `NOT NULL` plus, for `text`/`blob` columns, an additional `CHECK (col != '')`. This matches the v0.next state-validator semantics where `req` rejects the empty string (cross-ref §55.1, §42.2.2a).
+
+**Inviolable property — SQL passthrough is unchanged.** The SQL strings sent to the database are PRESERVED. Vocabulary unification touches only scrml source-level words; the emitted SQL DDL retains its standard shape (CREATE TABLE + standard constraint clauses + standard CHECK/NOT NULL/UNIQUE/REFERENCES). `?{}` SQL-passthrough blocks (§8) are unaffected.
+
+**Worked example — mixed-vocabulary schema:**
+
+```scrml
+<schema>
+  users {
+    id:        integer primary key
+    email:     text not null unique         // SQL-mirror
+    name:      text req length(>=2)         // shared-core (req → NOT NULL + CHECK; length → CHECK)
+    age:       integer min(18) max(120)     // shared-core
+    role:      text oneOf(['admin','editor','viewer'])
+                                             // shared-core (→ CHECK (role IN (...)))
+    bio:       text length(<=500)           // shared-core (no req → NULL allowed; CHECK length<=500)
+    created_at: timestamp default(CURRENT_TIMESTAMP)  // SQL-mirror
+  }
+</>
+```
+
+Lowered to SQLite:
+
+```sql
+CREATE TABLE users (
+  id         INTEGER PRIMARY KEY,
+  email      TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL CHECK (name != '') CHECK (length(name) >= 2),
+  age        INTEGER CHECK (age >= 18) CHECK (age <= 120),
+  role       TEXT CHECK (role IN ('admin','editor','viewer')),
+  bio        TEXT CHECK (length(bio) <= 500),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 39.5.9 When to use SQL-mirror vs shared-core
+
+Rule of thumb:
+
+- If your team thinks in SQL DDL and the column constraints have no counterpart in form state, use the **SQL-mirror form**: `not null`, `unique`, `references`, `default`, `primary key`.
+- If your team thinks in scrml validator vocabulary — especially when the same constraint applies to a form-coupled state cell elsewhere in the file (e.g., a `<signup>` form has `<name req length(>=2)>` and the schema's `users.name` column should match) — use the **shared-core form**: `req`, `length(>=2)`, `pattern(re)`, `min`/`max`, etc.
+
+Both forms are legal; mixed forms are legal (one column SQL-mirror, another column shared-core). The compiler emits identical SQL DDL regardless of which surface form is used (where the lowering is unambiguous — see §39.5.8).
+
 ### 39.6 Migration Diff Algorithm
 
 #### 38.6.1 Desired State vs. Actual State
