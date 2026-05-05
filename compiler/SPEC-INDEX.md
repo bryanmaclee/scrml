@@ -1,16 +1,19 @@
 # SPEC.md Section Index
 
 > Auto-generated line numbers. Regenerate: `bash scripts/update-spec-index.sh`
-> Last updated: 2026-05-04 (S57 Stage 0b D2.8 — major v0.next additions:
-> §17.0 (Tier ladder); §18.0 (block-form match — Tier 1) + §18.0.1-§18.0.3;
-> §51.0 (engines — Tier 2) + §51.0.A-§51.0.L; §54 composition note;
-> §55 NEW (Validators + auto-synth validity surface, §55.1-§55.15);
-> §34 +17 error codes (match/engine/derived-engine/component-engine-scope/
-> validator-circular/derived-with-validators). Section line numbers for §17
-> onward have shifted; subsection-level line numbers in Quick Lookup may
-> have minor drift — comprehensive realign deferred.
+> Last updated: 2026-05-04 (S57 Stage 0b D3 — channels + schema + predicates + `not`):
+> §38 MAJOR REWRITE (M19) — channels at file level, drop `@shared`, V5-strict body,
+> §38.4.1 v1→v0.next migration note, E-CHANNEL-002 retired in §38.9 + §34;
+> §39.5.7-§39.5.9 NEW (L4) — additive shared-core validator vocabulary in schema columns,
+> SQL DDL lowering rules, when-to-use guidance;
+> §53.6.1-§53.6.2 NEW (L4) — shared-core in refinement-type position, composition with
+> state-cell validators (cross-ref §55);
+> §42.2.5 NEW (L5) — `is some` vs `req` distinct predicates, three loci of
+> exists/required semantic;
+> §34 +2 error codes (E-CHANNEL-INSIDE-PROGRAM, E-CHANNEL-SHARED-MODIFIER).
+> Carries forward D2.8 line numbers below; section line numbers updated post-D3.
 
-Total lines: 23,384 | Total sections: 55 + appendices
+Total lines: 23,692 | Total sections: 55 + appendices
 
 > **Note on §49 heading format:** SPEC.md §49 uses a single `#` (H1) at line 15800 instead of the `## N.` pattern every other section uses. The regenerator script will not pick it up automatically — keep this in mind when running the script.
 
@@ -57,15 +60,15 @@ Total lines: 23,384 | Total sections: 55 + appendices
 | 31 | Dependency Graph | 11748-11771 | 24 | Purpose, construction, route analysis |
 | 32 | The `~` Keyword | 11772-11983 | 212 | Pipeline accumulator, lin variable, context boundary |
 | 33 | The `pure` Keyword | 11984-12048 | 65 | Purity constraints, **§33.6 fn ≡ pure function (S32)**, W-PURE-REDUNDANT |
-| 34 | Error Codes | 12120-12324 | 205 | All error code definitions (+6/-1 S32: E-STATE-COMPLETE, E-MACHINE-DIVERGENCE, E-STATE-SUBSTATE-*, E-STATE-TERMINAL-*; +2 S48: E-META-009, E-META-010; +2 S49: W-TAILWIND-001, E-TAILWIND-001) |
+| 34 | Error Codes | 13290-13535 | 246 | All error code definitions. **D3 (2026-05-04) +2:** E-CHANNEL-INSIDE-PROGRAM, E-CHANNEL-SHARED-MODIFIER; E-CHANNEL-002 retired (replaced by E-CHANNEL-SHARED-MODIFIER). **D2.8 (2026-05-04) +17:** match/engine/derived-engine/component-engine-scope/validator-circular/derived-with-validators. |
 | 35 | Linear Types — `lin` | 12252-12713 | 462 | Declaration (exactly-once + restricted intermediate visibility), consumption, control flow, closures, lin function params (§35.2.1), cross-`${}` block lin (§35.2.2), E-LIN-005 shadowing + E-LIN-006 deferred-ctx (§35.5) |
 | 36 | Input State Types | 12714-13071 | 358 | `<keyboard>`, `<mouse>`, `<gamepad>` |
 | 37 | Server-Sent Events | 13072-13313 | 242 | `server function*` SSE generators |
-| 38 | WebSocket Channels | 13314-13619 | 306 | `<channel>`, @shared, broadcast/disconnect |
-| 39 | Schema and Migrations | 13620-13895 | 276 | `< schema>`, column types, migration diff |
+| 38 | WebSocket Channels | 14598-15307 | 710 | **D3 MAJOR REWRITE (M19, 2026-05-04).** `<channel>` at FILE LEVEL (sibling of `<program>`, not child); `@shared` modifier REMOVED — auto-sync from being declared in channel body; V5-strict body (`<x> = init` declares; `@x` reads/writes); §38.1 file-level placement, §38.4 V5-strict reactive sync, §38.4.1 v1→v0.next migration; broadcast/disconnect/onserver:*/onclient:* preserved; cross-file inline expansion (§38.12) updated. E-CHANNEL-002 retired; E-CHANNEL-INSIDE-PROGRAM + E-CHANNEL-SHARED-MODIFIER added (§34). |
+| 39 | Schema and Migrations | 15308-15677 | 370 | `< schema>`, column types, migration diff. **D3 (L4, 2026-05-04) +3 subsections:** §39.5.7 additive shared-core validator vocabulary (`req`/`length`/`pattern`/`min`/`max`/`gt`/`lt`/`gte`/`lte`/`eq`/`neq`/`oneOf`/`notIn`); §39.5.8 lowering to standard SQL DDL (`CHECK`, `NOT NULL`); §39.5.9 when-to-use SQL-mirror vs shared-core. SQL-mirror remains canonical; shared-core is purely additive. |
 | 40 | Middleware and Request Pipeline | 13896-14119 | 224 | Auto middleware, handle() escape hatch |
 | 41 | Import System — `use`/`import` | 14120-14326 | 207 | Capability imports, value imports, vendoring |
-| 42 | `not` — Unified Absence Value | 14327-14558 | 232 | `not` keyword, `is not`, `is some`, `(x) =>`, `T | not`, compound exprs (§42.2.4) |
+| 42 | `not` — Unified Absence Value | 16109-16399 | 291 | `not` keyword, `is not`, `is some`, `given x =>`, `T | not`, compound exprs (§42.2.4). **D3 (L5, 2026-05-04) +1 subsection:** §42.2.5 `is some` vs `req` are distinct predicates — `is some` checks existence (`""` IS some), `req` checks meaningful value (`""` fails req); three native loci of "exists/required" semantic. |
 | 43 | Nested `<program>` | 14559-14641 | 83 | Execution contexts, shared-nothing, lifecycle, RPC |
 | 44 | `?{}` Multi-Database Adaptation | 14969-15055 | 87 | Bun.SQL target, driver resolution, `.get()` → `T | not`; **§44.8 bracket-matched `?{` scanner (F-SQL-001)** + E-SQL-008 hard-error |
 | 45 | Equality Semantics | 14698-14759 | 62 | Single `==`, no `===`, structural, compiler-derived |
@@ -76,7 +79,7 @@ Total lines: 23,384 | Total sections: 55 + appendices
 | 50 | Assignment as Expression | 16503-16969 | 467 | Assign-expr syntax, semantics, type rules, fn interaction |
 | 51 | State Transition Rules / `< machine>` / `<engine>` | 18778-21080 | 2303 | **§51.0 (S57 D2.8) — engines as Tier 2**: §51.0.A overview/singleton; §51.0.B declaration syntax; §51.0.C auto-declared variable + var=; §51.0.D mount position (decl=mount; cross-file singleton); §51.0.E initial= + W-ENGINE-INITIAL-MISSING; §51.0.F rule= contract (compile-time + runtime); §51.0.G .advance() loud; §51.0.H effect= / <onTransition> (to/from/once/if=); §51.0.I :-shorthand; §51.0.J derived engines (L20); §51.0.K components vs engines (Move 20, E-COMPONENT-ENGINE-SCOPE); §51.0.L relationship to legacy §51.1+. Legacy `<machine>` content preserved §51.1-§51.16. |
 | 52 | State Authority Declarations | 18693-19221 | 529 | Two-tier authority, server @var, sync infrastructure |
-| 53 | Inline Type Predicates | 19222-20160 | 939 | Value constraints, SPARK zones, named shapes, bind:value HTML attrs |
+| 53 | Inline Type Predicates | 21932-22913 | 982 | Value constraints, SPARK zones, named shapes, bind:value HTML attrs. **D3 (L4, 2026-05-04) +2 subsections:** §53.6.1 shared-core vocabulary in refinement-type position (cross-ref §55.1 for the universal-core predicate listing); §53.6.2 composition with state-cell validators (type predicate + `req` stack as independent enforcement layers). |
 | 54 | Nested Substates and State-Local Transitions | 22606-22906 | 301 | **S32 (2026-04-20).** Nested substate grammar (§54.2), state-local transitions (§54.3), field narrowing (§54.4), terminal states (§54.5), 4 new error codes (§54.6), interaction matrix (§54.7). Companion to §51.15 cross-check. **S57 D2.8 composition note**: §54 composes uniformly with §51.0 engine state-children. |
 | 55 | Validators and the Auto-Synthesized Validity Surface | 22907-23383 | 477 | **NEW S57 D2.8.** §55.1 universal-core vocabulary (req, length, pattern, min/max, gt/lt/gte/lte, eq/neq, oneOf/notIn — L4); §55.2 state-cell validators; §55.3 refinement-type validators (cross-ref §53); §55.4 schema-column validators (cross-ref §39); §55.5/§55.6 auto-synth validity surface compound + per-field (L11) — isValid/errors/touched/submitted; §55.7 synthesized-property semantics (read-only); §55.8 `<errors of=expr/>` first-class element (L13); §55.9 ValidationError enum (L12); §55.10 4-level message resolution chain (L12); §55.11 cross-field via predicate args (L14); §55.12 multi-errors / short-circuit; §55.13 reset interaction (cross-ref §6.8); §55.14 engine + derived cells; §55.15 cross-refs + error-code listing. |
 
@@ -218,3 +221,17 @@ Total lines: 23,384 | Total sections: 55 + appendices
 - reset + validity surface → §55.13 (23305+) (cross-ref §6.8)
 - validators on engine state-cells / derived cells → §55.14 (23320+)
 - E-DERIVED-WITH-VALIDATORS → §55.14 + §34
+
+<!-- Stage 0b D3 (2026-05-04) — channels + schema + predicates + `not` clarification -->
+- channel file-level placement → §38.1 (14600+)
+- channel V5-strict body (auto-sync from placement) → §38.4 (14707+)
+- v1→v0.next channel migration note → §38.4.1 (14756+)
+- E-CHANNEL-INSIDE-PROGRAM → §38.1 + §34
+- E-CHANNEL-SHARED-MODIFIER → §38.4 + §34
+- schema additive shared-core vocabulary (req/length/pattern/min/max/...) → §39.5.7 (~15445+)
+- schema lowering shared-core to SQL DDL → §39.5.8 (~15470+)
+- schema SQL-mirror vs shared-core (when to use) → §39.5.9 (~15530+)
+- refinement-type shared-core (cross-ref §55) → §53.6.1 (22285+)
+- refinement-type + state-validator composition → §53.6.2 (22310+)
+- `is some` vs `req` distinct predicates (L5) → §42.2.5 (~16210+)
+- three loci of exists/required semantic → §42.2.5 (~16225+)

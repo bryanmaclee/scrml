@@ -11358,9 +11358,11 @@ export const Card = <div class="card-body" class="component" props={ title: stri
   before codegen runs. See §38.12 for the full mechanism, worked
   examples, and `name=` attribute requirements for export.
 - Form 1 also covers `<channel>` declarations that are NOT exported
-  (per-page channels) — the existing `<channel name="X">` pattern from
-  §38 is unchanged. Only the `export <channel ...>` prefix activates the
-  cross-file inline-expansion path.
+  (per-file channels — channels declared at file top level, sibling of
+  `<program>`, used only in their declaring file). The canonical
+  `<channel name="X">` file-level pattern from §38 is unchanged. Only the
+  `export <channel ...>` prefix activates the cross-file inline-expansion
+  path.
 - Other lifecycle state-types (`<engine>`, `<timer>`, `<poll>`,
   `<request>`, `<errorBoundary>`) are not yet exportable via Form 1 and
   remain confined to the file in which they are declared. The
@@ -15273,9 +15275,9 @@ ONLY `export <channel>` declarations qualifies automatically.
   imported name in the import-decl SHALL be the unquoted form.
 - Cross-file `name=` collisions across distinct source files in the same
   consumer file SHALL emit `E-CHANNEL-008` (§38.12.8).
-- Per-page `<channel name="X">` declarations (without `export`) SHALL
-  continue to compile identically to pre-P3.A behaviour. CHX SHALL NOT
-  modify same-file channel decls.
+- Per-file `<channel name="X">` declarations (file top level, sibling of
+  `<program>`, no `export` prefix) SHALL continue to compile identically
+  to pre-P3.A behaviour. CHX SHALL NOT modify same-file channel decls.
 
 #### 38.12.8 Error Codes (P3.A additions)
 
