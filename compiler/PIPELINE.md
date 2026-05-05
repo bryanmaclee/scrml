@@ -1,11 +1,22 @@
 # scrml Compiler Pipeline — Stage Contracts
 
-**Version:** 0.6.1
-**Date:** 2026-05-02
+**Version:** 0.7.0
+**Date:** 2026-05-04
 **Owner:** scrml Integration Pipeline Reviewer
 **Status:** Authoritative — no stage integration proceeds without a reviewed contract here.
 
 **Change log:**
+- **0.7.0 (2026-05-04, Stage 0b D4):** v0.next pipeline updates — engineering target for Phase A1+ implementation. Per SPEC.md §1.4–§1.6 (markup-as-value pillar, north-star Tier ladder, V5-strict access), §6 (V5-strict reactivity), §18.0 (match block-form), §38 (file-level channels), §51.0 (engines as Tier 2), §55 (validators + auto-synthesized validity surface), and §4.14–§4.16 (`:`-shorthand, structural-elements registry, M7 negative-space). Affected stages get a v0.next addendum at each stage's end documenting the new contract surface; existing contract content remains authoritative for v1 features.
+  - **Stage 3 TAB:** new tokens (`pinned`, `is some`, `is not`), recognition of `<engine>`/`<match>`/`<errors>`/`<onTransition>` as scrml-defined structural elements, `:`-shorthand body recognition, V5-strict `<x>` decl AST shape, render-spec-RHS classification, `default=` attribute capture.
+  - **Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run, strip trailing "Machine"); category routing for new structural elements; `pinned` forward-reference detection.
+  - **Stage 3.1 MOD:** export registry includes `category: "engine"` entries (alongside `"channel"`, `"user-component"`).
+  - **Stage 3.3 UVB / VP-1:** attribute allowlists for `<engine>`, `<match>`, `<errors>`, `<onTransition>` registered in `compiler/src/attribute-registry.js`.
+  - **Stage 6 TS:** auto-synthesized validity surface type-checking (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`); `ValidationError` enum + `.Custom(tag)` extension; render-spec validity classification (bindable vs display-only); engine `derived=expr` type compatibility; bare-variant inference type completion; positional binding for predefined-shape compound state.
+  - **Stage 7 DG:** validator predicate-arg dependency edges; derived-state expression dependency edges; cycle detection for derived-cell and validator graphs.
+  - **Stage 8 CG:** `<x/>` render-by-tag expansion to bound input element with bind-flavour dispatch by render-spec shape (§5.4.1); engine state-child rendering as conditional-on-engine-variant; transition validation (`rule=` contract) including compile-time check inside state-child bodies; auto-synthesized validity property emission via reactive computed-property machinery; `<errors of=expr/>` rendering with default `messageFor` resolution + body override + `all` attribute; `reset(@cell)` keyword expansion; `default=` attribute capture and reset-time evaluation; non-deterministic flush (post-S55) preserved.
+  - **Output stage (CG/47):** auto-name encoding for synthesized properties (suffix-based deterministic) + auto-declared engine variables (cross-ref SPEC §47.5).
+  - **No new pipeline stages.** Existing stages absorb the new responsibilities; no new project-wide synchronization points are required.
+  - **Test posture:** v0.7.0 is a SPEC + PIPELINE engineering target. The compiler does not yet implement these contracts — Phase A1+ implementation dispatches bring the compiler into compliance. `bun test` is expected to pass on baseline tests post-D4 because no compiler source was modified.
 - **0.6.1 (2026-05-02):** Stage 3 (TAB) Amendment 7 added. Form 2
   `export type X = {...}` now produces both a `type-decl` and an `export-decl`
   (P3.B; closes F-ENGINE-001). Mirrors `export function`'s dual-node emission.
@@ -533,6 +544,88 @@ discriminated union tree.
 **Performance budget:** <= 20 ms per file.
 **Parallelism opportunity:** Yes — fully per-file.
 **Dependencies:** Block Splitter (BS) must complete for the file.
+
+### Stage 3 v0.next addendum (Pipeline 0.7.0 — SPEC §6 / §18 / §51 / §55 engineering target)
+
+**Status:** ENGINEERING TARGET. Implementation lands in Phase A1+. Existing v1 TAB behaviour above remains authoritative until A1 lands.
+
+**New tokens (lexer-level):**
+
+- `pinned` — keyword. Recognised on declaration sites (`<x pinned> = init`, `pinned import { ... } from '...'`), in import specifiers (`import { name pinned } from './x.scrml'`), and in cell modifier positions. Per SPEC §6.10, §21.8.1.
+- `is some` — composite operator (two tokens lexed as a phrase). Recognised in expression position. Cross-ref §42.2.5.
+- `is not` — composite operator. Existing in v1 (§42.2.4); v0.next preserves the form.
+- `default=` — attribute name on cell declarations. Per SPEC §6.8.
+
+**Structural-element recognition (additive to existing markup grammar):**
+
+The following four tag names are scrml-defined structural elements (cross-ref SPEC §4.15, §24.4) and SHALL be classified at TAB time as a distinct AST node kind from generic markup. The block-splitter recognises them as ordinary `<` openers (no whitespace before identifier — they follow the canonical no-space convention); TAB classifies them by name lookup against the structural-element registry.
+
+| Element | New AST node kind | Required attributes (TAB-validated) | Body recognition |
+|---|---|---|---|
+| `<engine>` | `engine-decl` (existing v1 path renamed from `machine-decl` per S53; v0.next adds the new attribute slots) | `for=Type` | bare-body OR `:`-shorthand state-children |
+| `<match>` | `match-block-decl` (NEW for v0.next — distinct from JS-style `match` expr) | `for=Type` | bare-body of variant arms |
+| `<errors>` | `errors-elem` (NEW) | `of=expr` | optional bare-body (override template); `all` boolean attribute |
+| `<onTransition>` | `on-transition-elem` (NEW) | none required | bare-body or `:`-shorthand; `to=Variant`, `from=Variant`, `once`, `if=expr` attributes |
+
+**`:`-shorthand body recognition:**
+
+Per SPEC §4.14, a tag opener may end with ` : <single-expression>>` (whitespace before the colon, then a single scrml expression, then the closing `>` of the opener). TAB SHALL recognise this form on `<engine>`, `<match>` arm state-children, `<onTransition>`, and any other element that admits the form per its owning section.
+
+- The expression following `:` is parsed using the same expression grammar TAB uses for bare-call attribute values + `${...}` interpolation contents.
+- Multi-statement intent (`;` outside expression-internal contexts) is `E-MULTI-STATEMENT-HANDLER`. TAB enforces this at parse time.
+- A closer present on a `:`-shorthand body is `E-CLOSER-001`.
+
+**V5-strict declaration AST shape (cross-ref SPEC §6.1, §6.2):**
+
+V5-strict introduces three RHS shapes for state-cell declarations. TAB classifies the RHS at parse time and records the shape on the AST node:
+
+```
+ReactiveDecl = {
+  kind: "reactive-decl",
+  name: string,
+  modifier: "plain" | "const" | "pinned" | "server" | ...,
+  rhsShape: "literal" | "render-spec" | "derived-expr",   // NEW v0.next
+  rhsRaw: string,                                          // verbatim source slice
+  rhsAst: ASTNode | LiftTarget,                            // shape-dependent typed payload
+  validators: AttrNode[],                                  // bare attribute list (req, length, pattern, ...)
+  defaultExpr: string | null,                              // from default= attribute
+  span: Span,
+}
+```
+
+- `rhsShape: "literal"` — RHS is a literal or expression value. `rhsAst` is a `LogicNode`.
+- `rhsShape: "render-spec"` — RHS is a markup element (Shape 2). `rhsAst` is a `MarkupElement`. The compiler uses the render-spec at codegen for `<x/>` render-by-tag expansion (cross-ref CG addendum below).
+- `rhsShape: "derived-expr"` — declaration uses `const` modifier; RHS is a reactive expression. `rhsAst` is a `LogicNode`.
+
+**Render-spec validation (parse-time):**
+
+A Shape 2 declaration's RHS markup element SHALL be classified as bindable or non-bindable at parse time. Non-bindable RHS markup (e.g., `<div>`) on a non-`const` declaration produces `E-CELL-RENDER-SPEC-NOT-BINDABLE` from TS (Stage 6) — TAB records the shape; TS validates against the use-site form.
+
+**Bare-variant inference parsing:**
+
+Per SPEC §14.10 / §18.0.3, `.VariantName` (no preceding qualifier) is legal in expression positions where the type is fixed. TAB parses bare-variant references as `EnumVariantRef { kind: "enum-variant-ref", qualifier: null, variantName: string, span }`. TS resolves the qualifier from context.
+
+**Positional binding parsing:**
+
+Per SPEC §14.11, a struct-typed cell with a positional initialiser `<x>: T = (a, b, c)` is parsed as a `TupleLiteral` RHS. TS validates the tuple's arity and per-position types against the struct's field declaration order.
+
+**Multi-statement-handler restriction:**
+
+Per SPEC §5.2.3, bare-form event-handler attribute values containing multiple statements emit `E-MULTI-STATEMENT-HANDLER`. TAB enforces this at attribute-value parse time. The check is: a bare-form (non-`${...}`) handler attribute value may not contain `;` outside expression-internal contexts (string literals, nested function bodies). The same rule applies to `:`-shorthand bodies.
+
+**`<x/>` render-by-tag disambiguation (TAB → NR handoff):**
+
+A markup-position tag `<x/>` (or `<x ...>...</>`) where `x` is a same-file or imported reactive-cell name resolves to render-by-tag at NR (Stage 3.05) using the unified state-type registry (§15.15). TAB does NOT itself disambiguate decl-vs-render-by-tag-vs-engine-statechild — it produces a markup AST node, and NR's category routing decides the kind. TAB's job is structural; the routing is NR's authoritative output.
+
+**New error codes emitted by TAB (v0.next additions):**
+
+- `E-CLOSER-001` — `:`-shorthand body with closer present (§4.14).
+- `E-MULTI-STATEMENT-HANDLER` — bare-form handler with multiple statements (§5.2.3, §4.14).
+- `E-NAME-COLLIDES-RESERVED` — user component or state-type name collides with a reserved structural-element name (§4.15, §24.4).
+- `E-IMPORT-PINNED-INVALID` — `pinned` modifier on a non-cell, non-engine import (§21.8.1; TAB detects at attribute-position parse time when the import resolves at MOD).
+- `E-VARIANT-AMBIGUOUS` (escalated from a TAB warning to TS error per ambiguity-resolution time; bare-variant references are accepted by TAB regardless and resolved at TS).
+
+**Performance budget:** <= 25 ms per file (existing 20 ms budget + 5 ms for v0.next additional structural-element recognition + render-spec classification). Verify in A1 implementation.
 
 ---
 
