@@ -8,6 +8,30 @@ scrml lets you write a complete app in one file: markup, reactive state, scoped 
 SQL, server functions, and inline tests — no build config, no separate server file,
 no state management library.
 
+> ## ⚠️ v0.1.0 → v0.2.0 — major breaking change in flight
+>
+> **Current shipped baseline: scrml v0.1.0.** Everything in this README and
+> the shipped compiler / examples / stdlib reflects v0.1.0.
+>
+> **In flight: scrml v0.2.0.** A multi-month migration is in progress. Headline
+> changes: **V5-strict access** (`<x> = init` declaration form + `@x`
+> expression access), Tier 0/1/2 ladder for case analysis (booleans →
+> `<match>` → `<engine>`), auto-synthesized validity surface for forms,
+> file-level `<channel>` blocks, schema shared-core vocabulary, refinement-type
+> predicates, plus ~20 more architectural locks (L1-L21). Compiler does not
+> yet implement these; spec describes them as the engineering target.
+> **Code written for v0.1.0 will require migration when v0.2.0 ships.** No
+> production adopters exist, so there is no v0.compat / migration-tool path;
+> we are landing v0.2.0 as the next stable, not as a parallel track.
+>
+> If you are reading articles, blog posts, or LLM-generated scrml that
+> shows `<count> = 0`-style decls, `<engine for=Phase>` blocks, or
+> `@form.isValid` validity-surface reads — **those describe v0.2.0 design
+> and will not compile against the current v0.1.0 compiler.** Full scope and
+> live progress in
+> [`docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md`](./docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md)
+> + `master-list.md` §0 dashboard.
+
 ## Quick start
 
 ```bash
@@ -33,10 +57,10 @@ bun test compiler/tests/
 
 ## What's in here
 
-- `compiler/` — compiler source, the authoritative `SPEC.md` / `SPEC-INDEX.md` / `PIPELINE.md`, 5,500+ tests, and reference self-host modules
-- `examples/` — 14 runnable single-file scrml apps
-- `samples/compilation-tests/` — 275 compilation tests covering every accepted construct
-- `stdlib/` — 13 stdlib modules
+- `compiler/` — compiler source, the authoritative `SPEC.md` / `SPEC-INDEX.md` / `PIPELINE.md`, **8,700+ tests**, and reference self-host modules
+- `examples/` — **32 runnable single-file scrml apps + the trucking-dispatch multi-page app**
+- `samples/compilation-tests/` — **277 compilation tests** covering every accepted construct
+- `stdlib/` — **16 user-facing stdlib modules** (`auth`, `crypto`, `data`, `format`, `fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`, `cron`, `regex`, `oauth`)
 - `benchmarks/` — runtime, build, and full-stack benchmarks vs React / Svelte / Vue
 - `editors/vscode/`, `editors/neovim/` — editor integrations
 - `lsp/server.js` — language server
