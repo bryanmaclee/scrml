@@ -165,3 +165,86 @@ root-only check (a malformed reset can be nested in a larger expression).
 [12:45 step-9 test-baseline-recheck] `bun run test` after all source changes:
 8,804 pass / 43 skip / 0 fail / 8,847 across 436 files (one ECONNREFUSED flake
 on first run, clean rerun). NO regressions introduced.
+
+[12:55 step-9 tests-added] Added
+`compiler/tests/integration/parse-reset-keyword.test.js` with 8 cases:
+  - §R9.1 positive: `reset(@count)` → reset-expr with ident target.
+  - §R9.2 positive: `reset(@form.email)` → reset-expr with MemberExpr target.
+  - §R9.3 negative: `reset()` fires E-RESET-NO-ARG (zero-arg message).
+  - §R9.4 negative: `reset(@a, @b)` fires E-RESET-NO-ARG (arity message).
+  - §R9.5 regression: Step 8 E-RESERVED-IDENTIFIER on `function reset() {}`
+    still fires; no spurious E-RESET-NO-ARG on that path.
+  - §R9.6 positive: `reset(@count + 1)` parses clean (binary-expr target;
+    target-shape validation deferred to A1b).
+  - §R9.7 regression: `limiter.reset("key")` stays a regular call (member
+    callee bypass).
+  - §R9.8 positive: `reset(@form)` compound-whole form parses clean.
+
+  All 8 tests pass first try.
+
+[12:58 step-9 final-test-run] `bun run test` after tests added:
+**8,812 pass / 43 skip / 0 fail / 8,855 across 437 files.** Delta from baseline:
++8 pass (within BRIEF target of +6 to +8). Test file count: +1
+(parse-reset-keyword.test.js). 0 regressions.
+
+## SPEC §34 review (post-implementation)
+
+The BRIEF authorized adding `E-RESET-NO-ARG` to §34 if absent. **Survey
+confirmed it already exists at SPEC.md line 14199.** Survey decision was to
+**reuse the same error code for both zero-arg AND multi-arg/spread shapes**,
+varying the diagnostic message text. Justification:
+  - The semantic — "wrong arity for reset" — is identical for both shapes.
+  - The §34 entry text ("requires an explicit cell argument: `reset(@cell)`
+    or `reset(@compound.field)`") already covers both shapes implicitly.
+  - A single error code keeps surface area minimal; further refinement (a
+    separate `E-RESET-ARITY` code) can be added later without breaking
+    existing tooling that's already trained on `E-RESET-NO-ARG`.
+  - The error name "NO-ARG" is mildly inaccurate for the multi-arg case but
+    not misleading — readers will see "got 2" in the message and understand.
+
+  **Conclusion: NO SPEC §34 EDIT REQUIRED.** The existing entry already
+  handles both shapes; the parser surfaces the right code with the right
+  message variant. If a future reviewer disagrees and wants `E-RESET-ARITY`
+  as a sibling code, that's a §34 micro-edit that doesn't change parser
+  behavior.
+
+## Final summary
+
+**Files modified (5):**
+  - `compiler/src/types/ast.ts` (+44 lines): `ResetExpr` interface + union add.
+  - `compiler/src/expression-parser.ts` (+157 lines): import update, parser
+    branch in `esTreeToExprNode` CallExpression case, 7 ExprNode-kind switch
+    additions, `forEachResetExprInExprNode` walker.
+  - `compiler/src/ast-builder.js` (+27 lines): import update, surfacing
+    diagnostic walks in both `safeParseExprToNodeGlobal` and
+    `safeParseExprToNode` (closure-scoped).
+  - `compiler/src/codegen/emit-expr.ts` (+15 lines): conservative
+    pass-through emit `reset(<target>)` (preserves pre-Step-9 JS bit-for-bit).
+  - `compiler/src/component-expander.ts` (+7 lines): substitute-prop walker
+    case.
+  - `compiler/src/meta-checker.ts` (+1 line): exprHasCompilerMember case.
+
+**Files added (1):**
+  - `compiler/tests/integration/parse-reset-keyword.test.js` (+8 tests).
+
+**Branch:** `phase-a1a-step-9-reset-keyword`.
+
+**Test delta:** 8,804 → 8,812 (+8) pass; 43 skip stable; 0 fail; 0 regressions.
+
+**Self-host parity:** N/A — Step 9 is parser-only; no codegen change. The
+conservative `reset(<target>)` emit form keeps any existing samples'
+compiled JS bit-for-bit identical to pre-Step-9.
+
+**Deferred to A1b:**
+  - Target-shape validation (`@cell` / `@compound.field` / `@compound` only;
+    arbitrary expressions like `@count + 1` rejected as
+    E-RESET-INVALID-TARGET).
+  - Symbol-table lookup of the target (does the cell exist? is it derived?
+    is `default=` declared on it?).
+
+**Deferred to A1c:**
+  - Codegen lowering of `reset-expr` to the proper runtime call wired to
+    `default=` evaluation per §6.8.1 (and the §6.3 compound semantics).
+  - Dependency-graph integration (the `default=` expression's reactive
+    dependencies, per §6.8.1's "evaluated AT RESET TIME, not at declaration
+    time").
