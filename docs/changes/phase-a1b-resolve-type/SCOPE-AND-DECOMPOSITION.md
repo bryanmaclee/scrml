@@ -1,6 +1,6 @@
 # A1b — Resolve + Type: scope and per-step decomposition (DRAFT)
 
-**Status:** DRAFT (S60, 2026-05-05). Awaiting user ratification of approach + step-count.
+**Status:** RATIFIED 2026-05-05 (S60). All 7 open Qs ratified per PA recommendations. User verbatim: "ratify all".
 **Predecessor:** A1a (lex+parse) — see `docs/changes/phase-a1a-lex-parse/AST-CONTRACTS-AND-DECOMPOSITION.md`. A1a 9/14 done at draft time; A1b begins after A1a-COMPLETE (Step 13 wraps).
 **Successor:** A1c (codegen + PIPELINE.md prose pass).
 **Authority:** SPEC v0.next (post-D4 + L21). Each A1a Step (1-13 + 11.5) extends an AST shape; A1b wires every consumer that depends on those shapes.
@@ -369,21 +369,23 @@ A1a established the **anti-html-fragment guard** as non-negotiable on every Shap
 
 ---
 
-## §9 Open questions for ratification (ranked)
+## §9 Ratified decisions (S60 — user verbatim "ratify all")
 
-1. **[BLOCKING] A1a Step 12 ordering** — PA recommends Step 12 BEFORE A1b begins. Step 12 is the "existing-test deltas" cleanup (4-8h, S56 destructive-ops pre-auth). Without it, every A1b step lands on a test suite still asserting old patterns; tests fail on lock firing not because A1b is wrong but because the test was due for rewrite. PA strong lean: **Step 12 before A1b. Confirm?**
+1. **[RATIFIED] A1a Step 12 ordering** — Step 12 (existing-test deltas) lands BEFORE A1b begins. **Definitive sequence: Step 11.0b → 11.0c → 11.5 → 12 → 13 → A1b.** Step 13 wraps A1a; A1b begins after.
 
-2. **[BLOCKING] Step 11.5 (ADR Option A FOLD) ordering** — PA-ratified S60 to land AFTER Step 11 BEFORE Step 12. **Confirms the dual-path L21 walker (B8) only needs single-kind walk.** Carries forward.
+2. **[RATIFIED, carries from S60 ADR] Step 11.5 (Option A FOLD) ordering** — AFTER Step 11 BEFORE Step 12. The dual-path L21 walker (B8) only needs single-kind walk after fold lands.
 
-3. **[HIGH] A1b dispatch granularity** — same per-step pattern as A1a (one step per dispatch, PA cherry-pick between)? PA strong lean: yes, identical pattern. A1b's larger surface (22 steps vs 14) makes per-step focus more important, not less.
+3. **[RATIFIED] A1b dispatch granularity** — identical per-step pattern as A1a. One B-step per dispatch, PA cherry-pick to main between, per-step branch `phase-a1b-step-bN-<slug>`, per-step doc dir `docs/changes/phase-a1b-step-bN-<slug>/` with BRIEF + progress.md.
 
-4. **[HIGH] Wave parallelism** — strict serial, or parallel-dispatch where independent? Wave 5 (B18-B22) is the safest parallel candidate; Wave 2 (B5-B8) has internal dependencies (B5 ⇒ B6, B7 ⇒ B8). **Caveat:** parallel dispatches need explicit file-touch-independence verification — B18 (event-handler attr) + B20 (typer) may both touch `compiler/src/typer*.ts` if the typer is a single file. Survey-first.
+4. **[RATIFIED] Wave parallelism** — serial within waves; selective parallel-dispatch on Wave 5 (B18-B22) where file-touch independence is verified. Wave 2 (B5-B8) strictly serial (B5 ⇒ B6, B7 ⇒ B8). **Cap: 2-3 concurrent agents max at peak Wave 5.** PA writes briefs + cherry-picks + pushes; this is the throughput ceiling without quality loss.
 
-5. **[MEDIUM] Validator typer placement** — new subsystem vs extension of existing? Survey-first should answer; PA leans new file `compiler/src/validators.ts` based on current `attribute-registry.js` not covering predicate semantics. Final call deferred to B9 dispatch survey.
+5. **[RATIFIED, with deferred final call] Validator typer placement** — PA leans new file `compiler/src/validators.ts`. **Final call deferred to B9 dispatch survey** — depth-of-survey discount has hit 8× and may surface that existing infra is more amenable to extension than expected. The B9 dispatch is authorized to make the call based on survey findings.
 
-6. **[MEDIUM] Refinement-type three-zone scope (B21)** — full SPARK three-zone, or subset? PA leans subset for A1b: static-zone literal-conformance + boundary-zone hook recording; trusted-zone elision deferred to A1c or later. Full three-zone is ~+8h.
+6. **[RATIFIED] Refinement-type scope (B21)** — subset for A1b: static-zone literal-conformance + boundary-zone hook recording. Trusted-zone elision deferred to A1c C16 OR post-v0.2.0 optimization. Saves ~+8h on B21. **Full SPARK three-zone is a v0.3.0 candidate.**
 
-7. **[LOW] Step count** — proposed 22 (B1-B22). Acceptable, or compress? PA: 22 is right-sized for per-step focus; compression would re-bundle multi-concern work.
+7. **[RATIFIED] Step count** — 22 steps (B1-B22). Per-step focus is the methodology that's been working through A1a (depth-of-survey discount × 8 + clean dispatches × 7). Compression would re-bundle multi-concern work; declined.
+
+---
 
 ---
 
@@ -421,4 +423,4 @@ A1b uses the **existing compiler diagnostics infrastructure** — there is no ne
 
 ## §13 Tags
 
-#phase-a1b #scope-doc #resolve-type #decomposition #22-steps #80-120h #awaiting-ratification #step-10-folded-in #b8-dual-path-walker #self-host-parity-deferred
+#phase-a1b #scope-doc #resolve-type #decomposition #22-steps #80-120h #ratified-s60 #step-10-folded-in #b8-dual-path-walker #self-host-parity-deferred #wave-5-selective-parallel #refinement-zone-subset
