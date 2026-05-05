@@ -561,6 +561,124 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Phase A1a Step 11.5 — Fold of `reactive-derived-decl` into state-decl
+// ADR Option A FOLD ratified S60. Both legacy (`const @x = expr`) and
+// structural (`const <x> = expr`) derived forms now produce unified
+// state-decl{shape:"derived",isConst:true}; the only discriminator is
+// `structuralForm` (false for legacy, true for structural).
+// ---------------------------------------------------------------------------
+
+describe("A1a Step 11.5 — fold reactive-derived-decl into state-decl", () => {
+  // §F11.5.1 — Legacy expression-form derived (the canonical fold case)
+  test("§F11.5.1: legacy `const @doubled = @count * 2` → state-decl shape:\"derived\", structuralForm:false, isConst:true, initExpr populated", () => {
+    const src = `<program>\${ @count = 0; const @doubled = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const doubled = decls.find((d) => d.name === "doubled");
+    expect(doubled).toBeDefined();
+    expect(doubled.kind).toBe("state-decl");
+    expect(doubled.shape).toBe("derived");
+    expect(doubled.isConst).toBe(true);
+    expect(doubled.structuralForm).toBe(false);
+    expect(doubled.initExpr).toBeDefined();
+    expect(doubled.initExpr).not.toBeNull();
+    // The retired kind must be entirely absent.
+    const retired = findKind(ast, "reactive-derived-decl");
+    expect(retired.length).toBe(0);
+  });
+
+  // §F11.5.2 — V5-strict structural derived (regression baseline; pre-existing)
+  test("§F11.5.2: V5-strict `const <doubled> = @count * 2` → state-decl shape:\"derived\", structuralForm:true, isConst:true (regression baseline)", () => {
+    const src = `<program>\${ <count> = 0; const <doubled> = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const doubled = decls.find((d) => d.name === "doubled");
+    expect(doubled).toBeDefined();
+    expect(doubled.shape).toBe("derived");
+    expect(doubled.isConst).toBe(true);
+    expect(doubled.structuralForm).toBe(true);
+    expect(doubled.initExpr).toBeDefined();
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
+  });
+
+  // §F11.5.3 — Mixed file: both forms produce the unified kind, differ only on structuralForm
+  test("§F11.5.3: mixed legacy + structural derived → both produce state-decl shape:\"derived\"; structuralForm distinguishes", () => {
+    const src = `<program>\${ @price = 0; const @taxA = @price * 0.08; <qty> = 1; const <taxB> = @price * 0.09 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(4);
+    const taxA = decls.find((d) => d.name === "taxA");
+    const taxB = decls.find((d) => d.name === "taxB");
+    expect(taxA).toBeDefined();
+    expect(taxB).toBeDefined();
+    // Both are derived state-decls; only structuralForm distinguishes.
+    expect(taxA.shape).toBe("derived");
+    expect(taxA.isConst).toBe(true);
+    expect(taxA.structuralForm).toBe(false); // legacy @-form
+    expect(taxB.shape).toBe("derived");
+    expect(taxB.isConst).toBe(true);
+    expect(taxB.structuralForm).toBe(true); // V5-strict structural
+    // Plain @price (legacy) and structural <qty> are also unified state-decl.
+    const price = decls.find((d) => d.name === "price");
+    const qty = decls.find((d) => d.name === "qty");
+    expect(price.shape).toBe("plain");
+    expect(price.structuralForm).toBe(false);
+    expect(qty.shape).toBe("plain");
+    expect(qty.structuralForm).toBe(true);
+  });
+
+  // §F11.5.4 — Anti-html-fragment guard for both forms
+  test("§F11.5.4: anti-html-fragment guard — neither legacy nor structural derived produces stray html-fragment matching its name", () => {
+    const src = `<program>\${ @count = 0; const @derLegacy = @count + 1; <other> = 0; const <derStruct> = @count + 2 }</program>`;
+    const { ast } = parse(src);
+    // Legacy form has no `<derLegacy>` syntax; just verify no html-fragment with this name.
+    assertNoHtmlFragmentMatching(ast, /<\s*derLegacy\s*>/);
+    assertNoHtmlFragmentMatching(ast, /<\s*derStruct\s*>/);
+    // The retired kind must be absent on the legacy form post-fold.
+    const retired = findKind(ast, "reactive-derived-decl");
+    expect(retired.length).toBe(0);
+  });
+
+  // §F11.5.5 — Invariant battery: shape:"derived" ⇒ isConst:true on every fold case.
+  test("§F11.5.5: invariant — every state-decl with shape:\"derived\" has isConst:true and a non-null initExpr", () => {
+    // Battery: legacy and structural derived in various contexts.
+    const fixtures = [
+      `<program>\${ @a = 0; const @b = @a }</program>`,
+      `<program>\${ @a = 0; const @b: number = @a * 2 }</program>`,                 // typed legacy
+      `<program>\${ <a> = 0; const <b> = @a }</program>`,                             // V5-strict structural
+      `<program>\${ <a> = 0; const <b>: number = @a * 2 }</program>`,                 // typed structural
+      `<program>\${ @a = 0; @b = 1; const @c = @a + @b }</program>`,                  // multi-deps legacy
+      `<program>\${ <a> = 0; <b> = 1; const <c> = @a + @b }</program>`,               // multi-deps structural
+      `<program>\${ @price = 1.0; const @t1 = @price * 0.1; const @t2 = @t1 * 0.05 }</program>`, // chained legacy
+    ];
+    let totalDerived = 0;
+    for (const src of fixtures) {
+      const { ast } = parse(src);
+      const decls = findKind(ast, "state-decl");
+      for (const d of decls) {
+        if (d.shape === "derived") {
+          totalDerived++;
+          // Invariant: shape:"derived" ⇒ isConst === true (per AST-CONTRACTS §1.1).
+          expect(d.isConst).toBe(true);
+          // Invariant: shape:"derived" ⇒ initExpr present and non-null.
+          expect(d.initExpr).toBeDefined();
+          expect(d.initExpr).not.toBeNull();
+          // structuralForm must be a boolean (true for V5-strict, false for legacy).
+          expect(typeof d.structuralForm).toBe("boolean");
+        }
+      }
+      // Anti-fold-regression: no `reactive-derived-decl` nodes anywhere.
+      const retired = findKind(ast, "reactive-derived-decl");
+      expect(retired.length).toBe(0);
+    }
+    // Battery should have exercised the invariant on multiple decls.
+    expect(totalDerived).toBeGreaterThanOrEqual(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Phase A1a Step 5 — Shape 2 `renderSpec` + bareword/call-form validators
 // ---------------------------------------------------------------------------
 
