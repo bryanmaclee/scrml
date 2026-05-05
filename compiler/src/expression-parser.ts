@@ -24,6 +24,7 @@ import type {
   MemberExpr, IndexExpr, CallExpr, NewExpr,
   LambdaExpr, LambdaParam,
   CastExpr, MatchExpr, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
+  ResetExpr,
 } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -1092,6 +1093,70 @@ export function esTreeToExprNode(
           const rawArmsArr = rawArmNodes.map(a => a.value as string ?? "");
           return { kind: "match-expr", span, subject, rawArms: rawArmsArr } satisfies MatchExpr;
         }
+
+        // §6.8.2 — `reset(<expr>)` is a language keyword expression. Lift the
+        // bare-Identifier `reset` callee form into a structurally-distinct
+        // `reset-expr` node so downstream passes (A1b target validation,
+        // A1c codegen lowering) can recognise it without re-checking the name.
+        // Member calls (e.g. `obj.reset(x)`) are NOT touched — those are
+        // ordinary method calls. Callee-shape: must be a bare Identifier here.
+        // Diagnostics for malformed shape are attached to the node and
+        // surfaced by the ast-builder wrapper as a TABError (E-RESET-NO-ARG).
+        if (calleeName === "reset") {
+          // Spread arguments are not legal for reset(); A1b will further
+          // validate target shape. At parse time we treat them as malformed.
+          const hasSpread = rawArgs.some(a => a.type === "SpreadElement");
+          // Diagnose zero-arg / multi-arg / spread shapes. The single-arg
+          // happy path produces a clean reset-expr without diagnostic.
+          if (rawArgs.length === 0) {
+            // Zero-arg form: synthesize an undefined-literal target so the
+            // node carries a valid shape; A1b can ignore the target since
+            // the diagnostic prevents further codegen.
+            const undefTarget: LitExpr = {
+              kind: "lit", span,
+              raw: "undefined", value: undefined as unknown as null,
+              litType: "undefined",
+            };
+            return {
+              kind: "reset-expr", span,
+              target: undefTarget,
+              diagnostic: {
+                code: "E-RESET-NO-ARG",
+                message:
+                  "E-RESET-NO-ARG: `reset()` called with no argument. The `reset` keyword "
+                  + "requires an explicit cell argument: `reset(@cell)` or "
+                  + "`reset(@compound.field)` (§6.8.2).",
+              },
+            } satisfies ResetExpr;
+          }
+          if (rawArgs.length > 1 || hasSpread) {
+            // Multi-arg or spread form: keep the first non-spread argument as
+            // the target so A1b can still typecheck a target shape; emit
+            // E-RESET-NO-ARG with an arity-specific message (single error code
+            // per Step 9 survey decision — see progress.md).
+            const firstArg = rawArgs.find(a => a.type !== "SpreadElement") as ESNode | undefined;
+            const target: ExprNode = firstArg
+              ? esTreeToExprNode(firstArg, filePath, baseOffset, rawSource)
+              : { kind: "lit", span, raw: "undefined", value: undefined as unknown as null, litType: "undefined" } satisfies LitExpr;
+            const detail = hasSpread
+              ? "spread arguments are not permitted"
+              : `expected exactly one argument, got ${rawArgs.length}`;
+            return {
+              kind: "reset-expr", span,
+              target,
+              diagnostic: {
+                code: "E-RESET-NO-ARG",
+                message:
+                  `E-RESET-NO-ARG: \`reset(...)\` ${detail}. The \`reset\` keyword `
+                  + `requires exactly one cell argument: \`reset(@cell)\` or `
+                  + `\`reset(@compound.field)\` (§6.8.2).`,
+              },
+            } satisfies ResetExpr;
+          }
+          // Happy path: exactly one non-spread argument.
+          const target = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
+          return { kind: "reset-expr", span, target } satisfies ResetExpr;
+        }
       }
 
       // Normal call
@@ -1536,6 +1601,13 @@ export function emitStringFromTree(node: ExprNode): string {
       // Emit verbatim — the escape hatch preserves the raw source
       return node.raw;
 
+    case "reset-expr": {
+      // §6.8.2 — round-trip emit as `reset(<target>)`. Diagnostic-bearing
+      // nodes still emit the same string (the diagnostic surfaces separately
+      // through the ast-builder wrapper); this keeps the round-trip stable.
+      return `reset(${emitStringFromTree(node.target)})`;
+    }
+
     default: {
       // Exhaustive check
       const _never: never = node;
@@ -1756,6 +1828,14 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
       const bNode = b as typeof a;
       // Escape-hatch: compare by whitespace-normalized raw content
       return normalizeWhitespace(a.raw) === normalizeWhitespace(bNode.raw);
+    }
+
+    case "reset-expr": {
+      const bNode = b as typeof a;
+      // Compare structurally on target. Diagnostic field is a parse-time
+      // annotation — treated as equal regardless of presence so that round-
+      // tripped (re-parsed-from-emit) trees compare equal to the original.
+      return deepEqualExprNode(a.target, bNode.target);
     }
 
     default: {
@@ -2254,6 +2334,14 @@ export function forEachIdentInExprNode(
       return;
     }
 
+    case "reset-expr": {
+      const n = node as ResetExpr;
+      // Recurse into the target expression so identifier-based analyses
+      // (lin tracking, dep-graph, reactive deps) see any @cell reads.
+      forEachIdentInExprNode(n.target, callback);
+      return;
+    }
+
     default: {
       // TypeScript exhaustiveness check. If this fires, a new ExprNode kind was
       // added without updating this function. Stop-and-report trigger per spec.
@@ -2331,6 +2419,13 @@ export function exprNodeContainsCall(node: ExprNode, calleeName?: string): boole
     case "lambda": return false; // scope boundary
     case "cast": return exprNodeContainsCall((node as CastExpr).expression, calleeName);
     case "match-expr": return exprNodeContainsCall((node as MatchExpr).subject, calleeName);
+    case "reset-expr": {
+      // `reset-expr` is NOT a call — it's a structurally-distinct keyword
+      // expression. If a caller asks "does this contain a call to `reset`?"
+      // the answer is no (the bare-Identifier-callee was lifted into reset-expr).
+      // Recurse into target so a call appearing inside the target counts.
+      return exprNodeContainsCall((node as ResetExpr).target, calleeName);
+    }
     default: { const _never: never = node; return false; }
   }
 }
@@ -2389,6 +2484,7 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
     case "lambda": return;
     case "cast": forEachCallInExprNode((node as CastExpr).expression, cb); return;
     case "match-expr": forEachCallInExprNode((node as MatchExpr).subject, cb); return;
+    case "reset-expr": forEachCallInExprNode((node as ResetExpr).target, cb); return;
     default: { const _never: never = node; return; }
   }
 }
@@ -2443,6 +2539,7 @@ export function exprNodeContainsAssignment(node: ExprNode): boolean {
     case "lambda": return false;
     case "cast": return exprNodeContainsAssignment((node as CastExpr).expression);
     case "match-expr": return exprNodeContainsAssignment((node as MatchExpr).subject);
+    case "reset-expr": return exprNodeContainsAssignment((node as ResetExpr).target);
     default: { const _never: never = node; return false; }
   }
 }
@@ -2488,6 +2585,7 @@ export function exprNodeContainsMemberAccess(node: ExprNode, props: string[]): b
     case "lambda": return false;
     case "cast": return exprNodeContainsMemberAccess((node as CastExpr).expression, props);
     case "match-expr": return exprNodeContainsMemberAccess((node as MatchExpr).subject, props);
+    case "reset-expr": return exprNodeContainsMemberAccess((node as ResetExpr).target, props);
     default: { const _never: never = node; return false; }
   }
 }
