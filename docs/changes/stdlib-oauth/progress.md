@@ -29,4 +29,44 @@ Append-only timestamped log.
 - [T11] Kickstarter v2 §9 catalog — added `scrml:oauth` row.
 - [T12] Kickstarter v2 §11.2.1 — added OAuth recipe with sign-in-with-Google example using scrml:redis storage adapter; documented typed error names; documented refresh-token rotation note.
 - [T13] Final commit (kickstarter update + final summary).
-- STATUS: COMPLETE pending final commit.
+- STATUS: COMPLETE — final commit 898b86e on branch changes/stdlib-oauth.
+
+## Final summary
+
+**Branch:** changes/stdlib-oauth (4 commits ahead of main)
+**Final SHA:** 898b86e
+
+**Commits:**
+- c93ceba — WIP pkce.scrml
+- dc6f0c6 — WIP core API + 4 provider presets
+- 61d05c5 — WIP unit tests (58 passing)
+- 898b86e — final: catalog row + recipe (kickstarter §9 + §11.2.1)
+
+**Test posture:**
+- 58 new unit tests (38 core + 20 presets); all pass.
+- Full pre-commit suite (unit + integration + conformance, 8028 tests) passes.
+- RFC 7636 Appendix B PKCE test vector verified.
+
+**Files added (8):**
+- stdlib/oauth/index.scrml
+- stdlib/oauth/pkce.scrml
+- stdlib/oauth/google.scrml
+- stdlib/oauth/github.scrml
+- stdlib/oauth/microsoft.scrml
+- stdlib/oauth/discord.scrml
+- compiler/tests/unit/stdlib-oauth.test.js
+- compiler/tests/unit/stdlib-oauth-presets.test.js
+
+**Files modified (1):**
+- docs/articles/llm-kickstarter-v2-2026-05-04.md (§9 catalog row + §11.2.1 OAuth recipe)
+
+**Exports added (top-level scrml:oauth):**
+- Core: `startFlow`, `exchangeCode`, `refreshToken`, `getUserInfo`, `revoke`, `memoryAdapter`
+- PKCE: `generateVerifier`, `deriveChallenge`, `PKCE_METHOD`
+- Presets: `googleConfig`, `parseGoogleIdToken`, `githubConfig`, `microsoftConfig`, `discordConfig`
+
+**Open questions (per brief §12):**
+1. parseGoogleIdToken — implemented WITHOUT signature verification (decode only). Documented in source. JWKS-verification is deferred to v0.3.0.
+2. Token storage — module returns tokens; caller persists. (As PA leaned.)
+3. OIDC discovery (RFC 8414) — not implemented. Should be logged in roadmap.
+4. Storage adapter shape verification — implemented (`_assertStorage` runs at startFlow / exchangeCode entry).
