@@ -725,6 +725,56 @@ no MOD dependency). Cross-file lookups defer to MOD's `exportRegistry`.
 **Dependencies:** TAB must complete; MOD optional (only required for cross-file
 lookups; same-file + lifecycle + HTML lookups run pre-MOD).
 
+### Stage 3.05 v0.next addendum (Pipeline 0.7.0 — SPEC §51 / §15.15 engineering target)
+
+**Auto-declared engine variable resolution (M6):**
+
+Per SPEC §51.0.C, an `<engine for=Type>` declaration auto-declares a reactive variable named by the lowercase first letter of the type name with the trailing `Machine` suffix stripped. For example:
+
+- `<engine for=PhaseState>` auto-declares `<phaseState>` cell.
+- `<engine for=MarioMachine>` auto-declares `<mario>` cell (suffix stripped).
+- `<engine for=AppMachine var=app>` declares `<app>` (explicit `var=` override).
+
+NR SHALL register the auto-declared (or `var=`-overridden) name in the same-file state-type registry with `resolvedKind: "scrml-lifecycle"` and `resolvedCategory: "engine"`. The engine's auto-declared variable name is also registered as a reactive cell of type `EnumType` (the engine's `for=Type`).
+
+**Auto-derive algorithm (deterministic):**
+
+```
+deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
+  if varAttr is non-null:
+    return varAttr   # explicit override
+  let stripped = typeName.endsWith("Machine") ? typeName.slice(0, -7) : typeName
+  return stripped[0].toLowerCase() + stripped.slice(1)
+```
+
+**Conflict detection:** if a same-file or imported declaration ALREADY uses the auto-derived name (for any reason — a separate `<x>` declaration, a function name collision, etc.), NR emits `E-ENGINE-VAR-DUPLICATE` (§51.0.C). The fix is to add `var=` to the engine to choose a non-conflicting name.
+
+**Category routing for v0.next structural elements:**
+
+NR's `resolvedCategory` enum extends to include engine and the four structural-element categories. Per AST node shape:
+
+| Node | resolvedKind | resolvedCategory |
+|---|---|---|
+| `<engine>` decl | `"scrml-lifecycle"` | `"engine"` |
+| `<match>` block | `"scrml-lifecycle"` | `"match-block"` (NEW) |
+| `<errors>` element | `"scrml-lifecycle"` | `"errors-elem"` (NEW) |
+| `<onTransition>` element | `"scrml-lifecycle"` | `"on-transition-elem"` (NEW) |
+| Engine state-child (`<Variant>` inside an `<engine>`) | `"scrml-lifecycle"` | `"engine-state-child"` (NEW) |
+| Match arm (`<Variant>` inside a `<match>`) | `"scrml-lifecycle"` | `"match-arm"` (NEW) |
+| `<x/>` render-by-tag (cell name in markup position) | `"user-state-type"` | `"render-by-tag"` (NEW) |
+
+The category set above lets downstream stages route on `resolvedCategory` without re-walking the AST to detect parent-context.
+
+**`pinned` forward-reference detection:**
+
+Per SPEC §6.10, a `pinned` cell whose initialiser depends on a cell declared LATER in source order is `E-STATE-PINNED-FORWARD-REF`. NR walks pinned-cell initialiser expressions and collects all referenced cell names; if any referenced cell has a `decl.span.start > pinned.span.start`, NR emits the error.
+
+**Cross-cell expression dependency tracking (sketch — full edges built by DG):**
+
+NR records each reactive cell's initialiser-expression dependencies as a side table for use by Stage 7 (DG). NR does NOT itself construct the dependency graph; it provides the symbol-table-level information (which cells reference which other cells in their initialisers) that DG consumes.
+
+**Performance budget:** <= 8 ms per file (existing 5 ms + 3 ms for engine-variable derivation + pinned-forward-ref detection). Verify in A1 implementation.
+
 ---
 
 ## Stage 3.1: Module Resolver (MOD)
@@ -813,6 +863,31 @@ MOD performs five steps in sequence:
 **Performance budget:** <= 5 ms for the full project (graph traversal; linear in file count).
 **Parallelism opportunity:** None — this is a project-wide synchronization point.
 **Dependencies:** TAB (Stage 3) must complete for ALL files.
+
+### Stage 3.1 v0.next addendum (Pipeline 0.7.0 — SPEC §21.8 / §38 engineering target)
+
+**Export registry category extension:**
+
+The `exportRegistry` value type SHALL include `category: string` alongside the existing fields. v0.next adds two category values to the existing `"user-component"` and `"channel"`:
+
+| Category value | Trigger |
+|---|---|
+| `"user-component"` | `const Name = <markup ...>...</>` (PascalCase const export) |
+| `"channel"` | `export <channel name="..." topic="...">...</>` (P3.A) |
+| `"engine"` (NEW) | `export <engine for=Type ...>...</>` — per SPEC §21.8 |
+| `"user-state-type"` (NEW) | a non-engine, non-component user state-type export (rare; reserved for future use) |
+
+**Engine export validation:**
+
+An exported `<engine>` SHALL declare an explicit `var=` attribute or an unambiguous auto-derived name (cross-ref Stage 3.05 NR addendum). The exported name in the `exportRegistry` is the `var=`-overridden or auto-derived variable name (NOT the `for=Type` name). Importing files reference this exact name as `<engineVarName/>` at use-sites.
+
+**`pinned` import validation:**
+
+When MOD validates an import (E-IMPORT-004 — name not found in target file's exports), it SHALL also validate the `pinned` modifier per SPEC §21.8.1:
+
+- A `pinned` import name MUST resolve to an export with `category === "engine"` OR an export of a reactive cell. Other categories with `pinned` produce `E-IMPORT-PINNED-INVALID` (§34, NEW).
+
+**Performance budget:** <= 5 ms for the full project (unchanged from v1).
 
 ---
 
