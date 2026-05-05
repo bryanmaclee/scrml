@@ -227,3 +227,99 @@ block) and `>` followed by `:` (typed) cases do NOT match the recognizer; they f
 through to the existing default html-fragment path. This is acceptable for Step 2 — those
 forms are deferred to later steps per the AST-CONTRACTS decomposition.
 
+## Implementation summary
+
+### Files changed
+
+- `compiler/src/ast-builder.js` — +155 LOC. One new helper function
+  (`tryParseStructuralDecl`) + 4 call sites (Shape 1 + Shape 3 in both
+  `parseOneStatement` and the top-level `parseLogicBody` loop).
+- `compiler/tests/integration/parse-shapes-v0next.test.js` — +259 LOC. 15 new test
+  cases covering Shapes 1+3 + 4 negative-guard cases + legacy baseline.
+
+### Path discipline incident
+
+Initial Edit calls used the main-repo path `/home/bryan-maclee/scrmlMaster/scrmlTS/...`
+instead of the worktree path
+`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-af050f5215bc1340a/...`.
+Caught when `git status` showed clean working tree despite making edits. Fix: reverted
+main repo via `git -C /home/bryan-maclee/scrmlMaster/scrmlTS checkout HEAD -- compiler/src/ast-builder.js`,
+then re-applied all 5 Edits to the correct worktree path. Lesson logged. PRE-BRIEF
+compliance restored.
+
+### Final test counts
+
+- Baseline (before Step 2): 8,730 pass / 43 skip / 0 fail / 8,773 tests
+- After implementation, BEFORE adding Step 2 tests: 8,730 pass / 43 skip / 0 fail / 8,773 tests
+  (zero regressions — recognizer well-isolated)
+- After adding Step 2 tests: 8,745 pass / 43 skip / 0 fail / 8,788 tests
+  (= 8,730 + 15 new, all pass)
+
+### Existing-test deltas
+
+**0 rewrites / 0 drops.** The recognizer ONLY fires when `<` appears at statement-start
+position followed by IDENT followed by `>` followed by `=`. No existing scrml input in
+the test corpus has this exact shape — those that did were already producing
+html-fragment (deceptive-success), and aren't asserted as positive tests. The audit's
+F1c case (`${ <count> = 0 }`) was a one-off probe, not a baked test.
+
+### Commits on branch
+
+- `96e1590` — WIP(a1a-step-2): survey + design notes
+- `d152d53` — WIP(a1a-step-2): tryParseStructuralDecl + recognizer hooks
+- `5291ed8` — test(a1a-step-2): 15 cases for <NAME>=expr + const <NAME>=expr
+
+### Step 2 DoD checklist
+
+- [x] block-splitter.js — UNCHANGED (raw text already preserved correctly)
+- [x] body-pre-parser.ts — UNCHANGED (inherits via parseLogicBody)
+- [x] ast-builder.js — `tryParseStructuralDecl` helper + 4 call sites
+- [x] parse-shapes-v0next.test.js — 15 new tests with anti-html-fragment guards
+- [x] Pre-commit hook green
+- [x] Full bun run test green: 8,745 pass / 43 skip / 0 fail
+- [x] 0 regressions on existing 8,730 tests
+- [x] Existing-test deltas: 0 rewrites / 0 drops
+- [x] No --no-verify
+- [x] progress.md complete with timestamps, survey, design choices, commits
+- [x] Branch clean
+
+### Notes for downstream Steps
+
+**For Step 3 (rename `reactive-decl` → `state-decl`):** The new `structuralForm: true`
+and `isConst: true` fields ride alongside existing `reactive-decl` fields. After rename,
+both legacy (`@count = 0` → `state-decl, structuralForm: false`) and structural
+(`<count> = 0` → `state-decl, structuralForm: true`) produce the same kind. Step 3
+mechanics: replace `kind: "reactive-decl"` with `kind: "state-decl"` at all ~11
+construction sites. ~100+ consumer-site updates expected (resolver, typer, codegen).
+
+**For Step 4 (shape discriminant):** The `tryParseStructuralDecl` helper currently sets
+only `structuralForm` and `isConst`. Step 4 should add the `shape` discriminant inline:
+- `shape: "plain"` when `isConst === false`, `renderSpec === null` — the default
+- `shape: "derived"` when `isConst === true`
+The helper is the natural single point of insertion. `renderSpec` field is added in
+Step 5 (Shape 2 markup RHS).
+
+**For Step 5 (Shape 2 with bareword validators):** The recognizer's `peek(2)` check
+will need to allow IDENT or KEYWORD tokens between `<NAME>` and `>` as bareword attrs
+(e.g., `<userName req length(>=2)>`). This is a substantial extension; the helper's
+single-point-of-update design supports it cleanly.
+
+### Disambiguation lookahead window — DOCUMENTED
+
+The Step 2 recognizer accepts EXACTLY this token shape at expression-statement-start:
+```
+PUNCT(<) IDENT PUNCT(>) PUNCT(=) [expr...]
+```
+or (no-whitespace, fused >=):
+```
+PUNCT(<) IDENT OPERATOR(>=) [expr...]
+```
+
+It rejects:
+- Tokens between IDENT and `>` (e.g., bareword attrs like `req`) — Step 5
+- `:` after `>` (typed annotation) — Step 5/6
+- `{` after `>` (compound block) — Step 11
+- IDENT not preceded by `<` (e.g., `count = 0` — that's tilde-decl)
+- `<` not followed by IDENT (e.g., `<` followed by space then IDENT — markup-style state opener)
+- `<` followed by IDENT followed by anything other than `>` or `>=`
+
