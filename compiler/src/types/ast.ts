@@ -1581,6 +1581,45 @@ export interface EscapeHatchExpr {
   raw: string;
 }
 
+// ---- Reset Expression (§6.8.2) ----
+
+/**
+ * `reset(@cell)` — language-level keyword expression that, at runtime, restores
+ * a state cell (or a field of a compound cell) to its declared default.
+ *
+ * Produced by `esTreeToExprNode` in the expression-parser when a CallExpression's
+ * callee is a bare Identifier named "reset". The transformation lifts what acorn
+ * sees as an ordinary call into a structurally-distinct node so downstream
+ * passes (A1b target-shape validation, A1c codegen lowering to the runtime
+ * reset operation, dependency-graph integration with `default=`) can recognise
+ * the construct without re-checking for the magic name.
+ *
+ * Parser-level invariants (Step 9, Phase A1a):
+ *   - Exactly one argument is required. Zero-arg or multi-arg forms surface
+ *     `E-RESET-NO-ARG` (§34) via the optional `diagnostic` field.
+ *   - The argument MAY be any ExprNode. Target-shape validation
+ *     (`@cell` / `@compound.field` / `@compound`) is deferred to A1b.
+ *
+ * The `diagnostic` field carries an error code + message when the call shape
+ * is malformed at parse time. The wrapper that calls `parseExprToNode`
+ * (currently `safeParseExprToNodeGlobal` and the closure-scoped variant inside
+ * `parseLogicBody`) checks for this field and pushes a TABError into the
+ * errors array. This mirrors the F-SQL-001 surfacing pattern used by
+ * `EscapeHatchExpr.sqlDiagnostic`.
+ */
+export interface ResetExpr {
+  kind: "reset-expr";
+  span: ExprSpan;
+  /** The cell-ref expression argument. May be any ExprNode at parse time. */
+  target: ExprNode;
+  /**
+   * Parse-time diagnostic for malformed reset forms (zero-arg, multi-arg).
+   * Surfaced by the ast-builder wrapper as a TABError (E-RESET-NO-ARG, §34).
+   * Absent on well-formed `reset(<expr>)` calls.
+   */
+  diagnostic?: { code: string; message: string };
+}
+
 // ---- Union ----
 
 /**
@@ -1605,4 +1644,5 @@ export type ExprNode =
   | MatchExpr
   | SqlRefExpr
   | InputStateRefExpr
-  | EscapeHatchExpr;
+  | EscapeHatchExpr
+  | ResetExpr;

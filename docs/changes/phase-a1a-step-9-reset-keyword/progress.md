@@ -103,3 +103,9 @@ an attached `diagnostic: { code: "E-RESET-NO-ARG", message: "..." }` field, and
 6. Run full `bun run test`. Confirm 0 regressions.
 
 ## Implementation log
+
+[12:30 step-9 ast-types] `compiler/src/types/ast.ts` — added `ResetExpr` interface
+(kind: "reset-expr", target: ExprNode, span, optional diagnostic field) and
+appended `ResetExpr` to the `ExprNode` union. Diagnostic-on-the-node mirrors
+F-SQL-001's pattern (EscapeHatchExpr.sqlDiagnostic). Cross-references: §6.8.2,
+§34, AST-CONTRACTS-AND-DECOMPOSITION.md §1.3.
