@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-05-05 (S59 in-flight — major-restructure session post-parser-audit)
 
-**Tests (current):** 8,730 pass / 43 skip / 0 fail / 8,773 across 434 files (post Step-1 + Step-8 of A1a). Pre-commit subset 8,005 / 33 / 0.
+**Tests (current):** 8,757 pass / 43 skip / 0 fail / 8,800 across 435 files (post A1a Steps 1 + 2 + 3 + 8 + program-attrs feature). Pre-commit subset ~8,030 / 33 / 0.
 
 **Currently shipped baseline:** **scrml v0.1.0** (16-module stdlib, 32 examples, full SQL passthrough via Bun.SQL, LSP + VSCode + neovim editor support, server-fn boundary, `<machine>` engines, `<channel>` channels, `?{}` SQL passthrough, `<schema>` blocks, `<program>` config + wrapper, ~24,739 LOC compiler / ~14,135 LOC codegen).
 
@@ -27,7 +27,7 @@
 | Stage 0a | Impact assessment | done | ✅ | `IMPACT-ASSESSMENT.md` (446 lines) |
 | Stage 0b | SPEC + PIPELINE + INDEX rewrite | 70-127h | ✅ | D1+D2 (S57) + D3+D4 (S58) all landed |
 | Stage 0b+ | L21 lock E-DERIVED-VALUE-MUTATE | done | ✅ | S59 commit `1217b41` |
-| **A1 — Foundational lex/parse** | `<NAME> = RHS` decl recognition + Shapes 1/2/3 + Variant C | **35-55h** | **🟡 IN FLIGHT** | Step 1 ✅ `9cd7779` (`reset` keyword), Step 8 ✅ `af4a0da` (E-RESERVED-IDENTIFIER), Steps 2-7 + 9-11 BLOCKED on re-decomposition (S60 dispatch agent's targets corrected per audit) |
+| **A1 — Foundational lex/parse** | `<NAME> = RHS` decl recognition + Shapes 1/2/3 + Variant C | **35-55h** | **🟡 IN FLIGHT** | Step 1 ✅ `9cd7779` (`reset` keyword), Step 2 ✅ `d28f6f7` (foundational `<NAME>` decl-site recognition; +15 tests; ~21min wall — depth-of-survey discount confirmed), Step 3 ✅ `8fa26e1` (rename `reactive-decl` → `state-decl` mass sweep; ~514 changes across ~120 file updates; 0 regressions), Step 8 ✅ `af4a0da` (E-RESERVED-IDENTIFIER + init.js fix). **Remaining: Steps 4-7 + 9-13** (rev 2 decomposition) — shape discriminant, Shape 2 render-spec + validators, default=/pinned, reset-expr, shape preservation, compound verification, test deltas, final commit. ~25-40h remaining. |
 | A2 — Structural elements | `<engine>`, `<match>` block, `<channel>`, `<errors>`, `<onTransition>` | 25-40h | ⏸️ pending A1 | |
 | A3 — Validators + synth surface | bareword validator scan + auto-synth + `<errors of=…/>` | 20-35h | ⏸️ pending A2 | |
 | A4 — Schema + refinement + pinned | shared-core in schema; refinement-type predicates; pinned on imports | 15-25h | ⏸️ pending A3 | |
@@ -58,21 +58,34 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 ### §0.4 v0.2.0 open questions / surfaced design queries
 
 - **`<program>` dual role** (S59) — RESOLVED: keep both inline-config-attributes use AND wrapper-of-body use AND nested-execution-context-boundary use. Spec at §40.2 + §43 unchanged.
+- **`<program>` documentary attributes** (S59 NEW) — RESOLVED + LANDED `4620290`. Five attrs: `title=`, `description=`, `version=`, `author=`, `license=`. SPEC §40.7 + W-PROGRAM-TITLE-NESTED warning. Article (`tier-ladder-promotion`) updated.
 - **Acorn replacement** — RESOLVED: stays. Pre-processor extension absorbs new syntax above acorn's scope. See SCOPE-MAP §A.4.
 - **Self-host migration risk** — TBD at B4 entry. Fixed-point regressions are subtle.
-- **`reactive-decl` rename to `state-decl`** — leaning yes. Decision at A1 re-decomposition time.
+- **`reactive-decl` rename to `state-decl`** — RESOLVED + LANDED in Step 3 (commit `8fa26e1`). ~514 changes across ~120 file updates. 0 regressions.
+- **Depth-of-survey discount pattern** (S59 captured) — see `scrml-support/design-insights.md` "Depth-of-survey discount" entry. Three confirmed occurrences (S51 W2, S52 DD4, S59 Step 2). PA-SCRML-PRIMER §12 has the session-start pointer + mitigation checklist.
 
-### §0.5 Salvageable from S60 11-step decomposition
+### §0.5 A1a 13-step status (rev 2 decomposition)
 
-**Landed independently of audit findings:**
-- Step 1 — `reset` keyword reserved (`9cd7779`)
-- Step 8 — E-RESERVED-IDENTIFIER + init.js template fix (`af4a0da`)
+| # | Step | Status |
+|---|---|---|
+| 1 | Lexer: reserve `reset` | ✅ `9cd7779` |
+| **2** | **Foundational: `<NAME>` decl-site recognition** | ✅ `d28f6f7` (depth-of-survey discount: ~21min vs 10-15h estimate) |
+| **3** | **AST kind rename `reactive-decl` → `state-decl`** | ✅ `8fa26e1` (~514 changes / ~120 files / 0 regressions) |
+| 4 | Parser: state-decl `shape` discriminant for Shapes 1 + 3 | 🟡 NEXT |
+| 5 | Parser: Shape 2 `renderSpec` + bareword validators + `req` | ⏸ |
+| 6 | Parser: `default=` + `pinned` on state-decl | ⏸ |
+| 7 | Parser: `pinned` on import items | ⏸ |
+| 8 | E-RESERVED-IDENTIFIER trigger | ✅ `af4a0da` |
+| 9 | Expression parser: `reset(@cell)` keyword + E-RESET-NO-ARG | ⏸ |
+| 10 | Expression parser: MemberCall/MemberAssignment/UnaryDelete shape verification | ⏸ |
+| 11 | Variant C compound verification + render-by-tag verification + kickstarter v2 §3 smoke | ⏸ |
+| 12 | Existing-test deltas: rewrite + drop | ⏸ |
+| 13 | Final commit + CHANGELOG draft | ⏸ |
 
-**Blocked on re-decomposition:**
-- Steps 2-7 (foundational + Shape 2 + default/pinned + reset-call + member shape preservation)
-- Steps 9-11 (compound verification + test deltas + final commit)
+**5/13 done.** Remaining: ~25-40h focused work across Steps 4-7 + 9-13. Each step a focused single-file dispatch with PA cherry-pick to main between steps.
 
-**Re-decomposition scope:** rewrite `AST-CONTRACTS-AND-DECOMPOSITION.md` with corrected target node (`reactive-decl` not `kind: "state"`); add foundational pass (`<NAME>` decl-site recognition in block-splitter + body-pre-parser) as new Steps 2-4; restructure Steps 5-9 around the new shape; keep Steps 10-11 (test deltas + final).
+**Side landings during A1a (parallel work):**
+- Documentary `<program>` attributes (`title=`, `description=`, `version=`, `author=`, `license=`) — SPEC §40.7 + emit-html.ts head injection + tier-ladder article update. Commit `4620290`.
 
 ---
 
