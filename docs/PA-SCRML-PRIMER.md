@@ -4,7 +4,7 @@
 
 **Status:** living document. Updated when SPEC changes, when locks land, when patterns emerge. Treat as the canon snapshot at the listed date.
 
-**Last updated:** 2026-05-04 (S57 wrap; reflects post-D1+D2 SPEC state, all S57 stdlib work, locks L1-L20)
+**Last updated:** 2026-05-04 (S58 mid-session; reflects post-D1+D2+D3 SPEC state, all S57 stdlib work + scrml:oauth, locks L1-L20)
 
 **Word of caution:** if this primer disagrees with `compiler/SPEC.md` or `docs/articles/llm-kickstarter-v2-2026-05-04.md`, the SPEC + kickstarter are authoritative. Surface the contradiction.
 
@@ -246,24 +246,87 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 
 ---
 
-## §9 Channels, schema, predicates, `not` keyword (Stage 0b D3 — pending)
+## §9 Channels, schema, predicates, `not` keyword (Stage 0b D3 — LANDED S58)
 
-These are pending in Stage 0b Dispatch 3 (brief pre-written). Until D3 lands, expect SPEC drift in §38 (channels), §39 (schema), §53 (predicates).
+D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now authoritative.
 
-**Current canon (kickstarter v2 §11.3, §11.6, §6 validators):**
+### §9.1 Channels (§38) — file-level, V5-strict, no `@shared`
 
-- **Channels are file-level** (NOT inside `<program>`). Drop `@shared` modifier. Auto-declare variable per Move 16. Body uses V5-strict state declarations.
-- **Schemas keep SQL-mirror vocabulary** (`not null`, `unique`, `references`, `default(literal)`) — principled exception. SQL passthrough (`?{}` blocks) is **inviolable**.
-- **`not` keyword** (Move 11 — pinned-style modifier on imports / decls for opt-out semantics).
+```scrml
+<channel name="chat" topic="lobby">
+  <messages> = []                                    // V5-strict — auto-syncs across clients
+
+  server function postMessage(author, body) {
+    @messages = [...@messages, { author, body, ts: Date.now() }]
+  }
+</>
+
+<program>
+  ${ const count = @messages.length }                // cross-scope canonical access
+</>
+```
+
+- Channels live at **file level** (sibling of `<program>`, never child). `E-CHANNEL-INSIDE-PROGRAM`.
+- `@shared` modifier is **REMOVED** in v0.next. `E-CHANNEL-SHARED-MODIFIER`. Auto-sync comes from being inside the channel body, not from a modifier.
+- Channel body uses **V5-strict** (§6). `<x> = init` declares a channel-scoped reactive cell auto-synced across subscribed clients.
+- Auto-creates WS endpoint `/_scrml_ws/<name>`; `topic=` defaults to `name`.
+- Auto-injected in server functions: `broadcast(data)`, `disconnect()`.
+- Channel-declared cells reachable from `<program>` via canonical `@cellName` access.
+- Handler attribute params (`onserver:message=handler(msg)`) — `msg` is a function-local LOCAL, accessed bare. V5-strict locals semantic; not state.
+
+### §9.2 Schema (§39) — SQL-mirror canonical + additive shared-core (L4)
+
+```scrml
+<schema>
+  users {
+    email: text not null unique          // SQL-mirror native — canonical source-level
+    name:  text req length(>=2)          // shared-core additive — req lowers to NOT NULL
+    age:   integer min(18) max(120)      // shared-core additive — lowers to CHECK constraints
+  }
+</>
+```
+
+- SQL-mirror (`not null`, `unique`, `references(table.col)`, `default(literal)`, `primary key`) remains **canonical**.
+- Shared-core (`req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) is **additive**. Both forms legal; mixed is legal.
+- Lowering rules (§39.5.8): `req → NOT NULL`; `length(>=N) → CHECK (length(col) >= N)`; `pattern(re) → CHECK (col REGEXP …)` driver-dependent (Postgres `~`, SQLite/MySQL `REGEXP`); `min/max/gt/lt/gte/lte/eq/neq → CHECK`; `oneOf([...]) → CHECK (col IN (...))`.
+- **Inviolable:** SQL strings sent to the database are unchanged in shape. Vocabulary unification touches scrml source-level only.
+- Cross-locus consistency: same shared-core word fires in three contexts — state validator (§55, reactive), refinement type (§53, compile + boundary), schema column (here, DBMS-enforced).
+- SQL passthrough (`?{}` blocks) remains **inviolable**.
+
+### §9.3 Predicates (§53) — refinement-type cross-ref (L4)
+
+```scrml
+<email>: string(pattern(/^[^@]+@[^@]+$/)) req = <input type="email"/>
+//        ────── refinement type (compile-time + runtime boundary)
+//                                              ── state validator (reactive form-validity)
+```
+
+- Shared-core vocabulary appears in refinement types as predicates on type annotations.
+- Firing semantics: compile-time + runtime boundary check. A non-conforming value cannot inhabit the type. **Stronger** than state validators (runtime-only-reactive) and schema constraints (DBMS-enforced).
+- Type predicate + state validator stack as **independent enforcement layers**. They compose cleanly.
+
+### §9.4 `is some` vs `req` (§42.2.5) — distinct predicates (L5)
+
+| Predicate | Semantics | `""` (empty string) |
+|---|---|---|
+| `is some` | value EXISTS (null/undefined fail) | TRUE — empty string IS some value |
+| `req` | value is NON-EMPTY / MEANINGFUL | FALSE — empty string fails req |
+
+Both predicates exist; both are needed; they coexist in the validator vocabulary. **Three native loci** of "exists/required" semantic across scrml: schema SQL-mirror (`not null`), state validator (`req` and/or `is some`), refinement type (predicate form). Each fires in its layer's enforcement context — not redundancy.
+
+### §9.5 `not` keyword
+
+(Move 11 — pinned-style modifier on imports / decls for opt-out semantics. Existing §42 content retained.)
 
 ---
 
-## §10 stdlib — what's on the shelf (15 modules)
+## §10 stdlib — what's on the shelf (16 modules)
 
 **Important:** stdlib modules are **import-only**, not standalone-compile targets. Don't try to compile `stdlib/<x>/index.scrml` directly — it's designed to be imported into a `<program>`.
 
 **App-building primitives:**
 - `scrml:auth` — `hashPassword`, `verifyPassword`, `signJwt`, `verifyJwt`, `decodeJwt`, `createRateLimiter`, TOTP (generate/verify)
+- `scrml:oauth` (NEW S58) — OAuth 2.0 + PKCE (RFC 7636). Core: `startFlow`, `exchangeCode`, `refreshToken`, `getUserInfo`, `revoke`. PKCE: `generateVerifier`, `deriveChallenge`. Storage: `memoryAdapter()` (dev only); caller injects production adapter. Provider presets: `googleConfig` + `parseGoogleIdToken` (decode-only, no JWKS verify yet — v0.3.0), `githubConfig`, `microsoftConfig`, `discordConfig`. Typed errors caught by `err.name`: `OAuthStateMismatch`, `OAuthVerifierMissing`, `OAuthTokenError`, `OAuthUserInfoError`, `OAuthRevocationError`. **Deferred:** JWKS sig verification, OIDC discovery (RFC 8414).
 - `scrml:data` — `validate(data, schema)`, `isValid`, `firstError`; predicate builders; transforms (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, etc.) — vocabulary alignment task pending B3
 - `scrml:router` — `match(pattern, path)`, `parseQuery`, `buildUrl`, `navigate`, `currentPath`, `onNavigate`
 - `scrml:store` — `createStore`, `createSessionStore`, `createCounter` (KV / session via SQLite)
@@ -284,7 +347,7 @@ These are pending in Stage 0b Dispatch 3 (brief pre-written). Until D3 lands, ex
 
 **Distribution model (locked S57):** bundled-with-compiler, single-version, stdlib-version = compiler-version, no registry, no separate semver.
 
-**Honesty positioning:** "kills ~80% of typical-app npm needs," not 100%. Real gap: OAuth providers (brief pre-written for `scrml:oauth`, not yet shipped); date-formatting beyond Intl; advanced HTTP middleware; OIDC discovery.
+**Honesty positioning:** "kills ~88-90% of typical-app npm needs" (S58 lift after `scrml:oauth` lands). Real remaining gaps: JWKS / OIDC discovery (deferred); date-formatting beyond Intl; advanced HTTP middleware beyond what's bundled; some niche utility libs (lodash-equivalents).
 
 **No generics** — scrml doesn't have type parameters. Recurring finding: per-domain enums + per-screen state-machine variants beat generic stdlib types like `AsyncPhase<T>` — naming the variants in app context produces better match blocks. The five-line "boilerplate" is five lines of useful domain spec.
 
