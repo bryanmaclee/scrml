@@ -83,7 +83,6 @@ import {
   TildeTracker,
   checkLinear,
   hasNonLiftTildeConsumer,
-  buildOverloadRegistry,
 } from "../../src/type-system.js";
 
 // ---------------------------------------------------------------------------
@@ -2339,113 +2338,6 @@ describe("§35.3 Attribute Validation", () => {
       );
       expect(markupErrors).toHaveLength(0);
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §36 State-Type Overload Registry
-// ---------------------------------------------------------------------------
-
-describe("§36 State-Type Overload Registry", () => {
-  function makeSpan(start = 0) {
-    return { file: "test.scrml", start, end: start + 10, line: 1, col: start + 1 };
-  }
-
-  function makeFnDecl(name, stateTypeScope, spanStart = 10) {
-    return {
-      id: spanStart,
-      kind: "function-decl",
-      name,
-      params: [],
-      body: [],
-      fnKind: "function",
-      isServer: false,
-      stateTypeScope,
-      span: makeSpan(spanStart),
-    };
-  }
-
-  function makeFileAST(fnNodes) {
-    return {
-      filePath: "test.scrml",
-      nodes: [
-        {
-          id: 1,
-          kind: "logic",
-          body: fnNodes,
-          span: makeSpan(0),
-        },
-      ],
-    };
-  }
-
-  test("buildOverloadRegistry creates overload set for functions with same name in different state types", () => {
-    const renderCard = makeFnDecl("render", "card", 10);
-    const renderBadge = makeFnDecl("render", "badge", 20);
-    const fileAST = makeFileAST([renderCard, renderBadge]);
-
-    const registry = buildOverloadRegistry(fileAST);
-
-    expect(registry.has("render")).toBe(true);
-    const overloads = registry.get("render");
-    expect(overloads.size).toBe(2);
-    expect(overloads.has("card")).toBe(true);
-    expect(overloads.has("badge")).toBe(true);
-    expect(overloads.get("card")).toBe(renderCard);
-    expect(overloads.get("badge")).toBe(renderBadge);
-  });
-
-  test("single function with stateTypeScope does NOT create an overload set", () => {
-    const renderCard = makeFnDecl("render", "card", 10);
-    const fileAST = makeFileAST([renderCard]);
-
-    const registry = buildOverloadRegistry(fileAST);
-
-    expect(registry.has("render")).toBe(false);
-  });
-
-  test("functions without stateTypeScope are not included in overload registry", () => {
-    const greet = {
-      id: 10,
-      kind: "function-decl",
-      name: "greet",
-      params: [],
-      body: [],
-      fnKind: "function",
-      isServer: false,
-      span: makeSpan(10),
-    };
-    const fileAST = makeFileAST([greet]);
-
-    const registry = buildOverloadRegistry(fileAST);
-
-    expect(registry.size).toBe(0);
-  });
-
-  test("three overloads for same function name", () => {
-    const renderCard = makeFnDecl("render", "card", 10);
-    const renderBadge = makeFnDecl("render", "badge", 20);
-    const renderAlert = makeFnDecl("render", "alert", 30);
-    const fileAST = makeFileAST([renderCard, renderBadge, renderAlert]);
-
-    const registry = buildOverloadRegistry(fileAST);
-
-    expect(registry.get("render").size).toBe(3);
-  });
-
-  test("multiple overload sets for different function names", () => {
-    const renderCard = makeFnDecl("render", "card", 10);
-    const renderBadge = makeFnDecl("render", "badge", 20);
-    const formatCard = makeFnDecl("format", "card", 30);
-    const formatBadge = makeFnDecl("format", "badge", 40);
-    const fileAST = makeFileAST([renderCard, renderBadge, formatCard, formatBadge]);
-
-    const registry = buildOverloadRegistry(fileAST);
-
-    expect(registry.has("render")).toBe(true);
-    expect(registry.has("format")).toBe(true);
-    expect(registry.get("render").size).toBe(2);
-    expect(registry.get("format").size).toBe(2);
   });
 });
 

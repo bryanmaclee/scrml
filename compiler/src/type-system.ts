@@ -391,7 +391,6 @@ interface TypedFileAST extends FileAST {
   componentShapes: Map<string, unknown>;
   scopeChain: ScopeChain;
   stateTypeRegistry: Map<string, ResolvedType>;
-  overloadRegistry: Map<string, Map<string, ASTNodeLike>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -7190,54 +7189,6 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
 }
 
 // ---------------------------------------------------------------------------
-// State-type overload registry
-// ---------------------------------------------------------------------------
-
-/**
- * Build the overload registry from a FileAST.
- */
-function buildOverloadRegistry(fileAST: FileAST): Map<string, Map<string, ASTNodeLike>> {
-  const registry = new Map<string, Map<string, ASTNodeLike>>();
-
-  function visit(node: unknown): void {
-    if (!node || typeof node !== "object") return;
-    const n = node as ASTNodeLike;
-
-    if ((n.kind === "function-decl") && n.stateTypeScope) {
-      const fnName = n.name as string;
-      const stateType = n.stateTypeScope as string;
-      if (fnName) {
-        if (!registry.has(fnName)) registry.set(fnName, new Map());
-        registry.get(fnName)!.set(stateType, n);
-      }
-    }
-
-    if (Array.isArray(n.children)) {
-      for (const child of (n.children as unknown[])) visit(child);
-    }
-    if (Array.isArray(n.body)) {
-      for (const stmt of (n.body as unknown[])) visit(stmt);
-    }
-    if (Array.isArray(n.nodes)) {
-      for (const node2 of (n.nodes as unknown[])) visit(node2);
-    }
-    if (n.ast && Array.isArray((n.ast as ASTNodeLike).nodes)) {
-      for (const node2 of ((n.ast as ASTNodeLike).nodes as unknown[])) visit(node2);
-    }
-  }
-
-  const nodes = fileAST.nodes ?? ((fileAST.ast as FileAST | undefined) ? (fileAST.ast as FileAST).nodes : []);
-  for (const node of (nodes ?? [])) visit(node);
-
-  // Only keep entries that have 2+ overloads
-  for (const [fnName, overloads] of registry) {
-    if (overloads.size < 2) registry.delete(fnName);
-  }
-
-  return registry;
-}
-
-// ---------------------------------------------------------------------------
 // TS-H: Loop control flow validation (E-LOOP-001/002/005)
 // ---------------------------------------------------------------------------
 
@@ -7905,8 +7856,8 @@ function processFile(
   // TS-G: Linear type enforcement pass.
   // The real pipeline passes { filePath, ast: FileAST, errors } objects to
   // runTS (CE output shape). fileAST.nodes is therefore undefined at the outer
-  // level; the actual nodes live under fileAST.ast.nodes. Use the same
-  // dual-shape fallback that buildOverloadRegistry uses at line 4060.
+  // level; the actual nodes live under fileAST.ast.nodes. The dual-shape
+  // fallback below handles both shapes.
   // checkLinear's default case descends into .body and .children so
   // markup.children and logic.body both get visited; function-decl recurses
   // with its own scope and breaks, so no double-walk occurs.
@@ -7930,16 +7881,12 @@ function processFile(
     checkAnimationFrame(allNodes, errors, filePath);
   }
 
-  // TS-B Step 3: Build the state-type overload registry.
-  const overloadRegistry = buildOverloadRegistry(fileAST);
-
   // Assemble TypedFileAST.
   const typedAst: TypedFileAST = Object.assign({}, fileAST, {
     nodeTypes,
     componentShapes: new Map(),
     scopeChain,
     stateTypeRegistry,
-    overloadRegistry,
     machineRegistry,
   });
 
@@ -8769,8 +8716,6 @@ export {
   MustUseTracker,
   checkLinear,
   hasNonLiftTildeConsumer,
-  // State-type overloading exports
-  buildOverloadRegistry,
   // §51.3 Machine registry exports
   buildMachineRegistry,
   resolveMachineBinding,
