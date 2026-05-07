@@ -7,7 +7,7 @@
  * subsequent A1b steps (B2 onward) build on:
  *
  *   B2 — V5-strict bare-name resolution + E-NAME-COLLIDES-STATE  [LANDED]
- *   B3 — `@name` resolution → record back-pointer on each ExprNode
+ *   B3 — `@name` resolution → record back-pointer on each ExprNode  [LANDED]
  *   B4 — Import binding + `pinned` forward-ref cycle detection
  *   B5 — Cell classifier (bindable, markup-typed, derived-with-validators)
  *   B6 — Render-by-tag E-CELL-NO-RENDER-SPEC + E-CELL-RENDER-SPEC-NOT-BINDABLE
@@ -22,6 +22,20 @@
  * a registered state-cell record is found at any enclosing scope, fires
  * `E-NAME-COLLIDES-STATE` per SPEC §6.1.3 + §34. Local names cannot shadow
  * registered state-cell names — the V5-strict invariant.
+ *
+ * Phase A1b Step B3 — `@name` resolution. PASS 3 walks every ExprNode payload
+ * on every AST node and, for each `@`-prefixed `IdentExpr`, calls
+ * `lookupStateCell(currentScope, name.slice(1))`. The result (a
+ * `StateCellRecord` or `null`) is stamped onto the IdentExpr as a
+ * non-enumerable `_resolvedStateCell` field. This is the annotated-AST
+ * contract that B5+ (cell classifier), B7 (derived-cell dep DAG), B10
+ * (validator typer cross-field args), and B22 (`reset(@cell)` keyword)
+ * consume to know which cell each `@name` read points to without
+ * re-resolving by string lookup. Per A1b plan §4.6 line 228, B3 RECORDS
+ * resolution; the resolution-fail catch-all is "existing infra" — B3 stamps
+ * `null` on failed lookups (no new error code). Compound nav (`@form.name`)
+ * resolves the BASE cell only at B3; deeper path resolution defers to
+ * `lookupQualifiedStateCell` consumers when leaf-level resolution is needed.
  *
  * What B1 lands:
  *   - A `Scope` data structure (per-file root, child scopes for function /
@@ -66,7 +80,9 @@ import type {
   TildeDeclNode,
   LinDeclNode,
   Span,
+  IdentExpr,
 } from "./types/ast.ts";
+import { forEachIdentInExprNode } from "./expression-parser.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -237,6 +253,21 @@ interface ScopeAnnotated {
 
 interface RecordAnnotated {
   _record?: StateCellRecord;
+}
+
+/**
+ * B3 annotation shape — back-pointer stamped on every `@`-prefixed IdentExpr.
+ *
+ * Value:
+ *   - `StateCellRecord` if the bare name (with `@` stripped) resolves to a
+ *     registered cell anywhere on the parent-chain.
+ *   - `null` if no such cell exists. Stamping `null` (rather than leaving
+ *     the field absent) makes the annotation contract explicit:
+ *     "B3 ran on this node; no resolution was found." Distinguishes a
+ *     resolved-to-null from an un-walked node (which has no field at all).
+ */
+interface ResolvedAtNameAnnotated {
+  _resolvedStateCell?: StateCellRecord | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +568,139 @@ function walkLocalDeclsForCollisions(
 }
 
 // ---------------------------------------------------------------------------
+// B3: `@name` resolution walker (PASS 3)
+// ---------------------------------------------------------------------------
+//
+// Walks every ExprNode payload on every AST node. For each `@`-prefixed
+// IdentExpr encountered, calls `lookupStateCell(currentScope, name.slice(1))`
+// and stamps the result onto the IdentExpr as a non-enumerable
+// `_resolvedStateCell` field. The stamped value is either a StateCellRecord
+// (resolved) or null (resolution failed — no error fired at B3 per A1b plan
+// §4.6 line 228; the resolution-fail catch-all is "existing infra").
+//
+// Why non-enumerable: the resolved record back-points to its scope which
+// owns a Map<string, StateCellRecord> — the same cycle pattern that motivated
+// B1's `_record` non-enumerable choice. Generic structural walkers (BP/CG)
+// must skip the field.
+//
+// Compound nav (`@form.name.toUpperCase()`): the BASE IdentExpr (`@form`)
+// resolves to the compound-parent record. The MemberExpr's `.name` /
+// `.toUpperCase()` segments are NOT IdentExprs (they are static property
+// names) — `forEachIdentInExprNode` correctly walks `member.object` only.
+// Consumers needing the leaf record (B22 `reset(@form.name)`) re-resolve
+// via `lookupQualifiedStateCell` using the parsed path.
+//
+// EXPR_FIELDS: the canonical list of AST-node fields that may carry an
+// ExprNode. Mirrors `dependency-graph.ts:227-240` and
+// `type-system.ts:7732-7735` (parseVariant Phase 2 walker).
+
+const B3_EXPR_FIELDS: readonly string[] = [
+  "exprNode",
+  "initExpr",
+  "argsExpr",
+  "condExpr",
+  "headerExpr",
+  "iterExpr",
+  "conditionExpr",
+  "guardExpr",
+  "valueExpr",
+  "rhsExpr",
+  "defaultExpr",
+];
+
+function resolveAtNameOnExprNode(
+  exprNode: unknown,
+  currentScope: Scope,
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+  forEachIdentInExprNode(exprNode as any, (ident: IdentExpr) => {
+    if (typeof ident.name !== "string") return;
+    if (!ident.name.startsWith("@")) return;
+    // Strip the `@` prefix to get the bare cell name. The compound-nav case
+    // (e.g., `@form.name`) is handled by MemberExpr → `forEachIdentInExprNode`
+    // walks `member.object` and produces the BASE `@form` IdentExpr; the leaf
+    // `.name` is a static property string, not an ident. So the `bareName`
+    // here is always the cell-name root.
+    const bareName = ident.name.slice(1);
+    if (!bareName) return; // `@` alone — defensive; tokenizer wouldn't produce this here.
+    const resolved = lookupStateCell(currentScope, bareName);
+    Object.defineProperty(ident, "_resolvedStateCell", {
+      value: resolved,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  });
+}
+
+function walkResolveAtNames(
+  nodes: ASTNode[] | undefined,
+  currentScope: Scope,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    // Resolve any ExprNode payloads this node carries.
+    for (const f of B3_EXPR_FIELDS) {
+      const v = anyN[f];
+      if (v && typeof v === "object") {
+        resolveAtNameOnExprNode(v, currentScope);
+      }
+    }
+    // Special case for c-style for: `cStyleParts: { initExpr, condExpr,
+    // updateExpr }`. Each sub-field carries an ExprNode root.
+    if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
+      for (const f of ["initExpr", "condExpr", "updateExpr"]) {
+        const v = anyN.cStyleParts[f];
+        if (v && typeof v === "object") {
+          resolveAtNameOnExprNode(v, currentScope);
+        }
+      }
+    }
+    // For state-decl with `renderSpec` (decl-with-spec / Shape 2 forms),
+    // the renderSpec may itself be (or contain) markup or an ExprNode. The
+    // `forEachIdentInExprNode` walker silently no-ops on non-ExprNode shapes,
+    // and the structural recursion below covers the markup case.
+
+    if (kind === "state-decl") {
+      // Use the compound sub-scope for nested @-refs inside compound bodies.
+      const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
+      if (stateScope && Array.isArray(anyN.children)) {
+        walkResolveAtNames(anyN.children, stateScope, visited);
+      }
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      // Use the function scope PASS 1 attached.
+      const fnScope = (anyN as ScopeAnnotated)._scope ?? currentScope;
+      walkResolveAtNames(anyN.body, fnScope, visited);
+      continue;
+    }
+
+    // Generic recursion. Same shape as PASS 1 / PASS 2.
+    if (Array.isArray(anyN.children)) walkResolveAtNames(anyN.children, currentScope, visited);
+    if (Array.isArray(anyN.body)) walkResolveAtNames(anyN.body, currentScope, visited);
+    if (Array.isArray(anyN.consequent)) walkResolveAtNames(anyN.consequent, currentScope, visited);
+    if (Array.isArray(anyN.alternate)) walkResolveAtNames(anyN.alternate, currentScope, visited);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkResolveAtNames(arm.body, currentScope, visited);
+      }
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkResolveAtNames([anyN.expr.node], currentScope, visited);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -581,6 +745,16 @@ export function runSYM(input: SYMInput): SYMResult {
   const errors: SYMDiagnostic[] = [];
   const visited2 = new WeakSet<object>();
   walkLocalDeclsForCollisions(ast.nodes, fileScope, visited2, errors);
+
+  // PASS 3 (B3): Walk every ExprNode payload on every AST node; for each
+  // `@`-prefixed IdentExpr, stamp `_resolvedStateCell` (record or null) via
+  // a parent-chain lookup. Re-uses the `_scope` annotations PASS 1 attached
+  // to function-decls + compound state-decls. No diagnostics fired here —
+  // resolution failures stamp `null`; the existing-infra catch-all
+  // (E-SCOPE-001 / DG sweep) handles any ultimate "unknown reactive" error
+  // surface.
+  const visited3 = new WeakSet<object>();
+  walkResolveAtNames(ast.nodes, fileScope, visited3);
 
   return {
     filePath,
@@ -680,4 +854,28 @@ export function getScopeForNode(node: ASTNode | FileAST | null | undefined): Sco
   if (annotated._scope) return annotated._scope;
   if (annotated._record) return annotated._record.scope;
   return null;
+}
+
+/**
+ * B3 read API — return the resolved `StateCellRecord` stamped onto an
+ * IdentExpr by PASS 3.
+ *
+ * Return shape:
+ *   - `StateCellRecord` — `@name` was `@`-prefixed and resolved to a
+ *     registered cell.
+ *   - `null` — `@name` was `@`-prefixed but no cell with that name was
+ *     registered in any enclosing scope (the resolution-fail case;
+ *     B3 stamps null, no error).
+ *   - `undefined` — the IdentExpr was either (a) not `@`-prefixed (so PASS 3
+ *     correctly skipped it) or (b) the IdentExpr lives in an ExprNode
+ *     position PASS 3's walker didn't traverse. Consumers should treat
+ *     `undefined` as "not annotated" and fall back to their own resolution
+ *     if needed.
+ */
+export function getResolvedStateCell(
+  ident: IdentExpr | null | undefined,
+): StateCellRecord | null | undefined {
+  if (!ident) return undefined;
+  const annotated = ident as IdentExpr & ResolvedAtNameAnnotated;
+  return annotated._resolvedStateCell;
 }
