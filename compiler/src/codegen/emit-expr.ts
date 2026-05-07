@@ -38,6 +38,7 @@ import type {
   EscapeHatchExpr,
 } from "../types/ast.ts";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived } from "./rewrite.js";
+import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -401,6 +402,12 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // §41.13 parseVariant — call-site annotated by TS pass with parseVariantEnum.
+  // Dispatch to the monomorphized parser emitter (emit-parse-variant.ts).
+  if (isParseVariantCall(node)) {
+    return emitParseVariantCall(node, ctx);
+  }
+
   // §51.14 replay(@target, @log[, index]) → _scrml_replay("target", _scrml_reactive_get("log"), index?)
   // The target's @-ref becomes a name string literal (not its value) so the
   // runtime helper knows which reactive-store slot to write. Matched before

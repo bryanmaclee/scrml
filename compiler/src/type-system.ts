@@ -3392,6 +3392,75 @@ function annotateNodes(
     ?? []
   );
 
+  // ---------------------------------------------------------------------------
+  // §41.13 / §53.10 — parseVariant call-site recognition pass.
+  //
+  // parseVariant is a compile-time special form (Path A — type-as-argument).
+  // The second argument MUST be a bare type-name identifier referring to a
+  // scrml-native enum type. Validation is a sibling-shape of E-ENGINE-004.
+  //
+  // Steps:
+  //   1. Walk import-decls; collect local names that bind to `parseVariant`
+  //      from `'scrml:data'`.
+  //   2. Wire each local name into fnErrorTypes / fnCanFail so the existing
+  //      `!{}` exhaustiveness check (§19.7, line 4314+) treats parseVariant
+  //      calls as failable returning ParseError.
+  //   3. Walk every ExprNode in the file via forEachCallInExprNode; for each
+  //      CallExpr whose callee ident matches a parseVariant local name,
+  //      validate args[1] (must be IdentExpr resolving to an enum type) and
+  //      annotate the call-node with `parseVariantEnum: EnumType` so codegen
+  //      can pick it up (parallel to meta-checker's typeRegistrySnapshot).
+  //
+  // Annotation lives directly on the call-node — survey Risk #3 (read EnumType
+  // off the annotated call-node, skip serializeTypeEntry payload extension).
+  // ---------------------------------------------------------------------------
+  const _allTopNodes = ((fileAST.nodes as ASTNodeLike[] | undefined)
+    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+    ?? []);
+
+  // Step 1: collect parseVariant local names from imports of 'scrml:data'.
+  const parseVariantLocals = new Set<string>();
+  function collectParseVariantImports(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "import-decl" && (n as ASTNodeLike).source === "scrml:data") {
+        const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
+        if (Array.isArray(specifiers)) {
+          for (const spec of specifiers) {
+            if (spec && spec.imported === "parseVariant" && typeof spec.local === "string") {
+              parseVariantLocals.add(spec.local);
+            }
+          }
+        } else if (Array.isArray(n.names)) {
+          // Defensive fallback when specifiers wasn't populated.
+          for (const name of n.names as unknown[]) {
+            if (typeof name === "string" && name === "parseVariant") {
+              parseVariantLocals.add("parseVariant");
+            }
+          }
+        }
+      }
+      const body = n.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectParseVariantImports(body);
+      const children = n.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectParseVariantImports(children);
+    }
+  }
+  collectParseVariantImports(_allTopNodes);
+
+  // Step 2: wire fnErrorTypes / fnCanFail so `!{}` exhaustiveness fires.
+  for (const localName of parseVariantLocals) {
+    fnErrorTypes.set(localName, "ParseError");
+    fnCanFail.add(localName);
+    fnAllDeclared.add(localName);
+  }
+
+  // Step 3: walk every ExprNode in the file. Validate + annotate each
+  // parseVariant call-site.
+  if (parseVariantLocals.size > 0) {
+    walkAndValidateParseVariantCalls(_allTopNodes, parseVariantLocals, typeRegistry, errors, fileSpan);
+  }
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown();
 
@@ -7562,6 +7631,168 @@ function checkLoopControl(nodes: ASTNodeLike[], errors: TSError[], filePath: str
   }
 
   walk(nodes, 0, false);
+}
+
+// ---------------------------------------------------------------------------
+// §41.13 / §53.10 — parseVariant validation helper.
+//
+// Validates that a CallExpr node's second argument is a bare type-name
+// identifier referring to a scrml-native enum type. Emits
+// E-PARSEVARIANT-TYPE-NOT-ENUM with the appropriate message variant when:
+//   - args[1] is missing
+//   - args[1] is not an IdentExpr (string literal, number, member, etc.)
+//   - args[1] resolves to an undeclared type
+//   - args[1] resolves to a non-enum type (struct, primitive, etc.)
+//
+// On success, returns the resolved EnumType; otherwise null.
+//
+// Future family members (`serialize`, `formFor`, etc.) will reuse the same
+// shape with a different code prefix — keep the helper signature flexible.
+// ---------------------------------------------------------------------------
+function validateParseVariantTypeArg(
+  call: { args?: unknown[] },
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+  span: Span,
+): EnumType | null {
+  const args = (call.args ?? []) as Array<{ kind?: string; name?: string }>;
+  // Arity is checked elsewhere; defensive guard here.
+  if (args.length < 2) return null;
+  const typeArg = args[1];
+  if (!typeArg || typeof typeArg !== "object") return null;
+
+  if (typeArg.kind !== "ident" || typeof typeArg.name !== "string") {
+    const got = typeArg.kind ?? "unknown";
+    errors.push(new TSError(
+      "E-PARSEVARIANT-TYPE-NOT-ENUM",
+      `E-PARSEVARIANT-TYPE-NOT-ENUM: Second argument to \`parseVariant\` must be a bare type name (e.g. \`parseVariant(json, MyEnum)\`). ` +
+      `Got: ${got}. ` +
+      `Type-as-argument primitives reject expression-valued or string-valued type arguments at compile time.`,
+      span,
+    ));
+    return null;
+  }
+
+  const typeName = typeArg.name;
+  const resolved = typeRegistry.get(typeName);
+  if (!resolved) {
+    errors.push(new TSError(
+      "E-PARSEVARIANT-TYPE-NOT-ENUM",
+      `E-PARSEVARIANT-TYPE-NOT-ENUM: \`parseVariant\` references unknown type '${typeName}'. ` +
+      `The second argument must name a scrml-native \`:enum\` type declared in this file, ` +
+      `or imported from another file. (See \`< match for=Type>\` E-ENGINE-004 for the parallel diagnostic.)`,
+      span,
+    ));
+    return null;
+  }
+  if (resolved.kind !== "enum") {
+    errors.push(new TSError(
+      "E-PARSEVARIANT-TYPE-NOT-ENUM",
+      `E-PARSEVARIANT-TYPE-NOT-ENUM: \`parseVariant\` references type '${typeName}' which is a ${resolved.kind}, not an enum. ` +
+      `parseVariant only accepts scrml-native \`:enum\` types — the variant set is what dispatches on the discriminator. ` +
+      `For struct boundary parsing, use a server-fn entry point with §53 SPARK predicate refinement on the typed parameter.`,
+      span,
+    ));
+    return null;
+  }
+  return resolved as EnumType;
+}
+
+/**
+ * §41.13 — walk an ASTNode tree and find every CallExpr whose callee resolves
+ * to a parseVariant local name. Validate args[1] and annotate the call-node
+ * with `parseVariantEnum: EnumType` for codegen.
+ *
+ * Walks both AST tree (markup, logic, function bodies) AND every ExprNode
+ * payload (exprNode, initExpr, condition, etc.) — the parseVariant call may
+ * appear at any expression position.
+ */
+function walkAndValidateParseVariantCalls(
+  nodes: ASTNodeLike[],
+  parseVariantLocals: Set<string>,
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+  defaultSpan: Span,
+): void {
+  // Set of fields on AST nodes that may carry an ExprNode payload.
+  const EXPR_FIELDS = [
+    "exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
+    "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr",
+  ];
+
+  function processCall(call: { kind?: string; callee?: unknown; args?: unknown[]; span?: Span } & Record<string, unknown>): void {
+    const callee = call.callee as { kind?: string; name?: string } | undefined;
+    if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
+    if (!parseVariantLocals.has(callee.name)) return;
+    const span = (call.span as Span | undefined) ?? defaultSpan;
+    const enumType = validateParseVariantTypeArg(call, typeRegistry, errors, span);
+    if (enumType) {
+      // Annotate the call-node so codegen (emit-parse-variant.ts) can pick it up.
+      // Convention parallels meta-checker.ts's typeRegistrySnapshot annotation.
+      (call as Record<string, unknown>).parseVariantEnum = enumType;
+    } else {
+      // Mark as recognized-but-invalid so codegen knows to skip the
+      // monomorphized emission and fall through to the runtime-fallback path.
+      (call as Record<string, unknown>).parseVariantInvalid = true;
+    }
+  }
+
+  function walkExpr(expr: unknown): void {
+    if (!expr || typeof expr !== "object") return;
+    // Use the structural call-walker on every ExprNode root.
+    try {
+      forEachCallInExprNode(expr as any, (call) => {
+        processCall(call as any);
+      });
+    } catch {
+      // forEachCallInExprNode is exhaustive per ExprNode kinds — defensive
+      // catch in case an experimental kind sneaks in.
+    }
+  }
+
+  function walkNode(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    const n = node as ASTNodeLike;
+
+    // Walk known ExprNode payload fields.
+    for (const f of EXPR_FIELDS) {
+      const v = (n as Record<string, unknown>)[f];
+      if (v && typeof v === "object") walkExpr(v);
+    }
+
+    // Some lift / ram / when-message / guarded-expr shapes nest the ExprNode
+    // under a wrapper object (e.g., n.expr.exprNode). Walk one level deep.
+    const expr = (n as Record<string, unknown>).expr;
+    if (expr && typeof expr === "object") {
+      const inner = (expr as Record<string, unknown>).exprNode;
+      if (inner && typeof inner === "object") walkExpr(inner);
+    }
+
+    // Recurse into children + body + arms.
+    const body = (n as Record<string, unknown>).body;
+    if (Array.isArray(body)) {
+      for (const c of body) walkNode(c);
+    }
+    const children = (n as Record<string, unknown>).children;
+    if (Array.isArray(children)) {
+      for (const c of children) walkNode(c);
+    }
+    const arms = (n as Record<string, unknown>).arms;
+    if (Array.isArray(arms)) {
+      for (const a of arms) {
+        if (a && typeof a === "object") {
+          const handlerExpr = (a as Record<string, unknown>).handlerExpr;
+          if (handlerExpr && typeof handlerExpr === "object") walkExpr(handlerExpr);
+          walkNode(a);
+        }
+      }
+    }
+    // guarded-expr nests its protected node:
+    const guardedNode = (n as Record<string, unknown>).guardedNode;
+    if (guardedNode && typeof guardedNode === "object") walkNode(guardedNode);
+  }
+
+  for (const n of nodes) walkNode(n);
 }
 
 // ---------------------------------------------------------------------------
