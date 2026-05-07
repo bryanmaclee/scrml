@@ -349,6 +349,70 @@ root, STOP. Re-derive the path from WORKTREE_ROOT.
 
 **Platform-level fix (deferred):** a `PreToolUse` hook in settings.json that rejects sub-dispatched-agent Write/Edit calls whose absolute path is in main but not the active worktree subtree. Closes the leak entirely; needs context-aware "is this the PA or a subagent?" signal. Filed as F4 follow-up; not yet scoped.
 
+### Dispatch landing — worktree-as-scratch / file-delta (S67 standing rule)
+
+**This supersedes the prior cherry-pick-from-worktree pattern AND the brief S67 fast-forward-dispatch experiment.** Validated S67 on B7 + B8 parallel dispatches: zero PA redo, single PA-authored commit per dispatch, no branch-name fight with the harness.
+
+**The premise:** the agent's worktree contains a complete working file-state. We don't need its commit history; we need its file deltas. Treat the worktree as a drop-zone, ignore the branch ancestry, land via `git checkout <branch> -- <files>` from main.
+
+**Standing protocol (every compiler-source dispatch):**
+
+1. **Dispatch with `isolation: "worktree"`.** Harness assigns worktree path + branch. Don't fight either. Brief instructs incremental commits for crash-recovery only — branch name doesn't have to match what the brief suggests.
+
+2. **Agent reports completion** with: WORKTREE_PATH, FINAL_SHA, FILES_TOUCHED list, deferred-items list.
+
+3. **PA review (in main checkout):**
+   ```
+   git diff main..<agent-branch> -- <files-touched>
+   ```
+   Filter: any file in the diff that is "agent-side-stale-view of main-current" (e.g., `hand-off.md`, files updated by sibling parallel dispatches that landed earlier) is SKIPPED — those are not the agent's work, just the agent's outdated base.
+
+4. **PA pulls file content into main:**
+   ```
+   git checkout <agent-branch> -- <file1> <file2> ...
+   ```
+   Operates from main checkout; pulls those exact paths from the agent's branch tip; stages them in main's index.
+
+5. **PA reviews staged delta.** `git diff --cached --stat` then per-file as needed.
+
+6. **PA single PA-authored commit** with descriptive message + agent-branch reference. Pre-commit hook runs `bun test`; full suite via post-commit hook.
+
+7. **Worktree branch retained** for forensic / crash-recovery. Not merged into main's history.
+
+**Crash-recovery preserved.** Agent commits to its branch incrementally per the global "Crash Recovery: Incremental Commits + Progress Reports" directive. Branch + progress.md still serve as recovery anchor.
+
+**Review gate preserved.** PA reviews the diff BEFORE the checkout. The gate is the file-content review, not the merge mechanic.
+
+**Known friction (recoverable, not deal-breaking):**
+
+- **Primer §13.7 / shared-table conflicts.** When two parallel dispatches both add rows to the same documentation table from the same base commit, the second-landing dispatch's primer change reflects the OLD table without the first's row. Manual merge required: take the row + specifics from the second branch's primer, append to the current main primer. ~3 minutes per occurrence. Workaround when known in advance: dispatch one at a time when both will touch the same shared doc surface.
+
+- **Agent-side-stale-views in the diff.** If main moved while the agent worked (sibling dispatch landed first, or PA committed hygiene), the agent's branch will show DELETIONS or REVERSALS of main's newer content. PA must visually filter the file list at step 3. ~30 seconds. Heuristic: a file the brief did not name is likely an agent-side-stale-view; verify by checking the agent's report for FILES_TOUCHED.
+
+**What this pattern eliminates:**
+
+- Cherry-pick churn (no per-commit replay)
+- Branch-name fights with the harness (don't care what the agent named it)
+- PA redo work (zero rewriting from agent output)
+- "Two artifacts on same territory" appearance (PA's review is reading-only; agent does the writing)
+
+**What this pattern costs:**
+
+- Main's git history loses agent's per-step commit granularity (agent's branch retains it for forensics)
+- Manual primer merge when sibling parallel dispatches touch shared doc surfaces
+
+**When NOT to use this pattern:**
+
+- Pure-PA edits (PA writes directly, commits directly — no agent involved)
+- User-driven small edits (no dispatch needed)
+- Multi-step waves where each commit needs individual review/reorder/squash control: consider the older cherry-pick pattern (still available; this rule is the default, not exclusive)
+
+**Evidence base:**
+
+- S43-S66: cherry-pick-from-worktree was the standing pattern. Caused mechanical churn + progress.md conflicts. User flagged as friction during S66.
+- S67 first attempt: fast-forward dispatch (instruct agent to use named branch, PA `git merge --ff-only`). Agent's branch was created as instructed BUT main had moved (S67 hygiene commit) so FF was impossible. Pattern revealed as fragile — first parallel branch FF's cleanly only if main hasn't moved.
+- S67 second attempt: worktree-as-scratch / file-delta. Worked on B7 + B8 in parallel. ~2 minutes total landing time per dispatch (review + checkout + commit) vs cherry-pick's ~10-15 minutes.
+
 ### Writing to user-voice
 - Append-only, verbatim
 - Path: `../scrml-support/user-voice-scrmlTS.md` (moved out of this repo 2026-04-17 when scrmlTS went public — MIT license)
