@@ -740,6 +740,7 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
   });
 
   // §S5.4 — Call-form validator `length(>=2)` with relational arg
+  // Phase A1b Step B9: args[0] is now a RelationalPredicateNode (not raw text).
   test("§S5.4: <userName req length(>=2)> = <input/> → call-form with relational arg", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }</program>`;
     const { ast } = parse(src);
@@ -751,15 +752,20 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
     expect(d.validators[0].name).toBe("req");
     expect(d.validators[0].args).toBeNull();
     expect(d.validators[1].name).toBe("length");
-    // Step 5: args stored as raw text array; A1b sub-grammar-parses to ExprNode[].
+    // B9: args is the parsed structured form. For length(rel-op N), arg[0]
+    // is a RelationalPredicateNode with op + value (the threshold ExprNode).
     expect(Array.isArray(d.validators[1].args)).toBe(true);
     expect(d.validators[1].args.length).toBe(1);
-    expect(d.validators[1].args[0]).toContain(">=");
-    expect(d.validators[1].args[0]).toContain("2");
+    const relPred = d.validators[1].args[0];
+    expect(relPred.kind).toBe("relational-predicate");
+    expect(relPred.op).toBe(">=");
+    expect(relPred.value.kind).toBe("lit");
+    expect(relPred.value.value).toBe(2);
     assertNoHtmlFragmentMatching(ast, /< userName/);
   });
 
   // §S5.5 — Multiple call-form validators
+  // Phase A1b Step B9: args[0] is now a parsed ExprNode (lit "number").
   test("§S5.5: <age min(18) max(120)> = <input/> → two call-form validators", () => {
     const src = `<program>\${ <age min(18) max(120)> = <input type="number"/> }</program>`;
     const { ast } = parse(src);
@@ -769,9 +775,13 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
     expect(d.shape).toBe("decl-with-spec");
     expect(d.validators.length).toBe(2);
     expect(d.validators[0].name).toBe("min");
-    expect(d.validators[0].args).toEqual(["18"]);
+    expect(d.validators[0].args.length).toBe(1);
+    expect(d.validators[0].args[0].kind).toBe("lit");
+    expect(d.validators[0].args[0].value).toBe(18);
     expect(d.validators[1].name).toBe("max");
-    expect(d.validators[1].args).toEqual(["120"]);
+    expect(d.validators[1].args.length).toBe(1);
+    expect(d.validators[1].args[0].kind).toBe("lit");
+    expect(d.validators[1].args[0].value).toBe(120);
   });
 
   // §S5.6 — Different bindable markup tag: textarea
@@ -813,6 +823,8 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
   });
 
   // §S5.9 — Pattern call-form with regex-string-arg
+  // Phase A1b Step B9: args[0] is now a parsed ExprNode (lit "string" with
+  // value "[a-z]+"). Pattern's quoted-string form parses cleanly.
   test("§S5.9: <slug pattern(\"[a-z]+\")> → pattern validator with string arg", () => {
     const src = `<program>\${ <slug pattern("[a-z]+")> = <input type="text"/> }</program>`;
     const { ast } = parse(src);
@@ -821,10 +833,13 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
     const d = decls[0];
     expect(d.validators.length).toBe(1);
     expect(d.validators[0].name).toBe("pattern");
-    expect(d.validators[0].args[0]).toContain("[a-z]+");
+    expect(d.validators[0].args.length).toBe(1);
+    expect(d.validators[0].args[0].kind).toBe("lit");
+    expect(d.validators[0].args[0].value).toBe("[a-z]+");
   });
 
   // §S5.10 — Cross-field validator: eq(@password)
+  // Phase A1b Step B9: args[0] is now a parsed IdentExpr with @-prefix.
   test("§S5.10: <confirm req eq(@password)> → eq validator with @password arg", () => {
     const src = `<program>\${ <confirm req eq(@password)> = <input type="password"/> }</program>`;
     const { ast } = parse(src);
@@ -834,7 +849,9 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
     expect(d.validators.length).toBe(2);
     expect(d.validators[0].name).toBe("req");
     expect(d.validators[1].name).toBe("eq");
-    expect(d.validators[1].args[0]).toContain("@password");
+    expect(d.validators[1].args.length).toBe(1);
+    expect(d.validators[1].args[0].kind).toBe("ident");
+    expect(d.validators[1].args[0].name).toBe("@password");
   });
 
   // §S5.11 — Negative: no `=` after attrs (just opener) → NOT Shape 2

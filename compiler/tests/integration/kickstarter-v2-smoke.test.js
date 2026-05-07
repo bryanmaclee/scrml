@@ -224,8 +224,11 @@ describe("Kickstarter v2 §3.1 K11.2 — three RHS shapes", () => {
     expect(lenV).toBeDefined();
     expect(Array.isArray(lenV.args)).toBe(true);
     expect(lenV.args.length).toBe(1);
-    expect(lenV.args[0]).toContain(">=");
-    expect(lenV.args[0]).toContain("2");
+    // Phase A1b Step B9: args[0] is a RelationalPredicateNode (not raw text).
+    expect(lenV.args[0].kind).toBe("relational-predicate");
+    expect(lenV.args[0].op).toBe(">=");
+    expect(lenV.args[0].value.kind).toBe("lit");
+    expect(lenV.args[0].value.value).toBe(2);
     assertNoHtmlFragmentMatching(ast, /<\s*userName/);
   });
 

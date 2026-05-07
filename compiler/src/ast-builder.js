@@ -46,6 +46,7 @@ import {
 } from "./tokenizer.ts";
 
 import { parseExprToNode, forEachResetExprInExprNode } from "./expression-parser.ts";
+import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 
 /**
@@ -3043,6 +3044,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //   - consumeUntil: index (relative to current `i`) AFTER the trailing `=`
     //     (or after the fused `>=` for the no-whitespace path)
     //   - validators: array of {name, args: string[]|null, span} entries
+    //     (Phase A1b Step B9 then transforms args into ValidatorArg[] —
+    //     ExprNode for standard predicates, RelationalPredicateNode for
+    //     length(>=N)-style — via decorateValidatorsWithExprNodes below.)
     //   - fusedGtEq: true if the closer was the fused `>=` OPERATOR token
     //                (no-whitespace form `<count>=0`); false for whitespace
     //                form `<NAME ...> = ...`. Note: fused `>=` precludes
@@ -3261,6 +3265,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           element: markupNode,
           span: markupNode.span,
         };
+        // Phase A1b Step B9 — convert raw-text validator args into structured
+        // ValidatorArg[] (ExprNode | RelationalPredicateNode). Mutates in
+        // place; preserves null/[] distinction; idempotent.
+        decorateValidatorsWithExprNodes(scan.validators, filePath);
         return {
           id: ++counter.next,
           kind: "state-decl",
@@ -3324,6 +3332,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       span: spanOf(startTok, peek()),
     };
     if (scan.validators.length > 0) {
+      // Phase A1b Step B9 — convert raw-text validator args into structured
+      // ValidatorArg[] (ExprNode | RelationalPredicateNode). Idempotent;
+      // safe to call from this defensive Shape-1/3-with-validators path.
+      decorateValidatorsWithExprNodes(scan.validators, filePath);
       node.validators = scan.validators;
     }
     if (typeAnnotation) {
@@ -3582,7 +3594,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
                 break;
               }
             }
-            argTexts.push(at.text);
+            // STRING tokens have their surrounding quotes stripped by the
+            // tokenizer; restore them via JSON.stringify so the joined raw
+            // text is parseable as a JS string literal in B9. Mirrors the
+            // default-expr collector treatment above (line ~3533). Without
+            // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
+            // expression-parser would fail to recognise it as a string lit.
+            argTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
             lastTok = at;
             argIdx++;
           }

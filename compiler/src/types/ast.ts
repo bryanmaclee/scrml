@@ -457,9 +457,13 @@ export interface ReactiveDeclNode extends BaseNode {
    * Empty array `[]` for Shape 2 with no validators. Undefined for Shape 1/3.
    *
    * Per AST-CONTRACTS-AND-DECOMPOSITION §1.1, `args` is the parsed expression
-   * list (`ExprNode[]`). Step 5 stores args as raw text (`string[]`) for
-   * forwarding to A1b's sub-grammar parser; relational-form args (`>=2`)
-   * and cross-field args (`@cell`) are not standalone-parseable as JS.
+   * list (`ValidatorArg[]`). Step 5 collects raw text into `args: [rawText]`
+   * (single-element array of joined paren contents); Phase A1b Step B9
+   * (validator-arg-parser) replaces `args` with the structured form: each
+   * arg is parsed into an `ExprNode` for standard predicates or a
+   * `RelationalPredicateNode` for the `length(>=N)`-style sub-grammar
+   * (which is not standalone-parseable JavaScript). Bareword `args: null`
+   * and zero-arg-call `args: []` are preserved as-is.
    */
   validators?: ValidatorEntry[];
   /**
@@ -514,24 +518,80 @@ export interface ReactiveDeclNode extends BaseNode {
 }
 
 /**
+ * Phase A1b Step B9 — relational-predicate sub-grammar node.
+ *
+ * Captures the `<rel-op> <expr>` form that appears as the argument to
+ * `length(...)` validators (per SPEC §55.1): `length(>=2)`, `length(<=N)`,
+ * `length(<5)`, `length(>0)`, `length(=N)`, `length(!=0)`. The form is NOT
+ * standalone-parseable JavaScript (no LHS for the operator) — it carries
+ * the comparison semantics that B10 (validator type-checking) and A1c
+ * (codegen) need to lower into runtime checks.
+ *
+ * NOT part of the ExprNode discriminated union — appears only inside
+ * ValidatorEntry.args. The dep-graph walker in `forEachIdentInExprNode`
+ * special-cases this kind to traverse `value` for reactive @cell tracking
+ * (per audit §1.7 + §55.11 cross-field validator semantics).
+ *
+ * Note on the wider grammar: the spec table at §55.1 lists `length(predicate)`
+ * generically — only the relational forms above are observed in worked
+ * examples. If §55 is ever extended to admit nested predicates here
+ * (e.g. `length(req)`), the parser will need extending; for now the operator
+ * set is closed at the six relational comparisons above.
+ */
+export interface RelationalPredicateNode {
+  kind: "relational-predicate";
+  /**
+   * Source span. Uses ExprSpan shape (structurally identical to Span) so
+   * the node composes naturally with ExprNode children.
+   */
+  span: ExprSpan;
+  /** Comparison operator. */
+  op: ">=" | "<=" | "<" | ">" | "=" | "!=";
+  /** Right-hand-side expression: the threshold (numeric literal, @cell ref, etc.). */
+  value: ExprNode;
+}
+
+/**
  * Phase A1a Step 5 — bareword/call-form validator on a state-decl.
  *
  * Bareword: `name` is the predicate identifier (`req`, `email`, `numeric`),
  * `args` is null.
  *
  * Call-form: `name` is the predicate identifier (`length`, `min`, `eq`),
- * `args` is an array of raw arg-text strings (Step 5 produces a single-element
- * array containing the joined paren contents; A1b sub-grammar-parses to
- * ExprNode[]).
+ * `args` is an array of parsed argument nodes. Per AST-CONTRACTS §1.1 and
+ * Phase A1b Step B9, the array element type is `ExprNode` for standard
+ * predicate args (numeric, regex, comparison, array-of-variants, @cell ref)
+ * and `RelationalPredicateNode` for the `length(>=N)`-style relational form.
+ *
+ * Per audit §1.5: the empty-array vs null distinction is preserved across
+ * the B9 transform. `args: null` ↔ bareword form (`<x req>`); `args: []` ↔
+ * zero-arg call form (`<x req()>`); `args: [...]` ↔ non-empty call form.
+ *
+ * Step 5 produces a single-element raw-text array (`["raw text"]`); B9
+ * replaces that with the parsed array of length 1 (universal-core predicates
+ * all take exactly one argument when in call-form per §55.1).
  */
 export interface ValidatorEntry {
   /** Predicate name (e.g., "req", "length", "min", "pattern"). */
   name: string;
-  /** Raw argument text(s); null for bareword validators. */
-  args: string[] | null;
+  /**
+   * Parsed argument list; null for bareword validators (no parens at all).
+   * Empty array `[]` legal for zero-arg call form (`req()`). Non-empty array
+   * holds parsed expressions; for `length(...)` predicates the element is a
+   * `RelationalPredicateNode`; for everything else it is an `ExprNode`.
+   */
+  args: ValidatorArg[] | null;
   /** Source span covering the validator (name + args region). */
   span: Span;
 }
+
+/**
+ * Phase A1b Step B9 — element type for `ValidatorEntry.args`.
+ *
+ * The discriminator is `kind`: standard ExprNode kinds (per the ExprNode union)
+ * or `"relational-predicate"` for the relational-form (length(>=N)) sub-grammar.
+ */
+export type ValidatorArg = ExprNode | RelationalPredicateNode;
 
 /**
  * Phase A1a Step 5 — `kind: "render-spec"` AST sub-node per
