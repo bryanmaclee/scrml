@@ -1,10 +1,50 @@
 ---
 title: Promotion ergonomics — I-MATCH-PROMOTABLE lint + bun scrml promote CLI
 date: 2026-05-06
-session: S65
+session: S65 (Tier A) + S66 (Tier B re-scoped)
 authority: Bryan design conversation S65 (post-Phase-2 parseVariant ship); pattern derived from existing `bun scrml migrate` precedent + W-LIFECYCLE-CANDIDATE / W-MATCH-TRANSITIONS-ACCRUING lints
-status: SCOPE STASHED — queued post-A+ verdict + post-B3
-estimate: ~13-22h for `--match` alone; ~18-30h with `--engine` (Tier 1→2 sibling)
+status: Tier A SHIPPED S65; Tier B SHIPPED S66 (re-scoped Path A — `is`-only); Tier C (`--engine` + W-MATCH-TRANSITIONS-ACCRUING) DEFERRED
+estimate: ~13-22h for `--match` alone; ~18-30h with `--engine` (Tier 1→2 sibling); re-scoped Tier B 16-26h
+---
+
+# §0. RE-SCOPED S66 (Path A authority)
+
+**Authority:** Bryan-authorized S66 architectural decision after the Phase 0 STOP report at
+[`SURVEY-PHASE-B.md`](./SURVEY-PHASE-B.md). Phase 0 surfaced three material findings (A, B, D)
+that warranted re-scope before implementation.
+
+**Tier B narrows to:**
+
+1. **Predicate matrix — `is`-only.** The lint and `bun scrml promote --match` operate on
+   exactly two parseable forms:
+   - `if (@cell.is(.X))` — method-call form
+   - `if (@cell is .X)` — operator form
+   - `if (@cell is .X msg)` — operator form with single-field bind (verified parseable;
+     test reference `compiler/tests/unit/if-is-variant.test.js`)
+
+   The `==`-with-dot-prefix-variant forms (`@cell == .X`, `@cell == .X(payload)`,
+   `@cell == .X msg`) named in §B below remain part of the design lock for documentation
+   but are NOT shipped in S66. Reason: `preprocessForAcorn`
+   (`compiler/src/expression-parser.ts:686+`) only registers placeholders for `is .Variant`,
+   not for `== .Variant`. The `==` form does not parse today — implementing the rewrite
+   would ship dead-code paths. Adding `==` is a future preprocessor extension, not a Tier B
+   work item. SPEC §56 has been amended to drop the `==` rows from §56.2 and §56.5.2.
+
+2. **`--engine` mode DEFERRED to Tier C.** The `--engine` CLI flag stays registered
+   (running it prints "implementation pending") but the `<match>` → `<engine>` span rewrite
+   does not ship in S66. Reason: `--engine` pairs with `W-MATCH-TRANSITIONS-ACCRUING`,
+   which has no §34 catalog row, no §28 suppression config row, and no source impl. Tier C
+   is the right home for that work. SPEC §56.6 lists the four Tier C work items concretely.
+
+3. **`I-MATCH-PROMOTABLE` §34 catalog row catch-up included.** Per Phase 0 Finding D, the
+   §34 row was missed in S65 Tier A. Tier B Phase 0a lands it as a small spec amendment.
+
+**Re-scoped estimate: 16-26h.** Down from the full SCOPE 25-41h. Single-session shippable.
+
+The original SCOPE design (below) remains the canonical record of intent. Sections marked
+with the predicate matrix or `--engine` belong to Tier C now; the Tier B ship is `--match` +
+the lint over the two `is` forms.
+
 ---
 
 # Promotion ergonomics — design + dispatch readiness
