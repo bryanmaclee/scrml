@@ -151,9 +151,9 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 
 1. **Lock L22 record** — append to `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md` (or wherever L21 was recorded). L22 phrasing: *"Type-as-argument is a first-class scrml language primitive, introduced by `parseVariant`. Foundation for the type-as-argument family (`serialize`, `formFor`, `schemaFor`, `tableFor`, reflective metadata). Each future family member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition."* Cite debate-05 verdict + judge ratification + S65 family-roadmap commit.
 
-2. **SPEC §41.13 (`scrml:data parseVariant`)** [DRIFT-1 corrected — was §10.4 in pre-survey draft] — add `parseVariant` API entry as a sibling to existing §41.12 `registerMessages`. Full call signature, second-arg type-constraint (enum-only), `::ParseError` failure type, exhaustive failure-variant list. Cite §53.10 (new — see step 3) for type-as-argument family framing; §22 (reflect) for sibling-precedent inside meta-blocks; §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing. ~40-60 lines.
+2. **SPEC §41.13 (`scrml:data parseVariant`)** [DRIFT-1 corrected — was §10.4 in pre-survey draft] — add `parseVariant` API entry as a sibling to existing §41.12 `registerMessages`. Full call signature, second-arg type-constraint (enum-only), `::ParseError` failure type, exhaustive failure-variant list. Cite §53.14 (new — see step 3) for type-as-argument family framing; §22 (reflect) for sibling-precedent inside meta-blocks; §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing. ~40-60 lines.
 
-3. **SPEC §53.10 (new subsection — "Type-as-argument primitives")** [survey-confirmed insert point: after §53.9.4, before §53 SPEC-ISSUE list] — formalize type-as-argument as a language concept per design insight #4. Distinguishes type-establishment step (constructor selection from discriminator) from predicate-enforcement step (SPARK boundary refinement). Documents the family roadmap. Documents the discipline that bounds the family (sliver test mandatory; synonym detection mandatory; per-feature deep-dive). Cross-refs §22 (reflect — meta-block precedent) + §41.13 (parseVariant — first general-position member) + §53.6 named-shape registry as structural model. ~80-120 lines (load-bearing for the family; first member specification carries the architectural framing).
+3. **SPEC §53.14 (new subsection — "Type-as-argument primitives")** [survey-confirmed insert point: after §53.9.4, before §53 SPEC-ISSUE list] — formalize type-as-argument as a language concept per design insight #4. Distinguishes type-establishment step (constructor selection from discriminator) from predicate-enforcement step (SPARK boundary refinement). Documents the family roadmap. Documents the discipline that bounds the family (sliver test mandatory; synonym detection mandatory; per-feature deep-dive). Cross-refs §22 (reflect — meta-block precedent) + §41.13 (parseVariant — first general-position member) + §53.6 named-shape registry as structural model. ~80-120 lines (load-bearing for the family; first member specification carries the architectural framing).
 
 4. **SPEC §34 catalog** — add error codes:
    - `E-PARSEVARIANT-TYPE-NOT-ENUM` — compile-time; second arg is not a scrml-native enum
@@ -183,7 +183,7 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
    - §10 stdlib catalog: add `parseVariant` row + `ParseError` enum description
    - §13 locks: add L22 entry
    - §13.5 spec-real-estate-vs-adoption table: parseVariant now ACTIVE
-   - **§14 (NEW) Type-as-argument family** — short reference paragraph naming the 5-member family with shipped/planned status; cross-references SPEC §53.x
+   - **§14 (NEW) Type-as-argument family** — short reference paragraph naming the 5-member family with shipped/planned status; cross-references SPEC §53.14
 
 10. **Predicate-gaps inventory update** — `scrml-support/docs/predicate-gaps-inventory-2026-05-06.md`: flip Gap #19 status from "captured" to "CLOSED by parseVariant (debate-05 verdict + Path-A architectural commit, S65)". Add note: Gap #20 (validator-set transform operators) still open; planned closure via `formFor(StructType, pick=/omit=/partial=)` (next family member after `serialize`).
 
@@ -199,7 +199,7 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 |---|---|---|---|
 | Lock L22 record + family doc | ~1-2h | ~1.5h | mechanical |
 | SPEC §41.13 entry [DRIFT-1 fix] | (was §10.4) | ~2-3h | §41.12 is the model |
-| SPEC §53.10 type-as-argument family | ~3-4h | ~2-3h | §53.6 named-shape registry is structural model |
+| SPEC §53.14 type-as-argument family | ~3-4h | ~2-3h | §53.6 named-shape registry is structural model |
 | SPEC §34 catalog (4 codes) | ~0.5-1h | ~0.5h | mechanical pattern |
 | Compiler — parser [DRIFT-2 fix] | ~3-5h | **0h (no-op)** | already parses correctly |
 | Compiler — type-system pass | ~3-5h | **2-3h** | rides E-ENGINE-004 helper + reflect() precedent |
@@ -216,7 +216,7 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 
 1. **Phase 1 (~2h):** L22 record + new `stdlib/data/parse.scrml` (ParseError enum + parseVariant marker export) + cross-file-import sniff test (write a one-file scrml that does `import { ParseError } from 'scrml:data'; <state>: ParseError = .Malformed("test")` — does the type resolve?). **Risk #1 verification gate.**
 2. **Phase 2 (~5-8h):** TS pass (E-PARSEVARIANT-TYPE-NOT-ENUM, ride E-ENGINE-004 helper) + codegen (`emit-parse-variant.ts` modeled on `emit-machines.ts`). Verify `!{}` handler integration via existing failable-call codegen.
-3. **Phase 3 (~5-7h, parallelizable):** SPEC §41.13 + §53.10 + §34 catalog adds + family-precedent doc + primer/kickstarter/inventory updates. Independent of compiler dispatch.
+3. **Phase 3 (~5-7h, parallelizable):** SPEC §41.13 + §53.14 + §34 catalog adds + family-precedent doc + primer/kickstarter/inventory updates. Independent of compiler dispatch.
 4. **Phase 4 (~1-2h, optional):** ghost-patterns lint add ("JSON.parse against typed boundary → consider parseVariant"); final inventory updates.
 
 ## Risks

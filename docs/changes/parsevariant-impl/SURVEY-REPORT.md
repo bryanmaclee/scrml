@@ -208,7 +208,7 @@ A new TS pass (or addition to the existing call-expression check pass) that:
 
 ---
 
-## 9. SPEC §53.x placement
+## 9. SPEC §53.14 placement
 
 **What exists today:**
 
@@ -224,15 +224,15 @@ A new TS pass (or addition to the existing call-expression check pass) that:
 
 **What's missing for parseVariant:**
 
-- **New subsection §53.10 "Type-as-argument primitives"** (or §53.11 — pick the next free slot after §53.9). NOT §53.x random — concretely §53.10. Must:
+- **New subsection §53.14 "Type-as-argument primitives"** (Phase-3-corrected — pre-survey draft said §53.10 but that slot was already occupied by "Interaction with `protect=`"; §53.14 is the actual landing slot). Must:
   - Declare type-as-argument as a first-class scrml primitive.
   - Describe the type-establishment-vs-predicate-enforcement framing (design insight #4).
   - Document the family roadmap (parseVariant, serialize, formFor, schemaFor, tableFor, variantNames).
   - Document the discipline (sliver test + synonym detection + per-feature deep-dive).
   - Cross-ref §41.13 for the parseVariant API, §22 for reflect, §53.6 named-shape registry as a structurally-similar registry pattern.
-- §53.6 named-shape registry IS structurally similar to a "type-as-argument-family registry" (compile-time-only registry, lookup-failure error code, extensibility hook deferred to ^{}). The model carries to §53.10 cleanly.
+- §53.6 named-shape registry IS structurally similar to a "type-as-argument-family registry" (compile-time-only registry, lookup-failure error code, extensibility hook deferred to ^{}). The model carries to §53.14 cleanly.
 
-**Recommended insert point:** after §53.9.4, before SPEC-ISSUE list at end of §53. New subsection §53.10 is the cleanest landing.
+**Recommended insert point:** after §53.9.4, before SPEC-ISSUE list at end of §53. New subsection §53.14 is the cleanest landing.
 
 ---
 
@@ -250,7 +250,7 @@ A new TS pass (or addition to the existing call-expression check pass) that:
 - Failable: failure type `ParseError:enum` declared in `scrml:data`.
 - Second-arg constraint: scrml-native `:enum` type only. Rejected at compile time with E-PARSEVARIANT-TYPE-NOT-ENUM (cross-ref §34).
 - Discriminator: enum's variant names (no override).
-- Cross-ref: §53.10 for the type-as-argument family framing; §22 for reflect (sibling type-as-argument primitive); §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing.
+- Cross-ref: §53.14 for the type-as-argument family framing; §22 for reflect (sibling type-as-argument primitive); §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing.
 - ParseError variants enumerated with semantics.
 
 **Primer §10 update note:** the primer's `## §10 stdlib — what's on the shelf` lists `scrml:data` capabilities in prose. Add `parseVariant` + `ParseError` description there. SCOPE step 9 already calls this out.
@@ -263,7 +263,7 @@ A new TS pass (or addition to the existing call-expression check pass) that:
 |---|---|---|---|
 | 1. Lock L22 record | (within 1-2h "Lock + family doc") | 0.5h | Mechanical append |
 | 2. SPEC §41.13 (NOT §10.4 — DRIFT-1) | ~3-4h (within 6-8h spec bucket) | 2-3h | §41.12 is the model |
-| 3. SPEC §53.10 — type-as-argument family | ~3-4h | 2-3h | §53.6 named-shape registry is the structural model |
+| 3. SPEC §53.14 — type-as-argument family | ~3-4h | 2-3h | §53.6 named-shape registry is the structural model |
 | 4. SPEC §34 catalog — 4 error codes | ~0.5-1h | 0.5h | Mechanical pattern (D4 just added 7 codes) |
 | 5a. Compiler — parser | ~3-5h estimated | **0h (no-op, see DRIFT-2)** | parseVariant is a regular CallExpression already |
 | 5b. Compiler — type-system pass | ~3-5h | **2-3h** | Riding E-ENGINE-004 pattern + typeRegistry.get + EnumType.variants[] + reflect() precedent — primitives all exist |
@@ -311,7 +311,7 @@ The dependency graph from this survey:
 3. TS pass: recognize parseVariant call + validate arg2 enum + annotate
    └─> depends on #2 (typeRegistry must contain ParseError for failure-type annot)
 4. Codegen: emit-parse-variant.ts (depends on #3 annotation)
-5. SPEC §41.13 + §53.10 + §34 entries (parallel; can land before code)
+5. SPEC §41.13 + §53.14 + §34 entries (parallel; can land before code)
 6. Tests (depend on #3 + #4)
 7. Primer / kickstarter / inventory updates (parallel; near end)
 8. Family-precedent doc (parallel; near end)
@@ -352,7 +352,7 @@ The dependency graph from this survey:
 
 **Spec:**
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/SPEC.md` §41.12 (16898) — model for §41.13 entry.
-- `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/SPEC.md` §53.6 (23139) — model for §53.10 family-registry framing.
+- `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/SPEC.md` §53.6 (23139) — model for §53.14 family-registry framing.
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/SPEC.md` §34 (13874) — error code catalog.
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/SPEC.md` §22 / §47.2 (17672 — `reflect(variable)` runtime decode API) — type-as-argument prior art inside SPEC.
 
