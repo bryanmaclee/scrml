@@ -2,9 +2,48 @@
 title: X snippet — Zod-replacement claim calibration
 date: 2026-05-06
 session: S65
-status: DRAFT — for Bryan's approval before posting
-context: debate-05 verdict ratified C-narrow (ship parseVariant, hold parseShape); npm-myth article amended in same session
+status: RATIFIED — Path C (Variant 3 first post; Variant 2 reserved as follow-up reply if critics engage)
+context: debate-05 verdict C-narrow ratified (ship parseVariant, hold parseShape); npm-myth article amended in same session
+posting_strategy: post Variant 3 standalone; if a critic engages with "but X is missing," reply with Variant 2 bullet form
 ---
+
+## PASTE-READY (Variant 3 — first post)
+
+```
+Update on the "scrml fully replaces Zod" claim. Ran a 5-expert debate. The verdict came out narrower than I'd argued and I want to surface it.
+
+What survives: scrml's form-validation layer is genuinely stronger than Zod. `<name req length(>=2)> = <input/>` synthesizes `@form.isValid`, `@form.errors`, `@form.touched` — the form-DX layer Zod itself doesn't ship (Zod needs react-hook-form for that). Cross-field validation is just predicate args: `<confirm req eq(@signup.password)>`. One declaration where Zod+rhf is two libraries.
+
+What was overreach: "None of it. Ever." For tRPC-shape boundary parsing of arbitrary JSON into a typed enum, scrml's answer is now `parseVariant(json, EnumType)` — type-driven dispatch, the enum's own variant names as discriminator, returns typed value or fails with `::ParseError`. This was the gap. It's closing.
+
+What stays intentionally absent: `parseShape` for structs. The server function IS the typed boundary. Adding `parseShape` would be a synonym for what already happens via boundary refinement. Holding the line on stdlib surface.
+
+Calibrated claim: "for forms, Zod doesn't belong in a scrml app. For boundary-parsing, scrml has its own typed answer."
+```
+
+(Note for paste: backticks render as literal characters on X, which is fine — they visually mark code identifiers. ~280 words / well under X's 25k-char post limit. Em dashes preserved.)
+
+## PASTE-READY (Variant 2 — reserved follow-up reply pattern)
+
+If a critic engages on the original post with "but what about [feature X]?", paste this reply:
+
+```
+Fair pushback. The honest cut:
+
+✅ Form validation: scrml's auto-synth validity surface (`@form.isValid`, `@form.errors`, cross-field via `eq(@field)`) is what Zod needs react-hook-form to do. Stronger.
+
+✅ Discriminated-union boundary parse: `parseVariant(json, EnumType)` ships, type-driven dispatch.
+
+⚠️ Struct boundary parse: server function, intentionally. No `parseShape`.
+
+⚠️ Vocabulary breadth (`startsWith`, `multipleOf`, etc.): `pattern(/^prefix/)` or `custom`. Some land later.
+
+"Ever" was rhetoric. The form layer claim survives every test.
+```
+
+---
+
+## Variant catalog (for archive)
 
 # X snippet — paste-ready
 
