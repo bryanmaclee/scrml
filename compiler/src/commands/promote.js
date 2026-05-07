@@ -10,10 +10,13 @@
  *     registered; running it prints "implementation pending — deferred to
  *     Tier C dispatch" and exits with code 2.
  *
- * Predicate matrix (S66 narrowing): `--match` rewrites only the
- * `if (@cell is .Variant)` predicate shape. Other shapes named in §56.2
- * (`@cell == .X`, `@cell.is(.X)`, bind-on-is) are out of scope until their
- * respective parser/preprocessor gaps are closed.
+ * Predicate matrix (S66 — full restoration after narrowing reversal):
+ * `--match` rewrites both `if (@cell is .Variant)` and `if (@cell == .Variant)`
+ * predicate shapes. Both produce structurally identical rewrites — they're
+ * variant-tag checks. The S66 preprocessor fix (expression-parser.ts) makes
+ * `.Variant` parseable as a primary expression, which unblocks `==` recognition.
+ * Method-call form `@cell.is(.X)` and bind-on-is `is .X msg` remain out of
+ * scope (separate language gaps; not promotion-ergonomics scope).
  *
  * Usage (locked surface):
  *   scrml promote --match <file>[:line]    # if-else → <match>

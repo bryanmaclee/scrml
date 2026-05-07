@@ -190,6 +190,56 @@ describe("§1 promote --match — exhaustive chain rewrite", () => {
       cleanup(dir);
     }
   });
+
+  // S66 — full predicate matrix restored; rewrite handles `==` form too
+  test("`==` predicate form rewrites to <match> identically to `is` form (S66 restored matrix)", async () => {
+    const source = [
+      "${",
+      "  type Phase:enum = { Idle, Loading, Error, Success }",
+      "  <phase>: Phase = .Idle",
+      "}",
+      "",
+      "<div>",
+      "  " + D,
+      "    if (@phase == .Idle) {",
+      "      <p>idle</p>",
+      "    } else if (@phase == .Loading) {",
+      "      <p>loading</p>",
+      "    } else if (@phase == .Error) {",
+      "      <p>error</p>",
+      "    } else if (@phase == .Success) {",
+      "      <p>success</p>",
+      "    }",
+      "  }",
+      "</>",
+    ].join("\n");
+    const { runPromote } = await import("../../src/commands/promote.js");
+    const { dir, filePath } = makeTmpFile("test-eq.scrml", source);
+    try {
+      let exitCode = null;
+      const realExit = process.exit;
+      process.exit = (code) => { exitCode = code; throw new Error("__exit_intercept__"); };
+      try { runPromote(["--match", filePath]); }
+      catch (e) { if (e.message !== "__exit_intercept__") throw e; }
+      finally { process.exit = realExit; }
+      if (exitCode != null) expect(exitCode).toBe(0);
+
+      const after = readFileSync(filePath, "utf8");
+      // Same <match> block shape as the `is`-form test, lifted from `==`-form source.
+      expect(after).toContain("<match for=Phase on=@phase>");
+      expect(after).toContain("<Idle>");
+      expect(after).toContain("<Loading>");
+      expect(after).toContain("<Error>");
+      expect(after).toContain("<Success>");
+      // Original `==` text removed
+      expect(after).not.toContain("if (@phase == .Idle)");
+      // Bodies preserved
+      expect(after).toContain("<p>idle</p>");
+      expect(after).toContain("<p>success</p>");
+    } finally {
+      cleanup(dir);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

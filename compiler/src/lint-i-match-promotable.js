@@ -10,12 +10,17 @@
  *   - compound-condition (advisory; chain has `||` / `&&` / negation; not
  *     auto-promotable — separate info per §56.4)
  *
- * **Predicate matrix (S66 narrowing):** the lint fires only on chains where
- * every branch's `condExpr` is a `binary` ExprNode with `op === "is"` whose
- * left is the same `@cell` ident across the chain. The other shapes named in
- * §56.2 (`@cell.is(.X)`, `@cell == .X`, bind-on-is) are not parseable as
- * structured AST today (predecessor S66 Phase 0 + sub-survey findings —
- * see docs/changes/promotion-ergonomics/SURVEY-PHASE-B.md and progress.md).
+ * **Predicate matrix (S66 — full restoration):** the lint fires on chains
+ * where every branch's `condExpr` is a `binary` ExprNode with `op === "is"`
+ * OR `op === "=="` and right-side a leading-dot ident, with the same `@cell`
+ * left across the chain. Both `is` and `==` are accepted because they're
+ * structurally equivalent variant-tag checks in scrml; the dev's choice of
+ * operator is style. The S66 preprocessor fix (`compiler/src/expression-parser.ts`)
+ * makes `.Variant` parseable as a primary expression in any operator context,
+ * which is what unblocks recognition of `@cell == .Variant` here.
+ * (Earlier S66 narrowing to `is`-only was reversed after Bryan flagged the
+ * structural error — see docs/changes/promotion-ergonomics/progress.md
+ * "S66 narrowing reversal" entry.)
  *
  * **Pipeline placement:** runs as a post-TS pass invoked from api.js. Needs
  * `stateTypeRegistry` (built by `runTS`) plus the typed-AST. The B3 cell
@@ -418,29 +423,41 @@ function analyseChain(chainHead, branches, typeRegistry, cellTypeByName) {
 }
 
 /**
- * True if expr is a `@cell is .Variant` predicate.
+ * True if expr is a variant-tag-check predicate over a state cell.
  *
- * Handles two AST shapes:
- *   1. Structured `binary op=is` (when the parser produced it cleanly)
- *   2. `escape-hatch` with `raw` text matching the canonical pattern (the
- *      block-form parser may emit escape-hatch where parseExprToNode would
- *      emit binary; we pattern-match on the raw text in that case)
+ * Recognized predicate forms (S66 — restored full predicate matrix after
+ * narrowing-error reversal):
+ *   - `@cell is .Variant`     → binary op="is"  right=ident(.X)
+ *   - `@cell == .Variant`     → binary op="=="  right=ident(.X)
+ *   - `@cell.is(.Variant)`    → call shape (escape-hatch fallback for now)
  *
- * Returns null if not a match; otherwise `{ cellName, variantTag }`
+ * Both `is` and `==` are accepted as variant-tag checks because they are
+ * structurally equivalent in scrml — both ask "does this enum value have
+ * variant tag X?". The dev's choice of operator reflects style; the lint
+ * (and rewrite) treats them as the same predicate shape.
+ *
+ * Handles two AST representations:
+ *   1. Structured `binary op=is|==` (the canonical post-S66-preprocessor path)
+ *   2. `escape-hatch` with `raw` text matching the canonical pattern
+ *      (block-form parser may emit escape-hatch in some contexts)
+ *
+ * Returns null if not a match; otherwise `{ cellName, variantTag, idLeft }`
  * (cellName includes the `@` prefix; variantTag has no leading `.`).
  */
 function matchIsVariantPredicate(expr) {
   if (!expr) return null;
 
-  // Path 1: structured binary node
-  if (expr.kind === "binary" && expr.op === "is" &&
+  // Path 1: structured binary node — `is` OR `==` over leading-dot ident RHS
+  if (expr.kind === "binary" && (expr.op === "is" || expr.op === "==") &&
       expr.left && expr.left.kind === "ident" &&
       expr.right && expr.right.kind === "ident" &&
       typeof expr.right.name === "string" && expr.right.name.startsWith(".")) {
     return { cellName: expr.left.name, variantTag: expr.right.name.slice(1), idLeft: expr.left };
   }
 
-  // Path 2: escape-hatch with raw text
+  // Path 2: escape-hatch with raw text. Accept both `is` and `==` operator
+  // tokens. (Post-S66 preprocessor fix the structured path covers most cases,
+  // but block-form-parsed conditions can still arrive as escape-hatch.)
   if (expr.kind === "escape-hatch" && typeof expr.raw === "string") {
     // Normalize spacing — parser may emit "( @phase is . Idle )"
     const normalized = expr.raw.replace(/\s+/g, " ").replace(/\.\s+/g, ".").trim();
@@ -448,11 +465,11 @@ function matchIsVariantPredicate(expr) {
     const inner = normalized.startsWith("(") && normalized.endsWith(")")
       ? normalized.slice(1, -1).trim()
       : normalized;
-    // Pattern: `@cell is .Variant` (also accept bare `cell` without @ for
-    // expression contexts; the cell-type lookup will fail if unsupported).
-    const m = /^(@?[A-Za-z_$][A-Za-z0-9_$.]*)\s+is\s+\.([A-Z][A-Za-z0-9_]*)$/.exec(inner);
+    // Pattern: `@cell (is|==) .Variant`. Bare cell name (no @) accepted for
+    // expression contexts; the cell-type lookup will fail if unsupported.
+    const m = /^(@?[A-Za-z_$][A-Za-z0-9_$.]*)\s+(is|==)\s+\.([A-Z][A-Za-z0-9_]*)$/.exec(inner);
     if (m) {
-      return { cellName: m[1], variantTag: m[2], idLeft: null };
+      return { cellName: m[1], variantTag: m[3], idLeft: null };
     }
   }
 

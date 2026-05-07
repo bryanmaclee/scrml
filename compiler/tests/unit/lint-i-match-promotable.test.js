@@ -109,6 +109,38 @@ describe("§1 Exhaustive — clean lift available", () => {
     expect(exhaustive.message).toContain(".Idle");
     expect(exhaustive.message).toContain(".Success");
   });
+
+  // S66 — full predicate matrix restored after narrowing-error reversal.
+  // Both `is .Variant` and `== .Variant` are accepted as variant-tag checks.
+  test("if-else using `==` predicate form also fires exhaustive (S66 restored matrix)", () => {
+    const source = fixtureWithBranches([
+      { cond: "@phase == .Idle" },
+      { cond: "@phase == .Loading" },
+      { cond: "@phase == .Error" },
+      { cond: "@phase == .Success" },
+    ]);
+    const result = compileSource(source);
+    const diags = getMatchDiags(result);
+    const exhaustive = diags.find(d => d.shape === "exhaustive");
+    expect(exhaustive).toBeDefined();
+    expect(exhaustive.enumName).toBe("Phase");
+    expect(exhaustive.missing).toEqual([]);
+    expect(exhaustive.message).toContain("exhaustively covers Phase");
+  });
+
+  test("mixed `is` and `==` predicate forms in same chain fire exhaustive (style-equivalent)", () => {
+    const source = fixtureWithBranches([
+      { cond: "@phase is .Idle" },
+      { cond: "@phase == .Loading" },
+      { cond: "@phase is .Error" },
+      { cond: "@phase == .Success" },
+    ]);
+    const result = compileSource(source);
+    const diags = getMatchDiags(result);
+    const exhaustive = diags.find(d => d.shape === "exhaustive");
+    expect(exhaustive).toBeDefined();
+    expect(exhaustive.missing).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
