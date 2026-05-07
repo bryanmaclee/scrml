@@ -764,9 +764,46 @@ const B3_EXPR_FIELDS: readonly string[] = [
   "defaultExpr",
 ];
 
+/**
+ * Resolve every `@name` IdentExpr in an ExprNode subtree, stamp
+ * `_resolvedStateCell`, and fire E-STATE-PINNED-FORWARD-REF when the read
+ * source-position precedes the pinned cell's (or pinned import's) decl-span
+ * end.
+ *
+ * **Read-position note (load-bearing).** IdentExpr `span` values are produced
+ * by `expression-parser.ts → spanFromEstree(node, file, baseOffset)`. When an
+ * ExprNode is parsed via `safeParseExprToNode` from inside an isolated
+ * substring (function bodies / interpolation segments), `baseOffset` is 0 —
+ * so the IdentExpr's `span.start` is the offset WITHIN the substring, not
+ * within the whole source file. That makes IdentExpr spans unsuitable as
+ * absolute read-positions for the source-position forward-ref check.
+ *
+ * The fallback is the **enclosing AST node's `span.start`** — passed in via
+ * the walker as `readPos`. Every container that B3 traverses
+ * (`function-decl`, `state-decl`, statement nodes, etc.) has an absolute
+ * span set by ast-builder. That position is the lower bound of the read's
+ * source-position; using it is conservative-correct:
+ *
+ *   - `function f() { return @x } ; <x pinned> = 0` — function.span.start
+ *     (~14) < x.span.end (~66) → fires (correct).
+ *   - `<x pinned> = 0 ; function f() { return @x }` — function.span.start
+ *     (>x.span.end) → no fire (correct).
+ *   - `<x pinned> = @x + 1` — state-decl.span.start (=decl.span.start)
+ *     < decl.span.end → fires (self-init; correct per spec).
+ *
+ * The conservative aspect: a read at `function.start + 50` syntactically
+ * AFTER a pinned decl that sits at `function.start + 100` would still see
+ * the read-position as `function.start`. But that scenario can't occur:
+ * pinned decls live at file/program scope and at compound scope, never
+ * inside function bodies — function bodies don't open a state-cell decl
+ * surface. So the read-position approximation is exact for the cases the
+ * spec normatively addresses.
+ */
 function resolveAtNameOnExprNode(
   exprNode: unknown,
   currentScope: Scope,
+  errors: SYMDiagnostic[],
+  readPos: number,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
   forEachIdentInExprNode(exprNode as any, (ident: IdentExpr) => {
@@ -786,13 +823,111 @@ function resolveAtNameOnExprNode(
       configurable: true,
       writable: true,
     });
+
+    // B4 — E-STATE-PINNED-FORWARD-REF source-position check.
+    //
+    // A read of a `pinned` cell is a forward-reference (per SPEC §6.9.3 /
+    // §6.10.2 / §6.10.5 / §7.6.1) when the enclosing-container source-position
+    // (`readPos`) precedes the cell's declaration-span end. `decl.span.end`
+    // (not `start`) catches both:
+    //   - Reads in code before the pinned decl (readPos < decl.start ≤ decl.end).
+    //   - Self-init reads inside the cell's own initialiser (the state-decl IS
+    //     the enclosing container, so readPos === decl.span.start, which is
+    //     < decl.span.end).
+    if (resolved && resolved.isPinned) {
+      const declSpan = resolved.declNode.span;
+      if (
+        declSpan
+        && typeof declSpan.end === "number"
+        && readPos < declSpan.end
+      ) {
+        const identSpan = makeReportSpan(ident, declSpan.file);
+        errors.push({
+          code: "E-STATE-PINNED-FORWARD-REF",
+          message:
+            `E-STATE-PINNED-FORWARD-REF: forward reference to \`pinned\` state cell `
+            + `\`<${resolved.qualifiedPath}>\`. The \`pinned\` modifier opts the cell `
+            + `out of hoisting; reads before its declaration site (or inside its own `
+            + `initialiser) are unsafe (SPEC §6.10 + §34).`,
+          span: identSpan,
+          severity: "error",
+        });
+      }
+      return; // resolved as state-cell; importBinding fallback irrelevant.
+    }
+
+    // B4 — pinned-import forward-ref. When the @-name does NOT resolve to a
+    // registered same-file state cell, fall back to importBindings. A pinned
+    // import behaves as a same-file pinned cell at file scope (SPEC §21.8.1):
+    // reads BEFORE the import-decl's span end fire E-STATE-PINNED-FORWARD-REF.
+    if (!resolved) {
+      const imp = lookupImportBinding(currentScope, bareName);
+      if (imp && imp.pinned) {
+        const impSpan = imp.declNode.span;
+        if (
+          impSpan
+          && typeof impSpan.end === "number"
+          && readPos < impSpan.end
+        ) {
+          const identSpan = makeReportSpan(ident, impSpan.file);
+          errors.push({
+            code: "E-STATE-PINNED-FORWARD-REF",
+            message:
+              `E-STATE-PINNED-FORWARD-REF: forward reference to \`pinned\` imported `
+              + `binding \`${imp.localName}\` (from \`${imp.sourcePath}\`). A pinned `
+              + `import behaves as a same-file pinned declaration at file scope; `
+              + `reads before the import statement are unsafe (SPEC §21.8.1 + §34).`,
+            span: identSpan,
+            severity: "error",
+          });
+        }
+      }
+    }
   });
+}
+
+/**
+ * Build the diagnostic-reporting span for an `@name` read. IdentExpr spans
+ * are NOT reliable absolute offsets (see `resolveAtNameOnExprNode` doc), so
+ * for diagnostics we report a synthetic span anchored at `fileFromDecl` with
+ * `start: 0, end: 0`. Callers that need a richer span (LSP / IDE) recover the
+ * actual source position from the enclosing AST node — the `readPos` value
+ * the walker already tracks. (A future B-step that propagates absolute
+ * baseOffsets through expression-parser will let us upgrade this to an
+ * exact span; today the diagnostic is correct on code/severity/file even if
+ * the column is approximate.)
+ */
+function makeReportSpan(ident: IdentExpr, fileFromDecl: string): Span {
+  const ispan = (ident as any).span;
+  return {
+    file: (ispan && typeof ispan.file === "string" && ispan.file.length > 0)
+      ? ispan.file
+      : fileFromDecl,
+    start: typeof ispan?.start === "number" ? ispan.start : 0,
+    end: typeof ispan?.end === "number" ? ispan.end : 0,
+    line: typeof ispan?.line === "number" ? ispan.line : 1,
+    col: typeof ispan?.col === "number" ? ispan.col : 1,
+  };
+}
+
+/**
+ * Extract a node's read-position. Prefers `node.span.start` when present;
+ * otherwise inherits from the parent walker's `readPos`. The conservative
+ * inheritance ensures every IdentExpr reached from a container with a
+ * known absolute span uses that span's start as its read-position.
+ */
+function nodeReadPos(node: any, parentReadPos: number): number {
+  const sp = node && node.span;
+  if (sp && typeof sp.start === "number") return sp.start;
+  return parentReadPos;
 }
 
 function walkResolveAtNames(
   nodes: ASTNode[] | undefined,
   currentScope: Scope,
   visited: WeakSet<object>,
+  errors: SYMDiagnostic[],
+  parentReadPos: number,
 ): void {
   if (!nodes) return;
   for (const n of nodes) {
@@ -801,12 +936,13 @@ function walkResolveAtNames(
     visited.add(n);
     const anyN = n as any;
     const kind = anyN.kind as string;
+    const readPos = nodeReadPos(anyN, parentReadPos);
 
     // Resolve any ExprNode payloads this node carries.
     for (const f of B3_EXPR_FIELDS) {
       const v = anyN[f];
       if (v && typeof v === "object") {
-        resolveAtNameOnExprNode(v, currentScope);
+        resolveAtNameOnExprNode(v, currentScope, errors, readPos);
       }
     }
     // Special case for c-style for: `cStyleParts: { initExpr, condExpr,
@@ -815,7 +951,7 @@ function walkResolveAtNames(
       for (const f of ["initExpr", "condExpr", "updateExpr"]) {
         const v = anyN.cStyleParts[f];
         if (v && typeof v === "object") {
-          resolveAtNameOnExprNode(v, currentScope);
+          resolveAtNameOnExprNode(v, currentScope, errors, readPos);
         }
       }
     }
@@ -828,7 +964,7 @@ function walkResolveAtNames(
       // Use the compound sub-scope for nested @-refs inside compound bodies.
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
       if (stateScope && Array.isArray(anyN.children)) {
-        walkResolveAtNames(anyN.children, stateScope, visited);
+        walkResolveAtNames(anyN.children, stateScope, visited, errors, readPos);
       }
       continue;
     }
@@ -836,22 +972,22 @@ function walkResolveAtNames(
     if (kind === "function-decl") {
       // Use the function scope PASS 1 attached.
       const fnScope = (anyN as ScopeAnnotated)._scope ?? currentScope;
-      walkResolveAtNames(anyN.body, fnScope, visited);
+      walkResolveAtNames(anyN.body, fnScope, visited, errors, readPos);
       continue;
     }
 
     // Generic recursion. Same shape as PASS 1 / PASS 2.
-    if (Array.isArray(anyN.children)) walkResolveAtNames(anyN.children, currentScope, visited);
-    if (Array.isArray(anyN.body)) walkResolveAtNames(anyN.body, currentScope, visited);
-    if (Array.isArray(anyN.consequent)) walkResolveAtNames(anyN.consequent, currentScope, visited);
-    if (Array.isArray(anyN.alternate)) walkResolveAtNames(anyN.alternate, currentScope, visited);
+    if (Array.isArray(anyN.children)) walkResolveAtNames(anyN.children, currentScope, visited, errors, readPos);
+    if (Array.isArray(anyN.body)) walkResolveAtNames(anyN.body, currentScope, visited, errors, readPos);
+    if (Array.isArray(anyN.consequent)) walkResolveAtNames(anyN.consequent, currentScope, visited, errors, readPos);
+    if (Array.isArray(anyN.alternate)) walkResolveAtNames(anyN.alternate, currentScope, visited, errors, readPos);
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
-        if (arm && Array.isArray(arm.body)) walkResolveAtNames(arm.body, currentScope, visited);
+        if (arm && Array.isArray(arm.body)) walkResolveAtNames(arm.body, currentScope, visited, errors, readPos);
       }
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
-      walkResolveAtNames([anyN.expr.node], currentScope, visited);
+      walkResolveAtNames([anyN.expr.node], currentScope, visited, errors, readPos);
     }
   }
 }
@@ -1051,8 +1187,10 @@ export function runSYM(input: SYMInput): SYMResult {
   // resolution failures stamp `null`; the existing-infra catch-all
   // (E-SCOPE-001 / DG sweep) handles any ultimate "unknown reactive" error
   // surface.
+  // Initial readPos = 0 (file start). Top-level nodes will override via
+  // their own span.start; nodes lacking spans inherit (defensively).
   const visited3 = new WeakSet<object>();
-  walkResolveAtNames(ast.nodes, fileScope, visited3);
+  walkResolveAtNames(ast.nodes, fileScope, visited3, errors, 0);
 
   // PASS 4 (B5): Classify each state-decl into a CellKind discriminant.
   // Stamps `_cellKind` and `_isBindable` non-enumerable properties on the
