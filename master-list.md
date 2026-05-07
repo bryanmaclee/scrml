@@ -2,9 +2,9 @@
 
 **Purpose:** Live inventory of what exists in scrmlTS, plus the **v0.2.0 migration dashboard**. Current truth only. Historical session-by-session detail lives in `docs/changelog.md`; deep-dives live in `scrml-support/docs/deep-dives/`.
 
-**Last updated:** 2026-05-06 (S64 close — **Stage 0c.A LANDED · Phase 4d LANDED · A1b Step B2 LANDED · debate-02/03/04 judged · tier-ladder deep-dive landed · SPEC §17.5 CLOSED for component-overload + DELETED for function-overload · 11 primer amendments + 4 SPEC §34 catalog adds**)
+**Last updated:** 2026-05-06 (S65 close — **predicate-system-Zod-replacement deep-dive LANDED · debate-05 judged 5/5 unanimous C-narrow · npm-myth article amended · X-snippet drafted · parseVariant impl SCOPE document landed · Gap #19 closure plan ready**)
 
-**Tests (current):** **8,941 pass / 44 skip / 1 todo / 0 fail / 8,986 across 440 files** (B2-LANDED; +13 net vs S63 baseline — B2 contributed +13 integration tests; Stage 0c.A's -5 unit-test deletions netted to +8 from baseline plus B2's other 5 = +13). Pre-commit subset ~8,212 / 33 / 0.
+**Tests (current):** **8,941 pass / 44 skip / 1 todo / 0 fail / 8,986 across 440 files** (unchanged from S64 — S65 was deliberation-and-docs only, no compiler source changes). Pre-commit subset ~8,217 / 33 / 0.
 
 **Currently shipped baseline:** **scrml v0.1.0** (16-module stdlib, 32 examples, full SQL passthrough via Bun.SQL, LSP + VSCode + neovim editor support, server-fn boundary, `<machine>` engines, `<channel>` channels, `?{}` SQL passthrough, `<schema>` blocks, `<program>` config + wrapper, ~24,739 LOC compiler / ~14,135 LOC codegen).
 
