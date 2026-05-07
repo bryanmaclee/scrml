@@ -110,6 +110,10 @@ import type {
   ImportSpecifier,
 } from "./types/ast.ts";
 import { forEachIdentInExprNode } from "./expression-parser.ts";
+import {
+  ARRAY_MUTATING_METHODS,
+  isDerivedMutatingAssignOp,
+} from "./derived-mutation-ops.ts";
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -1506,6 +1510,547 @@ function walkRenderByTagUses(
 }
 
 // ---------------------------------------------------------------------------
+// B8: L21 walker — E-DERIVED-VALUE-MUTATE (PASS 6)
+// ---------------------------------------------------------------------------
+//
+// Per SPEC §6.6.18 (lock L21), in-place mutation of a `const`-derived cell
+// SHALL be rejected at compile time. Three forbidden form classes:
+//
+//   1. Array mutating method calls — `@derivedArr.push(x)`, etc. (9 methods
+//      per §6.5.1: push, pop, shift, unshift, splice, reverse, sort, fill,
+//      copyWithin).
+//   2. Object property writes / compound-assignments / delete —
+//      `@derivedObj.foo = x`, `@derivedObj.foo += 1`, `delete @derivedObj.foo`,
+//      and the 14 compound forms (+=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=,
+//      >>=, >>>=, ??=, ||=, &&=).
+//   3. In-compound derived sub-cell — `@form.derivedField.method(...)` /
+//      `@form.derivedField.foo = x` where `derivedField` is `const`-declared
+//      inside a Variant C compound parent.
+//
+// AST shape paths (per `tests/integration/parse-mutation-shapes.test.js`):
+//
+//   - `reactive-array-mutation` (specialized lowering, single-segment receiver,
+//     method ∈ ARRAY_MUTATIONS) → check via `target` string + `method`.
+//   - `reactive-nested-assign` (specialized lowering, `=` only) → check via
+//     `target` string + `path[]`.
+//   - `bare-expr` containing one of:
+//       - `assign` (compound assigns; computed-index assigns; multi-segment
+//         receivers; plain `=` on chained members) → check via leaf-ident
+//         walk on `target`.
+//       - `call` with `callee.kind === "member"` and method name ∈
+//         ARRAY_MUTATING_METHODS — covers compound-receiver chains
+//         `@form.errors.push(x)`.
+//       - `unary` with `op === "delete"` and `argument.kind ∈ {"member",
+//         "index"}` → check via leaf-ident walk on `argument`.
+//
+// **NEXT-STEP HOOK (E-DERIVED-WRITE):** §6.6.18 normative requires this check
+// to share a pass with §6.6.8 E-DERIVED-WRITE (reassignment form). When that
+// rule is implemented, it should join this walker — `@derived = newval` is an
+// `assign` ExprNode whose `target` is a bare ident (not a member chain), so
+// the dispatch is a sibling discriminator, not a separate walk.
+//
+// **OUT OF B8 SCOPE (deferred):**
+//   - E-SYNTHESIZED-WRITE (§55.7) — depends on B11/B12's synth-cell registry
+//     which doesn't exist yet. B11 will extend this walker.
+//   - Markup-typed derived cells: per §6.6.18, the rule applies uniformly;
+//     markup APIs today expose no mutators so the rule is non-firing in
+//     practice but no special exemption is needed in the walker.
+
+/**
+ * Walk a chained member/index expression to its leaf IdentExpr. Mirrors the
+ * `leafIdent` helper in `tests/integration/parse-mutation-shapes.test.js`.
+ * Returns the leaf `ident` ExprNode, or null if the chain doesn't terminate
+ * in an ident (e.g., `(@a)[0]` parens-wrapped — defensive).
+ */
+function leafIdentInChain(node: any): any | null {
+  let cur = node;
+  while (cur && typeof cur === "object") {
+    if (cur.kind === "ident") return cur;
+    if (cur.kind === "member") { cur = cur.object; continue; }
+    if (cur.kind === "index") { cur = cur.object; continue; }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Collect dotted-path segments from a chained member/index expression.
+ * Stops at the leaf ident; returns segments in receiver-to-leaf order
+ * EXCLUDING the leaf ident's name. Computed-index segments produce no
+ * string segment (compound nav must use static dotted paths to find a
+ * registered sub-cell — `@form[i]` cannot resolve to a named compound child).
+ *
+ * Returns `null` if the chain terminates in something other than an ident
+ * (defensive — same shape as leafIdentInChain).
+ */
+function collectMemberPath(node: any): string[] | null {
+  const segments: string[] = [];
+  let cur = node;
+  while (cur && typeof cur === "object") {
+    if (cur.kind === "ident") {
+      segments.reverse();
+      return segments;
+    }
+    if (cur.kind === "member") {
+      // `member.property` is a static string per ESTree-flat scrml AST.
+      if (typeof cur.property === "string") segments.push(cur.property);
+      cur = cur.object;
+      continue;
+    }
+    if (cur.kind === "index") {
+      // Computed index — cannot contribute to a static path. Bail; B8
+      // resolves the BASE cell via leaf ident only (case 2-3 still fires
+      // when the base is derived; sub-path resolution unavailable).
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Build the full path used to look up the receiver cell record in the scope:
+ * `[leafIdentNameWithoutAt, ...memberPathSegments]`. The leaf ident's `@`
+ * prefix is stripped. For a single-segment receiver (e.g., `@arr` in
+ * `@arr.push(1)`), returns `["arr"]`. For a compound receiver
+ * (e.g., `@form.errors` in `@form.errors.push(1)`), returns `["form", "errors"]`.
+ */
+function buildReceiverPath(chainRoot: any): string[] | null {
+  const leaf = leafIdentInChain(chainRoot);
+  if (!leaf || typeof leaf.name !== "string") return null;
+  if (!leaf.name.startsWith("@")) return null;
+  const baseName = leaf.name.slice(1);
+  if (!baseName) return null;
+  const segments = collectMemberPath(chainRoot);
+  if (segments === null) return null;
+  return [baseName, ...segments];
+}
+
+/**
+ * Resolve a receiver chain to its `StateCellRecord` if any, returning the
+ * record + the qualified path used to look it up. The record's `isConst`
+ * field tells the caller whether this is a derived cell.
+ *
+ * For specialized-lowering kinds (`reactive-array-mutation`,
+ * `reactive-nested-assign`), the caller passes the constructed path
+ * directly (cheaper than walking the ExprNode).
+ */
+function resolveReceiverRecord(
+  scope: Scope,
+  path: string[],
+): StateCellRecord | null {
+  if (path.length === 0) return null;
+  if (path.length === 1) return lookupStateCell(scope, path[0]);
+  return lookupQualifiedStateCell(scope, path);
+}
+
+/**
+ * Construct a synthetic Span for a B8 diagnostic anchored at the AST node
+ * that carries the mutation. Mirrors B6/B4 synthetic-span pattern: `start`
+ * and `end` may be 0 if the underlying ExprNode lacks reliable absolute
+ * offsets, but `file` is always set.
+ */
+function spanFromMutationNode(node: any, fileFromScope: string): Span {
+  const sp = node && node.span;
+  return {
+    file: (sp && typeof sp.file === "string" && sp.file.length > 0)
+      ? sp.file
+      : fileFromScope,
+    start: typeof sp?.start === "number" ? sp.start : 0,
+    end: typeof sp?.end === "number" ? sp.end : 0,
+    line: typeof sp?.line === "number" ? sp.line : 1,
+    col: typeof sp?.col === "number" ? sp.col : 1,
+  };
+}
+
+/**
+ * Build the human-readable cell-reference string used in diagnostic messages.
+ * `["form", "derivedField"]` → `"@form.derivedField"`. For single-segment,
+ * `["doubled"]` → `"@doubled"`.
+ */
+function formatReceiver(path: string[]): string {
+  return "@" + path.join(".");
+}
+
+/**
+ * Fire E-DERIVED-VALUE-MUTATE for a method-call form (case 1).
+ * Caller has already verified the receiver resolves to a derived cell.
+ */
+function fireMethodCall(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  method: string,
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via \`.${method}(...)\`. \`${ref}\` is \`const\`-derived; mutating its `
+      + `value is forbidden — the mutation would be silently clobbered the next `
+      + `time upstream dependencies fire (SPEC §6.6.18 + §34). Fix: mutate the `
+      + `upstream cell instead, or declare a separate mutable cell for `
+      + `independent storage.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire E-DERIVED-VALUE-MUTATE for a property-assignment form (case 2 plain
+ * `=` or compound-assign `+=` etc.).
+ */
+function firePropertyAssign(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  op: string,
+  pathTail: string[],
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  const tailDesc = pathTail.length > 0 ? `.${pathTail.join(".")}` : "";
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via property write \`${ref}${tailDesc} ${op} ...\`. \`${ref}\` is `
+      + `\`const\`-derived; mutating its value is forbidden — the mutation `
+      + `would be silently clobbered the next time upstream dependencies `
+      + `fire (SPEC §6.6.18 + §34). Fix: mutate the upstream cell instead, `
+      + `or declare a separate mutable cell for independent storage.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire E-DERIVED-VALUE-MUTATE for a delete form (`delete @derivedObj.foo`).
+ */
+function fireDelete(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via \`delete\`. \`${ref}\` is \`const\`-derived; deleting properties of `
+      + `its value is forbidden — the deletion would be silently clobbered the `
+      + `next time upstream dependencies fire (SPEC §6.6.18 + §34). Fix: mutate `
+      + `the upstream cell instead, or declare a separate mutable cell.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Scan path prefixes longest→shortest, looking for a registered StateCell
+ * record. The deepest registered record on the prefix is the leaf cell
+ * (handles single-segment `["copy"]` and compound-nav
+ * `["form", "derivedField"]` uniformly).
+ *
+ * Returns the matched record + the prefix path that resolved it, or null.
+ */
+function findDeepestRegisteredOnPrefix(
+  scope: Scope,
+  fullPath: string[],
+): { record: StateCellRecord; path: string[] } | null {
+  for (let len = fullPath.length; len >= 1; len--) {
+    const prefix = fullPath.slice(0, len);
+    const rec = resolveReceiverRecord(scope, prefix);
+    if (rec) return { record: rec, path: prefix };
+  }
+  return null;
+}
+
+/**
+ * Fire E-DERIVED-VALUE-MUTATE for an assign-form (`+=`, plain `=`, etc.) when
+ * the receiver chain root resolves to a derived cell. Returns true if fired.
+ *
+ * `assignNode.target` is the (member|index) being assigned to; the receiver
+ * is `assignNode.target.object`. `fullReceiverPath` was built from that
+ * object.
+ */
+function scanPrefixesAndFireAssign(
+  fullReceiverPath: string[],
+  assignNode: any,
+  scope: Scope,
+  errors: SYMDiagnostic[],
+  containerSpan: Span,
+): boolean {
+  const hit = findDeepestRegisteredOnPrefix(scope, fullReceiverPath);
+  if (!hit || !hit.record.isConst) return false;
+  // Compute the property tail — segments AFTER the matched derived cell, plus
+  // the final assigned property.
+  const tail: string[] = fullReceiverPath.slice(hit.path.length);
+  if (assignNode.target.kind === "member" && typeof assignNode.target.property === "string") {
+    tail.push(assignNode.target.property);
+  } else if (assignNode.target.kind === "index") {
+    tail.push("[…]");
+  }
+  firePropertyAssign(errors, hit.path, assignNode.op, tail, containerSpan);
+  return true;
+}
+
+/**
+ * Inspect an ExprNode subtree for embedded mutation forms targeting a
+ * derived cell. Walks `assign`, `call`, and `unary` expressions; for each
+ * matching shape that resolves to a derived receiver, fires the
+ * appropriate diagnostic.
+ *
+ * `containerSpan` is the source-anchor for diagnostic spans (the enclosing
+ * statement-level node); ExprNode spans are not reliable absolute offsets
+ * (see B3 doc).
+ */
+function checkExprNodeForMutations(
+  exprNode: any,
+  scope: Scope,
+  errors: SYMDiagnostic[],
+  containerSpan: Span,
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+  const seen = new WeakSet<object>();
+  function walk(n: any): void {
+    if (!n || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    const k = n.kind;
+    if (k === "assign" && n.target && typeof n.op === "string"
+        && (n.target.kind === "member" || n.target.kind === "index")
+        && isDerivedMutatingAssignOp(n.op)) {
+      // The receiver chain is `n.target.object` (everything BEFORE the
+      // final property/index segment). The final segment IS the assign
+      // target; it's not part of the receiver path.
+      const fullPath = buildReceiverPath(n.target.object);
+      if (fullPath) {
+        // Walk prefixes longest→shortest; the deepest registered record is
+        // the leaf cell (covers single-segment `["copy"]`, compound-nav
+        // `["form", "derivedField"]`, etc.). Fire if `isConst`.
+        const fired = scanPrefixesAndFireAssign(fullPath, n, scope, errors, containerSpan);
+        // (no-op when not derived; scan returns boolean for future use)
+        void fired;
+      }
+    }
+    if (k === "call" && n.callee && n.callee.kind === "member"
+        && typeof n.callee.property === "string"
+        && ARRAY_MUTATING_METHODS.has(n.callee.property)) {
+      // The receiver is `n.callee.object` (everything BEFORE `.method`).
+      const fullPath = buildReceiverPath(n.callee.object);
+      if (fullPath) {
+        const hit = findDeepestRegisteredOnPrefix(scope, fullPath);
+        if (hit && hit.record.isConst) {
+          fireMethodCall(errors, hit.path, n.callee.property, containerSpan);
+        }
+      }
+    }
+    if (k === "unary" && n.op === "delete" && n.argument
+        && (n.argument.kind === "member" || n.argument.kind === "index")) {
+      // The DELETED property is `n.argument.property` (or computed index);
+      // the receiver chain is `n.argument.object`.
+      const fullPath = buildReceiverPath(n.argument.object);
+      if (fullPath) {
+        const hit = findDeepestRegisteredOnPrefix(scope, fullPath);
+        if (hit && hit.record.isConst) {
+          fireDelete(errors, hit.path, containerSpan);
+        }
+      }
+    }
+    // Recurse into structural sub-fields. ExprNode shapes carry various child
+    // ExprNodes (operands, arguments, callees, properties, etc.). A generic
+    // walk over enumerable object/array properties is sufficient and safe.
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key === "_resolvedStateCell") continue;
+      const v = (n as any)[key];
+      if (v && typeof v === "object") {
+        if (Array.isArray(v)) {
+          for (const item of v) walk(item);
+        } else {
+          walk(v);
+        }
+      }
+    }
+  }
+  walk(exprNode);
+}
+
+/**
+ * Check a `reactive-array-mutation` AST node (specialized lowering, case 1).
+ * Receiver is single-segment (`target` is the cell name); method is one of
+ * the ARRAY_MUTATIONS list per ast-builder. We re-validate against the
+ * canonical 9-method set from SPEC §6.5.1 (defensive — ast-builder list may
+ * drift from spec).
+ */
+function checkReactiveArrayMutation(
+  n: any,
+  scope: Scope,
+  errors: SYMDiagnostic[],
+  fileFromScope: string,
+): void {
+  if (typeof n.target !== "string" || typeof n.method !== "string") return;
+  if (!ARRAY_MUTATING_METHODS.has(n.method)) return;
+  const rec = lookupStateCell(scope, n.target);
+  if (rec && rec.isConst) {
+    fireMethodCall(errors, [n.target], n.method, spanFromMutationNode(n, fileFromScope));
+  }
+}
+
+/**
+ * Check a `reactive-nested-assign` AST node (specialized lowering, case 2
+ * plain `=` on dotted-path receiver). Receiver path is `target` (cell name)
+ * + `path[]` LESS the final segment (which is the assign target property).
+ *
+ * For `@obj.foo = 1` → `target: "obj"`, `path: ["foo"]`. The receiver IS
+ * `@obj`; the property being assigned is `foo`.
+ *
+ * For `@form.config.mode = "x"` → `target: "form"`, `path: ["config", "mode"]`.
+ * Receiver chain is `@form.config`; final assigned property is `mode`. To
+ * fire correctly when the LEAF cell (`@form.config` resolved through compound
+ * lookup) or the BASE cell (`@form`) is derived, we resolve the deepest
+ * registered record on the prefix path and check `isConst`.
+ */
+function checkReactiveNestedAssign(
+  n: any,
+  scope: Scope,
+  errors: SYMDiagnostic[],
+  fileFromScope: string,
+): void {
+  if (typeof n.target !== "string" || !Array.isArray(n.path)) return;
+  // Receiver path = [target, ...path[0..length-1]] — the assigned property
+  // is the LAST element of `path` (or `path` itself is the property if
+  // length === 1).
+  // We try resolving from the longest prefix down. The deepest registered
+  // record wins; if any registered record on the prefix is derived, fire.
+  // Spec §6.6.18 case 2 fires when the receiver root resolves to a `const`-
+  // declared cell — so we scan prefixes including [target] alone.
+  const fullPrefix = [n.target, ...n.path.slice(0, n.path.length - 1)];
+  // For length=1 path (e.g., `@obj.foo = x`), fullPrefix = ["obj"].
+  // For length=2 path (e.g., `@form.config.mode = x`), fullPrefix = ["form", "config"].
+  // Try the deepest qualified path first; if that doesn't resolve, walk shorter.
+  let derivedRec: StateCellRecord | null = null;
+  let derivedPath: string[] = [];
+  for (let len = fullPrefix.length; len >= 1; len--) {
+    const prefix = fullPrefix.slice(0, len);
+    const rec = resolveReceiverRecord(scope, prefix);
+    if (rec && rec.isConst) {
+      derivedRec = rec;
+      derivedPath = prefix;
+      break;
+    }
+  }
+  if (derivedRec) {
+    const tail = n.path.slice(derivedPath.length - 1);
+    firePropertyAssign(
+      errors,
+      derivedPath,
+      "=",
+      tail,
+      spanFromMutationNode(n, fileFromScope),
+    );
+  }
+}
+
+/**
+ * PASS 6 walker — descends the AST tree visiting every statement-level
+ * node. For each candidate mutation form, dispatches to one of the three
+ * checkers above. Mirrors the structural-recursion pattern used by PASS 3
+ * (walkResolveAtNames) and PASS 5 (walkRenderByTagUses).
+ */
+function walkDerivedValueMutate(
+  nodes: ASTNode[] | undefined,
+  currentScope: Scope,
+  visited: WeakSet<object>,
+  errors: SYMDiagnostic[],
+  fileFromScope: string,
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    // Specialized-lowering kinds (case 1 single-segment, case 2 plain `=`).
+    if (kind === "reactive-array-mutation") {
+      checkReactiveArrayMutation(anyN, currentScope, errors, fileFromScope);
+      // No body recursion — these are leaf statement nodes. argsExpr may
+      // contain nested ExprNodes (e.g., `@a.push(@b.push(1))`); walk them
+      // for nested mutations.
+      if (anyN.argsExpr) {
+        checkExprNodeForMutations(
+          anyN.argsExpr,
+          currentScope,
+          errors,
+          spanFromMutationNode(anyN, fileFromScope),
+        );
+      }
+      continue;
+    }
+    if (kind === "reactive-nested-assign") {
+      checkReactiveNestedAssign(anyN, currentScope, errors, fileFromScope);
+      if (anyN.valueExpr) {
+        checkExprNodeForMutations(
+          anyN.valueExpr,
+          currentScope,
+          errors,
+          spanFromMutationNode(anyN, fileFromScope),
+        );
+      }
+      continue;
+    }
+
+    // Generic ExprNode-bearing nodes — walk all carried ExprNodes for
+    // embedded mutations. Mirrors B3_EXPR_FIELDS coverage.
+    const containerSpan = spanFromMutationNode(anyN, fileFromScope);
+    for (const f of B3_EXPR_FIELDS) {
+      const v = anyN[f];
+      if (v && typeof v === "object") {
+        checkExprNodeForMutations(v, currentScope, errors, containerSpan);
+      }
+    }
+    if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
+      for (const f of ["initExpr", "condExpr", "updateExpr"]) {
+        const v = anyN.cStyleParts[f];
+        if (v && typeof v === "object") {
+          checkExprNodeForMutations(v, currentScope, errors, containerSpan);
+        }
+      }
+    }
+
+    // Scope-aware recursion.
+    if (kind === "state-decl") {
+      const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
+      if (stateScope && Array.isArray(anyN.children)) {
+        walkDerivedValueMutate(anyN.children, stateScope, visited, errors, fileFromScope);
+      }
+      continue;
+    }
+    if (kind === "function-decl") {
+      const fnScope = (anyN as ScopeAnnotated)._scope ?? currentScope;
+      walkDerivedValueMutate(anyN.body, fnScope, visited, errors, fileFromScope);
+      continue;
+    }
+
+    // Generic recursion (mirrors PASS 3 / PASS 5 structural recursion).
+    if (Array.isArray(anyN.children)) walkDerivedValueMutate(anyN.children, currentScope, visited, errors, fileFromScope);
+    if (Array.isArray(anyN.body)) walkDerivedValueMutate(anyN.body, currentScope, visited, errors, fileFromScope);
+    if (Array.isArray(anyN.consequent)) walkDerivedValueMutate(anyN.consequent, currentScope, visited, errors, fileFromScope);
+    if (Array.isArray(anyN.alternate)) walkDerivedValueMutate(anyN.alternate, currentScope, visited, errors, fileFromScope);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkDerivedValueMutate(arm.body, currentScope, visited, errors, fileFromScope);
+      }
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkDerivedValueMutate([anyN.expr.node], currentScope, visited, errors, fileFromScope);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -1597,6 +2142,16 @@ export function runSYM(input: SYMInput): SYMResult {
   // E-CELL-NO-RENDER-SPEC (§3.1); PascalCase RHS deferred (§3.2).
   const visited5 = new WeakSet<object>();
   walkRenderByTagUses(ast.nodes, fileScope, visited5, errors);
+
+  // PASS 6 (B8): L21 walker — fire E-DERIVED-VALUE-MUTATE on in-place
+  // mutations of `const`-derived cells per SPEC §6.6.18. Three forms covered:
+  // array mutating method calls, object property writes (incl. compound
+  // assigns + delete), in-compound derived sub-cells. Reads PASS 1's scope
+  // tree + StateCellRecord.isConst; no annotations written. E-DERIVED-WRITE
+  // (§6.6.8) is the sibling rule that will join this walker when implemented;
+  // E-SYNTHESIZED-WRITE (§55.7) is deferred to B11.
+  const visited6 = new WeakSet<object>();
+  walkDerivedValueMutate(ast.nodes, fileScope, visited6, errors, filePath);
 
   return {
     filePath,
