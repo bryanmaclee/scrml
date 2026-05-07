@@ -989,18 +989,19 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 | Element | Owning section | Attribute slots (parse-time) | Body form |
 |---|---|---|---|
-| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr` | bare-body (state-children) |
+| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr`, `parallel` (file-scope, §51.0.P) | bare-body (state-children) |
 | `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms) |
 | `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) |
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
+| `<onTimeout>` (S67) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
 
 **Normative statements:**
 
-- The block splitter SHALL classify openers `<engine`, `<match>`, `<errors`, and `<onTransition` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
-- These four element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
+- The block splitter SHALL classify openers `<engine`, `<match>`, `<errors`, `<onTransition`, and `<onTimeout` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
+- These five element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
-- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `errors`, or `onTransition` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
-- These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` (the specific code is documented in the owning section's error list).
+- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `errors`, `onTransition`, or `onTimeout` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` (the specific code is documented in the owning section's error list).
 
 **Cross-references:**
 
@@ -1008,6 +1009,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 - `<match>` shape and Tier 1 semantics: §18.0.1.
 - `<errors>` shape, default rendering, body override: §55.8.
 - `<onTransition>` shape, attribute legality, firing rules: §51.0.H.
+- `<onTimeout>` shape, attribute legality, firing rules: §51.0.M (S67 amendment).
 
 ### 4.16 M7 — multi-close shorthand `<///>` is NOT a part of scrml (negative-space)
 
@@ -13325,13 +13327,14 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 | `<match>` | §18.0.1 | Block-form match declaration; emits one selected arm body |
 | `<errors>` | §55.8 | Auto-renders validator errors per cell or rollup |
 | `<onTransition>` | §51.0.H | Cross-state effect handler; child of `<engine>` only |
+| `<onTimeout>` (S67) | §51.0.M | Time-driven transition declaration; child of an engine state-child only |
 
 **Normative statements:**
 
 - The HTML element registry (§24.1) SHALL NOT include these names. They are scrml-defined structural elements with their own owning-section semantics (cross-ref §4.15).
-- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`).
+- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`, §51.0.M for `<onTimeout>`).
 - These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers.
-- The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`.
+- The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`, `<onTimeout>` → resolved relative to its parent engine state-child.
 - Validation pass VP-1 (§3.3 attribute allowlist) registers the per-element attribute catalogs for these structural elements in `compiler/src/attribute-registry.js` (cross-ref Stage 3.3 contract).
 
 **Cross-references:**
@@ -13339,6 +13342,7 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 - §51.0 — engine semantics.
 - §18.0.1 — match block-form semantics.
 - §55.8 — `<errors>` element semantics.
+- §51.0.M — `<onTimeout>` semantics (S67 amendment).
 
 ---
 
@@ -14233,13 +14237,15 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-DERIVED-ENGINE-INITIAL-UNDEFINED | §51.0.J | `derived=expr` returns no value when the source is in its initial state. Add a default arm or use a wildcard arm in the derivation. | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
 | E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
+| E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
+| E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | A `<channel>` element appears as a descendant of `<program>` rather than at file top level. v0.next channels are file-level (M19); migrate the declaration to be a sibling of `<program>`. | Error |
 | E-CHANNEL-SHARED-MODIFIER | §38.4 | The `@shared` modifier is used in the source. The modifier is removed in v0.next (M19); reactive cells declared inside a channel body auto-sync by virtue of being declared in the channel body. Remove the `@shared` keyword and use `<name> = init` (V5-strict). | Error |
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
-| E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<errors>` without a parent context that supports it; etc. The owning section's error subsection documents the precise condition. (Stage 0b D4) | Error |
+| E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; etc. The owning section's error subsection documents the precise condition. (Stage 0b D4; S67 amendment.) | Error |
 | E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | A bare-form event-handler attribute value (or a `:`-shorthand body) contains multiple statements (semicolon-separated expressions or a block). Multi-statement intent forces a named function: `function startOver() { ... }` then `onclick=startOver()`. (Stage 0b D4) | Error |
 | E-IMPORT-PINNED-INVALID | §21.8.1 | The `pinned` modifier appears on an imported name that is not a state cell or an engine. `pinned` is meaningful only for cell-typed and engine-typed names; remove it for function or type imports. (Stage 0b D4) | Error |
 | E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) | Error |
@@ -20428,6 +20434,38 @@ singleton invariant. If you want per-instance state machines, use plain reactive
 **Conversely:** an engine body MAY instantiate components. That direction is fine —
 components are presentation factories that engines can use to render variant bodies.
 
+> **Machine Cohesion footnote (S67, 2026-05-07).** The 2026-04-17 Machine Cohesion
+> design-insight ratification framed the rule as "all `<engine>` openers use file-scope
+> attribute form." That wording was protecting the singleton invariant against
+> multi-instance contexts (component bodies, where N component instances would mean N
+> "singleton" engines). The actual load-bearing invariant is **one engine declaration
+> site → one running singleton instance for that scope**. Per S67 OQ-Harel-8 resolution
+> (user verbatim: *"pick engine, that feels right"*), the cohesion rule is articulated
+> as:
+>
+> - Engines MAY be declared at **file scope**.
+> - Engines MAY be declared inside **another engine's state-child body** (composite
+>   state-children — see §51.0.Q). The inner engine's lifecycle is coupled to the outer
+>   state-child's lifecycle; both retain singleton-ness (one outer × one inner = one
+>   inner instance).
+> - Engines MAY NOT be declared inside **component bodies** (`E-COMPONENT-ENGINE-SCOPE`,
+>   above) — multi-instance contexts violate the singleton invariant.
+> - Engines MAY NOT be declared inside **function bodies, snippet bodies, or other
+>   scopes** that do not have a singleton-ownership chain to file load.
+>
+> Cross-file engine import via `<EngineName/>` (§51.0.D) applies ONLY to file-scope
+> engines — only file-scope engines have a file-level identifier to import. Nested
+> engines are scope-local and not exportable.
+>
+> Pillar 5 (no per-kind mini-DSLs) is the load-bearing reason a separate keyword
+> (`<region>`, `<sub-engine>`, etc.) was rejected in favor of universal `<engine>`:
+> nested engines have IDENTICAL semantics to file-scope engines (same `for=`, same
+> `initial=`, same state-child bodies, same `rule=` contract, same `.advance()`
+> discipline, same singleton invariant). It is a SCOPE difference, not a KIND
+> difference. Tooling-uniformity reinforces this — `bun scrml migrate` /
+> `bun scrml promote` CLI stays context-blind. (Format parallel to §6.6.8 / §6.6.10
+> S59/S66 footnote precedents.)
+
 #### 51.0.L Pre-existing audit / validation content — relationship to §51.0
 
 The pre-existing §51.1-§51.16 content (legacy `<machine>` syntax, `transitions {}`
@@ -20450,6 +20488,493 @@ the legacy content disagree on surface syntax, §51.0 is authoritative for new c
   vocabulary and the new `<engine>` keyword.
 
 **Cross-ref §31** for the dependency-graph machinery used by `derived=` cycle detection.
+
+#### 51.0.M `<onTimeout>` element — temporal transitions on `<engine>` (S67, 2026-05-07)
+
+**Added 2026-05-07 (S67).** Brings §51.12 temporal-transition feature forward into
+`<engine>` syntax via a structural element parallel to `<onTransition>` (§51.0.H). The
+runtime backbone is shared with §51.12 (`_scrml_machine_arm_timer` /
+`_scrml_machine_clear_timer` in `compiler/src/runtime-template.js`); this subsection is a
+lowering-shape extension, not new runtime infrastructure.
+
+**Form:**
+
+```scrml
+<onTimeout after=DURATION to=.Variant/>
+```
+
+**Attributes:**
+
+| Attribute | Required? | Meaning |
+|---|---|---|
+| `after=DURATION` | REQUIRED | Time before the timer fires. Literal `Nms`/`Ns`/`Nm`/`Nh` per §51.12.3, OR computed `${expr}<unit>` form (§51.12.3 amendment). |
+| `to=.Variant` | REQUIRED | Target variant on timer fire. MUST be a legal target per the surrounding state-child's `rule=` (single/multi/wildcard). Strict-by-default. |
+
+**Worked example — fetch with timeout:**
+
+```scrml
+type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: string) }
+
+function load() {
+  @loadPhase = .Loading
+  const result = fetchItems() !{
+    | ::Network msg -> { @loadPhase = .Error(msg); return }
+    | ::Empty       -> { @loadPhase = .Done(0);    return }
+  }
+  @loadPhase = .Done(result.length)
+}
+
+<engine for=LoadPhase initial=.Idle>
+  <Idle rule=.Loading>
+    <button onclick=load()>Load</button>
+  </>
+
+  <Loading rule=(.Done | .TimedOut | .Error)>
+    <onTimeout after=30s to=.TimedOut/>
+    Loading...
+  </>
+
+  <Done count rule=.Idle>: ${count} rows
+  <TimedOut rule=.Idle>: Timed out
+  <Error msg rule=.Idle>: ${msg}
+</>
+```
+
+**Semantics:**
+
+- The timer is **armed on entry** to the state-child and **cleared on exit** (whether by
+  `rule=` transition, `<onTimeout>` fire, or external write).
+- Reset-on-reentry semantics match §51.12.4 — re-entering the state-child re-arms a
+  fresh timer (the previous timer's elapsed time is discarded).
+- Multiple `<onTimeout>` children per state-child are legal — each arms an independent
+  timer with its own `after=` duration and `to=` target. Independent firing.
+- `<onTimeout>` is a structural element registered in §4.15 + §24; the compiler does NOT
+  apply HTML attribute validation to it. Its attribute slot catalog is defined here.
+
+**`to=` legality (strict-by-default, S67 design decision):**
+
+The `to=` target MUST be a legal target per the surrounding state-child's `rule=` set:
+
+- `rule=.A` + `<onTimeout to=.A/>` — legal (single-target match).
+- `rule=(.A | .B)` + `<onTimeout to=.A/>` — legal (multi-target match).
+- `rule=(.A | .B)` + `<onTimeout to=.C/>` — `E-ENGINE-INVALID-TRANSITION` (timer target
+  not in `rule=` set).
+- `rule=*` + `<onTimeout to=anyVariant/>` — legal (wildcard escape).
+
+Validated **compile-time** when `rule=` is statically known (always true on engine
+state-children — the from-state IS this state-child). Same validation discipline as
+§51.0.F direct-write check.
+
+**Placement (§4.15 / §24 — structural element):**
+
+- Legal only inside an `<engine>` state-child body (sibling of `<onTransition>`).
+- Outside an engine state-child → `E-STRUCTURAL-ELEMENT-MISPLACED` (§34, extended
+  catalog).
+- Inside a `<match>` block-form state-child → `E-STRUCTURAL-ELEMENT-MISPLACED`
+  (rules-inert; §18.0.2).
+- Inside a derived engine's state-child (§51.0.J) — **legal**; firing the timer is a
+  legal transition event (the source-cell update path runs as if a write had occurred).
+  But because derived engines reject direct writes (`E-DERIVED-ENGINE-NO-WRITE`), the
+  timer can only fire when the source expression's value reaches `to=`'s variant. In
+  practice this is rarely useful; lint surface deferred.
+
+**Composition:**
+
+A state-child MAY have `effect=` + `<onTransition>` siblings + `<onTimeout>` siblings.
+All three coexist:
+
+- `effect=` fires on its single-target `rule=` transition (whether direct write or
+  timer-induced).
+- `<onTransition>` fires per its `to=` / `from=` targeting; transitions caused by
+  `<onTimeout>` ARE legal transition events and trigger matching `<onTransition>`
+  handlers.
+- Each `<onTimeout>` arms an independent timer.
+
+**Cross-refs:**
+
+- §51.12 — legacy `<machine>` temporal transitions (full normative spec for the runtime
+  backbone).
+- §51.12.3 — duration units; computed-delay relaxation (S67 amendment).
+- §51.0.F — `rule=` contract (the legality check `<onTimeout to=>` defers to).
+- §51.0.H — `<onTransition>` (sibling structural element).
+- §4.15, §24 — structural element registry.
+- §34 — `E-ENGINE-INVALID-TRANSITION`, `E-STRUCTURAL-ELEMENT-MISPLACED`.
+
+#### 51.0.N `history` attribute on composite state-children (S67, 2026-05-07)
+
+**Added 2026-05-07 (S67).** Insight 23 grammar decision #2 (DD-Harel verdict).
+
+A **composite state-child** (one whose body contains a nested `<engine>` — see §51.0.Q)
+may carry the bare attribute `history`. When present, the compiler synthesizes a
+reactive cell that stores the inner engine's last-active variant on outer-state-child
+exit, and restores from that cell on outer re-entry.
+
+**Form:**
+
+```scrml
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing>
+    Welcome — press start.
+  </>
+
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle>...</>
+      <Battle    rule=.Exploring>...</>
+    </>
+  </>
+
+  <Paused rule=.Playing.history>
+    Game paused. <button onclick=${ @appMode = .Playing.history }>Resume</button>
+  </>
+</>
+```
+
+**Semantics:**
+
+- The compiler synthesizes a reactive cell `@_<outerVar>_<variantName>_history` typed
+  as the inner engine's enum type (e.g., for the example above:
+  `@_appMode_Playing_history: PlayMode`).
+- On outer-exit (the outer state-child loses the variant), the inner engine's current
+  variant is **written** to the history cell.
+- On outer-re-entry into a composite state-child with `history`, the inner engine
+  **restores** from this cell rather than from `initial=`.
+- The history cell is read-only from user code (synth cell; same discipline as
+  validator-synth surface §55 — direct writes are `E-DERIVED-WRITE` /
+  `E-SYNTHESIZED-WRITE`).
+- **Tree-shakeable.** When zero engines in a project declare `history`, the synth-cell
+  infrastructure + outer-exit write hook + outer-entry restore hook are all elided
+  from emit. ~30-80 bytes per history-bearing parent (per Insight 23 user
+  cost-acceptance).
+- **Shallow only this revision.** OQ-Harel-4 verdict: deep history (recursive
+  inner-of-inner restoration) is **deferred**. A composite with `history` restores its
+  own immediate inner engine; if that inner engine is itself composite, its inner-inner
+  engine restarts at its own `initial=`. Deep history can be added later if a use case
+  documents the need.
+
+**Target syntax — `.Variant.history` structured target form (S67 design decision):**
+
+To transition into a history-restored composite state-child, use the structured target
+form `.OuterVariant.history`:
+
+```scrml
+<Paused rule=.Playing.history>
+  ...
+  ${ @appMode = .Playing.history }     // read: "transition to Playing AND restore inner"
+</>
+```
+
+The form `.Variant.history` is a structured-variant-target that extends the canonical
+`.Variant` grammar; usable wherever `.Variant` is legal as a `rule=` target or as a
+right-hand side of an engine-variable assignment. Bare `.Variant` (without `.history`)
+transitions to the variant and starts the inner engine at its `initial=` even when
+`history` is set — the history cell is preserved but ignored on this entry.
+
+| Form | Effect on outer | Effect on inner |
+|---|---|---|
+| `@appMode = .Playing` | enters `.Playing` | inner starts at its `initial=` (history cell ignored) |
+| `@appMode = .Playing.history` | enters `.Playing` | inner restores from history cell (or `initial=` if cell empty / first entry) |
+
+**Empty-history fallback.** If the composite has never been entered (history cell is
+empty / null), `.Variant.history` is equivalent to `.Variant` — inner starts at
+`initial=`. No error fires. This is the natural first-entry case.
+
+**Legality:**
+
+- `history` is legal ONLY on a state-child whose body contains a nested `<engine>`
+  (a composite state-child per §51.0.Q). Otherwise `E-HISTORY-NO-INNER-ENGINE` (§34,
+  extended catalog).
+- `history` on a derived engine's state-child is silently no-op; the derived engine
+  has no inner engine to track.
+- `.Variant.history` as a target outside engine context: existing grammar errors apply
+  (this is just an extended target form, not a free-standing expression).
+
+**Cross-refs:**
+
+- §51.0.Q — composite state-children (the substrate this attribute attaches to).
+- §51.0.F — `rule=` contract (`.Variant.history` as a target form).
+- §34 — `E-HISTORY-NO-INNER-ENGINE`.
+
+#### 51.0.O `internal:rule=` prefix — internal vs external transitions (S67, 2026-05-07)
+
+**Added 2026-05-07 (S67).** Insight 23 grammar decision #4.
+
+A **composite state-child** (§51.0.Q) may declare transitions as either *external*
+(canonical, full lifecycle) or *internal* (no exit/re-entry of the composite). Internal
+transitions are declared via the `internal:` attribute prefix on `rule=`.
+
+**Form:**
+
+```scrml
+<Playing history
+         rule=(.Title | .Paused)
+         internal:rule=.Playing>          <!-- internal self-transition -->
+  <engine for=PlayMode initial=.Exploring>
+    ...
+  </>
+</>
+```
+
+**Semantics:**
+
+- `internal:rule=...` accepts the same three target-only forms as canonical `rule=`
+  (single / multi / wildcard) — see §51.0.F.
+- An **external** transition (no prefix; canonical `rule=`) causes the composite
+  state-child to **exit** (firing any `<onTransition>` handlers attached to it,
+  clearing inner-engine state if `history` is absent, writing inner variant to the
+  history cell if `history` is present), then **re-enter** if the target is back to
+  itself.
+- An **internal** transition (`internal:rule=`) does NOT exit the composite. Inner
+  engine's lifecycle is preserved (no re-init, no history write/read). `<onTransition>`
+  handlers attached to the composite do NOT fire.
+- Default semantics (no `internal:` prefix) is **external** — preserves §51.0.F
+  default behavior; opting into internal is explicit.
+- `internal:rule=` and `rule=` MAY both be present on the same state-child. Different
+  targets in each declare different semantics:
+
+  ```scrml
+  <Playing rule=.Title                   <!-- external; full lifecycle -->
+           internal:rule=.Playing>       <!-- internal self-loop; preserves inner -->
+    ...
+  </>
+  ```
+
+**Legality:**
+
+- `internal:rule=` is legal ONLY on a composite state-child (one with a nested
+  `<engine>` body). Otherwise `E-INTERNAL-RULE-NOT-COMPOSITE` (§34, extended catalog).
+  Rationale: on a non-composite state-child there is no inner engine to preserve, so
+  the internal/external distinction is meaningless — use canonical `rule=`.
+- `internal:rule=*` (wildcard) — legal; same escape-hatch semantics as `rule=*`. Loses
+  static guarantees on the internal target.
+- Mixed direction: `internal:rule=` validated against the engine's variant set just like
+  canonical `rule=` (per §51.0.F). Statically rejected when target is not a variant of
+  `for=`.
+
+**Cross-refs:**
+
+- §51.0.Q — composite state-children.
+- §51.0.F — `rule=` contract (the form prefixed by `internal:`).
+- §51.0.H — `<onTransition>` (which DOES fire on external, does NOT fire on internal).
+- §34 — `E-INTERNAL-RULE-NOT-COMPOSITE`.
+
+#### 51.0.P `parallel` attribute on file-scope `<engine>` (S67, 2026-05-07)
+
+**Added 2026-05-07 (S67).** Insight 23 grammar decision #5.
+
+A file-scope `<engine>` declaration may carry the bare attribute `parallel` as
+**naming sugar** over the §51.4 multi-engine pattern. The attribute documents that this
+engine is intended to coexist independently with sibling engines as a parallel region.
+
+**Form:**
+
+```scrml
+<engine for=PlayerHealth initial=.Healthy parallel>
+  <Healthy/>
+  <AtRisk/>
+  <Critical/>
+</>
+
+<engine for=PlayerScore initial=.Zero parallel>
+  ...
+</>
+```
+
+**Semantics:**
+
+- `parallel` is a **naming attribute only.** The compiler does NOT treat `parallel`
+  engines specially — codegen + runtime are identical to a non-`parallel` engine.
+- Two engines with `parallel` coexist independently — same as the canonical §51.4
+  multi-engine pattern (e.g., `examples/14-mario-state-machine.scrml` MarioMachine +
+  HealthMachine). No joint lifecycle semantics; no synchronized transitions; no
+  cross-engine dispatch.
+- The attribute is for **documentation and tooling readability** — explicit signal that
+  these engines model orthogonal concerns.
+- Full SCXML parallel-node semantics (joint activation, synchronized transitions across
+  regions) are **out of scope for this revision** per §51.9.7 and OQ-Harel-3 verdict.
+
+**Legality:**
+
+- `parallel` is legal on file-scope `<engine>` declarations only.
+- On a nested `<engine>` (inside a composite state-child per §51.0.Q): silently
+  ignored — inner engines are coupled to outer-state-child lifecycle, which is the
+  opposite of "parallel" semantics. (No error fires; the attribute is noise but not
+  harmful.)
+- On a derived engine (`<engine derived=...>` per §51.0.J): silently ignored.
+
+**Cross-refs:**
+
+- §51.4 — canonical multi-engine pattern (the substrate `parallel` documents).
+- §51.9.7 — explicit deferral of full SCXML parallel-node semantics.
+
+#### 51.0.Q Hierarchy — nested `<engine>` declarations and parent-rule cascade (S67, 2026-05-07)
+
+**Added 2026-05-07 (S67).** Insight 23 grammar decisions #1 (hierarchy) and #3
+(parent-rule cascade dispatch). Implements the DD-Harel verdict (Approach C Hybrid)
+within the S67 scope ceiling: hierarchical (composite) states + dispatch priority. Does
+NOT include SCXML invoked services, deferred events, or activity-based transitions.
+
+##### 51.0.Q.1 Composite state-children — nested `<engine>` declarations
+
+A **composite state-child** is a state-child whose body contains a nested `<engine>`
+declaration. The nested engine has FULL engine semantics (own `for=` enum binding, own
+`initial=`, own state-children with `rule=` / `effect=` / `<onTransition>` /
+`<onTimeout>`, own auto-declared variable per §51.0.C, own `.advance()` per §51.0.G).
+
+**Form:**
+
+```scrml
+type AppMode:enum  = { Title, Playing, Paused }
+type PlayMode:enum = { Exploring, Battle, Inventory }
+
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing>
+    Welcome.
+  </>
+
+  <Playing rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle>
+        <button onclick=${ @playMode = .Battle }>Fight</button>
+      </>
+      <Battle rule=.Exploring>
+        <button onclick=${ @playMode = .Exploring }>Flee</button>
+      </>
+      <Inventory/>
+    </>
+  </>
+
+  <Paused rule=.Playing>
+    Paused.
+  </>
+</>
+```
+
+**Lifecycle coupling:**
+
+- The inner engine's lifecycle is **coupled** to the outer state-child's lifecycle.
+- **On outer entry** (the outer engine transitions into the composite state-child): the
+  inner engine is **initialized** (per its `initial=`) — OR **restored** from the
+  history cell if the composite carries `history` and the cell is non-empty (§51.0.N).
+- **On outer exit** (the outer engine transitions out of the composite state-child):
+  the inner engine is **suspended** — its state is preserved if `history` is set
+  (written to the history cell), discarded otherwise. The inner-engine variable is
+  unreachable while the outer is not in this composite state-child.
+- Singleton invariant preserved: outer × 1 = 1 inner instance. Each outer-entry
+  produces a single inner instance (re-entries reuse the same instance with reset or
+  history-restore semantics, never multi-instance).
+
+**Auto-declared inner variable visibility:**
+
+- The inner engine's auto-declared variable (per §51.0.C) is reachable by canonical
+  `@` access **only while the outer is in the composite state-child**. Reading the
+  inner variable outside the composite is `E-CELL-OUT-OF-SCOPE` (§34, deferred follow-on
+  — not fired in v0.next P1; surface to A1c codegen for runtime guard).
+- Use the `var=` attribute on the inner engine if the auto-derived name collides with
+  a file-scope identifier (§51.0.C disambiguation).
+
+**Machine Cohesion compliance** — the nested form satisfies the singleton invariant
+articulated in §51.0.K's footnote. Engines remain forbidden inside component bodies
+(`E-COMPONENT-ENGINE-SCOPE`) and inside function/snippet bodies.
+
+##### 51.0.Q.2 Parent-rule cascade — dispatch semantics inside a composite
+
+When code inside an inner engine's state-child body writes to one of the engine
+variables, the static-from-state knowledge follows the canonical §51.0.F rule:
+
+- A write to the **inner** variable (e.g., `@playMode = .Battle`): the from-state is
+  the inner state-child the write originates from. Validated against the **inner**
+  state-child's `rule=`.
+- A write to the **outer** variable (e.g., `@appMode = .Title`) from inside the
+  composite's body (including from inside the inner engine's state-children): the
+  from-state of the outer engine is statically the **composite outer state-child**.
+  Validated against the composite's `rule=` (§51.0.F).
+
+This is "parent-rule cascade" in the verdict's terminology: the outer's `rule=` is the
+contract that governs outer-variable writes from anywhere inside the composite,
+including from deep inside inner-engine bodies. No new dispatch mechanic — standard
+§51.0.F enforcement applied to whichever variable is being written.
+
+**Concrete example:**
+
+```scrml
+<engine for=AppMode initial=.Title>
+  <Playing rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle>
+        <button onclick=${
+          @playMode = .Battle    // legal — inner rule= permits .Exploring → .Battle
+          @appMode  = .Paused    // legal — composite (Playing) rule= permits → .Paused
+          @appMode  = .Title     // legal — composite rule= permits → .Title
+          // @appMode = .Inventory  // E-ENGINE-INVALID-TRANSITION: not in PlayMode anyway
+                                    //  — but this would also fail type-check (.Inventory
+                                    //    is PlayMode, not AppMode)
+        }>...</button>
+      </>
+    </>
+  </>
+</>
+```
+
+**Internal vs external interaction (§51.0.O):**
+
+- An external transition out of the composite (canonical `rule=`) fires the composite's
+  `<onTransition>` handlers + writes the inner variable to the history cell (if
+  `history` is set), then suspends the inner engine.
+- An internal transition (`internal:rule=`) does not exit; inner engine continues
+  unaffected.
+
+**Temporal transitions (§51.12, §51.0.M) are engine-specific** per OQ-Harel-7 verdict
+— a `<onTimeout>` on the inner engine fires only when the inner is active (which
+requires the outer to be in the composite); a `<onTimeout>` on the outer composite
+fires regardless of the inner engine's current variant. Timers do NOT cascade across
+the inner/outer boundary.
+
+##### 51.0.Q.3 Cascade-miss diagnostic — extended `E-ENGINE-INVALID-TRANSITION` (OQ-Harel-6)
+
+Per OQ-Harel-6 verdict, when a write inside a composite is rejected by the outer
+composite's `rule=` (and would be a legal target on a different outer state-child but
+the from-state is wrong), the diagnostic message extends to name BOTH engines for
+clarity:
+
+```
+E-ENGINE-INVALID-TRANSITION at line N:
+  Inside composite `<Playing>` (outer engine `appMode: AppMode`),
+  write `@appMode = .Inventory` is invalid.
+  Composite `Playing.rule=` permits: .Title, .Paused.
+  (Note: `.Inventory` is a variant of `PlayMode`, not `AppMode` — type mismatch.)
+```
+
+The composite-aware framing reduces the cognitive cost of debugging hierarchical
+engines. No new error code is introduced; the existing `E-ENGINE-INVALID-TRANSITION`
+catalog row covers the case (per OQ-Harel-6 verdict — extend message form, not
+catalog).
+
+##### 51.0.Q.4 Interaction with existing §51 surface (compatibility matrix)
+
+| Surface | Compatibility |
+|---|---|
+| §51.4 (multi-engine pattern) | Preserved. `parallel` attribute (§51.0.P) is naming sugar over §51.4. |
+| §51.9 (derived/projection engines, §51.0.J) | Compatible. A derived engine can project from inner-engine variable AND outer-engine variable. |
+| §51.11 (audit clause) | Compatible. The audit tuple format extends to include an `engine` field; inner and outer transitions audit separately. (Audit-format extension is an A2 follow-on; not part of A5-1.) |
+| §51.12 (legacy `<machine>` temporal) | Compatible. `<onTimeout>` (§51.0.M) is the canonical `<engine>` temporal surface; legacy `<machine>` form continues unchanged. Per OQ-Harel-7, temporal transitions do not cascade across the inner/outer boundary. |
+| §51.14 (replay) | Compatible. Replay receives a sequence of `(engine, from, to, at)` tuples; inner and outer engines replay independently. (Replay-extension is an A2 follow-on; not part of A5-1.) |
+| §54 (state-local transitions) | Compatible. Type-level vs machine-level — no conflict. |
+| `.advance(.X)` write discipline (§51.0.G) | Preserved. `.advance()` on the inner variable validates against the inner rule=; on the outer variable, validates against the composite's rule= per §51.0.Q.2. |
+
+**Cross-refs:**
+
+- §51.0.B — engine declaration syntax (the form a nested engine uses, identical to
+  file-scope).
+- §51.0.K — Machine Cohesion footnote (the singleton invariant articulation that
+  permits the nested form).
+- §51.0.F — `rule=` contract (the substrate of cascade enforcement).
+- §51.0.N — `history` attribute (extends composite state-children).
+- §51.0.O — `internal:rule=` prefix (the external/internal distinction).
+- §51.0.P — `parallel` attribute (file-scope naming sugar; orthogonal).
+- §51.4 — multi-engine pattern.
+- §51.9.7 — explicit deferral of full SCXML parallel-node semantics.
+- §34 — `E-ENGINE-INVALID-TRANSITION`, `E-COMPONENT-ENGINE-SCOPE`.
 
 ---
 
@@ -21677,6 +22202,15 @@ issues before §51 is considered fully ratified.
 deep-dive). Time-driven transitions as first-class machine rules. Prior art:
 XState `after`, SCXML `<send delay>`, Erlang `gen_statem` state timeouts.
 
+> **Cross-ref to the `<engine>` form (§51.0.M, S67 amendment 2026-05-07).** The
+> temporal-transition feature is also available on canonical `<engine>` declarations
+> via the `<onTimeout>` structural element — see §51.0.M. The runtime backbone is
+> shared (`_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`); the `<engine>`
+> form is a lowering-shape extension over the same runtime. **New code SHOULD prefer
+> `<engine>` + `<onTimeout>`;** the legacy `<machine>` form below remains authoritative
+> for projects already using it and is preserved verbatim. The S67 computed-delay
+> relaxation (§51.12.3.1) applies to both forms.
+
 #### 51.12.1 Motivation
 
 A UI that fetches data and shows a "Taking too long? Refresh." banner after
@@ -21741,6 +22275,36 @@ The unit suffix is required. Supported units:
 
 Fractional numbers are permitted (`0.5s` is 500 ms). The compiler converts
 to integer milliseconds via `Math.round(n × multiplier)`.
+
+##### 51.12.3.1 Computed-delay form (S67 amendment, 2026-05-07)
+
+**Added 2026-05-07 (S67).** The duration MAY be a computed expression of the form
+`${expr}<unit>`, where `expr` is any reactive expression yielding a non-negative
+number and `<unit>` is one of `ms` / `s` / `m` / `h`. Examples:
+
+```scrml
+<onTimeout after=${@backoffDelay}ms to=.Retry/>                       <!-- engine form -->
+<onTimeout after=${Math.min(1000 * 2 ** @attempt, 30000)}ms to=.Retry/>
+
+.Connecting after ${@backoffDelay}ms => .Open                         <!-- legacy machine form -->
+```
+
+Static literal cases (e.g., `after 30s`) retain the existing constant-folded path. The
+runtime function `_scrml_machine_arm_timer(name, ms, ...)` accepts `ms` as a runtime
+argument; computed durations emit per-arm runtime computation feeding the same call.
+
+**Type discipline.** The computed expression SHALL produce a non-negative number. The
+type-system enforces non-negativity statically when possible (literal arithmetic that
+constant-folds to a non-negative number is accepted at compile time). Runtime values
+that are negative or NaN are clamped at zero — equivalent to firing on the next tick
+per `setTimeout` semantics. Negative-runtime emits a development-mode warning the first
+time it occurs per arming site (deferred to A1c codegen; not part of A5-1).
+
+**Closes the WebSocket-backoff case.** Exponential-backoff and other dynamically-
+parameterized retry loops require runtime-computed durations; the prior literal-only
+constraint forced awkward workarounds (multiple temporal rules with different literal
+delays). The relaxation applies to both the `<engine>` form (`<onTimeout>` per §51.0.M)
+and the legacy `<machine>` form (`.From after duration => .To` per §51.12.2).
 
 #### 51.12.4 Re-entry Semantics
 
@@ -24732,6 +25296,8 @@ of the original D2 brief for the canonical listing):
 | `E-DERIVED-ENGINE-INITIAL-UNDEFINED` | Error | derived=expr undefined for source's initial state (§51.0.J). |
 | `E-DERIVED-ENGINE-CIRCULAR` | Error | Chained derivation cycle (§51.0.J). |
 | `E-COMPONENT-ENGINE-SCOPE` | Error | Component body instantiates an engine (§51.0.K). |
+| `E-HISTORY-NO-INNER-ENGINE` | Error | `history` attribute on a state-child without nested `<engine>` (§51.0.N, §51.0.Q). |
+| `E-INTERNAL-RULE-NOT-COMPOSITE` | Error | `internal:rule=` on a non-composite state-child (§51.0.O, §51.0.Q). |
 
 The full normative definitions (severity, trigger, fix recommendation, example) live in
 the relevant sections; §34 indexes them.

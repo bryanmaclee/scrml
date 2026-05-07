@@ -4,7 +4,7 @@
 
 **Status:** living document. Updated when SPEC changes, when locks land, when patterns emerge. Treat as the canon snapshot at the listed date.
 
-**Last updated:** 2026-05-06 (S64; reflects forgotten-surface audit findings + Phase 4d completion sweep — pipeline bookends, retired-AST-kinds (1 of 5 truly retired, interface dropped), 19 `@deprecated Phase 4d` string field declarations dropped from ast.ts. Earlier baseline: 2026-05-05 (S59; post-D1+D2+D3+D4 SPEC + L21 small-deliberation lock — Stage 0b complete, all S57 stdlib work + scrml:oauth, locks L1-L21))
+**Last updated:** 2026-05-07 (S68 — A5-1 spec amendments LANDED: §51.0.K Machine Cohesion footnote (singleton invariant articulated; nested engines permitted in composite state-children); §51.0.M `<onTimeout>` element (engine temporal surface; rides §51.12 runtime); §51.0.N `history` attribute on composite state-children + `.Variant.history` structured target form (shallow-only this revision); §51.0.O `internal:rule=` prefix; §51.0.P `parallel` attribute on file-scope `<engine>` (naming sugar); §51.0.Q hierarchy / nested `<engine>` declarations + parent-rule cascade dispatch; §51.12.3.1 computed-delay relaxation; §34 +2 codes E-HISTORY-NO-INNER-ENGINE + E-INTERNAL-RULE-NOT-COMPOSITE. Implementation pending Phase A7 dispatch. Earlier baseline: 2026-05-06 (S64; reflects forgotten-surface audit findings + Phase 4d completion sweep — pipeline bookends, retired-AST-kinds (1 of 5 truly retired, interface dropped), 19 `@deprecated Phase 4d` string field declarations dropped from ast.ts).
 
 **Word of caution:** if this primer disagrees with `compiler/SPEC.md` or `docs/articles/llm-kickstarter-v2-2026-05-04.md`, the SPEC + kickstarter are authoritative. Surface the contradiction.
 
@@ -209,7 +209,31 @@ Key engine concepts:
 - **`effect=` attribute** on a state-child for inline per-rule effects (single-target only — `E-ENGINE-EFFECT-AMBIGUOUS` on multi-target).
 - **Derived engines** — `<engine for=Phase derived=expr>` reactively recomputes the variant; no rules, no writes (`E-DERIVED-ENGINE-NO-WRITE`); no `initial=` (`E-DERIVED-ENGINE-NO-INITIAL`).
 - **Components are NOT engines** — a component-instance with internal state is fresh per instance; an engine is one app-lifecycle singleton (`E-COMPONENT-ENGINE-SCOPE`).
-- **Legacy `<machine>` keyword** — deprecated alias for `<engine>`. Emits `W-DEPRECATED-001` at the call site; the `bun scrml migrate <file>` CLI auto-rewrites `<machine` → `<engine`. `W-DEPRECATED-001 → E-DEPRECATED-001` transition planned for v0.3.0. **Note:** `<machine>` retains a richer `rule=` grammar (event-arrow, predicate, temporal-after; §51.3, §51.12). Migrating that grammar into `<engine>` is engineering work tracked separately (see master-PA inbox 2026-05-07-1327; S67 user-direction signal #4 — Class A, no debate).
+- **Legacy `<machine>` keyword** — deprecated alias for `<engine>`. Emits `W-DEPRECATED-001` at the call site; the `bun scrml migrate <file>` CLI auto-rewrites `<machine` → `<engine`. `W-DEPRECATED-001 → E-DEPRECATED-001` transition planned for v0.3.0. **Migration of legacy temporal `rule=` grammar (S68):** S67 spec amendments brought temporal transitions forward into `<engine>` form via `<onTimeout>` (§51.0.M); see §7.1 below. Legacy `<machine>` event-arrow + predicate `rule=` forms (§51.3) remain machine-only — those are not migrated into `<engine>` and remain `<machine>`-form-exclusive surfaces.
+
+### §7.1 S67 amendments — hierarchy, history, internal/external, parallel, onTimeout
+
+**Status:** SPEC LANDED at S68 (this section reflects A5-1). Implementation pending Phase A7 dispatch (~50-80h). Surface summary for PA navigation:
+
+- **`<onTimeout after=DURATION to=.Variant/>`** (§51.0.M) — engine temporal surface, parallel to `<onTransition>`. Self-closing. `to=` validated strict-by-default against surrounding state-child's `rule=` (must be in set OR rule=*). Reset-on-reentry per §51.12.4. Multiple per state-child legal. Rides §51.12 runtime backbone (`_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`). E-STRUCTURAL-ELEMENT-MISPLACED outside engine state-child.
+
+- **Computed-delay form** (§51.12.3.1) — `after=${expr}<unit>` accepts any non-negative-number expression. Applies to both `<onTimeout>` (engine) and legacy `<machine>` `.From after duration => .To` form. Static literals retain constant-fold path.
+
+- **Hierarchy / nested `<engine>`** (§51.0.Q.1) — engines may be declared inside an outer engine's state-child body. Such state-children are **composite state-children**. Inner engine has full engine semantics (own `for=`, `initial=`, state-children). Lifecycle coupled to outer state-child (init on entry, suspend on exit). Singleton invariant preserved: outer × 1 = 1 inner instance. Permitted by Machine Cohesion footnote (§51.0.K) — singleton invariant articulated; OQ-Harel-8 verdict: `<engine>` everywhere (no `<region>` keyword).
+
+- **Parent-rule cascade dispatch** (§51.0.Q.2) — writes to outer-engine variable from inside the composite are validated against the composite outer state-child's `rule=` (standard §51.0.F mechanic; just applied per-variable). Writes to inner-engine variable from inside inner state-children validated against inner state-child's `rule=`. No new dispatch primitive — "cascade" is conceptual framing for which `rule=` contract governs which variable's writes from which scope.
+
+- **`history` attribute** (§51.0.N) — bare attribute on a composite state-child. Compiler synthesizes reactive cell `@_<outerVar>_<variant>_history`; written on outer-exit, read on outer-re-entry. Shallow only this revision (deep deferred per OQ-Harel-4). **Tree-shakeable** — synth cell + hooks elided when zero engines declare `history`. Target syntax: `.Variant.history` is a structured-variant-target form, usable as `rule=.Playing.history` or `@phase = .Playing.history` to mean "transition to .Playing AND restore inner from history" (vs bare `.Playing` which starts inner at `initial=`). Empty-history fallback: equivalent to bare `.Variant`. E-HISTORY-NO-INNER-ENGINE if attribute appears on a non-composite state-child.
+
+- **`internal:rule=` prefix** (§51.0.O) — alternative to canonical `rule=` on composite state-children. Same three target-only forms. Internal transition does NOT exit/re-enter the composite (inner-engine lifecycle preserved; no history-write/read; composite's `<onTransition>` handlers don't fire). Default (no prefix) is external. Both `internal:rule=` and `rule=` may coexist on the same composite — different semantics. E-INTERNAL-RULE-NOT-COMPOSITE on non-composite state-children.
+
+- **`parallel` attribute** (§51.0.P) — bare attribute on file-scope `<engine>`. **Naming sugar only** over §51.4 multi-engine pattern. Compiler does nothing special; coexisting engines work as before (`examples/14-mario-state-machine.scrml` precedent). Documents that engines model orthogonal concerns. Full SCXML parallel-node semantics (joint activation/sync) remain deferred per §51.9.7 + OQ-Harel-3.
+
+- **Machine Cohesion sharpening footnote** (§51.0.K, S67) — singleton invariant articulated explicitly. Engines MAY be declared at file scope OR inside another engine's state-child body. MAY NOT be declared in component bodies (E-COMPONENT-ENGINE-SCOPE), function/snippet bodies. Cross-file engine import (`<EngineName/>`) applies only to file-scope engines. Pillar 5 (no per-kind mini-DSLs) + tooling-uniformity (CLI promotion / migration stays context-blind) are the load-bearing reasons a separate keyword (`<region>`/`<sub-engine>`) was rejected.
+
+**OQ-Harel-1 through OQ-Harel-7** are spec-authoring details bundled in §51.0.Q (entry/exit order; reset-vs-history on outer exit; parallel activation; deep vs shallow history; grammar disambiguation; cascade-miss diagnostic; temporal in hierarchy). Most resolved during A5-1 spec writing; OQ-Harel-1 (entry/exit order) deferred to A5-2/A5-3 implementation.
+
+**OQ-Harel-8** RESOLVED 2026-05-07 → `<engine>` everywhere; Machine Cohesion sharpened.
 
 ---
 
