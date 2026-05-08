@@ -214,10 +214,13 @@ export type CellKind = "plain" | "bindable" | "markup-typed" | "compound-parent"
  *
  * **Forward-compatibility shape (audit §2 brief #1):** the BASIC fields are
  * populated by B14 today. The A7 fields (`parentEngine`, `innerEngines`,
- * `historyAttr`, `internalRules`, `parallelAttr`, `onTimeoutElements`) are
+ * `historyAttr`, `internalRules`, `onTimeoutElements`) are
  * declared in the type so downstream passes can reference them without
  * type-system churn when A5-2/A5-3 dispatches land — they remain `undefined`
  * or `null` at this stage to mark "not yet meaningful in this dispatch."
+ * (`parallelAttr` was added by A5-2 mirroring §51.0.P recognition; the field
+ * was removed 2026-05-08 alongside the §51.0.P spec strike — see
+ * `docs/changes/parallel-close-2026-05-08/`.)
  *
  * SPEC cross-references:
  *   §51.0.A — singleton overview
@@ -280,9 +283,6 @@ export interface EngineMetadata {
    *  tag for codegen clarity. Only entries whose `internalRule.kind !== "absent"`
    *  are included. POPULATED by SYM PASS 16 (A5-3). */
   internalRules?: Array<{ stateChildTag: string; rule: EngineRuleForm }>;
-  /** §51.0.P — `parallel` attribute on file-scope engines. POPULATED by
-   *  PASS 10.A (A5-2 sub-step 2) — mirrors `engineDecl.parallelAttr`. */
-  parallelAttr?: boolean;
   /** §51.0.M — file-scope summary: flat list of `<onTimeout>` element
    *  entries across all state-children, each annotated with the owning
    *  state-child tag for codegen clarity. POPULATED by SYM PASS 16 (A5-3). */
@@ -3767,9 +3767,6 @@ function makeEngineRecord(
     innerEngines: [],
     historyAttr: undefined,
     internalRules: undefined,
-    // §51.0.P (S67 — A5-2 sub-step 2): mirror engineDecl.parallelAttr from
-    // ast-builder. Symmetric with how `isPinned` flows from engineDecl.pinned.
-    parallelAttr: engineDecl.parallelAttr === true,
     onTimeoutElements: undefined,
   };
 

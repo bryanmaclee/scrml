@@ -92,7 +92,6 @@ describe("usage-analyzer — skeleton constructors", () => {
     expect(u.engines).toBe(false);
     expect(u.derivedEngines).toBe(false);
     expect(u.engineHistory).toBe(false);
-    expect(u.engineParallel).toBe(false);
     expect(u.engineInternalRules).toBe(false);
     expect(u.engineOnTimeout).toBe(false);
     expect(u.engineNested).toBe(false);
@@ -291,21 +290,13 @@ describe("usage-analyzer — engines + temporal", () => {
     expect(u.derivedEngines).toBe(false);
   });
 
-  test("engine with parallel attr → engineParallel: true", () => {
-    const src = `<program>\${
-  enum Phase { Idle, Active }
-}<engine for=Phase initial=.Idle parallel/></program>`;
-    const u = analyze(src);
-    expect(u.engineParallel).toBe(true);
-  });
-
-  test("engine without parallel → engineParallel: false", () => {
-    const src = `<program>\${
-  enum Phase { Idle, Active }
-}<engine for=Phase initial=.Idle/></program>`;
-    const u = analyze(src);
-    expect(u.engineParallel).toBe(false);
-  });
+  // The "engine with parallel attr → engineParallel: true" + companion
+  // "engine without parallel → engineParallel: false" tests were REMOVED
+  // 2026-05-08 alongside the §51.0.P spec strike. The `engineParallel`
+  // FeatureUsage flag no longer exists. See
+  // `compiler/tests/unit/parallel-close-regression.test.js` for the
+  // counterpart that asserts the flag is gone and `parallel` in attribute
+  // position is silent-fallthrough.
 
   test("engine state-child with history attr → engineHistory: true", () => {
     const src = `<program>\${
@@ -713,7 +704,7 @@ describe("usage-analyzer — bitmap completeness probe", () => {
   <formRes><email>="" <pwd>="" </>
   function clear() { reset(@count) }
 }
-<engine for=Phase initial=.Idle parallel>
+<engine for=Phase initial=.Idle>
   <Idle history rule=.Active internal:rule=.Idle>
     <onTimeout after="500ms" to=.Active/>
   </>
@@ -740,7 +731,6 @@ describe("usage-analyzer — bitmap completeness probe", () => {
 
     // Engine surface
     expect(u.engines).toBe(true);
-    expect(u.engineParallel).toBe(true);
     expect(u.engineHistory).toBe(true);
     expect(u.engineInternalRules).toBe(true);
     expect(u.engineOnTimeout).toBe(true);

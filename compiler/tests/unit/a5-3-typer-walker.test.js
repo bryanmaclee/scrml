@@ -796,54 +796,13 @@ describe("§A5-3.9 — Engine cohesion: function/snippet body (§51.0.K)", () =>
 
 // ---------------------------------------------------------------------------
 // §A5-3.10 — parallel silent-ignore (§51.0.P)
+// REMOVED 2026-05-08: §51.0.P struck per parallel-disposition deep-dive.
+// The §A5-3.10 describe block (3 tests) covered the silent-ignore contract
+// when the spec text said `parallel` was naming sugar. Post-strike, the
+// `parallel` keyword in attribute position is a generic unknown attribute
+// and should still produce no diagnostic — covered by the regression test
+// at `compiler/tests/unit/parallel-close-regression.test.js`.
 // ---------------------------------------------------------------------------
-//
-// Per SURVEY §1.12 KEY FINDING #5 + §3.3: silent-ignore IS the
-// implementation. No diagnostic, no metadata mutation. A5-3 does ZERO work.
-// Tests anchor the silent contract.
-
-describe("§A5-3.10 — parallel silent-ignore (§51.0.P)", () => {
-  test("file-scope engine with parallel produces NO diagnostic", () => {
-    const src = `\${ type AppMode:enum = { Idle, Active } }
-<engine for=AppMode parallel initial=.Idle>
-  <Idle rule=.Active></>
-  <Active rule=.Idle></>
-</>`;
-    const { sym } = runUpToSYM(src);
-    // No new diagnostic codes from A5-3 for parallel.
-    expect(errorsByCode(sym, "E-ENGINE-PARALLEL-INVALID").length).toBe(0);
-    expect(errorsByCode(sym, "W-ENGINE-PARALLEL-IGNORED").length).toBe(0);
-  });
-
-  test("derived engine carrying parallel: silent-ignore (no diagnostic)", () => {
-    // Note: §51.0.P says parallel on derived engines is silently ignored.
-    // The derived engine has its own restrictions (B16) — but parallel
-    // itself is silent.
-    const src = `\${ type AppMode:enum = { Idle, Active } }
-<engine for=AppMode parallel derived=@idleSrc>
-  <Idle rule=*></>
-  <Active rule=*></>
-</>`;
-    const { sym } = runUpToSYM(src);
-    // Whatever B16 does with derived, A5-3 contributes no parallel-specific
-    // diagnostic.
-    expect(errorsByCode(sym, "E-ENGINE-PARALLEL-INVALID").length).toBe(0);
-    expect(errorsByCode(sym, "W-ENGINE-PARALLEL-IGNORED").length).toBe(0);
-  });
-
-  test("parallelAttr on engineMeta is preserved (mirrors engine-decl, A5-2 contract)", () => {
-    const src = `\${ type AppMode:enum = { Idle, Active } }
-<engine for=AppMode parallel initial=.Idle>
-  <Idle rule=.Active></>
-  <Active rule=.Idle></>
-</>`;
-    const { ast } = runUpToSYM(src);
-    const decl = findEngineDecl(ast);
-    expect(decl).toBeDefined();
-    expect(decl.parallelAttr).toBe(true);
-    expect(decl._record.engineMeta.parallelAttr).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // §A5-3.11 — EngineMetadata file-scope aggregation (per SURVEY §4)

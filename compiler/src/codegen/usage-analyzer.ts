@@ -20,7 +20,7 @@
  *   - docs/changes/phase-a1c-codegen/SCOPE-AND-DECOMPOSITION.md §4.0, §11
  *   - docs/changes/phase-a1c-codegen/SURVEY.md §2 (canonical bitmap shape)
  *   - SPEC §55.1 — universal-core 14-predicate catalog (validators)
- *   - SPEC §51.0 + §51.0.M-Q — engine surface (history/parallel/internal/onTimeout)
+ *   - SPEC §51.0 + §51.0.M-Q — engine surface (history/internal/onTimeout; §51.0.P parallel attribute STRUCK 2026-05-08)
  *   - SPEC §53 — refinement types (three-zone classification)
  *   - SPEC §38 — channel WebSocket
  *   - SPEC §6.8 — `reset(@cell)` + `default=`
@@ -76,8 +76,6 @@ export interface FeatureUsage {
   derivedEngines: boolean;
   /** Any engine state-child carrying `history` bareword (§51.0.N). */
   engineHistory: boolean;
-  /** Any file-scope engine with `parallel` bareword (§51.0.P). */
-  engineParallel: boolean;
   /** Any engine state-child with `internal:rule=` (§51.0.O). */
   engineInternalRules: boolean;
   /** Any `<onTimeout>` element inside an engine state-child (§51.0.M). */
@@ -175,7 +173,6 @@ export function emptyUsage(): FeatureUsage {
     engines: false,
     derivedEngines: false,
     engineHistory: false,
-    engineParallel: false,
     engineInternalRules: false,
     engineOnTimeout: false,
     engineNested: false,
@@ -223,7 +220,6 @@ export function fullUsage(): FeatureUsage {
     engines: true,
     derivedEngines: true,
     engineHistory: true,
-    engineParallel: true,
     engineInternalRules: true,
     engineOnTimeout: true,
     engineNested: true,
@@ -273,7 +269,6 @@ export function mergeUsage(a: FeatureUsage, b: FeatureUsage): FeatureUsage {
     engines: a.engines || b.engines,
     derivedEngines: a.derivedEngines || b.derivedEngines,
     engineHistory: a.engineHistory || b.engineHistory,
-    engineParallel: a.engineParallel || b.engineParallel,
     engineInternalRules: a.engineInternalRules || b.engineInternalRules,
     engineOnTimeout: a.engineOnTimeout || b.engineOnTimeout,
     engineNested: a.engineNested || b.engineNested,
@@ -444,9 +439,10 @@ function walkUsage(nodeList: unknown, usage: FeatureUsage): void {
       if (typeof node.sourceVar === "string" && (node.sourceVar as string).length > 0) {
         usage.derivedEngines = true;
       }
-      // §51.0.P (A5-2 sub-step 2) — `parallel` bareword on file-scope engine.
-      // ast-builder.js sets `engineDecl.parallelAttr` directly.
-      if (node.parallelAttr === true) usage.engineParallel = true;
+      // §51.0.P (S68 ratification, STRUCK 2026-05-08): the engineParallel
+      // flag was removed alongside the spec strike. The §51.4 multi-engine
+      // pattern (two file-scope `<engine>` declarations) IS the parallel
+      // pattern and requires no per-engine flag.
 
       // SYM-LEVEL FIELDS (post-PASS 10.A registration; provides A5-3
       // file-scope aggregations of state-child temporal data). Reading these
@@ -458,7 +454,6 @@ function walkUsage(nodeList: unknown, usage: FeatureUsage): void {
       const engineMeta = record?.engineMeta;
       if (engineMeta) {
         if (engineMeta.derivedExpr != null) usage.derivedEngines = true;
-        if (engineMeta.parallelAttr === true) usage.engineParallel = true;
         if (engineMeta.historyAttr === true) usage.engineHistory = true;
         const internalRules = engineMeta.internalRules as unknown[] | undefined;
         if (Array.isArray(internalRules) && internalRules.length > 0) {

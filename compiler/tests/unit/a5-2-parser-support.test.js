@@ -2,18 +2,20 @@
  * Phase A7 Step A5-2 — parser support for §51.0.M-Q (S67 ratified extensions).
  *
  * Tests the AST-shape extensions produced by:
- *   - `compiler/src/ast-builder.js` (engine-decl `parallelAttr` field)
  *   - `compiler/src/engine-statechild-parser.ts` (state-child opener
  *     extensions: `historyAttr`, `internalRule`, `historyForm`/`historyForms`
  *     on EngineRuleForm; body-scan helpers `scanForOnTimeoutEntries` /
  *     `scanForNestedEngineEntries`)
- *   - `compiler/src/symbol-table.ts` (engineMeta.parallelAttr flow-through)
+ *
+ * NOTE: §A5-2.4 (parallel bare attribute) and the §A5-2.8 PASS 10.A
+ * flow-through test for parallelAttr were REMOVED 2026-05-08 alongside the
+ * §51.0.P spec strike. See `docs/changes/parallel-close-2026-05-08/`.
  *
  * Coverage (per BRIEF §6.1):
  *   §A5-2.1  <onTimeout> element parsing
  *   §A5-2.2  history bare attribute
  *   §A5-2.3  internal:rule= prefix
- *   §A5-2.4  parallel bare attribute
+ *   §A5-2.4  parallel bare attribute  [REMOVED 2026-05-08 — §51.0.P STRUCK]
  *   §A5-2.5  Nested <engine> recognition
  *   §A5-2.6  .Variant.history target form (rule=, internal:rule=, expression RHS)
  *   §A5-2.7  Composition (full state-child carrying all extensions)
@@ -339,91 +341,14 @@ describe("§A5-2.3 — internal:rule= prefix (§51.0.O)", () => {
 
 // ---------------------------------------------------------------------------
 // §A5-2.4 — parallel bare attribute on file-scope <engine> (§51.0.P)
+// REMOVED 2026-05-08: §51.0.P struck per parallel-disposition deep-dive.
+// Recognition was retroactively closed; AST nodes no longer carry
+// `parallelAttr`. The §51.4 multi-engine pattern (two file-scope `<engine>`
+// declarations) IS the parallel pattern; orthogonality is documented with
+// a comment when the author wants to flag intent.
+// Regression coverage that catches accidental re-introduction lives in
+// `compiler/tests/unit/parallel-close-regression.test.js`.
 // ---------------------------------------------------------------------------
-
-describe("§A5-2.4 — parallel bare attribute (§51.0.P)", () => {
-  test("`parallel` bareword on file-scope engine sets engineMeta.parallelAttr = true", () => {
-    const src = `<program>
-<engine for=MarioState parallel initial=.Small>
-  <Small rule=.Big></>
-  <Big rule=.Small></>
-</>
-</program>`;
-    const { sym } = runUpToSYM(src);
-    const rec = sym.fileScope.stateCells.get("marioState");
-    expect(rec).toBeDefined();
-    expect(rec.engineMeta.parallelAttr).toBe(true);
-  });
-
-  test("absent parallel bareword → parallelAttr = false (post-A5-2 contract)", () => {
-    const src = `<program>
-<engine for=MarioState initial=.Small>
-  <Small rule=.Big></>
-  <Big rule=.Small></>
-</>
-</program>`;
-    const { sym } = runUpToSYM(src);
-    const rec = sym.fileScope.stateCells.get("marioState");
-    expect(rec.engineMeta.parallelAttr).toBe(false);
-  });
-
-  test("hypothetical `parallel=...` attribute does NOT match the bareword", () => {
-    const src = `<program>
-<engine for=MarioState initial=.Small parallel=on>
-  <Small rule=.Big></>
-  <Big rule=.Small></>
-</>
-</program>`;
-    const { sym } = runUpToSYM(src);
-    const rec = sym.fileScope.stateCells.get("marioState");
-    // `parallel=...` should NOT trip the bareword regex.
-    expect(rec.engineMeta.parallelAttr).toBe(false);
-  });
-
-  test("`parallel` works alongside `pinned` (both bareword modifiers)", () => {
-    const src = `<program>
-<engine for=MarioState parallel pinned initial=.Small>
-  <Small rule=.Big></>
-  <Big rule=.Small></>
-</>
-</program>`;
-    const { sym } = runUpToSYM(src);
-    const rec = sym.fileScope.stateCells.get("marioState");
-    expect(rec.engineMeta.parallelAttr).toBe(true);
-    expect(rec.engineMeta.isPinned).toBe(true);
-  });
-
-  test("engine-decl AST node carries parallelAttr field", () => {
-    const src = `<program>
-<engine for=MarioState parallel initial=.Small>
-  <Small rule=.Big></>
-  <Big rule=.Small></>
-</>
-</program>`;
-    const { ast } = runUpToSYM(src);
-    const decl = findEngineDecl(ast);
-    expect(decl).toBeDefined();
-    expect(decl.parallelAttr).toBe(true);
-  });
-
-  test("multiple file-scope engines: each gets independent parallelAttr", () => {
-    const src = `<program>
-<engine for=A parallel initial=.X>
-  <X rule=.Y></>
-  <Y rule=.X></>
-</>
-<engine for=B initial=.X>
-  <X rule=.Y></>
-  <Y rule=.X></>
-</>
-</program>`;
-    const { sym } = runUpToSYM(src);
-    const a = sym.fileScope.stateCells.get("a");
-    const b = sym.fileScope.stateCells.get("b");
-    expect(a.engineMeta.parallelAttr).toBe(true);
-    expect(b.engineMeta.parallelAttr).toBe(false);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // §A5-2.5 — Nested <engine> recognition (§51.0.Q.1)
@@ -722,20 +647,10 @@ type AppMode = Idle | Active
     expect(active.onTimeoutElements).toHaveLength(1);
   });
 
-  test("engine-decl AST node + engineMeta both carry parallelAttr (PASS 10.A flow-through)", () => {
-    const src = `<program>
-<engine for=AppMode parallel initial=.Idle>
-  <Idle rule=.Active></>
-  <Active rule=.Idle></>
-</>
-type AppMode = Idle | Active
-</program>`;
-    const { ast, sym } = runUpToSYM(src);
-    const decl = findEngineDecl(ast);
-    expect(decl.parallelAttr).toBe(true);
-    const rec = sym.fileScope.stateCells.get("appMode");
-    expect(rec.engineMeta.parallelAttr).toBe(true);
-  });
+  // The "engine-decl + engineMeta both carry parallelAttr" PASS 10.A
+  // flow-through test was REMOVED 2026-05-08 alongside the §51.0.P spec
+  // strike. See `compiler/tests/unit/parallel-close-regression.test.js` for
+  // the asserts-the-recognition-is-gone counterpart.
 });
 
 // ---------------------------------------------------------------------------

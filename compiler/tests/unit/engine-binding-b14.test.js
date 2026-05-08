@@ -307,7 +307,7 @@ describe("B14 SYM PASS 10.A — engine cell registration", () => {
     expect(rec.engineMeta.forType).toBe("Order");
   });
 
-  test("forward-compat A7 fields are declared but null/undefined at B14 (post-A5-2: parallelAttr populated; post-A5-3: aggregation populated)", () => {
+  test("forward-compat A7 fields are declared but null/undefined at B14 (post-A5-3: aggregation populated)", () => {
     const src = `<program>
 <engine for=MarioState initial=.Small>
   .Small => .Big
@@ -319,9 +319,12 @@ describe("B14 SYM PASS 10.A — engine cell registration", () => {
     expect(rec.engineMeta.parentEngine).toBeNull();
     expect(Array.isArray(rec.engineMeta.innerEngines)).toBe(true);
     expect(rec.engineMeta.innerEngines.length).toBe(0);
-    // §51.0.P (S67 — A5-2 sub-step 2): parallelAttr populated by PASS 10.A
-    // (mirrors engineDecl.parallelAttr). Engine without `parallel` → false.
-    expect(rec.engineMeta.parallelAttr).toBe(false);
+    // §51.0.P (S67-ratified, STRUCK 2026-05-08): the `parallelAttr` field
+    // was removed alongside the spec strike. EngineMetadata no longer
+    // exposes it. The `parallel` keyword in attribute position falls
+    // through silently as an unknown attribute; orthogonality is documented
+    // structurally via §51.4 multi-engine pattern.
+    expect(rec.engineMeta.parallelAttr).toBeUndefined();
     // A5-3 (PASS 16): aggregation fields populated. For a legacy
     // arrow-rules body (no state-children parsed), defaults are:
     //   historyAttr: false (OR-reduce over empty stateChildren),

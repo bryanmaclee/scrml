@@ -8603,10 +8603,14 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // mis-matches (mirrors the `historyAttr` regex tightening landed
         // S70 post-A5-3-SHIP for the SPEC §51.0.N `.Variant.history` shape).
         const pinnedMatch = /(?:^|\s)pinned(?=\s|>|\/|$)/.test(header);
-        // §51.0.P (S67 — A5-2): `parallel` bareword modifier on file-scope
-        // engines. Same standalone-token discipline as `pinned` above —
-        // defense-in-depth (mirrors S70 `historyAttr` regex tightening).
-        const parallelMatch = /(?:^|\s)parallel(?=\s|>|\/|$)/.test(header);
+        // §51.0.P (S67 ratification, struck 2026-05-08) — `parallel` bareword
+        // on file-scope `<engine>` was naming sugar over §51.4 multi-engine
+        // pattern. Closed retroactively per parallel-disposition deep-dive
+        // (synonym-test failure + SCXML semantic audit). Recognition removed;
+        // the keyword in attribute position is now treated as an unknown
+        // attribute and ignored silently (no diagnostic, no AST field). The
+        // §51.4 pattern (two file-scope `<engine>` declarations) IS the
+        // parallel pattern; orthogonality is documented with a comment.
 
         let engineName = "";
         let governedType = "";
@@ -8686,9 +8690,6 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // §51.0.B + §6.10 — `pinned` bareword modifier.
         const pinned = pinnedMatch === true;
 
-        // §51.0.P — `parallel` bareword modifier on file-scope engines.
-        const parallel = parallelMatch === true;
-
         // Extract rules from children (text nodes containing the rule lines)
         let rulesRaw = "";
         if (block.children && block.children.length > 0) {
@@ -8725,10 +8726,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           varNameOverride,
           initialVariant,
           pinned,
-          // §51.0.P (S67 — A5-2): `parallel` bareword modifier on file-scope
-          // engines. Recorded here; A5-3 typer validates placement (silent-
-          // ignore on derived engines per §51.0.J/§51.0.P interaction).
-          parallelAttr: parallel,
+          // §51.0.P (S68 ratification, STRUCK 2026-05-08): the `parallelAttr`
+          // field on engine-decl nodes was removed alongside the spec strike.
+          // No replacement field — orthogonal-region intent is communicated
+          // via §51.4 multi-engine pattern (two file-scope `<engine>`
+          // declarations) plus comments where the author wants to flag intent.
           // B14 Form 1 detection (`export <engine ...>`) — set by
           // liftBareDeclarations when the immediately preceding text block
           // contains a trailing `export` keyword. Surfaces to MOD's

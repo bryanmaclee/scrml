@@ -211,7 +211,7 @@ Key engine concepts:
 - **Components are NOT engines** — a component-instance with internal state is fresh per instance; an engine is one app-lifecycle singleton (`E-COMPONENT-ENGINE-SCOPE`).
 - **Legacy `<machine>` keyword** — deprecated alias for `<engine>`. Emits `W-DEPRECATED-001` at the call site; the `bun scrml migrate <file>` CLI auto-rewrites `<machine` → `<engine`. `W-DEPRECATED-001 → E-DEPRECATED-001` transition planned for v0.3.0. **Migration of legacy temporal `rule=` grammar (S68):** S67 spec amendments brought temporal transitions forward into `<engine>` form via `<onTimeout>` (§51.0.M); see §7.1 below. Legacy `<machine>` event-arrow + predicate `rule=` forms (§51.3) remain machine-only — those are not migrated into `<engine>` and remain `<machine>`-form-exclusive surfaces.
 
-### §7.1 S67 amendments — hierarchy, history, internal/external, parallel, onTimeout
+### §7.1 S67 amendments — hierarchy, history, internal/external, onTimeout
 
 **Status:** SPEC LANDED at S68 (this section reflects A5-1). Implementation pending Phase A7 dispatch (~50-80h). Surface summary for PA navigation:
 
@@ -226,8 +226,6 @@ Key engine concepts:
 - **`history` attribute** (§51.0.N) — bare attribute on a composite state-child. Compiler synthesizes reactive cell `@_<outerVar>_<variant>_history`; written on outer-exit, read on outer-re-entry. Shallow only this revision (deep deferred per OQ-Harel-4). **Tree-shakeable** — synth cell + hooks elided when zero engines declare `history`. Target syntax: `.Variant.history` is a structured-variant-target form, usable as `rule=.Playing.history` or `@phase = .Playing.history` to mean "transition to .Playing AND restore inner from history" (vs bare `.Playing` which starts inner at `initial=`). Empty-history fallback: equivalent to bare `.Variant`. E-HISTORY-NO-INNER-ENGINE if attribute appears on a non-composite state-child.
 
 - **`internal:rule=` prefix** (§51.0.O) — alternative to canonical `rule=` on composite state-children. Same three target-only forms. Internal transition does NOT exit/re-enter the composite (inner-engine lifecycle preserved; no history-write/read; composite's `<onTransition>` handlers don't fire). Default (no prefix) is external. Both `internal:rule=` and `rule=` may coexist on the same composite — different semantics. E-INTERNAL-RULE-NOT-COMPOSITE on non-composite state-children.
-
-- **`parallel` attribute** (§51.0.P) — bare attribute on file-scope `<engine>`. **Naming sugar only** over §51.4 multi-engine pattern. Compiler does nothing special; coexisting engines work as before (`examples/14-mario-state-machine.scrml` precedent). Documents that engines model orthogonal concerns. Full SCXML parallel-node semantics (joint activation/sync) remain deferred per §51.9.7 + OQ-Harel-3.
 
 - **Machine Cohesion sharpening footnote** (§51.0.K, S67) — singleton invariant articulated explicitly. Engines MAY be declared at file scope OR inside another engine's state-child body. MAY NOT be declared in component bodies (E-COMPONENT-ENGINE-SCOPE), function/snippet bodies. Cross-file engine import (`<EngineName/>`) applies only to file-scope engines. Pillar 5 (no per-kind mini-DSLs) + tooling-uniformity (CLI promotion / migration stays context-blind) are the load-bearing reasons a separate keyword (`<region>`/`<sub-engine>`) was rejected.
 

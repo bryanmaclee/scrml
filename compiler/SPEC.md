@@ -989,7 +989,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 | Element | Owning section | Attribute slots (parse-time) | Body form |
 |---|---|---|---|
-| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr`, `parallel` (file-scope, §51.0.P) | bare-body (state-children) |
+| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr` | bare-body (state-children) |
 | `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms) |
 | `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) |
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
@@ -20769,54 +20769,17 @@ transitions are declared via the `internal:` attribute prefix on `rule=`.
 - §51.0.H — `<onTransition>` (which DOES fire on external, does NOT fire on internal).
 - §34 — `E-INTERNAL-RULE-NOT-COMPOSITE`.
 
-#### 51.0.P `parallel` attribute on file-scope `<engine>` (S67, 2026-05-07)
-
-**Added 2026-05-07 (S67).** Insight 23 grammar decision #5.
-
-A file-scope `<engine>` declaration may carry the bare attribute `parallel` as
-**naming sugar** over the §51.4 multi-engine pattern. The attribute documents that this
-engine is intended to coexist independently with sibling engines as a parallel region.
-
-**Form:**
-
-```scrml
-<engine for=PlayerHealth initial=.Healthy parallel>
-  <Healthy/>
-  <AtRisk/>
-  <Critical/>
-</>
-
-<engine for=PlayerScore initial=.Zero parallel>
-  ...
-</>
-```
-
-**Semantics:**
-
-- `parallel` is a **naming attribute only.** The compiler does NOT treat `parallel`
-  engines specially — codegen + runtime are identical to a non-`parallel` engine.
-- Two engines with `parallel` coexist independently — same as the canonical §51.4
-  multi-engine pattern (e.g., `examples/14-mario-state-machine.scrml` MarioMachine +
-  HealthMachine). No joint lifecycle semantics; no synchronized transitions; no
-  cross-engine dispatch.
-- The attribute is for **documentation and tooling readability** — explicit signal that
-  these engines model orthogonal concerns.
-- Full SCXML parallel-node semantics (joint activation, synchronized transitions across
-  regions) are **out of scope for this revision** per §51.9.7 and OQ-Harel-3 verdict.
-
-**Legality:**
-
-- `parallel` is legal on file-scope `<engine>` declarations only.
-- On a nested `<engine>` (inside a composite state-child per §51.0.Q): silently
-  ignored — inner engines are coupled to outer-state-child lifecycle, which is the
-  opposite of "parallel" semantics. (No error fires; the attribute is noise but not
-  harmful.)
-- On a derived engine (`<engine derived=...>` per §51.0.J): silently ignored.
-
-**Cross-refs:**
-
-- §51.4 — canonical multi-engine pattern (the substrate `parallel` documents).
-- §51.9.7 — explicit deferral of full SCXML parallel-node semantics.
+> **§51.0.P — withdrawn 2026-05-08.** The `parallel` attribute (S67-ratified at S68
+> as naming sugar over the §51.4 multi-engine pattern) was struck following the
+> [parallel-attribute-disposition deep-dive (2026-05-08)](../docs/deep-dives/parallel-attribute-disposition-2026-05-08.md):
+> the attribute conceded synonym status by its own spec text, failed the synonym-detection
+> test from the [zod-amend methodology](../docs/articles/scrml-debate-amends-zod-claim-devto-2026-05-06.md),
+> and a subsequent SCXML semantic audit confirmed nothing not already expressible via
+> §51.4 + §51.0.J + §51.0.Q. Two top-level `<engine>` declarations ARE the parallel
+> pattern; document orthogonality with a comment if needed. Section number §51.0.P is
+> retired (gap left intentional — §51.0.O → §51.0.Q). Full SCXML parallel-region
+> semantics remain deferred per §51.9.7 + OQ-Harel-3 — a future ratification would
+> introduce its own surface, not revive `parallel`.
 
 #### 51.0.Q Hierarchy — nested `<engine>` declarations and parent-rule cascade (S67, 2026-05-07)
 
@@ -20965,7 +20928,7 @@ catalog).
 
 | Surface | Compatibility |
 |---|---|
-| §51.4 (multi-engine pattern) | Preserved. `parallel` attribute (§51.0.P) is naming sugar over §51.4. |
+| §51.4 (multi-engine pattern) | Preserved. Two file-scope `<engine>` declarations coexist independently — orthogonal regions are expressed structurally. |
 | §51.9 (derived/projection engines, §51.0.J) | Compatible. A derived engine can project from inner-engine variable AND outer-engine variable. |
 | §51.11 (audit clause) | Compatible. The audit tuple format extends to include an `engine` field; inner and outer transitions audit separately. (Audit-format extension is an A2 follow-on; not part of A5-1.) |
 | §51.12 (legacy `<machine>` temporal) | Compatible. `<onTimeout>` (§51.0.M) is the canonical `<engine>` temporal surface; legacy `<machine>` form continues unchanged. Per OQ-Harel-7, temporal transitions do not cascade across the inner/outer boundary. |
@@ -20982,7 +20945,6 @@ catalog).
 - §51.0.F — `rule=` contract (the substrate of cascade enforcement).
 - §51.0.N — `history` attribute (extends composite state-children).
 - §51.0.O — `internal:rule=` prefix (the external/internal distinction).
-- §51.0.P — `parallel` attribute (file-scope naming sugar; orthogonal).
 - §51.4 — multi-engine pattern.
 - §51.9.7 — explicit deferral of full SCXML parallel-node semantics.
 - §34 — `E-ENGINE-INVALID-TRANSITION`, `E-COMPONENT-ENGINE-SCOPE`.
