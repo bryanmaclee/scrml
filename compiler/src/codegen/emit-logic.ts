@@ -91,6 +91,18 @@ interface EmitLogicOpts {
    * runtime warning so undeclared sites are loud, not silent.
    */
   boundary: "server" | "client";
+  /**
+   * C1 — Variant C compound qualified-path prefix.
+   *
+   * When emitting children of a compound parent, this carries the parent
+   * cell's qualified path (e.g. `"signup"` or `"outer.inner"`). Each child
+   * state-decl encountered while this prefix is set registers under
+   * `${compoundPathPrefix}.${child.name}` (matches `StateCellRecord.qualifiedPath`).
+   *
+   * `null` / undefined at top-level cell scope. Threaded through the
+   * recursive child walk in `case "state-decl"` (compound-parent arm).
+   */
+  compoundPathPrefix?: string | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -261,6 +273,40 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     tildeVar: opts.tildeContext?.var ?? null,
     dbVar: opts.dbVar,
   };
+}
+
+/**
+ * C1 — Emit the `_scrml_default_set("name", () => <defaultExpr>);` sidecar
+ * for a state-decl with `defaultExpr !== null`.
+ *
+ * Per SPEC §6.8.1: `default=` stores the EXPRESSION (not a snapshot); the
+ * runtime evaluates the closure each time `reset(@cell)` fires. C1 emits the
+ * storage; C5 will lower `reset(@cell)` to read it.
+ *
+ * Per SURVEY §6.5: `default=` on a `const` derived cell is E-DERIVED-WRITE
+ * (A1b/B22 fires before codegen). C1 will never see a derived cell with
+ * `defaultExpr !== null` in a well-formed AST; if it does, emit a comment
+ * marker so the issue is loud rather than silent.
+ *
+ * Returns the sidecar line, or `null` if the cell has no `default=` attr.
+ *
+ * @param node — the state-decl AST node (must have `name` and may have `defaultExpr`)
+ * @param qualifiedName — the storage key (top-level: cell name; compound child: "parent.child")
+ * @param opts — the emit options (for encodingCtx)
+ */
+function _emitDefaultSidecar(node: any, qualifiedName: string, opts: EmitLogicOpts): string | null {
+  const defaultExpr = node.defaultExpr;
+  if (!defaultExpr) return null;
+  // Defensive: A1b/B22 should reject `default=` on `const <derived>` cells
+  // (E-DERIVED-WRITE). If we see one here, the AST is malformed; emit a
+  // marker so the issue is loud rather than silent.
+  if ((node as any).shape === "derived" && (node as any).isConst === true) {
+    return `// C1: SHOULD NOT REACH — default= on const <${node.name}> is E-DERIVED-WRITE (A1b/B22 should have rejected before codegen)`;
+  }
+  const ctx = opts.encodingCtx;
+  const encodedName = ctx ? ctx.encode(qualifiedName) : qualifiedName;
+  const defaultBody = emitExpr(defaultExpr, _makeExprCtx(opts));
+  return `_scrml_default_set(${JSON.stringify(encodedName)}, () => ${defaultBody});`;
 }
 
 /**
@@ -560,19 +606,133 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "state-decl": {
-      // Phase A1a Step 11.5 — fold of `reactive-derived-decl`. When the
-      // state-decl is the legacy `const @x = expr` form (post-fold:
-      // shape:"derived" + isConst:true + structuralForm:false), route to
-      // the dedicated derived-cell emitter (`_scrml_derived_declare`) below.
-      // Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is NOT
-      // routed here — that path remains on the legacy `_scrml_reactive_set`
-      // emitter (a pre-existing latent gap, deferred to A1c). Step 11.5's
-      // contract per BRIEF §2.2 is byte-output preservation for `const @x =
-      // expr` ONLY.
+      // C1 shape dispatch (SPEC §6.2 / §6.3 / §6.6.17 / §6.8):
+      //   1. compound-parent (children !== undefined)        → recursive child walk (re-uses _scrml_derived_declare for parent proxy)
+      //   2. derived markup-typed (_cellKind === "markup-typed")  → factory-shell + _scrml_derived_declare
+      //   3. derived plain (shape === "derived" && isConst)  → _scrml_derived_declare
+      //   4. plain reactive (Shape 1 + Shape 2)              → _scrml_reactive_set
+      //   5. default= sidecar (orthogonal; emit if defaultExpr !== null)  → _scrml_default_set
+      //
+      // Phase A1a Step 11.5 folded the legacy `reactive-derived-decl` AST
+      // node into `state-decl{shape:"derived",isConst:true}`. Pre-C1 the
+      // dispatch was gated on `structuralForm === false`, leaving Shape 3
+      // V5-strict (`const <x> = expr`) on the legacy `_scrml_reactive_set`
+      // path. C1 closes that gap (S61 Step 11.5 deferred work) by admitting
+      // both forms to the derived-declare emitter below.
+      //
+      // The `default=` sidecar is computed once at top of the case and
+      // appended to whichever main emission arm fires. SURVEY §6 contract:
+      // emit `_scrml_default_set("name", () => <defaultExpr>);` for any
+      // state-decl with `defaultExpr !== null`. Compound child decls carry
+      // their own `defaultExpr` and recurse into this case naturally so
+      // each child registers its default at its qualified-path key.
+      const _qualifiedName = (opts.compoundPathPrefix ? `${opts.compoundPathPrefix}.${node.name}` : node.name);
+      const _defaultSidecar = _emitDefaultSidecar(node, _qualifiedName, opts);
+      const _appendSidecar = (mainStmt: string): string =>
+        _defaultSidecar ? `${mainStmt}\n${_defaultSidecar}` : mainStmt;
+
+      // C1 dispatch arm 1: Variant C compound parent (`<formRes><name>=""</></>`)
+      // Per SPEC §6.3.2 / §6.3.5 + B5 cell-classifier (symbol-table.ts:1481),
+      // a compound parent is identified by `Array.isArray(node.children)` AND
+      // `_cellKind === "compound-parent"`. The parent itself is a derived cell
+      // whose value is a reconstructed object literal `{ field1: get("parent.field1"), ... }`
+      // (SURVEY §3.3 Option A-prime — re-uses `_scrml_derived_declare` rather
+      // than introducing a dedicated `_scrml_compound_declare` helper).
+      //
+      // Each child state-decl is emitted recursively with `compoundPathPrefix`
+      // threaded through opts, so child cells register under qualified paths
+      // (`formRes.name`, `signup.email`) matching `StateCellRecord.qualifiedPath`.
+      // In-compound derived cells (§6.6.16) and bindable children flow through
+      // the same dispatch — recursion routes them naturally.
+      //
+      // The dirty-propagation edges from each child to the parent are emitted
+      // alongside the parent declaration so writes to `formRes.name` dirty
+      // `formRes` (the parent re-evaluates on next read of `@formRes`). This
+      // is consistent with §6.3.5 + the runtime's lazy-pull derived semantics.
+      if (
+        (node as any)._cellKind === "compound-parent" ||
+        Array.isArray((node as any).children)
+      ) {
+        const ctxC = opts.encodingCtx;
+        const encodedParentName = ctxC ? ctxC.encode(_qualifiedName) : _qualifiedName;
+        const childOpts: EmitLogicOpts = { ...opts, compoundPathPrefix: _qualifiedName };
+        const childLines: string[] = [];
+        const childNames: string[] = [];
+        for (const child of (node.children as any[]) ?? []) {
+          if (!child || typeof child !== "object") continue;
+          // Recursively emit each child. Children are themselves state-decls
+          // and may be Shape 1, 2, or 3 (incl. nested compound) — the dispatch
+          // in this same case handles the routing.
+          const childEmit = emitLogicNode(child, childOpts);
+          if (childEmit) childLines.push(childEmit);
+          childNames.push(child.name);
+        }
+
+        // Build the parent-proxy reconstruction expression. Empty compound
+        // (`children: []` is legal per SPEC §6.3.2) emits an empty object
+        // literal as the value.
+        const reconExprBody = childNames.length === 0
+          ? "({})"
+          : "({ " + childNames.map(cn => {
+              const childQName = `${_qualifiedName}.${cn}`;
+              const encodedChild = ctxC ? ctxC.encode(childQName) : childQName;
+              return `${cn}: _scrml_reactive_get(${JSON.stringify(encodedChild)})`;
+            }).join(", ") + " })";
+
+        const parentLines: string[] = [];
+        parentLines.push(`_scrml_derived_declare(${JSON.stringify(encodedParentName)}, () => ${reconExprBody});`);
+        for (const cn of childNames) {
+          const childQName = `${_qualifiedName}.${cn}`;
+          const encodedChild = ctxC ? ctxC.encode(childQName) : childQName;
+          parentLines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedParentName)}, ${JSON.stringify(encodedChild)});`);
+        }
+
+        // Order: child declarations FIRST (so children exist before the parent
+        // proxy reads them on its first lazy pull), then the parent declare +
+        // subscribe edges. The `default=` sidecar applies to the parent cell
+        // itself only if the parent decl carries `defaultExpr` (rare; per
+        // SPEC §6.8.2 reset() recurses into children — but a parent-level
+        // `default=` is allowed structurally).
+        const all = [...childLines, ...parentLines];
+        return _appendSidecar(all.join("\n"));
+      }
+
+      // C1 dispatch arm 2: markup-typed derived (`const <badge> = <span>...`)
+      // Per B5 cell-classifier (symbol-table.ts:1480-1490), this is identified
+      // by `_cellKind === "markup-typed"` AND `isConst === true`. The ast-builder
+      // routes the markup RHS into `renderSpec.element` (NOT `initExpr`); the
+      // shape field is set to "decl-with-spec" by the same path that handles
+      // bindable Shape 2.
+      //
+      // C1 emits a placeholder declaration: `_scrml_derived_declare("badge",
+      // _scrml_markup_factory_N)` plus a top-level factory function shell.
+      // The factory body and the dep-tracking subscriptions are C2's territory
+      // (per BRIEF §1: "C1 emits the declaration; C2 wires the dep-tracking").
+      // Use-site `${@badge}` interpolation already routes correctly via the
+      // runtime's `_scrml_reactive_get` → `_scrml_derived_get` shim
+      // (runtime-template.js:181) once the cell is registered as derived.
+      //
+      // SURVEY §5.2 Option (b). The factory shell returns `null` until C2
+      // wires the markup-emit + dep-tracking; reads of `@badge` before C2
+      // ships will see `null` rather than crash, but the dispatch shape is
+      // already correct and the tests assert declaration shape, not runtime
+      // value. C2 lifts this from a stub to a real markup factory.
+      if (
+        (node as any)._cellKind === "markup-typed" &&
+        (node as any).isConst === true
+      ) {
+        const ctxMk = opts.encodingCtx;
+        const encodedMkName = ctxMk ? ctxMk.encode(_qualifiedName) : _qualifiedName;
+        const factoryId = genVar(`markup_factory_${node.name}`);
+        const lines: string[] = [];
+        lines.push(`function ${factoryId}() { /* C2: emit markup tree + register _scrml_derived_subscribe edges for upstream cells in renderSpec.element */ return null; }`);
+        lines.push(`_scrml_derived_declare(${JSON.stringify(encodedMkName)}, ${factoryId});`);
+        return _appendSidecar(lines.join("\n"));
+      }
+
       if (
         (node as any).shape === "derived" &&
-        (node as any).isConst === true &&
-        (node as any).structuralForm === false
+        (node as any).isConst === true
       ) {
         // Implements the post-fold derived-cell emitter (§6.6 derived).
         // Pre-Step-11.5 this was a separate `case "reactive-derived-decl":`;
@@ -585,12 +745,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
         if (!hasReactiveDeps) {
           const derivedRhs = emitExprField(node.initExpr, derivedInit, _makeExprCtx(opts));
-          return `/* W-DERIVED-001: const @${node.name} has no reactive dependencies — treating as const */ const ${node.name} = ${derivedRhs};`;
+          return _appendSidecar(`/* W-DERIVED-001: const @${node.name} has no reactive dependencies — treating as const */ const ${node.name} = ${derivedRhs};`);
         }
 
         const rewrittenBody = emitExprField(node.initExpr, derivedInit, { ..._makeExprCtx(opts), derivedNames });
         const ctxDerived = opts.encodingCtx;
-        const encodedDerivedDeclName = ctxDerived ? ctxDerived.encode(node.name) : node.name;
+        const encodedDerivedDeclName = ctxDerived ? ctxDerived.encode(_qualifiedName) : _qualifiedName;
 
         const derivedLines: string[] = [];
         derivedLines.push(`_scrml_derived_declare(${JSON.stringify(encodedDerivedDeclName)}, () => ${rewrittenBody});`);
@@ -598,7 +758,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           const encodedDep = ctxDerived ? ctxDerived.encode(dep) : dep;
           derivedLines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedDerivedDeclName)}, ${JSON.stringify(encodedDep)});`);
         }
-        return derivedLines.join("\n");
+        return _appendSidecar(derivedLines.join("\n"));
       }
 
       // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
@@ -626,7 +786,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const hasTypeAnnotation2 = !!(node as any).typeAnnotation;
         const hasMachineBinding2 = !!(node as any).machineBinding;
         const isInit2 = hasTypeAnnotation2 || hasMachineBinding2 || !(opts.machineBindings?.has(node.name));
-        return _emitReactiveSet(encodedName2, sqlExpr, opts, node.name, isInit2);
+        return _appendSidecar(_emitReactiveSet(encodedName2, sqlExpr, opts, node.name, isInit2));
       }
       // fix-cg-mounthydrate-sql-ref-placeholder (S40 follow-up): on the CLIENT
       // boundary a SQL-init state-decl (`@x = ?{...}` at top level or in a
@@ -649,12 +809,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `undefined` either way. The variable can still be (re)assigned later
       // (e.g. via a `server function` returning the SQL result through CPS).
       if (node.sqlNode && node.sqlNode.kind === "sql") {
-        return `// SQL-init for @${node.name} — client cannot evaluate _scrml_sql (E-CG-006); declare as \`server @${node.name}\` for mount-hydration (§8.11).`;
+        return _appendSidecar(`// SQL-init for @${node.name} — client cannot evaluate _scrml_sql (E-CG-006); declare as \`server @${node.name}\` for mount-hydration (§8.11).`);
       }
       // Legacy fallthrough for non-SQL state-decl initializers.
       const initStr: string = node.init ?? "undefined";
       const ctx = opts.encodingCtx;
-      const encodedName = ctx ? ctx.encode(node.name) : node.name;
+      const encodedName = ctx ? ctx.encode(_qualifiedName) : _qualifiedName;
       // Historically state-decl was treated as the initial declaration
       // site and the machine transition guard was skipped. But the AST
       // builder emits state-decl for EVERY `@name = expr` it parses,
@@ -675,13 +835,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
           const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
-          return [
+          return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
             _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr, node.initExpr), opts, node.name, isInit),
-          ].join("\n");
+          ].join("\n"));
         }
-        return _emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit);
+        return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
       }
       // Phase 4 simplified fallback: initExpr is missing (rare)
       const rewrittenInit = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
@@ -690,9 +850,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
         const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
-        return [`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n");
+        return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
-      return _emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit);
+      return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
     }
 
     // Phase A1a Step 11.5 — the legacy `case "reactive-derived-decl":` was

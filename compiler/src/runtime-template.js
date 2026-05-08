@@ -63,6 +63,20 @@ const _scrml_derived_cache = {};
 const _scrml_derived_dirty = {};
 const _scrml_derived_downstreams = {};
 
+// --- default= storage (§6.8) ---
+// _scrml_default_fns: name → () => default-value
+// Registered by _scrml_default_set at module-init alongside the cell
+// declaration. Read by reset(@cell) lowering (C5 — pending) to materialize
+// the default when reset is invoked. Per SPEC §6.8.1 the default is the
+// EXPRESSION (not a snapshot), so the closure is re-evaluated each reset.
+//
+// Parallel map (separate from _scrml_state / _scrml_derived_fns) so the
+// existing reactive registries keep their shape stability.
+const _scrml_default_fns = {};
+function _scrml_default_set(name, fn) {
+  _scrml_default_fns[name] = fn;
+}
+
 // --- machine temporal transitions (§51.12) ---
 // _scrml_machine_timers: encodedVarName → timeout id for the currently-armed
 // temporal transition. Transition-guard codegen clears any existing timer on
