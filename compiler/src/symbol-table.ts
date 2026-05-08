@@ -300,14 +300,68 @@ export interface EngineMetadata {
   stateChildren?: EngineStateChildEntry[];
 }
 
-/** §51.0.F three target-only forms — the `rule=` shape recognized by B15. */
+/** §51.0.F three target-only forms — the `rule=` shape recognized by B15.
+ *
+ *  A5-2 EXTENSION (§51.0.N — `.Variant.history` target form): `single` and
+ *  `multi` shapes carry an optional history-form discriminator (`historyForm`
+ *  / `historyForms`). Per Phase 0 SURVEY §1.6, Option A is approved — the
+ *  flag rides the existing forms transparently to all current consumers
+ *  (B15/B16/B17/B18/A1c). Most callsites can ignore the flag; A5-3 typer
+ *  and A1c codegen read it when lowering the `.Variant.history` runtime form.
+ *
+ *  `historyForms` is a parallel array to `targets` on `multi` shapes: one
+ *  flag per target, supporting mixed lists like `(.A | .B.history)` per
+ *  §51.0.N (no spec prohibition on mixing). When absent, all targets are
+ *  non-history form. */
 export type EngineRuleForm =
-  | { kind: "absent" }                                  // no `rule=` attribute (terminal state)
-  | { kind: "single"; target: string }                  // `rule=.NextVariant`
-  | { kind: "multi"; targets: string[] }                // `rule=(.A | .B | .C)`
-  | { kind: "wildcard" }                                // `rule=*`
-  | { kind: "legacy-arrow"; raw: string }               // `rule="event -> Variant"` (rejected)
-  | { kind: "parse-error"; raw: string; reason: string }; // unparseable rule=
+  | { kind: "absent" }                                                                    // no `rule=` attribute (terminal state)
+  | { kind: "single"; target: string; historyForm?: boolean }                             // `rule=.NextVariant` (or `.NextVariant.history`)
+  | { kind: "multi"; targets: string[]; historyForms?: boolean[] }                        // `rule=(.A | .B | .C)` — history-flag parallel array
+  | { kind: "wildcard" }                                                                  // `rule=*`
+  | { kind: "legacy-arrow"; raw: string }                                                 // `rule="event -> Variant"` (rejected)
+  | { kind: "parse-error"; raw: string; reason: string };                                 // unparseable rule=
+
+/**
+ * A5-2 (§51.0.M) — a `<onTimeout after=DURATION to=.Variant/>` self-closing
+ * structural element parsed out of an engine state-child body. The `after`
+ * attribute is captured as the raw literal-or-computed-expression string
+ * (e.g., `"500ms"`, `"${@delay}s"`); A5-3 typer parses the duration form
+ * and validates the `to=` target against `engineMeta.variants`.
+ *
+ * `rawOffset` is `bodyRaw`-relative — the absolute file offset is
+ * reconstructable by adding `engine-decl.span.start` + the offset of
+ * `bodyRaw` start within `rulesRaw` + this `rawOffset`.
+ */
+export interface OnTimeoutEntry {
+  /** Raw `after=` attribute value (literal `Nms`/`Ns`/etc. OR computed
+   *  `${expr}<unit>`). A5-3 typer normalizes into milliseconds. */
+  after: string;
+  /** `to=.Variant` target. Captured as the variant name (no leading dot).
+   *  Empty string when malformed (parse-error shape — A5-3 surfaces). */
+  to: string;
+  /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
+   *  of the `<onTimeout` opener. */
+  rawOffset: number;
+}
+
+/**
+ * A5-2 (§51.0.Q.1) — a nested `<engine>` declaration parsed out of a
+ * state-child body. Captured as raw text + offset; the inner engine's
+ * structural parsing (rules, state-children, etc.) is deferred — A5-3
+ * typer (or A1c codegen) walks the raw text via the same engine-decl
+ * construction path.
+ *
+ * Per Phase 0 SURVEY §1.5: A5-2 captures shape ONLY (no recursive parse).
+ * The composite-state-child marker is `innerEngines.length > 0`.
+ */
+export interface NestedEngineEntry {
+  /** The full nested-engine source slice — `<engine ...>...</>` (or
+   *  `</engine>`) — verbatim from the parent's `bodyRaw`. */
+  rawText: string;
+  /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
+   *  of the `<engine` opener. */
+  rawOffset: number;
+}
 
 /** §51.0.B + §51.0.F — a state-child entry parsed out of `engine-decl.rulesRaw`. */
 export interface EngineStateChildEntry {
@@ -340,6 +394,26 @@ export interface EngineStateChildEntry {
    *  For simplicity, B15 reports span-of-engine-decl on diagnostics; future
    *  span tightening is forward-compatible. */
   rawOffset: number;
+
+  // ---- A5-2 NEW (§51.0.M-Q ratified extensions) ----
+
+  /** §51.0.N — `history` bare attribute on the state-child opener.
+   *  `<Variant history rule=...>` sets this `true`. A5-2 records;
+   *  A5-3 typer fires E-HISTORY-NO-INNER-ENGINE when `historyAttr === true`
+   *  AND `innerEngines.length === 0`. */
+  historyAttr: boolean;
+  /** §51.0.O — `internal:rule=` parallel attribute. Same six EngineRuleForm
+   *  shapes as canonical `rule=`. `kind: "absent"` when the prefix is not
+   *  present. A5-3 typer fires E-INTERNAL-RULE-NOT-COMPOSITE when
+   *  `internalRule.kind !== "absent"` AND `innerEngines.length === 0`. */
+  internalRule: EngineRuleForm;
+  /** §51.0.M — `<onTimeout>` siblings inside this state-child body.
+   *  Empty array when none are present. */
+  onTimeoutElements: OnTimeoutEntry[];
+  /** §51.0.Q.1 — nested `<engine>` declarations parsed out of this body.
+   *  Empty array when this state-child is non-composite. The composite
+   *  marker is downstream-derivable from `innerEngines.length > 0`. */
+  innerEngines: NestedEngineEntry[];
 }
 
 /**
@@ -3684,12 +3758,14 @@ function makeEngineRecord(
     varName,
     isExported,
     isPinned,
-    // A7 forward-compat fields (declared, undefined at B14):
+    // A7 forward-compat fields (declared B14):
     parentEngine: null,
     innerEngines: [],
     historyAttr: undefined,
     internalRules: undefined,
-    parallelAttr: undefined,
+    // §51.0.P (S67 — A5-2 sub-step 2): mirror engineDecl.parallelAttr from
+    // ast-builder. Symmetric with how `isPinned` flows from engineDecl.pinned.
+    parallelAttr: engineDecl.parallelAttr === true,
     onTimeoutElements: undefined,
   };
 

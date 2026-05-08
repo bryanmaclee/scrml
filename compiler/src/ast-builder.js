@@ -8599,6 +8599,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const initialMatch = header.match(new RegExp(`\\binitial\\s*=\\s*\\.(${IDENT.source})\\b`));
         // `pinned` as a bareword (not `pinned=`).
         const pinnedMatch = /\bpinned\b(?!\s*=)/.test(header);
+        // §51.0.P (S67 — A5-2): `parallel` bareword modifier on file-scope
+        // engines. Negative-lookahead avoids false-match on a hypothetical
+        // `parallel=...` attribute (not in spec). A5-3 typer fires
+        // E-PARALLEL-NESTED-ENGINE / silently-ignores on derived engines.
+        const parallelMatch = /\bparallel\b(?!\s*=)/.test(header);
 
         let engineName = "";
         let governedType = "";
@@ -8678,6 +8683,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // §51.0.B + §6.10 — `pinned` bareword modifier.
         const pinned = pinnedMatch === true;
 
+        // §51.0.P — `parallel` bareword modifier on file-scope engines.
+        const parallel = parallelMatch === true;
+
         // Extract rules from children (text nodes containing the rule lines)
         let rulesRaw = "";
         if (block.children && block.children.length > 0) {
@@ -8714,6 +8722,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           varNameOverride,
           initialVariant,
           pinned,
+          // §51.0.P (S67 — A5-2): `parallel` bareword modifier on file-scope
+          // engines. Recorded here; A5-3 typer validates placement (silent-
+          // ignore on derived engines per §51.0.J/§51.0.P interaction).
+          parallelAttr: parallel,
           // B14 Form 1 detection (`export <engine ...>`) — set by
           // liftBareDeclarations when the immediately preceding text block
           // contains a trailing `export` keyword. Surfaces to MOD's
