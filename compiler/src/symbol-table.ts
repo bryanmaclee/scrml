@@ -109,7 +109,7 @@ import type {
   ImportDeclNode,
   ImportSpecifier,
 } from "./types/ast.ts";
-import { forEachIdentInExprNode } from "./expression-parser.ts";
+import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 import {
   ARRAY_MUTATING_METHODS,
   isDerivedMutatingAssignOp,
@@ -4425,6 +4425,521 @@ function walkValidateEngineStateChildrenAndRules(
 }
 
 // ---------------------------------------------------------------------------
+// B16: Derived-engine rejections (PASS 12) — A1b Phase
+// ---------------------------------------------------------------------------
+//
+// Per SPEC §51.0.J (Lock L20), a derived engine — declared via
+// `<engine for=Type derived=expr>` — must reject three classes of authoring
+// at compile time:
+//
+//   1. `initial=` attribute on the engine declaration —
+//      `E-DERIVED-ENGINE-NO-INITIAL`. Initial value is computed from
+//      `derived=expr` at engine-init time; an authored `initial=` is
+//      meaningless and contradicts the derivation contract.
+//
+//   2. `rule=` attribute on a state-child — `E-DERIVED-ENGINE-NO-RULES`.
+//      Transitions are determined by the source expression, not authored.
+//      Today's parser (§51.0.B-J Move 14) does NOT yet expose state-children
+//      with `rule=` attributes structurally; until then, B16 fires
+//      NO-RULES whenever a derived engine's `rulesRaw` body contains any
+//      transition rules (the line-shape `.From => .To` form). When the
+//      parser learns Move 14, the same walker reads the structured
+//      state-children directly.
+//
+//   3. Direct write to the engine's auto-declared variable (or `.advance(.X)`
+//      method-call form per §51.0.G) — `E-DERIVED-ENGINE-NO-WRITE`. Derived
+//      engine variables are read-only — the variable is the value of the
+//      `derived=expr` reactively recomputed.
+//
+// Cycle detection (`E-DERIVED-ENGINE-CIRCULAR`) lives in
+// `dependency-graph.ts` (B16 PHASE 3 in DG); see SECOND-consumer comment
+// at `buildEngineDerivedAdj` for the reuse pattern with B7's
+// `detectCycle`.
+//
+// **Walker shape:** AST-driven structural recursion, mirrors PASS 5 / PASS 6
+// / PASS 7 / PASS 10.A. Visits every `engine-decl` node; for each derived
+// engine (per `_record.engineMeta.derivedExpr !== null`), runs three
+// sub-checks (NO-INITIAL on the decl itself; NO-RULES on `rulesRaw`).
+// Then visits every `bare-expr` node looking for direct-write or
+// `.advance(.X)` shapes whose target ident matches a registered derived-
+// engine variable; fires NO-WRITE.
+//
+// **OUT OF B16 SCOPE:**
+//   - `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (runtime, A1c codegen).
+//   - General `E-ENGINE-INVALID-TRANSITION` on non-derived engines (B15 +
+//     A1c per audit §1.3).
+//   - `<onTransition>` and `effect=` validation (B17, uniformly, per
+//     §51.0.J line 20409 — these are LEGAL on derived-engine state-children).
+//   - Move-14-shape state-child structural walking (awaits ast-builder).
+
+/**
+ * Resolve a derived-engine variable name to its `EngineMetadata` from the
+ * file scope. Returns the metadata if and only if the cell exists, is an
+ * engine, and has a non-null `derivedExpr` whose `kind` is NOT
+ * `"legacy-source-var"`.
+ *
+ * **Why exclude `legacy-source-var`:** The legacy §51.9 derived/projection
+ * machine form (`<machine name=UI for=T derived=@source>`) has its OWN
+ * write-rejection path (`E-ENGINE-017`, type-system.ts) and uses `=>`
+ * projection rules in its body as the projection MAPPING (legal there).
+ * §51.0.J Move-14-shape derived engines (`<engine derived=match @x {...}>`)
+ * have a structurally different `derivedExpr` and forbid all three
+ * authoring forms (rules, initial=, direct writes).
+ *
+ * Today's parser (ast-builder.js line 8449) only emits the legacy form
+ * via `engine-decl.sourceVar`; B14 wraps it as
+ * `{ kind: "legacy-source-var", varName }`. When ast-builder learns the
+ * §51.0.J rich-expression form, `derivedExpr` will carry a parsed
+ * ExprNode (or a `kind` discriminant other than `"legacy-source-var"`),
+ * at which point this lookup begins returning hits and B16's rejections
+ * fire. Until then, the trio of NO-RULES / NO-INITIAL / NO-WRITE
+ * silently no-ops on legacy-form derivations — preventing double-fire
+ * with E-ENGINE-017 and not flagging legitimate §51.9 projection rules.
+ */
+function lookupDerivedEngineMeta(
+  fileScope: Scope,
+  varName: string,
+): { record: StateCellRecord; meta: EngineMetadata } | null {
+  const rec = fileScope.stateCells.get(varName);
+  if (!rec || !rec.engineMeta) return null;
+  const dExpr = rec.engineMeta.derivedExpr;
+  if (dExpr === null || dExpr === undefined) return null;
+  if (typeof dExpr === "object"
+      && (dExpr as Record<string, unknown>).kind === "legacy-source-var") {
+    return null;
+  }
+  return { record: rec, meta: rec.engineMeta };
+}
+
+/**
+ * Detect whether the engine's `rulesRaw` body contains user-authored
+ * transition rule lines. Per §51.0.J line 20406, derived engines REJECT
+ * `rule=` on state-children — the rules-body should be EMPTY (or contain
+ * only `<onTransition>` blocks per §51.0.J line 20409, which are LEGAL).
+ *
+ * Today's parser places transition rule lines like `.From => .To` inside
+ * `rulesRaw`. We detect the presence of `=>` outside of comments and
+ * outside of `<onTransition>` blocks as the trigger for NO-RULES. (The
+ * `audit @name` clause is also stripped before B16 sees the body via
+ * `type-system.ts:buildMachineRegistry`, but B16 reads the unsplit
+ * `rulesRaw` — we conservatively skip lines that look like `audit @ident`
+ * to avoid false positives even though those don't compile to rules.)
+ *
+ * Returns true if at least one rule-shaped line is present.
+ */
+function derivedEngineHasAuthoredRules(rulesRaw: string): boolean {
+  if (typeof rulesRaw !== "string" || rulesRaw.length === 0) return false;
+  // Strip line comments to avoid false positives in commented-out rules.
+  // Line-comment shape: leading `//` after optional whitespace; trailing
+  // `// comment` mid-line is rare in rules but stripped via regex.
+  const lines = rulesRaw.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\/\/.*$/, "").trim();
+    if (line.length === 0) continue;
+    // Skip audit clause if present.
+    if (/^audit\s+@[A-Za-z_$][A-Za-z0-9_$]*\s*$/.test(line)) continue;
+    // A transition rule line contains `=>` separating from-spec and to-spec.
+    // We don't deeply parse here; presence of `=>` is the authored-rule
+    // signal. Note: `<onTransition>` markup blocks would not contain `=>`
+    // at the top level of `rulesRaw` (they're tag-shaped), so this check
+    // is robust against the legal transition-handler form.
+    if (line.includes("=>")) return true;
+  }
+  return false;
+}
+
+/**
+ * Fire `E-DERIVED-ENGINE-NO-INITIAL` on a derived engine that has an
+ * `initial=` attribute set. Per SPEC §51.0.J line 20407 + §34 catalog row.
+ */
+function fireDerivedEngineNoInitial(
+  engineDecl: any,
+  varName: string,
+  initialVariant: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-DERIVED-ENGINE-NO-INITIAL",
+    message:
+      `E-DERIVED-ENGINE-NO-INITIAL: derived engine \`@${varName}\` has an ` +
+      `\`initial=.${initialVariant}\` attribute. Derived engines compute their ` +
+      `initial value from the \`derived=\` expression at engine-init time; ` +
+      `\`initial=\` is meaningless on a derived engine and contradicts the ` +
+      `derivation contract (SPEC §51.0.J + §34). Remove the \`initial=\` ` +
+      `attribute.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-DERIVED-ENGINE-NO-RULES` on a derived engine whose body contains
+ * authored transition rules. Per SPEC §51.0.J line 20406 + §34 catalog row.
+ */
+function fireDerivedEngineNoRules(
+  engineDecl: any,
+  varName: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-DERIVED-ENGINE-NO-RULES",
+    message:
+      `E-DERIVED-ENGINE-NO-RULES: derived engine \`@${varName}\` declares ` +
+      `transition rules (\`.From => .To\` form) in its body. Derived engines ` +
+      `do NOT permit authored transitions — transitions are determined by the ` +
+      `\`derived=\` source expression, not authored (SPEC §51.0.J + §34). ` +
+      `Remove the rule lines; if you need transition handlers, use ` +
+      `\`<onTransition>\` elements or \`effect=\` attributes on state-children ` +
+      `(those remain LEGAL on derived engines).`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-DERIVED-ENGINE-NO-WRITE` for a direct write or `.advance(...)`
+ * call to a derived engine's auto-declared variable. Per SPEC §51.0.J line
+ * 20408 + §34 catalog row + §51.0.G `.advance` symmetry.
+ */
+function fireDerivedEngineNoWrite(
+  bareExprNode: any,
+  varName: string,
+  isAdvance: boolean,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = bareExprNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const writeForm = isAdvance
+    ? `\`@${varName}.advance(...)\``
+    : `\`@${varName} = ...\``;
+  errors.push({
+    code: "E-DERIVED-ENGINE-NO-WRITE",
+    message:
+      `E-DERIVED-ENGINE-NO-WRITE: ${writeForm} writes to derived engine ` +
+      `\`@${varName}\`. Derived-engine variables are read-only — the value is ` +
+      `reactively computed from the \`derived=\` expression and cannot be ` +
+      `directly assigned (SPEC §51.0.J + §34). \`.advance(.X)\` is also rejected ` +
+      `per §51.0.G: it is method-style transition that targets the same ` +
+      `read-only variable. To change the engine's value, mutate the upstream ` +
+      `cell(s) referenced in the \`derived=\` expression.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * PASS 12 walker: scan engine-decl nodes for derived engines and fire
+ * E-DERIVED-ENGINE-NO-INITIAL / NO-RULES per the engine's annotation.
+ *
+ * Mirrors `walkRegisterEngines` (PASS 10.A) recursion shape — engines live
+ * as markup children, not logic. The `_record` annotation set by PASS 10.A
+ * is the trigger predicate.
+ *
+ * Exported for tests that simulate the future Move-14 ast-builder by
+ * mutating `engineMeta.derivedExpr` to a non-legacy shape, then directly
+ * invoking this walker without re-running runSYM (which would overwrite
+ * the mutation via PASS 10.A's `makeEngineRecord`).
+ */
+export function walkDerivedEngineDeclRejections(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkDerivedEngineDeclRejections(n, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "engine-decl") {
+    const record: StateCellRecord | undefined = node._record;
+    if (record && record.engineMeta) {
+      const meta = record.engineMeta;
+      const dExpr = meta.derivedExpr;
+      // Skip non-derived engines (B15 owns those rules).
+      if (dExpr === null || dExpr === undefined) {
+        return;
+      }
+      // Skip legacy §51.9 derived/projection machines — they are governed
+      // by `E-ENGINE-017` (writes) and §51.9 projection-rule semantics
+      // (their `=>` body lines ARE the projection map, not authored
+      // transitions). See `lookupDerivedEngineMeta` for full rationale.
+      if (typeof dExpr === "object"
+          && (dExpr as Record<string, unknown>).kind === "legacy-source-var") {
+        return;
+      }
+      // Move-14 shape derived engine — run rejection checks.
+      const varName = meta.varName ?? "";
+      // NO-INITIAL: `initial=` on a derived engine.
+      if (meta.initialVariant !== null && meta.initialVariant !== undefined) {
+        fireDerivedEngineNoInitial(
+          node, varName, meta.initialVariant, errors, filePath,
+        );
+      }
+      // NO-RULES: authored transition rules in the body.
+      const rulesRaw: string = typeof node.rulesRaw === "string" ? node.rulesRaw : "";
+      if (derivedEngineHasAuthoredRules(rulesRaw)) {
+        fireDerivedEngineNoRules(node, varName, errors, filePath);
+      }
+    }
+    // Engine bodies are RAW TEXT (no walkable children today). When state-
+    // children become walkable AST nodes, add per-child `rule=` attribute
+    // checking here.
+    return;
+  }
+
+  // Generic recursion. Mirror PASS 10.A's walker shape.
+  if (Array.isArray(node.children)) {
+    walkDerivedEngineDeclRejections(node.children, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkDerivedEngineDeclRejections(node.body, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkDerivedEngineDeclRejections(node.consequent, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkDerivedEngineDeclRejections(node.alternate, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkDerivedEngineDeclRejections(arm.body, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Detect direct-write and `.advance(.X)` shapes targeting a derived engine.
+ *
+ * Inspects a `bare-expr` node's `exprNode` (preferred) or string `expr`
+ * fallback. Two shapes fire `E-DERIVED-ENGINE-NO-WRITE`:
+ *
+ *   1. **Direct write:** `assign` ExprNode with `target.kind === "ident"`
+ *      and `target.name === "@<varName>"` where `<varName>` is a derived-
+ *      engine cell. Covers `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `**=`, `&&=`,
+ *      `||=`, `??=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `>>>=`. (Compound-
+ *      assigns are also writes.)
+ *
+ *   2. **Method-style transition:** `call` ExprNode where
+ *      `callee.kind === "member"`, `callee.object.kind === "ident"` with
+ *      name `@<varName>` (derived-engine cell), and
+ *      `callee.property === "advance"`. Per §51.0.G, `.advance(.X)` is
+ *      symmetric with direct writes; on derived engines it is rejected.
+ *
+ * Note: B16 walks ONLY the `bare-expr` node level (statement-level direct
+ * writes). Writes nested inside expression contexts (e.g.,
+ * `if (cond) { @phase = .X }`) descend into nested logic-block bodies via
+ * the recursion.
+ */
+function checkBareExprForDerivedEngineWrite(
+  bareExprNode: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const exprNode = bareExprNode.exprNode;
+  if (exprNode && typeof exprNode === "object") {
+    checkExprNodeForDerivedEngineWrite(exprNode, bareExprNode, fileScope, errors, filePath);
+  }
+}
+
+/**
+ * Recursively walk an ExprNode for derived-engine write shapes.
+ * Reports against the OUTER bare-expr node's span (more reliable absolute
+ * offsets than ExprNode spans, mirroring B8's pattern).
+ */
+function checkExprNodeForDerivedEngineWrite(
+  expr: any,
+  bareExprNode: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  if (!expr || typeof expr !== "object") return;
+  const seen = new WeakSet<object>();
+
+  function walk(n: any): void {
+    if (!n || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    const k = n.kind;
+
+    // Shape 1: direct write `@varname [op]= ...`
+    if (k === "assign" && n.target && n.target.kind === "ident"
+        && typeof n.target.name === "string" && n.target.name.startsWith("@")) {
+      const varName = n.target.name.slice(1);
+      const hit = lookupDerivedEngineMeta(fileScope, varName);
+      if (hit) {
+        fireDerivedEngineNoWrite(bareExprNode, varName, /*isAdvance=*/false, errors, filePath);
+        // Don't double-fire on nested shapes; continue descent below for
+        // unrelated nested writes (e.g., `@x = (@phase.advance(.A), 1)` —
+        // both fires are appropriate).
+      }
+    }
+
+    // Shape 2: `.advance(.X)` method-style transition on a derived engine.
+    if (k === "call" && n.callee && n.callee.kind === "member"
+        && typeof n.callee.property === "string"
+        && n.callee.property === "advance"
+        && n.callee.object && n.callee.object.kind === "ident"
+        && typeof n.callee.object.name === "string"
+        && n.callee.object.name.startsWith("@")) {
+      const varName = n.callee.object.name.slice(1);
+      const hit = lookupDerivedEngineMeta(fileScope, varName);
+      if (hit) {
+        fireDerivedEngineNoWrite(bareExprNode, varName, /*isAdvance=*/true, errors, filePath);
+      }
+    }
+
+    // Recurse into structural sub-fields. ExprNode shapes carry various
+    // child ExprNodes; a generic walk over enumerable properties covers
+    // them. We skip `span` and any `_*` annotation fields.
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      const v = (n as any)[key];
+      if (v && typeof v === "object") {
+        if (Array.isArray(v)) {
+          for (const item of v) walk(item);
+        } else {
+          walk(v);
+        }
+      }
+    }
+  }
+
+  walk(expr);
+}
+
+/**
+ * Detect a state-decl-shaped write to a derived engine variable. The
+ * scrml parser surfaces `@varname = expr` (and compound-assign forms) AS
+ * `state-decl` nodes even inside function bodies — there is no separate
+ * assignment-statement kind in the AST today. This is the same pattern
+ * `rejectWritesToDerivedVars` (type-system.ts:2118) detects for legacy
+ * E-ENGINE-017.
+ *
+ * Trigger: a `state-decl` whose `name` matches a derived-engine cell var
+ * AND which is NOT the engine's own auto-declaration (the state-decl
+ * lives in a different declaration site, e.g., inside a function body).
+ *
+ * The engine's auto-declaration is the engine-decl AST node — distinct
+ * `kind`, so `state-decl` always represents an authored variable
+ * binding/assignment, never the engine's own var.
+ */
+function checkStateDeclForDerivedEngineWrite(
+  stateDecl: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const varName: unknown = stateDecl.name;
+  if (typeof varName !== "string" || varName.length === 0) return;
+  const hit = lookupDerivedEngineMeta(fileScope, varName);
+  if (!hit) return;
+  fireDerivedEngineNoWrite(stateDecl, varName, /*isAdvance=*/false, errors, filePath);
+}
+
+/**
+ * PASS 12 walker (write side): scan AST for direct-write / `.advance`
+ * shapes targeting a derived-engine cell. Two AST surfaces fire NO-WRITE:
+ *
+ *   1. `bare-expr` nodes whose `exprNode` is `assign` (member or ident
+ *      target) or `call` with `.advance` member-method shape — covers
+ *      reassignments to a previously-declared cell, and `.advance(.X)`.
+ *   2. `state-decl` nodes whose `name` matches a derived-engine var —
+ *      the scrml parser surfaces `@var = expr` as a state-decl in
+ *      logic / function bodies regardless of whether the var is already
+ *      registered. Mirrors `rejectWritesToDerivedVars` (legacy
+ *      E-ENGINE-017 path) which walks `state-decl` for the same reason.
+ *
+ * Mirrors B8's `walkDerivedValueMutate` recursion shape (function bodies,
+ * state-decl children, match-arm bodies, etc.).
+ *
+ * Exported alongside `walkDerivedEngineDeclRejections` for test direct-
+ * invocation; see that walker's docs for rationale.
+ */
+export function walkDerivedEngineWriteRejections(
+  nodes: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkDerivedEngineWriteRejections(n, fileScope, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  const kind = node.kind;
+
+  if (kind === "bare-expr") {
+    checkBareExprForDerivedEngineWrite(node, fileScope, errors, filePath);
+    // bare-exprs are leaf statement nodes — no body recursion needed; the
+    // ExprNode walk inside `checkBareExprForDerivedEngineWrite` covers
+    // nested expression sub-shapes.
+    return;
+  }
+
+  if (kind === "state-decl") {
+    // Detect `@<derived-engine-var> = ...` surfaced as a state-decl.
+    // Skip if this state-decl IS the engine's own auto-declaration —
+    // engine-decls have `kind === "engine-decl"`, not `"state-decl"`,
+    // so reaching here means the state-decl is a user-authored binding
+    // attempting to write the engine var.
+    checkStateDeclForDerivedEngineWrite(node, fileScope, errors, filePath);
+    // Continue descent — state-decl children may carry nested writes.
+  }
+
+  // Recurse into common containers.
+  if (Array.isArray(node.children)) {
+    walkDerivedEngineWriteRejections(node.children, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkDerivedEngineWriteRejections(node.body, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkDerivedEngineWriteRejections(node.consequent, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkDerivedEngineWriteRejections(node.alternate, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkDerivedEngineWriteRejections(arm.body, fileScope, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -4613,6 +5128,24 @@ export function runSYM(input: SYMInput): SYMResult {
   const visitedB15 = new WeakSet<object>();
   walkValidateEngineStateChildrenAndRules(
     ast.nodes, ast, errors, filePath, visitedB15,
+  );
+
+  // PASS 12 (B16): Derived-engine rejection rules — fires
+  // E-DERIVED-ENGINE-NO-INITIAL, E-DERIVED-ENGINE-NO-RULES,
+  // E-DERIVED-ENGINE-NO-WRITE per SPEC §51.0.J + §34. Reads engine
+  // metadata stamped by PASS 10.A (`_record.engineMeta.derivedExpr`).
+  // Two sub-walks:
+  //   - decl-side (NO-INITIAL + NO-RULES): visits engine-decl nodes.
+  //   - write-side (NO-WRITE): visits bare-expr nodes for direct-write or
+  //     `.advance(.X)` shapes targeting a derived-engine cell.
+  // E-DERIVED-ENGINE-CIRCULAR is fired by Stage 7 (DG) — see
+  // `dependency-graph.ts:buildEngineDerivedAdj` for the second consumer
+  // of B7's reusability promise.
+  const visitedB16A = new WeakSet<object>();
+  walkDerivedEngineDeclRejections(ast.nodes, errors, filePath, visitedB16A);
+  const visitedB16B = new WeakSet<object>();
+  walkDerivedEngineWriteRejections(
+    ast.nodes, fileScope, errors, filePath, visitedB16B,
   );
 
   return {

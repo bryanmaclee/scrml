@@ -53,7 +53,7 @@ import { forEachIdentInValidators } from "./validator-arg-parser.ts";
 
 type NodeId = string;
 
-type DGEdgeKind = "calls" | "reads" | "writes" | "renders" | "awaits" | "invalidates" | "validator-reads";
+type DGEdgeKind = "calls" | "reads" | "writes" | "renders" | "awaits" | "invalidates" | "validator-reads" | "engine-derived-reads";
 type Boundary = "client" | "server";
 type Severity = "error" | "warning";
 
@@ -521,6 +521,37 @@ function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
 }
 
 /**
+ * Collect all `engine-decl` AST nodes from a file AST.
+ *
+ * Phase A1b B16 — engine cells live as top-level markup children (per
+ * `ast-builder.js` line 9150 — `engine-decl` nodes are children of markup,
+ * not logic). The walker descends into markup containers but does NOT
+ * descend into logic blocks (engines may not be declared inside function
+ * bodies per §51.0.K Machine Cohesion).
+ *
+ * Returns the engine-decl AST nodes (which carry `_record` annotations
+ * by SYM PASS 10.A — see `symbol-table.ts:walkRegisterEngines`). The
+ * record's `engineMeta.derivedExpr` field is the trigger predicate for
+ * B16's downstream walking.
+ */
+function collectAllEngineDecls(fileAST: FileAST): ASTNode[] {
+  const nodeList = fileAST.nodes;
+  const result: ASTNode[] = [];
+
+  function visit(list: ASTNode[]): void {
+    for (const node of list) {
+      if (node.kind === "engine-decl") result.push(node);
+      if ("children" in node && Array.isArray((node as MarkupNode).children)) {
+        visit((node as MarkupNode).children as ASTNode[]);
+      }
+    }
+  }
+
+  visit(nodeList);
+  return result;
+}
+
+/**
  * Collect all tilde-decl nodes from a file AST.
  * These are `~var = expr` declarations that may compile to derived reactives.
  */
@@ -780,6 +811,43 @@ function buildValidatorArgsAdj(
 }
 
 /**
+ * Build an adjacency map of `engine-derived-reads` edges (B16).
+ *
+ * An `engine-derived-reads` edge from engine cell A to cell B means: engine
+ * cell A's `derived=expr` references cell B (a reactive cell or another
+ * engine cell). A cycle in this subgraph violates §51.0.J line 20411
+ * "Chained derivation (A → B → C) | LEGAL. Cycle detection at compile time
+ * → `E-DERIVED-ENGINE-CIRCULAR` (§34)" and fires the corresponding error
+ * code.
+ *
+ * Sibling of `buildDerivedReadsAdj` (B7) and `buildValidatorArgsAdj` (B10).
+ * Same DFS (`detectCycle`) consumes the adjacency. B16 is the SECOND
+ * consumer of B7's reusability promise per primer §13.7 B7 specifics
+ * ("B16 ... will reuse the same DFS with their own filtered adjacency").
+ *
+ * Self-edges are NOT pushed into `edges` (would pollute the read-edge
+ * list and cause spurious behavior). The walker tracks self-references
+ * separately for B16's degenerate 1-cycle case (mirrors B7 + B10
+ * patterns).
+ */
+function buildEngineDerivedAdj(
+  edges: DGEdge[],
+  nodes: Map<NodeId, DGNode>,
+): Map<NodeId, Set<NodeId>> {
+  const adj = new Map<NodeId, Set<NodeId>>();
+  for (const edge of edges) {
+    if (edge.kind !== "engine-derived-reads") continue;
+    const fromNode = nodes.get(edge.from);
+    const toNode = nodes.get(edge.to);
+    if (!fromNode || !toNode) continue;
+    if (fromNode.kind !== "reactive" || toNode.kind !== "reactive") continue;
+    if (!adj.has(edge.from)) adj.set(edge.from, new Set());
+    adj.get(edge.from)!.add(edge.to);
+  }
+  return adj;
+}
+
+/**
  * Check if `from` can reach `to` via 'awaits' edges.
  */
 function isReachable(from: NodeId, to: NodeId, adj: Map<NodeId, Set<NodeId>>): boolean {
@@ -805,14 +873,17 @@ function isReachable(from: NodeId, to: NodeId, adj: Map<NodeId, Set<NodeId>>): b
 // Used by:
 //   - 'awaits' edge cycle detection (E-DG-001)
 //   - derived-cell 'reads' subgraph cycle detection (E-DERIVED-CIRCULAR-DEP, B7)
+//   - validator-args subgraph cycle detection (E-VALIDATOR-CIRCULAR-DEP, B10)
+//   - engine-derived subgraph cycle detection (E-DERIVED-ENGINE-CIRCULAR, B16)
 //
 // A1b B7: generalized from `detectAwaitsCycle` to support derived-cell cycle
 // detection. Same algorithm; the caller supplies the adjacency map (filtered
 // from a chosen edge subset) and the node set.
 //
-// B10/B11/B12 (validator-arg deps, §31.4) and B16 (engine-derived,
-// E-DERIVED-ENGINE-CIRCULAR) will reuse this function with their own filtered
-// adjacency maps. (Audit §1.4-§1.5 reusability constraint.)
+// B10 was the FIRST consumer of B7's reusability promise (validator-arg deps,
+// §31.4). B16 is the SECOND consumer (engine-derived deps, §51.0.J line
+// 20411). The pattern is: each consumer supplies a `buildXAdj` filter
+// alongside its edge-kind enum addition; `detectCycle` is unchanged.
 // ---------------------------------------------------------------------------
 
 type DFSColor = 0 | 1 | 2; // WHITE | GRAY | BLACK
@@ -1042,6 +1113,65 @@ export function runDG(input: DGInput): DGOutput {
       }
     }
 
+    // ------------------------------------------------------------------
+    // Phase A1b B16 — Engine cells as DG nodes + engine-derived edges
+    //
+    // Per primer §13.7 B14: every engine-decl carries a `_record`
+    // annotation populated by SYM PASS 10.A (`walkRegisterEngines`). The
+    // record's `engineMeta.varName` is the auto-declared variable name
+    // (§51.0.C); `engineMeta.derivedExpr` is non-null iff the engine is
+    // derived (§51.0.J).
+    //
+    // B16 registers EVERY engine cell as a `reactive` DG node (so other
+    // cells can `reads` it and engine-vs-engine cycle detection works).
+    // For each derived engine, B16 records the upstream cell read(s) for
+    // `engine-derived-reads` edge emission in the post-collection phase
+    // (after `reactiveVarNodeIds` is built).
+    //
+    // Note: B14's `derivedExpr` today carries the LEGACY single-source
+    // form (`{ kind: "legacy-source-var", varName: <upstream> }`) when
+    // `derived=@varname` is parsed (ast-builder.js line 8449). The §51.0.J
+    // rich `derived=match @x { ... }` form is NOT yet structurally
+    // parsed; when ast-builder learns it, B16's collector reads the parsed
+    // expression and uses `forEachIdentInExprNode` to enumerate ALL
+    // upstream cell reads. The cycle-detection mechanism is invariant.
+    // ------------------------------------------------------------------
+    const engineDecls = collectAllEngineDecls(fileAST);
+    for (const eDecl of engineDecls) {
+      const eAny = eDecl as any;
+      const record = eAny._record;
+      if (!record || !record.engineMeta) continue; // pre-SYM AST or non-engine
+      const varName: string = record.engineMeta.varName ?? "";
+      if (!varName) continue;
+      const nodeId = makeNodeId(filePath, eDecl.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }, "engine");
+      const dgNode: ReactiveDGNode = {
+        kind: "reactive",
+        nodeId,
+        varName,
+        hasLift: false,
+        span: eDecl.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      };
+      nodes.set(nodeId, dgNode);
+
+      // Record pending engine-derived reads. For the legacy single-source
+      // shape, the only upstream is `derivedExpr.varName`. Stored on the
+      // DG node as `_pendingEngineDerivedReads: string[]` so the
+      // post-`reactiveVarNodeIds` resolution loop can emit edges.
+      const derivedExpr = record.engineMeta.derivedExpr;
+      if (derivedExpr && typeof derivedExpr === "object") {
+        const derivedKind = (derivedExpr as Record<string, unknown>).kind;
+        if (derivedKind === "legacy-source-var") {
+          const upstream = (derivedExpr as Record<string, unknown>).varName;
+          if (typeof upstream === "string" && upstream.length > 0) {
+            (dgNode as any)._pendingEngineDerivedReads = [upstream];
+          }
+        }
+        // Future: when `derivedExpr` becomes a parsed ExprNode, walk it
+        // here with `forEachIdentInExprNode` to collect upstream `@cell`
+        // reads.
+      }
+    }
+
     // Collect SQL blocks
     const sqlBlocks = collectAllSqlBlocks(fileAST);
     for (const sqlNode of sqlBlocks) {
@@ -1229,6 +1359,38 @@ export function runDG(input: DGInput): DGOutput {
       }
       delete anyNode._pendingDerivedCallees;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Phase A1b B16 — Resolve pending engine-derived reads into edges
+  //
+  // For each engine cell (registered above) with `_pendingEngineDerivedReads`,
+  // emit `engine-derived-reads` edges to the upstream cell DG nodes. Self-
+  // references are tracked separately (degenerate 1-cycle case, mirrors
+  // B7's `selfReferencingDerivedNodes` and B10's
+  // `selfReferencingValidatorNodes` patterns).
+  // ------------------------------------------------------------------
+  const selfReferencingDerivedEngineNodes = new Set<NodeId>();
+  for (const [nodeId, dgNode] of nodes) {
+    if (dgNode.kind !== "reactive") continue;
+    const anyNode = dgNode as any;
+    if (!anyNode._pendingEngineDerivedReads) continue;
+    for (const upstreamVarName of anyNode._pendingEngineDerivedReads) {
+      if (upstreamVarName === dgNode.varName) {
+        // Self-reference: derived engine reads itself. Degenerate 1-cycle.
+        selfReferencingDerivedEngineNodes.add(nodeId);
+        continue;
+      }
+      const targetNodeId = reactiveVarNodeIds.get(upstreamVarName);
+      if (targetNodeId) {
+        edges.push({ from: nodeId, to: targetNodeId, kind: "engine-derived-reads" });
+        const readers = reactiveVarReaders.get(upstreamVarName);
+        if (readers) readers.add(nodeId);
+      }
+      // If the upstream var is unknown, silently skip (downstream typer
+      // surfaces unresolved-name errors; B16 doesn't double-fire here).
+    }
+    delete anyNode._pendingEngineDerivedReads;
   }
 
   // Scan function bodies for reactive variable references
@@ -1966,6 +2128,79 @@ export function runDG(input: DGInput): DGOutput {
   // E-DERIVED-CIRCULAR-DEP blocks code generation (SPEC §6.6.10 line 2710).
   // Fail-fast if any derived cycle was found, mirroring E-DG-001 behaviour.
   if (selfReferencingDerivedNodes.size > 0 || derivedCycle) {
+    return { depGraph: { nodes, edges }, errors };
+  }
+
+  // ------------------------------------------------------------------
+  // Phase A1b B16 — Cycle detection in engine-derived subgraph
+  // (E-DERIVED-ENGINE-CIRCULAR, SPEC §51.0.J line 20411, §31.5)
+  //
+  // A derived engine whose `derived=expr` depends on its own variant —
+  // directly (self-reference) or transitively through a chain of derived
+  // engines (A → B → C → A) — is a compile-time cycle. Per §31.5 line
+  // 13711: "A derived engine whose `derived=expr` depends on the engine's
+  // own variant is `E-DERIVED-ENGINE-CIRCULAR` (§34, also cross-ref
+  // §51.0.J)."
+  //
+  // SECOND consumer of B7's reusability promise (B10 was first). Same
+  // generic `detectCycle` DFS, distinct adjacency-builder
+  // (`buildEngineDerivedAdj`) filtering by `edge.kind ===
+  // "engine-derived-reads"`.
+  //
+  // Distinct from E-DERIVED-CIRCULAR-DEP (cells, §6.6.10) per §34 catalog
+  // line 14253: "Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which
+  // is the engine-form cycle."
+  // ------------------------------------------------------------------
+
+  // Self-references: degenerate 1-cycle case (`<engine for=T derived=@varname>`
+  // where `varname` resolves to the engine's own auto-declared variable —
+  // unrepresentable today since the parser requires `derived=@x` and the
+  // auto-declared name and source are same-file scoped to different
+  // identifiers; defensive handling for future ast-builder shapes).
+  for (const selfNodeId of selfReferencingDerivedEngineNodes) {
+    const dgNode = nodes.get(selfNodeId);
+    if (!dgNode || dgNode.kind !== "reactive") continue;
+    errors.push(
+      new DGError(
+        "E-DERIVED-ENGINE-CIRCULAR",
+        `E-DERIVED-ENGINE-CIRCULAR: Derived engine \`@${dgNode.varName}\` ` +
+          `references its own variant in its \`derived=\` expression. A derived ` +
+          `engine cannot depend on its own value — this would form an infinite ` +
+          `recompute loop (SPEC §51.0.J + §31.5). Break the self-reference by ` +
+          `deriving from a different cell.`,
+        dgNode.span,
+      ),
+    );
+  }
+
+  // Multi-node cycles in the engine-derived subgraph.
+  const engineDerivedAdj = buildEngineDerivedAdj(edges, nodes);
+  const engineCycle = detectCycle(engineDerivedAdj, allNodeIds);
+  if (engineCycle) {
+    const varChain = engineCycle
+      .map((nid) => {
+        const n = nodes.get(nid);
+        return n && n.kind === "reactive" ? `@${n.varName}` : nid;
+      })
+      .join(" -> ");
+    const firstReactive = nodes.get(engineCycle[0]);
+    errors.push(
+      new DGError(
+        "E-DERIVED-ENGINE-CIRCULAR",
+        `E-DERIVED-ENGINE-CIRCULAR: Circular dependency detected among ` +
+          `derived engines: ${varChain}. Each derived engine's \`derived=\` ` +
+          `expression depends on an engine whose own derivation eventually ` +
+          `depends back on the first — break the cycle (SPEC §51.0.J + §31.5).`,
+        firstReactive
+          ? firstReactive.span
+          : { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
+  // E-DERIVED-ENGINE-CIRCULAR blocks code generation (per §51.0.J + §34).
+  // Fail-fast mirrors E-DERIVED-CIRCULAR-DEP and E-VALIDATOR-CIRCULAR-DEP.
+  if (selfReferencingDerivedEngineNodes.size > 0 || engineCycle) {
     return { depGraph: { nodes, edges }, errors };
   }
 
