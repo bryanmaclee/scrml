@@ -13695,11 +13695,8 @@ Breakpoint values for v1 are fixed to Tailwind v3 defaults (640px, 768px, 1024px
 
 `group-*`, `peer-*`, and `before:` / `after:` pseudo-element variants are deferred to v2 (Section 26.5).
 
-<<<<<<< Updated upstream
 When a class string contains a variant-prefix-shaped segment whose prefix matches NONE of the recognized prefixes above (e.g. `weird:p-4`, `group-hover:bg-blue-500`), the compiler SHALL NOT emit CSS for that class and SHALL emit W-TAILWIND-001. This prevents the silent-strip pattern where the compiler would otherwise emit a rule for the base utility under the wrong selector.
 
-=======
->>>>>>> Stashed changes
 ### 26.4 Arbitrary Values
 
 The compiler SHALL recognize bracketed-value syntax `<utility-prefix>-[<value>]` as a request to emit a CSS rule whose property is determined by `<utility-prefix>` and whose value is `<value>`. The class name is CSS-escaped per CSS spec for use as a selector.
@@ -13751,11 +13748,7 @@ The variant-prefix `:` separator is bracket-aware: a `:` inside a `[...]` arbitr
 - `group-*` and `peer-*` parent/sibling-state variants — TBD (SPEC-ISSUE-012).
 - `before:` and `after:` pseudo-element variants (require `content` property handling) — TBD (SPEC-ISSUE-012).
 - Container queries (`@container`) — TBD.
-<<<<<<< Updated upstream
-
 For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `group-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
-=======
->>>>>>> Stashed changes
 
 ---
 
