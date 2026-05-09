@@ -7,6 +7,11 @@ import { CGError } from "./errors.ts";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
 import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./emit-css.ts";
+// SPEC §6.4 / §5.4.1 / L17 — A1c C3 render-by-tag expansion. lookupStateCell resolves
+// `<userName/>` to its decl record; getCellKind surfaces B5's `_cellKind` annotation
+// (`"bindable"` for Shape 2 with bindable RHS — the only legal use kind that survives
+// B6's diagnostic walker).
+import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 
 // Supported bind: attribute names per SPEC §5.4
 const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "selected", "files", "group"]);
@@ -149,6 +154,114 @@ const REQUEST_TAGS = new Set(["request"]);
 const TIMEOUT_TAGS = new Set(["timeout"]);
 
 /**
+ * A1c C3 — Lower a state-cell's validators to HTML-native attributes for
+ * carry-forward at the render-by-tag expansion site (SPEC §6.4.2 step 4 — "Any
+ * validators declared on the cell are wired as HTML attributes and connected
+ * to the validity surface (§6.11)"). C3 emits the HTML-native subset; the
+ * validity-surface side is C7+.
+ *
+ * Only the validators with HTML-native semantics get lowered:
+ *
+ *   - `req` (bareword, no args)        → `required` (boolean attribute)
+ *   - `pattern(re|"...")`              → `pattern="<source>"` (string)
+ *   - `min(N)`                         → `min="N"`              (string)
+ *   - `max(N)`                         → `max="N"`              (string)
+ *   - `length(>=N)`                    → `minlength="N"`        (string)
+ *   - `length(<=N)`                    → `maxlength="N"`        (string)
+ *   - `length(=N)`                     → both `minlength` + `maxlength` set to N
+ *
+ * All other validators (`is some`, `gt`/`lt`/`gte`/`lte`/`eq`/`neq`/`oneOf`/`notIn`,
+ * stdlib `email`/`url`/`numeric`/`integer`, `custom`) are NOT HTML-native — they
+ * stay validity-surface-only (C7+).
+ *
+ * Returns an array of attribute objects matching the markup AST `attributes` shape
+ * (`{name, value: {kind, value}}`). The caller appends these to the renderSpec
+ * element's attribute list before re-emitting via `emitNode`.
+ *
+ * Tolerant by default: any unrecognised arg shape silently no-ops on that validator
+ * (B9/B10 already enforced shape; defensive at codegen time).
+ */
+function _validatorAttrsForCell(declNode: any): Array<{ name: string; value: { kind: string; value: string } }> {
+  const validators: any[] = (declNode?.validators as any[]) ?? [];
+  if (!Array.isArray(validators) || validators.length === 0) return [];
+  const out: Array<{ name: string; value: { kind: string; value: string } }> = [];
+  for (const v of validators) {
+    if (!v || typeof v !== "object") continue;
+    const name: string = v.name ?? "";
+    const args: any[] | null = v.args ?? null;
+
+    // `req` — args === null (bareword) per B9 contract.
+    if (name === "req" && args === null) {
+      out.push({ name: "required", value: { kind: "string-literal", value: "" } });
+      continue;
+    }
+
+    if (!Array.isArray(args) || args.length === 0) continue;
+
+    const firstArg = args[0];
+
+    if (name === "pattern") {
+      // pattern(/regex/) → escape-hatch with raw text "/^.../" (B9 specifics).
+      // pattern("regex") → ExprNode with litType:"string".
+      let patternSrc: string | null = null;
+      if (firstArg?.kind === "escape-hatch" && typeof firstArg.raw === "string") {
+        // Strip leading/trailing `/` from regex literal raw form.
+        const raw: string = firstArg.raw;
+        const rxMatch = raw.match(/^\/(.*)\/[gimsuy]*$/);
+        patternSrc = rxMatch ? rxMatch[1] : raw;
+      } else if (firstArg?.kind === "lit" && firstArg.litType === "string" && typeof firstArg.value === "string") {
+        patternSrc = firstArg.value;
+      }
+      if (patternSrc !== null) {
+        out.push({ name: "pattern", value: { kind: "string-literal", value: patternSrc } });
+      }
+      continue;
+    }
+
+    if (name === "min" || name === "max") {
+      let numStr: string | null = null;
+      if (firstArg?.kind === "lit" && firstArg.litType === "number" && firstArg.value !== undefined) {
+        numStr = String(firstArg.value);
+      } else if (firstArg?.kind === "escape-hatch" && typeof firstArg.raw === "string") {
+        // Defensive: numbers might land in escape-hatch in rare AST shapes.
+        const trimmed = firstArg.raw.trim();
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) numStr = trimmed;
+      }
+      if (numStr !== null) {
+        out.push({ name, value: { kind: "string-literal", value: numStr } });
+      }
+      continue;
+    }
+
+    if (name === "length") {
+      // RelationalPredicateNode (B9 sibling kind): {kind:"relational-predicate", op, value:ExprNode}
+      if (firstArg?.kind === "relational-predicate") {
+        const op: string = firstArg.op ?? "";
+        const valExpr = firstArg.value;
+        let numStr: string | null = null;
+        if (valExpr?.kind === "lit" && valExpr.litType === "number" && valExpr.value !== undefined) {
+          numStr = String(valExpr.value);
+        }
+        if (numStr === null) continue;
+        if (op === ">=") {
+          out.push({ name: "minlength", value: { kind: "string-literal", value: numStr } });
+        } else if (op === "<=") {
+          out.push({ name: "maxlength", value: { kind: "string-literal", value: numStr } });
+        } else if (op === "=") {
+          out.push({ name: "minlength", value: { kind: "string-literal", value: numStr } });
+          out.push({ name: "maxlength", value: { kind: "string-literal", value: numStr } });
+        }
+        // ">" / "<" / "!=" — not HTML-native (no off-by-one HTML attr); skip.
+      }
+      continue;
+    }
+
+    // All other validators are validity-surface-only; no HTML-attr lowering.
+  }
+  return out;
+}
+
+/**
  * Generate HTML from markup AST nodes.
  * Also populates the BindingRegistry for client JS wiring.
  */
@@ -182,6 +295,12 @@ export function generateHtml(
 
   const reactiveVarNames: Set<string> | null = fileAST ? collectReactiveVarNames(fileAST) : null;
   const fnBodyRegistry = fileAST ? buildFunctionBodyRegistry(fileAST) : null;
+  // A1c C3 — file-scope handle for render-by-tag tag→cell resolution.
+  // `runSYM` (symbol-table.ts:6271) attaches `_scope` non-enumerably to the FileAST.
+  // When the AST was constructed without SYM (raw test fixtures), fileScope is null
+  // and render-by-tag detection is skipped — the legacy raw-tag emission path keeps
+  // working for tests that bypass symbol-table population.
+  const fileScope: any = fileAST?._scope ?? null;
 
   function emitNode(node: any): void {
     if (!node || typeof node !== "object") return;
@@ -697,6 +816,101 @@ export function generateHtml(
           }
         }
         return;
+      }
+
+      // ---------------------------------------------------------------------
+      // A1c C3 — Render-by-tag expansion (SPEC §6.4 / §5.4.1 / L17, L16).
+      //
+      // When a self-closing lowercase markup tag resolves to a registered
+      // Shape 2 `bindable` state cell (B5 `_cellKind === "bindable"`), expand
+      // the use site to the cell's `renderSpec.element` markup tree at this
+      // DOM position. The expansion is identical at every use site (§6.4.4
+      // forbids per-site overrides). Multi-render correctness (L16) is
+      // intrinsic — the underlying reactive cell (declared by C1) is shared
+      // across all expansion sites; each rendered DOM node is fresh.
+      //
+      // C3 emits the EXPANSION SHAPE only — the actual `bind:value` /
+      // `bind:checked` / `bind:files` / `bind:group` dispatch by render-spec
+      // element type is C4 (§5.4.1 dispatch table). C3 stamps a
+      // `data-scrml-render-by-tag` data-attribute hookpoint that C4's wiring
+      // emitter consumes (mirrors the existing `data-scrml-bind-*` /
+      // `data-scrml-attr-tpl-*` placeholder conventions).
+      //
+      // Validators carry forward as HTML-native attributes per §6.4.2 step 4
+      // (req → required, pattern → pattern, min/max → min/max, length(>=N) →
+      // minlength). Validity-surface wiring (`@cell.isValid`/`.errors`) is
+      // C7+ scope; not emitted here.
+      //
+      // B6 (symbol-table.ts:1715) has already fired E-CELL-NO-RENDER-SPEC /
+      // E-CELL-RENDER-SPEC-NOT-BINDABLE on illegal use sites at A1b time,
+      // so by codegen time only legal use sites survive. PascalCase tags
+      // (component territory; B6 v1 accepts silently) are skipped — they
+      // route through the existing component branch.
+      //
+      // Skip predicates: void/lifecycle/input-state/request/timeout/channel
+      // tags + non-self-closed forms + uppercase-first-letter (component) +
+      // tags without a render-spec resolution (HTML built-ins like <br/>).
+      if (
+        isSelfClosing &&
+        fileScope &&
+        /^[a-z]/.test(tag) &&
+        !VOID_ELEMENTS.has(tag) &&
+        !LIFECYCLE_SILENT_TAGS.has(tag) &&
+        !INPUT_STATE_TAGS.has(tag) &&
+        !REQUEST_TAGS.has(tag) &&
+        !TIMEOUT_TAGS.has(tag) &&
+        tag !== "channel" &&
+        tag !== "errorBoundary" && tag !== "errorboundary" &&
+        tag !== "program"
+      ) {
+        const decl = lookupStateCell(fileScope, tag);
+        const cellKind = decl ? getCellKind(decl.declNode as any) : undefined;
+        if (decl && cellKind === "bindable") {
+          const renderSpecRoot: any = (decl.declNode as any).renderSpec?.element;
+          if (renderSpecRoot && renderSpecRoot.kind === "markup") {
+            const renderById = genVar("render_by_tag");
+
+            // Collect the renderSpec's existing attributes (decl-site authoritative).
+            const baseAttrs: any[] = renderSpecRoot.attributes ?? renderSpecRoot.attrs ?? [];
+
+            // Lower HTML-native validators to attributes per §6.4.2 step 4.
+            const validatorAttrs = _validatorAttrsForCell(decl.declNode as any);
+
+            // Hookpoint attribute for C4's bind:* dispatch.
+            const renderByTagAttr = {
+              name: "data-scrml-render-by-tag",
+              value: { kind: "string-literal", value: renderById },
+            };
+
+            // Build the expanded markup node — clone the renderSpec.element
+            // shallowly with the augmented attribute list. Don't mutate the
+            // source AST; downstream walkers may revisit.
+            const expanded = {
+              ...renderSpecRoot,
+              attributes: [...baseAttrs, ...validatorAttrs, renderByTagAttr],
+              attrs: undefined,
+            };
+
+            // Emit via the regular markup walker — recurses through children,
+            // attaches data-scrml-bind-*/-class:/-on*/etc placeholders for
+            // any reactive attributes the renderSpec already carries, and
+            // honours all the standard attribute-emission paths.
+            emitNode(expanded);
+
+            // Record the binding for C4 + downstream consumers.
+            if (registry) {
+              registry.addLogicBinding({
+                kind: "render-by-tag",
+                placeholderId: renderById,
+                cellName: tag,
+                renderSpecTag: renderSpecRoot.tag,
+                renderSpecAttrs: baseAttrs,
+                declValidators: (decl.declNode as any).validators ?? [],
+              } as any);
+            }
+            return;
+          }
+        }
       }
 
       parts.push(`<${tag}`);

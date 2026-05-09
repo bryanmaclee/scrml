@@ -65,9 +65,13 @@ export interface LogicBinding {
   /**
    * Discriminator. Absent → conventional reactive/conditional binding (uses
    * placeholderId + expr). "if-chain-branch" → positive chain branch. "if-chain-else" →
-   * else branch of an if-chain.
+   * else branch of an if-chain. "render-by-tag" → A1c C3 render-by-tag expansion site
+   * (`<userName/>` in markup body resolves to a Shape 2 bindable cell, expanded inline
+   * to the cell's renderSpec.element; this binding records the cell+renderSpec metadata
+   * so C4 can emit the bind:value/bind:checked/bind:files/bind:group dispatch per
+   * SPEC §5.4.1).
    */
-  kind?: "if-chain-branch" | "if-chain-else";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag";
 
   // Conventional reactive / conditional binding fields.
   // Required for `kind === undefined` bindings (the default).
@@ -117,6 +121,29 @@ export interface LogicBinding {
   branchMode?: "mount" | "display";
   condition?: any;
   refs?: string[];
+
+  /**
+   * A1c C3 — render-by-tag expansion fields.
+   * Required when `kind === "render-by-tag"`.
+   *
+   *   cellName        — the source-level cell name (`"userName"`, `"agree"`, …) — what
+   *                     C4 binds reactively. Same as the resolved tag name at the
+   *                     `<cellName/>` use site.
+   *   renderSpecTag   — the expanded element's tag (`"input"`, `"textarea"`, `"select"`).
+   *                     Drives §5.4.1 bind-dispatch (text-shape `<input>` → bind:value;
+   *                     `<input type="checkbox"/>` → bind:checked; etc).
+   *   renderSpecAttrs — the renderSpec.element's attributes array (kept verbatim from
+   *                     the cell's decl-site). C4 reads `type=...` etc to refine the
+   *                     bind: flavour. Validator-derived HTML attrs are NOT included
+   *                     here; they're emitted to the DOM directly via the markup AST.
+   *   declValidators  — the cell's validator entries (B9 contract). C4/C7+ may consume
+   *                     for validity-surface wiring. Optional; absent in test fixtures
+   *                     that bypass SYM.
+   */
+  cellName?: string;
+  renderSpecTag?: string;
+  renderSpecAttrs?: any[];
+  declValidators?: any[];
 }
 
 export class BindingRegistry {
