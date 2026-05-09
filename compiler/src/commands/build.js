@@ -297,7 +297,14 @@ export function generateServerEntry(serverModules) {
   lines.push('const PORT = parseInt(process.env.PORT ?? "3000", 10);');
   lines.push("const SERVE_DIR = import.meta.dir;");
   lines.push("");
-  lines.push("Bun.serve({");
+  if (hasWs) {
+    // C18 (§38.6): Bun.serve() returns the server handle; stash it on
+    // globalThis so the auto-injected broadcast() helper inside channel-
+    // scoped server functions can call _scrml_active_server.publish(topic, msg).
+    lines.push("const _scrml_server = Bun.serve({");
+  } else {
+    lines.push("Bun.serve({");
+  }
   lines.push("  port: PORT,");
   lines.push("  async fetch(req, server) {");
   lines.push("    const url = new URL(req.url);");
@@ -338,6 +345,11 @@ export function generateServerEntry(serverModules) {
   }
 
   lines.push("});");
+  if (hasWs) {
+    // C18 (§38.6): expose Bun.serve() handle for broadcast() in HTTP-routed
+    // channel-scoped server functions.
+    lines.push("globalThis._scrml_active_server = _scrml_server;");
+  }
   lines.push("");
   lines.push("console.log(`scrml server listening on http://localhost:${PORT}`);");
   lines.push("");

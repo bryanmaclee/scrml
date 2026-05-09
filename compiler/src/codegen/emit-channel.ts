@@ -189,25 +189,134 @@ function extractClientHandlers(node: any): { open: string | null; close: string 
 }
 
 /**
- * Extract `@shared` variable names from a channel node's children.
+ * Extract auto-syncing channel-cell variable names from a channel node's body.
+ *
+ * Per SPEC §38.4 (M19 / B19, S57+): every V5-strict state-decl declared
+ * inside a `<channel>` body auto-syncs across all subscribed clients. The
+ * `@shared` modifier is removed in v0.next; presence inside the channel body
+ * is the sync trigger. State-decls carry `structuralForm: true` (§6.1) under
+ * V5-strict — the canonical shape `<x> = init`.
+ *
+ * For backcompat we also accept the legacy `isShared: true` flag (older
+ * AST shapes), but the canonical v0.next path is `structuralForm: true`.
+ * LOCALS declared inside `${ }` logic blocks (`let x = ...`, `const x = ...`)
+ * do NOT auto-sync — only structural state-decls do.
+ *
+ * Note: the export name `extractSharedVars` is preserved for backcompat with
+ * any in-tree callers; the function now returns the V5-strict cell set.
  */
 export function extractSharedVars(node: any): string[] {
-  const shared: string[] = [];
+  const cells: string[] = [];
   const children: any[] = node.children ?? [];
 
-  function walkForShared(nodeList: any[]): void {
+  function walkForCells(nodeList: any[]): void {
     for (const n of nodeList) {
       if (!n || typeof n !== "object") continue;
-      if (n.kind === "state-decl" && n.isShared === true) {
-        shared.push(n.name ?? "");
+      if (n.kind === "state-decl") {
+        // V5-strict (§38.4): structural state-decls auto-sync.
+        // Legacy: isShared:true (pre-M19).
+        if (n.structuralForm === true || n.isShared === true) {
+          cells.push(n.name ?? "");
+        }
       }
-      if (Array.isArray(n.children)) walkForShared(n.children);
-      if (n.kind === "logic" && Array.isArray(n.body)) walkForShared(n.body);
+      if (Array.isArray(n.children)) walkForCells(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) walkForCells(n.body);
     }
   }
 
-  walkForShared(children);
-  return shared.filter(Boolean);
+  walkForCells(children);
+  return cells.filter(Boolean);
+}
+
+/**
+ * Alias of {@link extractSharedVars} with a v0.next-canonical name. Returns
+ * the auto-syncing channel-cell variable names declared inside a channel body
+ * (V5-strict state-decls per §38.4).
+ */
+export const extractChannelCells = extractSharedVars;
+
+/**
+ * Walk an AST and produce a map from function name to the channel-name that
+ * lexically owns it. A function is "channel-owned" when its declaration
+ * appears inside a `<channel>` body (per §38.6: "any server-annotated function
+ * or handler whose declaration appears within the lexical scope of a
+ * `<channel>` body").
+ *
+ * Inputs to the C18 implementation:
+ *   - `broadcast(data)` and `disconnect()` are auto-injected as locals in
+ *     channel-owned server function emit (§38.6, §38.6.1).
+ *   - Channel-owned server functions writing to channel-cells (§38.4) are
+ *     legitimate (they propagate via the broadcast wire); RI's E-RI-002
+ *     guard skips channel-owned cell writes.
+ *   - Calls to `broadcast()` / `disconnect()` from a function NOT in this map
+ *     fire E-CHANNEL-004.
+ *
+ * Returns a Map keyed by function name (string) → channel name (string).
+ * If two channels both declare a function with the same name, the latter
+ * wins; collisions of this kind are rare (and would already be caught by
+ * the typer's duplicate-function-decl check).
+ */
+export function collectChannelFunctionMap(nodes: any[]): Map<string, string> {
+  const result = new Map<string, string>();
+
+  function visitInsideChannel(nodeList: any[], channelName: string): void {
+    for (const n of nodeList) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "function-decl" && typeof n.name === "string" && n.name.length > 0) {
+        result.set(n.name, channelName);
+      }
+      if (Array.isArray(n.children)) visitInsideChannel(n.children, channelName);
+      if (n.kind === "logic" && Array.isArray(n.body)) visitInsideChannel(n.body, channelName);
+    }
+  }
+
+  function visit(nodeList: any[]): void {
+    for (const n of nodeList) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "markup" && (n.tag ?? "") === "channel") {
+        // Skip P3.A exporter copies (per collectChannelNodes filter).
+        if (n._p3aIsExport === true) continue;
+        const { name } = extractChannelAttrs(n);
+        if (Array.isArray(n.children)) visitInsideChannel(n.children, name);
+        continue;
+      }
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+    }
+  }
+
+  visit(nodes);
+  return result;
+}
+
+/**
+ * Walk an AST and produce a map from channel name to the set of state-decl
+ * cell names declared inside that channel's body (V5-strict §38.4 cells).
+ * Used by RI to skip E-RI-002 on channel-owned server functions writing
+ * to channel-owned cells (the writes propagate via the broadcast wire).
+ *
+ * Returns a Map<channelName, Set<cellName>>.
+ */
+export function collectChannelCellMap(nodes: any[]): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+
+  function visit(nodeList: any[]): void {
+    for (const n of nodeList) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "markup" && (n.tag ?? "") === "channel") {
+        if (n._p3aIsExport === true) continue;
+        const { name } = extractChannelAttrs(n);
+        const cells = new Set<string>(extractSharedVars(n));
+        result.set(name, cells);
+        continue;
+      }
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+    }
+  }
+
+  visit(nodes);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +357,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
 
   if (sharedVars.length > 0) {
     lines.push(`        if (_d.__type === "__sync") {`);
-    lines.push(`          // @shared variable sync from server`);
+    lines.push(`          // §38.4 channel-cell sync from server (V5-strict auto-sync)`);
     for (const varN of sharedVars) {
       lines.push(`          if (_d.__key === ${JSON.stringify(varN)}) _scrml_reactive_set(${JSON.stringify(varN)}, _d.__val);`);
     }
@@ -293,7 +402,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`})();`);
 
   if (sharedVars.length > 0) {
-    lines.push(`// @shared effects for <channel name="${name}">`);
+    lines.push(`// §38.4 channel-cell auto-sync effects for <channel name="${name}">`);
     for (const varN of sharedVars) {
       lines.push(`_scrml_effect(() => ${varName}.syncShared(${JSON.stringify(varN)}, _scrml_reactive_get(${JSON.stringify(varN)})));`);
     }
@@ -388,7 +497,7 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
 
     if (sharedVars.length > 0) {
       lines.push(`        if (d.__type === "__sync") {`);
-      lines.push(`          // Broadcast @shared sync to all other subscribers`);
+      lines.push(`          // §38.4 broadcast channel-cell sync to all other subscribers`);
       lines.push(`          ws.publish(ws.data.__topic, raw);`);
       lines.push(`          return;`);
       lines.push(`        }`);

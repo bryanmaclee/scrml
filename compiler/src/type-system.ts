@@ -2948,6 +2948,15 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // codegen pipeline to _scrml_replay(...). Allowlisted here so the
   // scope-check pass doesn't flag it as an undeclared identifier.
   "replay",
+  // §38.6 — channel built-ins. Auto-injected as locals in server functions
+  // declared inside a `<channel>` body (codegen-time injection, see
+  // emit-server.ts emitBroadcastInjection). Allowlisted here so the
+  // scope-check pass doesn't flag them as undeclared idents in well-formed
+  // channel-scoped code. E-CHANNEL-004 — broadcast/disconnect outside a
+  // channel scope — is a separate codegen-time check (out of C18 scope; see
+  // SURVEY for follow-up).
+  "broadcast",
+  "disconnect",
 ]);
 
 /**

@@ -887,3 +887,461 @@ describe("§23: emitChannelWsHandlers close handler has full signature", () => {
     expect(code).toContain("ws.unsubscribe");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §24 (C18): V5-strict channel-cell auto-sync — every state-decl inside a
+// channel body auto-syncs across subscribers (§38.4 M19 / B19 line 15677).
+//
+// Pre-C18, extractSharedVars only matched `isShared:true` (the retired v1
+// `@shared` modifier). V5-strict `<x> = init` decls carry `structuralForm:
+// true` instead, so canonical v0.next channels emitted connected WS but
+// zero sync wire — the F-CHANNEL-001 silent-failure pattern. This block
+// locks in the V5-strict path.
+// ---------------------------------------------------------------------------
+
+import { extractSharedVars, extractChannelCells, collectChannelFunctionMap, collectChannelCellMap } from "../../src/codegen/emit-channel.js";
+
+describe("§24 (C18): V5-strict channel-cell auto-sync", () => {
+  test("extractSharedVars collects state-decls with structuralForm:true (V5-strict)", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      // Logic block wrapping a state-decl with the V5-strict marker.
+      {
+        kind: "logic",
+        body: [
+          { kind: "state-decl", name: "messages", structuralForm: true },
+          { kind: "state-decl", name: "count", structuralForm: true },
+        ],
+      },
+    ]);
+    const cells = extractSharedVars(node);
+    expect(cells).toContain("messages");
+    expect(cells).toContain("count");
+  });
+
+  test("extractChannelCells alias returns the same V5-strict cell set", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [{ kind: "state-decl", name: "messages", structuralForm: true }],
+      },
+    ]);
+    expect(extractChannelCells(node)).toEqual(["messages"]);
+  });
+
+  test("legacy isShared:true is still accepted (backcompat)", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [{ kind: "state-decl", name: "legacyVar", isShared: true }],
+      },
+    ]);
+    expect(extractSharedVars(node)).toContain("legacyVar");
+  });
+
+  test("LOCALS in logic blocks (let/const) do NOT auto-sync", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [
+          { kind: "let-decl", name: "localOnly" },
+          { kind: "state-decl", name: "messages", structuralForm: true },
+        ],
+      },
+    ]);
+    const cells = extractSharedVars(node);
+    expect(cells).toContain("messages");
+    expect(cells).not.toContain("localOnly");
+  });
+
+  test("client IIFE emits __sync handler for V5-strict cell", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [{ kind: "state-decl", name: "messages", structuralForm: true }],
+      },
+    ]);
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml");
+    const code = lines.join("\n");
+    expect(code).toContain('__type === "__sync"');
+    expect(code).toContain('__key === "messages"');
+    expect(code).toContain("syncShared");
+  });
+
+  test("client IIFE emits effect → syncShared for V5-strict cell write", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [{ kind: "state-decl", name: "count", structuralForm: true }],
+      },
+    ]);
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml");
+    const code = lines.join("\n");
+    expect(code).toMatch(/_scrml_effect.*syncShared.*"count"/);
+  });
+
+  test("server WS handlers re-publish __sync frames to subscribers (V5-strict)", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")], [
+      {
+        kind: "logic",
+        body: [{ kind: "state-decl", name: "messages", structuralForm: true }],
+      },
+    ]);
+    const lines = emitChannelWsHandlers([node], [], "/test/app.scrml");
+    const code = lines.join("\n");
+    expect(code).toContain('d.__type === "__sync"');
+    expect(code).toContain("ws.publish(ws.data.__topic, raw)");
+  });
+
+  test("end-to-end: V5-strict channel emits sync wire on both ends (canonical v0.next)", () => {
+    const source = `<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+</>
+
+<program>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { ast } = parseSource(source);
+    const reactiveLines = emitReactiveWiring(makeCompileContext({ fileAST: ast, errors: [] }));
+    const clientCode = reactiveLines.join("\n");
+    expect(clientCode).toContain('__key === "messages"');
+    expect(clientCode).toContain("syncShared");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §25 (C18): channel-function map + channel-cell map — context for
+// broadcast/disconnect injection + future RI/typer use.
+// ---------------------------------------------------------------------------
+
+describe("§25 (C18): collectChannelFunctionMap + collectChannelCellMap", () => {
+  test("collectChannelFunctionMap finds server functions inside channel body", () => {
+    const ast = {
+      nodes: [
+        {
+          kind: "markup",
+          tag: "channel",
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "chat" } }],
+          children: [
+            {
+              kind: "logic",
+              body: [
+                { kind: "function-decl", name: "postMessage", isServer: true, body: [] },
+                { kind: "function-decl", name: "handleOpen", body: [] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const map = collectChannelFunctionMap(ast.nodes);
+    expect(map.get("postMessage")).toBe("chat");
+    expect(map.get("handleOpen")).toBe("chat");
+  });
+
+  test("collectChannelFunctionMap does NOT include functions outside channel body", () => {
+    const ast = {
+      nodes: [
+        {
+          kind: "markup",
+          tag: "channel",
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "chat" } }],
+          children: [
+            { kind: "logic", body: [{ kind: "function-decl", name: "inside", body: [] }] },
+          ],
+        },
+        {
+          kind: "logic",
+          body: [{ kind: "function-decl", name: "outside", body: [] }],
+        },
+      ],
+    };
+    const map = collectChannelFunctionMap(ast.nodes);
+    expect(map.has("inside")).toBe(true);
+    expect(map.has("outside")).toBe(false);
+  });
+
+  test("collectChannelFunctionMap maps each function to its OWN channel (multi-channel files)", () => {
+    const ast = {
+      nodes: [
+        {
+          kind: "markup",
+          tag: "channel",
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "chat" } }],
+          children: [
+            { kind: "logic", body: [{ kind: "function-decl", name: "fnChat", body: [] }] },
+          ],
+        },
+        {
+          kind: "markup",
+          tag: "channel",
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "updates" } }],
+          children: [
+            { kind: "logic", body: [{ kind: "function-decl", name: "fnUpdates", body: [] }] },
+          ],
+        },
+      ],
+    };
+    const map = collectChannelFunctionMap(ast.nodes);
+    expect(map.get("fnChat")).toBe("chat");
+    expect(map.get("fnUpdates")).toBe("updates");
+  });
+
+  test("collectChannelFunctionMap skips P3.A exporter copies (_p3aIsExport)", () => {
+    const ast = {
+      nodes: [
+        {
+          kind: "markup",
+          tag: "channel",
+          _p3aIsExport: true,
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "exporter" } }],
+          children: [
+            { kind: "logic", body: [{ kind: "function-decl", name: "shouldNotMap", body: [] }] },
+          ],
+        },
+      ],
+    };
+    const map = collectChannelFunctionMap(ast.nodes);
+    expect(map.has("shouldNotMap")).toBe(false);
+  });
+
+  test("collectChannelCellMap returns channel-name → cell-set map", () => {
+    const ast = {
+      nodes: [
+        {
+          kind: "markup",
+          tag: "channel",
+          attrs: [{ name: "name", value: { kind: "string-literal", value: "chat" } }],
+          children: [
+            {
+              kind: "logic",
+              body: [
+                { kind: "state-decl", name: "messages", structuralForm: true },
+                { kind: "state-decl", name: "count", structuralForm: true },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const map = collectChannelCellMap(ast.nodes);
+    const cells = map.get("chat");
+    expect(cells).toBeDefined();
+    expect(cells.has("messages")).toBe(true);
+    expect(cells.has("count")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §26 (C18): broadcast/disconnect injection in channel-scoped server fns —
+// end-to-end via compileScrml. Verifies the auto-injected helpers reach the
+// emitted .server.js for HTTP-routed functions inside a channel body.
+// ---------------------------------------------------------------------------
+
+import { compileScrml } from "../../src/api.js";
+import { mkdtempSync as _mkdtempSync, writeFileSync as _writeFileSync, rmSync as _rmSync } from "fs";
+import { join as _join } from "path";
+import { tmpdir as _tmpdir } from "os";
+
+function _compileFixture(src) {
+  const TMP = _mkdtempSync(_join(_tmpdir(), "channel-c18-"));
+  const file = _join(TMP, "app.scrml");
+  _writeFileSync(file, src);
+  const result = compileScrml({
+    inputFiles: [file],
+    outputDir: _join(TMP, "out"),
+    write: false,
+    log: () => {},
+  });
+  _rmSync(TMP, { recursive: true, force: true });
+  return { result, file };
+}
+
+describe("§26 (C18): broadcast/disconnect injection in channel-scoped server fns", () => {
+  test("server fn inside channel body gets `broadcast` injected as local", () => {
+    const src = `<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+
+\${
+  server function postMessage(author, body) {
+    broadcast({ type: "new", author, body })
+  }
+}
+</>
+
+<program>
+<button onclick=postMessage("u","x")>send</button>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    expect(serverJs).toContain("const broadcast =");
+    expect(serverJs).toContain("§38.6 broadcast/disconnect built-ins");
+    expect(serverJs).toContain('publish("lobby"');
+  });
+
+  test("server fn inside channel body gets `disconnect` injected as local", () => {
+    const src = `<channel name="notifs">
+\${ <count> = 0 }
+
+\${
+  server function ping() {
+    broadcast({ type: "ping" })
+    disconnect()
+  }
+}
+</>
+
+<program>
+<button onclick=ping()>p</button>
+<p>\${@count}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    expect(serverJs).toContain("const disconnect =");
+  });
+
+  test("server fn OUTSIDE channel body does NOT get broadcast injected", () => {
+    const src = `<channel name="chat">
+\${ <messages> = [] }
+</>
+
+<program>
+\${
+  server function someFn(x) {
+    return x + 1
+  }
+}
+<button onclick=someFn(1)>x</button>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    // No broadcast/disconnect injection when the function is not inside a channel body.
+    // The handler for someFn must not include the §38.6 prelude.
+    const handlerMatch = serverJs.match(/_scrml_handler_someFn[\s\S]*?\n\}/);
+    if (handlerMatch) {
+      expect(handlerMatch[0]).not.toContain("const broadcast =");
+      expect(handlerMatch[0]).not.toContain("const disconnect =");
+    }
+  });
+
+  test("each channel-scoped fn publishes to its OWN topic (multi-channel disambiguation)", () => {
+    const src = `<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+\${
+  server function fnChat() {
+    broadcast({ type: "chat" })
+  }
+}
+</>
+
+<channel name="updates" topic="news">
+\${ <count> = 0 }
+\${
+  server function fnUpdates() {
+    broadcast({ type: "update" })
+  }
+}
+</>
+
+<program>
+<button onclick=fnChat()>c</button>
+<button onclick=fnUpdates()>u</button>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    // fnChat should publish to "lobby"; fnUpdates should publish to "news".
+    const fnChatHandler = serverJs.match(/_scrml_handler_fnChat[\s\S]*?\n\}/)?.[0] ?? "";
+    const fnUpdatesHandler = serverJs.match(/_scrml_handler_fnUpdates[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(fnChatHandler).toContain('publish("lobby"');
+    expect(fnUpdatesHandler).toContain('publish("news"');
+  });
+
+  test("topic= defaults to channel name when absent (broadcast publishes to name)", () => {
+    const src = `<channel name="myChannel">
+\${ <count> = 0 }
+\${
+  server function bump() {
+    broadcast({ type: "bump" })
+  }
+}
+</>
+
+<program>
+<button onclick=bump()>b</button>
+<p>\${@count}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    // No `topic=` → topic defaults to name="myChannel".
+    expect(serverJs).toContain('publish("myChannel"');
+  });
+
+  test("broadcast helper guards against missing _scrml_active_server (no crash)", () => {
+    const src = `<channel name="ch1">
+\${ <m> = 0 }
+\${
+  server function go() {
+    broadcast({ x: 1 })
+  }
+}
+</>
+
+<program>
+<button onclick=go()>g</button>
+<p>\${@m}</p>
+</program>
+`;
+    const { result, file } = _compileFixture(src);
+    expect(result.errors ?? []).toEqual([]);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    // The injected broadcast must guard so undefined globalThis._scrml_active_server
+    // doesn't crash the request handler.
+    expect(serverJs).toContain('typeof globalThis !== "undefined"');
+    expect(serverJs).toContain("globalThis._scrml_active_server");
+    expect(serverJs).toContain('typeof _scrml_srv.publish === "function"');
+  });
+
+  test("broadcast/disconnect are tokenizer keywords AND are typer-allowlisted (no E-SCOPE-001)", () => {
+    // This is the surface integration test for the type-system.ts allowlist
+    // change: a channel-scoped server fn calling broadcast() / disconnect()
+    // must compile clean — no E-SCOPE-001 from the typer.
+    const src = `<channel name="chat">
+\${ <m> = 0 }
+\${
+  server function go() {
+    broadcast({ x: 1 })
+    disconnect()
+  }
+}
+</>
+
+<program>
+<button onclick=go()>g</button>
+<p>\${@m}</p>
+</program>
+`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+});
+

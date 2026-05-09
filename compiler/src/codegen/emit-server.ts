@@ -4,7 +4,7 @@ import { routePath } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls } from "./collect.ts";
 import { emitLogicNode } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
-import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers } from "./emit-channel.ts";
+import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap } from "./emit-channel.ts";
 import { serverRewriteEmitted } from "./rewrite.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
@@ -87,6 +87,63 @@ export function generateServerJs(
   const _scrml_handleNodeEarly: any | null = fnNodes.find((fn: any) => fn.isHandleEscapeHatch) ?? null;
 
   const channelNodes: any[] = ctxForCache?.analysis?.channelNodes ?? collectChannelNodes(getNodes(fileAST));
+  // C18 (§38.6): map function-name → owning-channel-name. Server functions
+  // declared inside a `<channel>` body get `broadcast(data)` / `disconnect()`
+  // auto-injected as locals; functions outside the map don't.
+  const channelFnMap: Map<string, string> = collectChannelFunctionMap(getNodes(fileAST));
+  // C18 (§38.6): per-channel topic resolution map. Keyed by channel name; the
+  // value is a JS expression-string evaluating to the topic at runtime. For
+  // string-literal topics this is `JSON.stringify(value)`; for `topic=@var`
+  // we currently fall back to the channel's `name` attribute (matches the
+  // client IIFE topic-default behavior; dynamic `topic=@var` server-side is
+  // §38.6.2 territory and is deferred per C18 SURVEY).
+  const channelTopicMap: Map<string, string> = new Map();
+  for (const chNode of channelNodes) {
+    const attrs: any[] = chNode.attrs ?? chNode.attributes ?? [];
+    const nameAttr = attrs.find((a: any) => a && a.name === "name");
+    let chName = "channel";
+    if (nameAttr) {
+      const v = nameAttr.value;
+      if (v?.kind === "string-literal") chName = v.value;
+      else if (typeof v === "string") chName = v;
+    }
+    const topicAttr = attrs.find((a: any) => a && a.name === "topic");
+    let topicExpr = JSON.stringify(chName);
+    if (topicAttr) {
+      const v = topicAttr.value;
+      if (v?.kind === "string-literal") topicExpr = JSON.stringify(v.value);
+      // dynamic topic=@var: leave as channel name fallback; §38.6.2 deferred
+    }
+    channelTopicMap.set(chName, topicExpr);
+  }
+
+  // C18 (§38.6): emit `broadcast(data)` / `disconnect()` injection lines for
+  // a channel-owned server function. Returns indented JS lines that define
+  // both as locals so the user's body can call them directly.
+  //
+  // - `broadcast(d)` publishes JSON-serialized `d` to the channel topic via
+  //   the global server handle (`globalThis._scrml_active_server`), set by
+  //   build.js / dev.js after `Bun.serve()`. Falls back to a no-op when no
+  //   server is registered (test paths, isolated module imports, etc.).
+  // - `disconnect()` from an HTTP-routed channel-owned server function has
+  //   no "current client" identity (the call originates from an HTTP POST,
+  //   not a WS connection). It is therefore a no-op in this context. The
+  //   `onserver:close` / `onserver:message` paths that DO have `ws` in
+  //   scope inject a different `disconnect()` shape inside emit-channel's
+  //   _scrml_ws_handlers handler bodies (deferred per C18 SURVEY).
+  function emitBroadcastInjection(channelName: string, indent: string): string[] {
+    const topicExpr = channelTopicMap.get(channelName) ?? JSON.stringify(channelName);
+    return [
+      `${indent}// §38.6 broadcast/disconnect built-ins for channel "${channelName}"`,
+      `${indent}const broadcast = (_scrml_data) => {`,
+      `${indent}  const _scrml_srv = (typeof globalThis !== "undefined" && globalThis._scrml_active_server) || null;`,
+      `${indent}  if (_scrml_srv && typeof _scrml_srv.publish === "function") {`,
+      `${indent}    _scrml_srv.publish(${topicExpr}, JSON.stringify(_scrml_data));`,
+      `${indent}  }`,
+      `${indent}};`,
+      `${indent}const disconnect = () => { /* §38.6: no-op from HTTP-routed server fn (no current client) */ };`,
+    ];
+  }
 
   // §8.11: detect if this file needs a synthetic __mountHydrate route
   // (≥2 `server @var` decls with callable initExprs → coalesce initial loads).
@@ -607,6 +664,16 @@ export function generateServerJs(
         }
       }
 
+      // C18 (§38.6): if this server function is declared inside a channel
+      // body, inject `broadcast(data)` / `disconnect()` as locals so the
+      // user's body can call them. Functions outside any channel scope get
+      // no injection — references to broadcast/disconnect there fire
+      // E-CHANNEL-004 (or, today, the typer's E-SCOPE-001 fallback).
+      const _ownerChannel = channelFnMap.get(name);
+      if (_ownerChannel) {
+        for (const l of emitBroadcastInjection(_ownerChannel, "    ")) lines.push(l);
+      }
+
       const body: any[] = fnNode.body ?? [];
       const cpsSplit = route.cpsSplit;
 
@@ -716,6 +783,14 @@ export function generateServerJs(
             for (const l of _pLines) lines.push(l);
           }
         }
+      }
+
+      // C18 (§38.6): broadcast/disconnect injection for channel-owned server
+      // functions on the non-CSRF (auth-managed) path. Mirror of the CSRF
+      // path injection above.
+      const _ownerChannelNonCsrf = channelFnMap.get(name);
+      if (_ownerChannelNonCsrf) {
+        for (const l of emitBroadcastInjection(_ownerChannelNonCsrf, "  ")) lines.push(l);
       }
 
       const body: any[] = fnNode.body ?? [];

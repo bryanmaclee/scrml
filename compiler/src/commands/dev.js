@@ -480,6 +480,10 @@ export async function runDev(args) {
   // Bun.serve() returns a server object that supports server.reload(config)
   // to update routes/ws handlers without dropping connections.
   let server = Bun.serve(buildServeConfig(opts, serveDir));
+  // C18 (§38.6): expose Bun.serve() handle for the broadcast() helper
+  // injected into channel-scoped server functions. Refreshed on every
+  // server.reload() since reload() returns the same server instance.
+  globalThis._scrml_active_server = server;
 
   console.log(`[dev] Serving ${serveDir} at http://localhost:${opts.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
@@ -527,6 +531,8 @@ export async function runDev(args) {
           server.stop(true);
           server = Bun.serve(buildServeConfig(opts, serveDir));
         }
+        // C18 (§38.6): refresh broadcast() handle after reload/restart.
+        globalThis._scrml_active_server = server;
         // Signal all connected browsers to reload.
         broadcastReload();
         if (sseClients.size > 0) {

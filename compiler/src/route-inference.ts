@@ -2211,6 +2211,18 @@ export function runRI(input: RIInput): RIOutput {
             };
           } else {
             // CPS not applicable: fire E-RI-002 for ANY server-escalated function.
+            //
+            // C18 (§38.4): channel-scoped server functions that write to a
+            // channel-cell are spec-permitted per §38.4 line 15677 (writes
+            // emit `__sync` wire frames). However, the server-side codegen
+            // for `@cell = expr` currently emits `_scrml_reactive_set(...)`
+            // which is a client-side runtime symbol — the emitted server
+            // module would crash at request time. Rather than claim a
+            // feature that breaks at runtime, retain E-RI-002 here and
+            // surface the gap explicitly: server-side channel-cell read/
+            // write semantics are deferred to a follow-up step. Adopters
+            // can still use channel-scoped server functions that take args
+            // + call `broadcast()` — the most common Phoenix-style pattern.
             errors.push(new RIError(
               "E-RI-002",
               `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
