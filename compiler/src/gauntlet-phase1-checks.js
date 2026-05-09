@@ -151,8 +151,25 @@ function checkTopLevelTextPreamble(blocks, filePath, errors) {
         nextBlock &&
         nextBlock.type === "markup" &&
         nextBlock.name === "channel";
-      if (trimmedTrailingExport && (nextIsComponentMarkup || nextIsChannelMarkup)) {
-        // Form 1 (P2 component / P3.A channel) — fall through to TAB. No diagnostic.
+      // C15 (Phase A1c, 2026-05-09): Form 1 also covers
+      // `export <engine for=Type ...>` per SPEC §21.8 line 12340 + §51.0.D.
+      // The next block is markup with name === "engine" (or "machine" for the
+      // legacy alias per §51.3 deprecated keyword). TAB's machineDecls walker
+      // (`module-resolver.js:175-189`) reads the engine-decl's `isExported`
+      // flag (set by ast-builder via the `_b14IsExport` propagation at
+      // `ast-builder.js:945-967`) and registers the export with `kind:
+      // "engine"` for SYM PASS 10.B's cross-file mount validation. The
+      // existing engine-binding-b14.test.js test
+      // (`export <engine ...> Form 1 sets isExported:true`, line 170-181)
+      // already exercises the TAB-side wiring; this GCP1 suppression closes
+      // the gap that blocked the end-to-end pipeline (compileScrml) from
+      // accepting Form 1 export-of-engine syntax.
+      const nextIsEngineMarkup =
+        nextBlock &&
+        nextBlock.type === "markup" &&
+        (nextBlock.name === "engine" || nextBlock.name === "machine");
+      if (trimmedTrailingExport && (nextIsComponentMarkup || nextIsChannelMarkup || nextIsEngineMarkup)) {
+        // Form 1 (P2 component / P3.A channel / C15 engine) — fall through to TAB. No diagnostic.
         continue;
       }
 

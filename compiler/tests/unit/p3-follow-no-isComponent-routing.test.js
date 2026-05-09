@@ -95,6 +95,13 @@ const ALLOWED = {
                                    // shape `{kind, category, isComponent}` from MOD's
                                    // exportRegistry; B4 imports the type but never
                                    // reads `.isComponent` for routing decisions.
+  // C15 — exportRegistry plumbing into codegen carries the same value
+  // shape `{kind, category, isComponent}` as MOD's registry entries. The
+  // `isComponent` field appears in the TYPE ANNOTATION only; codegen
+  // routing reads `category` (e.g. `=== "engine"`) — never `.isComponent`.
+  "codegen/context.ts": 2,         // type-signature mention only (CompileContext.exportRegistry shape)
+  "codegen/index.ts": 2,           // type-signature mention only (CgInput.exportRegistry shape)
+  "codegen/emit-engine.ts": 3,     // type-signature mentions + lookupSourceMap path-shape comment
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

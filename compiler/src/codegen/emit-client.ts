@@ -7,7 +7,7 @@ import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -570,6 +570,32 @@ export function generateClientJs(ctx: CompileContext): string {
   if (derivedEngineLines.length > 0) {
     lines.push("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
     for (const line of derivedEngineLines) lines.push(line);
+    lines.push("");
+  }
+
+  // C15 cross-file engine mount markers — per §21.8 + §51.0.D.
+  // For each `<engineVarName/>` use-site in the importer's markup whose
+  // source export is `category: "engine"`, emit a mount-position marker
+  // comment. The singleton mechanism is the page-shared `_scrml_state`
+  // table — exporter's `_scrml_reactive_set("appPhase", ...)` writes to
+  // the same map all importers read from. The JS module-import side is
+  // already handled by the existing import-rewriter at line 498-514 above
+  // (`import { Phase } from './engines.scrml'` → `import { Phase } from
+  // "./engines.client.js"`). The `.client.js` import is preserved by the
+  // GITI-003 prune (line 869) so the exporter's module-init code runs at
+  // page load even when no symbol from the import is referenced in the
+  // importer's body.
+  //
+  // Body rendering at the use-site DOM position is DEFERRED — same parser
+  // blocker as C12/C13/C14. The marker documents WHERE the imported
+  // engine renders; a follow-on body-render emitter fills the slot.
+  //
+  // See `compiler/src/codegen/emit-engine.ts` C15 section + the C15 SURVEY
+  // (`docs/changes/phase-a1c-step-c15-cross-file-engine-mount/SURVEY.md`).
+  const crossFileEngineMountLines = emitCrossFileEngineMountsForFile(fileAST, ctx.exportRegistry ?? null);
+  if (crossFileEngineMountLines.length > 0) {
+    lines.push("// --- cross-file engine mounts (compiler-generated, §21.8 + §51.0.D) ---");
+    for (const line of crossFileEngineMountLines) lines.push(line);
     lines.push("");
   }
 

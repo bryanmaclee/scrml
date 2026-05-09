@@ -63,6 +63,19 @@ export interface CompileContext {
    * Used only in embedded-runtime mode. External mode always emits SCRML_RUNTIME.
    */
   usedRuntimeChunks: Set<string>;
+  /**
+   * Phase A1c Step C15 — MOD's `exportRegistry` map plumbed into codegen so
+   * cross-file engine mount sites (`<engineVarName/>` in importer markup
+   * resolving to an engine-category export) can be discriminated at emit time.
+   *
+   * Shape: `Map<absolutePath, Map<exportName, {kind, category, isComponent}>>`.
+   * Mirrors the same map B14 PASS 10.B consumes in `symbol-table.ts:3997-4066`.
+   * Null when no MOD result is available (test harnesses that bypass the full
+   * pipeline) — codegen's cross-file mount walker short-circuits in that case.
+   *
+   * SPEC §21.8 + §51.0.D — cross-file engine import via `<EngineName/>`.
+   */
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,5 +110,9 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // and detecting transition usage from the AST requires inspecting
     // the binding registry which may not be populated at context creation time.
     usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope', 'errors', 'transitions']),
+    // C15 — MOD exportRegistry, optional. Defaults to null for tests that
+    // bypass the full pipeline; the C15 cross-file mount walker short-circuits
+    // when null.
+    exportRegistry: partial.exportRegistry ?? null,
   };
 }

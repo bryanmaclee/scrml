@@ -988,6 +988,10 @@ export function compileScrml(options = {}) {
     sourceMap,
     mode,
     emitMachineTests,
+    // C15 — pass MOD's exportRegistry so codegen can identify cross-file
+    // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
+    // and emit the §21.8 mount-position marker per SPEC §51.0.D.
+    exportRegistry: moduleResult.exportRegistry,
   }));
   collectErrors("CG", cgResult.errors);
 

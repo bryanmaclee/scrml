@@ -859,3 +859,332 @@ export function emitDerivedEngineSubstrateForFile(fileAST: any): string[] {
 
   return lines;
 }
+
+// ===========================================================================
+// C15 — Cross-file engine mount + auto-declared engine variable (M16, M18)
+// ===========================================================================
+//
+// Per SPEC §21.8 (cross-file engine import normative, lines 12328-12395) +
+// §51.0.D (engine mount position rules + cross-file singleton via
+// `<EngineName/>`, lines 20380-20426). Wave 4 closer; depends on C12 (variant
+// cell + transition table substrate), C13 (write-hook + .advance()), C14
+// (derived-engine substrate). Sibling-aware: B17.2 (parser-extension for
+// `<onTransition>` + `effect=`) is in flight in parallel; B17.2 owns the
+// parser/symbol-table territory while C15 owns the codegen territory.
+//
+// **What C15 emits per importer file with cross-file engine mount sites:**
+//
+//   1. Per `<engineVarName/>` use-site in markup whose `engineVarName`
+//      resolves (via importBindings × exportRegistry) to an exported engine
+//      in another file: a §21.8 mount-position MARKER COMMENT documenting
+//      the singleton mount. Mirrors C12 / C14's same-file mount-position
+//      marker pattern.
+//
+//   2. The JS module-import side is HANDLED BY `emit-client.ts:498-514`'s
+//      existing import-rewriter — `import { Phase } from './engines.scrml'`
+//      becomes `import { Phase } from "./engines.client.js"`, which forces
+//      engines.client.js to load. The exporter's module-init-time
+//      `_scrml_reactive_set("appPhase", "Idle")` runs during that load,
+//      populating the page-shared `_scrml_state` (§Q1 of C15 SURVEY:
+//      `_scrml_state` IS module-scope-shared in production via classic-script
+//      global lex env — see `compiler/src/runtime-template.js:81`).
+//
+// **What C15 does NOT emit (deferred):**
+//
+//   - State-child body rendering at the use-site DOM position. SAME parser
+//     blocker as C12/C13/C14 — engine state-child bodies are RAW TEXT today.
+//     The mount-position marker comment marks the slot for a follow-on
+//     body-render emitter to fill.
+//   - `<onTransition>` / `effect=` firing on cross-file mounted engines —
+//     SAME parser blocker as C13/C14.
+//   - `<EngineName/>` INSIDE a component body — A1b B17 deferred this; C15
+//     should NOT handle (B17 follow-on territory).
+//   - Implicit auto-import per §21.8 line 12353 (`import { Phase }` only,
+//     then `<appPhase/>` works) — DEFERRED. Requires TAB/MOD-extension to
+//     desugar the implicit `appPhase` into the importer's importBindings.
+//     The EXPLICIT auto-import form (`import { Phase, appPhase } from
+//     './engines.scrml'`) is fully shipped per §21.8 line 12354.
+//   - Re-export of an imported engine (§21.4 standard re-export) at the
+//     emit level — re-export is already handled by MOD's re-export-chain
+//     resolution; C15 just consumes the resolved exportRegistry entry.
+//
+// **Discrimination annotation (Q4 in C15 SURVEY):**
+//   NR (`name-resolver.ts:419-435`) does NOT discriminate engine-imports
+//   from other user-state-type imports — `category === "engine"` is
+//   collapsed into `kind: "user-state-type"` at NR's importedRegistry build.
+//   C15 codegen re-derives the discrimination at emit time using the same
+//   primitives B14 PASS 10.B uses: `fileScope.importBindings` lookup +
+//   `exportRegistry` source-export category check.
+//
+// **Singleton invariant (§51.0.A + §51.0.D line 20413):**
+//   A cross-file imported engine is the SAME instance across all use-sites
+//   in all importing files. The singleton mechanism is the page-shared
+//   `_scrml_state` table — exporter's `_scrml_reactive_set("appPhase", ...)`
+//   writes to the same map all importers read from. NO new instance per
+//   importer. Multiple use-sites in one importer → same instance. Multiple
+//   importers → same instance. Transitions in any mount-site location
+//   update the shared cell.
+// ===========================================================================
+
+/**
+ * Per-mount-site descriptor for a cross-file engine use-site detected in the
+ * importer's markup. C15's emission consumes this; produced by
+ * `collectCrossFileEngineMounts`.
+ */
+export interface CrossFileEngineMountSite {
+  /** The local binding name in the importer's scope (the `<varName/>` tag). */
+  varName: string;
+  /** The exporter file's absolute path (from importBindings.sourcePath). */
+  exporterPath: string;
+  /** The exporter's exported name (matches `varName` unless aliased on import). */
+  exportedName: string;
+}
+
+/**
+ * Type-shape mirror for the shape `fileAST._scope` carries (file-level Scope).
+ * Mirrored locally to avoid the symbol-table.ts dependency in this codegen
+ * module — keeps the import surface lean. Matches `compiler/src/symbol-table.ts`
+ * `Scope` exactly for the fields we read (importBindings).
+ */
+interface CrossFileFileScopeLike {
+  importBindings?: Map<string, { localName: string; exportedName: string; sourcePath: string; pinned?: boolean }>;
+}
+
+/**
+ * The MOD exportRegistry shape — outer Map<absolutePath, …>, inner
+ * Map<exportName, {kind, category, isComponent}>. Mirrors
+ * `compiler/src/module-resolver.js:buildExportRegistry`.
+ */
+type CrossFileExportRegistry = Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>>;
+
+/**
+ * Walk the importer file's AST + markup and collect every `<varName/>` use-
+ * site whose source export is `category: "engine"`. Mirrors B14 PASS 10.B's
+ * walker (`symbol-table.ts:3997-4066`) for symmetry — both use the SAME
+ * lookup primitives (importBindings × exportRegistry × `category === "engine"`).
+ *
+ * Self-closing PascalCase / lowercase tags resolved against importBindings
+ * are component instantiations, engine mounts, channel mounts, or other
+ * imported entities. The discriminator is the SOURCE EXPORT'S CATEGORY:
+ *
+ *   - `category === "engine"`             → cross-file engine mount (THIS WALKER)
+ *   - `category === "user-component"`     → component instantiation (CE territory)
+ *   - other (function, type, channel, …)  → E-ENGINE-MOUNT-NOT-ENGINE fired by B14
+ *
+ * Same-file engines render at decl position per §51.0.D (no use-site tag form);
+ * the walker only fires on tags resolved through the import path. Returns an
+ * empty array when no exportRegistry is provided (test harnesses) OR when the
+ * importer has no cross-file engine mount sites.
+ *
+ * **Re-export support (§21.4):** when the source export is a re-export chain,
+ * MOD's exportRegistry SHOULD have already resolved the chain to the ultimate
+ * engine-category entry. C15 does not chase re-export chains itself —
+ * single-step lookup against the `binding.sourcePath` Map suffices.
+ *
+ * **Path-shape resilience:** `importBindings.sourcePath` carries the LITERAL
+ * import-statement source string (e.g., `"./engines.scrml"`), which is a
+ * RELATIVE path in user source. MOD's `exportRegistry` is keyed by ABSOLUTE
+ * paths (post-`resolveModulePath` resolution). To make the lookup robust
+ * against both shapes (unit-test harnesses pass relative-keyed registries;
+ * the production pipeline keys by absolute), the walker tries:
+ *   (1) the literal `binding.sourcePath` (relative form — matches
+ *       harness-fed registries),
+ *   (2) the absolute resolved form `resolveModulePath(sourcePath, importerPath)`
+ *       — matches the production-pipeline registry.
+ * The first non-empty source-map wins. This costs one extra Map.get when the
+ * relative key matches; when it doesn't, a single resolve+lookup is the
+ * cheapest correct path.
+ */
+export function collectCrossFileEngineMounts(
+  fileAST: any,
+  exportRegistry: CrossFileExportRegistry | null | undefined,
+): CrossFileEngineMountSite[] {
+  const out: CrossFileEngineMountSite[] = [];
+  if (!exportRegistry) return out; // no MOD result → nothing to discriminate.
+  if (!fileAST) return out;
+
+  const fileScope: CrossFileFileScopeLike | null = (fileAST as any)._scope ?? null;
+  const importBindings = fileScope?.importBindings;
+  if (!importBindings || importBindings.size === 0) return out; // no imports → no cross-file mounts.
+
+  // Importer's path — needed to resolve relative import sources to absolute
+  // for the production-shape exportRegistry lookup. May be empty in synthetic
+  // unit tests; the relative-path lookup still works for those.
+  const importerPath: string = (fileAST as any).filePath ?? "";
+
+  const visited = new WeakSet<object>();
+  const seen = new Set<string>(); // de-dup multiple use-sites of the same varName
+  const orderedMounts: CrossFileEngineMountSite[] = [];
+
+  /**
+   * Look up the source's exportRegistry entry, trying both the literal
+   * (relative) source and the absolute-resolved path. See the "path-shape
+   * resilience" note in the parent function's docblock.
+   */
+  function lookupSourceMap(sourcePath: string): { map: Map<string, { kind: string; category: string; isComponent: boolean }> | undefined; resolvedPath: string } {
+    // (1) Try literal — matches unit-test harnesses that build exportRegistry
+    // with relative path keys (e.g., engine-binding-b14.test.js).
+    const directMap = exportRegistry!.get(sourcePath);
+    if (directMap && directMap.size > 0) {
+      return { map: directMap, resolvedPath: sourcePath };
+    }
+    // (2) Try absolute-resolved — matches production-pipeline exportRegistry
+    // keyed by post-`resolveModulePath` absolute paths. Use a dynamic require
+    // to avoid the static dependency at this codegen module's import-time
+    // (keeps the import surface lean + makes the function tree-shakeable
+    // when no cross-file engines are used).
+    if (sourcePath.startsWith("./") || sourcePath.startsWith("../")) {
+      if (importerPath && importerPath.length > 0) {
+        try {
+          // Lazy require to avoid the import surface dependency.
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { resolveModulePath } = require("../module-resolver.js");
+          const absSource: string = resolveModulePath(sourcePath, importerPath);
+          const absMap = exportRegistry!.get(absSource);
+          if (absMap && absMap.size > 0) {
+            return { map: absMap, resolvedPath: absSource };
+          }
+        } catch {
+          // resolveModulePath unavailable or threw — fall through with
+          // undefined map (caller short-circuits).
+        }
+      }
+    }
+    return { map: undefined, resolvedPath: sourcePath };
+  }
+
+  function visit(node: any): void {
+    if (!node || typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (node.kind === "markup" && node.selfClosing === true && typeof node.tag === "string") {
+      const tag = node.tag;
+      const binding = importBindings.get(tag);
+      if (binding) {
+        const { map: sourceMap, resolvedPath } = lookupSourceMap(binding.sourcePath);
+        if (sourceMap) {
+          const exportInfo = sourceMap.get(binding.exportedName);
+          if (exportInfo && exportInfo.category === "engine") {
+            // De-dup: multiple use-sites of the same varName in one file
+            // resolve to the SAME singleton — emit one marker site
+            // descriptor (C15's emission writes one comment per unique
+            // varName per file; the singleton invariant is global across
+            // all use-sites). The de-dup also keeps the emitted marker
+            // count proportional to the engine count, not the use-site
+            // count.
+            //
+            // Note: this de-dup affects the EMITTED MARKER count. The
+            // SINGLETON invariant is enforced at runtime via the shared
+            // `_scrml_state` table — every use-site reads the same cell
+            // regardless of how many marker comments are emitted.
+            if (!seen.has(tag)) {
+              seen.add(tag);
+              orderedMounts.push({
+                varName: tag,
+                // Record the RESOLVED path so the marker comment is
+                // unambiguous (production: absolute; harness: literal).
+                exporterPath: resolvedPath,
+                exportedName: binding.exportedName,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Recurse into children + body + consequent + alternate + arms.
+    // Mirrors B14 PASS 10.B's recursion shape exactly so the walker visits
+    // the same node set.
+    if (Array.isArray(node.children)) for (const c of node.children) visit(c);
+    if (Array.isArray(node.body)) for (const c of node.body) visit(c);
+    if (Array.isArray(node.consequent)) for (const c of node.consequent) visit(c);
+    if (Array.isArray(node.alternate)) for (const c of node.alternate) visit(c);
+    if (Array.isArray(node.arms)) {
+      for (const arm of node.arms) {
+        if (arm && Array.isArray(arm.body)) for (const c of arm.body) visit(c);
+      }
+    }
+  }
+
+  const nodes: any[] = (fileAST.nodes as any[] | undefined)
+    ?? (fileAST.ast?.nodes as any[] | undefined)
+    ?? [];
+  for (const n of nodes) visit(n);
+
+  for (const m of orderedMounts) out.push(m);
+  return out;
+}
+
+/**
+ * Emit the §21.8 cross-file engine mount-position marker for a single mount
+ * site. Mirrors C12's same-file `// §51.0.D engine mount position: …` pattern.
+ *
+ * Body rendering at the use-site DOM position is DEFERRED — same parser
+ * blocker as C12/C13/C14 (`engine-statechild-parser.ts:14-21` — engine
+ * state-child bodies are RAW TEXT today; no walkable AST). The marker
+ * documents WHERE the imported engine renders so a follow-on body-render
+ * emitter can locate the slot.
+ *
+ * The actual SINGLETON resolution + mount mechanism is:
+ *   - Importer's `import { ... } from './engines.scrml'` is rewritten to
+ *     `import { ... } from "./engines.client.js"` by `emit-client.ts:498-514`.
+ *     The .client.js import is PRESERVED by the GITI-003 prune (line 869 of
+ *     emit-client.ts) — never dropped, even when no symbol from the import
+ *     is used in the importer's body, because the IMPORT's SIDE EFFECT
+ *     (running the exporter's module-init code) IS the load-bearing reason
+ *     to keep it.
+ *   - Loading engines.client.js runs the exporter's
+ *     `_scrml_reactive_set("appPhase", "Idle")` at module-init time.
+ *   - The shared `_scrml_state` table (page-global classic-script lex env)
+ *     surfaces the cell to all importers.
+ *
+ * @param site — the mount-site descriptor from `collectCrossFileEngineMounts`
+ * @returns the marker-comment line
+ */
+export function emitCrossFileEngineMount(site: CrossFileEngineMountSite): string {
+  return `// §21.8 cross-file engine mount: ${site.varName} from ${site.exporterPath} — singleton via shared _scrml_state — body rendering deferred to follow-on`;
+}
+
+/**
+ * Emit the C15 substrate for every cross-file engine mount site in the file.
+ *
+ * Top-level orchestrator — sibling to `emitEngineSubstrate` (C12) and
+ * `emitDerivedEngineSubstrateForFile` (C14). Returns an empty array when no
+ * cross-file mount sites exist (lets the caller skip a section header
+ * without checking length).
+ *
+ * Per SPEC §21.8 + §51.0.D — cross-file engine sharing is render-only at
+ * the use-site; the engine's declaration in the EXPORTER file controls all
+ * attributes. The IMPORTER's use-site emits ONLY the mount marker; the
+ * engine's variant cell + transition table + derived projection (per C12 /
+ * C13 / C14) all live in the EXPORTER's compiled output. The importer's
+ * compiled JS includes the exporter's module via the standard import-rewrite
+ * (handled by `emit-client.ts:498-514`); the side effect of that import's
+ * module-init code populates the page-shared `_scrml_state`, giving the
+ * importer transparent read access to the singleton cell.
+ *
+ * **Singleton verification at runtime:** multiple use-sites in the same
+ * importer (or across different importers) MUST resolve to the same
+ * `_scrml_reactive_get("varName")` cell. The walker above de-dups multiple
+ * use-sites of the same varName at the EMITTED MARKER level; the runtime
+ * singleton is enforced by the shared `_scrml_state` table itself (one map
+ * keyed by varName → one cell value).
+ *
+ * @param fileAST — the importer file's AST (must have `_scope.importBindings`)
+ * @param exportRegistry — MOD's exportRegistry (null = no cross-file detection)
+ * @returns lines of JS code; empty array when no cross-file mounts exist
+ */
+export function emitCrossFileEngineMountsForFile(
+  fileAST: any,
+  exportRegistry: CrossFileExportRegistry | null | undefined,
+): string[] {
+  const sites = collectCrossFileEngineMounts(fileAST, exportRegistry);
+  if (sites.length === 0) return [];
+
+  const lines: string[] = [];
+  for (const site of sites) {
+    lines.push(emitCrossFileEngineMount(site));
+  }
+  return lines;
+}

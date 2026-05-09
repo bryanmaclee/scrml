@@ -93,6 +93,17 @@ export interface CgInput {
    * suppress envelope emission for handlers with composition errors.
    */
   batchPlannerErrors?: Array<{ code: string; message: string; span?: any }>;
+  /**
+   * Phase A1c Step C15 — MOD's `exportRegistry` map, optional. When provided,
+   * codegen can identify cross-file engine mount sites (`<engineVarName/>` in
+   * importer markup whose source export's category is `"engine"`) and emit
+   * the §21.8 mount-position marker per SPEC §51.0.D.
+   *
+   * Shape: `Map<absolutePath, Map<exportName, {kind, category, isComponent}>>`.
+   * Identical to the map B14 PASS 10.B consumes (`symbol-table.ts:3997-4066`).
+   * Threaded into per-file `CompileContext.exportRegistry`.
+   */
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
 }
 
 export interface CgFileOutput {
@@ -136,6 +147,7 @@ export function runCG(input: CgInput): CgOutput {
     encoding: encodingInput = false,
     batchPlan = null,
     batchPlannerErrors = [],
+    exportRegistry: exportRegistryInput = null,
   } = input;
 
   // Resolve encoding configuration (§47)
@@ -499,6 +511,9 @@ export function runCG(input: CgInput): CgOutput {
       derivedNames: collectDerivedVarNames(fileAST),
       analysis: analysis ?? null,
       usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
+      // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
+      // discriminate cross-file engine mount sites from local components / HTML.
+      exportRegistry: exportRegistryInput,
     };
 
     const hasMarkup = (analysis as any)?.markupNodes?.length > 0;
