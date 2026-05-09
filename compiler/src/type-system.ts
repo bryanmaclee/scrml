@@ -2079,6 +2079,27 @@ function buildMachineRegistry(
       continue;
     }
 
+    // §51.0 modern-form dispatch (S75 — body-shape, not keyword): if the
+    // body contains a PascalCase state-child opener (`<Variant ...>`), it's
+    // the §51.0.B + §51.0.F modern engine form. SYM PASS 11 (B15) owns its
+    // grammar and diagnostics (E-ENGINE-STATE-CHILD-MISSING /
+    // E-ENGINE-STATE-CHILD-INVALID-VARIANT / E-ENGINE-RULE-INVALID-VARIANT
+    // etc.). The TS-stage `parseMachineRules` only knows the legacy
+    // arrow-rule grammar (§51.3 / §51.9), so applying it to a modern body
+    // would silently match nothing and fire a false-positive E-ENGINE-005
+    // ("no transition rules"). Skip parseMachineRules for modern bodies
+    // and register a `MachineType` entry with empty rules so downstream
+    // codegen still sees the engine name; modern engines have an
+    // independent codegen path through `emit-engine.ts` keyed on
+    // `engineMeta.stateChildren` (already populated by B15).
+    //
+    // Body-shape (not keyword) dispatches because §51.3.2 (P1 amendment)
+    // permits `<engine>` over either body shape and existing samples use
+    // `<engine>` over the legacy arrow body. The inline regex mirrors
+    // B15's own classification (engine-statechild-parser.ts:88's
+    // `isLegacyArrowRulesBody` heuristic, which checks the inverse).
+    const hasStateChildOpener = /<\s*[A-Z]/.test(rulesRaw);
+
     // §51.9 — derived / projection machine. The source enum type is
     // resolved at this call's caller (after all type + machine decls are
     // registered), so we defer source-var validation to that later pass.
@@ -2086,6 +2107,23 @@ function buildMachineRegistry(
     // (the projection's OWN type, which is what `.Editable`/`.ReadOnly`
     // variants refer to on the RHS).
     if (sourceVar) {
+      if (hasStateChildOpener) {
+        // Modern-form derived engine — B15 + B16 own diagnostics. Register
+        // a derived MachineType entry with empty rules; emit-engine.ts will
+        // codegen from engineMeta.stateChildren.
+        registry.set(name, {
+          kind: "machine",
+          name,
+          governedTypeName: govName,
+          governedType: govType,
+          rules: [],
+          isDerived: true,
+          sourceVar,
+          projectedVarName: engineNameToProjectedVar(name),
+          auditTarget,
+        });
+        continue;
+      }
       // Projection rules use a slightly different shape: LHS is the SOURCE
       // variant(s), RHS is a single PROJECTION variant (single variant-ref,
       // no alternation per §51.9.2). LHS variant names are validated against
@@ -2116,6 +2154,20 @@ function buildMachineRegistry(
         // stay all-lowercase while PascalCase names (Order, OrderStatus) only
         // lose the leading capital.
         projectedVarName: engineNameToProjectedVar(name),
+        auditTarget,
+      });
+      continue;
+    }
+
+    if (hasStateChildOpener) {
+      // Modern-form (non-derived) engine — body has `<Variant ...>` openers.
+      // Skip parseMachineRules; B15 fires the §51.0 family of diagnostics.
+      registry.set(name, {
+        kind: "machine",
+        name,
+        governedTypeName: govName,
+        governedType: govType,
+        rules: [],
         auditTarget,
       });
       continue;

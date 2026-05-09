@@ -1,0 +1,40 @@
+// engine-modern-002-effects — modern §51.0 engine with `<onTransition>` body
+// hooks (§51.0.H, B17 family).
+//
+// Exercises:
+//   - Modern state-child body (§51.0.B / §51.0.F) — see -001-basic for the
+//     minimal positive case.
+//   - `rule=(.A | .B)` multi-target form (§51.0.F).
+//   - `<onTransition to=.X>` hook inside a state-child body (§51.0.H, Form 2;
+//     B17.2 parser, B17.3 typer, B17.4 codegen). The hook fires only on the
+//     specific from→to transition.
+//
+// Per §51.0.C the engine auto-declares its reactive variable from `for=`
+// (FetchPhase → @fetchPhase); per §51.0.K the user does NOT separately declare it.
+
+${
+    type FetchPhase:enum = { Idle, Loading, Success, Error }
+
+    function logSuccess() {}
+    function logError() {}
+}
+
+<engine for=FetchPhase initial=.Idle>
+    <Idle rule=.Loading></>
+    <Loading rule=(.Success | .Error)>
+        <onTransition to=.Success>${ logSuccess() }</>
+        <onTransition to=.Error>${ logError() }</>
+    </>
+    <Success rule=.Idle></>
+    <Error rule=.Idle></>
+</>
+
+<program>
+<div class="fetch-app">
+    <h1>Status: ${@fetchPhase.variant}</>
+    <button onclick=${@fetchPhase = FetchPhase.Loading}>Begin</>
+    <button onclick=${@fetchPhase = FetchPhase.Success}>Mark success</>
+    <button onclick=${@fetchPhase = FetchPhase.Error}>Mark error</>
+    <button onclick=${@fetchPhase = FetchPhase.Idle}>Reset</>
+</>
+</program>
