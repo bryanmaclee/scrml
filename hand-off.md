@@ -1,186 +1,197 @@
-# scrmlTS — Session 73 (CLOSE — A1c Waves 1+2+3 ALL SHIPPED · 9 commits · +437 tests · 0 regressions · 0 path-discipline leaks)
+# scrmlTS — Session 74 (CLOSE — A1c Wave 4 CLOSED · B17.x family CLOSED · §51.0.H spec-complete · 8 ships · +245 tests · 0 regressions)
 
 **Date opened:** 2026-05-08
-**Date closed:** 2026-05-08
-**Previous:** `handOffs/hand-off-72.md` (S72 close — Position B server-keyword DEPRECATION ratified · A9 phase opened · A9 Ext 4 SHIPPED · cross-machine switch in progress)
-**This file:** rotates to `handOffs/hand-off-73.md` at S74 open
-**Tests at S73 close:** **10,308 pass / 60 skip / 1 todo / 0 fail / 35,353 expects** (487 files, ~11s)
+**Date closed:** 2026-05-09 (session crossed midnight)
+**Previous:** `handOffs/hand-off-73.md` (S73 close — A1c Waves 1+2+3 ALL CLOSED · 9 ships · +437 tests · 0 regressions · 0 path-discipline leaks)
+**This file:** rotates to `handOffs/hand-off-74.md` at S75 open
+**Tests at S74 close:** **10,553 pass / 65 skip / 1 todo / 0 fail** (~17s pre-commit; ~17s post-commit)
 
 ---
 
-## TL;DR — what S73 did
+## TL;DR — what S74 did
 
-**Massive implementation session — 9 ships across 3 A1c waves, all parallel-disposition friction-free.**
+**Massive implementation session — 8 ships across two sequence-locked tracks (A1c Wave 4 engines + B17.x family), +245 tests, zero regressions.**
 
-| # | Step | Commit | Δ | Wave |
+| # | Step | Commit | Δ | Track |
 |---|---|---|---|---|
-| 1 | C3 — render-spec expansion at `<x/>` | `26ce40b` | +23 | 1 |
-| 2 | C4 — bind:* dispatch | `bb317ea` | +54 | **1 ✓** |
-| 3 | C5 — reset(@cell) + default= | `67b9e96` | +34 | 2 |
-| 4 | C6 — validator runtime catalog (14 universal-core) | `50d35b9` | +79 | 2 |
-| 5 | C7 — per-cell validator runner (§55.12 short-circuit) | `f935822` | +61 | **2 ✓** |
-| 6 | C8 — validity surface synthesis | `cf37440` | +54 | 3 |
-| 7 | C9 — cross-field deps precision | `6a311c7` | +35 | 3 |
-| 8 | C10 — 4-level error message resolution | (in `ff0a5dd` push) | +61 | 3 |
-| 9 | C11 — `<errors of=expr/>` first-class element | `ff0a5dd` | +36 | **3 ✓** |
+| 1 | C12 — engine state-machine substrate | `5c910a3` | +41 | Wave 4 |
+| 2 | A6-1 — test-bind SPEC | `bd30009` | 0 | A8 |
+| 3 | C13 — `.advance()` + write-hook | `888d0fd` | +40 | Wave 4 |
+| 4 | C14 — derived engines | `a945313` | +37 | Wave 4 |
+| 5 | B17.2 — `<onTransition>`+`effect=` parser | `fd70150` | +28 | B17.x |
+| 6 | C15 — cross-file engine mount | `43c8747` | +32 | **Wave 4 ✓** |
+| 7 | B17.3 — typer diagnostics (5 fire-sites) | `40813f4` | +26 | B17.x |
+| 8 | B17.4 — codegen hook firing | `3790131` | +41 | **B17.x ✓** |
 
-Plus archive housekeeping: scrml-support `6206192` (S66 SKIPPED zod-amends article landed in `archive/articles-skipped/`).
-
-**Cross-machine pickup at S73 open:** scrml-support pulled 4 commits behind from S72 push. scrmlTS already in sync. No cross-machine drift after that.
+**Cross-machine pickup at S74 open:** scrmlTS already at `532966f` (S73 wrap). scrml-support already at `6206192`. Both repos clean.
 
 **Pattern observations:**
-- **Parallel-dispatch maturity:** S72 had 3 F4 path-discipline leaks across parallel dispatches; S73 had ZERO across 11 dispatches (counting C5+C6 + C9+C10+C11 as parallel batches). Brief-encoded sibling-territory awareness held.
-- **Depth-of-survey discount (now frequency-9):** every dispatch's survey returned actionable findings before implementation — file-locus corrections (C3 → emit-html.ts, C5 → runtime-template.js path), substantial existing-substrate discoveries (C5: half already shipped via C1; C6: compile-time catalog mirrors 1:1; C8: zero C5 extension needed), scope-shape verdict surfacing (C9: REFINEMENT not silent-bug — runtime probe disproved hypothesis).
-- **Spec-Rule-4 enforcement:** C6 explicitly REJECTED SCOPE-doc drift listing `email/url/numeric/integer/custom` as universal-core predicates (those are stdlib library / enum-tag escape hatch, NOT predicates per primer §8 audit). Regression-guard test asserts the exclusion.
-- **`scrml-dev-pipeline` agent NOT staged this machine** (carryover from S71 master-PA notice — still pending). All 9+ dispatches went via `general-purpose` substitution per pa.md authorized pattern. Worked fine for T2-shaped extensions.
+- **Wave 4 sequential discipline held.** Per SCOPE: C12 → C13 → C14 → C15 strict sequential. Each step's HANDOFF explicitly addressed next-step prerequisites; downstream steps consumed prior helpers without re-deriving. Zero scope-creep.
+- **B17.x family pattern.** When C13 hit a parser-blocker (`<onTransition>`/`effect=` not parsed), PA surfaced as Rule-3/Rule-4 question rather than silently re-scoping. Result: full `<onTransition>`+`effect=` surface shipped in same session — B17.2 (parser) + B17.3 (typer, 5 fire-sites) + B17.4 (codegen). §51.0.H spec-complete from compiler perspective.
+- **Parallel-dispatch maturity (mostly held).** Multiple parallel pairs ran cleanly: C13 + A6-1 (file-disjoint codegen + spec); C15 + B17.2 (file-disjoint codegen + parser). 2 F4 path-discipline incidents though — A6-1 self-recovered pre-commit via brief discipline block; C15 didn't self-recover but pre-commit P3-FOLLOW migration test caught it. Both contained.
+- **Briefs-as-prep paid off.** C15 + B17.2 + B17.3 + B17.4 briefs were drafted in advance; ratifications surfaced ahead of dispatch; dispatches ran with high signal-to-noise.
+- **`scrml-dev-pipeline` agent NOT staged this machine** (carryover from S71 master-PA notice — still pending). All 8 dispatches went via `general-purpose` substitution per pa.md authorized pattern. Worked clean; staging is no longer urgent.
 
 ---
 
-## State as of S73 close
+## State as of S74 close
 
 | Field | Value |
 |---|---|
-| scrmlTS HEAD | (this wrap commit) |
-| scrmlTS origin sync | TBD post-wrap-push |
-| scrml-support HEAD | `6206192` (post-archive landing earlier this session) |
+| scrmlTS HEAD | `3790131` (B17.4 SHIP — push pending — 8 commits ahead) |
+| scrmlTS origin sync | 0/+8 (push pending at wrap step 7) |
+| scrml-support HEAD | `6206192` (S73 archive landing, pushed) |
 | scrml-support origin sync | 0/0 ✓ |
-| Tests at close | **10,308 / 60 / 1 / 0** ✓ via `bun run test` (~11s) |
+| Tests at close | **10,553 / 65 / 1 / 0** ✓ via post-commit hook |
 | Inbox | empty (`handOffs/incoming/` clean) |
 | Outbox-pending | none |
-| Active dispatches | none (Wave 3 all landed) |
-| Worktree branches retained | 9 from S73 — all forensic per S67 protocol |
+| Active dispatches | none (all 8 landed) |
+| Worktree branches retained | 8 from S74 — all forensic per S67 protocol |
 
-**Cumulative tests since S71 baseline:** 9,734 (S71) → **10,308 (S73 close)** = **+574 pass tests across S72 + S73, 0 regressions, 0 net new fails**.
+**Cumulative tests since S73 baseline:** 10,308 (S73 close) → **10,553 (S74 close)** = **+245 pass / +5 skip / 0 net new fails**.
 
-**S73 alone:** 9,872 (S73 open via this machine's `bun run test` chain) → 10,308 = **+436 / +437 arithmetic** (±1 floating drift) across 9 ships.
+**Wave 4 (engines) CLOSED at substrate level.** C12 + C13 + C14 + C15 all shipped. Visual-rendering + body-rendering deferrals carry forward (parser blocker, wide body-parse step territory).
 
----
-
-## Open questions to surface immediately at S74 open
-
-1. **Cross-machine pickup IF S74 opens on the other machine.** MANDATORY: `git fetch origin && git pull --rebase origin main` on BOTH repos. Verify scrmlTS at this wrap commit + scrml-support at `6206192`. Re-run `bun run test`; expect 10,308 / 60 / 1 / 0 (or self-host-parity-inclusive count if running with self-host scope).
-
-2. **A1c Wave 4 (engines, ~18-25h, SEQUENTIAL) — next priority.** C12 (engine state-machine runtime, 5-7h) is foundational; C13 (.advance + onTransition hook firing, 4-5h), C14 (derived engines, 4-6h), C15 (cross-file engine mount + auto-declared engine variable, 5-7h) follow sequentially. Per SCOPE: "C12 → C13 → C14 → C15 sequential."
-
-3. **A1c Wave 5 (cross-cutting C16-C22, ~25-35h, MOSTLY PARALLELIZABLE)** — biggest parallel-dispatch window. After Wave 4 lands, can fan out C16/C17/C18/C19/C20/C21/C22 with file-disjoint planning.
-
-4. **A1c Wave 6 (C23 PIPELINE prose pass, ~5-8h, INDEPENDENT)** — can run in parallel with any other wave.
-
-5. **A8 (test-bind, Insight 22, ~6-12h) — UNBLOCKED since S72 (A9 Ext 4 shipped).** Parallel track candidate.
-
-6. **A9 Ext 5 (S5 replay safety / idempotency-key storage)** — STILL gated on A1c C17 spec-edit ordering (per S72 integration constraint). Becomes dispatchable after C17 lands.
-
-7. **`scrml-dev-pipeline` agent staging gap** — STILL not staged on this machine since S71 master-PA notice. Pipeline-substitution to general-purpose has worked clean across 9 dispatches; staging is no longer urgent. Filed.
-
-8. **F4 PreToolUse hook mitigation** — S72 had 3 leaks; S73 had 0. The brief-encoded path-discipline block + sibling-territory-awareness blocks have been effective without the hook. May be deprioritizable; surface to user for re-tier decision.
+**B17.x family CLOSED.** B17 (E-COMPONENT-ENGINE-SCOPE pre-A1c) + B17.2 (parser) + B17.3 (typer 5 fire-sites) + B17.4 (codegen). §51.0.H spec-complete from compiler perspective.
 
 ---
 
-## Things S74 PA must NOT screw up (S70+S71+S72+S73 cumulative)
+## Open questions to surface immediately at S75 open
 
-S72-close standing list (items 113-150) carries forward verbatim. **S73 NEW additions:**
+1. **Cross-machine pickup IF S75 opens on the other machine.** MANDATORY: `git fetch origin && git pull --rebase origin main` on BOTH repos. Verify scrmlTS at this wrap commit + scrml-support at `6206192`. Re-run `bun run test`; expect 10,553 / 65 / 1 / 0.
 
-151. **A1c Waves 1+2+3 fully shipped.** C0-C11 all on main + pushed. The codegen surface for state-decl emission, validators, and the validity surface is functionally complete. Don't dispatch sub-step regressions; if a runtime-behavior bug is found, it's a Wave 4+ regression or an integration gap, not a Wave 1/2/3 do-over.
+2. **A1c Wave 5 (cross-cutting C16-C22) — ~25-35h, MOSTLY PARALLELIZABLE — next big window.** 7 steps with file-disjoint planning opportunities. Highest parallel-dispatch density of A1c. Per SCOPE row 235:
+   - C16 — Refinement-type runtime emission (§53), ~5-7h
+   - C17 — Schema additive shared-core lowering (§39), ~4-6h
+   - C18 — Channel WebSocket emission + broadcast/disconnect runtime injection (§38), ~4-6h
+   - C19 — `<program>` documentary attributes (§40.7), ~1-2h
+   - C20 — `pinned` import hoisting, ~3-4h
+   - C21 — Tier 3 predefined-shape compound (positional sugar lowering), ~2-3h
+   - C22 — Bare-variant inference codegen (M9), ~2-3h
+   - **Note: C17 spec-edit ordering blocks A9 Ext 5** per S72 integration constraint.
 
-152. **`<errors of=expr/>` is now a first-class structural element.** Don't propose adding it again or re-debating the design. The element is registered at `attribute-registry.js` + `html-elements.js` (rendersToDom: false) + emitted via `emit-html.ts` dispatch arm. Body-override via arrow-function-shaped logic-node body is the canonical custom-render path per §55.8.
+3. **A1c Wave 6 (C23 PIPELINE prose pass)** — ~5-8h, INDEPENDENT, can run alongside Wave 5.
 
-153. **`messageFor` runtime helper is `_scrml_message_for(error, fieldName, cellName?)`.** Globally available in any `.client.js` whose source triggers the `messages` chunk (chunk #17). C11 emits a `typeof`-guarded fallback for backward-compat; the real helper resolves automatically when present. Pass `cellName` as the qualified storage key (e.g., `"signup.email"`) to enable Level-1 inline-override lookup.
+4. **A8 (test-bind) sub-steps A6-2 through A6-6** — A6-1 SPEC shipped this session. Remaining: A6-2 parser (~1-2h), A6-3 typer (~1-2h), A6-4 codegen (~2-3h), A6-5 tests (~1.5-2.5h), A6-6 optional `scrml:test` API alignment (~30-60min). File-disjoint with most A1c work; could parallelize.
 
-154. **`runtime-validators.js` is the C6 runtime catalog (14 fire functions + dispatch helpers + frozen catalog).** It is NOT a stdlib module shim; it lives at `compiler/src/runtime-validators.js` (sibling of `runtime-template.js`). The `validators` chunk (chunk #16) loads it via `fs.readFileSync` at module-load time — keeps `runtime-validators.js` as single source of truth (no duplication into runtime-template.js).
+5. **A9 Ext 5 (S5 replay safety / idempotency-key storage)** — STILL gated on A1c C17 spec-edit ordering (per S72 integration constraint). Becomes dispatchable after C17 lands.
 
-155. **C9 verdict was REFINEMENT, not silent-bug fix.** Pre-C9 cross-field reactivity already worked via transitive dirty propagation through the compound parent. C9 added PRECISION (qualified-path subscriptions + direct qualified-path reads). The hypothesis-disproof-via-runtime-probe pattern is reusable: when a refinement step's brief assumes "fix a bug," the survey's runtime probe may reveal "no bug, just imprecision." That's a refinement verdict, not a no-op.
+6. **C15-surfaced bugs filed for separate dispatches:**
+   - **TS state-child rule= recognition** — `parseMachineRules` only knows legacy arrow-rule form; new `<engine ... initial=...> <Variant rule=...>` state-child form fires false-positive E-ENGINE-005. Blocks all end-to-end engine compileScrml testing. ~3-5h survey-first.
+   - **B14 PASS 10.B path-shape mismatch** — `exportRegistry.get(binding.sourcePath)` uses literal relative source while production keys are absolute. Silently no-ops. ~1h fix (resolve to absolute via `resolveModulePath` before lookup).
 
-156. **`<errors>` placeholder anchor span persists in DOM with empty innerHTML when errors are empty.** Pragmatic interpretation of §55.8 line 25193-25195 ("literally nothing rendered") — the anchor is required for re-render hookup. A future C-step could refine to true zero-DOM via `<template>` + marker comment (mirrors Phase 2c clean-if pattern). Documented in C11 SURVEY as deferred refinement.
+7. **SPEC.md conflict markers cleanup** — pre-existing from older `bde823e WIP(uvb-w1)` commit at lines 13698-13702 + 13754-13758. Sat undetected (markdown spec text, tests don't validate). ~5min PA edit (resolve merge — pick a side or merge both).
 
-157. **§55.12 short-circuit rule is C7's responsibility, NOT C6's.** C6 fire functions are pure pass/fail; they don't know about siblings. C7's runner walks `validators[]` in declaration order, calls `fire`, accumulates, and BREAKS the loop when `req` or `is some` returns non-null. §C7.14 demonstrates this with the canonical `<name req length(>=2) pattern(...)>` example on `""`.
+8. **F4 PreToolUse hook elevation candidate.** 2 incidents this session (A6-1 self-recovered, C15 stashed/reconciled). Per pa.md F4 mitigation §2, the platform-level PreToolUse hook would close the leak entirely. Filed; needs context-aware "is this PA or a subagent?" signal.
 
-158. **Compound-level synth-surface predictability rule (§55.5):** even compounds with NO validators get the four synth properties with trivial defaults (`isValid` true, `errors` `{}`, `touched` `{}`, `submitted` false). C8 emits unconditionally per compound parent. Don't propose conditional emission — predictability over namespace savings is the spec's load-bearing position.
+9. **CWD drift pattern in PA shell sessions** — 2 recoveries this session (B17.2 landing, C15 landing). Bash CWD persists; some chained operations land shell in worktree directory. Pattern worth filing for next-session pickup.
 
-159. **Top-level (non-compound) cells with validators DO NOT get synth surface** per §55.5 L11 Edge A. C7 emits no runner for them. Their validator failures are tracked via the type-system (refinement type) when that path lands. Single-cell forms should use a one-field compound (`<form><name req/></>`) per spec convention.
-
-160. **Form-detection for `submitted` is document-level submit listener** (one `addEventListener` per compound with `submitted` synth, idempotency-guarded). Multi-form discrimination NOT implemented — predictability over selectivity per §55.7. If multiple forms become a real adopter friction, refine; documented in C8.
-
-161. **A1c Wave 4 sequencing is HARD per SCOPE:** C12 → C13 → C14 → C15. C12 emits the engine state-machine runtime (current variant cell + transition table + initial state); C13/C14/C15 build on top. Don't dispatch in parallel — C13 depends on C12's transition-table shape, C14 depends on C12's variant-cell shape, C15 depends on C12's auto-declared variable.
-
-162. **C9's qualified-path walker (`forEachQualifiedCellRef*` in `validator-arg-parser.ts`)** is the new sibling to `forEachIdentInExprNode`. Future B-steps or codegen needing to walk MemberExpr chains rooted at `@` should use the qualified-path family — the base-ident walker will under-collect.
-
-163. **9 worktree branches retained in `.claude/worktrees/`** for forensic per S67. NOT cleanup priority — branches are crash-recovery anchors and forensic-review anchors.
+10. **`scrml-dev-pipeline` agent staging gap** — STILL not staged on this machine since S71 master-PA notice. Pipeline-substitution to general-purpose has been clean across 17+ dispatches in S73+S74 combined. No longer urgent. Filed.
 
 ---
 
-## File modification inventory (S73)
+## Things S75 PA must NOT screw up (S70+S71+S72+S73+S74 cumulative)
 
-**scrmlTS commits (9 ship + 1 archive + 1 wrap = 11 total):**
+S73-close standing list (items 113-163) carries forward verbatim. **S74 NEW additions:**
+
+164. **A1c Wave 4 fully shipped at substrate level.** C12-C15 all on main + push pending. The codegen surface for engine state-machine runtime, .advance + direct-write hook, derived engines, cross-file mount — all functionally complete. Don't dispatch sub-step regressions; if a runtime-behavior bug is found, it's a Wave 5+ regression or integration gap, not a Wave 4 do-over.
+
+165. **B17.x family fully shipped.** §51.0.H surface (effect= Form 1 + <onTransition> Form 2 + co-existence + default semantics + derived-engine integration) is spec-complete from compiler perspective. Don't propose adding it again or re-debating.
+
+166. **Engine variable detection set is `engineVarNames: Set<string>`** plumbed through `EmitExprContext` (added by C13). Any future `.advance` / `.method` interception on engine variables uses this set. Don't bypass.
+
+167. **C13 `_scrml_engine_*` runtime helpers in chunk #18 `engine`:**
+- `_scrml_engine_check_transition(currentVariant, target, tableConst)` — internal predicate
+- `_scrml_engine_advance(varName, target, tableConst)` — `.advance()` surface (asserted-advance-failed framing)
+- `_scrml_engine_direct_set(varName, target, tableConst)` — direct-write (plain E-ENGINE-INVALID-TRANSITION)
+
+C14 reuses for derived engines (gated). C15 cross-file mounts reference via the same shared module-scope `_scrml_state` (no per-importer instance). B17.4 wraps these helpers with hook-firing call.
+
+168. **C14 derived-engine emission gates on `legacyMachineKeyword !== true`.** Both predicate AND chunk-detection. This was a mid-implementation critical fix — legacy `<machine derived=@x>` ALSO populates `engineMeta.derivedExpr`. Don't unify without preserving the gate.
+
+169. **C15 worked around B14 PASS 10.B path-shape bug** in its OWN walker (`lookupSourceMap` try-relative-then-absolute). The B14 bug remains in main; file fix as separate dispatch. C15's workaround keeps cross-file mount working in production.
+
+170. **B17.2 added 3 defensive parser bug fixes** (findOpenerEnd `${...}` skip, findStateChildCloser + findEngineCloser onTransition skip, mixed bare-vs-valued attribute walker). All pre-existing footguns surfaced by B17.2's needs. None affect prior behaviour. Don't revert.
+
+171. **B17.3 NEW E-ONTRANSITION-NO-TARGET error code** at §34, placed adjacent to E-ENGINE-EFFECT-AMBIGUOUS (line 14454). Preserves §51.0.H code family contiguity. Don't reorder.
+
+172. **B17.4 hook-firing dispatch shape = compile-time-baked switch** (Q1 ratified). Per-engine `__scrml_engine_<varName>_fire_hooks(from, to)` function with hard-coded if-arms per declared hook. NOT a runtime registry. Don't refactor to runtime registry.
+
+173. **B17.4 firing timing is SPLIT** (Q2 ratified). `if=expr` evaluates BEFORE cell write (consistent old-state context for gating); body fires AFTER cell write completes (observers see new value, aligns with §51.0.H "when LEAVING"). Don't unify.
+
+174. **B17.4 `once` lifecycle = compile-time-generated runtime boolean** (Q3 ratified). Per `<onTransition once>` emit module-scope `let __scrml_engine_<varName>_once_<idx> = false;`. NOT a runtime fired-set Map. Tree-shakeable per once-attribute presence.
+
+175. **B17.4 hooks do NOT fire on engine init** (Decision 5). Transitions only per §51.0.H "when LEAVING". Entering initial state isn't a transition.
+
+176. **B17.4 derived-engine integration via `wrapDerivedEngineClosureBodyWithHooks`** (Decision 6). Reads `_scrml_derived_cache[name]` for old-vs-new comparison inside `_scrml_derived_declare` closure. Don't restructure — uses C14's substrate.
+
+177. **A6-1 SPEC text lives in §19.12.6/.7/.8** (PRIMARY home) + §47.5 cross-ref (dispatch mechanism cross-ref). Plus §19.13 + §34 E-TEST-006 row. A6-2 parser must consume from these anchors. Q4 OQ deferral notes shape = §51.0.K-style blockquote footnote at end of §19.12.7 (per §6.6.8/§6.6.10/§51.0.K convention precedent).
+
+178. **A6-1 handler-shape discrimination = by typer at compile time** (RHS is normal expression; if function-typed and signature-assignable → invoke; else → return-stub). Aligns with `default=expr` precedent. Don't propose syntactic discrimination.
+
+179. **8 worktree branches retained in `.claude/worktrees/`** for forensic per S67. NOT cleanup priority — branches are crash-recovery + forensic-review anchors.
+
+180. **2 F4 incidents this session** — A6-1 self-recovered pre-commit; C15 stashed + reconciled at landing. Don't ignore future incidents; the brief discipline block + pre-commit P3-FOLLOW test are the current containment layers.
+
+---
+
+## File modification inventory (S74)
+
+**scrmlTS commits (8 ships + 1 wrap = 9 total):**
 
 | Commit | Files | Topic |
 |---|---|---|
-| `26ce40b` | binding-registry.ts, emit-html.ts, c3 test, c3 docs (BRIEF/SURVEY/progress) | C3 render-spec expansion |
-| `bb317ea` | emit-bindings.ts, c4 test, c4 docs | C4 bind:* dispatch |
-| `67b9e96` | runtime-template.js, runtime-chunks.ts, emit-client.ts, emit-logic.ts, emit-expr.ts, emit-functions.ts, emit-control-flow.ts, scheduling.ts, c5 test, runtime-tree-shaking test, browser-todomvc test, c5 docs | C5 reset + default |
-| `50d35b9` | runtime-validators.js (NEW), c6 test, c6 docs | C6 validator runtime catalog |
-| `f935822` | emit-validators.ts (NEW), runtime-template.js, runtime-chunks.ts, emit-client.ts, emit-logic.ts, runtime-tree-shaking test, c7 test, c7 docs | C7 per-cell runner |
-| `cf37440` | emit-synth-surface.ts (NEW), emit-bindings.ts, emit-client.ts, emit-logic.ts, c7 test (1 stale assertion tightened), c8 test, c8 docs | C8 synth surface |
-| `6a311c7` | emit-validators.ts, validator-arg-parser.ts (forEachQualifiedCellRef* NEW), c9 test, c9 docs | C9 cross-field precision |
-| `(in ff0a5dd push)` (`bb64238` worktree) | runtime-template.js, runtime-chunks.ts (16→17), emit-client.ts, emit-logic.ts, emit-messages.ts (NEW), runtime-tree-shaking test, c7 test (1 stale assertion narrowed), c10 test, stdlib/data/{index.scrml, messages.scrml NEW}, c10 docs | C10 4-level message resolution |
-| `ff0a5dd` | attribute-registry.js, binding-registry.ts, emit-event-wiring.ts, emit-html.ts, html-elements.js, html-elements.test.js, type-system.test.js, c11 test, c11 docs | C11 `<errors of=>` element |
-| `(this wrap)` | hand-off.md, master-list.md, docs/changelog.md, handOffs/hand-off-72.md (rotated from S72-close) | S73 wrap |
+| `5c910a3` | emit-engine.ts (NEW), emit-client.ts, c12 test (NEW), c12 docs (BRIEF/SURVEY/progress) | C12 engine substrate |
+| `bd30009` | SPEC.md, SPEC-INDEX.md, a6-1 docs | A6-1 test-bind SPEC |
+| `888d0fd` | runtime-template.js, runtime-chunks.ts, emit-engine.ts (extend), emit-expr.ts, emit-logic.ts, emit-reactive-wiring.ts, emit-functions.ts, scheduling.ts, emit-client.ts, c10-error-message-resolution.test.js (chunk-count update), c13 test (NEW), runtime-tree-shaking.test.js (chunk-count update), c13 docs | C13 .advance + write-hook |
+| `a945313` | emit-engine.ts (extend with C14), emit-client.ts (extend chunk arm), c14 test (NEW), c14 docs | C14 derived engines |
+| `fd70150` | engine-statechild-parser.ts, symbol-table.ts, b17-2 test (NEW), b17-2 docs | B17.2 parser-extension |
+| `43c8747` | api.js, codegen/context.ts, codegen/index.ts, codegen/emit-client.ts, codegen/emit-engine.ts (extend), gauntlet-phase1-checks.js, c15 test (NEW), p3-follow-no-isComponent-routing.test.js (allowlist), c15 docs | C15 cross-file mount |
+| `40813f4` | symbol-table.ts (NEW PASS 17), SPEC.md (NEW E-ONTRANSITION-NO-TARGET row), SPEC-INDEX.md, b17-3 test (NEW), b17-3 docs | B17.3 typer diagnostics |
+| `3790131` | emit-engine.ts (NEW B17.4 section), emit-client.ts, emit-expr.ts, emit-logic.ts, emit-functions.ts, emit-reactive-wiring.ts, scheduling.ts, b17-4 test (NEW), b17-4 docs | B17.4 codegen hook firing |
+| `(this wrap)` | hand-off.md, master-list.md, docs/changelog.md, handOffs/hand-off-73.md (rotated from S73-close) | S74 wrap |
 
-**scrml-support commits (1 — early-session):**
-- `6206192` (S66 SKIPPED zod-amends article landed in `archive/articles-skipped/scrml-debate-amends-zod-claim-devto-2026-05-06.md`).
+**scrml-support commits (0 — no changes this session).**
 
 ---
 
-## Wave-by-wave summary
+## Track-by-track summary
 
-### Wave 1 (foundational state-decl emission) — CLOSED
-
-| Step | Topic | Δ tests |
-|---|---|---|
-| C0 (S70) | usage-analyzer pass | +67 |
-| C1 (S72) | shape-aware cell emitter | +25 |
-| C2 (S72) | derived-cell reactive computation | +31 |
-| C3 (S73) | render-spec expansion at `<x/>` | +23 |
-| C4 (S73) | bind:* dispatch | +54 |
-
-After C4: state-decl shape emission complete. Render-by-tag use sites expand to bound input elements; bind: dispatch by render-spec type wires reactive flow.
-
-### Wave 2 (reset + validators) — CLOSED
+### A1c Wave 4 (engines) — CLOSED at substrate level
 
 | Step | Topic | Δ tests |
 |---|---|---|
-| C5 (S73) | reset(@cell) runtime + default= | +34 |
-| C6 (S73) | validator runtime catalog (14 universal-core) | +79 |
-| C7 (S73) | per-cell validator runner (§55.12 short-circuit) | +61 |
+| C12 (S74) | engine state-machine substrate | +41 |
+| C13 (S74) | .advance() + direct-write rule= validation hook | +40 |
+| C14 (S74) | derived engines (`derived=expr`, L20) | +37 |
+| C15 (S74) | cross-file engine mount + auto-declared engine variable | +32 (+5 skip) |
 
-After C7: reset semantics fire correctly across compound + multi-level compound nav; validators run + fire `ValidationError` enum tags into per-field synth cells.
+After C15: substrate is functionally complete. Body rendering deferred (wide body-parse step territory). `<onTransition>` + `effect=` codegen firing was deferred from C13/C14 — landed via B17.x family below.
 
-### Wave 3 (validity surface) — CLOSED
+### B17.x family (`<onTransition>` + `effect=`) — CLOSED · §51.0.H spec-complete
 
 | Step | Topic | Δ tests |
 |---|---|---|
-| C8 (S73) | validity surface synthesis (compound rollup + touched + submitted) | +54 |
-| C9 (S73) | cross-field deps precision (qualified-path subscriptions) | +35 |
-| C10 (S73) | 4-level error message resolution | +61 |
-| C11 (S73) | `<errors of=expr/>` first-class element | +36 |
+| B17 (pre-A1c) | core E-COMPONENT-ENGINE-SCOPE | (in main pre-S74) |
+| B17.2 (S74) | parser-extension (body-scan + opener-attr) | +28 |
+| B17.3 (S74) | typer diagnostics (5 fire-sites incl. NEW E-ONTRANSITION-NO-TARGET) | +26 |
+| B17.4 (S74) | codegen hook firing (compile-time-baked switch + split timing + once + derived-engine integration) | +41 |
 
-After C11: end-to-end validity surface works. Validators fire → errors populate per-field cells → compound rollup aggregates → `<errors of=>` renders user-facing messages with 4-level resolution.
+After B17.4: §51.0.H surface spec-complete from compiler perspective. Form 1 (`effect=`) + Form 2 (`<onTransition>`) + co-existence + default semantics + skipped lifecycle + derived-engine integration + cross-ref §18.0.2 (parser handles forbidden-inside-`<match>`) all landed.
 
-### Wave 4 (engines) — NOT YET DISPATCHED
+### Phase A8 (test-bind) — A6-1 SHIPPED
 
-| Step | Topic | Est |
+| Step | Topic | Δ tests |
 |---|---|---|
-| C12 | engine state-machine runtime | 5-7h |
-| C13 | .advance(.event) + `<onTransition>` hook firing | 4-5h |
-| C14 | derived=expr engine emission (L20) | 4-6h |
-| C15 | cross-file engine mount + auto-declared variable (M16, M18) | 5-7h |
+| A6-1 (S74) | SPEC amendment (§19.12.6/.7/.8 + §47.5 cross-ref + §19.13/§34 E-TEST-006 row) | 0 (spec only) |
 
-**Sequential per SCOPE.** ~18-25h total.
+A6-2 through A6-6 (parser/typer/codegen/tests/optional API) pending. File-disjoint with most A1c remaining work.
 
-### Wave 5 (cross-cutting C16-C22) — NOT YET DISPATCHED
+### A1c Wave 5 (cross-cutting C16-C22) — NOT YET DISPATCHED
 
-7 steps, ~25-35h, mostly file-disjoint and parallelizable. **Note: C17 spec-edit ordering blocks A9 Ext 5 (per S72 integration constraint).**
+7 steps, ~25-35h, mostly file-disjoint and parallelizable. **Note: C17 spec-edit ordering blocks A9 Ext 5** (per S72 integration constraint).
 
-### Wave 6 (C23 PIPELINE prose pass) — INDEPENDENT
+### A1c Wave 6 (C23 PIPELINE prose) — INDEPENDENT
 
 ~5-8h, can run in parallel with any other wave. Documents v0.next pipeline state.
 
@@ -191,20 +202,20 @@ After C11: end-to-end validity surface works. Validators fire → errors populat
 `/home/bryan/scrmlMaster/handOffs/incoming/`:
 - `2026-04-22-scrmlTS-to-master-insight-25-multi-meta.md` — UNREAD legacy from S30s era
 - `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md` — RENAMED at master-push-protocol-retirement (S72)
-- `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md` — UNREAD (master-PA agent staging request from S71; still not addressed; pipeline-substitution to general-purpose has been working clean so deprioritized but filed)
+- `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md` — UNREAD (master-PA agent staging request from S71; still not addressed; pipeline-substitution clean across 17+ dispatches now so deprioritized)
 
-No active pending master notices from S73.
+No active pending master notices from S74.
 
 ---
 
 ## Push state
 
-scrmlTS: 9 commits pushed throughout session (C3/C4 batched, C5/C6 batched, C7 alone, C8 alone, C9/C10/C11 batched). Plus this wrap commit pending push. **Wrap-push pending.**
+scrmlTS: 8 commits ahead at wrap-trigger. **Wrap-push pending (will execute as wrap step 7).**
 
-scrml-support: 1 commit pushed at session open (`6206192` archive landing). 0/0 since.
+scrml-support: 0/0 sync ✓ (no changes this session).
 
 ---
 
 ## Tags
 
-#session-73 #a1c-waves-1-2-3-CLOSED #9-ships #+437-tests #zero-regressions #zero-path-discipline-leaks #parallel-dispatch-mature #depth-of-survey-frequency-9 #spec-rule-4-enforced-at-c6 #cross-machine-pickup-clean #wave-4-engines-next
+#session-74 #a1c-wave-4-CLOSED #b17-x-family-CLOSED #spec-§51.0.H-spec-complete #8-ships #+245-tests #zero-regressions #2-f4-incidents-contained #cwd-drift-recovered-twice #briefs-as-prep-paid-off #parallel-dispatch-mature #spec-md-conflict-markers-filed-for-cleanup
