@@ -11355,6 +11355,81 @@ assert-stmt   ::= ... (existing forms)
 - `assert.fails.with` SHALL verify both that the function fails AND that the error variant matches the specified variant name.
 - `assert.fails` and `assert.fails.with` SHALL NOT propagate the error. They capture it for assertion purposes.
 
+#### 19.12.6 `test-bind` Declaration
+
+**Added:** 2026-05-08 (S74; phase A8 / A6-1). Ratified by design-insight 22 ("Effect-Test-Mockability: `test-bind` as canonical scrml surface", 2026-05-07).
+
+The `test-bind` declaration form provides scope-local server-function binding inside `~{}` test blocks. It is the canonical scrml surface for testing engine-bearing or server-function-using code paths without contacting real services or networks.
+
+**Surface declaration syntax:**
+
+```
+test-bind-decl ::= 'test-bind' identifier '=' expression
+```
+
+- `identifier` SHALL name a server function (`server fn`, §12.5) that is in the file's import or declaration scope. The identifier is resolved against §47-encoded names — no new naming scheme is introduced.
+- `expression` SHALL be any expression legal in the surrounding logic context (§7). The typer (compiler stage TS) decides dispatch shape from the resolved type of the expression:
+  - If the expression resolves to a function value whose signature is assignable to the bound server function's signature, the test-mode dispatch SHALL invoke that function with the call-site arguments.
+  - Otherwise, the expression value `v` SHALL act as a return-stub: the test-mode dispatch SHALL ignore call-site arguments and return `v`. The typer SHALL require `typeof v` to be assignable to the bound server function's return type.
+- `test-bind` SHALL be legal ONLY at the body scope of a `~{}` test block — sibling to `test "..." {...}` cases and `assert.*` statements. `test-bind` SHALL NOT appear inside a `test "..." {...}` case body, inside a nested `${...}` logic context, or in any non-`~{}` context.
+- A single `~{}` block MAY contain multiple `test-bind` declarations. Each declaration binds a distinct server function. A second `test-bind` declaration for the same identifier within the same `~{}` block SHALL be a compile error.
+
+**Scope:** A `test-bind` declaration is scope-local to the enclosing `~{}` block. It SHALL NOT leak into sibling `~{}` blocks, into outer-scope, or into any other compilation unit. The declaration is consumed by the test-mode dispatch hook (§19.12.7) and erased before any production code emission.
+
+**Normative statements (explicit-unchanged claims, per design-insight 22):**
+
+1. `E-TEST-004` (§34, the `~{}` outer-scope reference denial) SHALL remain unchanged. `test-bind` is a *scope-local declaration*, not an outer-scope reference; the two surfaces are orthogonal.
+2. `E-FN-004` (§48.3, denial of coeffects inside `fn` bodies) SHALL remain unchanged. `test-bind` does not relax purity in any production code path.
+3. Insight 21 (no effect rows on `fn` types) SHALL remain unchanged. `test-bind` operates entirely outside the `fn` type surface — it is a test-block declaration form, not a type-system extension.
+
+#### 19.12.7 `test-bind` Dispatch Contract
+
+**Compile-time conditional dispatch.** When the compiler's `output.testMode` is enabled (the same compilation mode that emits `<base>.test.js` user-authored suites and `<base>.machine.test.js` engine harnesses), every server-function call site in the compilation unit emits a guarded dispatch:
+
+1. If a `test-bind` declaration for the called server function is in scope (i.e. the call site lies inside a `~{}` block whose body declared a binding for that server function), the dispatch SHALL invoke the binding instead of the production server-fn call.
+2. If no `test-bind` declaration for the called server function is in scope, the dispatch SHALL emit error code `E-TEST-006` and halt the test execution at that call site. Silent passthrough to the production server-fn call SHALL NOT occur.
+
+**Production binary cost: 0 bytes.** When `output.testMode` is disabled (release builds, `output.mode: "production"`), the dispatch hook SHALL NOT be emitted. The server-fn call site emits exactly the production call shape. The `test-bind` declaration form, the dispatch table, the per-call guard, and the `E-TEST-006` runtime check SHALL all be dead-code-eliminated from release artefacts. `test-bind` is a test-mode-only surface; the production binary is bit-identical to a compilation that contained no `test-bind` declarations.
+
+**Cross-reference: §47 (Output Name Encoding).** The keys of the test-mode dispatch table are the §47-encoded names of the bound server functions. No new naming scheme is introduced by `test-bind`; the encoding rules of §47.1–§47.4 apply unchanged to the dispatch keys. See §47.5 for the matching cross-reference paragraph on the dispatch hook's relation to the encoded-name surface.
+
+**Forward-compatibility — Position B (effect-record schemas) NOT ADOPTED at this time.** Design-insight 22 considered an alternative shape ("Position B": effect-record schemas + `expects` sequences, re-frame style) and is **not adopted at this time**. The `test-bind` dispatch point defined here is structurally a subset of what Position B would need: a future amendment MAY extend the dispatch hook to also emit an effect-record at the dispatch site rather than only forwarding to the binding. Such an extension would be additive over the surface defined here and SHALL NOT break existing `test-bind` declarations. Per S67 user-direction methodology (recorded in design-insights.md alongside Insight 22), this deferral is **not** gated on a flip condition — it is a "not adopted at this time; structurally extensible if a real use case emerges later" deferral, with no flip-condition framing.
+
+> **OQ deferral footnote (S67-style, A6-1, 2026-05-08).** The following open questions are recorded with this section. Each is deferred and does NOT bear on the normative claims above. Format parallel to the §6.6.8 / §6.6.10 / §51.0.K footnote precedents.
+>
+> - **OQ-8b** (`<onTransition>` body effects beyond server-function calls). Out of scope for `test-bind`. Server-function mockability inside `~{}` is closed by Insight 22 (partial closure of OQ-8); `<onTransition>` bodies containing arbitrary imperative effects are re-filed as OQ-8b for future debate. `test-bind` does NOT mock those effects.
+> - **OQ-test-bind-concurrency.** Parallel test-runner block-local table isolation — what is the isolation primitive (thread-local storage, block-ID-keyed table, other)? This is an A6-3 (typer) and A6-4 (codegen) implementation question; the spec is silent on the isolation primitive at this revision.
+> - **OQ-test-bind-passthrough.** The verdict ratifies fail-fast (E-TEST-006) over silent passthrough. The OQ remains "validate against test-runner ergonomics" — a future amendment MAY relax fail-fast if real ergonomics require it. Not adopted at this time.
+> - **OQ-audit-log-compose.** Interaction with `audit @log` (§51.11) — does the test-bound value appear in the audit log when the bound server-fn would have written one? The spec is silent at this revision. Future amendment MAY codify either inclusion or exclusion; pending real use case.
+
+#### 19.12.8 `test-bind` Worked Example
+
+```scrml
+~{ "engine reaches .Success given synthetic HTTP, no real network"
+    test-bind fetchUser  = (id) => { id, name: "Alice", email: "a@b.com" }
+    test-bind fetchPosts = []
+
+    test "user load drives engine to .Success" {
+        // ... test body that exercises the engine + asserts state transition.
+        // Inside this test case, every call to `fetchUser(...)` returns the
+        // synthetic user record from the binding above; every call to
+        // `fetchPosts(...)` (regardless of arguments) returns the empty array.
+        //
+        // A call to any OTHER server function in scope that lacks a
+        // `test-bind` declaration would raise E-TEST-006 (fail-fast).
+    }
+}
+```
+
+The example demonstrates:
+- Multiple `test-bind` declarations per `~{}` block (`fetchUser` and `fetchPosts`).
+- Function-form handler (`fetchUser = (id) => {...}`) — the dispatch invokes the function with call-site arguments.
+- Literal/return-stub form (`fetchPosts = []`) — the dispatch ignores call-site arguments and returns the literal value.
+- Scope-local nature — `fetchUser` and `fetchPosts` exist only inside this `~{}` block; sibling `~{}` blocks SHALL NOT see them.
+- Integration with engine-bearing tests (the OQ-8 use case) — the `test-bind` declarations make the engine's transition surface deterministic without network access.
+
+The worked example is canonical scrml shape. Test-mockability patterns from other ecosystems (e.g. `jest.fn().mockReturnValue(x)`, `sinon.stub(api, 'fetch')`, `vi.mock(...)`) are NOT scrml. The scrml-way surface is the `test-bind <name> = <rhs>` declaration above — terse, declarative, scope-local, type-checked.
+
 ---
 
 ### 19.13 Error Codes
@@ -11370,6 +11445,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; cycle 2 (v0.next+1). Reserved; not yet emitted. | Error |
 
@@ -14353,6 +14429,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TEST-003 | §~ | `~{}` test block: timeout exceeded | Test |
 | E-TEST-004 | §~ | `~{}` test block: references variable from outer scope | Test |
 | E-TEST-005 | §~ | `~{}` test block: invalid test structure | Test |
+| E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope. Fail-fast over silent passthrough (design-insight 22, S74). Test-mode-only; dead-code-eliminated from release builds (§47.5 cross-ref). | Test |
 | E-TYPE-004 | §14.3 | Struct field access on non-struct type | Error |
 | E-TYPE-052 | §14.2 | InitCap algorithm: type name must be PascalCase | Error |
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
@@ -18049,6 +18126,8 @@ Encoded names do NOT apply to:
 - CG SHALL apply encoded names to every JavaScript variable binding it emits.
 - CG SHALL NOT apply encoded names to CSS class names, HTML element names, HTML attribute names, or public export identifiers.
 - The public module boundary (§29) SHALL use developer-chosen names for exported identifiers. Internal bindings behind that boundary SHALL use encoded names.
+
+**Cross-reference — test-mode `test-bind` dispatch hook (§19.12.6 / §19.12.7).** When `output.testMode` is enabled, every server-function call site emits a guarded dispatch keyed by the §47-encoded name of the called server function. A `test-bind` declaration inside an enclosing `~{}` block populates a scope-local dispatch table under those same encoded keys; the call-site dispatch consults the table before forwarding to production. The encoded-name surface defined by §47.1–§47.4 is the SOLE keying mechanism — `test-bind` introduces no new naming scheme. When `output.testMode` is disabled (release builds), the dispatch hook is dead-code-eliminated; the production binary is bit-identical to a compilation that contained no `test-bind` declarations. See §19.12.6 (declaration syntax), §19.12.7 (dispatch contract + 0-byte production guarantee), and §34 row `E-TEST-006` (fail-fast on unbound server-fn in active test-bind context).
 
 ---
 
