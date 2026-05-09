@@ -27,6 +27,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { resolve, dirname } from "path";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import {
@@ -471,7 +472,20 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
     expect(errs.length).toBe(0);
   });
 
-  test("imported channel mounted as <X/> → fires", () => {
+  test("imported channel mounted as <X/> → suppressed (CHX cross-file mount)", () => {
+    // Channels have their own cross-file mount semantics: P3.A's CHX (CE
+    // phase 2) inlines the source `<channel>` decl into the consumer at
+    // the `<topic/>` use-site. SYM PASS 10.B's E-ENGINE-MOUNT-NOT-ENGINE
+    // would be a false positive for every cross-file channel consumer, so
+    // `channel` is on the suppression list alongside `user-component`.
+    //
+    // Pre-S75-fix history: this test asserted `length === 1` because the
+    // walker DID fire on relative-keyed registries (test-harness path
+    // matched). Production runs with absolute-keyed registries silently
+    // no-op'd via the path-shape mismatch bug, so legit channel mounts
+    // didn't surface the false-positive. The S75 fix makes the lookup
+    // robust AND extends the suppression list — both behaviors converge
+    // on "channel mount is legit; do not fire".
     const src = `\${
   import { topic } from './channels.scrml'
 }
@@ -488,8 +502,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
     exportRegistry.set("./channels.scrml", channelSourceMap);
     const sym = runUpToSYM(src, "test.scrml", exportRegistry);
     const errs = getEngineMountNotEngineErrors(sym);
-    expect(errs.length).toBe(1);
-    expect(errs[0].message).toMatch(/channel/);
+    expect(errs.length).toBe(0);
   });
 
   test("no exportRegistry passed → check skipped silently", () => {
@@ -510,6 +523,220 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
 </program>`;
     const exportRegistry = new Map();
     const sym = runUpToSYM(src, "test.scrml", exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SYM PASS 10.B — PATH-SHAPE RESILIENCE (S75 fix)
+// ---------------------------------------------------------------------------
+//
+// Pre-S75: the lookup at symbol-table.ts:4088 used `binding.sourcePath`
+// (LITERAL `imp.source`, e.g. `./engines.scrml`) directly, but MOD's
+// production exportRegistry is keyed by ABSOLUTE paths (post-
+// `resolveModulePath`). Result: production runs silently no-op'd cross-file
+// engine mount validation. The unit-test harness path stayed green only
+// because tests built relative-keyed registries that matched the literal.
+//
+// Post-S75: the helper tries literal first (test-harness compat) then
+// absolute-resolved fallback (production compat). These tests cover the
+// production-shape path that was broken; the existing tests above cover
+// the literal-shape path the bug-site already worked with.
+
+describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
+  test("absolute-keyed exportRegistry — engine mount validates (no diagnostic)", () => {
+    // Production-shape exportRegistry: outer key is the absolute path of the
+    // exporter, post-`resolveModulePath` resolution. The walker must resolve
+    // the consumer's literal `./engines.scrml` to the same absolute path.
+    const consumerPath = resolve("/tmp/sample-project/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "./engines.scrml");
+    const src = `\${
+  import { marioState } from './engines.scrml'
+}
+<program>
+  <marioState/>
+</program>`;
+    const exportRegistry = new Map();
+    const engineSourceMap = new Map();
+    engineSourceMap.set("marioState", {
+      kind: "engine",
+      category: "engine",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, engineSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("absolute-keyed registry + non-engine import → fires E-ENGINE-MOUNT-NOT-ENGINE", () => {
+    // Same production shape, but the source export is a function. Pre-S75
+    // this case silently no-op'd in production (false negative); post-S75
+    // the absolute-resolved lookup hits and the diagnostic fires correctly.
+    const consumerPath = resolve("/tmp/sample-project/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "./utils.scrml");
+    const src = `\${
+  import { helper } from './utils.scrml'
+}
+<program>
+  <helper/>
+</program>`;
+    const exportRegistry = new Map();
+    const fnSourceMap = new Map();
+    fnSourceMap.set("helper", {
+      kind: "function",
+      category: "function",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, fnSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toMatch(/helper/);
+    expect(errs[0].message).toMatch(/function/);
+  });
+
+  test("absolute-keyed registry + user-component → suppressed", () => {
+    // Regression: production-shape lookup should still respect the
+    // user-component suppression (CE/NR routing territory).
+    const consumerPath = resolve("/tmp/sample-project/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "./components.scrml");
+    const src = `\${
+  import { Card } from './components.scrml'
+}
+<program>
+  <Card/>
+</program>`;
+    const exportRegistry = new Map();
+    const componentSourceMap = new Map();
+    componentSourceMap.set("Card", {
+      kind: "const",
+      category: "user-component",
+      isComponent: true,
+    });
+    exportRegistry.set(exporterAbs, componentSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("absolute-keyed registry + channel → suppressed (CHX cross-file mount)", () => {
+    // Regression: production-shape lookup should respect the channel
+    // suppression too (P3.A CHX inlines source `<channel>` into consumer
+    // at the use-site, so `<channelName/>` is legitimate cross-file mount).
+    // This is the path that drove the 11 P3.A test failures during the
+    // S75 implementation; post-fix it must stay green.
+    const consumerPath = resolve("/tmp/sample-project/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "./channels.scrml");
+    const src = `\${
+  import { ticker } from './channels.scrml'
+}
+<program>
+  <ticker/>
+</program>`;
+    const exportRegistry = new Map();
+    const channelSourceMap = new Map();
+    channelSourceMap.set("ticker", {
+      kind: "channel",
+      category: "channel",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, channelSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("deep-nested relative import path (`./subdir/engines.scrml`) — absolute-keyed registry resolves", () => {
+    // Stresses `resolveModulePath`'s `resolve(dirname(importerPath), source)`
+    // logic for paths that traverse a subdirectory boundary. Same
+    // production-shape (absolute key in registry) but non-trivial relative
+    // specifier on the import.
+    const consumerPath = resolve("/tmp/sample-project/pages/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "./subdir/engines.scrml");
+    const src = `\${
+  import { marioState } from './subdir/engines.scrml'
+}
+<program>
+  <marioState/>
+</program>`;
+    const exportRegistry = new Map();
+    const engineSourceMap = new Map();
+    engineSourceMap.set("marioState", {
+      kind: "engine",
+      category: "engine",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, engineSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("parent-relative import (`../shared/engines.scrml`) — absolute-keyed registry resolves", () => {
+    // Stresses the `..` traversal case — `resolveModulePath` must walk up
+    // the dirname chain when joining. Production shape; absolute key.
+    const consumerPath = resolve("/tmp/sample-project/pages/consumer.scrml");
+    const exporterAbs = resolve(dirname(consumerPath), "../shared/engines.scrml");
+    const src = `\${
+  import { appPhase } from '../shared/engines.scrml'
+}
+<program>
+  <appPhase/>
+</program>`;
+    const exportRegistry = new Map();
+    const engineSourceMap = new Map();
+    engineSourceMap.set("appPhase", {
+      kind: "engine",
+      category: "engine",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, engineSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("absolute-keyed registry + synthetic importer path (no on-disk file) — absolute fallback still works", () => {
+    // The `resolveModulePath` helper does `resolve(dirname(importerPath), …)`
+    // which is a pure-string operation — no fs check is required for the
+    // join itself (only for the existence-fallback inside the helper, which
+    // we don't depend on). Synthetic absolute paths must therefore resolve
+    // correctly even when no file exists on disk.
+    const consumerPath = "/synthetic/test/area/file.scrml";
+    const exporterAbs = "/synthetic/test/area/eng.scrml";
+    const src = `\${
+  import { sysState } from './eng.scrml'
+}
+<program>
+  <sysState/>
+</program>`;
+    const exportRegistry = new Map();
+    const engineSourceMap = new Map();
+    engineSourceMap.set("sysState", {
+      kind: "engine",
+      category: "engine",
+      isComponent: false,
+    });
+    exportRegistry.set(exporterAbs, engineSourceMap);
+    const sym = runUpToSYM(src, consumerPath, exportRegistry);
+    const errs = getEngineMountNotEngineErrors(sym);
+    expect(errs.length).toBe(0);
+  });
+
+  test("test-harness path (no exportRegistry) — still skips silently", () => {
+    // Regression: path-shape resilience must not change the no-registry
+    // skip semantics. When there is no MOD registry to consult, the walker
+    // must continue to no-op silently (the SYM stage is permitted to run
+    // without MOD in unit-test isolation).
+    const src = `\${
+  import { someName } from './unknown.scrml'
+}
+<program>
+  <someName/>
+</program>`;
+    const sym = runUpToSYM(src, "/synthetic/abs/test.scrml" /* no exportRegistry */);
     const errs = getEngineMountNotEngineErrors(sym);
     expect(errs.length).toBe(0);
   });

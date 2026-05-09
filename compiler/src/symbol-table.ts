@@ -128,6 +128,15 @@ import {
 } from "./engine-statechild-parser.ts";
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
+// B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
+// it builds `exportRegistry` (keys are absolute, post-`resolveModulePath`).
+// Import-binding `sourcePath` is the LITERAL `imp.source` string — typically
+// a relative path. The `lookupExportRegistry` helper below tries the literal
+// first (matches test-harness registries that key by relative paths), then
+// the absolute-resolved form (matches the production pipeline). Mirrors C15's
+// `lookupSourceMap` workaround in `codegen/emit-engine.ts`; both lookups are
+// stage-local — there is no shared helper today.
+import { resolveModulePath } from "./module-resolver.js";
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -986,16 +995,68 @@ const B4_IMPORT_PINNED_FIRE_KINDS: ReadonlySet<string> = new Set([
   "channel",
 ]);
 
+/**
+ * Look up the source file's exportRegistry entry by trying both path shapes.
+ *
+ * **Why this exists:** import-binding `sourcePath` carries the LITERAL
+ * `imp.source` string (typically a relative path like `./engines.scrml`), but
+ * MOD's `exportRegistry` is keyed by ABSOLUTE paths post-`resolveModulePath`
+ * resolution. The asymmetry causes `exportRegistry.get(sourcePath)` to silently
+ * miss in the production pipeline — false-negative B4 + B14 PASS 10.B fires.
+ *
+ * **Strategy:** try the literal first (matches unit-test harnesses that build
+ * `exportRegistry` with relative path keys, e.g. `engine-binding-b14.test.js`);
+ * if that misses AND the path is relative AND we have an importer path, try
+ * the absolute-resolved form (matches the production pipeline). The literal-
+ * first ordering is faster on the common-case test path; the absolute fallback
+ * costs one extra resolve+Map.get when the relative key misses.
+ *
+ * **Shape:** mirrors C15's `lookupSourceMap` in `codegen/emit-engine.ts`
+ * (parallel fix in a different stage). The two helpers are stage-local; no
+ * shared module today.
+ *
+ * @param exportRegistry — MOD's exportRegistry (or undefined).
+ * @param sourcePath — the binding's `sourcePath` (literal `imp.source`).
+ * @param importerPath — absolute path of the SYM-input file (may be empty
+ *   in synthetic harness paths; the absolute lookup is then skipped).
+ * @returns the inner Map (export name → category) or undefined when neither
+ *   shape resolves.
+ */
+function lookupExportRegistry(
+  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>>,
+  sourcePath: string,
+  importerPath: string,
+): Map<string, { kind: string; category: string; isComponent: boolean }> | undefined {
+  // (1) Literal lookup — relative-keyed test harnesses + non-relative
+  // specifiers (stdlib `scrml:`, vendor `vendor:`, raw absolute paths) all
+  // hit here.
+  const direct = exportRegistry.get(sourcePath);
+  if (direct) return direct;
+  // (2) Absolute fallback — only meaningful for relative specifiers AND when
+  // we know the importer path. `resolveModulePath` would return non-relative
+  // specifiers as-is, so the second lookup would just repeat (1). Skip.
+  if (!sourcePath.startsWith("./") && !sourcePath.startsWith("../")) return undefined;
+  if (!importerPath || importerPath.length === 0) return undefined;
+  try {
+    const absSource = resolveModulePath(sourcePath, importerPath);
+    return exportRegistry.get(absSource);
+  } catch {
+    // resolveModulePath threw (bad input, fs error, etc.) — treat as a miss.
+    return undefined;
+  }
+}
+
 function fireImportPinnedInvalid(
   fileScope: Scope,
   exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | undefined,
   errors: SYMDiagnostic[],
+  filePath: string,
 ): void {
   if (!exportRegistry) return;
   for (const rec of fileScope.importBindings.values()) {
     if (!rec.pinned) continue;
-    const sourceMap = exportRegistry.get(rec.sourcePath);
-    if (!sourceMap) continue; // unknown source (resolveModulePath mismatch); skip.
+    const sourceMap = lookupExportRegistry(exportRegistry, rec.sourcePath, filePath);
+    if (!sourceMap) continue; // unknown source (path-shape miss + absolute fallback miss); skip.
     const exportInfo = sourceMap.get(rec.exportedName);
     if (!exportInfo) continue; // E-IMPORT-004 (unknown name) handled by MOD.
     const exportKind = exportInfo.kind;
@@ -4085,21 +4146,35 @@ function walkValidateCrossFileEngineMounts(
     // mounting an imported name. Validate the source export category.
     const binding = fileScope.importBindings.get(tag);
     if (binding) {
-      const sourceMap = exportRegistry.get(binding.sourcePath);
+      // Path-shape resilience: try literal `binding.sourcePath` first
+      // (relative-keyed test harnesses), then absolute-resolved (production
+      // pipeline). See `lookupExportRegistry` docblock above.
+      const sourceMap = lookupExportRegistry(exportRegistry, binding.sourcePath, filePath);
       if (sourceMap) {
         const exportInfo = sourceMap.get(binding.exportedName);
         if (exportInfo && exportInfo.category && exportInfo.category !== "engine") {
           // Not an engine — fire E-ENGINE-MOUNT-NOT-ENGINE.
           //
-          // Suppression: if the export is a `user-component`, the use-site
-          // `<ComponentName/>` is a legitimate component instantiation —
-          // NOT an engine mount. We only fire when the user CLEARLY
-          // intended an engine mount; today's heuristic is too loose to
-          // distinguish, so we suppress for `user-component` to avoid
-          // false positives. The audit §6 of B14's intended scope is
-          // cross-file ENGINE mount specifically; component mounts are
-          // CE/NR-resolved.
-          if (exportInfo.category !== "user-component") {
+          // Suppression list (categories whose `<X/>` use-site is a
+          // LEGITIMATE cross-file mount, not an engine mount):
+          //   - `user-component` — component instantiation; CE/NR territory.
+          //   - `channel`        — cross-file channel mount; CHX (CE phase 2)
+          //                        inlines the source `<channel>` decl into
+          //                        the consumer at this use-site. Firing
+          //                        here would be a false positive for every
+          //                        cross-file channel consumer (P3.A).
+          // Other categories (function, type, const, …) have no mount
+          // semantics — `<helper/>` for an imported function IS a user
+          // error, and the diagnostic is the correct surface.
+          //
+          // Why this matters: pre-fix, the path-shape miss silently no-op'd
+          // the entire walker in production, so legit channel mounts didn't
+          // fire. Post-fix, the absolute-resolved lookup hits, and we MUST
+          // suppress here to keep the channel mount path green.
+          if (
+            exportInfo.category !== "user-component" &&
+            exportInfo.category !== "channel"
+          ) {
             fireEngineMountNotEngine(node, tag, exportInfo.category, errors, filePath);
           }
         }
@@ -6732,7 +6807,7 @@ export function runSYM(input: SYMInput): SYMResult {
   // const/let imports are accepted with a documented B14 deferral. When
   // no exportRegistry is supplied (test-harness path), the check is
   // skipped silently.
-  fireImportPinnedInvalid(fileScope, exportRegistry, errors);
+  fireImportPinnedInvalid(fileScope, exportRegistry, errors, filePath);
 
   // PASS 3 (B3): Walk every ExprNode payload on every AST node; for each
   // `@`-prefixed IdentExpr, stamp `_resolvedStateCell` (record or null) via

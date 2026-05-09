@@ -91,10 +91,14 @@ const ALLOWED = {
   "types/ast.ts": 5,               // field declaration + deprecation note
   "validators/post-ce-invariant.ts": 7, // doc comments only — no code reads
   "type-system.ts": 2,             // single doc-comment line
-  "symbol-table.ts": 6,            // type-signature mentions only — registry value
+  "symbol-table.ts": 8,            // type-signature mentions only — registry value
                                    // shape `{kind, category, isComponent}` from MOD's
                                    // exportRegistry; B4 imports the type but never
-                                   // reads `.isComponent` for routing decisions.
+                                   // reads `.isComponent` for routing decisions. S75
+                                   // path-shape fix added 2 mentions: one in the new
+                                   // `lookupExportRegistry` helper's signature, one in
+                                   // its return type — both are pure type-shape, no
+                                   // routing reads.
   // C15 — exportRegistry plumbing into codegen carries the same value
   // shape `{kind, category, isComponent}` as MOD's registry entries. The
   // `isComponent` field appears in the TYPE ANNOTATION only; codegen
