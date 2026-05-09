@@ -6318,6 +6318,348 @@ function walkValidateEngineA5Extensions(
 
 
 // ---------------------------------------------------------------------------
+// PASS 17 (B17.3) — `<onTransition>` + `effect=` typer diagnostics (§51.0.H + §51.0.F)
+// ---------------------------------------------------------------------------
+//
+// Per Phase A1b Step B17.3 (BRIEF + SURVEY at
+// `docs/changes/phase-a1b-step-b17-3-typer-diagnostics-ontransition-effect/{BRIEF,SURVEY}.md`).
+//
+// Consumes B17.2's parser annotations on `EngineStateChildEntry`:
+//   - `effectRaw: string | null` — the inner expression text of `effect=${...}`
+//     attribute on the state-child opener (or `null` when absent).
+//   - `onTransitionElements: OnTransitionEntry[]` — `<onTransition>` siblings
+//     parsed out of the state-child body, each with `to/from/once/ifExprRaw/bodyRaw`.
+//
+// **In-scope fire-sites (5 — STANDARD shape per S74 BRIEF Q1+Q2 ratification):**
+//
+//   1. E-ENGINE-EFFECT-AMBIGUOUS (existing §34 row 14377; §51.0.H line 20471) —
+//      `entry.effectRaw != null && entry.rule.kind === "multi"`. `effect=` is
+//      single-target only; combining with multi-target rule= is ambiguous (which
+//      target triggers it?).
+//
+//   2. E-ENGINE-RULE-INVALID-VARIANT (existing §34 row 14467) for
+//      `<onTransition to=.X>` — `entry.to != null && entry.to NOT IN engineMeta.variants`.
+//      Mirrors A5-3 PASS 16 fire-site #4 pattern (same code reused for `<onTimeout to=>`).
+//
+//   3. E-ENGINE-RULE-INVALID-VARIANT (same code as #2) for `<onTransition from=.X>` —
+//      `entry.from != null && entry.from NOT IN engineMeta.variants`. Same pattern.
+//
+//   4. E-ENGINE-INVALID-TRANSITION (existing §34 row 14376; §51.0.F rule= contract) —
+//      compile-time fire when an `<onTransition to=.X>` placed in a FROM-state-child
+//      (i.e., in this state-child whose body it sits in) does NOT satisfy the surrounding
+//      `rule=` legality. Mirrors A5-3 PASS 16 fire-site #3 (same pattern as `<onTimeout
+//      to=.X>`). The from-state IS this state-child (`sc.tag`); the to-state must be
+//      permitted by `sc.rule`.
+//
+//      Wildcard `rule=*` accepts any target — never fires.
+//      Multi-target `rule=(.A | .B)` — `entry.to` must be in `[.A, .B]`.
+//      Single-target `rule=.A` — `entry.to` must be `.A`.
+//      Absent rule (terminal state) — fires for ANY `entry.to`.
+//
+//   5. E-ONTRANSITION-NO-TARGET (NEW §34 row at S74 — A1b B17.3) —
+//      `entry.to == null && entry.from == null`. The handler has no trigger.
+//      Per §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear.
+//
+// **Out of scope (DEFERRED on infrastructure or scope-OUT per BRIEF):**
+//
+//   - `<onTransition>` placement OUTSIDE engine state-child (E-STRUCTURAL-ELEMENT-MISPLACED)
+//     — same precondition that defers A5-3 fire-sites #5/#6 (markup walker that
+//     tokenizes `<onTransition>` everywhere).
+//   - `if=expr` type-checking — DEFERRED per SURVEY decision 2 (engine bodies are
+//     RAW TEXT today; expression-typer doesn't see `ifExprRaw` content).
+//   - `<onTransition>` BODY type-checking — body-rendering wide step territory.
+//   - `from=.X` cross-state-child consistency check — future C-step (codegen
+//     correlates `from=.X` placements against the FROM-state-child's `rule=`).
+//   - Inner-engine recursion — A1c codegen territory; PASS 17 walks the OUTER
+//     engine's state-children only (composite marker is `innerEngines.length > 0`).
+//
+// **EngineRuleForm shapes mapping (to fire-site #1 + #4):**
+//
+//   - `kind: "single"` → effect= LEGAL (no fire-site #1); fire-site #4 checks
+//     `entry.to === r.target`.
+//   - `kind: "multi"` → effect= AMBIGUOUS (fire-site #1); fire-site #4 checks
+//     `r.targets.includes(entry.to)`.
+//   - `kind: "wildcard"` → effect= LEGAL per the BRIEF predicate (`kind === "multi"`
+//     ONLY fires E-ENGINE-EFFECT-AMBIGUOUS; wildcard does NOT). Fire-site #4 always
+//     passes (wildcard accepts any target).
+//   - `kind: "absent"` → effect= LEGAL technically (no transitions to fire on, so
+//     effect= never runs — semantically inert; no fire-site #1 since rule.kind is
+//     not "multi"). Fire-site #4 fires for terminal state on ANY `entry.to`.
+//   - `kind: "legacy-arrow" / "parse-error"` → SKIP fire-site #4 (B15 already
+//     fired on the malformed rule=; B17.3 does NOT double-fire misleading legality
+//     diagnostics against a structurally-broken rule).
+
+/**
+ * Fire a B17.3 SYM diagnostic with engine-decl's `span` as a coarse anchor.
+ * Mirrors `fireA5Diagnostic` (A5-3 PASS 16 helper) — today's parser doesn't
+ * surface tightened spans on individual `<onTransition>` elements (B17.2's
+ * `rawOffset` is bodyRaw-relative, not an absolute span). Per SURVEY
+ * decision 3, B17.3 inherits A5-3's coarse-anchor approach. Future parser
+ * tightening will produce per-element spans automatically — swap the
+ * `span` source here without touching call-sites.
+ */
+function fireB17Diagnostic(
+  errors: SYMDiagnostic[],
+  code: string,
+  message: string,
+  engineDecl: any,
+  filePath: string,
+  severity: "error" | "warning" = "error",
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({ code, message, span, severity });
+}
+
+/**
+ * PASS 17 (B17.3) — per-engine `<onTransition>` + `effect=` typer diagnostics.
+ * For each `engine-decl` carrying a `_record` (set by PASS 10.A) AND
+ * `engineMeta.stateChildren` (populated by PASS 11 / B15 + B17.2 annotations),
+ * iterate state-children and apply the 5 fire-sites enumerated above.
+ *
+ * Exported for direct test use (mirrors A5-3's `validateEngineA5Extensions`
+ * export pattern). Synthesized AST tests bypass full-pipeline run.
+ */
+export function validateEngineB17Diagnostics(
+  engineDecl: any,
+  fileAst: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  void fileAst; // reserved for future cross-decl checks; intentional unused.
+  const record: StateCellRecord | undefined = engineDecl._record;
+  if (!record || !record.engineMeta) return;
+  const meta = record.engineMeta;
+
+  const stateChildren = meta.stateChildren;
+  if (!Array.isArray(stateChildren) || stateChildren.length === 0) return;
+
+  const variants = Array.isArray(meta.variants) ? meta.variants : [];
+  const variantSet = new Set(variants);
+  const forType = typeof meta.forType === "string" ? meta.forType : "";
+
+  for (const sc of stateChildren) {
+    if (!sc || typeof sc !== "object") continue;
+
+    // ----- Fire-site #1: E-ENGINE-EFFECT-AMBIGUOUS (§51.0.H line 20471) -----
+    // `effect=` on multi-target `rule=` is ambiguous — which target triggers it?
+    // Per BRIEF predicate: `entry.effectRaw != null && entry.rule.kind === "multi"`.
+    if (sc.effectRaw != null && sc.rule && sc.rule.kind === "multi") {
+      const targets = sc.rule.targets.map((t: string) => `.${t}`).join(" | ");
+      fireB17Diagnostic(
+        errors,
+        "E-ENGINE-EFFECT-AMBIGUOUS",
+        `E-ENGINE-EFFECT-AMBIGUOUS: \`effect=\` attribute on state-child ` +
+        `\`<${sc.tag}>\` has multi-target \`rule=(${targets})\`. Use \`<onTransition ` +
+        `to=...>\` children instead — \`effect=\` requires a single-target rule (§51.0.H).`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+    }
+
+    // ----- Per-onTransition checks (fire-sites #2, #3, #4, #5) -----
+    if (Array.isArray(sc.onTransitionElements) && sc.onTransitionElements.length > 0) {
+      for (const ot of sc.onTransitionElements) {
+        if (!ot || typeof ot !== "object") continue;
+
+        // ----- Fire-site #5: E-ONTRANSITION-NO-TARGET (NEW §34 row, S74) -----
+        // The handler has no trigger when both `to=` and `from=` are absent.
+        if (ot.to == null && ot.from == null) {
+          fireB17Diagnostic(
+            errors,
+            "E-ONTRANSITION-NO-TARGET",
+            `E-ONTRANSITION-NO-TARGET: \`<onTransition>\` in state-child ` +
+            `\`<${sc.tag}>\` has neither \`to=\` nor \`from=\` attribute. The handler ` +
+            `has no trigger. Add \`to=.Variant\` (outgoing) or \`from=.Variant\` ` +
+            `(incoming) (§51.0.H).`,
+            engineDecl,
+            filePath,
+            "error",
+          );
+          // Continue to next entry — fire-sites #2/#3/#4 are gated on
+          // to/from being non-null and would not fire here anyway.
+          continue;
+        }
+
+        // ----- Fire-site #2: E-ENGINE-RULE-INVALID-VARIANT for `<onTransition to=.X>` -----
+        // Skipped when variants is empty (unknown for=Type — same gate as B15/A5-3).
+        let toIsKnownVariant = true;
+        if (typeof ot.to === "string" && ot.to.length > 0) {
+          if (variants.length > 0 && !variantSet.has(ot.to)) {
+            toIsKnownVariant = false;
+            fireB17Diagnostic(
+              errors,
+              "E-ENGINE-RULE-INVALID-VARIANT",
+              `E-ENGINE-RULE-INVALID-VARIANT: \`<onTransition to=.${ot.to}>\` inside ` +
+              `state-child \`<${sc.tag}>\` references variant \`.${ot.to}\` which is not ` +
+              `in \`${forType}\`. Valid variants are: ${formatVariantList(variants)}.`,
+              engineDecl,
+              filePath,
+              "error",
+            );
+          }
+        }
+
+        // ----- Fire-site #3: E-ENGINE-RULE-INVALID-VARIANT for `<onTransition from=.X>` -----
+        if (typeof ot.from === "string" && ot.from.length > 0) {
+          if (variants.length > 0 && !variantSet.has(ot.from)) {
+            fireB17Diagnostic(
+              errors,
+              "E-ENGINE-RULE-INVALID-VARIANT",
+              `E-ENGINE-RULE-INVALID-VARIANT: \`<onTransition from=.${ot.from}>\` inside ` +
+              `state-child \`<${sc.tag}>\` references variant \`.${ot.from}\` which is not ` +
+              `in \`${forType}\`. Valid variants are: ${formatVariantList(variants)}.`,
+              engineDecl,
+              filePath,
+              "error",
+            );
+          }
+        }
+
+        // ----- Fire-site #4: E-ENGINE-INVALID-TRANSITION (compile-time, §51.0.F) -----
+        // Only checks the FROM-state-child placement: `<onTransition to=.X>` placed
+        // in `sc` means "when leaving sc TOWARD .X" — must satisfy sc.rule's contract.
+        // SKIP when:
+        //   - `entry.to` is null (this is a `from=`-only entry; placement contract
+        //     applies to the OTHER state-child's rule= per §51.0.H from-side semantics,
+        //     and that cross-state-child check is OUT OF SCOPE per the comment above).
+        //   - `entry.to` is not a known variant (fire-site #2 already fired; don't
+        //     double-fire a misleading legality diagnostic against a non-variant).
+        //   - `sc.rule` is `legacy-arrow` / `parse-error` (B15 already fired on the
+        //     malformed rule=; mirror A5-3 fire-site #3 skip behavior).
+        if (
+          typeof ot.to === "string" && ot.to.length > 0 &&
+          toIsKnownVariant
+        ) {
+          const r = sc.rule;
+          if (r) {
+            switch (r.kind) {
+              case "absent":
+                // Terminal state — no transitions; `<onTransition to=.X>` cannot fire.
+                fireB17Diagnostic(
+                  errors,
+                  "E-ENGINE-INVALID-TRANSITION",
+                  `E-ENGINE-INVALID-TRANSITION: \`<onTransition to=.${ot.to}>\` in ` +
+                  `state-child \`<${sc.tag}>\` is not a legal transition target — ` +
+                  `\`<${sc.tag}>\` has no \`rule=\` attribute (terminal state per §51.0.F). ` +
+                  `Either add \`rule=.${ot.to}\` (or a wider rule covering \`.${ot.to}\`) to ` +
+                  `\`<${sc.tag}>\`, or place this \`<onTransition from=.${sc.tag}>\` in the ` +
+                  `\`<${ot.to}>\` state-child instead.`,
+                  engineDecl,
+                  filePath,
+                  "error",
+                );
+                break;
+              case "wildcard":
+                // `rule=*` — any target legal; never fires.
+                break;
+              case "single":
+                if (r.target !== ot.to) {
+                  fireB17Diagnostic(
+                    errors,
+                    "E-ENGINE-INVALID-TRANSITION",
+                    `E-ENGINE-INVALID-TRANSITION: \`<onTransition to=.${ot.to}>\` in ` +
+                    `state-child \`<${sc.tag}>\` is not a legal transition target — ` +
+                    `\`rule=.${r.target}\` (single-target form per §51.0.F — only ` +
+                    `\`.${r.target}\` is reachable). Either add \`.${ot.to}\` to \`rule=\`, ` +
+                    `or place this \`<onTransition from=.${sc.tag}>\` in the \`<${ot.to}>\` ` +
+                    `state-child instead.`,
+                    engineDecl,
+                    filePath,
+                    "error",
+                  );
+                }
+                break;
+              case "multi":
+                if (!r.targets.includes(ot.to)) {
+                  const targets = r.targets.map((t) => `.${t}`).join(" | ");
+                  fireB17Diagnostic(
+                    errors,
+                    "E-ENGINE-INVALID-TRANSITION",
+                    `E-ENGINE-INVALID-TRANSITION: \`<onTransition to=.${ot.to}>\` in ` +
+                    `state-child \`<${sc.tag}>\` is not a legal transition target — ` +
+                    `\`rule=(${targets})\` (multi-target form per §51.0.F — only the ` +
+                    `listed targets are reachable). Either add \`.${ot.to}\` to \`rule=\`, ` +
+                    `or place this \`<onTransition from=.${sc.tag}>\` in the \`<${ot.to}>\` ` +
+                    `state-child instead.`,
+                    engineDecl,
+                    filePath,
+                    "error",
+                  );
+                }
+                break;
+              case "legacy-arrow":
+              case "parse-error":
+                // B15 already fired on malformed rule=; don't double-fire here
+                // (mirrors A5-3 PASS 16 fire-site #3 skip behavior).
+                break;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * PASS 17 walker — visits every engine-decl in the AST and runs B17.3
+ * `<onTransition>` + `effect=` validation. Mirrors `walkValidateEngineA5Extensions`
+ * (PASS 16) shape verbatim — same recursion contract, same engine-decl
+ * stop-recursion (engine bodies are raw text; no walkable children today).
+ */
+function walkValidateEngineB17Diagnostics(
+  nodes: any,
+  fileAst: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkValidateEngineB17Diagnostics(n, fileAst, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "engine-decl") {
+    validateEngineB17Diagnostics(node, fileAst, errors, filePath);
+    // Engine bodies are RAW TEXT (parser limitation per primer §13.7 B14
+    // specifics). Inner-engine recursion is DEFERRED to A1c per A5-3
+    // SURVEY §3.3 — no walking inside engine-decl from PASS 17.
+    return;
+  }
+
+  if (Array.isArray(node.children)) {
+    walkValidateEngineB17Diagnostics(node.children, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkValidateEngineB17Diagnostics(node.body, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkValidateEngineB17Diagnostics(node.consequent, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkValidateEngineB17Diagnostics(node.alternate, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkValidateEngineB17Diagnostics(arm.body, fileAst, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -6601,6 +6943,29 @@ export function runSYM(input: SYMInput): SYMResult {
   //     §3.3.
   const visitedA53 = new WeakSet<object>();
   walkValidateEngineA5Extensions(ast.nodes, ast, errors, filePath, visitedA53);
+
+  // PASS 17 (B17.3): `<onTransition>` + `effect=` typer diagnostics per
+  // §51.0.H + §51.0.F. For every engine-decl carrying a `_record` AND
+  // `engineMeta.stateChildren` (populated by PASS 11 / B15 + B17.2 parser
+  // annotations on each state-child), iterate state-children to fire:
+  //   - E-ENGINE-EFFECT-AMBIGUOUS on `effect=` + multi-target `rule=`.
+  //   - E-ENGINE-RULE-INVALID-VARIANT on `<onTransition to=.X>` /
+  //     `<onTransition from=.X>` not in `engineMeta.variants`.
+  //   - E-ENGINE-INVALID-TRANSITION on `<onTransition to=.X>` not permitted
+  //     by surrounding `rule=` (compile-time, mirrors A5-3 fire-site #3).
+  //   - E-ONTRANSITION-NO-TARGET on `<onTransition>` with neither `to=` nor
+  //     `from=` (NEW §34 row added at S74).
+  //
+  // Ordering: runs AFTER PASS 11 (B15) and AFTER PASS 16 (A5-3) — both
+  // populate state-child annotations PASS 17 reads. PASS 12 / 13 / 14 / 15
+  // are engine-orthogonal — order is irrelevant.
+  //
+  // Out of scope: `if=expr` type-checking (engine bodies are RAW TEXT today);
+  // structural-placement check (`<onTransition>` outside engine state-child)
+  // gated on the same markup-walker precondition that defers A5-3 fire-sites
+  // #5/#6; cross-state-child `from=` consistency check (codegen territory).
+  const visitedB173 = new WeakSet<object>();
+  walkValidateEngineB17Diagnostics(ast.nodes, ast, errors, filePath, visitedB173);
 
   return {
     filePath,

@@ -59,7 +59,7 @@ Total lines: 25,508 | Total sections: 56 + appendices
 | 31 | Dependency Graph | 13652-13724 | 73 | Purpose, construction, route analysis. **D4 +2 subsections:** §31.4 validator predicate-arg dependency tracking (L14); §31.5 derived-state expression dependency tracking (L15, L20). |
 | 32 | The `~` Keyword | 13725-13936 | 212 | Pipeline accumulator, lin variable, context boundary |
 | 33 | The `pure` Keyword | 13937-14001 | 65 | Purity constraints, **§33.6 fn ≡ pure function (S32)**, W-PURE-REDUNDANT |
-| 34 | Error Codes | 14002-14274 | 273 | All error code definitions. **S74 A8/A6-1 +1:** E-TEST-006 (fail-fast unbound server-fn in active test-bind context, §19.12.7; design-insight 22). **S69 +1:** E-RESET-INVALID-TARGET (B22). **S68 A5-1 +2:** E-HISTORY-NO-INNER-ENGINE, E-INTERNAL-RULE-NOT-COMPOSITE. **S66 +1:** I-MATCH-PROMOTABLE info-level lint (Promotion Ergonomics §56). **S65 +4:** E-PARSEVARIANT-* (parseVariant, §41.13). **D4 (2026-05-04) +7:** E-CLOSER-001, E-NAME-COLLIDES-RESERVED, E-STRUCTURAL-ELEMENT-MISPLACED, E-MULTI-STATEMENT-HANDLER, E-IMPORT-PINNED-INVALID, E-DERIVED-CIRCULAR-DEP, E-USE-INVALID-CTX. **D3 +2:** E-CHANNEL-INSIDE-PROGRAM, E-CHANNEL-SHARED-MODIFIER. **D2.8 +17:** match/engine/derived-engine/component-engine-scope/validator-circular/derived-with-validators. |
+| 34 | Error Codes | 14002-14274 | 273 | All error code definitions. **S74 A1b B17.3 +1:** E-ONTRANSITION-NO-TARGET (`<onTransition>` with neither `to=` nor `from=`). **S74 A8/A6-1 +1:** E-TEST-006 (fail-fast unbound server-fn in active test-bind context, §19.12.7; design-insight 22). **S69 +1:** E-RESET-INVALID-TARGET (B22). **S68 A5-1 +2:** E-HISTORY-NO-INNER-ENGINE, E-INTERNAL-RULE-NOT-COMPOSITE. **S66 +1:** I-MATCH-PROMOTABLE info-level lint (Promotion Ergonomics §56). **S65 +4:** E-PARSEVARIANT-* (parseVariant, §41.13). **D4 (2026-05-04) +7:** E-CLOSER-001, E-NAME-COLLIDES-RESERVED, E-STRUCTURAL-ELEMENT-MISPLACED, E-MULTI-STATEMENT-HANDLER, E-IMPORT-PINNED-INVALID, E-DERIVED-CIRCULAR-DEP, E-USE-INVALID-CTX. **D3 +2:** E-CHANNEL-INSIDE-PROGRAM, E-CHANNEL-SHARED-MODIFIER. **D2.8 +17:** match/engine/derived-engine/component-engine-scope/validator-circular/derived-with-validators. |
 | 35 | Linear Types — `lin` | 14275-14736 | 462 | Declaration (exactly-once + restricted intermediate visibility), consumption, control flow, closures, lin function params (§35.2.1), cross-`${}` block lin (§35.2.2), E-LIN-005 shadowing + E-LIN-006 deferred-ctx (§35.5) |
 | 36 | Input State Types | 14737-15094 | 358 | `<keyboard>`, `<mouse>`, `<gamepad>` |
 | 37 | Server-Sent Events | 15095-15336 | 242 | `server function*` SSE generators |
@@ -218,6 +218,7 @@ Total lines: 25,508 | Total sections: 56 + appendices
 - `.advance(.X)` engine method → §51.0.G (~19968+)
 - engine `effect=` / `<onTransition>` (to/from/once/if=) → §51.0.H (~19996+)
 - E-ENGINE-EFFECT-AMBIGUOUS → §51.0.H (~20021+)
+- E-ONTRANSITION-NO-TARGET (S74 — A1b B17.3; `<onTransition>` with neither to= nor from=) → §51.0.H + §34
 - `:`-shorthand for state-child body → §51.0.I (~20047+) + §4.14 (943+) (D4 universal grammar registration)
 - derived engines / `derived=expr` (L20) → §51.0.J (~20067+)
 - E-DERIVED-ENGINE-NO-RULES / -NO-INITIAL / -NO-WRITE / -INITIAL-UNDEFINED / -CIRCULAR → §51.0.J (~20091+)

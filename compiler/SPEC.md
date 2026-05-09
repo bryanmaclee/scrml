@@ -14452,6 +14452,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. | Runtime |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
+| E-ONTRANSITION-NO-TARGET | §51.0.H | An `<onTransition>` element appears with neither `to=.Variant` nor `from=.Variant`. The handler has no trigger (per the §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear — `to=` fires when leaving toward `.Variant`; `from=` fires when arriving from `.Variant`). Add `to=.Variant` (outgoing) or `from=.Variant` (incoming). (Catalog addition S74 — A1b B17.3.) | Error |
 | E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
 | W-ENGINE-INITIAL-MISSING | §51.0.E | `initial=` omitted on a non-derived `<engine>`. Compiler defaults to the first state-child's variant. Add `initial=.Variant` to silence the warning. | Warning |
 | E-DERIVED-ENGINE-NO-RULES | §51.0.J | `rule=` declared on a state-child of a derived engine (`<engine derived=...>`). Transitions are determined by the source expression, not authored. Remove `rule=`. | Error |
@@ -25496,6 +25497,7 @@ of the original D2 brief for the canonical listing):
 | `E-VARIANT-AMBIGUOUS` | Error | Bare variant reference ambiguous (§14.10 expression positions, §18.0.3 match-arm patterns). |
 | `E-ENGINE-INVALID-TRANSITION` | Runtime | Direct write or .advance violates rule= contract (§51.0.F-G). |
 | `E-ENGINE-EFFECT-AMBIGUOUS` | Error | effect= on a multi-target rule= (§51.0.H). |
+| `E-ONTRANSITION-NO-TARGET` | Error | `<onTransition>` element has neither to= nor from= attribute (§51.0.H). |
 | `E-ENGINE-VAR-DUPLICATE` | Error | Separate decl of engine's auto-declared variable (§51.0.C). |
 | `W-ENGINE-INITIAL-MISSING` | Warning | initial= omitted on non-derived engine (§51.0.E). |
 | `E-DERIVED-ENGINE-NO-RULES` | Error | rule= on state-child of derived engine (§51.0.J). |
