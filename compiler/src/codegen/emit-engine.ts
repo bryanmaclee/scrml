@@ -1077,7 +1077,20 @@ export function collectCrossFileEngineMounts(
   if (!exportRegistry) return out; // no MOD result → nothing to discriminate.
   if (!fileAST) return out;
 
-  const fileScope: CrossFileFileScopeLike | null = (fileAST as any)._scope ?? null;
+  // §C15.11/§C15.12 fix (S76): SYM attaches `_scope` to the INNER `ast`
+  // (`runSYM` at `symbol-table.ts:6999` does `Object.defineProperty(ast,
+  // "_scope", ...)`), but codegen's `fileAST` is the wrapper-shaped
+  // `{filePath, ast, ...}` object — `_scope` therefore lives at
+  // `fileAST.ast._scope`, not `fileAST._scope`. Mirror the existing
+  // wrapper-vs-inner fallback pattern used below for `fileAST.nodes` /
+  // `fileAST.ast?.nodes` (line ~1184). Without this fallback, the
+  // production-pipeline call from `emit-client.ts:615` always sees
+  // `importBindings: undefined` and short-circuits — yielding empty
+  // cross-file engine mount markers regardless of source content.
+  // Surfaced S75 in §C15.11/§C15.12 deferral; pinpointed S76 via
+  // direct fileAST shape inspection.
+  const fileScope: CrossFileFileScopeLike | null =
+    (fileAST as any)._scope ?? (fileAST as any).ast?._scope ?? null;
   const importBindings = fileScope?.importBindings;
   if (!importBindings || importBindings.size === 0) return out; // no imports → no cross-file mounts.
 

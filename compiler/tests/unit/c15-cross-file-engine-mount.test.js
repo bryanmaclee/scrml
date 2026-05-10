@@ -737,7 +737,7 @@ describe("C15 §C15.10 — same-file engine substrate NOT regressed by C15", () 
 // `<onTransition>`/`effect=` parser-extension work).
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.11 — full pipeline: importer's compiled client.js has the marker (DEFERRED — codegen-side FileAST-shape divergence, surfaced S75)", () => {
+describe("C15 §C15.11 — full pipeline: importer's compiled client.js has the marker (UNBLOCKED S76 — wrapper-vs-inner _scope fallback in collectCrossFileEngineMounts)", () => {
   test("compileScrml: importer + exporter pair produces marker in importer's client.js", () => {
     const ROOT = join(TMP, "c15-11");
     mkdirSync(ROOT, { recursive: true });
@@ -828,7 +828,7 @@ export
 // §C15.12 — End-to-end: multiple importers see the same singleton substrate
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.12 — multiple importers share the same exporter substrate (DEFERRED — same codegen-side FileAST-shape gap as §C15.11, surfaced S75)", () => {
+describe("C15 §C15.12 — multiple importers share the same exporter substrate (UNBLOCKED S76 — same one-line wrapper-vs-inner _scope fallback fixes §C15.11+§C15.12 together)", () => {
   test("two importer files of the same engine: both have markers; ONE substrate in exporter", () => {
     const ROOT = join(TMP, "c15-12");
     mkdirSync(ROOT, { recursive: true });
