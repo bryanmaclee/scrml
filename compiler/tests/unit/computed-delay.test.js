@@ -297,6 +297,81 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
 });
 
 // ---------------------------------------------------------------------------
+// §A5-5.5b — Legacy <machine>: computed-form NOW WORKS end-to-end (S77 closure)
+//
+// Closes the §A5-5.5 deferred limitation. The original block-splitter+ast-
+// builder bug was fragmenting `${...}` substrings into separate logic
+// children + ast-builder injecting `\n` BETWEEN children. After the
+// `rulesRaw += child.raw` (no `\n` inserted) fix at ast-builder.js, the
+// `${...}` substring concats cleanly back into the single rule line, and
+// the existing parseMachineRules + parseAfterDuration + emitDurationLiteral
+// path produces correct codegen.
+// ---------------------------------------------------------------------------
+
+describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)", () => {
+  test("`.From after ${@d}ms => .To` rulesRaw is reconstructed without fragmenting", () => {
+    const { splitBlocks } = require("../../src/block-splitter.js");
+    const { buildAST } = require("../../src/ast-builder.js");
+    const src = `\${
+  type Phase:enum = { Connecting, Open, Closed }
+  @phase: BackoffMachine = Phase.Connecting
+  @backoffDelay = 500
+}
+<machine name=BackoffMachine for=Phase>
+  .Connecting after \${@backoffDelay}ms => .Open
+  .Open => .Closed
+</>`;
+    const bs = splitBlocks("test.scrml", src);
+    const { ast } = buildAST(bs);
+    const eng = ast.machineDecls?.[0] ?? ast.nodes.find(n => n.kind === "engine-decl");
+    expect(eng).toBeTruthy();
+    // Rule line is intact: ${@backoffDelay} adjacent to `after ` and `ms`,
+    // not split across newlines.
+    expect(eng.rulesRaw).toContain(".Connecting after ${@backoffDelay}ms => .Open");
+  });
+
+  test("`.From after ${@d}ms => .To` compiles end-to-end + emits IIFE-wrapped runtime computation", () => {
+    const src = `\${
+  type Phase:enum = { Connecting, Open, Closed }
+  @phase: BackoffMachine = Phase.Connecting
+  @backoffDelay = 500
+}
+<machine name=BackoffMachine for=Phase>
+  .Connecting after \${@backoffDelay}ms => .Open
+  .Open => .Closed
+</>`;
+    const { errors, clientJs } = compileToClientJs(src);
+    expect(errors.filter(e => e.severity === "error")).toEqual([]);
+    // Verify the runtime arm site is emitted (the IIFE body) and the
+    // reactive read is rewritten through _scrml_reactive_get.
+    expect(clientJs).toContain("_scrml_machine_arm_timer");
+    expect(clientJs).toContain('_scrml_reactive_get("backoffDelay")');
+    // The IIFE clamp shape (matches emitDurationLiteral output).
+    expect(clientJs).toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
+  });
+
+  test("regression: literal-form `.From after 500ms => .To` still works (no inserted \\n needed)", () => {
+    const src = `\${
+  type Phase:enum = { Connecting, Open }
+  @phase: M = Phase.Connecting
+}
+<machine name=M for=Phase>
+  .Connecting after 500ms => .Open
+</>`;
+    const { errors, clientJs } = compileToClientJs(src);
+    expect(errors.filter(e => e.severity === "error")).toEqual([]);
+    // Literal-form rules at module-init use _scrml_machine_arm_initial with
+    // a JSON-encoded rulesPayload (computed rules opt out per §51.12.4 S77).
+    // The payload is a JSON-stringified JSON string, so quotes inside appear
+    // backslash-escaped: `\"afterMs\":500`. Verify the literal entry is present.
+    expect(clientJs).toContain("_scrml_machine_arm_initial");
+    expect(clientJs).toContain('\\"afterMs\\":500');
+    // No IIFE wrapper for literal cases.
+    expect(clientJs).not.toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §A5-5.6 — Engine <onTimeout>: literal form emits {ms, target}
 // ---------------------------------------------------------------------------
 

@@ -9079,11 +9079,26 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // §51.0.B + §6.10 — `pinned` bareword modifier.
         const pinned = pinnedMatch === true;
 
-        // Extract rules from children (text nodes containing the rule lines)
+        // Extract rules from children (text nodes containing the rule lines).
+        //
+        // A5-5b (S77, 2026-05-10): concatenate child `raw` text WITHOUT
+        // inserting a `\n` separator. Pre-A5-5b the loop appended `"\n"`
+        // between children, which fragmented `${expr}` substrings — the
+        // block-splitter parses `${...}` inside a `<machine>` body as a
+        // separate `logic` child, so a rule like `.X after ${@d}ms => .Y`
+        // arrives as 3 children (text, logic, text) and the inserted `\n`
+        // turned them into three broken lines. `splitRuleLines` (in
+        // type-system.ts) tracks brace depth and would have kept the rule
+        // intact had the children been concatenated cleanly.
+        //
+        // Behavioral preservation: text-only `<machine>` bodies appear as
+        // ONE text child with internal newlines that already delimit the
+        // rules; no inserted `\n` is needed. The existing trailing `.trim()`
+        // at the end of this block strips any trailing whitespace.
         let rulesRaw = "";
         if (block.children && block.children.length > 0) {
           for (const child of block.children) {
-            if (child.raw) rulesRaw += child.raw + "\n";
+            if (child.raw) rulesRaw += child.raw;
           }
         }
         // Also extract from raw content after the header line
