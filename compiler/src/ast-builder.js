@@ -8076,6 +8076,35 @@ function parseTestBody(tokens, filePath, span, errors) {
   }
 
   /**
+   * Statement-keyword IDENT tokens that imply a new statement begins when
+   * encountered at depth 0 on a source line greater than the previous
+   * consumed token's line. Used by the test-case body collector to split
+   * newline-separated statements that lack explicit `;` separators.
+   *
+   * Conservative list — JS keywords that unambiguously begin a statement.
+   * Excludes value-keywords (`true`/`false`/`null`/`undefined`/`this`),
+   * function-expression starters that may appear mid-expression, and
+   * declarations like `class` that may appear mid-RHS.
+   */
+  function isStmtKeywordToken(text) {
+    return (
+      text === "let" ||
+      text === "const" ||
+      text === "var" ||
+      text === "return" ||
+      text === "throw" ||
+      text === "break" ||
+      text === "continue" ||
+      text === "if" ||
+      text === "for" ||
+      text === "while" ||
+      text === "do" ||
+      text === "try" ||
+      text === "switch"
+    );
+  }
+
+  /**
    * Detect the 3-token sequence `IDENT("test") + PUNCT("-") + IDENT("bind")`
    * starting at index `idx`. Returns true iff the sequence is present.
    *
@@ -8335,9 +8364,22 @@ function parseTestBody(tokens, filePath, span, errors) {
           caseAsserts.push(assertNode);
           caseBody.push("assert " + rawExpr);
         } else {
-          // Non-assert statement: collect tokens until next assert keyword or }
-          const stmtParts = [];
+          // Non-assert statement(s): collect tokens until next assert keyword
+          // or }. Split into individual statements on `;` PUNCT at depth 0 OR
+          // on a depth-0 statement-keyword IDENT that starts on a new source
+          // line. The split-on-newline-keyword case handles the
+          // newline-separated form `let a = f()\nlet b = g()` (no explicit
+          // `;`); without splitting, the joined-on-spaces output would be
+          // `let a = f ( ) let b = g ( )` — invalid JS at bun:test load time.
+          // Filed S76 via A6-5 integration testing; closed S77.
           let depth = 0;
+          let stmtParts = [];
+          let lastLine = -1;
+          const flushStmt = () => {
+            const s = stmtParts.join(" ").trim();
+            if (s) caseBody.push(s);
+            stmtParts = [];
+          };
           while (i < tokens.length && tokens[i].kind !== "EOF") {
             const t = tokens[i];
             if (t.kind === "PUNCT" && t.text === "}" && depth === 0) break;
@@ -8346,13 +8388,35 @@ function parseTestBody(tokens, filePath, span, errors) {
             // case-body loop fires the diagnostic above instead of silently
             // absorbing the declaration into the preceding statement.
             if (depth === 0 && isTestBindSeq(i)) break;
+            // Explicit `;` at depth 0 → flush + consume the `;` itself.
+            if (depth === 0 && t.kind === "PUNCT" && t.text === ";") {
+              flushStmt();
+              i++;
+              continue;
+            }
+            // Implicit split: depth 0, current parts non-empty, current
+            // token is a statement-keyword whose source line is greater than
+            // the last consumed token's line. Accept BOTH "KEYWORD" (most
+            // entries — `let`/`const`/`return`/etc. are in the tokenizer's
+            // KEYWORDS set) and "IDENT" (defensive fallback for any kind
+            // discrimination drift).
+            if (
+              depth === 0 &&
+              stmtParts.length > 0 &&
+              (t.kind === "KEYWORD" || t.kind === "IDENT") &&
+              isStmtKeywordToken(t.text) &&
+              t.span && typeof t.span.line === "number" &&
+              lastLine >= 0 && t.span.line > lastLine
+            ) {
+              flushStmt();
+            }
             if (t.kind === "PUNCT" && t.text === "{") depth++;
             else if (t.kind === "PUNCT" && t.text === "}") depth--;
             stmtParts.push(t.text);
+            if (t.span && typeof t.span.line === "number") lastLine = t.span.line;
             i++;
           }
-          const stmt = stmtParts.join(" ").trim();
-          if (stmt) caseBody.push(stmt);
+          flushStmt();
         }
       }
 
