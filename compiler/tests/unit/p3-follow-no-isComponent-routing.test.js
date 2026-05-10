@@ -83,7 +83,10 @@ const SRC_DIR = join(__dirname, "../../src");
 const ALLOWED = {
   "block-splitter.js": 18,         // 14 stamps + doc comments
   "ast-builder.js": 25,            // 20 stamps + parseAttributes param + comments
-  "module-resolver.js": 8,         // info.isComponent stamp + doc + signature mentions
+  "module-resolver.js": 11,        // info.isComponent stamp + doc + signature mentions
+                                   // + S76 §C15.13 re-export resolution (3 added: pass-1
+                                   // stamp + pass-2 inherit read + pass-2 inherit write —
+                                   // all write-side; routing reads still go through NR).
   "component-expander.ts": 20,     // helper + write-side stamps + doc + re-parse fallback
   "gauntlet-phase1-checks.js": 5,  // pre-NR check + doc
   "api.js": 5,                     // doc comments only

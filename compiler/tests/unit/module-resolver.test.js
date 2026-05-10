@@ -48,6 +48,7 @@ function makeFile(filePath, imports = [], exports = []) {
         exportedName: exp.name,
         exportKind: exp.kind || "type",
         reExportSource: exp.reExportSource || null,
+        renames: exp.renames || null,
         span: { file: filePath, start: 0, end: 0, line: 1, col: 1 },
       })),
     },
@@ -232,6 +233,157 @@ describe("§D — export registry", () => {
     const { graph } = buildImportGraph(files);
     const registry = buildExportRegistry(graph);
     expect(registry.get("/app/main.scrml").size).toBe(0);
+  });
+
+  // §C15.13 (S76) — Re-export resolution. Without pass 2, a re-exported
+  // engine landed as `kind: "re-export"` / `category: "other"`, causing
+  // SYM PASS 10.B to fire false-positive E-ENGINE-MOUNT-NOT-ENGINE on
+  // `<X/>` use-sites resolved through a re-exporter.
+
+  test("§D-C15.13.1 — single-level re-export of an engine inherits engine kind+category", () => {
+    const files = [
+      makeFile("/app/engines.scrml", [], [
+        { name: "phase", kind: "engine" },
+      ]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["phase"], source: "./engines.scrml" }],
+        [{ name: "phase", kind: "re-export", reExportSource: "./engines.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const reexportEntry = registry.get("/app/reexport.scrml").get("phase");
+    expect(reexportEntry.kind).toBe("engine");
+    expect(reexportEntry.category).toBe("engine");
+    expect(reexportEntry.isComponent).toBe(false);
+  });
+
+  test("§D-C15.13.2 — re-export inherits function kind+category", () => {
+    const files = [
+      makeFile("/app/utils.scrml", [], [
+        { name: "compute", kind: "function" },
+      ]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["compute"], source: "./utils.scrml" }],
+        [{ name: "compute", kind: "re-export", reExportSource: "./utils.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const reexportEntry = registry.get("/app/reexport.scrml").get("compute");
+    expect(reexportEntry.kind).toBe("function");
+    expect(reexportEntry.category).toBe("function");
+  });
+
+  test("§D-C15.13.3 — re-export inherits user-component category for PascalCase const", () => {
+    const files = [
+      makeFile("/app/comp.scrml", [], [
+        { name: "Card", kind: "const" },
+      ]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["Card"], source: "./comp.scrml" }],
+        [{ name: "Card", kind: "re-export", reExportSource: "./comp.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const reexportEntry = registry.get("/app/reexport.scrml").get("Card");
+    expect(reexportEntry.kind).toBe("const");
+    expect(reexportEntry.category).toBe("user-component");
+    expect(reexportEntry.isComponent).toBe(true);
+  });
+
+  test("§D-C15.13.4 — transitive re-export chain (A → B → C) collapses to source kind", () => {
+    const files = [
+      makeFile("/app/source.scrml", [], [
+        { name: "phase", kind: "engine" },
+      ]),
+      makeFile("/app/middle.scrml",
+        [{ names: ["phase"], source: "./source.scrml" }],
+        [{ name: "phase", kind: "re-export", reExportSource: "./source.scrml" }],
+      ),
+      makeFile("/app/top.scrml",
+        [{ names: ["phase"], source: "./middle.scrml" }],
+        [{ name: "phase", kind: "re-export", reExportSource: "./middle.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    expect(registry.get("/app/middle.scrml").get("phase").kind).toBe("engine");
+    expect(registry.get("/app/top.scrml").get("phase").kind).toBe("engine");
+    expect(registry.get("/app/top.scrml").get("phase").category).toBe("engine");
+  });
+
+  test("§D-C15.13.5 — rename through re-export uses localName for source lookup", () => {
+    const files = [
+      makeFile("/app/source.scrml", [], [
+        { name: "phase", kind: "engine" },
+      ]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["phase"], source: "./source.scrml" }],
+        [{
+          name: "phaseAlias",
+          kind: "re-export",
+          reExportSource: "./source.scrml",
+          renames: [{ exported: "phaseAlias", local: "phase" }],
+        }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const aliasEntry = registry.get("/app/reexport.scrml").get("phaseAlias");
+    expect(aliasEntry.kind).toBe("engine");
+    expect(aliasEntry.category).toBe("engine");
+  });
+
+  test("§D-C15.13.6 — re-export of non-existent source name stays as re-export (E-IMPORT-004 elsewhere)", () => {
+    const files = [
+      makeFile("/app/source.scrml", [], [
+        { name: "phase", kind: "engine" },
+      ]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["nonExistent"], source: "./source.scrml" }],
+        [{ name: "nonExistent", kind: "re-export", reExportSource: "./source.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const entry = registry.get("/app/reexport.scrml").get("nonExistent");
+    expect(entry.kind).toBe("re-export");
+    expect(entry.category).toBe("other");
+  });
+
+  test("§D-C15.13.7 — re-export from external (.js) source stays as re-export (graph-absent)", () => {
+    // External .js sources are not in the graph; resolver leaves the entry
+    // unresolved (caller treats `kind: "re-export"` as opaque).
+    const files = [
+      makeFile("/app/reexport.scrml",
+        [{ names: ["external"], source: "./external.js" }],
+        [{ name: "external", kind: "re-export", reExportSource: "./external.js" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    const entry = registry.get("/app/reexport.scrml").get("external");
+    expect(entry.kind).toBe("re-export");
+  });
+
+  test("§D-C15.13.8 — public registry entries do NOT expose internal underscore fields", () => {
+    const files = [
+      makeFile("/app/source.scrml", [], [{ name: "phase", kind: "engine" }]),
+      makeFile("/app/reexport.scrml",
+        [{ names: ["phase"], source: "./source.scrml" }],
+        [{ name: "phase", kind: "re-export", reExportSource: "./source.scrml" }],
+      ),
+    ];
+    const { graph } = buildImportGraph(files);
+    const registry = buildExportRegistry(graph);
+    for (const [, names] of registry) {
+      for (const [, entry] of names) {
+        expect(entry).not.toHaveProperty("_reExportSource");
+        expect(entry).not.toHaveProperty("_localName");
+      }
+    }
   });
 });
 

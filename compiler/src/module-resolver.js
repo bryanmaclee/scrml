@@ -348,12 +348,31 @@ export function topologicalSort(graph) {
  * (`category === "user-component"`) for backwards compatibility with
  * non-routing consumers.
  *
+ * §C15.13 (S76 — A1c follow-up): braced re-exports (`export { X } from
+ * './source'`) are resolved to inherit the source export's kind/category.
+ * Without this, re-exports landed as `kind: "re-export"` falling through
+ * to `category: "other"`, which caused SYM PASS 10.B to fire false-positive
+ * `E-ENGINE-MOUNT-NOT-ENGINE` on `<X/>` use-sites that resolved through a
+ * re-exporter file. Resolution is iterative-to-fixed-point so transitive
+ * chains (A re-exports from B re-exports from C) collapse correctly. Cycles
+ * are bounded by an iteration cap; cyclic re-exports stay as
+ * `kind: "re-export"` (also surfaced separately by `detectCircularImports`).
+ * `re-export-all` (`export * from './x'`) is NOT enumerated here — those
+ * entries don't carry per-name shape; the importer-side resolver (api.js
+ * seeder) chases them via `isReExportAll`. Future work (B-step) can extend
+ * this pass to enumerate `*` against the source's full export set if
+ * cross-file mount validation through star-re-exports becomes necessary.
+ *
  * @param {Map<string, object>} graph
  * @returns {Map<string, Map<string, {kind: string, category: string, isComponent: boolean}>>}
  */
 export function buildExportRegistry(graph) {
   const registry = new Map();
 
+  // ---- Pass 1 — build initial registry from direct + engine + per-name entries.
+  // Re-exports land with `kind: "re-export"` and carry `_reExportSource` +
+  // `_localName` for pass 2 resolution. Underscore-prefixed fields are
+  // internal; pass 3 strips them.
   for (const [filePath, entry] of graph) {
     const names = new Map();
     for (const exp of entry.exports) {
@@ -394,9 +413,50 @@ export function buildExportRegistry(graph) {
       } else {
         category = "other";
       }
-      names.set(name, { kind, category, isComponent });
+      names.set(name, {
+        kind,
+        category,
+        isComponent,
+        _reExportSource: exp.reExportSource ?? null,
+        _localName: exp.localName ?? name,
+      });
     }
     registry.set(filePath, names);
+  }
+
+  // ---- Pass 2 — resolve re-exports to fixed-point. Cap iterations at
+  // graph.size + 2 so transitive chains converge but cycles can't loop
+  // forever. Within an iteration, only re-export entries whose source
+  // entry is ALREADY non-re-export get inherited (so we converge in
+  // depth-of-chain iterations regardless of registry traversal order).
+  const MAX_ITERATIONS = graph.size + 2;
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    let changed = false;
+    for (const [, names] of registry) {
+      for (const [, entry] of names) {
+        if (entry.kind !== "re-export") continue;
+        if (!entry._reExportSource) continue;
+        const sourceNames = registry.get(entry._reExportSource);
+        if (!sourceNames) continue; // source file not in graph (external/.js)
+        const sourceEntry = sourceNames.get(entry._localName);
+        if (!sourceEntry) continue; // source name missing (E-IMPORT-004 elsewhere)
+        if (sourceEntry.kind === "re-export") continue; // chase next iter
+        entry.kind = sourceEntry.kind;
+        entry.category = sourceEntry.category;
+        entry.isComponent = sourceEntry.isComponent;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // ---- Pass 3 — strip internal underscore-prefixed fields so the public
+  // registry shape stays {kind, category, isComponent}.
+  for (const [, names] of registry) {
+    for (const [, entry] of names) {
+      delete entry._reExportSource;
+      delete entry._localName;
+    }
   }
 
   return registry;

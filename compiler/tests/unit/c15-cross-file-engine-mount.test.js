@@ -891,7 +891,7 @@ export
 // §C15.13 — Re-export of imported engine is legal (§21.4); no duplicate substrate
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.13 — re-export of imported engine: no duplicate substrate (DEFERRED — MOD re-export engine-category falls to 'other'; surfaced S75)", () => {
+describe("C15 §C15.13 — re-export of imported engine: no duplicate substrate (UNBLOCKED S76 — MOD buildExportRegistry pass-2 re-export resolution)", () => {
   test("re-exporter file does NOT duplicate the engine substrate", () => {
     const ROOT = join(TMP, "c15-13");
     mkdirSync(ROOT, { recursive: true });
