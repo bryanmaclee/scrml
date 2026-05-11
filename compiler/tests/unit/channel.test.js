@@ -217,18 +217,18 @@ describe("§3: channel topic attribute", () => {
 // §4: Channel protect attribute
 // ---------------------------------------------------------------------------
 
-describe("§4: channel protect attribute", () => {
-  test("protect= attribute is present when specified", () => {
+describe("§4: channel auth attribute (S80 — replaces legacy protect=)", () => {
+  test("auth= attribute is present when specified", () => {
     const source = `<program>
 <div>
-<channel name="private" protect="auth">
+<channel name="private" auth="required">
 </>
 </>
 </>`;
     const { ast } = parseSource(source);
     const channelNode = findMarkupNodes(ast.nodes, "channel")[0];
-    const protectAttr = (channelNode.attrs ?? channelNode.attributes ?? []).find(a => a.name === "protect");
-    expect(protectAttr).toBeDefined();
+    const authAttr = (channelNode.attrs ?? channelNode.attributes ?? []).find(a => a.name === "auth");
+    expect(authAttr).toBeDefined();
   });
 });
 

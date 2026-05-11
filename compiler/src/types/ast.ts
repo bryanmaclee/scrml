@@ -1349,8 +1349,6 @@ export interface MiddlewareConfig {
   cors: string | null;
   /** Logging mode (e.g. "structured"). */
   log: string | null;
-  /** CSRF protection mode. */
-  csrf: string | null;
   /** Rate limit pattern (e.g. "100/min"). */
   ratelimit: string | null;
   /** Security headers mode (e.g. "strict"). */

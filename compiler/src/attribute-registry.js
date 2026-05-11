@@ -82,7 +82,6 @@ ELEMENT_ATTR_REGISTRY.set("program", {
   allowedAttrs: new Map([
     // §6 / §39 — program shape
     ["db",            attrSpec({ supportsInterpolation: false })],
-    ["protect",       attrSpec({ supportsInterpolation: false })],
     ["tables",        attrSpec({ supportsInterpolation: false })],
     ["html",          attrSpec({ supportsInterpolation: false })],
     ["name",          attrSpec({ supportsInterpolation: false })],
@@ -139,16 +138,19 @@ ELEMENT_ATTR_REGISTRY.set("page", {
 //
 // `name=` is the WebSocket URL key — LITERAL ONLY. Interpolation here is the
 // F-CHANNEL-001 silent-failure surface.
-// `auth=` is documented as a future extension (F-CHANNEL-005); today it's
-// silently inert. VP-1 surfaces it the same way as `<page auth=>`.
+// `auth=` is the canonical WS-upgrade gate per §38.5 + §52.13. Replaces the
+// pre-S80 `protect=` channel attribute (renamed for vocabulary alignment —
+// the upgrade gate is auth-shaped, not protect-shaped; field-level access
+// control `protect=` remains on `<db>` and `<Type>`).
 // ---------------------------------------------------------------------------
 
 ELEMENT_ATTR_REGISTRY.set("channel", {
   allowedAttrs: new Map([
     ["name",       attrSpec({ supportsInterpolation: false })],   // VP-3 surface (F-CHANNEL-001)
     ["topic",      attrSpec({ supportsInterpolation: false })],
-    ["protect",    attrSpec({ supportsInterpolation: false })],
     ["reconnect",  attrSpec({ supportsInterpolation: false })],
+    // §38.5 — auth= replaces the legacy `protect=` channel attribute (S80,
+    // 2026-05-11). The WS upgrade gate is auth-shaped, not protect-shaped.
     ["auth",       attrSpec({
       supportsInterpolation: false,
       allowedValues: ["required", "optional", "none"],

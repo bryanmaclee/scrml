@@ -1876,7 +1876,7 @@ describe("W-PROGRAM-001: program root detection", () => {
   });
 
   test("program with attributes does not emit W-PROGRAM-001", () => {
-    const src = '<program db="./test.db" protect="secret"></program>';
+    const src = '<program db="./test.db" name="myapp"></program>';
     const result = parse(src);
     const warning = result.errors.find(e => e.code === "W-PROGRAM-001");
     expect(warning).toBeUndefined();

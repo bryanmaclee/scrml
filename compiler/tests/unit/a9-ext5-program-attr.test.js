@@ -57,9 +57,9 @@ describe("ast-builder.js — `<program idempotency-store=>` extraction", () => {
   });
 
   test("idempotency-store= alongside other middleware attrs — coexists", () => {
-    const result = tab(`<program cors="*" csrf="on" idempotency-store="postgres">content</program>`);
+    const result = tab(`<program cors="*" log="structured" idempotency-store="postgres">content</program>`);
     expect(result.ast.middlewareConfig.cors).toBe("*");
-    expect(result.ast.middlewareConfig.csrf).toBe("on");
+    expect(result.ast.middlewareConfig.log).toBe("structured");
     expect(result.ast.middlewareConfig.idempotencyStore).toBe("postgres");
   });
 });

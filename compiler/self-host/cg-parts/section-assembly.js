@@ -353,7 +353,6 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
     const _scrml_hasMW = middlewareConfig != null
     const _scrml_hasCors = _scrml_hasMW && middlewareConfig.cors != null
     const _scrml_hasLog = _scrml_hasMW && middlewareConfig.log != null && middlewareConfig.log != 'off'
-    const _scrml_hasCsrfMW = _scrml_hasMW && middlewareConfig.csrf == 'on'
     const _scrml_hasRatelimit = _scrml_hasMW && middlewareConfig.ratelimit != null
     const _scrml_hasSecureHeaders = _scrml_hasMW && middlewareConfig.headers == 'strict'
     const _scrml_handleNode = _scrml_handleNodeEarly
@@ -458,23 +457,8 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
             lines.push("    // handle() escape hatch body (§39.3) — wrapped in IIFE for return capture")
             lines.push("    const _scrml_mw_result = await (async () => {")
 
-            lines.push("      // resolve() = CSRF check + route dispatch")
+            lines.push("      // resolve() = route dispatch (CSRF check is per-route)")
             lines.push("      const resolve = async (_scrml_resolve_req) => {")
-            if (_scrml_hasCsrfMW) {
-                lines.push("        const _scrml_m = _scrml_resolve_req.method.toUpperCase();")
-                lines.push("        const _scrml_is_mut = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(_scrml_m);")
-                lines.push("        if (_scrml_is_mut) {")
-                lines.push("          const _scrml_ck = _scrml_resolve_req.headers.get('Cookie') ?? '';")
-                lines.push("          const _scrml_ct = (_scrml_ck.match(/scrml_csrf=([^;]+)/)?.[1]) ?? '';")
-                lines.push("          const _scrml_ch = _scrml_resolve_req.headers.get('X-CSRF-Token') ?? '';")
-                lines.push("          if (!_scrml_ct || _scrml_ct !== _scrml_ch) {")
-                lines.push("            return new Response(JSON.stringify({ error: 'CSRF validation failed' }), {")
-                lines.push("              status: 403,")
-                lines.push("              headers: { 'Content-Type': 'application/json' },")
-                lines.push("            });")
-                lines.push("          }")
-                lines.push("        }")
-            }
             lines.push("        return routeHandler(_scrml_resolve_req);")
             lines.push("      };")
 
@@ -494,22 +478,7 @@ export function generateServerJs(ctxOrFileAST, routeMapLegacy, errorsLegacy, aut
 
             lines.push("    })();")
         } else {
-            lines.push("    // No handle() — direct route dispatch")
-            if (_scrml_hasCsrfMW) {
-                lines.push("    const _scrml_m = _scrml_mw_req.method.toUpperCase();")
-                lines.push("    const _scrml_is_mut = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(_scrml_m);")
-                lines.push("    if (_scrml_is_mut) {")
-                lines.push("      const _scrml_ck = _scrml_mw_req.headers.get('Cookie') ?? '';")
-                lines.push("      const _scrml_ct = (_scrml_ck.match(/scrml_csrf=([^;]+)/)?.[1]) ?? '';")
-                lines.push("      const _scrml_ch = _scrml_mw_req.headers.get('X-CSRF-Token') ?? '';")
-                lines.push("      if (!_scrml_ct || _scrml_ct !== _scrml_ch) {")
-                lines.push("        return new Response(JSON.stringify({ error: 'CSRF validation failed' }), {")
-                lines.push("          status: 403,")
-                lines.push("          headers: { 'Content-Type': 'application/json' },")
-                lines.push("        });")
-                lines.push("      }")
-                lines.push("    }")
-            }
+            lines.push("    // No handle() — direct route dispatch (CSRF check is per-route)")
             lines.push("    const _scrml_mw_result = await routeHandler(_scrml_mw_req);")
         }
 

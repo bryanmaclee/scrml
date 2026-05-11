@@ -89,15 +89,15 @@ export <channel name="hub" onserver:open=onConnect() onserver:message=onMsg(m)>
     expect(onMsg).toBeDefined();
   });
 
-  test("name + protect — protect attr preserved", () => {
-    const { ast, errors } = build(`export <channel name="private" protect="auth">
+  test("name + auth — auth attr preserved (S80 — replaces legacy protect=)", () => {
+    const { ast, errors } = build(`export <channel name="private" auth="required">
   ${"$"}{ @shared messages = [] }
 </>
 `);
     expect(errors.filter(e => !e.code.startsWith("W-"))).toEqual([]);
     const ch = (ast.channelDecls || [])[0];
-    const protectAttr = (ch.attrs || []).find(a => a.name === "protect");
-    expect(protectAttr).toBeDefined();
+    const authAttr = (ch.attrs || []).find(a => a.name === "auth");
+    expect(authAttr).toBeDefined();
   });
 
   test("missing name= attribute on exported channel — E-CHANNEL-EXPORT-001", () => {

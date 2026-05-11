@@ -439,7 +439,7 @@ describe("AST Builder — self-host parity", () => {
     assertParity('<program cors="*" log="structured">content</program>');
   });
 
-  test("E-MW-001 csrf without auth", () => {
+  test("csrf=\"on\" parity (E-MW-001 retired S80 — should fire zero errors in both pipelines)", () => {
     assertParity('<program csrf="on">content</program>');
   });
 

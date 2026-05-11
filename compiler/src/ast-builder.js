@@ -10038,9 +10038,11 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // ---------------------------------------------------------------------------
   // Middleware attribute extraction from <program> (§39)
   //
-  // When <program cors="*" log="structured" csrf="on" ratelimit="100/min" headers="strict">
+  // When <program cors="*" log="structured" ratelimit="100/min" headers="strict">
   // is present, extract these into a top-level `middlewareConfig` on the AST.
-  // E-MW-001: csrf="on" without session infrastructure.
+  // `csrf=` is extracted into authConfig (above) — canonical value set is
+  // "auto" | "off" per §52.13; the previously-separate middleware-mode csrf="on"
+  // value was retired at S80 alongside E-MW-001.
   // E-MW-002: ratelimit= value does not match N/unit pattern.
   // ---------------------------------------------------------------------------
 
@@ -10057,7 +10059,6 @@ export function buildAST(bsOutput, tokenizerOverrides) {
 
     const mwCors = getMWAttr('cors');
     const mwLog = getMWAttr('log');
-    const mwCsrf = getMWAttr('csrf');
     const mwRatelimit = getMWAttr('ratelimit');
     const mwHeaders = getMWAttr('headers');
     // §39.2.6 (A9 Ext 5): idempotency-store= attribute. Values:
@@ -10077,27 +10078,16 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     const mwBatchInListCap = getMWAttr('batch-in-list-cap');
 
     if (
-      mwCors !== null || mwLog !== null || mwCsrf !== null || mwRatelimit !== null
+      mwCors !== null || mwLog !== null || mwRatelimit !== null
       || mwHeaders !== null || mwIdempotencyStore !== null
       || mwIdempotencyTTL !== null || mwBatchInListCap !== null
     ) {
       middlewareConfig = {
-        cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders,
+        cors: mwCors, log: mwLog, ratelimit: mwRatelimit, headers: mwHeaders,
         idempotencyStore: mwIdempotencyStore,
         idempotencyTTL: mwIdempotencyTTL,
         batchInListCap: mwBatchInListCap,
       };
-    }
-
-    // E-MW-001: csrf="on" requires session infrastructure (auth= on <program>).
-    if (mwCsrf === 'on' && !authConfig) {
-      const programSpan2 = programNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      errors.push(new TABError(
-        'E-MW-001',
-        'E-MW-001: csrf="on" requires session infrastructure. ' +
-        'Add <program auth="required"> or use a session handler, or remove csrf="on".',
-        programSpan2,
-      ));
     }
 
     // E-MW-002: ratelimit= value must match N/unit where unit is sec, min, or hour.

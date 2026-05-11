@@ -26,7 +26,8 @@ interface ChannelAttrs {
   safeName: string;
   topic: string;
   reconnectMs: number;
-  hasProtect: boolean;
+  /** True when the `<channel>` carries its own `auth=` attribute (§52.13). */
+  hasChannelAuth: boolean;
   hasPresence: boolean;
 }
 
@@ -128,10 +129,12 @@ function extractChannelAttrs(node: any): ChannelAttrs {
     if (!isNaN(parsed) && parsed >= 0) reconnectMs = parsed;
   }
 
-  const hasProtect = attrMap.has("protect");
+  // S80 (2026-05-11): <channel auth=> replaces the legacy <channel protect=>
+  // WS-upgrade gate per §38.5 + §52.13.
+  const hasChannelAuth = attrMap.has("auth");
   const hasPresence = attrMap.has("presence");
 
-  return { name, safeName, topic, reconnectMs, hasProtect, hasPresence };
+  return { name, safeName, topic, reconnectMs, hasChannelAuth, hasPresence };
 }
 
 /**
@@ -426,7 +429,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
  */
 export function emitChannelServerJs(node: any, errors: CGError[], filePath: string, hasAuth = false): string[] {
   const lines: string[] = [];
-  const { name, safeName, topic, hasProtect } = extractChannelAttrs(node);
+  const { name, safeName, topic, hasChannelAuth } = extractChannelAttrs(node);
 
   const path = `/_scrml_ws/${safeName}`;
   // Route export name follows the same convention as HTTP routes: _scrml_route_ws_<safeName>
@@ -439,8 +442,8 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   lines.push(`  isWebSocket: true,`);
   lines.push(`  handler: (req, server) => {`);
 
-  if (hasAuth || hasProtect) {
-    lines.push(`    // Auth check for WebSocket upgrade`);
+  if (hasAuth || hasChannelAuth) {
+    lines.push(`    // Auth check for WebSocket upgrade (§38.5)`);
     lines.push(`    const _authResult = _scrml_auth_check(req);`);
     lines.push(`    if (_authResult) return _authResult;`);
   }

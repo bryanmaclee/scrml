@@ -12,8 +12,7 @@
  *   MW-LOG-001   log="structured" generates JSON log emission
  *   MW-LOG-002   log="minimal" generates human-readable log emission
  *   MW-LOG-003   no log= (or log="off") generates no logging
- *   MW-CSRF-001  csrf="on" with auth generates CSRF check in resolve()
- *   MW-CSRF-002  csrf="on" without auth produces E-MW-001 error
+ *   MW-CSRF-RETIRED  E-MW-001 retired at S80; csrf="on" no longer fires (was middleware-mode trigger; canonical csrf= is "auto"|"off" per §52.13)
  *   MW-RATE-001  ratelimit="100/min" generates sliding window rate limiter
  *   MW-RATE-002  ratelimit="badvalue" produces E-MW-002 error
  *   MW-HEADERS-001 headers="strict" generates security header injection
@@ -152,7 +151,7 @@ describe("MW-CORS-001: cors='*' generates CORS OPTIONS route", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_cors_options_route");
@@ -167,7 +166,7 @@ describe("MW-CORS-001: cors='*' generates CORS OPTIONS route", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_cors_headers");
@@ -182,7 +181,7 @@ describe("MW-CORS-001: cors='*' generates CORS OPTIONS route", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain('"*"');
@@ -202,7 +201,7 @@ describe("MW-CORS-002: cors='https://example.com' generates restricted origin", 
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "https://example.com", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "https://example.com", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("https://example.com");
@@ -244,7 +243,7 @@ describe("MW-LOG-001: log='structured' generates JSON log emission", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: "structured", csrf: null, ratelimit: null, headers: null },
+      { cors: null, log: "structured", ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_log_request");
@@ -266,7 +265,7 @@ describe("MW-LOG-002: log='minimal' generates human-readable log", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: "minimal", csrf: null, ratelimit: null, headers: null },
+      { cors: null, log: "minimal", ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_log_request");
@@ -288,7 +287,7 @@ describe("MW-LOG-003: no log= generates no logging infrastructure", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: null, log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).not.toContain("_scrml_log_request");
@@ -302,7 +301,7 @@ describe("MW-LOG-003: no log= generates no logging infrastructure", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: "off", csrf: null, ratelimit: null, headers: null },
+      { cors: null, log: "off", ratelimit: null, headers: null },
     );
 
     expect(serverJs).not.toContain("_scrml_log_request");
@@ -310,35 +309,16 @@ describe("MW-LOG-003: no log= generates no logging infrastructure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// MW-CSRF-001: csrf="on" generates CSRF check in resolve() (with auth)
+// MW-CSRF-RETIRED: csrf="on" + E-MW-001 retired at S80 (2026-05-11).
+// Canonical value set is csrf="auto" | "off" per §52.13. Invalid literals
+// (including "on") emit W-ATTR-002 via the attribute-registry. Per-route
+// baseline CSRF (auto-emitted when no-auth + state-mutating routes) and
+// auth-mode synchronizer-token CSRF (triggered by csrf="auto") have their
+// own coverage in session-auth.test.js + sql-client-leak.test.js.
 // ---------------------------------------------------------------------------
 
-describe("MW-CSRF-001: csrf='on' with auth generates CSRF check", () => {
-  test("CSRF validation code appears in resolve() function", () => {
-    const { fnNode, routeMap } = makePostHandler("saveItem", [
-      makeReturnStmt('"ok"', span(110)),
-    ]);
-
-    const serverJs = getServerJs(
-      [makeLogicBlock([fnNode], span(90))],
-      routeMap,
-      { cors: null, log: null, csrf: "on", ratelimit: null, headers: null },
-    );
-
-    // Should contain CSRF cookie validation
-    expect(serverJs).toContain("scrml_csrf");
-    expect(serverJs).toContain("X-CSRF-Token");
-    expect(serverJs).toContain("403");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// MW-CSRF-002: csrf="on" without session infrastructure produces E-MW-001
-// ---------------------------------------------------------------------------
-
-describe("MW-CSRF-002: csrf='on' without auth produces E-MW-001", () => {
-  test("E-MW-001 error when csrf='on' without <program auth=>", () => {
-    // Parse source with csrf="on" but no auth=
+describe("MW-CSRF-RETIRED: E-MW-001 no longer fires for csrf='on'", () => {
+  test("csrf='on' without auth produces no E-MW-001 error (code retired)", () => {
     const source = `<program csrf="on">
 \${ server function getData() {
   return "ok"
@@ -347,9 +327,7 @@ describe("MW-CSRF-002: csrf='on' without auth produces E-MW-001", () => {
 
     const { errors } = parseSource(source);
     const mwError = errors.find(e => e.code === "E-MW-001");
-    expect(mwError).toBeDefined();
-    expect(mwError.message).toContain("csrf");
-    expect(mwError.message).toContain("session");
+    expect(mwError).toBeUndefined();
   });
 });
 
@@ -366,7 +344,7 @@ describe("MW-RATE-001: ratelimit='100/min' generates rate limiter", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: "100/min", headers: null },
+      { cors: null, log: null, ratelimit: "100/min", headers: null },
     );
 
     expect(serverJs).toContain("_scrml_check_ratelimit");
@@ -384,7 +362,7 @@ describe("MW-RATE-001: ratelimit='100/min' generates rate limiter", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: "100/min", headers: null },
+      { cors: null, log: null, ratelimit: "100/min", headers: null },
     );
 
     expect(serverJs).toContain("60000");
@@ -398,7 +376,7 @@ describe("MW-RATE-001: ratelimit='100/min' generates rate limiter", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: "10/sec", headers: null },
+      { cors: null, log: null, ratelimit: "10/sec", headers: null },
     );
 
     expect(serverJs).toContain("1000");
@@ -412,7 +390,7 @@ describe("MW-RATE-001: ratelimit='100/min' generates rate limiter", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: "1000/hour", headers: null },
+      { cors: null, log: null, ratelimit: "1000/hour", headers: null },
     );
 
     expect(serverJs).toContain("3600000");
@@ -474,7 +452,7 @@ describe("MW-HEADERS-001: headers='strict' generates security headers", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: null, headers: "strict" },
+      { cors: null, log: null, ratelimit: null, headers: "strict" },
     );
 
     expect(serverJs).toContain("_scrml_apply_security_headers");
@@ -600,7 +578,7 @@ describe("MW-HANDLE-002: handle() body emitted in _scrml_mw_wrap", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([handleNode, routeFn], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: null, log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_mw_wrap");
@@ -615,7 +593,7 @@ describe("MW-HANDLE-002: handle() body emitted in _scrml_mw_wrap", () => {
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("_scrml_mw_wrap(");
@@ -635,7 +613,7 @@ describe("MW-HANDLE-003: combined middleware config generates full pipeline", ()
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: "structured", csrf: null, ratelimit: "100/min", headers: "strict" },
+      { cors: "*", log: "structured", ratelimit: "100/min", headers: "strict" },
     );
 
     // CORS
@@ -898,7 +876,7 @@ describe("MW-WRAP-001: _scrml_mw_wrap generated with any middlewareConfig", () =
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     expect(serverJs).toContain("function _scrml_mw_wrap(");
@@ -912,7 +890,7 @@ describe("MW-WRAP-001: _scrml_mw_wrap generated with any middlewareConfig", () =
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: null, log: null, csrf: null, ratelimit: null, headers: "strict" },
+      { cors: null, log: null, ratelimit: null, headers: "strict" },
     );
 
     expect(serverJs).toContain("function _scrml_mw_wrap(");
@@ -932,7 +910,7 @@ describe("MW-WRAP-002: route export uses _scrml_mw_wrap when middleware present"
     const serverJs = getServerJs(
       [makeLogicBlock([fnNode], span(90))],
       routeMap,
-      { cors: "*", log: null, csrf: null, ratelimit: null, headers: null },
+      { cors: "*", log: null, ratelimit: null, headers: null },
     );
 
     // The handler in the route export should be wrapped

@@ -922,7 +922,7 @@ describe("<program> root element", () => {
   });
 
   test("<program> with attributes parses correctly", () => {
-    const blocks = split('<program db="./app.db" protect="password_hash" tables="users,posts" html="living-2026-03"></program>');
+    const blocks = split('<program db="./app.db" tables="users,posts" html="living-2026-03"></program>');
     expect(blocks).toHaveLength(1);
     expect(blocks[0].type).toBe("markup");
     expect(blocks[0].name).toBe("program");

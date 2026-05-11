@@ -14737,10 +14737,9 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-CHANNEL-008 | §38.12.8 | Two cross-file channel imports from different source files in the same consumer share the same `name=` attribute value — they would conflict on the same WebSocket route. Resolution: rename one of the channels in its source file. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts:2696`.) | Error |
 | E-CHANNEL-EXPORT-001 | §38.12 | `export <channel ...>` declared without a string-literal `name=` attribute. Reactive-ref / interpolated forms are not supported because the wire identity must be compile-time stable. Resolution: use a static `name="..."` literal. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:877`.) | Error |
 | E-CHANNEL-EXPORT-002 | §38.12 | Internal — channel declared as exported in MOD's exportRegistry but the corresponding `<channel>` markup node was not collected in `ast.channelDecls`. Indicates a compiler-internal invariant violation; surface bug report. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts:2786`.) | Error |
-| E-MW-001 | §40 | `csrf="on"` used without session infrastructure active (no `<program protect="...">` and no equivalent session handling). CSRF tokens are bound to session identity; without a session there's nothing to bind to. (Catalog addition S78 audit; spec prose at SPEC.md:16793. **Un-fireable note:** no current src emit-site located — see audit follow-up.) | Error |
-| E-MW-002 | §40 | `ratelimit=` attribute value does not match the canonical `N/unit` pattern (e.g., `100/minute`, `10/second`). (Catalog addition S78 audit; spec prose at SPEC.md:16807. **Un-fireable note:** no current src emit-site located — see audit follow-up.) | Error |
-| E-MW-005 | §40 | More than one `handle()` function definition in the same file. A file has at most one middleware handler. (Catalog addition S78 audit; spec prose at SPEC.md:16922. **Un-fireable note:** no current src emit-site located — see audit follow-up.) | Error |
-| E-MW-006 | §40 | `handle()` defined outside file top-level `${ }` logic context (e.g., inside a function body or nested scope). The middleware handler must be a file-top-level binding. (Catalog addition S78 audit; spec prose at SPEC.md:16923. **Un-fireable note:** no current src emit-site located — see audit follow-up.) | Error |
+| E-MW-002 | §40 | `ratelimit=` attribute value does not match the canonical `N/unit` pattern (e.g., `100/minute`, `10/second`). Emitted at `compiler/src/ast-builder.js:10104`. | Error |
+| E-MW-005 | §40 | More than one `handle()` function definition in the same file. A file has at most one middleware handler. Emitted at `compiler/src/ast-builder.js:10148`. | Error |
+| E-MW-006 | §40 | `handle()` defined outside file top-level `${ }` logic context (e.g., inside a function body or nested scope). The middleware handler must be a file-top-level binding. Emitted at `compiler/src/ast-builder.js:10161`. | Error |
 | E-USE-001 | §41 | `use` declaration appears inside a `${ }` context, component body, or other nested scope. `use` is only valid at file top level. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:283`.) | Error |
 | E-USE-002 | §41 | `use` declaration appears after the first markup element or logic context in the file. All `use` declarations must precede file body content. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:198`.) | Error |
 | E-USE-005 | §41 | `use` specifier uses an unrecognized protocol prefix (must begin with `scrml:`, `vendor:`, `./`, or `../`). Bare npm-style specifiers are not valid in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:211`.) | Error |
@@ -15903,7 +15902,7 @@ A `<channel>` is a **file-level structural element** that provides persistent bi
 ```scrml
 <channel name="chat"
          topic=@room
-         protect="auth"
+         auth="required"
          reconnect=2000
          onserver:open=handleOpen()
          onserver:message=handleMessage(msg)
@@ -16016,13 +16015,13 @@ For readers familiar with v1 channels: v1 channels lived inside `<program>` and 
 | `${ @shared count = 0 }` inside channel body | `<count> = 0` inside channel body (V5-strict) |
 | `@count = ...` reads/writes (after `@shared` decl) | `@count = ...` reads/writes (canonical V5-strict) |
 
-The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `protect=` cookie check) is UNCHANGED. Only the source-level shape of declarations and placement moved. There is no backward compatibility shim — v0.next is scrml; v1 is a prior iteration.
+The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `auth=` cookie check) is UNCHANGED. Only the source-level shape of declarations and placement moved. There is no backward compatibility shim — v0.next is scrml; v1 is a prior iteration.
 
 The compiler emits `E-CHANNEL-INSIDE-PROGRAM` on a channel descended from `<program>` and `E-CHANNEL-SHARED-MODIFIER` on any `@shared` occurrence — these errors guide adopters of pre-S57 source to the v0.next shape.
 
-### 38.5 protect= Integration
+### 38.5 auth= Integration
 
-The `protect=` attribute maps to a session cookie check in the upgrade handler. When present, the compiler injects an `_scrml_auth_check(req)` call before `server.upgrade()` is called.
+The `auth=` attribute on `<channel>` accepts `"required" | "optional" | "none"` (per §52.13). When `auth="required"` is set, the compiler injects an `_scrml_auth_check(req)` call before `server.upgrade()` is invoked; unauthenticated upgrade requests are rejected. (Prior to S80, this attribute was named `protect=` on `<channel>`. The rename aligns channel session-gating with the canonical routing-surface vocabulary defined in §52.13; the field-level access control surface `protect=` remains on `<db>` and `<Type>` declarations per §6.12.1 and §52.)
 
 ### 38.6 broadcast() and disconnect() Built-ins
 
@@ -16587,7 +16586,7 @@ A `< schema>` block appears at the top level of a file, alongside (not inside) `
 **Worked example — valid:**
 
 ```scrml
-<program db="./app.db" protect="password_hash">
+<program db="./app.db">
 
 < schema>
     users {
@@ -16949,7 +16948,7 @@ The following attributes on `<program>` enable automatic middleware generation:
 |---|---|---|
 | `cors=` | `"*"` or `"https://example.com"` | CORS preflight handler (OPTIONS route) + `Access-Control-*` headers on all responses |
 | `log=` | `"structured"` \| `"minimal"` \| `"off"` | Request/response logging with timestamp, method, path, status, duration |
-| `csrf=` | `"on"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests |
+| `csrf=` | `"auto"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
 | `ratelimit=` | `"100/min"` \| `"N/unit"` | In-memory sliding window rate limiter per IP; 429 response when exceeded |
 | `headers=` | `"strict"` | Injects `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy: default-src 'self'` on all responses |
 | `idempotency-store=` | `"auto"` (default) \| `"sqlite"` \| `"postgres"` \| `"mysql"` \| `"redis"` \| `"none"` | Per-app idempotency-key store backend used by §19.9.6 replay-safety machinery. See §39.2.6. |
@@ -16991,7 +16990,7 @@ The compiler generates:
 
 #### 39.2.3 `csrf=`
 
-`csrf="on"` enables CSRF protection for all state-mutating requests (POST, PUT, PATCH, DELETE).
+`csrf="auto"` enables CSRF protection for all state-mutating requests (POST, PUT, PATCH, DELETE).
 
 The compiler generates:
 - A server-side function that reads or creates a CSRF token in the current session.
@@ -17002,7 +17001,8 @@ The compiler generates:
 **Normative statements:**
 
 - CSRF protection SHALL apply only to requests that mutate state (POST, PUT, PATCH, DELETE). GET requests SHALL NOT be subject to CSRF validation.
-- `csrf="on"` SHALL require session infrastructure to be active (either `<program protect="...">` or equivalent session handling). Using `csrf="on"` without session infrastructure SHALL be a compile error (E-MW-001).
+- `csrf=` accepts the literal values `"auto"` and `"off"` (canonical value set defined at §52.13). Any other literal value SHALL emit `W-ATTR-002` per §52.13.2.
+- `csrf="auto"` SHALL be paired with `<program auth=>` to enable session-bound synchronizer-token validation; without `auth=`, baseline double-submit cookie helpers are auto-emitted on routes that mutate state.
 
 #### 39.2.4 `ratelimit=`
 
@@ -17192,12 +17192,13 @@ A scrml application with one custom concern adds one `handle()`. The common 80% 
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-MW-001 | `csrf="on"` used without session infrastructure | Error |
 | E-MW-002 | `ratelimit=` value does not match `N/unit` pattern | Error |
 | E-MW-003 | `resolve()` called zero times or more than once in `handle()` (per execution path) | Error |
 | E-MW-004 | `handle()` returns a non-`Response` value | Error |
 | E-MW-005 | More than one `handle()` definition in the same file | Error |
 | E-MW-006 | `handle()` defined outside file top-level `${ }` | Error |
+
+> **E-MW-001 retired (S80, 2026-05-11).** The prior pairing requirement (`csrf="on"` ⟹ `auth=`) was retired alongside the `csrf="on"` value. The canonical value set is `csrf="auto" | "off"` per §52.13. Invalid literals emit `W-ATTR-002`.
 
 ### 40.7 Documentary Attributes — `<program>` HTML head metadata
 
