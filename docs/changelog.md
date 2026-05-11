@@ -4,6 +4,28 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 Current baseline (2026-05-11 S82 close, PA-verified at pre-commit hook on `0c80d16`): **10,458 pass / 66 skip / 1 todo / 0 FAIL** (507 files; pre-commit subset). **Full suite** (`bun run test` — includes browser/lsp/commands/self-host): **11,259 tests total / 0 FAIL** (535 files). 0 source code changes this session — all S82 work is doc-system structural fix. 7 commits across S82 (5 scrmlTS + 2 scrml-support): IMPLEMENTATION-ROADMAP + IMPACT-ASSESSMENT historical-banner, pa.md session-start SoT update + maps-discipline protocol, master-list §0.5 trim, shipped change/audit dirs dereffed to scrml-support archive, primary.map.md Task-Shape Routing + feedback loop, project-mapper template extended for future regen.
 
+### 2026-05-11 (S83 — A6-6 CLOSED as Option Y, A8 family fully done)
+
+S83 (single-day session, 2026-05-11; third session this day after S81/S82). **A6-6 `scrml:test` API alignment** closed as **Option Y — no action needed** via focused design dive. This was the last `⏸️ pending` sub-step in the A8 test-bind family. A8 family now FULLY shipped end-to-end; A6-6 removed from the v0.2.0-lacking list.
+
+- **Verdict:** evaluated 8 candidate `scrml:test` helpers (mock-call introspection, assertCalledWith, async-aware assertions, scrml-error-tag matchers, isBound, snapshot, partial-match, plus 2 surfaced during the dive). **None structurally justified.**
+  - **F1 (decisive):** `assert.fails[.with]` grammar at SPEC §19.12.3 is strictly superior to any `assertFailsWith` helper — speaks scrml's error-tag vocabulary natively. Candidate 4 dead.
+  - **F2 (decisive):** test-bind codegen at `compiler/src/codegen/emit-test.ts` (~283 LOC) emits a bare `const <id> = <expr>`; no introspection hook. Adding `mockedCalls`/`assertCalledWith` requires either codegen change (violates SPEC §19.12.7 0-byte production cost guarantee) or a global registry. Closure-recorder pattern (`let calls = []; test-bind fn = (x) => { calls = [...calls, x]; ... }`) covers the workflow in scrml-idiomatic shape. Candidates 1, 2 dead.
+  - **F3 (decisive):** server-fns become sync in test mode by design. `assertResolves`/`assertRejects` solve no real workflow within the canonical test-bind shape. Candidate 3 dead.
+  - **Candidate 5** (`isBound`): E-TEST-006 fail-fast covers this loudly. Dead.
+
+- **Re-trigger conditions (only R1 re-opens A6-6):**
+  - **R1:** ≥2 adopter friction reports requesting call-history re-opens A6-6 with codegen-side scope.
+  - **R2** (await-in-test bodies) / **R3** (snapshot assertions) / **R4** (partial-match assertions): out-of-A6-6 scope; file as separate scrml:test enrichment dispatches if friction signals.
+
+- **Maps consulted (S82 protocol live test):** `primary.map.md` + `test.map.md` + `structure.map.md`. Load-bearing — `test.map.md` and `structure.map.md` confirmed the codegen authority (`emit-test.ts`, 283 LOC) and the canonical test-bind fixture path; F1/F2/F3 source-content arguments drove the structural-rejection verdict. **First end-to-end test of S82 maps-discipline protocol PASSED:** dispatch brief paste-verbatim block was used; agent reported maps-load-bearing explicitly; protocol functioning as designed.
+
+- **Output:** `scrml-support/docs/deep-dives/a6-6-scrml-test-api-alignment-2026-05-11.md` (~1500 words).
+
+- **Tests:** unchanged from S82 close (no source code touched). 0 regressions.
+
+- **v0.2.0 remaining (post-S83):** Code-side: A5-7 tests + samples for A7 engine S67 surface (~12-18h). Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h), B3 stdlib audit + γ rewrite (~10-20h), B5 editor support (~8-15h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). No code-side blockers remain except A5-7.
+
 ### 2026-05-11 (S82 close — wrap)
 
 S82 (single-day session, 2026-05-11; same day as S81). **7 commits across 2 repos** under explicit user authorization. Doc-system structural fix — 0 compiler source code changed. Trigger: PA produced an inaccurate "v0.2.0 lacking" list by reading `scrml-support/archive/changes/v0next-spec-impact/IMPLEMENTATION-ROADMAP.md` (S57-frozen, 24+ sessions stale) as authoritative — direct Rule-4 violation. Burned ~22% context on a list that named A1a/A1b/A1c/A5/A6/A7/A8/A9/A10/debounce-throttle (all SHIPPED) as "lacking." User pushed back on the doc-system bloat as root cause; authorized a structural fix over per-item workaround.
