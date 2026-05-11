@@ -1101,7 +1101,20 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
   let unsubscribers = [];
   let isRunning = false;
   let runCount = 0;
-  const MAX_RUNS = 100; // infinite loop guard
+  // S79 audit fix (hardcoded-thresholds A.1): infinite-loop guard cap is
+  // overridable via globalThis.__scrml_max_meta_runs. Adopters with complex
+  // derived graphs may set this higher (e.g. 1000) before the scrml runtime
+  // loads. Tests use a small value (e.g. 5) to exercise the bail path
+  // without authoring 101-cycle reactive fixtures. Default 100 (Stripe-
+  // shape sensible bound -- big enough to avoid false positives on real
+  // reactive cycles, small enough to detect a runaway loop within a few
+  // seconds of wall-clock).
+  var _scrml_runtime_max_runs = (typeof globalThis !== "undefined" &&
+    typeof globalThis.__scrml_max_meta_runs === "number" &&
+    globalThis.__scrml_max_meta_runs > 0)
+    ? globalThis.__scrml_max_meta_runs
+    : 100;
+  const MAX_RUNS = _scrml_runtime_max_runs; // infinite loop guard (overridable; see globalThis.__scrml_max_meta_runs)
 
   function trackingGet(name) {
     // Record dependency if we are inside a tracking context

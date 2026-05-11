@@ -4,6 +4,18 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 Current baseline (2026-05-10 S78 close, machine-switch wrap — PA-VERIFIED): **11,051 pass / 77 skip / 1 todo / 0 FAIL**. **ALL 6 prior environmental fails CLOSED via root-cause fixes**. Net delta vs S77 close: **+90 pass / +13 skip / +0 todo / -6 fail** across **16 commits** (Phase A10 SHIP + audit fold-in + audit threads). **S78 closed: Phase A10 engine state-child body render SHIPPED end-to-end; 6-deep deferral chain CLOSED; A5-6 Feature 1 (named timer + cancelTimer) UNBLOCKED; SPEC + test conformance audits BOTH COMPLETE; debounce/throttle re-deliberation landed (Approach B ratified — clean cut to `<name debounced=Nms>` attribute form); hardcoded threshold sweep landed (5 prioritized refactors); E-IMPORT-007 unblocked via injectable `gatherLimit`; pre-commit hook INSTALLED on this machine after audit discovered it had been silently uninstalled.**
 
+### 2026-05-10 (S79 — hardcoded-thresholds Bucket A SHIPPED · MAX_RUNS overridable + EncodingContext.seqCap injectable · 11 unit tests · 0 regressions)
+
+Top 2 Bucket A items from `docs/audits/hardcoded-thresholds-2026-05-10.md` shipped:
+
+- **A.1 `MAX_RUNS = 100` (meta-effect infinite-loop guard).** `compiler/src/runtime-template.js:1098` — literal replaced with `globalThis.__scrml_max_meta_runs ?? 100` lookup at the top of `_scrml_meta_effect`. Type-guarded (`typeof === "number" && > 0`). Tests can set `globalThis.__scrml_max_meta_runs = 5` to exercise the bail path with a 6-cycle fixture; adopters with complex derived graphs can set higher (e.g. 1000) before the scrml runtime loads. Fallback default unchanged (100).
+- **A.2 `seq > 1331` (E-CG-014 disambiguator overflow).** `compiler/src/codegen/type-encoding.ts:443` — literal `1331` replaced with `this.seqCap`. New `seqCap` field on `EncodingContext` (default 1331); new constructor opt `__testOnly_typeEncodingSeqCap`. Plumbed through `compiler/src/codegen/index.ts` via the existing `encoding` option object (which is already a top-level compile option). Diagnostic message uses dynamic cap value (`more than ${cap+1} bindings`) so tests can assert clean text. Conformance tests for E-CG-014 can now use a 4-binding fixture with `seqCap: 2` instead of synthesizing 1,332.
+- **Tests:** new `compiler/tests/unit/hardcoded-thresholds-bucket-a-injection.test.js` — 11 tests / 24 expect() calls. Coverage: runtime substitution shape (A.1: globalThis lookup + type-guard + default fallback), EncodingContext.seqCap default + override + edge cases (negative, non-number, 0) + E-CG-014 fires at custom cap with small fixture + symmetric back-compat (default 1331 path) + disabled-encoding bypass.
+- **Regression check:** type-encoding + meta-effect tests both green (60 pass / 0 fail).
+- **Audit doc updated:** `docs/audits/hardcoded-thresholds-2026-05-10.md` §6 items 1+2 marked ✅ SHIPPED with implementation notes.
+
+Remaining audit items (deferred): C.1 idempotency TTL via scrmlconfig (~1h, adopter-relevant), B.1 serve-client timeouts (~20min), C.2 batch IN-list cap (~1h, non-SQLite backends).
+
 ### 2026-05-10 (S79 — A5-6 Feature 1 SHIPPED · named timer + cancelTimer builtin · closes Phase A10 deferral chain at original target · 28 unit tests · 0 regressions)
 
 A5-6 Feature 1 (`<onTimeout name=IDENT>` + `cancelTimer("X")` builtin) — the original closure target of the 6-deep deferral chain that Phase A10 unblocked at S78 — landed SHIPPED in S79 PA-direct work. Per ratified S77 SCOPE Option A; Phase A10's walkable arm-body AST is the unblocker (cancelTimer call recognition needs static (varName, armTag) from arm context).

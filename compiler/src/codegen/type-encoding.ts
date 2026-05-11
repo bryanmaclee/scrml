@@ -400,6 +400,20 @@ export class EncodingContext {
   /** Whether to append $originalName debug suffix. */
   readonly debug: boolean;
 
+  /**
+   * S79 audit fix (hardcoded-thresholds A.2): test-only injectable cap on
+   * the per-prefix `seq` counter. When `register()` would assign a `seq`
+   * value > `seqCap`, fires `E-CG-014` (Disambiguator overflow). Default
+   * 1331 (the spec-canonical algorithmic ceiling — corresponds to the
+   * 3-char base36 codomain `_<kind><hash><seq>`). Tests inject a small
+   * value (e.g. `seqCap: 3`) to trigger the diagnostic with a 4-binding
+   * fixture instead of synthesizing 1,332 bindings.
+   *
+   * NOT an adopter-facing knob — the cap reflects an internal encoding
+   * format choice. Promoting to adopter API requires a SPEC §47 amendment.
+   */
+  readonly seqCap: number;
+
   /** Map from original name → encoded name. */
   private nameMap = new Map<string, string>();
 
@@ -412,9 +426,18 @@ export class EncodingContext {
   /** Collision checker instance. */
   private collisionChecker = new CollisionChecker();
 
-  constructor(opts: { enabled?: boolean; debug?: boolean } = {}) {
+  constructor(opts: {
+    enabled?: boolean;
+    debug?: boolean;
+    /** S79 audit fix A.2 — see `seqCap` field JSDoc. */
+    __testOnly_typeEncodingSeqCap?: number;
+  } = {}) {
     this.enabled = opts.enabled ?? false;
     this.debug = opts.debug ?? false;
+    this.seqCap = (typeof opts.__testOnly_typeEncodingSeqCap === "number"
+      && opts.__testOnly_typeEncodingSeqCap >= 0)
+      ? opts.__testOnly_typeEncodingSeqCap
+      : 1331;
   }
 
   /**
@@ -439,11 +462,12 @@ export class EncodingContext {
     const seq = this.seqCounters.get(prefix) ?? 0;
     this.seqCounters.set(prefix, seq + 1);
 
-    // Check overflow (>1332 same-type bindings)
-    if (seq > 1331) {
+    // Check overflow (default >1332 same-type bindings; cap injectable per
+    // S79 audit fix A.2 via `__testOnly_typeEncodingSeqCap`).
+    if (seq > this.seqCap) {
       throw new CGError(
         "E-CG-014",
-        `Disambiguator overflow: scope contains more than 1,332 bindings ` +
+        `Disambiguator overflow: scope contains more than ${this.seqCap + 1} bindings ` +
           `of type "${normalizeType(type)}" (prefix "${prefix}").`,
         {}
       );

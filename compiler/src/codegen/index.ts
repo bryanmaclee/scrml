@@ -85,7 +85,12 @@ export interface CgInput {
    */
   emitMachineTests?: boolean;
   /** Enable output name encoding (§47). Default: false. */
-  encoding?: boolean | { enabled: boolean; debug?: boolean };
+  encoding?: boolean | {
+    enabled: boolean;
+    debug?: boolean;
+    /** S79 audit fix A.2 — see `EncodingContext.seqCap` JSDoc. */
+    __testOnly_typeEncodingSeqCap?: number;
+  };
   /** Stage 7.5 BatchPlan — consumed by emit-server for Tier 1 envelopes. */
   batchPlan?: any;
   /**
@@ -552,6 +557,9 @@ export function runCG(input: CgInput): CgOutput {
     const encodingCtx = new EncodingContext({
       enabled: encodingOpts.enabled,
       debug: encodingOpts.debug,
+      __testOnly_typeEncodingSeqCap:
+        (encodingOpts as { __testOnly_typeEncodingSeqCap?: number })
+          .__testOnly_typeEncodingSeqCap,
     });
     compileCtx.encodingCtx = encodingCtx;
 

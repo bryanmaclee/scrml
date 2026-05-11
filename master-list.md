@@ -2,7 +2,7 @@
 
 **Purpose:** Live inventory of what exists in scrmlTS, plus the **v0.2.0 migration dashboard**. Current truth only. Historical session-by-session detail lives in `docs/changelog.md`; deep-dives live in `scrml-support/docs/deep-dives/`.
 
-**Last updated:** 2026-05-10 (S79 — **Batch K combined deref sweep (131 file/dir moves, 207 cumulative w/S61) · `docs/changes/` 99 → 4 · `docs/audits/` 22 → 3 · pre-commit hook installed on this machine · A5-6 Feature 1 SHIPPED (named timer `name=` + `cancelTimer("X")` builtin) · 28 unit tests · 0 regressions**)
+**Last updated:** 2026-05-10 (S79 — **Batch K combined deref sweep (131 file/dir moves, 207 cumulative w/S61) · `docs/changes/` 99 → 4 · `docs/audits/` 22 → 3 · pre-commit hook installed on this machine · A5-6 Feature 1 SHIPPED (named timer `name=` + `cancelTimer("X")` builtin) · hardcoded-thresholds Bucket A SHIPPED (MAX_RUNS overridable + EncodingContext.seqCap injectable) · 39 unit tests across both / 0 regressions**)
 
 **Tests (current — S78 close, machine-switch wrap):** **11,051 pass / 77 skip / 1 todo / 0 FAIL** (530 files; via `bun run test` ~12s). **ALL 6 prior environmental fails CLOSED** via root-cause fixes at commit `a9b1e7d` (3 test-bind A6-5 cwd → `process.cwd()`; F-BUILD-002 §3 → `.mjs` temp file; Self-host tokenizer parity → new `scripts/rebuild-self-host-dist.ts`) + Bootstrap L3 marked describe.skip with documented compiler-bug follow-up. Pre-commit hook installed on this machine (`git config core.hooksPath scripts/git-hooks`) + verified firing every commit.
 

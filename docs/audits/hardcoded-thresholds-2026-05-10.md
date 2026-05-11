@@ -138,8 +138,8 @@ Files audited:
 
 ## §6 Recommended actions (prioritized)
 
-1. **A.1 — `MAX_RUNS` injection** (~30 min). Highest-priority: this is the only Bucket A item that fires in adopter production code (DevTools `console.error`). Adding `options.maxMetaRuns` makes it testable AND adopter-tunable.
-2. **A.2 — `seq` cap test-injection** (~45 min). Closes the conformance gap on E-CG-014; mirrors the E-IMPORT-007 precedent verbatim. Recommend `__testOnly_typeEncodingSeqCap`.
+1. ✅ **A.1 — `MAX_RUNS` injection** SHIPPED S79 2026-05-10. Replaced literal with `globalThis.__scrml_max_meta_runs ?? 100` lookup at the top of `_scrml_meta_effect`. Tests can `globalThis.__scrml_max_meta_runs = 5` to exercise bail path with a 6-cycle fixture; adopters can set higher (e.g. 1000) before scrml runtime loads. Fallback default unchanged (100).
+2. ✅ **A.2 — `seq` cap test-injection** SHIPPED S79 2026-05-10. Added `seqCap` field on `EncodingContext` + constructor opt `__testOnly_typeEncodingSeqCap` (default 1331). Plumbed through codegen/index.ts via the existing `encoding` option object. Test fixture exercises E-CG-014 with `seqCap: 2` + 4 same-type bindings instead of synthesizing 1,332.
 3. **C.1 — Idempotency TTL via scrmlconfig** (~1h). Highest adopter-value Bucket C. Pillar-5 honest pattern matches the S72 idempotency-store precedent — adopters who use idempotency at all will want to tune TTL.
 4. **B.1 — serve-client timeout injection** (~20 min). Cheap; unblocks slow-CI scenarios + persistent-server unit tests.
 5. **C.2 — Batch IN-list cap via scrmlconfig** (~1h). Lower priority because `.nobatch()` opt-out exists, but adopter-relevant for non-SQLite backends.
