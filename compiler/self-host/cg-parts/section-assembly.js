@@ -934,8 +934,14 @@ export function generateLibraryJs(ctxOrFileAST, routeMapLegacy, errorsLegacy) {
                         lines.push("import * as " + m[1] + " from \"" + m[2] + "\";")
                     }
                     blockText = _stripInlineMeta(blockText)
-                    blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\([^)]+\)\s*;?/g, "")
-                    blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\([^)]+\)\s*;?/g, "")
+                    // S80 bugfix: mirror of emit-library.ts strip-regex narrowing.
+                    // The prior `[^)]+` was not paren-aware and would greedy-truncate
+                    // `await import(new URL(...).href)` and `await import(process.cwd()
+                    // + "...")` to the first `)`, leaving residue in plain code that
+                    // happens to use `await import(expr)` outside `^{}` meta blocks.
+                    // The string-literal arg shape mirrors importRe/nsImportRe above.
+                    blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "")
+                    blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "")
                     blockText = blockText.trim()
                     if (blockText) {
                         lines.push(blockText)

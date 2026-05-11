@@ -510,25 +510,30 @@ describe("Bootstrap: compiler compiles compiler", () => {
 // self-hosted, not just the pipeline stages.
 // ---------------------------------------------------------------------------
 
-// Phase A10 / S78 audit: SKIP. The dynamic import of `compiler/self-host/api.js`
-// transitively loads `compiler/dist/self-host/ast.js`, which is corrupted by a
-// host-compiler library-mode emit bug — `try { ^{...} } catch { }` patterns in
-// `compiler/self-host/ast.scrml` (lines 25-40) emit residue like `.href)` and
-// `+ "/compiler/src/expression-parser.ts"` instead of stripped-clean blocks.
-// The corruption manifests as `Unexpected token (31:8)` when importing the
-// regenerated dist. The fix is in the standard compiler's library-mode meta-
-// block strip pass, NOT in the self-host source. Tracked as a follow-up;
-// scrml-support/docs/follow-ups should pick this up.
+// Phase A10 / S78 audit / S80 partial fix: the host-compiler library-mode
+// meta-block strip pass WAS greedy-truncating `await import(expr)` calls in
+// plain JS (outside `^{}` meta blocks). Root cause: strip regex used `[^)]+`
+// arg shape, which is not paren-aware — for `await import(new URL(...).href)`
+// it stopped at the first `)` (the URL closer) and stripped the leading
+// `const _ep = await import(new URL(...` portion, leaving `.href)` as
+// residue. Fix at `compiler/src/codegen/emit-library.ts:180-188` and its
+// self-host mirror `compiler/self-host/cg-parts/section-assembly.js:937-944`
+// narrows the strip regex to quoted-string args (mirroring importRe /
+// nsImportRe emit shapes). With the strip-bug fix, `ast.js` no longer has the
+// `.href)` residue and is structurally valid; api.js can be imported when
+// `compiler/self-host/cg.scrml` is restructured.
 //
-// Until the bug is fixed, this test cannot pass even with up-to-date dist
-// files. The old dist (committed prior to S78) had the same issue plus stale
-// content; regenerated dist is structurally correct except for the meta-block
-// strip residue. Marked `.skip` with documented reason rather than firing
-// every commit / blocking the pre-commit hook.
-//
-// Other Bootstrap tests (L1: pipeline-stage parity, L2: standard API smoke)
-// continue to run and pass — those don't depend on api.js's transitive imports.
-describe.skip("Bootstrap L3: self-hosted API compiles compiler [SKIP — host-compiler library-mode meta-block strip bug; see comment above]", () => {
+// REMAINING SKIP REASON (S80): the L3 + L2 parity tests assert that the
+// self-hosted pipeline produces output identical to the standard TS pipeline.
+// That parity is NOT met today (verified S80: when cg.runCG was undefined,
+// compileScrml soft-fell-back to the standard implementation, masking
+// divergence; when restructured to expose cg.runCG, 21 parity assertions
+// fail). The self-host module set has real divergences beyond the strip-bug
+// surface — fixing them is a substantial separate priority not in scope for
+// the L3-strip-bug session. The L1 (pipeline-stage parity) tests above
+// continue to run and pass — those exercise individual stage modules with
+// the JS originals as the source of truth.
+describe.skip("Bootstrap L3: self-hosted API compiles compiler [SKIP — self-host parity gap; L3 strip-bug fixed at S80 but L2/L3 parity unmet — see comment above]", () => {
   const apiPath = resolve(projectRoot, "compiler/self-host/api.js");
 
   const bootstrapFiles = [

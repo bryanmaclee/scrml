@@ -176,10 +176,16 @@ export function generateLibraryJs(
           }
           // Strip ^{ await import(...) } meta blocks
           blockText = stripInlineMeta(blockText);
-          // Strip bare `const { ... } = await import("...")` declarations (already emitted as ES imports)
-          blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\([^)]+\)\s*;?/g, "");
-          // Strip bare `const name = await import("...")` declarations (already emitted as ES imports)
-          blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\([^)]+\)\s*;?/g, "");
+          // Strip bare `const { ... } = await import("string-literal")` declarations
+          // (already emitted as ES imports above). The string-literal arg shape
+          // mirrors the importRe/nsImportRe emit patterns — only those forms
+          // were converted to ES imports, so only those forms get stripped.
+          // S80 bugfix: prior regexes used `[^)]+` which is not paren-aware and
+          // greedy-truncated `await import(new URL(...).href)` and similar
+          // complex-arg calls to the first `)`, leaving residue. Constraining
+          // to quoted-string args matches the emit symmetry.
+          blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
+          blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
           blockText = blockText.trim();
           // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
           // Apply per-line, skipping comment lines to avoid mangling English text
