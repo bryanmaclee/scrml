@@ -9818,6 +9818,16 @@ function collectHoisted(nodes) {
       // §51.3: engine-decl nodes are children of markup (program), not logic
       if (node.kind === "engine-decl") {
         machineDecls.push(node);
+        // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — recurse into engine bodyChildren
+        // to discover NESTED engines in composite state-children. Phase A10
+        // attaches `bodyChildren` (walkable AST) to each engine-decl; a
+        // nested engine-decl lives as a child of one of the state-child
+        // markup entries inside bodyChildren. Without this recursion, nested
+        // engines drop out of `machineDecls` (codegen never emits substrate +
+        // dispatcher for them).
+        if (Array.isArray(node.bodyChildren)) {
+          walk(node.bodyChildren);
+        }
       }
       if (node.kind === "markup" || node.kind === "state") {
         walk(node.children || []);

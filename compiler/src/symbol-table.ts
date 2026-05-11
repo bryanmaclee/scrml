@@ -4045,9 +4045,16 @@ function walkRegisterEngines(
 
   if (kind === "engine-decl") {
     registerEngineDecl(node, fileScope, errors, filePath);
-    // Engine bodies are RAW TEXT (engine-decl.rulesRaw) — no walkable
-    // children today. When state-children become walkable AST nodes, this
-    // is where nested-engine recursion would attach.
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — nested engine recursion. Phase A10
+    // (S78) attaches `bodyChildren` (walkable AST) to each engine-decl; a
+    // nested engine-decl inside a composite state-child body must ALSO be
+    // registered so its `_record.engineMeta` is populated (otherwise codegen
+    // never emits its substrate). The recursion respects Machine Cohesion
+    // (§51.0.K): nested engines are PERMITTED in composite state-children
+    // (singleton invariant preserved per outer-entry; outer × 1 = 1 inner).
+    if (Array.isArray(node.bodyChildren)) {
+      walkRegisterEngines(node.bodyChildren, fileScope, errors, filePath, visited);
+    }
     return;
   }
 
@@ -4877,11 +4884,16 @@ function walkValidateEngineStateChildrenAndRules(
   const node = nodes as any;
   if (node.kind === "engine-decl") {
     validateEngineStateChildrenAndRules(node, fileAst, errors, filePath);
-    // Engine bodies are RAW TEXT — no walkable children today (parser
-    // limitation per primer §13.7 B14 specifics). When state-child
-    // bodies become walkable, this is where we'd recurse to fire
-    // compile-time E-ENGINE-INVALID-TRANSITION on direct writes inside
-    // them. Today's body parser yields `bodyRaw: string` only.
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — recurse into bodyChildren to
+    // validate NESTED engines too (so their `engineMeta.stateChildren`,
+    // `engineMeta.variants`, etc. are populated for codegen). The state-
+    // child bodies themselves remain RAW TEXT for direct-write scanning
+    // (handled at fire-site #9 in PASS 16 / `validateEngineA5Extensions`);
+    // this recursion only descends through the bodyChildren tree to find
+    // nested engine-decl nodes.
+    if (Array.isArray(node.bodyChildren)) {
+      walkValidateEngineStateChildrenAndRules(node.bodyChildren, fileAst, errors, filePath, visited);
+    }
     return;
   }
 
@@ -5181,9 +5193,13 @@ export function walkDerivedEngineDeclRejections(
         fireDerivedEngineNoRules(node, varName, errors, filePath);
       }
     }
-    // Engine bodies are RAW TEXT (no walkable children today). When state-
-    // children become walkable AST nodes, add per-child `rule=` attribute
-    // checking here.
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — recurse into bodyChildren to
+    // apply rejection checks to nested derived engines too. A nested
+    // engine inside a composite state-child must satisfy the same
+    // derived-engine rules (§51.0.J + §34) as a file-scope engine.
+    if (Array.isArray(node.bodyChildren)) {
+      walkDerivedEngineDeclRejections(node.bodyChildren, errors, filePath, visited);
+    }
     return;
   }
 
@@ -6849,9 +6865,15 @@ function walkValidateEngineA5Extensions(
   const node = nodes as any;
   if (node.kind === "engine-decl") {
     validateEngineA5Extensions(node, fileAst, errors, filePath);
-    // Engine bodies are RAW TEXT (parser limitation per primer §13.7
-    // B14 specifics). Inner-engine recursion is DEFERRED to A1c per
-    // SURVEY §3.3 — no walking inside engine-decl from PASS 16.
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — recurse into bodyChildren so
+    // nested engines (composite state-children) get their A5 extensions
+    // validated too. Each nested engine has its own state-children with
+    // their own rule=/`onTimeout`/`history`/`internal:rule=` surface to
+    // validate. Without this recursion, inner-engine A5 extensions would
+    // be silently un-validated.
+    if (Array.isArray((node as any).bodyChildren)) {
+      walkValidateEngineA5Extensions((node as any).bodyChildren, fileAst, errors, filePath, visited);
+    }
     return;
   }
 
@@ -7191,9 +7213,14 @@ function walkValidateEngineB17Diagnostics(
   const node = nodes as any;
   if (node.kind === "engine-decl") {
     validateEngineB17Diagnostics(node, fileAst, errors, filePath);
-    // Engine bodies are RAW TEXT (parser limitation per primer §13.7 B14
-    // specifics). Inner-engine recursion is DEFERRED to A1c per A5-3
-    // SURVEY §3.3 — no walking inside engine-decl from PASS 17.
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — recurse into bodyChildren so
+    // nested engines (composite state-children) get their B17 hook
+    // diagnostics validated too. Each nested engine may have its own
+    // `effect=` / `<onTransition>` arms — without this recursion they'd
+    // be silently un-validated.
+    if (Array.isArray((node as any).bodyChildren)) {
+      walkValidateEngineB17Diagnostics((node as any).bodyChildren, fileAst, errors, filePath, visited);
+    }
     return;
   }
 

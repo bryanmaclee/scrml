@@ -499,45 +499,152 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
 });
 
 // ===========================================================================
-// §8. Restore-on-re-entry observable — BLOCKED ON BUG #2 (.skip)
+// §8. Restore-on-re-entry codegen — Bug #2 + restore-form lowering (Wave 2.4)
 // ===========================================================================
 //
-// The runtime mechanism for inner-engine state restoration on outer-re-entry
-// via `.Variant.history` target form depends on:
-//   (a) Inner-engine state being live (Bug #1 ✓ shipped — inner-engine
-//       bodies preserved per Phase A10 bodyChildren).
-//   (b) Inner-engine dispatcher EMITTING — Bug #2 (Wave 2.4) territory.
-//       Without an inner-engine dispatcher, the OBSERVABLE "inner restores
-//       to captured variant on outer re-entry" cannot be verified end-to-end;
-//       the synth cell IS written/read by the runtime, but no inner-engine
-//       UI re-renders to read.
+// Per SPEC §51.0.N: writes via `.Variant.history` form lower distinctly from
+// bare `.Variant`. The history-form write threads `isHistoryRestore=true`
+// (8th positional arg) to `_scrml_engine_direct_set` / `_scrml_engine_advance`;
+// the runtime helper sets the pending-restore flag on the outer var; the
+// outer dispatcher's composite-arm postMountJs reads + clears the flag and
+// restores inner from the synth cell when set.
 //
-// Bug #3 (Wave 2.3, this dispatch) wires the WRITE MECHANISM completely:
-//   - History map emitted; synth cells initialized; write-on-exit threaded
-//     through `_scrml_engine_direct_set` / `_scrml_engine_advance` via the
-//     7th positional historyMap arg.
-//   - The capture works on every external outer-exit through these helpers
-//     (verifiable as a side-effect of the runtime branch — see runtime-
-//     template.js `_scrml_engine_history_capture_on_exit`).
+// A5-7 Wave 2.4 (Bug #2, 2026-05-11) ships the codegen plumbing end-to-end:
+//   - WRITE SITE: `@outerVar = .Variant.history` → strip `.history` from the
+//     emitted value, pass `true` for `isHistoryRestore`. Bare `.Variant`
+//     omits the flag (tree-shake).
+//   - DISPATCHER POSTMOUNTJS: composite-arm with `history` reads pending flag,
+//     restores from synth cell (or falls through to inner.initial= on null —
+//     empty-history fallback per §51.0.N).
+//   - RUNTIME: `_scrml_engine_direct_set` accepts the 8th arg, sets the
+//     pending-restore flag in `_scrml_engine_pending_history_restore[outerVar]`
+//     BEFORE the cell write so the subscriber fire sees the flag.
 //
-// The restore-on-re-entry test below stays .skip with cite until Bug #2 ships.
-describe.skip("engine-a7-history §8 — outer re-entry restore (blocked on Bug #2)", () => {
-  test("outer-re-entry via .Variant.history restores inner engine — blocked on Bug #2", () => {
-    // Per SPEC §51.0.N: on outer-re-entry into a composite with `history`,
-    // the inner engine restores from the history cell rather than from
-    // initial=. Empty cell → fall back to initial=.
-    //
-    // The observable verification needs the inner-engine dispatcher to be
-    // emitted (Bug #2, Wave 2.4) — currently inner-engine bodies are
-    // preserved (Bug #1) but their dispatchers are not wired. Synth cell
-    // write/read mechanism IS in place from Bug #3 (Wave 2.3).
-    //
-    // When Bug #2 lands, this test should:
-    //   1. Compile a composite with history + nested engine.
-    //   2. Drive the outer engine through a sequence:
-    //      enter .Playing → inner advances to non-initial variant →
-    //      exit .Playing → re-enter via .Variant.history form
-    //   3. Assert the inner-engine var matches the captured variant
-    //      (not the inner's initial=).
+// Observable DOM-level verification (inner mount innerHTML matches saved
+// variant on re-entry) would require a JSDOM/Puppeteer integration test;
+// that's deferred to the v0.2.0-bar A5-7 integration suite. These tests
+// verify the CODEGEN SHAPE is correct end-to-end.
+
+describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)", () => {
+  test("`.Variant.history` write strips `.history` and threads isHistoryRestore=true", () => {
+    // Per SPEC §51.0.N: writes via `.Variant.history` lower distinctly. The
+    // emitted value is the bare variant tag (no JS-level .history member
+    // access — which would runtime-fail since variant strings have no
+    // .history property); the isHistoryRestore flag is threaded as the
+    // trailing positional arg.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+  <Paused rule=.Playing.history></>
+</>
+
+\${ function resume() { @appMode = AppMode.Playing.history } }`;
+    const { errors, clientJs } = compileToClientJs(src, "w24-history-write");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // The lowered call: bare `AppMode.Playing` (no `.history` chain), and
+    // trailing `true` as the isHistoryRestore positional arg. Engine has
+    // history + no timers/idle/internal, so the call shape is:
+    //   _scrml_engine_direct_set("appMode", AppMode.Playing, table, null, null, null, history_map, true)
+    expect(clientJs).toMatch(
+      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+    // Sanity: no `.history` member access on the variant string.
+    expect(clientJs).not.toContain("AppMode.Playing.history");
+  });
+
+  test("bare `.Variant` (no `.history`) does NOT thread isHistoryRestore", () => {
+    // Negative case: bare-variant write must NOT emit the trailing `true`.
+    // This is the tree-shake side of the restore-form lowering.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { A, B }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=.Title>
+    <engine for=PlayMode initial=.A>
+      <A rule=.B></>
+      <B rule=.A></>
+    </>
+  </>
+</>
+
+\${ function leave() { @appMode = AppMode.Title } }`;
+    const { errors, clientJs } = compileToClientJs(src, "w24-bare-write");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // Call shape with history but WITHOUT isHistoryRestore — trailing `true`
+    // must be absent.
+    expect(clientJs).toMatch(
+      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
+    );
+    // Confirm: the close paren immediately after the history_map arg (no
+    // ", true" trailing).
+    expect(clientJs).not.toMatch(
+      /_scrml_engine_direct_set\("appMode"[^)]*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+  });
+
+  test("dispatcher composite-arm postMountJs has both restore-from-synth AND fallback branches", () => {
+    // Verifies the codegen shape: when the state-child carries `history`,
+    // the postMountJs emits the read+clear of the pending-restore flag AND
+    // the empty-history fallback path (synth cell null → reset to
+    // inner.initial=).
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+  <Paused rule=.Playing.history></>
+</>`;
+    const { errors, clientJs } = compileToClientJs(src, "w24-dispatcher-shape");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // postMountJs marker + flag read.
+    expect(clientJs).toContain("§51.0.Q.1 composite-arm post-mount: init/restore inner engine playMode");
+    expect(clientJs).toContain('_scrml_engine_pending_history_restore["appMode"]');
+    expect(clientJs).toContain('_pending === "Playing"');
+    // Read+clear pattern.
+    expect(clientJs).toContain('delete _scrml_engine_pending_history_restore["appMode"]');
+    // Synth-cell read.
+    expect(clientJs).toContain('_scrml_state["_appMode_Playing_history"]');
+    // Restore-from-synth + fallback-to-initial branches both present.
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*_saved\)/);
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"Exploring"\)/);
+  });
+
+  test(".advance(.Variant.history) — write-site lowering also strips .history", () => {
+    // The `.advance(.Variant.history)` form is also a valid history-restore
+    // write per §51.0.G + §51.0.N. The lowering at emitEngineAdvanceCall is
+    // a Wave 4 follow-on (the test brief lists this as substrate; the
+    // strict-MVP path uses direct-write `@var = .V.history` form which IS
+    // wired above). Per A5-7 brief: ".advance(.X)" history-form lowering is
+    // an additional surface — when not yet wired, this test documents it as
+    // a deferred follow-on. For Wave 2.4, this test asserts that the bare
+    // .advance form still works (no regression).
+    const src = `\${ type Phase:enum = { Idle, Active } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active></>
+  <Active rule=.Idle></>
+</>
+
+\${ function go() { @phase.advance(Phase.Active) } }`;
+    const { errors, clientJs } = compileToClientJs(src, "w24-advance-bare");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    expect(clientJs).toContain("_scrml_engine_advance");
   });
 });

@@ -412,19 +412,130 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     expect(fatal).toEqual([]);
   });
 
-  test.skip("DEFERRED (Bug #2): nested engine dispatcher emission inside composite arm body", () => {
+  test("CLOSED (Bug #2): nested engine dispatcher emission inside composite arm body", () => {
     // Per SPEC §51.0.Q.1: nested engine has FULL engine semantics — including
-    // its own dispatcher subscribing to the inner variable. Currently the
-    // nested engine state-child bodies are parsed but the inner dispatcher /
-    // render functions are not emitted to client JS.
-    //
-    // Bug #1 (body-parser mis-attribution) is FIXED at
-    // changes/fix-nested-engine-body-parser-lowercase-html (2026-05-11) —
-    // see §7 tests above. The remaining inner-dispatcher emission gap is
-    // tracked separately as Bug #2 (Wave 4 codegen follow-on).
-    //
-    // Verification: search clientJs for `__scrml_engine_playMode_transitions`
-    // — today this is absent even when the source declares the inner engine.
+    // its own dispatcher subscribing to the inner variable. A5-7 Wave 2.4
+    // (Bug #2, 2026-05-11) widens engine discovery into engine-decl
+    // bodyChildren, so nested engines now get substrate (transitions table,
+    // variant cell init, dispatcher, render functions, history map if
+    // applicable, internal table if applicable) — same as file-scope engines.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle>
+        <button onclick=fight()>Fight</>
+      </>
+      <Battle rule=.Exploring>
+        <button onclick=flee()>Flee</>
+      </>
+    </>
+  </>
+  <Paused rule=.Playing></>
+</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug2-inner-dispatcher");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // Inner engine substrate emits — transitions table, variant cell init.
+    expect(clientJs).toContain("__scrml_engine_playMode_transitions");
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"Exploring"\)/);
+    // Inner engine render functions + dispatcher emit.
+    expect(clientJs).toContain("_scrml_engine_playMode_render_Exploring");
+    expect(clientJs).toContain("_scrml_engine_playMode_render_Battle");
+    expect(clientJs).toContain("__scrml_engine_playMode_dispatch");
+    // Inner dispatcher subscribes to the inner cell.
+    expect(clientJs).toMatch(/_scrml_reactive_subscribe\("playMode",/);
+    // Outer engine ALSO emits unchanged.
+    expect(clientJs).toContain("__scrml_engine_appMode_transitions");
+    expect(clientJs).toContain("__scrml_engine_appMode_dispatch");
+  });
+
+  test("Bug #2: tree-shake — flat engine (no nested) emits zero inner-engine code", () => {
+    // Sanity: an engine WITHOUT nested engines must NOT trigger any
+    // inner-dispatcher / inner-substrate emission. Tree-shake invariant.
+    const src = `\${ type Phase:enum = { Idle, Active } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=go()>Go</>
+  </>
+  <Active rule=.Idle></>
+</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug2-treeshake-flat");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    expect(clientJs).toContain("__scrml_engine_phase_transitions");
+    // No mention of any other engine.
+    expect(clientJs).not.toMatch(/__scrml_engine_(?!phase)[a-zA-Z]+_transitions/);
+    // No composite-arm postMountJs (no inner engine to init).
+    expect(clientJs).not.toContain("§51.0.Q.1 composite-arm post-mount");
+  });
+
+  test("Bug #2: composite-arm postMountJs resets inner cell to initial on entry (no history)", () => {
+    // Per SPEC §51.0.Q.1: "On outer entry … the inner engine is initialized
+    // (per its `initial=`)". Without history, every entry to the composite
+    // arm resets the inner cell. The codegen emits a `_scrml_reactive_set`
+    // call inside the dispatcher branch for the composite arm.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { A, B }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=.Title>
+    <engine for=PlayMode initial=.A>
+      <A rule=.B>
+        <button onclick=ab()>A→B</>
+      </>
+      <B rule=.A>
+        <button onclick=ba()>B→A</>
+      </>
+    </>
+  </>
+</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug2-init-on-entry");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // Composite-arm post-mount block emits.
+    expect(clientJs).toContain("§51.0.Q.1 composite-arm post-mount");
+    // Inner cell reset to its initial=.
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"A"\)/);
+    // Tree-shake: WITHOUT history on this state-child, no synth-cell
+    // reference and no pending-restore branch.
+    expect(clientJs).not.toContain("_appMode_Playing_history");
+    expect(clientJs).not.toContain("_scrml_engine_pending_history_restore[\"appMode\"]");
+  });
+
+  test("Bug #2: composite-arm with history emits restore-or-init branches", () => {
+    // When the composite carries `history`, postMountJs emits BOTH branches:
+    // restore from synth cell when pending-restore flag matches, fall through
+    // to inner.initial= otherwise (empty-history fallback per §51.0.N).
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { A, B }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.A>
+      <A rule=.B>
+        <button onclick=ab()>A→B</>
+      </>
+      <B rule=.A>
+        <button onclick=ba()>B→A</>
+      </>
+    </>
+  </>
+  <Paused rule=.Playing.history></>
+</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug2-history-restore-branch");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+    // Restore branch references the synth-cell key.
+    expect(clientJs).toContain("_appMode_Playing_history");
+    expect(clientJs).toContain("_scrml_engine_pending_history_restore[\"appMode\"]");
+    // Both restore (synth cell value) and fallback (inner initial) emit.
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*_saved\)/);
+    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"A"\)/);
   });
 });
 

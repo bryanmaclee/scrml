@@ -240,14 +240,22 @@ export function collectC12EngineDecls(fileAST: any): EngineDeclLike[] {
 
   // Fallback: manual walk over markup children. Mirrors B16's
   // `collectAllEngineDecls` shape in `compiler/src/dependency-graph.ts`.
+  // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — also recurses into engine-decl
+  // `bodyChildren` to discover NESTED engines per §51.0.Q.1. Mirrors
+  // `collectHoisted` recursion (ast-builder.js:9819) so the fallback path
+  // agrees with the canonical machineDecls path on nested-engine discovery.
   const nodes: any[] = (fileAST.nodes as any[] | undefined)
     ?? (fileAST.ast?.nodes as any[] | undefined)
     ?? [];
   function visit(list: any[]): void {
     for (const node of list) {
       if (!node || typeof node !== "object") continue;
-      if (node.kind === "engine-decl" && isC12EngineDecl(node)) {
-        out.push(node);
+      if (node.kind === "engine-decl") {
+        if (isC12EngineDecl(node)) out.push(node);
+        // Descend into bodyChildren to find nested engines (§51.0.Q.1).
+        if (Array.isArray((node as { bodyChildren?: unknown[] }).bodyChildren)) {
+          visit((node as { bodyChildren?: unknown[] }).bodyChildren as unknown[] as any[]);
+        }
       }
       if (Array.isArray(node.children)) visit(node.children);
     }
@@ -1259,7 +1267,100 @@ function buildEngineArms(decl: EngineDeclLike): import("./emit-variant-guard.ts"
     const attrs = match.attrs ?? match.attributes ?? [];
     const payloadBindings = extractPayloadBindingsFromAttrs(attrs);
     const body = filterRenderableChildren(match.children ?? []);
-    arms.push({ tag, payloadBindings, body });
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — composite state-child post-mount JS.
+    // On outer-entry into a composite state-child (one whose body contains a
+    // nested `<engine>`), per spec §51.0.Q.1: "the inner engine is
+    // initialized (per its `initial=`) — OR restored from the history cell
+    // if the composite carries `history` and the cell is non-empty (§51.0.N)."
+    //
+    // Implementation: after the dispatcher writes innerHTML (which puts the
+    // inner mount slot in DOM) and the arm wire-fn binds reactive surfaces,
+    // postMountJs writes the inner cell. The write goes through
+    // `_scrml_reactive_set` (not the engine write-guard) — by design: this
+    // is a synth-controlled bootstrap, not a user-driven transition; the
+    // rule= contract on the inner engine does not gate composite entry.
+    // The set fires inner dispatcher's subscriber → inner mount innerHTML
+    // updates to match the new inner variant.
+    //
+    // History-restore form (`@outerVar = .Tag.history`) routes through the
+    // synth-pending-restore flag set by the WRITE-site lowering (B-c).
+    // When the flag is set for this (outerVar, tag) pair AND the synth
+    // cell is non-null, we restore the saved variant instead of resetting
+    // to inner.initial=. Empty-history fallback per §51.0.N: cell null →
+    // fall through to initial=.
+    const inner = findInnerEngineForStateChild(decl, tag);
+    let postMountJs: string | undefined = undefined;
+    if (inner) {
+      const innerVar = inner.varName;
+      const outerVar = meta.varName;
+      const synthCellKey = engineHistoryCellKey(outerVar, tag);
+      // The inner's initial variant — resolved at codegen time via
+      // resolveEngineInitialVariant. Fallback to first stateChildren tag
+      // (mirrors emit-machines.ts default behavior when initial= omitted).
+      let innerInitial: string | null = null;
+      // Discover inner's engineMeta. We walk the matched arm's children
+      // for the inner engine-decl (mirrors findInnerEngineForStateChild
+      // logic; both should yield the same node).
+      function findInnerDecl(nodes: unknown[]): EngineDeclLike | null {
+        for (const n of nodes) {
+          if (!n || typeof n !== "object") continue;
+          const node = n as { kind?: unknown; children?: unknown };
+          if (node.kind === "engine-decl") return node as EngineDeclLike;
+          if (Array.isArray((node as { children?: unknown[] }).children)) {
+            const r = findInnerDecl((node as { children?: unknown[] }).children!);
+            if (r) return r;
+          }
+        }
+        return null;
+      }
+      const innerDecl = findInnerDecl(match.children ?? []);
+      if (innerDecl && innerDecl._record?.engineMeta) {
+        innerInitial = resolveEngineInitialVariant(innerDecl._record.engineMeta);
+      }
+      if (innerInitial) {
+        // A5-7 Wave 2.4 tree-shake — only emit the history-restore branch
+        // when THIS state-child carries `history`. Without history, the
+        // composite-arm post-mount logic reduces to an unconditional
+        // reset-to-initial (per §51.0.Q.1 lifecycle: "On outer entry … the
+        // inner engine is initialized (per its `initial=`)"). The
+        // history-restore branch references the synth-cell key, which the
+        // tree-shake-emit-no-history test explicitly asserts must NOT
+        // appear when no engine in the file declares `history`.
+        const scHasHistory = sc.historyAttr === true;
+        const lines: string[] = [];
+        lines.push(`// §51.0.Q.1 composite-arm post-mount: init/restore inner engine ${innerVar}`);
+        lines.push(`{`);
+        if (scHasHistory) {
+          // History-restore: check the pending-restore flag set by
+          // `_scrml_engine_direct_set` / `_scrml_engine_advance` when the
+          // write was the structured `.Tag.history` form. Read+clear.
+          lines.push(`  var _pending = (typeof _scrml_engine_pending_history_restore === "object" && _scrml_engine_pending_history_restore !== null)`);
+          lines.push(`    ? _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}] : null;`);
+          lines.push(`  if (_pending === ${JSON.stringify(tag)}) {`);
+          lines.push(`    delete _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}];`);
+          lines.push(`    var _saved = _scrml_state[${JSON.stringify(synthCellKey)}];`);
+          lines.push(`    if (_saved != null) {`);
+          lines.push(`      _scrml_reactive_set(${JSON.stringify(innerVar)}, _saved);`);
+          lines.push(`    } else {`);
+          lines.push(`      _scrml_reactive_set(${JSON.stringify(innerVar)}, ${JSON.stringify(innerInitial)});`);
+          lines.push(`    }`);
+          lines.push(`  } else {`);
+          lines.push(`    _scrml_reactive_set(${JSON.stringify(innerVar)}, ${JSON.stringify(innerInitial)});`);
+          lines.push(`  }`);
+        } else {
+          // No history on this state-child — unconditional reset-to-initial.
+          // Tree-shake: NO reference to `_<outer>_<tag>_history` synth cell.
+          lines.push(`  _scrml_reactive_set(${JSON.stringify(innerVar)}, ${JSON.stringify(innerInitial)});`);
+        }
+        lines.push(`}`);
+        postMountJs = lines.join("\n");
+      }
+    }
+    if (postMountJs) {
+      arms.push({ tag, payloadBindings, body, postMountJs });
+    } else {
+      arms.push({ tag, payloadBindings, body });
+    }
   }
   return arms;
 }
@@ -1582,7 +1683,7 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
  * site (table emission precedes any code that writes the engine variable;
  * see `emit-client.ts` orchestration).
  */
-export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: string): string[] {
+export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: string, isHistoryRestore: boolean = false): string[] {
   const lines: string[] = [
     `// §51.0.F engine direct-write hook: ${binding.varName} (${binding.forType})`,
   ];
@@ -1646,6 +1747,27 @@ export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: s
       historyArg = `, ${binding.historyMapName}`;
     }
   }
+  // A5-7 Wave 2.4 (§51.0.Q.1 + §51.0.N, Bug #2): when the write was the
+  // structured `.Variant.history` form, pass `true` as the trailing (8th
+  // positional) arg so the runtime sets the pending-history-restore flag
+  // BEFORE firing the outer subscriber. The dispatcher's composite-arm
+  // postMountJs reads + clears the flag. Tree-shake: when not a history-
+  // restore form, omit the arg (runtime treats undefined as not-set).
+  // Position-padding: when earlier args are missing, fill them with null.
+  let historyRestoreArg = ``;
+  if (isHistoryRestore) {
+    if (!hasTimers && !hasIdle && !hasInternal && !hasHistory) {
+      historyRestoreArg = `, null, null, null, null, true`;
+    } else if (!hasIdle && !hasInternal && !hasHistory) {
+      historyRestoreArg = `, null, null, null, true`;
+    } else if (!hasInternal && !hasHistory) {
+      historyRestoreArg = `, null, null, true`;
+    } else if (!hasHistory) {
+      historyRestoreArg = `, null, true`;
+    } else {
+      historyRestoreArg = `, true`;
+    }
+  }
   // B17.4 + A5-7 Wave 2.2 — when the engine has hooks, capture pre-write
   // variant + fire hooks AFTER the runtime helper commits the write (Q2
   // split timing: body fires post-write so observers read the new value).
@@ -1659,11 +1781,11 @@ export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: s
     const fnName = engineHookFiringFunctionName(binding.varName);
     lines.push(`{`);
     lines.push(`  const __scrml_engine_from = _scrml_reactive_get(${JSON.stringify(binding.varName)});`);
-    lines.push(`  const __scrml_engine_external = _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg}${historyArg});`);
+    lines.push(`  const __scrml_engine_external = _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg}${historyArg}${historyRestoreArg});`);
     lines.push(`  if (__scrml_engine_external) ${fnName}(__scrml_engine_from, _scrml_reactive_get(${JSON.stringify(binding.varName)}));`);
     lines.push(`}`);
   } else {
-    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg}${historyArg});`);
+    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg}${historyArg}${historyRestoreArg});`);
   }
   return lines;
 }

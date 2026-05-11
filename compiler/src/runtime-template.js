@@ -2358,6 +2358,21 @@ function _scrml_engine_check_transition(currentVariant, target, table) {
   return false;
 }
 
+// A5-7 Wave 2.4 (§51.0.Q.1 + §51.0.N, Bug #2) — pending-history-restore flag map.
+// Keyed by outer engine var name; value is the target outer variant tag when the
+// most recent write to that outer var was the .Tag.history structured target
+// form. Read+cleared by the outer dispatcher's composite-arm postMountJs after
+// the inner mount slot lands in DOM. When the flag is set AND the synth cell
+// _scrml_state["_<outerVar>_<targetTag>_history"] is non-null, the inner cell
+// restores from the synth cell. When unset OR cell null, the inner falls
+// through to its initial= attribute (per §51.0.N empty-history fallback).
+//
+// The flag is SET by _scrml_engine_direct_set / _scrml_engine_advance when
+// the codegen-emitted 8th arg (isHistoryRestore) is true. The flag is CLEARED
+// by the dispatcher (postMountJs) immediately after consumption so subsequent
+// non-history-form writes don't accidentally restore.
+const _scrml_engine_pending_history_restore = {};
+
 // A5-7 Wave 2.3 (§51.0.N, Bug #3) — Capture the inner-engine variant into
 // the synth history cell on an external outer-exit. Called by both
 // _scrml_engine_advance and _scrml_engine_direct_set in the EXTERNAL branch
@@ -2384,7 +2399,7 @@ function _scrml_engine_history_capture_on_exit(varName, current, target, history
   _scrml_state[cellKey] = _scrml_state[innerVarName];
 }
 
-function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, internalTable, historyMap) {
+function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, internalTable, historyMap, isHistoryRestore) {
   // timersTable (optional, A5-4): per-state-tag timer-config map for engines
   // with at least one <onTimeout>. When provided, clear-on-exit fires before
   // the cell write and arm-on-entry fires after. When null/undefined (engines
@@ -2437,6 +2452,14 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   // at the moment of exit (not after any side effect of the write). Tree-
   // shaken via null historyMap.
   if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, current, target, historyMap);
+  // A5-7 Wave 2.4 §51.0.Q.1 — set the pending-history-restore flag BEFORE
+  // the cell write (which fires the outer dispatcher's subscriber). The
+  // dispatcher composite-arm postMountJs reads the flag, restores inner
+  // from the synth cell when set, and clears the flag. Tree-shaken via
+  // isHistoryRestore default-false.
+  if (isHistoryRestore === true && historyMap != null && historyMap[target] != null) {
+    _scrml_engine_pending_history_restore[varName] = target;
+  }
   // Clear timers attached to the OUTGOING state-child first (timers belong
   // to the from-state — the spec semantics are "armed on entry, cleared on
   // exit"). Re-entering the same state-child clears + re-arms below.
@@ -2452,7 +2475,7 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   return true;
 }
 
-function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry, internalTable, historyMap) {
+function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry, internalTable, historyMap, isHistoryRestore) {
   // timersTable: see _scrml_engine_advance above.
   // idleEntry (A5-6 §51.0.R): per-engine event-timeout watchdog config or null.
   // internalTable (A5-7 Wave 2.2 §51.0.O): per-engine internal transition
@@ -2480,6 +2503,11 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
   // A5-7 Wave 2.3 §51.0.N — history capture on EXTERNAL outer-exit (see
   // _scrml_engine_advance for rationale). Tree-shaken via null historyMap.
   if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, current, target, historyMap);
+  // A5-7 Wave 2.4 §51.0.Q.1 — pending-history-restore flag (see
+  // _scrml_engine_advance for rationale).
+  if (isHistoryRestore === true && historyMap != null && historyMap[target] != null) {
+    _scrml_engine_pending_history_restore[varName] = target;
+  }
   if (timersTable != null) _scrml_engine_clear_state_timers(varName, current, timersTable);
   _scrml_reactive_set(varName, target);
   if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);

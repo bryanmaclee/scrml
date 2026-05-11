@@ -107,6 +107,23 @@ export interface VariantArm {
   tag: string;
   payloadBindings: string[];
   body: any[];
+  /**
+   * A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — optional JS snippet emitted into
+   * the dispatcher branch immediately AFTER the wire-fn call and dispose
+   * assignment. Used by engine consumer (emit-engine.ts) to inject inner-
+   * engine initialization / history-restore logic for composite arms.
+   *
+   * Snippet contract:
+   *   - Runs in scope where `_mount` is the arm's mount element, `_payload`
+   *     is the payload positional array (or null), `_tag` is the variant tag.
+   *   - May reference module-scope helpers (`_scrml_engine_direct_set`,
+   *     `_scrml_state`, history-map identifiers, etc.).
+   *   - SHOULD NOT throw. Defensive — wrap risky operations.
+   *
+   * Empty / undefined when arm is non-composite. Used only by the engine
+   * consumer; future match-block consumer may use it for its own purposes.
+   */
+  postMountJs?: string;
 }
 
 /**
@@ -667,6 +684,17 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`  ${head} (_tag === ${JSON.stringify(arm.tag)}) {`);
     dispatcherLines.push(`    _mount.innerHTML = ${fnName}(${args});`);
     dispatcherLines.push(`    ${disposeVar} = ${wireFnName}(_mount);`);
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — postMountJs injection point.
+    // The engine consumer populates this for composite arms with inner-
+    // engine init / history-restore logic. Branch-uniform skip when arm
+    // is non-composite (postMountJs is undefined or empty). Indented to
+    // match the if-block body for readability.
+    if (typeof arm.postMountJs === "string" && arm.postMountJs.length > 0) {
+      for (const ln of arm.postMountJs.split("\n")) {
+        if (ln.length > 0) dispatcherLines.push(`    ${ln}`);
+        else dispatcherLines.push("");
+      }
+    }
     dispatcherLines.push(`  }`);
   }
   // No default branch — when _tag does not match any arm, the mount keeps

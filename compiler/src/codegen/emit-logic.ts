@@ -867,11 +867,53 @@ function _collectMarkupTreeReactiveDeps(markupNode: any, opts: EmitLogicOpts): S
 }
 
 /**
+ * A5-7 Wave 2.4 (§51.0.N + §51.0.Q.1, Bug #2) — Detect the structured
+ * `.Variant.history` write form on an assignment's RHS ExprNode. Returns:
+ *   - `{ isHistoryForm: true, strippedNode }` when the RHS is a member-expr
+ *     whose property is exactly `"history"` AND whose object is a variant-
+ *     bearing expression (an `ident` starting with "." OR a member-expr like
+ *     `EnumType.Variant`). The `strippedNode` is the inner variant expression
+ *     to emit as the runtime value (the `.history` suffix is metadata, not a
+ *     JS lookup).
+ *   - `{ isHistoryForm: false, strippedNode: null }` otherwise.
+ *
+ * Examples:
+ *   - `@v = .Playing.history`                → strip → `.Playing`        (T)
+ *   - `@v = AppMode.Playing.history`         → strip → `AppMode.Playing` (T)
+ *   - `@v = AppMode.Playing`                 → no strip                  (F)
+ *   - `@v = computeVariant()`                → no strip                  (F)
+ *   - `@v = AppMode.Playing.history.foo`     → no strip (property!='history' on outer) (F)
+ */
+function detectHistoryForm(initExpr: any): { isHistoryForm: boolean; strippedNode: any } {
+  if (!initExpr || typeof initExpr !== "object") return { isHistoryForm: false, strippedNode: null };
+  if (initExpr.kind !== "member") return { isHistoryForm: false, strippedNode: null };
+  if (initExpr.property !== "history") return { isHistoryForm: false, strippedNode: null };
+  const inner = initExpr.object;
+  if (!inner || typeof inner !== "object") return { isHistoryForm: false, strippedNode: null };
+  // Variant-bearing: either a bare-dot ident (".Variant" on the auto-resolved
+  // engine-type path) or a member-expr on the enum type ("EnumType.Variant").
+  // We accept any inner expression here — runtime lookup of `.history` on a
+  // bare string is `undefined`, so the only legal source of `.history` is
+  // the structured target form. Conservative: also accept member-on-member
+  // (e.g. `Outer.AppMode.Playing.history`).
+  if (inner.kind === "ident" && typeof inner.name === "string" && inner.name.startsWith(".")) {
+    return { isHistoryForm: true, strippedNode: inner };
+  }
+  if (inner.kind === "member") {
+    return { isHistoryForm: true, strippedNode: inner };
+  }
+  return { isHistoryForm: false, strippedNode: null };
+}
+
+/**
  * Emit a reactive_set, or a transition guard if the variable is machine-bound.
  * @param rawName — the original variable name (for machineBindings lookup)
  * @param encodedName — the encoded name (for reactive_set key)
+ * @param isHistoryRestore — A5-7 Wave 2.4 §51.0.N+Q.1 (Bug #2). TRUE when the
+ *   write expression was the structured `.Variant.history` form. Threaded to
+ *   `emitEngineWriteGuard` so the runtime helper sets the pending-restore flag.
  */
-function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogicOpts, rawName?: string, isInit?: boolean): string {
+function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogicOpts, rawName?: string, isInit?: boolean, isHistoryRestore?: boolean): string {
   if (!isInit) {
     const lookupName = rawName ?? encodedName;
     const binding = opts.machineBindings?.get(lookupName) ?? null;
@@ -887,7 +929,7 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
     const engineBinding = opts.engineBindings?.get(lookupName) ?? null;
     if (engineBinding) {
       const { emitEngineWriteGuard } = require("./emit-engine.ts");
-      return emitEngineWriteGuard(engineBinding, valueExpr).join("\n");
+      return emitEngineWriteGuard(engineBinding, valueExpr, isHistoryRestore === true).join("\n");
     }
   }
   // §51.12 — on init of a machine-bound var whose machine has temporal
@@ -1052,8 +1094,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (target && target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@") && assignNode.op === "=") {
             const bareName = target.name.slice(1);
             if (opts.engineBindings.get(bareName)) {
-              const rhsStr = emitExpr(assignNode.value as any, _makeExprCtx(opts));
-              return _emitReactiveSet(bareName, rhsStr, opts, bareName) + ";";
+              // A5-7 Wave 2.4 (§51.0.N + §51.0.Q.1, Bug #2): detect the
+              // structured `.Variant.history` form. When present, strip the
+              // `.history` suffix from the value expression (so the runtime
+              // value is just the bare variant tag) AND mark this write as a
+              // history-restore so the runtime sets the pending flag for the
+              // dispatcher's composite-arm postMountJs to consume.
+              const histDet = detectHistoryForm(assignNode.value as any);
+              const valueExprNode = histDet.isHistoryForm ? histDet.strippedNode : (assignNode.value as any);
+              const rhsStr = emitExpr(valueExprNode, _makeExprCtx(opts));
+              return _emitReactiveSet(bareName, rhsStr, opts, bareName, /*isInit*/ false, histDet.isHistoryForm) + ";";
             }
           }
         }
@@ -1647,10 +1697,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // binding IS a reassignment.
       const isInit = hasTypeAnnotation || hasMachineBinding ||
         !(opts.machineBindings?.has(node.name) || opts.engineBindings?.has(node.name));
+      // A5-7 Wave 2.4 (§51.0.N + §51.0.Q.1, Bug #2): for engine-bound
+      // reassignments, detect the `.Variant.history` structured target form
+      // on the initExpr. When present, strip the `.history` suffix (so the
+      // emitted runtime value is the bare variant tag) AND propagate the
+      // history-restore flag to `_emitReactiveSet` so the runtime helper
+      // sets the pending-restore flag for the dispatcher's composite-arm
+      // postMountJs to consume. Only applies when NOT init (reassignment
+      // path) AND the var is in engineBindings.
+      const _isEngineReassign = !isInit && !!opts.engineBindings?.has(node.name);
+      const _histDet = _isEngineReassign ? detectHistoryForm(node.initExpr) : { isHistoryForm: false, strippedNode: null };
+      const _effectiveInitExpr = _histDet.isHistoryForm ? _histDet.strippedNode : node.initExpr;
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
-        const rewrittenInit = emitExpr(node.initExpr, _makeExprCtx(opts));
-        const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr, node.initExpr);
+        const rewrittenInit = emitExpr(_effectiveInitExpr, _makeExprCtx(opts));
+        const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr, _effectiveInitExpr);
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "undefined") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
@@ -1658,10 +1719,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
-            _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr, node.initExpr), opts, node.name, isInit),
+            _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr, _effectiveInitExpr), opts, node.name, isInit, _histDet.isHistoryForm),
           ].join("\n"));
         }
-        return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
+        return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit, _histDet.isHistoryForm));
       }
       // Phase 4 simplified fallback: initExpr is missing (rare)
       const rewrittenInit = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
