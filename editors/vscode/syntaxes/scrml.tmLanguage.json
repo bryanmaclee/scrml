@@ -9,6 +9,7 @@
     { "include": "#meta-block" },
     { "include": "#sql-block" },
     { "include": "#logic-block" },
+    { "include": "#test-block" },
     { "include": "#css-inline-block" },
     { "include": "#style-block" },
     { "include": "#error-effect-block" },
@@ -70,6 +71,7 @@
         { "include": "#logic-block" },
         { "include": "#sql-block" },
         { "include": "#meta-block" },
+        { "include": "#test-block" },
         { "include": "#css-inline-block" },
         { "include": "#string-double" },
         { "include": "#string-single" },
@@ -77,14 +79,17 @@
         { "include": "#reactive-variable" },
         { "include": "#lift-keyword" },
         { "include": "#match-keyword" },
+        { "include": "#multi-word-keywords" },
+        { "include": "#builtin-functions" },
         { "include": "#logic-keywords" },
         { "include": "#function-declaration" },
         { "include": "#arrow-function" },
         { "include": "#tilde-keyword" },
+        { "include": "#invalid-equality" },
         { "include": "#operator" },
         { "include": "#number" },
         { "include": "#boolean" },
-        { "include": "#null-undefined" },
+        { "include": "#invalid-null-undefined" },
         { "include": "#markup-self-closing" },
         { "include": "#markup-close-tag" },
         { "include": "#markup-open-tag" },
@@ -245,10 +250,67 @@
       "patterns": [
         { "include": "#protect-attribute" },
         { "include": "#bind-attribute" },
+        { "include": "#class-binding-attribute" },
         { "include": "#event-attribute" },
         { "include": "#if-attribute" },
+        { "include": "#engine-attribute" },
+        { "include": "#reactivity-attribute" },
+        { "include": "#predicate-bareword-attribute" },
         { "include": "#generic-attribute" }
       ]
+    },
+
+    "class-binding-attribute": {
+      "comment": "Reactive single-class toggle: class:active=@isActive or class:foo=${cond}.",
+      "match": "(class:[a-zA-Z][a-zA-Z0-9_-]*)(=)(@[a-zA-Z_][a-zA-Z0-9_.]*|\\$\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "support.type.property-name.class-binding.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "variable.other.reactive.scrml" }
+      }
+    },
+
+    "engine-attribute": {
+      "comment": "Engine + state-child + onTransition/onTimeout/onIdle attribute slots per SPEC §4.15 / §51.0.",
+      "patterns": [
+        {
+          "comment": "internal:rule= prefix on composite state-children (§51.0.O).",
+          "match": "(internal:rule)(=)",
+          "captures": {
+            "1": { "name": "support.type.property-name.engine.internal-rule.scrml" },
+            "2": { "name": "punctuation.separator.key-value.scrml" }
+          }
+        },
+        {
+          "comment": "Bareword engine/state-child attributes (history, pinned, once, all).",
+          "match": "\\b(history|pinned|once|all)\\b(?=[\\s>]|/>|$)",
+          "name": "support.type.property-name.engine.bare.scrml"
+        },
+        {
+          "comment": "Named engine + state-child + onTransition + onTimeout + onIdle attributes.",
+          "match": "\\b(rule|effect|initial|for|to|from|after|derived|default|var|name|of|on|topic|reconnect|auth|csrf|sessionExpiry|loginRedirect|tables|src|db|interval|running|delay|index|id|key|each)(=)",
+          "captures": {
+            "1": { "name": "support.type.property-name.engine.scrml" },
+            "2": { "name": "punctuation.separator.key-value.scrml" }
+          }
+        }
+      ]
+    },
+
+    "reactivity-attribute": {
+      "comment": "S79 / SPEC §6.13 reactivity attributes — debounced=Nms, throttled=Nms (literal or computed).",
+      "match": "\\b(debounced|throttled)(=)(\\$\\{[^}]*\\}[a-z]+|[0-9]+(?:ms|s|m|h))",
+      "captures": {
+        "1": { "name": "support.type.property-name.reactivity.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "constant.numeric.duration.scrml" }
+      }
+    },
+
+    "predicate-bareword-attribute": {
+      "comment": "Universal-core predicate bareword attribute on a state-decl (Shape 2): <userName req length(>=2)>. 14 predicates per SPEC §55.1.",
+      "match": "\\b(req|length|pattern|min|max|gt|lt|gte|lte|eq|neq|oneOf|notIn)\\b(?=\\s|\\(|>|/>|$)",
+      "name": "support.type.property-name.predicate.scrml"
     },
 
     "protect-attribute": {
@@ -357,17 +419,62 @@
 
     "logic-keywords": {
       "name": "keyword.control.scrml",
-      "match": "\\b(let|const|lin|var|if|else|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct)\\b"
+      "match": "\\b(let|const|lin|var|if|else|else-if|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct|engine|machine|errors|onTransition|onTimeout|onIdle|channel|schema|program|not|req|fail|pinned|reset|derived|history|given|partial|when|transaction|test-bind)\\b"
     },
 
     "top-level-keywords": {
       "name": "keyword.control.scrml",
-      "match": "\\b(type|enum|struct|import|export|from|as)\\b"
+      "match": "\\b(type|enum|struct|import|export|from|as|engine|machine|channel|schema|program|pinned)\\b"
+    },
+
+    "multi-word-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.absence.scrml",
+          "match": "\\b(is\\s+not|is\\s+some)\\b"
+        }
+      ]
+    },
+
+    "builtin-functions": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.scrml",
+          "match": "\\b(cancelTimer|parseVariant|serialize|reflect|broadcast|disconnect|cleanup|flush|animationFrame|registerMessages|advance|tryAdvance|isOk|isError)\\b"
+        }
+      ]
+    },
+
+    "test-block": {
+      "name": "meta.embedded.block.test.scrml",
+      "begin": "~\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.block.test.begin.scrml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.block.test.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#logic-block-inner" }
+      ]
+    },
+
+    "invalid-equality": {
+      "comment": "scrml has no === or !==; E-EQ-004 forbids both. Flag visually so devs see the issue before compile time.",
+      "name": "invalid.illegal.equality.scrml",
+      "match": "===|!=="
+    },
+
+    "invalid-null-undefined": {
+      "comment": "scrml has no null/undefined tokens; SPEC §42 + E-SYNTAX-042 forbids both. The absence sentinel is `not`. Flag visually.",
+      "name": "invalid.illegal.null-undefined.scrml",
+      "match": "\\b(null|undefined)\\b"
     },
 
     "operator": {
       "name": "keyword.operator.scrml",
-      "match": "===|!==|==|!=|<=|>=|&&|\\|\\||\\?\\?|\\+\\+|--|\\*\\*|=>|::|->|\\.\\.\\."
+      "match": "==|!=|<=|>=|&&|\\|\\||\\?\\?|\\+\\+|--|\\*\\*|=>|::|->|\\.\\.\\."
     },
 
     "string-double": {
@@ -431,7 +538,8 @@
     },
 
     "null-undefined": {
-      "name": "constant.language.scrml",
+      "comment": "Retained for back-compat — see #invalid-null-undefined for the v0.2.0 flag-as-illegal behavior. This pattern is no longer referenced from the active include set.",
+      "name": "invalid.illegal.null-undefined.scrml",
       "match": "\\b(null|undefined)\\b"
     }
   }
