@@ -3655,9 +3655,12 @@ ${
             const mwCsrf = getMWAttr("csrf")
             const mwRatelimit = getMWAttr("ratelimit")
             const mwHeaders = getMWAttr("headers")
+            const mwIdempotencyStore = getMWAttr("idempotency-store")
+            const mwIdempotencyTTL = getMWAttr("idempotency-ttl")
+            const mwBatchInListCap = getMWAttr("batch-in-list-cap")
 
-            if (mwCors != null || mwLog != null || mwCsrf != null || mwRatelimit != null || mwHeaders != null) {
-                middlewareConfig = { cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders }
+            if (mwCors != null || mwLog != null || mwCsrf != null || mwRatelimit != null || mwHeaders != null || mwIdempotencyStore != null || mwIdempotencyTTL != null || mwBatchInListCap != null) {
+                middlewareConfig = { cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore, idempotencyTTL: mwIdempotencyTTL, batchInListCap: mwBatchInListCap }
             }
 
             if (mwCsrf == "on" && !authConfig) {
