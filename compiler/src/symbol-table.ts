@@ -1616,10 +1616,11 @@ function walkResolveAtNames(
     // inherits the surrounding scope (file scope at engine-decl site +
     // engine var registered by PASS 10.A).
     //
-    // Per Phase 0 SURVEY §3, payload-binding scope injection (e.g., `<Error
-    // msg>` introducing `msg` as a local) is DEFERRED to a follow-up — body
-    // content can resolve top-level + engine cells today; payload bindings
-    // would surface as B3 unresolveds, which is a known follow-on.
+    // Payload-binding scope injection (e.g., `<Error msg>` introducing `msg`
+    // as a local in the arm body sub-scope) is handled by the type-system
+    // pass (`type-system.ts` engine-decl case, S81 Phase A10 follow-on).
+    // B3 here resolves `@`-prefixed identifiers (state cells); bare-identifier
+    // references inside arm bodies (e.g., `${msg}`) are TS territory.
     if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
       walkResolveAtNames(anyN.bodyChildren, currentScope, visited, errors, readPos);
     }

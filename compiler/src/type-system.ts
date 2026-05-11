@@ -75,6 +75,56 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree } from "./expression-parser.ts";
 
 // ---------------------------------------------------------------------------
+// Engine state-child grammar metadata (S81 Phase A10 follow-on)
+// ---------------------------------------------------------------------------
+//
+// These constants are duplicated from `compiler/src/codegen/emit-variant-guard.ts`
+// (`ENGINE_STATE_CHILD_RESERVED_ATTRS`, `STATE_CHILD_STRUCTURAL_TAGS`,
+// `extractPayloadBindingsFromAttrs`) because TS is upstream of codegen — TS
+// cannot import from `./codegen/*`. Both consumers describe the same grammar:
+// the set of state-child opener attrs that are reserved by the engine surface
+// (rule/history/internal:rule/effect) vs. payload-binding barewords, and the
+// set of structural-element tags that may appear inside a state-child body
+// but are NOT renderable markup.
+//
+// TODO (post-S81): when `EngineStateChildEntry.payloadBindings` is populated
+// by SYM PASS 11 (B15 walker) per primer §13.7, both consumers can be
+// retired in favor of reading `entry.payloadBindings` directly, and the
+// structural-tag set can move to a shared `engine-statechild-grammar.ts`
+// module. For now the duplication is deliberate + minimized.
+
+const TS_ENGINE_STATE_CHILD_RESERVED_ATTRS = new Set<string>([
+  "rule",
+  "history",
+  "internal:rule",
+  "effect",
+]);
+
+const TS_STATE_CHILD_STRUCTURAL_TAGS = new Set<string>([
+  "onTimeout",
+  "onTransition",
+  "onIdle",
+  "engine",
+  "machine",
+]);
+
+function extractEngineStateChildPayloadBindings(attrs: unknown): string[] {
+  if (!Array.isArray(attrs)) return [];
+  const out: string[] = [];
+  for (const a of attrs) {
+    if (!a || typeof a !== "object") continue;
+    const name = (a as { name?: unknown }).name;
+    if (typeof name !== "string") continue;
+    if (TS_ENGINE_STATE_CHILD_RESERVED_ATTRS.has(name)) continue;
+    const value = (a as { value?: unknown }).value;
+    if (value && typeof value === "object" && (value as { kind?: unknown }).kind === "absent") {
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Internal span type (mirrors ast.ts Span)
 // ---------------------------------------------------------------------------
 
@@ -5357,32 +5407,98 @@ function annotateNodes(
       }
 
       // ------------------------------------------------------------------
-      // Engine declaration — Phase A10 boundary.
+      // Engine declaration — Phase A10 body-walk re-enablement (S81).
       //
       // Pre-A10, engine state-child bodies were stored only as `rulesRaw:
       // string` and engine-decl fell through to the `default` case which
       // happily iterated ALL array fields (recursing into nothing because
       // there were none). Phase A10 (S78, 2026-05-10) added a walkable
-      // `bodyChildren: ASTNode[]` field to engine-decl. The default-case
-      // recursion would walk that field too — but engine state-child body
-      // content includes structural elements (`<onTimeout after=10s/>`,
-      // `<onTransition to=.X/>`, `<onIdle .../>`) whose attribute values
-      // are non-standard for general markup parsing (`after=10s` reads as
-      // an unquoted identifier in standard attribute resolution and fires
-      // E-SCOPE-001).
+      // `bodyChildren: ASTNode[]` field to engine-decl + the codegen
+      // structural-element filter (`STATE_CHILD_STRUCTURAL_TAGS` in
+      // `codegen/emit-variant-guard.ts`). The gate documented at this
+      // case pre-S81 was "wait for the filter before TS descends so
+      // `after=10s` on `<onTimeout>` doesn't fire false E-SCOPE-001."
       //
-      // Until Phase A10 Phase 3+4 lands body-render codegen + the
-      // structural-element filter at the emission boundary, TS should NOT
-      // descend into engine state-child body content. A1b walker passes
-      // (PASS 3, PASS 6, PASS 13, PASS 14) handle body-content scope/cell
-      // validation in their own targeted descents — TS is intentionally
-      // out of scope. This mirrors the deferral pattern for `component-def`
-      // bodies (which are also raw text + invisible to TS) per the B17
-      // deferral comment in symbol-table.ts.
+      // S81 closes both deferrals together (per S78 hand-off §"Phase A10
+      // deferred items" + hand-off-80 priority #1):
+      //   1. Body-walk re-enablement: TS descends into bodyChildren and
+      //      walks each state-child markup node, applying the structural-
+      //      element filter (`TS_STATE_CHILD_STRUCTURAL_TAGS` above) so
+      //      `<onTimeout>`/`<onTransition>`/`<onIdle>`/nested engines are
+      //      skipped — their non-standard attrs no longer surface.
+      //   2. Payload-binding scope injection: when a state-child opener
+      //      carries a bareword attr (e.g., `<Error msg rule=.Loading>`),
+      //      `msg` is bound into a fresh arm scope BEFORE the body is
+      //      walked. References to `msg` inside `${msg}` interpolations
+      //      / event handlers / nested markup resolve cleanly. The arm
+      //      scope is popped after the body is walked, so payload names
+      //      don't leak to sibling arms or outside the engine.
       //
-      // Engine-decl produces no ResolvedType-bearing computation today;
-      // returning tAsIs() matches what the default case did pre-A10.
+      // Pattern mirrors the `match-arm-block` case above (B20 payload-
+      // destructure binding). Payload-binding type is `tAsIs` for v1 —
+      // variant payload type inference is post-B20 territory (would
+      // require resolving the engine's `for=Type` to its enum decl,
+      // then matching state-child tag → variant → payload field types).
+      // Today the binding just unblocks scope resolution.
+      //
+      // Gate references: A1b walker passes (PASS 3, PASS 6, PASS 13,
+      // PASS 14) already descend into bodyChildren for their own
+      // diagnostics (E-SCOPE-001 on `@cell` references, E-DERIVED-VALUE-
+      // MUTATE, E-RESET-INVALID-TARGET, E-CHANNEL-INSIDE-PROGRAM); those
+      // walkers DON'T currently inject payload bindings — `${@cell}`
+      // refs work because they're `@`-prefixed (state cells, not locals).
+      // Bare-identifier refs (`${msg}`) are TS territory and require the
+      // body-walk re-enablement landing here.
       case "engine-decl": {
+        const bodyChildren = (n as { bodyChildren?: ASTNodeLike[] }).bodyChildren;
+        if (Array.isArray(bodyChildren)) {
+          for (const child of bodyChildren) {
+            if (!child || typeof child !== "object") continue;
+            if (child.kind !== "markup") {
+              // Non-markup children (rare — typically logic blocks if any
+              // appear at body-top-level) walk via the default path.
+              visitNode(child);
+              continue;
+            }
+            // Structural-element children at body top-level (e.g., file-
+            // scope `<onIdle>` if reachable here) — skip; their attrs are
+            // engine-grammar-specific, not general-markup-resolvable.
+            const tag = (child as { tag?: string }).tag;
+            if (typeof tag === "string" && TS_STATE_CHILD_STRUCTURAL_TAGS.has(tag)) {
+              continue;
+            }
+            // State-child markup node (e.g., `<Idle>`, `<Error msg>`).
+            // Push an arm scope, inject payload bindings, walk renderable
+            // children (filtering out structural elements at every level).
+            const armLabel = typeof tag === "string" ? tag : "anon";
+            scopeChain.push(`engine-arm:${armLabel}:${nodeKey(child)}`);
+            const payloadNames = extractEngineStateChildPayloadBindings(
+              (child as { attrs?: unknown; attributes?: unknown }).attrs
+                ?? (child as { attributes?: unknown }).attributes,
+            );
+            for (const binding of payloadNames) {
+              if (typeof binding === "string" && binding.length > 0) {
+                scopeChain.bind(binding, { kind: "variable", resolvedType: tAsIs() });
+              }
+            }
+            // Walk the state-child's children, filtering structural-element
+            // descendants at every level so e.g. a nested `<onTransition>`
+            // inside the arm body doesn't fire false E-SCOPE-001.
+            const armChildren = (child as { children?: unknown }).children;
+            if (Array.isArray(armChildren)) {
+              for (const grand of armChildren) {
+                if (!grand || typeof grand !== "object") continue;
+                const grandTag = (grand as { kind?: string; tag?: string });
+                if (grandTag.kind === "markup" && typeof grandTag.tag === "string"
+                    && TS_STATE_CHILD_STRUCTURAL_TAGS.has(grandTag.tag)) {
+                  continue;
+                }
+                visitNode(grand as ASTNodeLike);
+              }
+            }
+            scopeChain.pop();
+          }
+        }
         resolvedType = tAsIs();
         break;
       }
