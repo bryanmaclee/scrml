@@ -5869,6 +5869,24 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // node exists for *discoverability* in walkers; consumers that need
       // parameter detail can re-tokenize `raw` or read the export-decl raw.
       if ((exportNode.exportKind === "function" || exportNode.exportKind === "fn") && exportNode.exportedName) {
+        // S81 D1 (2026-05-11): propagate `.idempotent()` modifier per §19.9.7.
+        // The inline function-decl parser detects this token-by-token at the
+        // post-`)` cursor position (ast-builder.js ~6610 for `function`, ~6803
+        // for `fn`). The synth path here doesn't tokenize — it stubs a
+        // function-decl from the export raw. Without propagation, downstream
+        // walkers seeing the synthetic node won't know about the modifier; the
+        // monotonicity classifier (Stage 5.5) reads `fnNode.idempotentModifier`
+        // and falls back to over-emitting idempotency keys. Detect the
+        // modifier here via a targeted regex on the export raw — `)` followed
+        // by optional whitespace + `.idempotent()` per §19.9.7 normative
+        // placement (between `)` and return-type / route / body).
+        // Pattern: `) . idempotent ( )` — `\s*` between every token so the
+        // tokenized raw form (space-padded between every token, see test
+        // output of buildAST.ast.nodes[].raw) matches the same regex as the
+        // source-form `).idempotent()`. The non-export inline parser at
+        // ~6610 reads from the token stream directly so doesn't need this
+        // tolerance.
+        const hasIdempotentModifier = /\)\s*\.\s*idempotent\s*\(\s*\)/.test(rawStr);
         nodes.push({
           id: ++counter.next,
           kind: "function-decl",
@@ -5878,6 +5896,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           fnKind: exportNode.exportKind,
           isServer,
           ...(isPure ? { isPure: true } : {}),
+          ...(hasIdempotentModifier ? { idempotentModifier: true } : {}),
           isGenerator: false,
           canFail: false,
           raw: rawStr,
