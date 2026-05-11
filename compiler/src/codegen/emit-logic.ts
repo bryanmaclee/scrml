@@ -111,6 +111,28 @@ interface EmitLogicOpts {
    */
   enginesWithHooks?: Set<string> | null;
   /**
+   * A5-4 (§51.0.M): Engine variable names with at least one `<onTimeout>`
+   * element. Threaded to EmitExprContext so `.advance()` call sites in
+   * reactive-assignment RHS / logic statement emission pass the timer-table
+   * arg through to `_scrml_engine_advance`.
+   */
+  enginesWithOnTimeout?: Set<string> | null;
+  /**
+   * A5-6 (§51.0.R, S77): Engine variable names that declare `<onIdle>`.
+   * Threaded to EmitExprContext so `.advance()` call sites in reactive-
+   * assignment RHS / logic statement emission pass the watchdog-config
+   * arg through to `_scrml_engine_advance`.
+   */
+  enginesWithIdleWatchdog?: Set<string> | null;
+  /**
+   * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix): Engine variable names with at least
+   * one state-child carrying `internal:rule=`. Threaded to EmitExprContext
+   * so `.advance()` call sites in reactive-assignment RHS / logic statement
+   * emission pass the internal transition table identifier as the trailing
+   * arg to `_scrml_engine_advance`.
+   */
+  enginesWithInternalRules?: Set<string> | null;
+  /**
    * Emission boundary. "server" swaps DOM-oriented lowerings for their
    * server-context equivalents (e.g. `lift <expr>` in a server-fn body
    * becomes `return <expr>;` instead of a `_scrml_lift(() =>
@@ -388,6 +410,13 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // B17.4 (§51.0.H) — engines that have effect=/<onTransition> arms;
     // gates the hook-firing wrap on `.advance()` emissions.
     enginesWithHooks: opts.enginesWithHooks ?? null,
+    // A5-4 (§51.0.M), A5-6 (§51.0.R), A5-7 Wave 2.2 (§51.0.O) — engines
+    // with on-timeout / idle-watchdog / internal-rule surfaces. Threaded so
+    // `.advance()` calls inside reactive-assignment RHS / logic statements
+    // emit the timer / idle / internal-table args correctly.
+    enginesWithOnTimeout: opts.enginesWithOnTimeout ?? null,
+    enginesWithIdleWatchdog: opts.enginesWithIdleWatchdog ?? null,
+    enginesWithInternalRules: opts.enginesWithInternalRules ?? null,
   };
 }
 

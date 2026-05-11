@@ -92,6 +92,17 @@ export interface EmitExprContext {
    * `<onIdle>` omit the arg.
    */
   enginesWithIdleWatchdog?: Set<string> | null;
+  /**
+   * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — engine variable names in the file's
+   * scope that have at least one state-child carrying `internal:rule=`. When
+   * the engine var is in this set, `emitEngineAdvanceCall` passes the per-
+   * engine internal transition table identifier as the trailing (6th)
+   * argument to `_scrml_engine_advance` so the runtime checks the internal
+   * write-path first. Tree-shaken: engines without any `internal:rule=` omit
+   * the arg (runtime treats undefined as null and falls through to the
+   * canonical external path).
+   */
+  enginesWithInternalRules?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -544,7 +555,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       // engine watchdog config identifier as the 5th arg. Tree-shake when
       // engine has no <onIdle>.
       const hasIdle = ctx.enginesWithIdleWatchdog ? ctx.enginesWithIdleWatchdog.has(bareName) : false;
-      return emitEngineAdvanceCall(bareName, targetExpr, hasHooks, hasOnTimeout, hasIdle);
+      // A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — pass hasInternal so the helper
+      // threads the per-engine internal transition table identifier as the
+      // trailing (6th) arg. Tree-shake when engine has no `internal:rule=`.
+      const hasInternal = ctx.enginesWithInternalRules ? ctx.enginesWithInternalRules.has(bareName) : false;
+      return emitEngineAdvanceCall(bareName, targetExpr, hasHooks, hasOnTimeout, hasIdle, hasInternal);
     }
   }
 

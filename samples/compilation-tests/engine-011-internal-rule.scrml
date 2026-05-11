@@ -20,19 +20,24 @@
 // COMPOSITE per §34 — on a non-composite state-child the inner/outer
 // distinction is meaningless.
 //
-// v1 implementation state (2026-05-11):
+// v1 implementation state (2026-05-11, Wave 2.2 SHIPPED):
 //   - Parser captures `internalRule: EngineRuleForm` on each state-child
 //     (engine-statechild-parser.ts).
 //   - Typer (SYM PASS 11) fires E-INTERNAL-RULE-NOT-COMPOSITE on non-
 //     composite state-children carrying internal:rule=.
-//   - Codegen flattens internal:rule= today (emit-engine.ts:76 comment —
-//     Wave 4 follow-on for distinct internal-vs-external write paths).
-//     Both rule= and internal:rule= currently produce the same external
-//     transition behavior. Test coverage at typer level is in
-//     compiler/tests/unit/a5-3-typer-walker.test.js §A5-3.2.
+//   - Codegen emits a sibling __scrml_engine_<varName>_internal_transitions
+//     const per engine with any internal:rule= (tree-shaken when absent).
+//   - Runtime _scrml_engine_direct_set / _scrml_engine_advance check the
+//     internal table FIRST. Internal-legal targets take the internal path
+//     (cell value updates with no subscriber fire → variant-guard dispatcher
+//     does not re-render the arm → inner engine lifecycle preserved; no
+//     <onTransition> hook fires; no timer arm/clear; no history-cell write).
+//     Both helpers return true on external commit, false on internal —
+//     codegen gates the post-commit hook-firing call on that boolean.
+//   - Test coverage: compiler/tests/unit/engine-a7-internal-rule.test.js §1-§7
+//     (typer at §A5-3.2, codegen at §7).
 //
-// This sample exists to ensure the canonical internal:rule= shape parses
-// + type-checks clean and to be the surface adopters reach for.
+// This sample is the canonical internal:rule= surface adopters reach for.
 
 <program>
 ${

@@ -2316,14 +2316,24 @@ function _scrml_message_for(error, fieldName, cellName) {
 //   - _scrml_engine_check_transition(currentVariant, target, table)
 //       Pure boolean predicate. Looks up the from-variant entry; legal iff
 //       the entry is "*" OR includes the target. No side effects.
-//   - _scrml_engine_advance(varName, target, table)
+//   - _scrml_engine_advance(varName, target, table, timersTable, idleEntry, internalTable)
 //       For \`@var.advance(.X)\`. Reads current variant, checks, throws with
 //       "asserted advance failed" framing on failure, else sets the cell.
-//       Per §51.0.G "loud failure" semantics.
-//   - _scrml_engine_direct_set(varName, target, table)
+//       Per §51.0.G "loud failure" semantics. Returns true on EXTERNAL
+//       transition, false on INTERNAL transition (§51.0.O). Codegen gates
+//       the post-commit hook-firing call on the return value.
+//   - _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry, internalTable)
 //       For \`@var = .X\`. Reads current variant, checks, throws plain
 //       E-ENGINE-INVALID-TRANSITION on failure, else sets the cell.
-//       Per §51.0.F direct-write enforcement (Move 12).
+//       Per §51.0.F direct-write enforcement (Move 12). Returns the same
+//       external/internal boolean as _scrml_engine_advance.
+//
+// A5-7 Wave 2.2 (§51.0.O): when internalTable is non-null AND the target is
+// internal-legal from the current variant, the internal write-path runs:
+// the cell value updates WITHOUT firing subscribers, no <onTransition>
+// hooks fire, no timer clear/arm, no history-cell write. The helper returns
+// false so the codegen-emitted post-commit hook-firing call is skipped.
+// The idle watchdog DOES reset (§51.0.R — internal is engine activity).
 //
 // Both throwing helpers funnel through _scrml_engine_check_transition so
 // the lookup logic exists in exactly one place. Codegen emits ONE call per
@@ -2337,12 +2347,40 @@ function _scrml_engine_check_transition(currentVariant, target, table) {
   return false;
 }
 
-function _scrml_engine_advance(varName, target, table, timersTable, idleEntry) {
+function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, internalTable) {
   // timersTable (optional, A5-4): per-state-tag timer-config map for engines
   // with at least one <onTimeout>. When provided, clear-on-exit fires before
   // the cell write and arm-on-entry fires after. When null/undefined (engines
   // with zero <onTimeout>), the timer paths short-circuit (no-op).
+  // internalTable (optional, A5-7 Wave 2.2 §51.0.O): per-engine INTERNAL
+  // transition table. When provided AND the target is internal-legal from
+  // the current variant, the internal write-path runs (no subscriber fire,
+  // no <onTransition>, no timer arm/clear, no history) and the helper returns
+  // false. Otherwise (or when internalTable is null), the canonical external
+  // path runs and returns true. Codegen gates the post-commit hook-firing
+  // call on this boolean.
   const current = _scrml_reactive_get(varName);
+  // A5-7 Wave 2.2 — internal-path check FIRST. Per §51.0.O an internal
+  // transition is preferred when both an internal rule and an external rule
+  // permit the same target (canonical example: composite self-loop
+  // internal-rule=.Playing from .Playing; if the user also has
+  // rule=.Playing for some reason, the internal semantics win — they're
+  // the more-specific "stay in place" intent).
+  if (internalTable != null && _scrml_engine_check_transition(current, target, internalTable)) {
+    // §51.0.O internal write path:
+    //   - Update the cell value WITHOUT firing subscribers (variant-guard
+    //     dispatcher would tear down + re-create the arm body, including the
+    //     inner engine — which is exactly what internal:rule= avoids).
+    //   - SKIP <onTransition> hook fire (helper returns false; codegen gates).
+    //   - SKIP timer clear/arm (timers are state-child-scoped; the composite
+    //     did not exit — timers stay armed).
+    //   - SKIP history-cell write (§51.0.N — internal does not write history).
+    //   - DO reset the idle watchdog: §51.0.R counts ANY transition as
+    //     engine activity, internal included.
+    _scrml_state[varName] = target;
+    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+    return false;
+  }
   if (!_scrml_engine_check_transition(current, target, table)) {
     throw new Error(
       "E-ENGINE-INVALID-TRANSITION: asserted advance failed. " +
@@ -2362,12 +2400,25 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry) {
   // transition (machine-wide event-timeout). idleEntry is null when the
   // engine declares no <onIdle> (tree-shake).
   if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+  return true;
 }
 
-function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry) {
+function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry, internalTable) {
   // timersTable: see _scrml_engine_advance above.
   // idleEntry (A5-6 §51.0.R): per-engine event-timeout watchdog config or null.
+  // internalTable (A5-7 Wave 2.2 §51.0.O): per-engine internal transition
+  // table or null. Returns true on external transition, false on internal.
   const current = _scrml_reactive_get(varName);
+  // A5-7 Wave 2.2 — internal-path check FIRST (see _scrml_engine_advance).
+  if (internalTable != null && _scrml_engine_check_transition(current, target, internalTable)) {
+    // §51.0.O internal write path — see _scrml_engine_advance for full
+    // rationale. Side-effect-free write: update cell value, do NOT fire
+    // subscribers, do NOT touch timers, do NOT touch history. Idle watchdog
+    // resets per §51.0.R (internal IS engine activity).
+    _scrml_state[varName] = target;
+    if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+    return false;
+  }
   if (!_scrml_engine_check_transition(current, target, table)) {
     throw new Error(
       "E-ENGINE-INVALID-TRANSITION: illegal direct write to engine variable. " +
@@ -2379,6 +2430,7 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
   _scrml_reactive_set(varName, target);
   if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);
   if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
+  return true;
 }
 
 // ---------------------------------------------------------------------------

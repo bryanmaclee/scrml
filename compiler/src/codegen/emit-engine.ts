@@ -72,9 +72,13 @@ type EngineRuleForm =
 
 /**
  * The B15 EngineStateChildEntry shape (mirrored locally for the same reason
- * as EngineRuleForm above). Fields beyond `tag` and `rule` are ignored by
- * C12 — historyAttr/internalRule/onTimeoutElements/innerEngines all flow to
- * later Wave-4 sub-steps.
+ * as EngineRuleForm above). Fields beyond `tag` and `rule` are consumed by:
+ *   - `internalRule` — A5-7 Wave 2.2 §51.0.O (shipped) — see
+ *     `emitEngineInternalTransitionTable` + `engineHasInternalRules`.
+ *   - `onTimeoutElements` — A5-4 §51.0.M (shipped) — see
+ *     `emitEngineTimersTable` + `engineHasOnTimeoutElements`.
+ *   - `historyAttr` — deferred (Wave 2.3 / Bug #3).
+ *   - `innerEngines` — deferred (Wave 2.4 / Bug #2).
  */
 /**
  * B17.4 — `<onTransition>` element shape (mirrors `OnTransitionEntry` in
@@ -297,6 +301,28 @@ export function engineIdleWatchdogName(varName: string): string {
 }
 
 /**
+ * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — Compute the per-engine INTERNAL
+ * transition-table const name. Format:
+ * `__scrml_engine_<varName>_internal_transitions`. Sibling to the canonical
+ * `__scrml_engine_<varName>_transitions` table; emitted ONLY when at least
+ * one state-child in the engine declares `internal:rule=` (tree-shake — see
+ * `engineHasInternalRules`).
+ *
+ * Runtime branch: `_scrml_engine_direct_set` and `_scrml_engine_advance`
+ * check the internal table first (when non-null). If the target is
+ * internal-legal from the current variant, the internal write-path runs:
+ * cell value updates WITHOUT firing subscribers, NO `<onTransition>` hooks
+ * fire, NO timer arm/clear, NO history-cell write. The helpers return
+ * `false` so the codegen-emitted post-commit hook-firing call is skipped.
+ *
+ * When the engine has no `internal:rule=` declarations, codegen passes
+ * `null` for this arg at every write-guard / advance site (tree-shake).
+ */
+export function engineInternalTransitionTableName(varName: string): string {
+  return `__scrml_engine_${varName}_internal_transitions`;
+}
+
+/**
  * A5-6 (§51.0.R, S77) — Does this engine have a `<onIdle>` watchdog?
  *
  * The check inspects `engineMeta.idleWatchdog` (the per-engine entry
@@ -307,6 +333,45 @@ export function engineIdleWatchdogName(varName: string): string {
 export function engineHasIdleWatchdog(meta: EngineMetadata): boolean {
   const ent = meta.idleWatchdog;
   return ent != null && typeof ent.to === "string" && ent.to.length > 0;
+}
+
+/**
+ * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — Does this engine have at least one
+ * state-child carrying `internal:rule=`?
+ *
+ * The check inspects `engineMeta.stateChildren[].internalRule` — populated by
+ * the structural parser (`engine-statechild-parser.ts:1481`) and validated by
+ * SYM PASS 11 (composite-only legality + variant-set membership).
+ *
+ * Tree-shake control: when this returns false, codegen:
+ *   - emits NO `__scrml_engine_<varName>_internal_transitions` const
+ *   - passes `null` for the internalTable arg at every write-guard /
+ *     `.advance()` site
+ *   - the runtime branches treat null internalTable as "no internal path
+ *     exists" and fall through to the canonical external path
+ *
+ * Counts only entries with `internalRule.kind !== "absent"`. Legacy-arrow /
+ * parse-error rule kinds are NOT internal rules (B15 fires diagnostics for
+ * those), so this predicate is conservative — false means definitely no
+ * internal write-path needed.
+ */
+export function engineHasInternalRules(meta: EngineMetadata): boolean {
+  const sc = meta.stateChildren;
+  if (!Array.isArray(sc) || sc.length === 0) return false;
+  for (const child of sc) {
+    if (!child) continue;
+    const internal = child.internalRule;
+    if (
+      internal &&
+      typeof internal.kind === "string" &&
+      internal.kind !== "absent" &&
+      internal.kind !== "legacy-arrow" &&
+      internal.kind !== "parse-error"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -592,6 +657,58 @@ export function emitEngineTransitionTable(meta: EngineMetadata): string[] {
   return lines;
 }
 
+/**
+ * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — Emit the static INTERNAL transition-
+ * table const for one engine.
+ *
+ * Shape (only emitted when `engineHasInternalRules(meta)` is true):
+ *   const __scrml_engine_appMode_internal_transitions = Object.freeze({
+ *     "Title":   [],
+ *     "Playing": ["Playing"],
+ *   });
+ *
+ * Same shape as the canonical external transitions table — keyed by from-
+ * variant tag, value is the encoded internal rule entry (single / multi /
+ * wildcard `"*"` / terminal `[]`). State-children WITHOUT `internal:rule=`
+ * get the terminal `[]` entry, meaning "no internal transitions from this
+ * variant."
+ *
+ * Tree-shake (caller responsibility): `emitEngineSubstrate` skips this
+ * emission entirely when `engineHasInternalRules` returns false. Callers
+ * MUST gate on `engineHasInternalRules` BEFORE calling this — passing a
+ * meta with all-absent internalRules will still emit the table, but with
+ * every entry being `[]` (defensive: contract is "skip when no internal
+ * rules"; the function itself is permissive about input).
+ *
+ * @param meta — the engine's `engineMeta` (from `_record.engineMeta`)
+ * @returns lines of JS code; empty array if `stateChildren` is empty
+ */
+export function emitEngineInternalTransitionTable(meta: EngineMetadata): string[] {
+  const sc = meta.stateChildren;
+  if (!Array.isArray(sc) || sc.length === 0) return [];
+
+  const tableName = engineInternalTransitionTableName(meta.varName);
+  const lines: string[] = [];
+
+  lines.push(`// §51.0.O internal transition table for engine ${meta.varName}: ${meta.forType}`);
+  lines.push(`const ${tableName} = Object.freeze({`);
+
+  const entries: string[] = [];
+  for (const child of sc) {
+    if (!child || typeof child.tag !== "string" || child.tag.length === 0) {
+      continue;
+    }
+    const key = JSON.stringify(child.tag);
+    const internalRule = child.internalRule ?? { kind: "absent" } as EngineRuleForm;
+    const value = encodeRuleEntry(internalRule);
+    entries.push(`  ${key}: ${value}`);
+  }
+  lines.push(entries.join(",\n"));
+  lines.push(`});`);
+
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // Variant cell init emission — §51.0.C auto-declared variable
 // ---------------------------------------------------------------------------
@@ -741,6 +858,12 @@ export function emitEngineSubstrate(fileAST: any): string[] {
   for (const decl of decls) {
     const meta = decl._record!.engineMeta!;
     const tableLines = emitEngineTransitionTable(meta);
+    // A5-7 Wave 2.2 §51.0.O — per-engine INTERNAL transition table. Emitted
+    // adjacent to the canonical external table; sibling to timers/idle.
+    // Empty when no state-child declares `internal:rule=` (tree-shake).
+    const internalTableLines = engineHasInternalRules(meta)
+      ? emitEngineInternalTransitionTable(meta)
+      : [];
     // A5-4 §51.0.M — per-engine `<onTimeout>` timer-config table. Emitted
     // BEFORE the cell init so the initial-arm call inside cellLines can
     // reference the table identifier. Empty when the engine has no
@@ -750,9 +873,16 @@ export function emitEngineSubstrate(fileAST: any): string[] {
     // Sibling to timers table; emitted only when engine declares `<onIdle>`.
     const idleLines = emitEngineIdleWatchdog(meta);
     const cellLines = emitEngineVariantCellInit(meta);
-    if (tableLines.length === 0 && timersLines.length === 0 && idleLines.length === 0 && cellLines.length === 0) continue;
+    if (
+      tableLines.length === 0 &&
+      internalTableLines.length === 0 &&
+      timersLines.length === 0 &&
+      idleLines.length === 0 &&
+      cellLines.length === 0
+    ) continue;
     if (lines.length > 0) lines.push("");
     for (const l of tableLines) lines.push(l);
+    for (const l of internalTableLines) lines.push(l);
     for (const l of timersLines) lines.push(l);
     for (const l of idleLines) lines.push(l);
     for (const l of cellLines) lines.push(l);
@@ -1058,6 +1188,21 @@ export interface EngineBindingInfo {
   /** A5-6 — Compile-time-baked per-engine watchdog config const identifier
    *  (per §51.0.R). Always populated when `hasIdleWatchdog === true`. */
   idleWatchdogName?: string;
+  /** A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — TRUE when at least one state-child
+   *  in this engine declares `internal:rule=`. When TRUE, write-guard +
+   *  advance emission pass the per-engine internal transition table identifier
+   *  as a trailing (6th) argument to `_scrml_engine_direct_set` /
+   *  `_scrml_engine_advance`. The runtime checks the internal table FIRST
+   *  (when non-null); if the target is internal-legal from the current
+   *  variant, the internal write-path runs (no subscriber fire, no
+   *  `<onTransition>`, no timer arm/clear, no history). When FALSE, the 6th
+   *  arg is omitted (runtime treats undefined as null and falls through to
+   *  the external path — tree-shake). */
+  hasInternalRules?: boolean;
+  /** A5-7 Wave 2.2 — Compile-time-baked per-engine internal transition
+   *  table const identifier (per §51.0.O). Always populated when
+   *  `hasInternalRules === true`. */
+  internalTableName?: string;
 }
 
 /**
@@ -1078,6 +1223,7 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
     const meta = decl._record?.engineMeta;
     if (!meta || typeof meta.varName !== "string" || meta.varName.length === 0) continue;
     const hasOT = engineHasOnTimeoutElements(meta);
+    const hasIR = engineHasInternalRules(meta);
     out.set(meta.varName, {
       varName: meta.varName,
       forType: meta.forType,
@@ -1097,6 +1243,16 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
       hasIdleWatchdog: engineHasIdleWatchdog(meta),
       idleWatchdogName: engineHasIdleWatchdog(meta)
         ? engineIdleWatchdogName(meta.varName)
+        : undefined,
+      // A5-7 Wave 2.2 (§51.0.O, Bug #4 fix): bind whether any state-child
+      // declares `internal:rule=`. When true, both write-guard and advance
+      // emitters pass the internal transition table identifier as the
+      // trailing (6th) argument so the runtime checks the internal path
+      // first and skips subscriber-fire / `<onTransition>` / timers / history
+      // when the target is internal-legal.
+      hasInternalRules: hasIR,
+      internalTableName: hasIR
+        ? engineInternalTransitionTableName(meta.varName)
         : undefined,
     });
   }
@@ -1128,36 +1284,60 @@ export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: s
   // outgoing timers + arms incoming ones around the cell write. When the
   // engine has zero <onTimeout> elements, omit the arg (the runtime treats
   // undefined as null and short-circuits — tree-shake).
-  const timersArg = (binding.hasOnTimeoutElements && binding.timersTableName)
-    ? `, ${binding.timersTableName}`
-    : ``;
+  const hasTimers = !!(binding.hasOnTimeoutElements && binding.timersTableName);
+  const hasIdle = !!(binding.hasIdleWatchdog && binding.idleWatchdogName);
+  const hasInternal = !!(binding.hasInternalRules && binding.internalTableName);
+  const timersArg = hasTimers ? `, ${binding.timersTableName}` : ``;
   // A5-6 (§51.0.R, S77): when the engine declares <onIdle>, pass the
   // watchdog config identifier as the 5th arg so the runtime resets the
   // watchdog after the commit. When timersArg is empty AND idleArg is
   // non-empty, fill the timers position with `null` to keep arg positions
   // aligned.
   let idleArg = ``;
-  if (binding.hasIdleWatchdog && binding.idleWatchdogName) {
-    if (timersArg === ``) {
+  if (hasIdle) {
+    if (!hasTimers) {
       idleArg = `, null, ${binding.idleWatchdogName}`;
     } else {
       idleArg = `, ${binding.idleWatchdogName}`;
     }
   }
-  // B17.4 — when the engine has hooks, capture pre-write variant + fire hooks
-  // AFTER the runtime helper commits the write (Q2 split timing: body fires
-  // post-write so observers read the new value). Wrapping in a block keeps
-  // `__scrml_from_X` namespaces local — multiple writes to different engines
-  // in the same statement-level scope don't collide.
+  // A5-7 Wave 2.2 (§51.0.O, Bug #4 fix): when ANY state-child declares
+  // `internal:rule=`, pass the per-engine internal transition table
+  // identifier as the trailing (6th positional) arg. The runtime checks
+  // this table FIRST; if the target is internal-legal from the current
+  // variant, the internal write-path runs (no subscriber fire, no hooks,
+  // no timer arm/clear, no history). The helper returns `false` so the
+  // post-commit hook-firing call below is skipped. Position-padding: when
+  // timersArg or idleArg is missing, fill the slot with `null` to keep
+  // positional arg alignment.
+  let internalArg = ``;
+  if (hasInternal) {
+    if (!hasTimers && !hasIdle) {
+      internalArg = `, null, null, ${binding.internalTableName}`;
+    } else if (!hasIdle) {
+      internalArg = `, null, ${binding.internalTableName}`;
+    } else {
+      internalArg = `, ${binding.internalTableName}`;
+    }
+  }
+  // B17.4 + A5-7 Wave 2.2 — when the engine has hooks, capture pre-write
+  // variant + fire hooks AFTER the runtime helper commits the write (Q2
+  // split timing: body fires post-write so observers read the new value).
+  // §51.0.O: hooks fire ONLY on EXTERNAL transitions. The runtime helper
+  // returns `true` when the transition was external, `false` when internal
+  // — the post-commit hook fire is gated on that boolean.
+  // Wrapping in a block keeps `__scrml_engine_from` namespaces local —
+  // multiple writes to different engines in the same statement-level scope
+  // don't collide.
   if (binding.hasHooks === true) {
     const fnName = engineHookFiringFunctionName(binding.varName);
     lines.push(`{`);
     lines.push(`  const __scrml_engine_from = _scrml_reactive_get(${JSON.stringify(binding.varName)});`);
-    lines.push(`  _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg});`);
-    lines.push(`  ${fnName}(__scrml_engine_from, _scrml_reactive_get(${JSON.stringify(binding.varName)}));`);
+    lines.push(`  const __scrml_engine_external = _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg});`);
+    lines.push(`  if (__scrml_engine_external) ${fnName}(__scrml_engine_from, _scrml_reactive_get(${JSON.stringify(binding.varName)}));`);
     lines.push(`}`);
   } else {
-    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg});`);
+    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg}${idleArg}${internalArg});`);
   }
   return lines;
 }
@@ -1206,6 +1386,7 @@ export function emitEngineAdvanceCall(
   hasHooks?: boolean,
   hasOnTimeout?: boolean,
   hasIdle?: boolean,
+  hasInternal?: boolean,
 ): string {
   const tableName = engineTransitionTableName(varName);
   // A5-4 (§51.0.M): when this engine has at least one `<onTimeout>` element,
@@ -1230,14 +1411,33 @@ export function emitEngineAdvanceCall(
       idleArg = `, ${engineIdleWatchdogName(varName)}`;
     }
   }
-  const baseCall = `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName}${timersArg}${idleArg})`;
-  // B17.4 — when the engine has hooks, wrap with capture-pre + hook-fire-post.
+  // A5-7 Wave 2.2 (§51.0.O, Bug #4 fix): when this engine has any
+  // `internal:rule=` declaration, pass the per-engine internal transition
+  // table identifier as the trailing (6th positional) argument. Runtime
+  // checks the internal table first; if internal-legal, takes the internal
+  // path (no subscriber fire, no hooks). Position-padding: fill missing
+  // earlier slots with `null` to keep alignment.
+  let internalArg = ``;
+  if (hasInternal === true) {
+    const internalName = engineInternalTransitionTableName(varName);
+    if (timersArg === `` && idleArg === ``) {
+      internalArg = `, null, null, ${internalName}`;
+    } else if (idleArg === ``) {
+      internalArg = `, null, ${internalName}`;
+    } else {
+      internalArg = `, ${internalName}`;
+    }
+  }
+  const baseCall = `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName}${timersArg}${idleArg}${internalArg})`;
+  // B17.4 + A5-7 Wave 2.2 — when the engine has hooks, wrap with capture-pre +
+  // hook-fire-post. The runtime helper returns `true` for external transitions,
+  // `false` for internal — gate the post-commit hook fire on that boolean.
   // IIFE keeps the wrap valid in any expression position (statement, sub-expr,
   // arg position, etc.). Tree-shaken when hasHooks is false (or undefined).
   if (hasHooks === true) {
     const fnName = engineHookFiringFunctionName(varName);
     const varKey = JSON.stringify(varName);
-    return `(() => { const __scrml_engine_from = _scrml_reactive_get(${varKey}); ${baseCall}; ${fnName}(__scrml_engine_from, _scrml_reactive_get(${varKey})); })()`;
+    return `(() => { const __scrml_engine_from = _scrml_reactive_get(${varKey}); const __scrml_engine_external = ${baseCall}; if (__scrml_engine_external) ${fnName}(__scrml_engine_from, _scrml_reactive_get(${varKey})); })()`;
   }
   return baseCall;
 }
@@ -2438,6 +2638,36 @@ export function collectEnginesWithIdleWatchdog(fileAST: unknown): Set<string> {
   for (const decl of collectC14DerivedEngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (meta && engineHasIdleWatchdog(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  return out;
+}
+
+/**
+ * A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — Build a Set of engine var names that
+ * have at least one state-child carrying `internal:rule=`. Used by emit-expr.ts
+ * + emit-reactive-wiring.ts + emit-functions.ts to gate the internal-table arg
+ * insertion at `.advance()` and direct-write sites. Mirrors
+ * `collectEnginesWithIdleWatchdog` shape exactly. Includes BOTH non-derived
+ * (C12-scope) and derived (C14-scope) engines.
+ *
+ * Per §51.0.O — `internal:rule=` is legal only on composite state-children
+ * (non-composite case fires E-INTERNAL-RULE-NOT-COMPOSITE at typer). This
+ * collector trusts the typer fired any necessary diagnostics; it just gates
+ * codegen-time emission based on the presence of internal:rule= structurally.
+ */
+export function collectEnginesWithInternalRules(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const decl of collectC12EngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasInternalRules(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  for (const decl of collectC14DerivedEngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasInternalRules(meta) && typeof meta.varName === "string") {
       out.add(meta.varName);
     }
   }

@@ -146,7 +146,7 @@ export function extractInitExpr(stmt: ASTNode): string {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -172,6 +172,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(enginesWithHooks && enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
     ...(enginesWithOnTimeout && enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
     ...(enginesWithIdleWatchdog && enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}),
+    ...(enginesWithInternalRules && enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}),
     ...(returnTypeAnnotation ? { returnTypeAnnotation, enclosingFnName: enclosingFnName ?? null } : {}),
   };
 

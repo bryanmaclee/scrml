@@ -256,7 +256,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // C13 (§51.0.F + §51.0.G) — sibling map for new `<engine>`-form direct-write
   // hook + `.advance()` dispatch. Forked from `machineBindings` per C13 SURVEY
   // q1 (the new C12 table format and legacy TransitionRule[] do not merge cleanly).
-  const { buildEngineBindingsMap, collectEngineVarNames, collectEnginesWithHooks, collectEnginesWithOnTimeout, collectEnginesWithIdleWatchdog } = require("./emit-engine.ts");
+  const { buildEngineBindingsMap, collectEngineVarNames, collectEnginesWithHooks, collectEnginesWithOnTimeout, collectEnginesWithIdleWatchdog, collectEnginesWithInternalRules } = require("./emit-engine.ts");
   const engineBindings = buildEngineBindingsMap(fileAST);
   const engineVarNames: Set<string> = collectEngineVarNames(fileAST);
   // B17.4 (§51.0.H) — engines with hooks gate the wrap on `.advance()` /
@@ -269,6 +269,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // A5-6 (§51.0.R, S77) — engines that declare `<onIdle>` gate the watchdog-
   // config arg insertion at write sites; sibling to enginesWithOnTimeout.
   const enginesWithIdleWatchdog: Set<string> = collectEnginesWithIdleWatchdog(fileAST);
+  // A5-7 Wave 2.2 (§51.0.O, Bug #4 fix) — engines with at least one state-
+  // child carrying `internal:rule=` gate the internal-table arg insertion at
+  // write sites; sibling to enginesWithIdleWatchdog.
+  const enginesWithInternalRules: Set<string> = collectEnginesWithInternalRules(fileAST);
   // C2: build function-body registry once per file for transitive reactive-dep
   // extraction in derived-cell inits (closes SPEC §6.6.3 line 2470-2482
   // normative — deps tracked through fn calls). Mirrors the
@@ -285,9 +289,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const { buildTypeRegistry } = require("../type-system.ts");
     typeRegistry = buildTypeRegistry(typeDeclsForRegistry, [], { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 });
   }
-  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
-    ? { derivedNames, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}) }
-    : { encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}) };
+  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
+    ? { derivedNames, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}) }
+    : { encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl

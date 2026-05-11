@@ -383,30 +383,181 @@ describe("engine-a7-internal-rule §6 — internalRule absence shape", () => {
 // Wave-4 deferred behavior
 // ===========================================================================
 
-describe.skip("engine-a7-internal-rule §7 — distinct write path (Wave 4 deferral)", () => {
-  test("DEFERRED: internal:rule= write does NOT exit composite (inner engine lifecycle preserved)", () => {
+// ===========================================================================
+// §7. Distinct internal-vs-external write path codegen (Wave 2.2 — landed)
+//
+// Per SPEC §51.0.O. The three behavioral concerns:
+//   (a) inner-engine lifecycle preservation across internal: transition
+//   (b) outer <onTransition> exclusion on internal transition
+//   (c) history-cell write skip on internal transition (blocked on Bug #3)
+//
+// These tests assert the CODEGEN SHAPE — the deterministic compile-time
+// surface that runtime behavior rides on. Browser/JSDOM runtime verification
+// is a v2 follow-up via the same test path once the per-arm DOM scaffolding
+// is mountable from a unit-test harness; today the codegen contract IS the
+// regression anchor (the runtime helpers in runtime-template.js carry plain
+// JS semantics that match the contract — see §51.0.O comments inline).
+// ===========================================================================
+
+describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
+  test("internal:rule= emits per-engine internal transition table + threads to direct_set", () => {
     // Per SPEC §51.0.O: an internal transition does NOT exit the composite.
     // Inner engine's lifecycle is preserved — no re-init, no history write/read.
     //
-    // Per emit-engine.ts:76 comment, this distinct write-path codegen is a
-    // Wave 4 follow-on. Both rule= and internal:rule= currently produce the
-    // same external transition behavior.
+    // Codegen contract (Wave 2.2):
+    //   1. Engine with any internal:rule= emits a sibling const named
+    //      __scrml_engine_<varName>_internal_transitions with the same shape
+    //      as the canonical __scrml_engine_<varName>_transitions table —
+    //      keyed by from-variant tag, values are encoded internal-rule entries.
+    //   2. Direct-write call sites pass the internal-table identifier as the
+    //      trailing positional arg to _scrml_engine_direct_set so the runtime
+    //      can branch on internal vs external at write time.
+    //   3. The internal-table entry for a state-child WITHOUT internal:rule=
+    //      is the terminal `[]` (no internal targets from this state).
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=.Title internal:rule=.Playing>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+</>
+
+<button onclick=\${@appMode = AppMode.Playing}>Start</>
+<button onclick=\${@appMode = AppMode.Title}>Quit</>`;
+    const { errors, clientJs } = compileToClientJs(src, "ir-w22-tables");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    // (1) Internal transition table emitted as a sibling const.
+    expect(clientJs).toContain("__scrml_engine_appMode_internal_transitions");
+
+    // (2) Internal table entry for .Playing carries the internal target.
+    //     Shape: "Playing": ["Playing"] — self-loop preserving inner engine.
+    expect(clientJs).toMatch(/__scrml_engine_appMode_internal_transitions[\s\S]*?"Playing":\s*\[\s*"Playing"\s*\]/);
+
+    // (3) State-children WITHOUT internal:rule= encode as terminal `[]`.
+    expect(clientJs).toMatch(/__scrml_engine_appMode_internal_transitions[\s\S]*?"Title":\s*\[\s*\]/);
+
+    // (4) Canonical external transitions table is preserved (sanity — both
+    //     surfaces co-exist; the internal addition does not displace the
+    //     external one).
+    expect(clientJs).toContain("__scrml_engine_appMode_transitions");
+    expect(clientJs).toMatch(/__scrml_engine_appMode_transitions[\s\S]*?"Playing":\s*\[\s*"Title"\s*\]/);
+  });
+
+  test("<onTransition> on composite does NOT fire on internal transition (codegen gate)", () => {
+    // Per §51.0.O cross-ref to §51.0.H: <onTransition> handlers attached to a
+    // composite state-child do NOT fire on internal transitions. The runtime
+    // implements this by having _scrml_engine_direct_set / _scrml_engine_advance
+    // return a boolean (true=external, false=internal). Codegen wraps the
+    // engine-write site with a capture-pre + conditional hook-fire-post; the
+    // post-commit fire is gated on the boolean.
     //
-    // When the distinct write path lands, this test should assert (sketch):
-    //   const { clientJs } = compileToClientJs(...);
-    //   expect(clientJs).toMatch(/_scrml_engine_internal_set\(.*"Playing"/);
+    // Codegen contract:
+    //   - Direct-write hook-firing wrap: `const __scrml_engine_external =
+    //     _scrml_engine_direct_set(...); if (__scrml_engine_external)
+    //     __scrml_engine_<varName>_fire_hooks(...)`.
+    //   - The internal-transitions table identifier is threaded as the
+    //     trailing arg to direct_set, so the runtime branch is reachable.
+    //
+    // Test shape: place <onTransition to=.Title> in <Playing> — the hook fires
+    // on the EXTERNAL Playing → .Title transition (legal via canonical
+    // rule=.Title). Internal Playing → Playing (via internal:rule=.Playing)
+    // takes the INTERNAL branch and skips the hook fire.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=.Title internal:rule=.Playing>
+    <onTransition to=.Title>\${ console.log("external transition fired") }</>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+</>
+
+\${ function trigger() { @appMode = AppMode.Title } }`;
+    const { errors, clientJs } = compileToClientJs(src, "ir-w22-hooks");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    // Engine has a hook (effect= / <onTransition>); the wrap should be present.
+    expect(clientJs).toContain("__scrml_engine_appMode_fire_hooks");
+
+    // The wrap captures the boolean return and gates the hook-fire on it.
+    // The exact identifier name is __scrml_engine_external (set by codegen).
+    expect(clientJs).toMatch(/const __scrml_engine_external = _scrml_engine_direct_set\(/);
+    expect(clientJs).toMatch(/if \(__scrml_engine_external\) __scrml_engine_appMode_fire_hooks\(/);
+
+    // The internal-transitions table identifier must be threaded to the
+    // direct_set call site — otherwise the runtime can't reach the internal
+    // branch. The expected positional shape (with no timers / no idle but with
+    // internal-rules in scope): direct_set(name, value, externalTable, null,
+    // null, internalTable). Position-padding emits two `null` args before the
+    // internal-table identifier so positional alignment holds.
+    expect(clientJs).toMatch(/_scrml_engine_direct_set\([\s\S]*?__scrml_engine_appMode_internal_transitions\)/);
   });
 
-  test("DEFERRED: <onTransition> on composite does NOT fire on internal transition", () => {
-    // Per §51.0.O: <onTransition> handlers attached to the composite do NOT
-    // fire on internal transitions. Verifying requires the distinct internal
-    // write path to be emitted (Wave 4).
-  });
-
-  test("DEFERRED: history cell is NOT written on internal transition", () => {
+  test.skip("history cell is NOT written on internal transition (blocked on Bug #3)", () => {
     // Per §51.0.O cross-ref to §51.0.N: internal transitions don't write to
-    // the history cell (because the composite doesn't exit). Verifying
-    // requires both internal write path AND history synth-cell emission to
-    // be in place (both Wave 4).
+    // the history cell (because the composite doesn't exit). Verifying this
+    // codegen contract requires the history synth-cell emission to be in
+    // place — that's Bug #3 (history synth-cell), a separate Wave 2.3
+    // dispatch. The runtime path already honors the spec (the internal
+    // branch in _scrml_engine_direct_set does NOT call any history-write
+    // hook; when Bug #3 lands and adds the history-write hook to the
+    // EXTERNAL branch only, the internal branch's skip is by construction).
+    //
+    // This test stays .skip until Bug #3 ships. Once the history synth-cell
+    // is emitted, the assertion shape becomes (sketch):
+    //   const src = `... <Playing history rule=.Title internal:rule=.Playing> ...`;
+    //   const { clientJs } = compileToClientJs(src, "ir-w22-hist");
+    //   // Verify the history-write hook is gated on the EXTERNAL boolean
+    //   // (or equivalently: lives in the external branch of _scrml_engine_*_set).
+    //   expect(clientJs).toMatch(/if \(__scrml_engine_external\)[\s\S]*?_appMode_Playing_history/);
+  });
+
+  test("tree-shake — composite without internal:rule= emits NO internal-path metadata", () => {
+    // Per the codegen tree-shake contract: engines whose state-children have
+    // ZERO internal:rule= declarations emit NO __scrml_engine_<varName>_internal_transitions
+    // const, and call sites omit the trailing internal-table arg. This is the
+    // dual of the §51.0.O surface — adopters who don't use internal:rule= pay
+    // zero bytes for it.
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=.Title>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+</>
+
+<button onclick=\${@appMode = AppMode.Playing}>Start</>`;
+    const { errors, clientJs } = compileToClientJs(src, "ir-w22-treeshake");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    // (1) The external transition table emits as usual.
+    expect(clientJs).toContain("__scrml_engine_appMode_transitions");
+
+    // (2) The internal transition table does NOT emit — zero internal:rule=
+    //     means zero internal-path metadata.
+    expect(clientJs).not.toContain("__scrml_engine_appMode_internal_transitions");
+
+    // (3) Defensive: no direct_set call site threads the internal-table
+    //     identifier (the const doesn't exist, so threading it would be a
+    //     ReferenceError at module-init).
+    expect(clientJs).not.toContain("_internal_transitions");
   });
 });
