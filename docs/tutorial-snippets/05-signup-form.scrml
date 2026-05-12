@@ -1,0 +1,71 @@
+// 05-signup-form.scrml — declarative form with auto-synth validity surface.
+//
+// Compound state with validators (<signup>...) auto-synthesizes a reactive
+// validity surface: @signup.isValid, @signup.errors, @signup.touched, plus
+// per-field surfaces (@signup.name.isValid, @signup.name.errors, ...).
+// All synth properties are read-only — the compiler computes them.
+//
+// The engine lives at file level; markup uses `match` to switch on the phase.
+
+${
+  type SignupPhase:enum = { Editing, Submitting, Done }
+}
+
+<engine for=SignupPhase initial=.Editing>
+  <Editing    rule=.Submitting></>
+  <Submitting rule=.Done></>
+  <Done       rule=.Editing></>
+</>
+
+<program>
+
+${
+  <signup>
+    <name     req length(>=2)>             = <input type="text"/>
+    <email    req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
+    <password req length(>=8)>              = <input type="password"/>
+    <confirm  req eq(@signup.password)>     = <input type="password"/>
+    <agree    req>                          = <input type="checkbox"/>
+  </>
+
+  function submit() {
+    if (not @signup.isValid) return
+    @signupPhase = SignupPhase.Submitting
+    persistSignup(@signup.name, @signup.email, @signup.password)
+    @signupPhase = SignupPhase.Done
+  }
+
+  // Server-escalated via the ?{} block — `server` keyword no longer needed
+  // (deprecated per Insight 26, 2026-05-08).
+  function persistSignup(name, email, password) {
+    ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run()
+  }
+}
+
+<div>
+  ${
+    match @signupPhase {
+      .Editing => {
+        lift <form onsubmit=submit()>
+          <h1>Sign up</h1>
+          <label>Name      <name/>     <errors of=@signup.name/></label>
+          <label>Email     <email/>    <errors of=@signup.email/></label>
+          <label>Password  <password/> <errors of=@signup.password/></label>
+          <label>Confirm   <confirm/>  <errors of=@signup.confirm/></label>
+          <label class="row">
+            <agree/> I agree to the terms
+            <errors of=@signup.agree/>
+          </label>
+          <button type="submit" disabled=not @signup.isValid>Create account</button>
+        </form>
+      }
+      .Submitting => { lift <p>Creating your account…</p> }
+      .Done => {
+        lift <p>Welcome, ${@signup.name}!</p>
+        lift <button onclick=${@signupPhase = SignupPhase.Editing}>Sign up another</button>
+      }
+    }
+  }
+</div>
+
+</program>

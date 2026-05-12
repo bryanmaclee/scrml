@@ -1,150 +1,203 @@
-# scrml Tutorial
+# scrml Tutorial — zero to a running app
 
-scrml is a single-file language for building web applications. One `.scrml` file compiles to the HTML, JavaScript, CSS, and server routes that a working app needs. There is no separate "client project" and "server project"; markup and reactive state live next to the database queries and authentication checks that back them up, and the compiler decides which half runs where.
+This tutorial walks you from an empty directory to a small but complete scrml app: a counter that persists to SQLite, a multi-step signup form with declarative validation, an `<engine>`-driven state machine, and a real-time channel. Every snippet here is a working `.scrml` file in `docs/tutorial-snippets/`; the compile step at the start of each section runs against the real compiler.
 
-This tutorial teaches the language from the ground up. By the end you will be able to write an interactive UI with reactive state, iterate over typed data, model errors as enum variants, persist to SQLite through inline SQL, push updates over a WebSocket channel, and generate markup at compile time. The middle sections — Layer 1 and Layer 2 — are the heart of the language. The last section is an appendix of less common features that you do not need on day one but will appreciate when you hit the problem they solve.
+**Audience.** You have written some JavaScript or TypeScript and used at least one reactive framework (React, Svelte, Vue, Solid). You have a passing familiarity with HTML and SQL. You do not need to know anything about scrml before reading this.
 
-**Who this is for.** If you have written JavaScript or TypeScript, know a little HTML and CSS, and have used at least one reactive framework (React, Svelte, Vue, Solid) the ideas here will be familiar. scrml borrows liberally from the JSX world, the Svelte world, and the PHP world, and tries to cut the parts it does not need.
+**What scrml is, in one paragraph.** scrml is a single-file language for full-stack web apps. One `.scrml` file compiles to the HTML, JavaScript, CSS, and server routes the app needs. Markup, reactive state, server functions, SQL, real-time channels, and tests all live in the same file; the compiler decides which half runs in the browser and which half runs on the server. The unit of organization is the program, not the tier.
 
-**What is different about scrml.** Most full-stack frameworks start from a client framework (React, Vue, Svelte) and bolt a server on, or start from a server framework (Rails, Django, Laravel) and bolt a client on. scrml starts from a single file. Markup, client-side reactive state, server-side database queries, authentication, WebSocket channels, and Web Worker code all live together and compile to separate bundles based on where they need to run. The unit of organization is the program, not the tier.
+**What this tutorial covers.** The v0.2.4 canonical surface — the syntax and idioms ratified through the S52-S84 deliberation arc. If you find older material online that disagrees with this document (especially anything from before April 2026 — `< machine>` instead of `<engine>`, `@var = 0` for declaration instead of `<var> = 0`, `null`/`undefined`/`===`/`!==` JavaScript literals instead of `is some` / `is not` / `==` / `!=`), trust this document. scrml is post-training-cutoff for every LLM, and the language has shifted since.
 
-This has two practical consequences that shape the rest of this tutorial. First, you never write a route file; the shape of a page is the shape of its `.scrml` file. Second, you never write a separate API schema; the data contract between client and server is whatever your program's inferred call graph implies, and any mismatch is a compile error, not a 500 at runtime.
-
-If you have been burned by the "two codebases, one product" mismatch — duplicated types, stale TypeScript interfaces for API responses, refactors that break the wire protocol silently — the rest of this tutorial will feel like a simplification.
-
-**Prerequisites.** Working knowledge of JavaScript syntax, arrow functions, `const`/`let`, template strings, and the DOM event model. A passing acquaintance with SQL helps for Layer 3 but is not required — the examples use only `SELECT` and `INSERT`.
-
-**How to run the samples.** Every code block in this tutorial is an actual `.scrml` file in `docs/tutorial-snippets/`. To compile one, run:
-
-```
-bun compiler/bin/scrml.js compile docs/tutorial-snippets/01c-reactive-state.scrml
-```
-
-The compiler will emit the built artifacts (HTML, JS, CSS, and, when relevant, a tiny server) and print a summary. You can wire the output into any static or Bun-based server; for this tutorial the compile step alone is enough to check that a sample is well-formed.
-
-When you want the full language reference after working through this tutorial, see `compiler/SPEC.md`. When you want longer, working sample apps, browse `examples/`; those are runnable end-to-end rather than dissected snippet by snippet.
-
-**How this tutorial is organized.** The material is layered: each section builds only on the previous ones, and each layer ends with a checkpoint that names what you can now do. Layer 0 is the hook — two small demos that set the scene. Layer 1 is the core you will use every day. Layer 2 adds types and composition. Layer 3 adds the full-stack story. Layer 4 is an appendix of less common features.
-
-A reader in a hurry can read Layers 0–2 and come back to 3 when they need a database. A reader looking for the quickest introduction to the language's uniqueness should read Layer 0, then skim Layer 3.1–3.3 (where the client/server boundary shows up), then read the rest at leisure.
-
-**What you will not find in this tutorial.** Build systems, CI pipelines, deployment recipes, design system patterns, state-management libraries — none of these are part of scrml. The language aims to be complete enough that you do not reach for most of them. When you do need them (for example, when integrating a scrml app with an existing organization's infrastructure), conventional tooling works: Bun for the runtime, your preferred hosting for deployment, your preferred observability stack on top.
-
-**Conventions in this document.** Every code block is labeled with its snippet filename in the first-line comment (for example, `// 00a — The hook, client-only.`). You can find the unabbreviated source at `docs/tutorial-snippets/<name>.scrml` in this repository and compile it directly. Inline code — short phrases like `@count` or `const @doubled` — is `code-formatted`. A few sections flag errors you are likely to see while learning; those are marked with the `E-XXX-NNN` convention the compiler uses, so you can recognize them by name when you hit them.
+**Prerequisites.** Working knowledge of JavaScript syntax (`const`/`let`, arrow functions, template strings) and the DOM event model. A passing acquaintance with SQL helps for §2 onward but is not required — every SQL example uses only `SELECT` and `INSERT`.
 
 ---
 
-## Layer 0 — The Hook
+## 0. Setup — `scrml init` and the dev loop
 
-The fastest way to explain what scrml is doing is to show you the same app written two ways.
+scrml ships as a single binary that runs under [Bun](https://bun.sh). Install Bun first, then scaffold a new project:
 
-### Client-only: a todo list
+```
+curl -fsSL https://bun.sh/install | bash
+scrml init my-app
+cd my-app
+scrml dev
+```
 
-Here is a small todo list. It runs entirely in the browser. State lives in two `@vars`; two plain functions mutate them; a `for` loop inside the markup renders the list.
+`scrml init my-app` creates a new directory with a single `.scrml` file, a `package.json`, and a `bunfig.toml`. `scrml dev` compiles and serves the file with hot reload — edit, save, see the result in your browser.
+
+If you are following along inside this repository instead of starting fresh, every code block in this tutorial has a matching snippet under `docs/tutorial-snippets/`. To compile any one of them directly:
+
+```
+bun compiler/bin/scrml.js compile docs/tutorial-snippets/02-counter.scrml
+```
+
+The compiler emits the built artifacts (HTML, JS, CSS, and, when relevant, a small server) and prints a summary. For this tutorial, the compile step alone is enough to confirm a sample is well-formed; the project's `examples/` directory holds longer end-to-end programs to run.
+
+The CLI surface is small enough to memorize:
+
+```
+scrml init [dir]       — scaffold a new project
+scrml dev <file|dir>   — compile + watch + serve (with hot reload)
+scrml build <dir>      — production build
+scrml compile <file>   — one-shot compile to ./dist/
+```
+
+There is no `scrml.config.js`, no `defineConfig`, no `tailwind.config.js`. The dev server is part of the language tooling.
+
+---
+
+## 1. The shape of a scrml file
+
+Every scrml program is one `<program>` element. Inside it, a `${ ... }` logic block holds declarations and functions, and the rest is markup. Here is the smallest useful program:
 
 ```scrml
-// 00a — The hook, client-only. A 3-item todo list with reactive state,
-// event wiring, and for/lift iteration. No backend anywhere.
+// 01-hello.scrml — the minimal program. Plain text in markup, no state.
+
+<program>
+
+<h1>Hello, scrml!</h1>
+<p>This file compiles to HTML + JS + CSS.</p>
+
+</program>
+```
+
+There is no `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell. Anything outside `<program>` is reserved for sibling top-level elements you will meet later (`<channel>`, `<schema>`). Comments use `// ...` and `/* ... */` and are allowed anywhere.
+
+A `<program>` body holds three kinds of content:
+
+1. **Markup** — HTML elements (`<div>`, `<p>`, `<form>`, ...) plus a small set of scrml-specific extensions (`bind:value`, `class:active`, `onclick=`, `if=`, `for`/`lift`).
+2. **`${ ... }` logic blocks** — JavaScript-shaped statements: declarations, functions, imports. Inside markup, `${expression}` is an interpolation slot that substitutes the expression's value.
+3. **`#{ ... }` style blocks** — scoped CSS for the program. (See §2.3.)
+
+Tag closing has three forms: explicit `</tagname>`, shorthand `</>` (closes the most recently opened tag), and a trailing `/` on void elements (`<br/>`). The shorthand `</>` is the canonical scrml closer; use it freely.
+
+---
+
+## 2. The counter — reactive state, V5-strict access
+
+The classic first program in any reactive language: a counter with a `+` button. Here it is in scrml:
+
+```scrml
+// 02-counter.scrml — reactive state, V5-strict declaration form.
 
 <program>
 
 ${
-  @items = ["Write", "Compile", "Ship"]
-  @draft = ""
+  <count> = 0
 
-  function add() {
-    if (@draft == "") return
-    @items = [...@items, @draft]
-    @draft = ""
-  }
-
-  function remove(i) {
-    @items = @items.filter((_, idx) => idx != i)
-  }
+  function inc() { @count = @count + 1 }
+  function dec() { @count = @count - 1 }
 }
 
-<div class="max-w-md mx-auto mt-8 p-6">
-  <h1 class="text-2xl font-bold">Todos</h1>
-
-  <form onsubmit=add() class="flex gap-2 my-4">
-    <input type="text" bind:value=@draft class="flex-1 p-2 border rounded" placeholder="What's next?"/>
-    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded">Add</button>
-  </form>
-
-  <ul class="flex flex-col gap-1">
-    ${
-      for (let item of @items) {
-        lift <li class="flex justify-between p-2 border-b">
-          <span>${item}</span>
-          <button onclick=remove(0) class="text-red-600">x</button>
-        </li>
-      }
-    }
-  </ul>
+<div>
+  <h1>Counter: ${@count}</h1>
+  <button onclick=dec()>−</button>
+  <button onclick=inc()>+</button>
 </div>
 
 </program>
 ```
 
-Three things are worth naming now. The `${ ... }` brace at the top holds a *logic block* — declarations, functions, and any imperative setup. Anything prefixed with `@` is reactive state: write to `@draft` and every DOM node that reads it updates. Inside markup a second `${ ... }` introduces an expression slot; `for`/`lift` inside a slot produces repeated nodes. The shape of the file will not change much across this tutorial.
+Three things are happening here, and they are the load-bearing rules of the language:
 
-Look at the `add` function. Writing `@items = [...@items, @draft]` replaces the entire array reactive with a new array — there is no `@items.push(...)`. This is deliberate: scrml tracks reassignments, not mutations of the underlying object, which keeps the reactivity model simple and predictable. The `@draft = ""` that follows re-renders the input because it is two-way bound.
+1. **`<count> = 0` declares a reactive state cell.** The structural form `<name> = init` is the V5-strict declaration syntax. The compiler registers `count` as reactive for the rest of the file.
 
-Look at the `remove` function. The same functional-update pattern: `filter` to a new array, reassign the variable. If you have written React or Solid, this is the standard idiom; if you come from Vue, you give up nothing by writing this way and gain a lot of static-analysis clarity.
+2. **`@count` reads or writes the cell.** The `@` sigil marks every state touch in an expression — read in `${@count}`, read on the right of `=`, write on the left. Bare `count` (no `<>` or `@`) is a LOCAL identifier, never reactive state.
 
-Look at the form. `<form onsubmit=add()>` — the handler is a *call expression*, not a string. The browser's default submit behavior is prevented for you; you don't need `e.preventDefault()`. Click the button, the form submits, `add()` runs, and the result is the same as typing in a React controlled-input app: one new item in the list, input cleared.
+3. **`onclick=inc()` is a bare call expression.** The handler is a function call, not a string. Parentheses are mandatory; arguments work as you would expect (`onclick=remove(item.id)`).
 
-### Full-stack: the same todo list, backed by SQLite
+The asymmetry between `<count>` for declaration and `@count` for expression access is deliberate. It makes every state touch visually distinguishable from local-variable touch — you can scan a function body and count "how many state cells does this function read or mutate" at a glance. This is load-bearing for both human readability and the compiler's static analysis.
 
-Now here is the same app again, but instead of keeping todos in a JavaScript array in the browser, we persist them to a SQLite database on the server.
+**Why this matters in practice.** If you write `let count = 5` after `<count> = 0`, the compiler emits `E-NAME-COLLIDES-STATE`. Local names cannot shadow registered state names — a refactor that accidentally shadows state is caught at compile time, not at runtime.
+
+Compile and run:
+
+```
+bun compiler/bin/scrml.js compile docs/tutorial-snippets/02-counter.scrml
+```
+
+The output goes to `./dist/`. Open `dist/02-counter.html` and you have a working counter.
+
+### 2.1 Derived state — `const <name> = expr`
+
+When a value is a pure function of other reactive state, declare it with `const <name>`:
 
 ```scrml
-// 00b — The same app, full-stack.
-// Only the `<db>` block and two server functions were added. Markup is unchanged.
+// 02a-derived.scrml — derived state recomputes whenever inputs change.
 
 <program>
 
-<db src="demo.db" tables="todos">
+${
+  <count> = 0
+  const <doubled> = @count * 2
+  const <parity> = @count % 2 == 0 ? "even" : "odd"
+
+  function inc() { @count = @count + 1 }
+}
+
+<div>
+  <p>Count: ${@count}</p>
+  <p>Doubled: ${@doubled}</p>
+  <p>Parity: ${@parity}</p>
+  <button onclick=inc()>+</button>
+</div>
+
+</program>
+```
+
+`const <doubled> = @count * 2` reads as "whenever any reactive input on the right changes, recompute the expression." The dependency graph is tracked automatically — you never list dependencies explicitly. Reading the derived cell uses `@doubled`, same as a plain reactive.
+
+Derived cells are **reference-immutable**: `@doubled = 99` is `E-DERIVED-WRITE`. The value can change (when `@count` changes), but you cannot assign to it from your code.
+
+### 2.2 Persisting the counter — `<schema>`, `<db>`, `?{}`
+
+A counter in memory is gone the moment you refresh the page. Let's persist it. scrml has a built-in database layer — no `npm install better-sqlite3`, no Prisma, no schema files in a separate directory. You declare the database shape in a `<schema>` block at the top of the file, open a connection with `<db>`, and write parameterized SQL with `?{}`:
+
+```scrml
+// 02b-counter-persisted.scrml — counter that survives a refresh.
+
+<schema>
+  counters {
+    id:    integer primary key
+    value: integer not null default(0)
+  }
+</>
+
+<program>
+
+<db src="counter.db" tables="counters">
 
   ${
-    @items = []
-    @draft = ""
+    <count> = loadCount()
 
-    server function loadTodos() {
-      lift ?{`SELECT id, body FROM todos ORDER BY id`}.all()
+    // No `server` keyword needed — these functions escalate to the server
+    // automatically because they touch a `?{}` SQL block. (Body-content
+    // inference, Insight 26 — the `server` keyword is deprecated.)
+    function loadCount() {
+      const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
+      return row is some ? row.value : 0
     }
 
-    server function persistTodo(body) {
-      ?{`INSERT INTO todos (body) VALUES (${body})`}.run()
+    function persistCount(n) {
+      ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
+         ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run()
     }
 
-    function add() {
-      if (@draft == "") return
-      persistTodo(@draft)
-      @items = loadTodos()
-      @draft = ""
+    function inc() {
+      @count = @count + 1
+      persistCount(@count)
     }
 
-    if (@items.length == 0) {
-      @items = loadTodos()
+    function dec() {
+      @count = @count - 1
+      persistCount(@count)
     }
   }
 
-  <div class="max-w-md mx-auto mt-8 p-6">
-    <h1 class="text-2xl font-bold">Todos</h1>
-
-    <form onsubmit=add() class="flex gap-2 my-4">
-      <input type="text" bind:value=@draft class="flex-1 p-2 border rounded" placeholder="What's next?"/>
-      <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded">Add</button>
-    </form>
-
-    <ul class="flex flex-col gap-1">
-      ${
-        for (let row of @items) {
-          lift <li class="p-2 border-b">${row.body}</li>
-        }
-      }
-    </ul>
+  <div>
+    <h1>Persistent counter: ${@count}</h1>
+    <button onclick=dec()>−</button>
+    <button onclick=inc()>+</button>
   </div>
 
 </>
@@ -152,1568 +205,872 @@ Now here is the same app again, but instead of keeping todos in a JavaScript arr
 </program>
 ```
 
-Compare the two files side by side. The markup is identical. The form is identical. The iteration is identical. What changed is that the `<program>` now wraps its body in a `<db src="demo.db" ...>` block, and two of the functions inside `${ ... }` are prefixed with the word `server`. Those two functions — `loadTodos` and `persistTodo` — run on the server. Everything else runs in the browser.
+Compare to §2's in-memory counter. The markup is identical. The function shape is identical. Three additive changes:
 
-Nothing about this boundary was declared. There is no `"use server"` directive. There are no separate files. The compiler reads the program, notices that `?{ ... }` SQL blocks cannot run in a browser, and walks the call graph from there: any function that calls into a server function, through the client, becomes an RPC call. Authentication checks, CSRF tokens, payload serialization, and route generation are produced for you.
+1. **`<schema>`** at the top of the file declares the database schema. `counters { id: integer primary key, value: integer not null default(0) }` reads as a small DDL. The compiler diffs this against the live database and generates migrations — you never write `ALTER TABLE` by hand.
+2. **`<db src="counter.db" tables="counters">`** opens the database connection and lists the tables this program is allowed to access. The UI nests inside the `<db>` block, which makes the database scope visually obvious.
+3. **Server-side functions are inferred from their bodies.** `loadCount` and `persistCount` touch `?{}` SQL blocks, which are server-only. The compiler escalates the functions to server-side automatically — no `server` keyword needed. (The `server` keyword is deprecated as of Insight 26, 2026-05-08; older code that uses it still compiles, but new code should not.)
 
-This is the pitch of the whole language. You write the markup once; the boundary between client and server is *inferred*, not *declared*. The rest of this tutorial is a patient walk through the primitives that make that boundary work.
+The `?{`SELECT ...`}` form holds parameterized SQL. The backtick string is the query; `${var}` interpolations become bound parameters automatically — even if `var` contains quotes or semicolons, it is treated as data, not SQL. Injection is impossible by construction. The methods are `.run()` (INSERT/UPDATE/DELETE), `.get()` (single row or null), and `.all()` (array of rows).
 
-Read the full-stack version one more time, and notice the symmetry with the client-only one. The state block is still `${ ... }`. The `@items` and `@draft` are still reactive. The `for`/`lift` iteration is still exactly the same. There is no new concept for "fetch data"; the call to `loadTodos()` inside `add` is an ordinary function call that happens to compile to an RPC. There is no new concept for "save data"; the call to `persistTodo(@draft)` is also just a function call. The `if (@items.length == 0) @items = loadTodos()` at the bottom of the logic block is the program's one-time load on first render — it runs once because `@items` is written after that, and the condition becomes false.
+> **Note on `is some`.** scrml has no `null` or `undefined` keyword in source. The presence check is `value is some` (true when defined and non-null) and the absence check is `value is not` (true when null or undefined). This is the canonical scrml shape for what JavaScript spells as `value !== null && value !== undefined`. You write `==` and `!=` for equality (`==` does strict comparison; `===` does not exist).
 
-The *mental model* here is: "write the program as if everything ran locally; let the compiler move server-only operations to the server." You can verify this is working by running the compiler on `00b-hook-fullstack.scrml` and looking at what comes out — two bundles, one for the browser and one for the server process, with a small route table that wires them together.
+The one rule that distinguishes server functions from client functions is that **server-escalated functions must not assign to reactive state** (`E-RI-002`). State transitions belong on the client; the server's job is to fetch and persist. A client function calls a server-escalated function for data, then updates state with the result. The compiler propagates server-side classification through the call graph: if `addContact()` calls server-escalated `persistContact()`, the assignment to `@name = ""` inside `addContact` is checked in client context. The canonical idiom is to call `reset(@name)` instead of `@name = ""` after the server call — `reset()` is a language keyword that goes through the client-side reset path unambiguously.
 
-> **Note:** The closer `</>` — a forward slash with nothing after it — closes the most recently opened tag. You can also write the full `</div>` or `</program>`; scrml accepts both. We will use `</>` when the surrounding tag is obvious.
+### 2.3 Styling — `#{}` scoped CSS and Tailwind utilities
 
-One more observation before we leave the hook. If you look at the two snippets and mentally diff them, the change from "runs only in the browser" to "runs against a persistent database on a server" is purely *additive*: a wrapping `<db>` element, a `server function` prefix, and a `?{ ... }` SQL block. No refactor, no file split, no "client-side API layer." This additivity is the headline property of scrml. A feature can grow from client-only to full-stack without rewriting the parts that already worked, and the reverse is equally true — prototype an app as a client-only UI, wire it up to a database later.
-
-Compare this to the common alternative: start a project with a React frontend and an Express backend, then realize you need a database, then realize you want real-time, then realize your client-server contract is brittle. Each step adds a file, a build step, a potential skew. In scrml, each of these is a small additive change inside a single file.
-
-That is the whole pitch. The rest of this tutorial is the craft of working inside it.
-
----
-
-## Layer 1 — Primitives
-
-Layer 1 covers the things you use in every scrml file: the top-level `<program>`, the `${}` logic block, reactive `@vars`, derived values, attribute bindings, and styling. If you finish Layer 1 you can build a real client-side app.
-
-### 1.1 `<program>` and markup
-
-Every scrml file is a single `<program>` element. Markup inside `<program>` is HTML with a handful of extensions. Elements close with `</tagname>`, with the shorthand `</>`, or with a trailing `/` on a void element.
+scrml has two styling tools, used together or apart depending on taste.
 
 ```scrml
-// 01a — Minimal <program>. Shows the three closer forms:
-// explicit </h1>, trailing / on </>, and bare <br/>.
+// 02c-styles.scrml — scoped CSS via #{}.
 
 <program>
 
-<h1>Hello</h1>
-<p>Second paragraph with a trailing closer.</>
-<br/>
-<p>Done.</p>
-
-</program>
-```
-
-There is no extra boilerplate. No `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell and injects the runtime. Anything outside `<program>` is an error; comments (`// ...` and `/* ... */`) are allowed anywhere.
-
-The tag names themselves are the ones you already know — `<div>`, `<p>`, `<form>`, and so on. A handful of tags are *not* HTML at all but language-level **state object openers** that the compiler treats specially. The full list is:
-
-- `<program>` — the program root (this section);
-- `< db>` — a database connection scope (Section 3.1);
-- `< channel>` — a real-time WebSocket scope (Section 4.4);
-- `<errorBoundary>` — a failure-recovery scope (Section 3.5);
-- `< machine>` — a state-machine scope (Section 2.10);
-- `< schema>` — a declarative DB-schema scope (taught at SPEC level for now; tutorial coverage lands in a later pass);
-- `< keyboard>`, `< mouse>`, `< gamepad>` — input-state scopes (SPEC-only for now);
-- `< timer>`, `< timeout>` — timing scopes (SPEC-only for now).
-
-Each opener introduces its own state context and is covered in the section that uses it. The opener syntax for the multi-letter ones is `< name ...>` with a leading space after the `<` to disambiguate from regular HTML elements (per `compiler/SPEC.md` §4.2). State object openers cannot carry `if=`, `else=`, or `else-if=` (Section 1.8) — they are infrastructure, not conditional markup, and removing one would tear down the lifecycle the rest of the program depends on. Everything else in markup is plain HTML plus any components you define yourself.
-
-A scrml file is self-contained: one file, one program, one deliverable. You do not need to set up a project scaffold, configure a bundler, or create a `pages/` directory. Compile `hello.scrml` and you get `hello.html` plus the JavaScript, CSS, and (for full-stack programs) server artifacts to run it. That is the whole conceptual footprint of the language at the file level.
-
-Attributes inside markup mostly behave like regular HTML. The few that do not are the scrml extensions you will meet across Layer 1: `bind:value`, `class:name`, `onclick` (and other event names), and `if=` / `else=` / `else-if=` (Section 1.8). The remaining scrml-specific attributes — `slot=` (Section 2.7), `protect=` (Section 3.4), `auth=` (Section 3.4), and `show=` (Section 2.5) — are introduced where they belong. Every one of them is a plain attribute-looking name with a scrml-specific compile-time meaning.
-
-### 1.2 The `${}` logic block
-
-Markup and logic are separated by the `${ ... }` block. Inside this block you write JavaScript-shaped statements: `const` bindings, `function` declarations, `import`s, `type` declarations, and top-level expressions. Outside a logic block, inside markup, `${expression}` is an interpolation slot that substitutes the expression's value.
-
-```scrml
-// 01b — Logic block with a file-scope const + interpolation.
-
-<program>
-
-${
-  const name = "scrml"
-  const year = 2026
-}
-
-<h1>Hello from ${name}</h1>
-<p>It is ${year}.</p>
-
-</program>
-```
-
-Notice that the same `${ ... }` punctuation does two different jobs, and context disambiguates them. At file scope (between markup elements, or before any) it is a logic block — a multi-statement brace. Inside an attribute or inside a text node it is an interpolation — a single expression.
-
-> **Error you might hit:** E-SCOPE-001 — a naked `@var` outside `${ ... }` is an error. File-scope state declarations must always sit inside a logic block. This is the single most common mistake when learning scrml, which is why the next few sections lean on it.
-
-The reason this error exists — rather than just "we could figure it out" — is that `${ ... }` is the compiler's marker for "this is code, not markup." Without that marker at declaration time, scrml cannot tell whether `@count = 0` is a declaration you want to run at startup, or a piece of attribute syntax that happens to look like assignment. Requiring the logic block makes the boundary unambiguous and keeps the parser simple.
-
-You will write logic blocks several places in a single program. The top of the file is the usual home for declarations (types, state, functions, imports). Inside markup, a logic block handles loops, branches, and bits of imperative setup that emit nodes. Inside a component body, a logic block is where you declare the component's local helpers. The scope of a logic block is the smallest enclosing `<program>`, `<db>`, `<channel>`, or component; variables do not leak out.
-
-Expressions are a subset of this: an `${expression}` *inside markup* interpolates — it must be a single expression that evaluates to a value, and its value is substituted into the surrounding text or attribute. If the expression's value is a primitive (string, number, boolean), the compiler stringifies it. If it is a DOM node or snippet, the compiler attaches it directly.
-
-### 1.3 Reactive state with `@`
-
-State is prefixed with `@`. An assignment to `@count` inside a logic block creates a reactive variable; every subsequent write to that variable re-runs every part of the markup that read it.
-
-```scrml
-// 01c — Reactive state + a function + button. The classic counter.
-
-<program>
-
-${
-  @count = 0
-
-  function inc() { @count = @count + 1 }
-}
-
-<p>Count: ${@count}</p>
-<button onclick=inc()>+</button>
-
-</program>
-```
-
-`@count` is declared simply by assigning to it inside `${ ... }`; the compiler registers the name as a reactive variable for the rest of the file. Reading `@count` inside markup (`${@count}`) subscribes the surrounding DOM to that variable. Writing `@count = @count + 1` inside `inc` triggers a re-render of that subscribed text node — and *only* that text node.
-
-The `onclick=inc()` attribute is a scrml event binding. Unlike plain HTML, the attribute value is treated as an expression; `inc()` is a *call* to run on click, not a string to eval. The parentheses are mandatory, so that the difference between "pass the function" and "call the function" is never ambiguous.
-
-> **Note:** scrml `@vars` are file-scoped. A single program is one scope; they are not global. If you want isolated state, put the work inside a component (Section 2.6).
-
-There are a few things worth understanding about how reactivity actually works at compile time. When the compiler sees `${@count}` inside markup, it generates a tiny *effect*: a function that updates that text node and that the runtime registers as a subscriber to `@count`. When you later write `@count = @count + 1`, the runtime looks up the subscribers of `@count` and re-runs just those effects. The surrounding `<button>` is untouched; the rest of the page is untouched.
-
-This matters because it tells you why certain idioms work: reassigning `@items = [...@items, x]` is efficient because only the list's render block re-runs, not the whole page. It also tells you why certain idioms do *not* work: mutating a field like `@items[0].name = "new"` does not trigger re-render, because the compiler only sees *assignments to `@vars`* as reactive triggers. If you want reactivity on nested fields, reassign the top-level `@var` or, as we will see in Section 2.2, model the data with struct types and replace the whole record.
-
-The pattern for "update one field of a record" is therefore:
-
-```
-@user = { ...@user, name: "new" }
-```
-
-This copies the record, overrides one field, and reassigns the top-level `@var`. It is the same idiom you use in React for setState with an object — scrml did not invent it, but the language is deliberately built around it.
-
-### 1.4 Derived values with `const @`
-
-A derived value is a `const @` declaration whose right-hand side is an expression over other reactive state. The compiler re-computes the expression whenever any of its inputs change.
-
-```scrml
-// 01d — Derived value. `const @doubled` recomputes whenever @count changes.
-
-<program>
-
-${
-  @count = 0
-  const @doubled = @count * 2
-
-  function inc() { @count = @count + 1 }
-}
-
-<p>Count: ${@count}</p>
-<p>Doubled: ${@doubled}</p>
-<button onclick=inc()>+</button>
-
-</program>
-```
-
-`const @doubled = @count * 2` reads: "whenever `@count` changes, recompute `@count * 2` and store it as `@doubled`." There is no `$derived()` function call; the `const @` form is the language-level spelling. You cannot assign to `@doubled` — it is read-only by construction.
-
-> **Hazard:** some early design notes floated a `~x = expr` shorthand for derived values. That form is **not supported**. The only way to write a derived reactive is `const @name = expression`.
-
-Derived values can depend on other derived values. You can write `const @isEven = @doubled % 4 == 0` and it will recompute whenever `@doubled` recomputes, which in turn happens whenever `@count` changes. The dependency graph is tracked automatically; you never list dependencies explicitly.
-
-One subtlety: the expression on the right of `const @ =` must be *pure* in the sense of "a function of its reactive inputs." Side effects (calling a function that logs, setting something external, mutating shared state) should not live here. Use a `function` or a `when` handler if you need to *do* something in response to a change; use `const @` only to *compute* something from state.
-
-In practice, reach for derived values whenever you see yourself writing the same expression in multiple places in markup, or whenever you would otherwise need a helper function to compute something from state. A derived value is a single named piece of state with a declared meaning — it makes later readers' lives easier.
-
-### 1.5 Bindings, classes, and event handlers
-
-Interactive apps need three kinds of attribute extension: two-way bindings on form controls (`bind:value`), conditional class attachments (`class:active`), and event handlers (`onclick`, `onkeydown`, and so on).
-
-```scrml
-// 01e — Attribute bindings: bind:value, class:active, onclick, onkeydown.
-
-<program>
-
-${
-  @text = ""
-  @active = false
-
-  function toggle() { @active = !@active }
-  function handleKey(e) {
-    if (e.key == "Enter") @text = ""
-  }
-}
-
-<div>
-  <input type="text" bind:value=@text onkeydown=handleKey() placeholder="Type then Enter"/>
-  <p class:active=@active>Current: ${@text}</p>
-  <button onclick=toggle()>Toggle</button>
-</div>
-
-</program>
-```
-
-`bind:value=@text` is two-way: typing in the input updates `@text`, and writing to `@text` from elsewhere (for example, `@text = ""`) updates the input. This is one of the places scrml visibly borrows from Svelte.
-
-`class:active=@active` adds or removes the CSS class `active` based on the truthiness of `@active`. It leaves the rest of the `class` attribute alone — if you combine `class="card"` with `class:active=@expanded`, the card is either `"card"` or `"card active"` depending on `@expanded`.
-
-`onkeydown=${(e) => handleKey(e)}` is the form to use when the handler needs the native event object. The arrow function inside `${ ... }` runs on each event, receives the event as its argument, and forwards it to your handler. The shorter `onkeydown=handleKey()` form is also valid, but it does NOT pass the event — arguments to the call expression are forwarded as-is and only those arguments reach the handler. Use the call form for argument-only handlers (`onclick=remove(item.id)`); use the arrow form when you need the event itself.
-
-Every DOM event name works the same way: `onclick`, `oninput`, `onchange`, `onsubmit`, `onkeyup`, `onkeydown`, `onfocus`, `onblur`, `onmousedown`, `onmouseup`, `onmouseover`, and so on. If the name exists in the DOM, scrml accepts the attribute. Pointer events, composition events, animation events — all wired the same way.
-
-You can pass arguments explicitly, too. Instead of `onclick=toggle()` you could write `onclick=toggleSection("header")`. Arguments are ordinary scrml expressions; they can reference `@vars`, local consts inside a loop, or anything else in scope. Inside a `for` iteration, this is how you pass the current item to a handler: `onclick=remove(item.id)`.
-
-The `bind:` namespace has more than just `value`. On a `<select>` it binds the selected value; on `<input type="checkbox">` it binds a boolean; on `<input type="radio">` it binds the selected radio's value. On a contenteditable element it binds the text content. The family is consistent: `bind:name=@var` means "keep `@var` and the DOM attribute `name` in sync."
-
-For `class:`, you can attach multiple conditional classes on the same element: `<p class="note" class:active=@active class:error=@hasError>`. Each one is independent, and the resulting class list is computed dynamically.
-
-### 1.6 Styling: scoped `#{}` CSS
-
-A program can carry its own CSS in a `#{ ... }` block. Selectors inside the block are scoped to the program — the compiler rewrites class names and wraps bare tag selectors so they cannot leak.
-
-```scrml
-// 01f — Scoped styles via #{} block. Class names are rewritten per-component.
-
-<program>
+${ <count> = 0 ; function inc() { @count = @count + 1 } }
 
 <div class="card">
-  <h1>Scoped</h1>
-  <p>This card's styles only apply inside this program.</p>
+  <h1>${@count}</h1>
+  <button onclick=inc()>+</button>
 </div>
 
 #{
   .card {
-    max-width: 360px;
+    max-width: 280px;
     margin: 2rem auto;
     padding: 1.5rem;
     border: 1px solid #ddd;
     border-radius: 8px;
-    font-family: sans-serif;
+    text-align: center;
   }
-  h1 { color: #2563eb; }
+  button {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 1.25rem;
+  }
 }
 
 </program>
 ```
 
-You can mix `#{ ... }` with regular stylesheets and with inline `style=` attributes. A `#{ ... }` block may appear at the top or bottom of the program; by convention it goes at the bottom, next to the component it styles, so the markup stays near the top.
+The `#{ ... }` block holds CSS scoped to this program. The compiler rewrites class names and wraps bare tag selectors so they cannot leak — the same technique Svelte and CSS Modules use, built into the file format.
 
-Scoping works by class-name rewriting: the compiler takes every `.card` selector in `#{ ... }` and rewrites both the selector and the corresponding `class="card"` attribute to a unique hashed class name such as `card-a91b`. The program's styles are therefore guaranteed not to collide with styles defined in other programs, even if every file uses the same class names. This is the same technique Svelte and CSS Modules use — but here it is built into the file, not a separate tooling choice.
-
-Bare tag selectors (`h1 { ... }`) are also scoped: they match only elements inside this program. You can reach "outside" the scope with a `:global(...)` wrapper when you really need to, but that is the exception rather than the rule.
-
-Rules of thumb: use `#{ ... }` for one-off bespoke styling that belongs to a single program. Use Tailwind (Section 1.7) for common utilities shared across a design system. Use a separate imported stylesheet only when you have a third-party CSS file (a reset, a vendor framework) that you do not want to rewrite.
-
-### 1.7 Styling: Tailwind utilities
-
-scrml also ships with first-class Tailwind support. When you use utility classes directly on elements, the compiler reads them at build time and produces exactly the CSS the program needs — no separate `tailwind.config.js` build step and no unused utilities in the output.
+scrml also supports Tailwind utility classes out of the box. The compiler scans class attributes at build time and emits only the utilities the program actually uses:
 
 ```scrml
-// 01g — Same app, Tailwind utility classes instead of #{}.
-
-<program>
-
-<div class="max-w-sm mx-auto mt-8 p-6 border border-gray-200 rounded-lg font-sans">
-  <h1 class="text-blue-600 text-2xl font-bold">Tailwind</h1>
-  <p class="text-gray-700 mt-2">Utility classes are compiled at build time.</p>
+<div class="max-w-sm mx-auto mt-8 p-6 border rounded-lg text-center">
+  <h1 class="text-3xl font-bold">${@count}</h1>
+  <button class="mt-2 px-4 py-2 bg-blue-600 text-white rounded" onclick=inc()>+</button>
 </div>
-
-</program>
 ```
 
-This is the same visual result as the scoped `#{ ... }` version. Which one you reach for is a matter of taste; some teams prefer `#{ ... }` for one-off presentational work and Tailwind for shared design-system utilities. The two can live together in a single file without conflict.
+No `tailwind.config.js`, no separate build step. A small program that uses ten utilities ships exactly those ten utilities' worth of CSS.
 
-Because the compiler scans class attributes at build time, the Tailwind CSS it emits contains only the utilities the program actually uses. A small program that uses ten Tailwind utilities ships exactly those ten utilities' worth of CSS, not the entire framework. The hook example back in Section 0.1 uses Tailwind throughout — if you look at its compiled output you will see a couple of kilobytes of CSS, not the full Tailwind bundle.
+Pick `#{}` for one-off bespoke styling, Tailwind for shared design-system utilities, both together when each fits a different problem. There is no performance difference between them.
 
-You can combine the two styling approaches freely: Tailwind utilities for layout and spacing (`flex`, `gap-2`, `p-4`), `#{ ... }` blocks for anything fiddly that utilities cannot express naturally (complex selectors, keyframes, pseudo-elements). Neither is "better"; the two cover complementary needs.
+---
 
-### 1.8 Conditional rendering: `if=`, `else=`, `else-if=`
+## 3. Lists, components, iteration
 
-Most apps need to show or hide markup based on state. scrml's primary tool for this is the `if=` attribute, an unquoted expression placed directly on the element you want to conditionalise. When the expression is true, the element appears; when it is false, the element does not appear. The companion attributes `else-if=` and the bare `else` extend this into a multi-branch chain.
+The next step beyond a counter is a list. Here is a small todo app — keep the data in memory for now (we'll persist it in §6 alongside SQL):
 
 ```scrml
-// 01h — Conditional rendering. if=, else-if=, else as an attribute chain.
-// `else` is a bare attribute (no `=`, no value). The chain runs over sibling
-// elements at the same parent level. Exactly one branch is shown at a time.
+// 03-todos.scrml — in-memory todos with for/lift, components, and bind:value.
 
 <program>
 
 ${
-  @step = 1
+  type Todo:struct = { id: number, body: string, done: boolean }
 
-  function next() {
-    @step = @step >= 3 ? 1 : @step + 1
+  <items>: Todo[] = []
+  <draft> = ""
+  <nextId> = 1
+
+  function add() {
+    if (@draft == "") return
+    @items = [...@items, { id: @nextId, body: @draft, done: false }]
+    @nextId = @nextId + 1
+    @draft = ""
   }
+
+  function toggle(id) {
+    @items = @items.map(t => t.id == id ? { ...t, done: !t.done } : t)
+  }
+
+  function remove(id) {
+    @items = @items.filter(t => t.id != id)
+  }
+
+  const TodoRow = <li class="row" props={ item: Todo }>
+    <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
+    <span class:done=@item.done>${@item.body}</span>
+    <button onclick=remove(@item.id)>x</button>
+  </li>
 }
 
-<div>
-  <p if=(@step == 1)>Step one: enter your name.</p>
-  <p else-if=(@step == 2)>Step two: confirm your email.</p>
-  <p else>All done.</p>
-
-  <button onclick=next()>Next (current: ${@step})</button>
+<div class="todo-app">
+  <h1>Todos</h1>
+  <form onsubmit=add()>
+    <input type="text" bind:value=@draft placeholder="What's next?"/>
+    <button type="submit">Add</button>
+  </form>
+  <ul>
+    ${
+      for (let t of @items) {
+        lift <TodoRow item=t/>
+      }
+    }
+  </ul>
 </div>
+
+#{
+  .todo-app { max-width: 420px; margin: 2rem auto; font-family: sans-serif; }
+  form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  input[type="text"] { flex: 1; padding: 0.5rem; }
+  .row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+  .row .done { text-decoration: line-through; color: #999; }
+}
 
 </program>
 ```
 
-The two-branch shape is the everyday case: one element carries `if=expr` and an immediately-following sibling carries the bare attribute `else` (no `=`, no value). For three or more branches, insert any number of `else-if=expr` siblings between the opener and the optional `else`. Exactly one branch's element is shown at a time.
+Several pieces of scrml's shape show up at once here. Let's name them.
 
-> **`else` is bare on purpose.** Unlike every other scrml attribute you have seen so far, `else` takes no `=` and no value — `<p else>` is the literal syntax. This is the only bare attribute in Layer 1 and it is worth memorising. Spelling it as `else=true` or `else=""` is a parse error.
+### 3.1 `type Name:struct = { ... }` — structural record types
 
-A few rules govern chains. They follow naturally from "the chain has to be a contiguous sequence of siblings":
+A struct type names a record shape with typed fields. Instances are plain object literals; there are no constructors:
 
-- A bare `else` must immediately follow an `if=` or `else-if=` element at the same parent level. A stray `<span else>` with no preceding `if=` is `E-CTRL-001`.
-- An `else-if=` must immediately follow an `if=` or `else-if=` element at the same parent level. Otherwise: `E-CTRL-002`.
-- Once a chain ends with `else`, no further `else-if=` or `else` may continue it. A second `else` on the next sibling is `E-CTRL-003`.
-- A single element cannot carry both `if=` and `else-if=`/`else` simultaneously — it either opens a chain or continues one. Both is `E-CTRL-005`.
+```scrml
+type Todo:struct = { id: number, body: string, done: boolean }
+```
 
-"Immediately following" means at the same parent level, with nothing in between except whitespace. A comment, a stray text node, or a closer tag breaks the chain. If you need to interleave unrelated markup between branches, factor each branch into a component and apply the chain at the call sites instead.
+The type-annotation form `<items>: Todo[] = []` declares the cell with an explicit type — the compiler carries the annotation through reads and writes, and into `match` arms. For a single value, the annotation goes after the structural-name form: `<phase>: LoadPhase = .Idle`.
 
-The chain attributes work on any HTML element and on any user-defined component, but they cannot appear on the language-level *state object openers* listed in Section 1.1 — `<program>`, `<db>`, `<channel>`, `<errorBoundary>`, `<machine>`, and the input-state and timing openers. Putting `if=`, `else-if=`, or `else` on one of those is `E-CTRL-004`. The reasoning is straightforward: a state opener carries lifecycle and infrastructure (a database connection, a WebSocket, a state machine) that the rest of the program assumes is always present. Conditionally hiding it would tear that lifecycle down underneath running code.
+### 3.2 `for`/`lift` iteration
 
-The observable behaviour of `if=` and the chain is "the element appears when the condition is true and does not appear when it is false." The visible result of changing `@step` from 1 to 2 in the example above is that the first paragraph disappears and the second appears, in either order, atomically. The compiler is free to achieve that effect by removing the DOM node entirely or by toggling its `display` property — either way, the user sees the same thing. (If you want a guaranteed *DOM stays mounted* toggle for performance reasons, reach for `show=`; see Section 2.5.)
+Inside an interpolation slot, a `for` loop iterates. To emit markup from the loop body you use the `lift` keyword — it says "lift this node into the surrounding markup":
 
-A common shape worth knowing is the loading/error/success triad:
+```scrml
+${
+  for (let t of @items) {
+    lift <TodoRow item=t/>
+  }
+}
+```
+
+The `${ ... }` inside `<ul>` is a logic block because its body is a multi-statement `for`. Each iteration's `lift` produces a new sibling child of the surrounding `<ul>`. Without `lift`, the markup inside the loop would be an unused expression — `lift` is what marks an expression as something to attach to the DOM.
+
+`for`/`lift` reacts to changes in the iterated reactive: reassign `@items = [...@items, newItem]` and the loop re-evaluates, producing the new `<li>` without re-rendering the whole list.
+
+> **An important detail about reactivity.** Scrml tracks **reassignments of `@vars`**, not mutations of the underlying value. `@items.push(x)` does not trigger a re-render — `@items = [...@items, x]` does. The same pattern applies for objects: `@user.name = "Ada"` does not re-render, `@user = { ...@user, name: "Ada" }` does. This is the same idiom as React's `setState`, and it keeps the reactivity model simple and predictable.
+
+### 3.3 Components
+
+A component in scrml is a `const` bound to a markup expression inside a `${ ... }` block. It is invoked by name in markup like a custom element. Props are declared via a `props={...}` attribute on the root element of the component body:
+
+```scrml
+const TodoRow = <li class="row" props={ item: Todo }>
+  <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
+  <span class:done=@item.done>${@item.body}</span>
+  <button onclick=remove(@item.id)>x</button>
+</li>
+```
+
+The convention is that component names are capitalized so the parser can distinguish them from lowercase HTML tags. Props are typed; calling a component with a missing required prop or the wrong type is a compile error. Each component instance has its own state scope, so two `<Counter/>` tags render two independent counters.
+
+The closer of a component is `</>` (or the explicit tag name), same as any element. `bind:value`, `class:done`, and `onchange=fn()` work on component-internal markup exactly as they do on plain HTML.
+
+### 3.4 Attribute extensions — `bind:`, `class:`, `on<event>`
+
+The handful of scrml-specific attributes shown in the todo app:
+
+- **`bind:value=@draft`** — two-way binding on a form control. Typing in the input updates `@draft`; writing to `@draft` from elsewhere updates the input. Works on `<input>`, `<select>`, `<textarea>`, and checkbox/radio inputs.
+- **`class:done=@item.done`** — adds or removes the CSS class `done` based on the truthiness of the expression. Multiple `class:` bindings stack independently; a `class="row"` on the same element remains intact.
+- **`onclick=remove(@item.id)`**, **`onsubmit=add()`**, **`onchange=toggle(@item.id)`** — event handlers as bare call expressions. The handler is a function call, not a string. Inside a `for` loop, you pass the current item to the handler with normal scrml-expression arguments. For the rare case where you need the native event object, use `onclick=${(e) => handle(e)}` — an arrow inside an interpolation slot.
+
+There is no `<script>` tag, no JSX braces, no Svelte directives. The shape is "HTML, plus a few attribute-looking names with scrml-specific compile-time meaning."
+
+### 3.5 Conditional rendering — `if=`, `else-if=`, `else`
+
+Show or hide an element by putting `if=expr` on it. Chains use sibling elements with `else-if=expr` and a bare `else`:
+
+```scrml
+<p if=(@items.length == 0)>No todos yet — add one above.</p>
+<ul else>
+  ${ for (let t of @items) { lift <TodoRow item=t/> } }
+</ul>
+```
+
+A bare `else` is the one attribute in scrml that takes no `=` and no value — `<ul else>` is the literal syntax. Spelling it as `else=true` is a parse error. The chain runs over sibling elements at the same parent level; exactly one branch is shown at a time.
+
+For exhaustive branching over the variants of an enum, prefer `<match for=Type>` (§4.2) — adding a new variant later forces every match site to update, which a chain of `if=`s does not.
+
+---
+
+## 4. Engines — the Tier-0 → Tier-1 → Tier-2 ladder
+
+When the UI has more than one mode — loading vs loaded, idle vs active, draft vs submitted vs paid — you have a state machine, whether you spell it that way or not. scrml's centerpiece is the **engine**: a first-class state machine that owns part of (or all of) the UI tree.
+
+The language gives you a three-rung ladder for promoting "this UI has modes" into "this UI is a fully-handled state machine." You start at Tier 0 — boolean flags and `if=` chains — and promote toward Tier 2 — a full `<engine>` — as the design firms up. Promotion is **additive and mechanical**: state-children carry forward verbatim, only the wrapper changes.
+
+### 4.1 Tier 0 — `if=` chains over booleans
+
+For a prototype, two or three booleans gating sibling elements is usually fine:
 
 ```scrml
 <div if=@loading>Loading…</div>
 <div else-if=@error>Error: ${@error}</div>
-<div else>Welcome, ${@user.name}.</div>
+<div else>Welcome.</div>
 ```
 
-Three siblings, exhaustive over the three states. This is also a natural pattern for component-per-state rendering — you can mix HTML elements and component instances freely in a single chain (`<Spinner if=@loading/><ErrorPanel else-if=@error msg=@error/><Dashboard else user=@user/>`). For exhaustive branching over the variants of an enum, prefer `match` (introduced in Section 2.4); the chain form is structural rather than exhaustiveness-checked, so adding a new enum variant will not warn you that a chain is missing a branch.
+This is correct scrml. It is also a candidate for promotion: as soon as you reach for a third or fourth boolean to model the same "phase of this screen," you have a state machine in everything but name. The compiler will eventually nudge with `W-LIFECYCLE-CANDIDATE` to suggest the upgrade.
 
-Note that this `if=` chain idiom is markup-level only. Inside a logic block (`${ ... }`) you write ordinary `if (cond) { ... } else { ... }` JavaScript, lifting markup out via `lift` when needed. The two are different tools: the attribute chain is for "this element's existence depends on a condition," and the `${ if (...) { lift ... } }` form is for "I want a logic-block branch that emits markup." Section 2.5 returns to the topic with `show=` and ternary interpolation; the rest of this layer assumes you are comfortable with `if=`, `else-if=`, and `else` from here onward.
+### 4.2 Tier 1 — `match expr { ... }` over an enum
 
-### Checkpoint
+The first commitment step is to name the screen's phases as an enum and dispatch on it with `match`:
 
-At this point you have seen enough to write a client-side scrml app. You can declare state, write derived values, bind form inputs, handle events, and style elements. The todo list in Section 0.1 uses exactly these primitives and nothing else — go re-read it now; every line should make sense.
+```scrml
+// 04a-tier1-match.scrml — Tier 1: enum + match expression dispatch.
 
-What you cannot yet do: iterate over typed data with named fields, branch exhaustively on a value's variant, split the UI into reusable components, or separate pure computation from impure mutation. That is Layer 2.
+<program>
 
-Before moving on, it is worth sitting with Layer 1 for a moment. The primitives here — `<program>`, `${ ... }`, `@var`, `const @ =`, `bind:`, `class:`, event attributes, `#{ ... }`, Tailwind — are the language's small but complete core. Most scrml code spends most of its time in exactly these constructs. If you internalize this layer, the later layers will feel less like new ideas and more like sensible extensions:
+${
+  type LoadPhase:enum = {
+    Idle
+    Loading
+    Loaded(rows: number)
+    Failed(msg: string)
+  }
 
-- Layer 2 adds *structure* to the values you were already handling (struct/enum types) and *composition* to the markup you were already writing (components, slots).
-- Layer 3 adds *persistence* without changing the shape of the code (the todo example in 0.1 and 0.2 is proof).
-- Layer 4 adds *distribution* — workers, channels, compile-time codegen — for specific needs.
+  <phase>: LoadPhase = .Idle
 
-Everything stacks on Layer 1. When you hit a weird bug later on, nine times out of ten the misunderstanding is a Layer 1 thing: a `@var` read outside `${ ... }`, a `@count` mutated instead of reassigned, a derived value written as `~` instead of `const @`, an event handler that forgot its parentheses. Re-read this layer until the small rules are reflex, and the rest of the tutorial becomes concrete rather than abstract.
+  function load() {
+    @phase = .Loading
+    @phase = LoadPhase.Loaded(42)        // fake result for the demo
+  }
+
+  function reset_phase() { @phase = .Idle }
+}
+
+<div>
+  ${
+    match @phase {
+      .Idle        => { lift <button onclick=load()>Load</button> }
+      .Loading     => { lift <p>Loading…</p> }
+      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                        lift <button onclick=reset_phase()>Reset</button> }
+      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                        lift <button onclick=reset_phase()>Try again</button> }
+    }
+  }
+</div>
+
+</program>
+```
+
+Three things are new:
+
+1. **An enum type.** `type LoadPhase:enum = { Idle, Loading, Loaded(rows: number), Failed(msg: string) }` declares a tagged sum type. `Idle` and `Loading` carry no payload; `Loaded(rows: number)` and `Failed(msg: string)` each carry one. The whole shape is "one of these four, exactly."
+
+2. **The reactive holds an enum value.** `<phase>: LoadPhase = .Idle` declares `phase` as a `LoadPhase` reactive starting in `.Idle`. The leading `.` is bare-variant inference — the compiler infers `.Idle` as `LoadPhase.Idle` because the cell's type is statically known. Inside a function-call argument position the inference doesn't always fire, so `LoadPhase.Loaded(42)` qualifies the constructor explicitly.
+
+3. **`match @phase { .Variant(binding) => { lift ... } }`** dispatches on the reactive's variant inside a logic block. Each arm pattern-matches one variant; payload variants destructure inline (`.Loaded(n)` binds the payload's `rows` field to the local `n`). The `lift` keyword inside each arm marks the produced markup as something to attach to the surrounding DOM.
+
+`match` is exhaustive. Adding a fifth variant to `LoadPhase` later — say `Cached(rows: number)` — turns every match site into a compile error until you add the new arm. That is the main benefit of enums + `match` over a chain of `if=`s: the compiler will tell you exactly where to update.
+
+> **Note on the structural `<match for=Type on=expr>` block.** A first-class markup-element form for Tier 1 dispatch — `<match for=LoadPhase on=@phase> <Idle>...</> </>` — is in the spec and tracked for a future release. Until that parser lands, the JS-style `match expr { ... }` inside a logic block (shown above) is the canonical Tier-1 dispatch form. The exhaustiveness check, payload destructuring, and engine promotion ladder are identical between the two; only the syntactic shape differs.
+
+### 4.3 Tier 2 — `<engine for=Type initial=...>` with `rule=` transitions
+
+The full engine surface adds three additive concepts to the Tier-1 shape: an `initial=` state, a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. The engine is declared at **file level** (a sibling of `<program>`, not a child) and its state-children are empty in the current parser — markup uses a `match` block inside `<program>` to render based on the auto-declared variable.
+
+```scrml
+// 04b-tier2-engine.scrml — Tier 2: <engine> with rule= contracts.
+
+${
+  type LoadPhase:enum = {
+    Idle
+    Loading
+    Loaded(rows: number)
+    Failed(msg: string)
+  }
+
+  function load() {
+    @loadPhase = .Loading
+    @loadPhase = LoadPhase.Loaded(42)        // fake result for the demo
+  }
+}
+
+<engine for=LoadPhase initial=.Idle>
+  <Idle    rule=.Loading></>
+  <Loading rule=(.Loaded | .Failed)></>
+  <Loaded  rule=.Idle></>
+  <Failed  rule=.Idle></>
+</>
+
+<program>
+
+<div>
+  ${
+    match @loadPhase {
+      .Idle        => { lift <button onclick=load()>Load</button> }
+      .Loading     => { lift <p>Loading…</p> }
+      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                        lift <button onclick=${@loadPhase = .Idle}>Reset</button> }
+      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                        lift <button onclick=${@loadPhase = .Idle}>Try again</button> }
+    }
+  }
+</div>
+
+</program>
+```
+
+Read it as: "the engine owns the `LoadPhase` enum, starts in `.Idle`, declares the legal transitions out of each variant, and the program renders the right markup for the current phase."
+
+Things to notice:
+
+- **`<engine for=LoadPhase initial=.Idle>`** at file level declares the engine. The engine's variable is **auto-declared** by the compiler — its name is the lowercase first run of the type (`loadPhase` here). You do NOT also write `<loadPhase> = .Idle`; that would be a duplicate declaration.
+- **`initial=.Idle`** sets the starting state. Required on non-derived engines.
+- **`rule=` declares legal transitions OUT** of this state-child. `rule=.Loading` means "from `.Idle` you may transition to `.Loading`." Multi-target uses parens with `|`: `rule=(.Loaded | .Failed)`.
+- **State-child bodies are empty (`</>`)** in the current parser. The shape of "what to render in each state" lives in the `<program>`'s `match` block, which reads `@loadPhase` and dispatches accordingly. A future spec amendment will let state-child bodies hold markup directly (per primer §13.7 + Phase A10 work); the current shape splits the two cleanly.
+- **Transitions are direct writes.** `@loadPhase = .Loading` triggers the engine's validation: if the destination is not in the current state-child's `rule=` set, you get `E-ENGINE-INVALID-TRANSITION` (compile-time when the from-state is statically known, runtime otherwise).
+- **`<onTransition from=A to=B>`** declares a cross-state effect — code that runs when the engine moves from A to B. Use it for analytics, animations, cleanup, anything that should happen on the transition itself.
+
+The migration story from Tier 1 to Tier 2 is mechanical: the `match` block carries forward verbatim; you add a file-level `<engine for=Type initial=...>` declaration with `rule=` contracts; the type annotation `<phase>: LoadPhase` becomes the engine's auto-declared variable (`@loadPhase`).
+
+> **Engines render at their declaration position** (for the future state-child-body shape). Until that parser lands, the rendering happens at the `match` block inside `<program>`. Cross-file engines (imported from another `.scrml` file) use a `<EngineName/>` use-site mount tag, but you only meet that when you split a program across files.
+
+### 4.4 Why the ladder
+
+Three rungs, three points of commitment:
+
+- **Tier 0** is fine for prototypes. Two booleans is not yet a state machine.
+- **Tier 1** is the first commitment: name the phases, dispatch on the variant. Exhaustiveness checking starts here. You can stop at Tier 1 if the transition story is uninteresting ("any phase can move to any other phase; the compiler just dispatches on value").
+- **Tier 2** is the second commitment: declare legal transitions. The compiler now rejects invalid moves at compile time when it can see the from-state, runtime otherwise. The engine is the single source of truth for "what are the next legal actions?", which is often what the UI wants to ask ("which buttons should be enabled?").
+
+Promote when the cost of promotion is less than the cost of bugs the next tier prevents. For a screen with two modes that never go wrong, Tier 0 is fine forever. For an order lifecycle (Draft → Submitted → Paid → Shipped → Delivered), Tier 2 prevents a whole class of "the cancelled order somehow shipped" bugs.
+
+### 4.5 A worked example — Mario state machine
+
+The `examples/14-mario-state-machine.scrml` program is a working illustration of an engine with payload variants, transitions driven by user actions, and a **derived engine** that projects one enum onto another. The derived form looks like:
+
+```scrml
+<engine for=HealthRisk derived=@marioState>
+  .Small               => .AtRisk
+  .Big | .Fire | .Cape => .Safe
+</>
+```
+
+A derived engine reactively recomputes its variable from the source — `rule=`, `initial=`, and direct writes are forbidden because the source drives everything. Use it when one piece of state has a natural read-only view of another.
 
 ---
 
-## Layer 2 — Composition
+## 5. Forms — `<form>`, validators, and the auto-synthesized validity surface
 
-Layer 2 introduces the tools for scaling a single file past a simple demo: typed iteration, sum types, exhaustive `match`, reusable components, and the split between pure `fn`s and stateful `function`s.
+Validation in scrml is **declarative**, not imperative. You don't write a `validate()` function; you declare validators directly on the state-cell declarations, and the compiler synthesizes a reactive validity surface and error-rendering path automatically.
 
-### 2.1 Iteration with `for` / `lift`
-
-Inside an interpolation slot, a `for` loop iterates. To emit markup from the loop body you use the `lift` keyword — it says "lift this node into the surrounding markup."
+Here is a multi-step signup form that exercises the full surface:
 
 ```scrml
-// 02a — Iteration. for/lift inside ${} inside <ul>.
-
-<program>
+// 05-signup-form.scrml — declarative form with auto-synth validity surface.
 
 ${
-  @items = ["apple", "banana", "cherry"]
+  type SignupPhase:enum = { Editing, Submitting, Done }
 }
 
-<ul>
-  ${
-    for (let x of @items) {
-      lift <li>${x}</li>
-    }
-  }
-</ul>
-
-</program>
-```
-
-The `${ ... }` inside `<ul>` is a logic block because its body is a multi-statement `for`. Each iteration's `lift <li>...</li>` produces a new sibling child of `<ul>`. The word `lift` is there because, without it, `<li>...</li>` inside a logic block would just be an unused expression; `lift` is what marks an expression as something to attach to the surrounding DOM tree.
-
-> **Note:** scrml `for` is the normal JavaScript `for (let x of ...)`. `forEach` and `map` work too, but `for`/`lift` reads cleaner in markup context.
-
-A subtle but important property: the `for` block reacts to changes in `@items`. If you push a new item (by reassigning `@items = [...@items, newItem]`), the loop re-evaluates and the new `<li>` is added without re-rendering the whole list from scratch. scrml diffs the produced nodes by identity where it can; for a flat list of strings, pushes and removes are cheap. For larger lists with stable identity, the conventional idiom is to have a struct with an `id` field and key on that.
-
-Inside a `for`, any `lift` expression is attached as a child of the element containing the logic block. If you `lift` multiple things from a single iteration — say a header and a body — they all attach in order:
-
-```
-for (let group of @groups) {
-  lift <h2>${group.title}</h2>
-  lift <ul>${ for (let x of group.items) { lift <li>${x}</li> } }</ul>
-}
-```
-
-Nested `for`/`lift` composes. The outer loop produces header-and-list pairs; the inner loop produces list items inside each group's list. The nesting is exactly what you would write in imperative DOM building, and the compiler keeps all of it reactive.
-
-### 2.2 Struct types
-
-scrml has a simple structural type system. A `type Foo:struct = { ... }` declaration names a record shape with typed fields. Instances are plain object literals — there are no constructors.
-
-```scrml
-// 02b — Struct type used as a typed array.
-
-<program>
-
-${
-  type Person:struct = { name: string, age: number }
-
-  @people = [
-    { name: "Ada",  age: 36 },
-    { name: "Alan", age: 41 },
-  ]
-}
-
-<ul>
-  ${
-    for (let p of @people) {
-      lift <li>${p.name} (${p.age})</li>
-    }
-  }
-</ul>
-
-</program>
-```
-
-The syntax `type Name:struct = {...}` reads "the type `Person` is a *struct* whose fields are..." The `:struct` qualifier distinguishes record types from other kinds; the next section shows `:enum` for sum types. Field types are any of the primitive types (`string`, `number`, `boolean`), arrays, other named types, or inline object types.
-
-scrml types are structural: a value is a `Person` if it has the right-shape fields, not because of a class declaration. An object literal `{ name: "Ada", age: 36 }` is a valid `Person` without any constructor call. This makes types lightweight and cheap to add: declare one when you want the compiler to check a shape, skip one when the shape is obvious or local.
-
-You can nest structs, arrays, and optional fields. An optional field is written with `?` after the name:
-
-```
-type User:struct = {
-  id:    number,
-  name:  string,
-  email: string?,
-  tags:  string[],
-}
-```
-
-Optional fields can be missing from a value — the type checker will force you to check presence before reading. That check uses the `is some` / `is not not` operators from Section 2.8.
-
-### 2.3 Enum types
-
-An enum is a sum type: a value is exactly one of the listed variants. Variants are written one per line inside `{ ... }` as bare names — no leading `.`. A variant can carry payload fields, which makes an enum a *tagged union* rather than just a set of constants.
-
-```scrml
-// 02c — Multi-line enum type. Variants on separate lines inside { ... } braces.
-
-<program>
-
-${
-  type Status:enum = {
-    Todo
-    InProgress
-    Done
-  }
-
-  // The type annotation on the reactive lets `match` downstream see it as
-  // a Status-typed subject (otherwise the type system widens to asIs and
-  // match rejects with E-TYPE-025).
-  @status: Status = Status.Todo
-}
-
-<p>
-  ${
-    match @status {
-      .Todo       => { lift "Not started" }
-      .InProgress => { lift "Working on it" }
-      .Done       => { lift "Complete" }
-    }
-  }
-</p>
-
-</program>
-```
-
-The leading `.` appears only on the *reference* side (inside `match` arms, `is .Variant` checks). In the declaration body the names are bare.
-
-To *read* an enum value you use `match` (next section). Variants without payload are constructed as `Status.Todo`; variants with payload are constructed as `Shape.Circle(10)` — the payload shape follows the variant name in parentheses. We return to payload variants in the next section.
-
-> **Note:** newline separation of variants is the canonical style. Commas between variants are also accepted (`{ Todo, InProgress, Done }` fits on one line when the set is small), but one-per-line reads better for anything more than a handful.
-
-Enums shine for UI state. A loading-then-success-or-error request is a four-variant enum:
-
-```
-type Request:enum = {
-  Idle
-  Loading
-  Success(data: Row[])
-  Failure(msg: string)
-}
-```
-
-Every place in your code that reads the request has to handle all four variants — including the data payload that `Success` carries and the message that `Failure` carries. You cannot accidentally render `data.length` when the request is still `Loading`, because the `Loading` variant has no `data` field and the type checker knows that. This is the main reason scrml treats enums as first-class: they are the right shape for "one of several possible states" and the compiler will not let you forget a state.
-
-### 2.4 `match` — exhaustive, uses `=>`
-
-`match` is how you destructure an enum. Each arm matches one variant and runs its block; the compiler checks at build time that every variant has an arm, and fails the build if you forget one.
-
-```scrml
-// 02d — Exhaustive match. Picks an icon/label per enum variant.
-
-<program>
-
-${
-  type Status:enum = {
-    Todo
-    InProgress
-    Done
-  }
-
-  @status: Status = Status.InProgress
-
-  function advance() {
-    match @status {
-      .Todo       => { @status = Status.InProgress }
-      .InProgress => { @status = Status.Done }
-      .Done       => { @status = Status.Todo }
-    }
-  }
-}
-
-<div>
-  <p>
-    ${
-      match @status {
-        .Todo       => { lift "[ ] Todo" }
-        .InProgress => { lift "[~] In progress" }
-        .Done       => { lift "[x] Done" }
-      }
-    }
-  </p>
-  <button onclick=advance()>Advance</button>
-</div>
-
-</program>
-```
-
-The arm separator is `=>` — canonical per the spec (§18.2). `->` is accepted as an alias and `:>` compiles for now but is not the style to teach. Blocks use ordinary `{ ... }`. A match used in markup context — inside an interpolation slot — uses `lift` inside each arm to emit that arm's output.
-
-`match` is exhaustive. If you add a fourth variant to `Status` later, every `match` in your program that branched on `Status` becomes a compile error until you add a handling arm for the new variant. This is the main benefit of enums-plus-match over "string constants and if/else": the compiler forces you to update call sites. A migration that would be a bug-hunt in weakly-typed code is a guided list of compile errors in scrml.
-
-**Payload variants and destructuring.** A variant declared with a parenthesized field list carries that payload when constructed, and a `match` arm can bind those fields to local names.
-
-```
-type Request:enum = {
-  Idle
-  Loading
-  Success(data: Row[])
-  Failure(msg: string)
-}
-
-match @req {
-  .Idle          => { lift "Click to load" }
-  .Loading       => { lift "Loading..." }
-  .Success(data) => { for (let r of data) { lift <li>${r.name}</li> } }
-  .Failure(msg)  => { lift <p class="err">${msg}</p> }
-}
-```
-
-Positional bindings (`.Success(data)`) bind against the declared field order. Named bindings (`.Success(data: rows)`) destructure by field name and let you rename locally. A `_` in any position is an explicit discard. Arity mismatch — `.Rectangle(w)` for a `Rectangle(width, height)` variant — is `E-TYPE-021`; use either the full positional list or the named form with a subset.
-
-Construction mirrors this: `Shape.Circle(10)` returns a tagged object you can compare, pass around, or match on. Unit variants (no payload) are still plain strings under the hood: `Status.Todo === "Todo"`. The runtime normalizes both shapes so `match` arms dispatch uniformly.
-
-**Match subject typing.** The subject of `match` must be a typed value — enum, union, or primitive. If the compiler can only infer `asIs`, it rejects with `E-TYPE-025`. Three ways to keep a subject's type visible: annotate a reactive at declaration (`@status: Status = Status.Todo`), annotate a function parameter (`function handle(s: Status) { match s { ... } }`), or annotate a local binding (`let s: Status = raw`). Any of the three carries the narrowed type through to `match`.
-
-Match also works on non-enum values — you can match on numbers, strings, or booleans — but the exhaustiveness check is most useful on enums, because only enums have a finite known set of cases.
-
-### 2.5 Control flow: `show=` and ternary (and when to reach for `match`)
-
-By Section 1.8 you have already seen `if=`/`else-if=`/`else` chains. This section covers the two remaining conditional-markup tools: `show=`, which keeps the element mounted and toggles its CSS `display`; and a ternary inside an interpolation, which substitutes one of two expressions.
-
-```scrml
-// 02e — show= visibility toggle and a ternary inside interpolation.
-// (For if=/else=/else-if= chains, see 01h.)
-
-<program>
-
-${
-  @loggedIn = true
-  @verbose  = false
-}
-
-<div>
-  <p show=@verbose>Extra diagnostic info.</p>
-  <p>Status: ${@loggedIn ? "online" : "offline"}</p>
-</div>
-
-</program>
-```
-
-Use `show=` when the element should stay in the DOM but its visibility toggles. Common cases: a form input you want to keep mounted across tab switches so its in-progress value is preserved; a media element you do not want to tear down between toggles; an expensive subtree that flips on and off often. Like `if=`, `show=` does not apply to state-object openers — see Section 1.1 for the full list.
-
-A ternary inside an interpolation handles the smaller case of "two slightly different bits of text or attribute value." `${@loggedIn ? "online" : "offline"}` is an ordinary scrml expression in interpolation position; it does not change the DOM tree at all, only the substituted value. Reach for it when both branches are short expressions and there is no markup to swap.
-
-For exhaustive branching over an enum's variants, prefer `match` (Section 2.4) rather than a long `if=`/`else-if=` chain. `match` is exhaustiveness-checked: adding a new variant to the enum forces every match site to be updated, which a chain of `if=`s does not. The chain form is structural rather than enum-aware; use it when the conditions are independent boolean expressions, and use `match` when the conditions are "which variant of this enum is it?".
-
-### 2.6 Inline components
-
-A component in scrml is a `const` bound to an element expression inside a logic block. It is invoked by name in markup, like a custom element. Children — the content between the open and close tags at the call site — are substituted into the component body via `${children}`.
-
-```scrml
-// 02f — Inline component. Declare inside ${}, invoke in markup.
-// Components receive children via ${children} spread in the body.
-
-<program>
-
-${
-  const Card = <div class="card">
-    ${children}
-  </div>
-}
-
-<Card>
-  <h2>Hello</h2>
-  <p>Inside a card.</p>
-</Card>
-
-#{
-  .card {
-    padding: 1rem;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-  }
-}
-
-</program>
-```
-
-The convention is that component names are capitalized (`Card`, `Panel`, `UserBadge`) so the parser can distinguish them from lowercase HTML tags.
-
-Because a component is just a value assigned to a `const`, you can pass it around, put it in an array, return it from a function, or declare one inside another. There is no separate "component definition" step; components are a naming convention on top of scrml expressions.
-
-A component can take props. Props are declared on the component's root element via a `props={...}` attribute:
-
-```
-const Badge = <span class="badge" props={ label: string, kind: "info" | "warn" | "err" }>
-  ${label}
-</span>
-
-<Badge label="Saved" kind="info"/>
-```
-
-Each prop has a typed name; inside the component body, the prop is available as a local `const`. Props can be primitives, structs, enums, arrays, or — for advanced composition — `snippet` values (Section 2.7). Calling a component with a missing required prop is a compile error; calling it with the wrong type is a compile error.
-
-Props and `${children}` work together. A component can take named slot-children (via `snippet` props) and positional children (via `${children}`) at the same time. The common pattern is: simple wrappers use `${children}` only, structured panels declare `snippet` props for each region.
-
-Each component instance has its own `@var` scope. Two `<Counter/>` tags render two independent counters, each with its own `@count`. This is what "put the work inside a component" means from the Section 1.3 note on state scope: components are the unit of state isolation.
-
-### 2.7 Slots
-
-When a component needs more than one kind of child — say, a header and a body — it declares named *slots* using a `props` attribute with type `snippet`, and the caller assigns children to slots with `slot="name"`.
-
-```scrml
-// 02g — Named slots. A Panel component with header + body snippet props.
-// Children are assigned to slots via `slot="name"` on direct children.
-
-<program>
-
-${
-  const Panel = <section class="panel" props={
-    header: snippet,
-    body:   snippet,
-  }>
-    ${children}
-    <div class="panel__header">
-      ${render header()}
-    </div>
-    <div class="panel__body">
-      ${render body()}
-    </div>
-  </section>
-}
-
-<Panel>
-  <h2 slot="header">Settings</h2>
-  <p slot="body">Adjust your preferences here.</p>
-</Panel>
-
-#{
-  .panel { border: 1px solid #ddd; border-radius: 6px; margin: 1rem 0; }
-  .panel__header { background: #f5f5f5; padding: 0.5rem 1rem; font-weight: 600; }
-  .panel__body { padding: 1rem; }
-}
-
-</program>
-```
-
-`props={ header: snippet, body: snippet }` declares that this component accepts two snippet props — `header` and `body` — which the caller will fill with `slot="header"` and `slot="body"` children respectively. Inside the component body, `${render header()}` renders the snippet passed for `header`. Snippets are small typed functions over markup; they are first-class values, so you can pass them between components, store them in arrays, and call them multiple times.
-
-Because snippets are callable, they can take arguments, too. A table component might declare a `row: snippet(item: Row)` prop and call it inside an iteration:
-
-```
-const Table = <table props={ rows: Row[], row: snippet(item: Row) }>
-  <tbody>
-    ${ for (let r of rows) { lift <tr>${render row(r)}</tr> } }
-  </tbody>
-</table>
-```
-
-The caller supplies a snippet that receives each row and produces the cells. This is the scrml shape of "render prop" or "scoped slot" from other frameworks.
-
-For most components, though, `${children}` alone is enough. Reach for named `snippet` slots when a component has clearly distinct regions (header/body/footer, title/content, input/preview) and you want the consumer to fill each region separately.
-
-### 2.8 Presence checks: `is not not`, `is some`, `not`
-
-JavaScript's mental model for "missing" values is a mess — `null`, `undefined`, and falsy-but-present values all look alike. scrml has three dedicated operators for talking about presence. Each must be parenthesized inside an attribute, because the unparenthesized `!` and `==` cases are ambiguous with other uses.
-
-```scrml
-// 02h — Presence checks. `is not not`, `is some`, `not @var`. Always parenthesized.
-
-<program>
-
-${
-  @user     = { name: "Ada" }
-  @email    = "ada@example.com"
-  @loggedIn = true
-}
-
-<div>
-  <p if=(@user is not not)>User is present.</p>
-  <p if=(@email is some)>Email is provided.</p>
-  <p if=(not @loggedIn)>Please sign in.</p>
-</div>
-
-</program>
-```
-
-`x is not not` reads "x is defined" — the double negation is the point; it distinguishes presence (`is not not`) from truthiness. `x is some` is an alias for the same check with different emphasis. `not x` is logical negation — the boolean complement, equivalent to JavaScript's `!x`.
-
-You will write `is not not` and `is some` most often when guarding a block against null values; you will write `not` most often when you want a boolean flip of a boolean.
-
-The reason scrml has three spellings rather than one is that all three read cleanly in different contexts:
-
-- `if (@user is some)` reads naturally as "if a user is present."
-- `if (@config.option is not not)` reads as "if the option is defined at all."
-- `if (not @loggedIn)` reads as "if not logged in."
-
-Each is the right grammar for a different question. Pick whichever reads closest to what the condition means in natural language, and be consistent across your program.
-
-The parentheses requirement is a parser rule: inside attribute positions, the parser cannot easily tell where a scrml operator ends and the next attribute begins without them. You do not need parentheses in pure expression positions (inside `${ }` interpolations or logic blocks), only in attribute values like `if=(...)`.
-
-### 2.9 Pure functions with `fn`
-
-There are two flavors of function declaration in scrml: `function` (for stateful work that can touch `@vars`) and `fn` (for pure computation that cannot). A `fn` is typed — parameters and return type are declared — and is statically checked to be free of side effects. Use `fn` for anything you would test in isolation.
-
-```scrml
-// 02i — Pure `fn` declaration. Typed, used in markup.
-
-<program>
-
-${
-  fn formatName(first: string, last: string) -> string {
-    return first + " " + last
-  }
-}
-
-<p>${formatName("Grace", "Hopper")}</p>
-
-</program>
-```
-
-The signature `fn formatName(first: string, last: string) -> string` reads: "pure function `formatName` taking two strings, returning a string." A `fn` cannot read or write `@vars`, call a client-side DOM API, or perform I/O. It is a value, compilable to either side of the client/server boundary without ceremony.
-
-The rule of thumb: reach for `fn` whenever you can, and fall back to `function` only when you must mutate state. Pure code is easier to reason about, easier to test with `~{ ... }` (Section 3.6), and portable across the boundary.
-
-A pure `fn` declared at program scope is automatically available on both sides of the client/server boundary. The compiler either inlines it into the client bundle, or, if it is only called from server code, ships it only there. You never think about "which environment does this code need?" for a pure function — its purity means it can run anywhere.
-
-The `fn` declaration also participates in the type system. The return type after `->` is checked against every `return` in the body. Parameter types are checked at every call site. This catches the full set of small typos (passing a string where a number is expected, returning nothing from a function that should return a value) at compile time. For quick experiments you can omit the return type and scrml will infer it, but explicit is usually clearer at code-review time.
-
-Finally, a `fn` can be marked failable with `!` (see Section 3.5). A failable `fn` returns either its normal value or fails with a typed error variant. The caller either pattern-matches the error with `!{ ... }` or propagates the failure up to an `<errorBoundary>`. Because this is all at the type level, there is no hidden "might throw" to worry about: if a function can fail, its signature says so.
-
-### 2.10 State machines
-
-An enum plus a match takes you most of the way to "one of several possible states." A state *machine* goes one step further: it declares which transitions between those states are legal, so the compiler and runtime will reject illegal ones instead of silently accepting them. scrml spells this as a top-level `< machine>` block bound to an enum type.
-
-```scrml
-// 02j — State machine. `< machine name=Name for=EnumType>` declares the legal
-// transitions for a reactive bound to that machine. Writes that are not
-// in the rule set are rejected at runtime.
-
-<program>
-
-${
-  type OrderState:enum = { Draft, Submitted, Paid, Shipped, Delivered, Cancelled }
-
-  // The machine annotation on the reactive is what wires runtime guarding.
-  // Assignments to @order are validated against OrderMachine's rule set.
-  @order: OrderMachine = OrderState.Draft
-
-  function submit()  { @order = OrderState.Submitted }
-  function pay()     { @order = OrderState.Paid }
-  function ship()    { @order = OrderState.Shipped }
-  function deliver() { @order = OrderState.Delivered }
-  function cancel()  { @order = OrderState.Cancelled }
-}
-
-< machine name=OrderMachine for=OrderState>
-  .Draft     => .Submitted | .Cancelled
-  .Submitted => .Paid | .Cancelled
-  .Paid      => .Shipped | .Cancelled
-  .Shipped   => .Delivered
+<engine for=SignupPhase initial=.Editing>
+  <Editing    rule=.Submitting></>
+  <Submitting rule=.Done></>
+  <Done       rule=.Editing></>
 </>
 
-<div>
-  <p>Order: <b>${@order}</b></p>
-  <button onclick=submit()>Submit</button>
-  <button onclick=pay()>Pay</button>
-  <button onclick=ship()>Ship</button>
-  <button onclick=deliver()>Deliver</button>
-  <button onclick=cancel()>Cancel</button>
-</div>
-
-</program>
-```
-
-Two pieces wire the machine to a reactive. The enum (`OrderState`) lists the states. The `< machine name=OrderMachine for=OrderState>` block lists the legal transitions — each rule has a *from* variant on the left and one or more *to* variants on the right, separated by `=>`. The `|` alternation on the right lets a single from-state fan out to several legal destinations. Finally, the reactive's type annotation (`@order: OrderMachine`) is what binds the two together: writes to `@order` go through the machine guard instead of the default setter.
-
-Try the example. `.Draft → .Paid` will be rejected at runtime — it is not in the rule set. `.Draft → .Submitted` succeeds. The rules themselves are also enforced by the type system: misspelling a variant (`.Draftt => .Submitted`) is a compile-time E-ENGINE-004, not a silent wrong-path at runtime.
-
-**Why machines over plain enum state?** Three wins over raw `@state = Status.X` writes. First, the compiler tells you exactly what the legal transitions are, in one block, where you'd otherwise have to hunt through every write site to reason about state flow. Second, the runtime guards against a whole class of sequencing bugs (the cancelled order that somehow gets shipped, the draft post that appears published without going through review). Third, once the machine exists, it is the single source of truth for "what are the next legal actions?", which is often exactly what the UI wants to ask ("which buttons should be enabled right now?").
-
-**Payload variants in transitions (§1b).** If the enum has payload variants, machine rules can bind the payload with a guard. A `.Charging(n) => .Firing given (n > 50)` rule reads as "from Charging(n) to Firing, provided n > 50." The `given` clause is a boolean expression over the bound payload fields. Unguarded siblings after a guarded rule act as the fallback. This is how you write "you can only fire if the power bank is more than half full, otherwise you fall back to discharged."
-
-**Derived machines — one enum projected onto another (§51.9).** Sometimes the natural thing is not a new machine but a *read-only view* of an existing one. A pipeline state might drive a UI mode (editable / read-only / terminal); an auth state might drive a permissions enum. Write this as a `derived from` machine:
-
-```scrml
-// 02l — Derived (projection) machine. A derived machine projects one enum
-// onto another at read time. Writes to the projected reactive are rejected
-// at compile time (E-ENGINE-017) — the projection is read-only and
-// auto-updates whenever the source changes.
-
 <program>
 
 ${
-  type OrderState:enum = { Draft, Submitted, Paid, Shipped, Delivered, Cancelled }
-  type UIMode:enum     = { Editable, ReadOnly, Terminal }
-
-  @order: OrderMachine = OrderState.Draft
-}
-
-< machine name=OrderMachine for=OrderState>
-  .Draft     => .Submitted | .Cancelled
-  .Submitted => .Paid | .Cancelled
-  .Paid      => .Shipped | .Cancelled
-  .Shipped   => .Delivered
-</>
-
-< machine name=UI for=UIMode derived=@order>
-  .Draft                             => .Editable
-  .Submitted | .Paid | .Shipped      => .ReadOnly
-  .Delivered | .Cancelled            => .Terminal
-</>
-
-<p>Mode: <b>${@ui}</b></p>
-
-</program>
-```
-
-The derived machine `UI` projects the source `@order` into `UIMode` variants. The projected reactive's name is derived from the machine name with the leading uppercase run lowercased — `UI` → `@ui`, `OrderStatus` → `@orderStatus`. You never declare `@ui` directly; the compiler materializes it for you, and writes to it are rejected at compile time (`E-ENGINE-017` — "projected variables are read-only"). Whenever `@order` changes, the runtime marks `@ui` dirty and re-evaluates on the next read; the markup interpolation `${@ui}` re-renders automatically.
-
-**When to reach for each.** A plain enum plus match is enough when the state is small and every write site is obviously in the same few functions. Add a `< machine>` once the transition story matters — to document legal paths, to gate invalid ones, or to ask "what's next from here?" programmatically. Add a `derived` machine once the UI (or any other downstream reactive) has a derivable view of a state machine's output: it is cheaper than a manual `const @` derivation, and it gives you a single named enum type to match on in the UI instead of a chain of conditions over the source.
-
-The snippets `02j-machine.scrml`, `02k-payload-variants.scrml`, and `02l-derived-machine.scrml` in `docs/tutorial-snippets/` are the working programs for this section. Compile them and flip states through the buttons to see the runtime guarding and the derived projection in action.
-
-### Checkpoint
-
-With Layer 2 in hand you can build non-trivial client-side UIs. You can iterate typed collections, destructure enums exhaustively, decompose the UI into components with slots, and separate pure code from impure code. Every subsequent section layers features on top of these primitives.
-
-A few patterns are worth noticing because they will recur in the rest of the tutorial. First, the enum-plus-match pattern for "one of several possible states" is universal: UI views (idle/loading/success/failure), validation outcomes (ok/EmptyName/TooShort), and server error responses all take this shape. Whenever you reach for a string constant to represent "what kind of thing this is," step back and ask whether an enum with match would be clearer. Usually it is.
-
-Second, the `fn`-then-`function` discipline pays for itself surprisingly quickly. Pure `fn`s are trivially testable with `~{ ... }`, portable across the client/server boundary, and cheap to reason about. Client `function`s are where state changes, and there are usually only a handful of them per program. Keeping those two kinds of code visually and syntactically distinct makes the program easier to read months later.
-
-Third, components — even tiny ones — are the unit of reuse. If a markup fragment appears twice in a program, promote it to a component; you get independent state scope, typed props, and a name that documents what the thing is. The friction of creating a component is `const Name = <...>`; it is cheap enough that you should do it whenever there is a reason.
-
-If any of Layer 2 felt fuzzy, compile the snippets and poke at them. The snippet files in `docs/tutorial-snippets/` are each a working program you can modify: change `Status` to have a fourth variant and watch the compiler flag the match; change a prop's type and watch the call site complain. The learning loop is fast.
-
----
-
-## Layer 3 — Full-stack
-
-Layer 3 turns your program into a full-stack app. In this layer you will connect to SQLite with `<db>`, write parameterized SQL with `?{ ... }`, mark functions as server-side, guard routes with `protect=`, handle failures as typed enum variants, and write inline tests.
-
-### 3.1 The `<db>` state block
-
-The `<db>` element opens a database connection that the program's server functions can use. It takes a `src` pointing to a SQLite file (paths are relative to the program), and a `tables` list naming the tables this program is allowed to touch.
-
-```scrml
-// 03a — Full `<db>` block wrapping a minimal todo UI.
-
-<program>
-
-<db src="tasks.db" tables="tasks">
-
-  ${
-    @tasks = []
-
-    server function loadTasks() {
-      lift ?{`SELECT id, title FROM tasks ORDER BY id`}.all()
-    }
-
-    if (@tasks.length == 0) {
-      @tasks = loadTasks()
-    }
-  }
-
-  <div>
-    <h1>Tasks</h1>
-    <ul>
-      ${
-        for (let t of @tasks) {
-          lift <li>${t.title}</li>
-        }
-      }
-    </ul>
-  </div>
-
-</>
-
-</program>
-```
-
-The entire UI — its logic block, its markup, everything — is nested *inside* the `<db>` block. This is intentional: the nesting makes the scope of database access visually obvious. Outside a `<db>` element, `?{ ... }` blocks are a compile error, because there is no connection in scope.
-
-> **Hazard:** an early design sketch spelled this `<program db="tasks.db">`. That form is **wrong**; the correct spelling is a nested `<db src="..." ...>` state block. If you see the attribute form anywhere, it is out of date.
-
-The `tables` attribute is a safety fence. Listing a table there says "this program is allowed to query this table." Queries against other tables fail to compile. This is not authentication (that is `auth=` and `protect=` — coming up in Section 3.4) but architectural hygiene: it prevents one page of your app from accidentally poking at another page's data.
-
-You can open more than one `<db>` block in a single program. Each block contains its own set of server functions and SQL queries. A reporting page might read from `orders.db` and `customers.db` in side-by-side `<db>` blocks; the compiler treats them as independent connections with independent prepared-statement pools.
-
-The `<db>` element is a state block, not a component — it does not render visible UI. It exists at compile time to wrap its contents in the connection scope, and at run time to open the actual connection. The markup inside renders normally; the `<db>` boundary itself produces no DOM.
-
-### 3.2 SQL with `?{}`
-
-A `?{ ... }` block holds a parameterized SQL statement. The content is a backtick-delimited string; JavaScript template interpolation (`${var}`) is used for parameters, and the compiler turns those into prepared-statement placeholders, so user input never becomes concatenated SQL.
-
-```scrml
-// 03b — ?{} SQL. Backtick strings. .all() for SELECT, .run() for INSERT.
-
-<program>
-
-<db src="tasks.db" tables="tasks">
-
-  ${
-    @tasks = []
-    @draft = ""
-
-    server function loadTasks() {
-      lift ?{`SELECT id, title FROM tasks ORDER BY id`}.all()
-    }
-
-    server function addTask(title) {
-      ?{`INSERT INTO tasks (title) VALUES (${title})`}.run()
-    }
-
-    function submit() {
-      if (@draft == "") return
-      addTask(@draft)
-      @tasks = loadTasks()
-      @draft = ""
-    }
-
-    if (@tasks.length == 0) {
-      @tasks = loadTasks()
-    }
-  }
-
-  <form onsubmit=submit()>
-    <input type="text" bind:value=@draft/>
-    <button type="submit">Add</button>
-  </form>
-  <ul>
-    ${ for (let t of @tasks) { lift <li>${t.title}</li> } }
-  </ul>
-
-</>
-
-</program>
-```
-
-A `?{ ... }` expression produces a prepared-statement value. Its two common methods are `.all()` (run a `SELECT` and return rows) and `.run()` (run an `INSERT`, `UPDATE`, or `DELETE` for side effect). The interpolated `${title}` in the insert is a bound parameter — even if `title` contains quotes or semicolons, it is treated as data, not SQL.
-
-There is no escape hatch for string-concatenated SQL. Every value you want to mention inside a `?{ ... }` backtick string must go through an `${ ... }` interpolation, and every such interpolation is a bound parameter. Column and table names cannot be parameterized the same way — if you need dynamic schema (pick a column based on user input), you structure that with a `match` in scrml code that selects one of a finite set of fully literal queries. Injection is impossible by construction.
-
-`.all()` returns an array of rows typed against the schema of the `SELECT`. If the columns are `id, title`, each row has `.id` and `.title`, with types inferred from the table. `.run()` returns a small metadata object (`{ changes, lastInsertRowid }`) that you can use when you need the new row's id immediately.
-
-A third method, `.get()`, returns the first row of a `SELECT` or `null` if there are no rows. Use it for "fetch by id" queries where at most one row is expected. As with the other methods, the compiler types the return based on the query text.
-
-Inside a server function, the `lift` keyword in `lift ?{ ... }.all()` marks the return value as the one to send back over the wire. Without `lift`, the statement is executed for its side effect and the function returns nothing. The idiom in the snippet (`server function loadTodos() { lift ?{...}.all() }`) is therefore "run this query on the server and ship the rows back to the caller."
-
-### 3.3 Server functions and the boundary
-
-A function prefixed with `server` runs on the server. It can call `?{ ... }` blocks, read server-only modules, and do I/O. It is called from the client the same way any local function is called — by name, with arguments — and the compiler wires the transport.
-
-The one rule that distinguishes server functions from client functions is that **server functions must not assign to `@vars`**. State transitions belong on the client; the server's job is to fetch and persist. A client function can (and routinely does) call a server function for data, then update state with the result.
-
-```scrml
-// 03c — Division of labor.
-// Client function owns @state transitions.
-// Server function persists only — it must NOT assign @vars (E-RI-002).
-
-<program>
-
-<db src="tasks.db" tables="tasks">
-
-  ${
-    @tasks = []
-    @draft = ""
-
-    // Server: persistence only. No @state assignments here.
-    server function persistTask(title) {
-      ?{`INSERT INTO tasks (title) VALUES (${title})`}.run()
-    }
-
-    server function loadTasks() {
-      lift ?{`SELECT id, title FROM tasks ORDER BY id`}.all()
-    }
-
-    // Client: owns @state.
-    function addTask() {
-      if (@draft == "") return
-      persistTask(@draft)
-      @tasks = loadTasks()
-      @draft = ""
-    }
-
-    if (@tasks.length == 0) {
-      @tasks = loadTasks()
-    }
-  }
-
-  <form onsubmit=addTask()>
-    <input type="text" bind:value=@draft/>
-    <button type="submit">Add</button>
-  </form>
-
-</>
-
-</program>
-```
-
-Notice the shape: `persistTask` and `loadTasks` are `server` — they work with the database. `addTask` is plain `function` — it owns `@draft` and `@tasks` transitions and calls the server functions between them. This is the grain of the language: server code persists, client code drives the UI, and the boundary between them is a function call.
-
-> **Error you might hit:** E-RI-002 — a server function that assigns to an `@var`. The error message will point at the line; the fix is always the same: move the assignment into the calling client function.
-
-The reason for the rule is pragmatic. Server functions run on the server, in response to an RPC. They do not share memory with the client's `@var` store; a write to `@var` on the server would update a copy that no one else ever sees, leaving the real client-side state stale. Rather than papering over this with silent semantics, the compiler forbids the write outright.
-
-This pattern is worth internalizing because it scales cleanly. Servers fetch and persist; clients own the UI's state machine. Server functions are small, composable, and can be called from anywhere on the client side. Client functions orchestrate: call the server, update state, clear inputs, advance the view. When you find yourself writing a server function that looks complicated, it is usually because some of its logic should have been on the client.
-
-Calling a server function from a client function is a normal call. The arguments are serialized, shipped over HTTP, and the return value is shipped back. Errors propagate normally — a thrown exception on the server becomes a rejected call on the client, which bubbles to the nearest `<errorBoundary>` (Section 3.5). The network transport is invisible to your code, but you still need to think about latency: a call that would be instant locally might take 50–500ms over the wire.
-
-> **Note:** `server function` is the canonical declaration form for server-only logic. There is no shorter prefix-style spelling.
-
-### 3.4 `protect=`
-
-Some columns — password hashes, API keys, private user fields — must never be sent to the browser, regardless of whose code is doing the sending. `<db protect="...">` tells the compiler which columns are server-only. A `SELECT` that includes a protected column is rejected *in the client bundle*: the query can still be issued from server code, but any attempt to compile code that ships that column to the browser is a hard error.
-
-```scrml
-// 03d — protect=. Columns listed in protect="..." are server-only:
-// the compiler refuses to ship them to any client bundle. Use for
-// password hashes, API keys, anything the browser must never see.
-
-<program auth="required">
-
-<db src="users.db" protect="password_hash" tables="users">
-
-  ${
-    @users = []
-
-    server function loadUsers() {
-      // We SELECT without password_hash — protected column isn't pulled to client.
-      lift ?{`SELECT id, email FROM users ORDER BY id`}.all()
-    }
-
-    if (@users.length == 0) {
-      @users = loadUsers()
-    }
-  }
-
-  <ul>
-    ${ for (let u of @users) { lift <li>${u.email}</li> } }
-  </ul>
-
-</>
-
-</program>
-```
-
-Two things to note. First, `<program auth="required">` at the top requires that every request to this page be authenticated; unauthenticated visitors see the auth fallback. Second, the query in `loadUsers` deliberately does *not* select `password_hash` — a defensive measure — but `protect=` is the compile-time enforcement that would catch a mistake if someone added `password_hash` to the `SELECT` later.
-
-You can list multiple protected columns: `protect="password_hash, totp_secret, api_key"`. Any query that pulls any of these into a client-reachable code path is rejected. Server-to-server work — hashing the password during login, for instance — can still read them freely, because that code path does not cross the client boundary.
-
-`auth="required"` interacts with the rest of the program. Unauthenticated requests are redirected to `/login` (override with `loginRedirect="/your-path"` on `<program>`). The details of how the authenticated session is exposed to your code — the user-identity surface, fields, lifetime, refresh behavior — are covered in `SPEC.md` §40; for the purposes of this tutorial, `auth="required"` is a switch you flip when the page must be behind login.
-
-The pair of `auth=` and `protect=` gives you the two halves of web security that are easy to get wrong: who can see the page, and which fields leave the server. Both are compile-time enforced, so a refactor cannot silently violate them.
-
-### 3.5 Error handling: `renders`, `fail`, `!{}`, `<errorBoundary>`
-
-scrml models errors as enum variants. A variant can carry a `renders` clause that says how to display itself in the UI. A function that can fail is declared with `!` after its parameter list and the error type after the return arrow. Callers handle each variant with `!{ ... }`; unhandled failures bubble up to the nearest `<errorBoundary>`, which renders the variant's `renders` markup in place.
-
-```scrml
-// 03e — Errors as types. Enum variants with `renders` clauses display themselves.
-// A failable function `fail`s a variant. The caller uses !{} to handle each arm.
-// Unhandled failures bubble up to the nearest <errorBoundary>.
-
-<program>
-
-${
-  type Err:enum = {
-    EmptyName
-      renders <p class="text-red-600">Name required.</>
-    TooShort(n: number)
-      renders <p class="text-red-600">Needs at least ${n} chars.</>
-  }
-
-  @name = ""
-
-  function validate()! -> Err {
-    if (@name == "")          fail Err::EmptyName
-    if (@name.length < 3)     fail Err::TooShort(3)
-  }
-
-  function save() {
-    validate() !{
-      | ::EmptyName    -> { }
-      | ::TooShort n   -> { }
-      | _              -> { }
-    }
-  }
-}
-
-<errorBoundary>
-  <div>
-    <input type="text" bind:value=@name/>
-    <button onclick=save()>Save</button>
-  </div>
-</>
-
-</program>
-```
-
-Several pieces are doing work here. `type Err:enum = { EmptyName renders ... TooShort(n: number) renders ... }` declares a two-variant error type; each variant's `renders` clause is markup parameterized over its payload (the `TooShort` variant can read its `n` inside its own markup).
-
-`function validate()! -> Err` declares that `validate` can fail with an `Err`. Inside the body, `fail Err::EmptyName` and `fail Err::TooShort(3)` raise a specific variant.
-
-At the call site, `validate() !{ | ::EmptyName -> { } | ::TooShort n -> { } | _ -> { } }` pattern-matches each variant: the `::EmptyName` arm handles the no-payload variant, the `::TooShort n` arm binds the payload number to `n`, and `_` is the catch-all. If the arm blocks are empty (as above), the error bubbles; the surrounding `<errorBoundary>` catches it and renders the variant's own `renders` markup at the boundary's location.
-
-This pattern makes error messages a piece of the type system rather than a string-concatenation afterthought. A new variant with a new `renders` clause is a new branch in every `!{ ... }` that matches the type, and the compiler tells you where the holes are.
-
-Three idioms cover most real-world use. First, "handle everything inline": every arm does something specific, the catch-all is absent or sets state. Second, "handle one, let the rest bubble": one arm is the case you know how to fix here, everything else falls through to the boundary. Third, "handle none, let the boundary render": `validate() !{ | _ -> { } }` catches the failure at the call site but does no work, which triggers the boundary's default rendering behavior.
-
-`<errorBoundary>` can wrap any subtree. You can nest them: an inner boundary around a risky widget catches that widget's errors, an outer boundary catches anything the inner one missed. Each boundary renders the error at its own location in the DOM, which gives you control over where the UI degrades when something fails. A shopping cart's "checkout" button can have its own `<errorBoundary>` so a payment error shows next to the button, not at the page root.
-
-Beyond the client-side story, errors work across the client/server boundary. A server function that `fail`s a variant propagates that failure through the RPC back to the calling client function. The `!{ ... }` on the client handles it the same way as a local failure — the network transport is invisible. This is the one place you will notice, though, that network latency is real: a `fail` from the server round-trips before you see it, which is one more reason to keep validation logic on the client when you can.
-
-### 3.6 Inline tests with `~{}`
-
-A `~{ ... }` block holds inline tests. Tests are stripped from production builds entirely — they are not shipped to the browser and not compiled into the server bundle. Inside a `~{ ... }` block, `test "name" { ... }` declares a single case, and `assert` checks a condition.
-
-```scrml
-// 03f — Inline tests. ~{} blocks are stripped from production builds.
-
-<program>
-
-${
-  @count = 0
-  function inc() { @count = @count + 1 }
-}
-
-<button onclick=inc()>+ ${@count}</button>
-
-~{ "counter"
-  test "increments by one" {
-    @count = 0
-    inc()
-    assert @count == 1
-  }
-}
-
-</program>
-```
-
-Tests live next to the code they test, which makes them easy to find and easy to delete when the code they cover is refactored. They are most useful for pure `fn`s (Section 2.9), but they can also drive client functions — a test is allowed to read and write `@vars` directly, which simulates a user action.
-
-The string after `~{` (here, `"counter"`) is the test group's name. You can have multiple groups in a single file and multiple `test` cases in a single group. `assert condition` fails the test if the condition is false; `assert condition, "message"` includes a message in the failure.
-
-The run command is `bun compiler/bin/scrml.js test <file>.scrml`, which compiles the file in test mode (tests included) and runs every `test` case it finds. Because `~{ ... }` blocks are stripped from production builds, you pay nothing for having them in your source; you can leave hundreds of tests inline and the deployed JavaScript will not grow by a byte.
-
-For testing server functions, the idiom is to write a pure `fn` that does the computation and a thin `server function` wrapper that does only the I/O. The `fn` gets the unit tests; the wrapper gets integration coverage from end-to-end tests. This matches the discipline of separating pure from impure code that Section 2.9 argued for.
-
-### Checkpoint
-
-You can now build a full-stack scrml app. You can declare a database connection, write parameterized SQL, split persistence from UI transitions, protect columns from the client, model errors as types, and test inline. The rest of the tutorial is optional — features that solve real problems but that you only reach for when you need them.
-
-A full-stack app in scrml has a recognizable shape by now. At the top, a `<program>` with any required `auth=` setting. Inside, a `<db>` block declaring the connection and protected columns. Inside that, a `${ ... }` logic block with: types (including an `Err` enum if the program can fail), `@vars` for UI state, pure `fn`s for validation, server functions for persistence and load, and client functions that orchestrate. Below the logic block, the markup: forms bound to `@vars`, lists iterated by `for`/`lift`, feedback rendered by `match` on the error or status enums, all wrapped in an `<errorBoundary>`. Next to the markup, a `#{ ... }` block or Tailwind utilities for styling. At the bottom, a `~{ ... }` test block covering the validators and at least one client flow.
-
-That shape is the idiomatic scrml file. Once it feels natural, the language is no longer doing anything new at you — you are just combining primitives you already know.
-
-A practical note on performance. The compiler generates efficient reactive code: only the nodes that subscribe to a changed `@var` re-render, not the whole tree. Server functions are served from a lightweight router that knows which functions each page might call, so cold-path overhead is minimal. SQLite via the Bun runtime is extremely fast for the sizes most web apps actually have. The defaults are good enough that you can ship production apps without profiling; optimize only when a real measurement says you need to.
-
-A practical note on deployment. A compiled scrml program is a small bundle: one JavaScript file for the client, one for the server, a CSS file, and an HTML shell. The server bundle runs under Bun; any host that can run a Bun process can run a scrml app. For static-only programs (no `<db>`, no server functions), the output is a static site — there is no server at all.
-
----
-
-## Layer 4 — Appendices
-
-Everything in Layer 4 is a tool for a specific situation. You can skim these and come back when you hit the problem each one solves.
-
-### 4.1 Compile-time metaprogramming with `^{}` and `emit()`
-
-A `^{ ... }` block runs at *compile time*, not at run time. Inside it, `emit(markupString)` splices the string's content into the AST at the block's location. Use this to generate repetitive markup from a data source without paying for it at runtime.
-
-```scrml
-// 04a — Compile-time meta. ^{} runs at build; emit() splices markup into the AST.
-
-<program>
-
-${
-  const colors = [
-    { name: "blue",  hex: "#2563eb" },
-    { name: "green", hex: "#16a34a" },
-    { name: "red",   hex: "#dc2626" },
-  ]
-}
-
-<div class="palette">
-  ^{
-    for (const c of colors) {
-      emit(`<div class="chip" style="background:${c.hex}">${c.name}</div>`)
-    }
-  }
-</div>
-
-</program>
-```
-
-The output HTML contains three plain `<div class="chip">` elements with the colors baked in. There is no runtime iteration — the loop disappears at build time. This is useful for palettes, icon sets, enumerated tables of constants, and anywhere else that the data is known statically and the repetition is boilerplate.
-
-> **Note:** `^{ ... }` is a cousin of `${ ... }` but inverted: runtime-logic versus build-time-logic. A mnemonic is that `^` points up at the compiler.
-
-Use cases for `^{ ... }`: generating a color palette from a design token file; building a table of form fields from a schema; producing a list of sample items from a fixture; unrolling an enumeration into a series of static links. Anywhere you would write a code generator in another stack, you can usually write a `^{ ... }` block in scrml instead.
-
-The data you iterate over inside `^{ ... }` has to be available at compile time. A literal array as in the example works. Reading a JSON file at compile time through `import` works. Reading a runtime value (a `@var`, or a server function's return) does *not* work — those do not exist yet when the compiler runs. If you need runtime iteration, reach for `for`/`lift` inside `${ ... }` (Section 2.1), which runs in the browser.
-
-> **Note on match syntax:** `=>` is canonical per `SPEC.md` §18.2, `->` is an accepted alias, and `:>` still compiles today but is not the style to teach. This tutorial and the in-repo examples use `=>`.
-
-### 4.2 Reflecting types at compile time
-
-The build-time `reflect(TypeName)` function hands you a structural description of a type — its fields, variants, payload shapes — that you can iterate inside `^{ ... }`. This is scrml's answer to runtime reflection: you do the work at build time, not at render time.
-
-```scrml
-// 04b — reflect() for compile-time type introspection.
-
-<program>
-
-${
-  type Token:struct = {
-    id:     number,
-    value:  string,
-    expiry: number,
-  }
-}
-
-<table>
-  <thead><tr><th>Field</th><th>Type</th></tr></thead>
-  <tbody>
-    ^{
-      const info = reflect(Token)
-      for (const f of info.fields) {
-        emit(`<tr><td>${f.name}</td><td>${f.type}</td></tr>`)
-      }
-    }
-  </tbody>
-</table>
-
-</program>
-```
-
-The resulting HTML has one `<tr>` per field, with the field name and type baked into static text. If you change the `Token` struct and recompile, the table updates. This pattern scales well for admin panels, schema documentation, and typed form generators.
-
-`reflect(TypeName)` returns a structural description that differs by the type's kind. For a struct, the description has a `fields` array. For an enum, it has a `variants` array, and each variant has a name and a payload shape. For a union or type alias, it has the constituents. See the SPEC for the exact shape, but in general: anything the compiler knows about a type is queryable through `reflect()` at build time.
-
-A common second use is form generation. Given a struct `User:struct = { name: string, email: string, age: number }`, you can iterate its fields in `^{ ... }` and emit an `<input>` per field with the correct `type` attribute. The result is a boilerplate-free form that stays in sync with the type — add a field to the struct and the form gains a new input on next recompile.
-
-### 4.3 Web Workers via nested `<program name=>`
-
-A nested `<program name="...">` inside another `<program>` compiles to a separate Web Worker. The parent talks to it via `<#name>.send(...)` and `when message from <#name> (data) { ... }`. Inside the worker, `when message(data) { ... }` receives the message and `send(...)` replies.
-
-```scrml
-// 04c — Web worker via nested <program>. Parent sends a number,
-// worker squares it, parent receives the result.
-
-<program>
-
-<program name="squarer">
-  ${
-    when message(data) {
-      send({ input: data.n, result: data.n * data.n })
-    }
-  }
-</>
-
-${
-  @n      = 7
-  @result = { input: 0, result: 0 }
-
-  function compute() {
-    <#squarer>.send({ n: @n })
-  }
-
-  when message from <#squarer> (data) {
-    @result = data
-  }
-}
-
-<div>
-  <input type="number" bind:value=@n/>
-  <button onclick=compute()>Square</button>
-  <p if=(@result.result != 0)>
-    ${@result.input}^2 = ${@result.result}
-  </p>
-</div>
-
-</program>
-```
-
-The nested program is a full scrml program in miniature — it has its own logic block, its own variables, and its own `when` handlers. The compiler emits it as a separate JavaScript file bundled as a worker, and stitches in the message-passing glue so that the `.send` call at the parent and the `when message` handler at the worker are ends of the same wire.
-
-This is the scrml spelling of "move heavy computation off the main thread." It costs one extra nested block and gives you non-blocking UI.
-
-The parent references the worker as `<#squarer>`, a name-based handle. You can have multiple workers in a program, each named distinctly; each produces its own bundle and its own message channel. Messages are structured-clone-copied — JSON-compatible shapes are the safe bet, same as ordinary Web Worker communication.
-
-`when message(data) { ... }` inside the worker is a *handler*: it runs each time a message arrives. Inside the handler, `send(value)` replies to the parent. `when message from <#name> (data) { ... }` on the parent side is the matching subscription: it runs each time the worker sends something back.
-
-Use workers for CPU-bound work that would otherwise block input: image processing, heavy iteration, parsing large files, running a language-model inference, crunching a regular-expression over megabytes of text. For I/O-bound work, server functions are usually the better fit — they run on the server, not in the browser at all.
-
-### 4.4 Real-time with `<channel>`
-
-A `<channel name="...">` opens a WebSocket connection shared between every client viewing the page. Inside the channel, `@shared` variables are replicated: a write from any connected client propagates to all the others. This is the scrml spelling of "live presence" — chat rooms, multiplayer cursors, real-time dashboards.
-
-```scrml
-// 04d — WebSocket channel. <channel name="..."> opens a live connection
-// shared between all connected clients. @shared vars propagate automatically.
-
-<program>
-
-${
-  @draft = ""
-}
-
-<div>
-  <h1>Live Room</h1>
-
-  <channel name="room">
-    ${
-      @shared tick = 0
-    }
+  <signup>
+    <name     req length(>=2)>             = <input type="text"/>
+    <email    req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
+    <password req length(>=8)>              = <input type="password"/>
+    <confirm  req eq(@signup.password)>     = <input type="password"/>
+    <agree    req>                          = <input type="checkbox"/>
   </>
 
-  <p>Tick: ${@tick}</p>
-  <input type="text" bind:value=@draft/>
+  function submit() {
+    if (not @signup.isValid) return
+    @signupPhase = SignupPhase.Submitting
+    persistSignup(@signup.name, @signup.email, @signup.password)
+    @signupPhase = SignupPhase.Done
+  }
+
+  function persistSignup(name, email, password) {
+    // Hash + persist — see §6 for the failable variant.
+    ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run()
+  }
+}
+
+<div>
+  ${
+    match @signupPhase {
+      .Editing => {
+        lift <form onsubmit=submit()>
+          <h1>Sign up</h1>
+          <label>Name      <name/>     <errors of=@signup.name/></label>
+          <label>Email     <email/>    <errors of=@signup.email/></label>
+          <label>Password  <password/> <errors of=@signup.password/></label>
+          <label>Confirm   <confirm/>  <errors of=@signup.confirm/></label>
+          <label class="row">
+            <agree/> I agree to the terms
+            <errors of=@signup.agree/>
+          </label>
+          <button type="submit" disabled=not @signup.isValid>Create account</button>
+        </form>
+      }
+      .Submitting => { lift <p>Creating your account…</p> }
+      .Done => {
+        lift <p>Welcome, ${@signup.name}!</p>
+        lift <button onclick=${@signupPhase = SignupPhase.Editing}>Sign up another</button>
+      }
+    }
+  }
 </div>
 
 </program>
 ```
 
-The `@shared tick = 0` declaration inside the channel creates a reactive variable that is *replicated* across every client joined to the `"room"` channel. Writing `@tick = @tick + 1` on any client propagates to every other client within a single event loop turn. The transport, reconnection, and fan-out are the compiler's job.
+This program puts most of the v0.2.4 surface in one place. Let's walk it.
 
-`<channel>` is the heaviest feature in this tutorial, operationally — it requires a running WebSocket server — but the syntax is about as small as it could be. If your app does not need multi-client state, skip it.
+### 5.1 Compound state — `<signup> ... </>`
 
-The naming of a channel is a namespace. Two programs that use `<channel name="room">` share the same room; two programs with `<channel name="room-42">` share a different room. Typical patterns: one channel per chat room, one channel per document being co-edited, one channel for a site-wide presence indicator. Channel names can be dynamic — `<channel name=@roomId>` binds the reactive `@roomId` — in which case the program rejoins the new room whenever `@roomId` changes.
+`<signup> ... </>` declares a **compound state cell** with field-children inside. Each field is a normal V5-strict declaration; the compound parent groups them under one name. Field access uses `@signup.name` (canonical), exactly the same shape as `@user.name` for a plain struct field.
 
-`@shared` is the only new reactive qualifier. A `@shared tick = 0` behaves exactly like a normal `@var` to read it and write it, with the extra property that its value is replicated to other clients. Non-`@shared` `@vars` inside the channel remain local — each client has its own copy. Mix and match freely: shared cursor positions, local input drafts.
+### 5.2 Decl-coupled-with-render-spec — `<name req> = <input/>`
 
-For message-level control (sending a payload to all other clients without going through a shared variable), there is an imperative API analogous to the Web Worker one; see the SPEC for channel methods. In most apps, `@shared` is enough, and the framework handles the transport for you.
+The declaration `<name req length(>=2)> = <input type="text"/>` does three things at once:
 
-### 4.5 Multi-file: `import` and `use`
+1. **Declares** `name` as a reactive cell.
+2. **Attaches validators** (`req` and `length(>=2)`) as bare attributes on the declaration.
+3. **Couples a render-spec** — the `<input>` element on the right. Whenever you write `<name/>` in markup, it expands to the bound input element.
 
-Once a program grows past a comfortable single-file size, you split it. A helper `.scrml` module can `export` functions and values from its logic block; a main program `import`s them by path.
+This is the canonical scrml shape for "the form field is a value and its rendering at the same time." You don't separately write `<input bind:value=@signup.name>` — the decl-coupled form does the binding for you.
 
-Here is a helper module that exports a single `fn`:
+### 5.3 The validator vocabulary
 
-```scrml
-// 04e-helper — sibling module. Exports a fn used by 04e-import.scrml.
+The 14 universal-core validators are: `req`, `is some`, `length(rel)`, `pattern(regex)`, `min(n)`, `max(n)`, `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)`, `eq(expr)`, `neq(expr)`, `oneOf([...])`, `notIn([...])`.
 
-${
-  export fn greet(name: string) -> string {
-    return "Hello, " + name + "!"
-  }
-}
+Cross-field validation falls out automatically. `<confirm req eq(@signup.password)>` reads as "confirm must equal password" — the compiler tracks the dependency and re-evaluates the validator whenever either cell changes. There is no special "cross-field" vocabulary.
+
+### 5.4 The auto-synthesized validity surface
+
+When a compound state declaration contains any field with validators, the compiler auto-synthesizes a reactive validity surface at TWO levels — the compound rollup and per-field. Both are reactive, both are read-only:
+
+```
+@signup.isValid       boolean — true iff all fields pass their validators
+@signup.errors        compound-level errors array
+@signup.touched       any field touched yet?
+@signup.submitted     was first submit attempted?
+
+@signup.name.isValid  per-field
+@signup.name.errors   per-field (enum tags from ValidationError, NOT strings)
+@signup.name.touched  first interaction
 ```
 
-And here is the program that imports it:
+You read these like any reactive property. Writing them is `E-SYNTHESIZED-WRITE` — the compiler computes them; you don't.
+
+### 5.5 The error rendering element — `<errors of=expr/>`
+
+`<errors of=@signup.name/>` is a first-class scrml markup element that renders the validation errors for the named cell. Per-field (`<errors of=@signup.name/>`) or rollup (`<errors of=@signup all/>`). By default it renders the first error; the `all` attribute renders the full list.
+
+Error messages resolve through a four-level chain: inline override on the decl (highest priority), project-registered messages (the i18n hook), `scrml:data` shipped English defaults, or a `<match>` escape hatch on the `ValidationError` enum for full control.
+
+### 5.6 The form is driven by an engine
+
+The signup form is one state of a three-state engine (`Editing` → `Submitting` → `Done`). The engine declared at file level owns the legal transitions; the `match` block inside `<program>` renders the right markup for the current phase. This is the canonical Tier-2 idiom: the form's lifecycle (you can submit it, then you can't, then you're done) is a state machine, and the engine makes that explicit.
+
+The `disabled=not @signup.isValid` on the submit button uses the `not` operator (§7) — `not x` is logical negation, the scrml spelling of JavaScript's `!x`. Combined with the auto-synth surface, the button is automatically enabled or disabled based on whether every field passes its validators.
+
+### 5.7 `reset(@cell)` — clearing form state
+
+To clear a form, call `reset(@signup)` — `reset` is a language keyword (no import needed). It re-evaluates each field's init expression, restoring the form to its initial state. Per-field reset works too: `reset(@signup.name)`.
 
 ```scrml
-// 04e-import — imports a fn from a sibling .scrml file and uses it in markup.
+<button type="button" onclick=reset(@signup)>Clear</button>
+```
+
+> **`reset` is a reserved identifier.** You cannot define `function reset() { ... }` — pick another name like `clearForm` or `restart` for local helpers.
+
+---
+
+## 6. Failable functions — `function f()! -> Err` and `!{}`
+
+Some operations can fail: a network call, a database query, a parsing pass. scrml models errors as **enum variants** rather than thrown exceptions. A function that can fail is declared with `!` after its parameter list and an error type after the return arrow. Callers handle each variant with a `!{ ... }` block.
+
+```scrml
+// 06-failable.scrml — failable function with a typed error enum.
+
+${
+  type SaveError:enum = {
+    EmptyName
+    InvalidEmail(input: string)
+    DuplicateEmail(email: string)
+  }
+
+  type Phase:enum = { Editing, Saving, Saved, Errored(msg: string) }
+}
+
+<engine for=Phase initial=.Editing>
+  <Editing rule=.Saving></>
+  <Saving  rule=(.Saved | .Errored)></>
+  <Saved   rule=.Editing></>
+  <Errored rule=.Editing></>
+</>
 
 <program>
 
-${
-  import { greet } from './04e-helper.scrml'
-}
+<db src="users.db" tables="users">
 
-<p>${greet("world")}</p>
+  ${
+    <form>
+      <name  req length(>=2)>             = <input type="text"/>
+      <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
+    </>
+
+    // Failable + server-escalated. The `!` after the param list marks the
+    // function as failable; `-> SaveError` names the error enum type.
+    function persistUser(name, email)! -> SaveError {
+      if (name == "")                          fail SaveError.EmptyName
+      if (not email.includes("@"))             fail SaveError.InvalidEmail(email)
+      const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
+      if (existing is some)                    fail SaveError.DuplicateEmail(email)
+      ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${"placeholder"})`}.run()
+    }
+
+    function save() {
+      @phase = Phase.Saving
+      persistUser(@form.name, @form.email) !{
+        | .EmptyName        -> { @phase = Phase.Errored("Name can't be empty.") ; return }
+        | .InvalidEmail(e)  -> { @phase = Phase.Errored("Not an email: " + e) ; return }
+        | .DuplicateEmail(e)-> { @phase = Phase.Errored(e + " is already taken.") ; return }
+      }
+      @phase = Phase.Saved
+    }
+  }
+
+  <div>
+    ${
+      match @phase {
+        .Editing => {
+          lift <form onsubmit=save()>
+            <label>Name  <name/>  <errors of=@form.name/></label>
+            <label>Email <email/> <errors of=@form.email/></label>
+            <button type="submit" disabled=not @form.isValid>Save</button>
+          </form>
+        }
+        .Saving => { lift <p>Saving…</p> }
+        .Saved => {
+          lift <p>Saved!</p>
+          lift <button onclick=${@phase = Phase.Editing}>Add another</button>
+        }
+        .Errored(msg) => {
+          lift <p class="err">${msg}</p>
+          lift <button onclick=${@phase = Phase.Editing}>Try again</button>
+        }
+      }
+    }
+  </div>
+
+</>
 
 </program>
 ```
 
-Imports use ordinary ES-module syntax — named imports, relative paths, `.scrml` extension required. A helper module does *not* need a `<program>` element; it is a bag of exports. Types, `fn`s, `function`s, and `const`s can all be exported.
+The shape:
 
-For larger projects, the idiomatic split is: one program per route, helper modules for shared types, shared validators, and shared server functions. The `use` keyword (analogous to `import` for language-level modules) extends the same idea to community packages; see `SPEC.md` for the full rules.
+- **`function persistUser(name, email)! -> SaveError`** — the `!` after the parameter list marks the function as failable. The arrow specifies the error enum type. The body uses `fail .Variant` (or `fail .Variant(payload)`) to raise a specific error.
+- **`!{ ... | .Variant -> { ... } }`** at the call site — pattern-match each error variant. The match is **exhaustive**; if a new variant is added to `SaveError`, the compiler tells you which call sites need a new arm.
+- **Errors propagate when not handled.** A `!{ ... }` that doesn't handle a particular variant lets it bubble up. The compiler tracks unhandled error types in the function's signature.
 
-A few practical tips for multi-file projects. Types exported from a helper module can be used on both sides of the client/server boundary; scrml tracks where each export is referenced and ships it only where needed. A shared `fn` that is imported by both a client function and a server function is emitted into both bundles — you do not duplicate the source, the compiler handles it. An imported `server function` stays on the server, regardless of which program called it.
+Notice what is NOT in this code: no `try` / `catch`, no `throw`, no `Promise.reject`. Failures are values; they flow through ordinary control flow. The signature of every failable function tells you exactly which errors can come out — there are no hidden exceptions.
 
-Circular imports are a compile error, same as in any ES-module stack. If you find yourself wanting a cycle, the right move is usually a third module that holds the shared types or the shared helper that both sides need.
+> **No `async`, no `await`, no `Promise` in source.** The compiler auto-awaits every server-function call. You write `const user = persistUser(...)` and the boundary is invisible at the syntax level. Writing `await` is forbidden (`E-AWAIT-FORBIDDEN`). Failable calls flow through the same machinery — `persistUser(...) !{ ... }` is the canonical shape on both client and server.
 
-Import paths are relative. An `import { greet } from './util/format.scrml'` inside `pages/home.scrml` resolves against `pages/`, giving `pages/util/format.scrml`. There is no implicit module resolution rule beyond what ES modules already do — if you have used any modern JavaScript bundler, you know the rules.
+### 6.1 Errors are states — the engine shape composes
 
-### 4.6 A small gallery of combinations
+Look at how the `!{}` handler in `save()` routes each failure variant into a phase change: `.EmptyName -> { @phase = .Errored("...") }`. The engine then renders the right markup for each phase. The error path and the success path both flow through `@phase`, and the engine's `rule=` contracts guarantee that the screen always shows exactly one state.
 
-Before the closing section, here is a short tour of patterns that combine primitives from multiple layers. Each is a sketch rather than a full program — the goal is to show you how the pieces fit when you reach for them together.
+This is the canonical scrml pattern for handling failures: the failable call's `!{}` handler routes each variant into the right phase variant; the engine pattern-matches each phase into the right markup. There is no separate `<isError>` cell, no separate error component to remember to render — the failure mode lives in the type.
 
-**Optimistic update with rollback on server failure.** A client function updates `@items` immediately, calls a server function, and rolls back if the server returns an error. The client function does the state transitions; the server function does the persistence; the error enum handles the rollback branch.
+---
 
-```
-function addOptimistic(text) {
-  const snapshot = @items
-  @items = [...@items, { id: "tmp", body: text }]
-  persistTodo(text) !{
-    | ::DbBusy -> { @items = snapshot }
-    | _        -> { @items = loadTodos() }
-  }
-}
-```
+## 7. Negation, presence checks, the `not` keyword
 
-**Derived UI state from a loaded collection.** A `const @` reads reactive state (loaded `@todos`) and produces filtered views. The derived values stay in sync with the underlying collection automatically; no manual refresh call is needed.
+A small but load-bearing detail. scrml uses three operators where JavaScript uses one:
 
-```
+| scrml | JavaScript | Reading |
+|---|---|---|
+| `not x` | `!x` | Logical negation. |
+| `x is some` | `x !== null && x !== undefined` | Presence check — value exists. |
+| `x is not` | `x === null \|\| x === undefined` | Absence check — value missing. |
+
+The `not` keyword is the canonical operator-form (per §45.7); the `!x` JavaScript spelling also compiles but `not x` is preferred for readability.
+
+```scrml
 ${
-  @todos  = []
-  @filter = "all"
-  const @visible = @filter == "all"
-    ? @todos
-    : @todos.filter(t => t.done == (@filter == "done"))
-}
-```
+  <user>: User? = null              // optional — may be missing
 
-**Shared counter across clients.** Inside a `<channel>`, a `@shared count` reactive is incremented on click. Every connected client sees every click.
-
-```
-<channel name="lobby">
-  ${ @shared count = 0 }
-</>
-
-<button onclick=${() => @count = @count + 1}>Clicked ${@count} times</button>
-```
-
-**Schema-driven form.** A `reflect()` call inside `^{ ... }` iterates a struct's fields, producing one input per field at compile time. The runtime handler picks up the values from a `@form` reactive whose shape matches the struct.
-
-```
-${ type Post:struct = { title: string, body: string, author: string } }
-<form>
-  ^{
-    for (const f of reflect(Post).fields) {
-      emit(`<input name="${f.name}" bind:value=@form.${f.name}/>`)
+  function welcome() {
+    if (@user is some) {
+      return "Hello, " + @user.name
+    } else {
+      return "Sign in to continue"
     }
   }
-</form>
-```
 
-**Worker-computed derived value.** A heavy computation is delegated to a worker, and the result is stored in a reactive on the parent. The parent's UI reads the reactive as if it were a normal derived value, but the work happens off the main thread.
-
-```
-<program name="worker">
-  ${ when message(data) { send(heavyCompute(data.input)) } }
-</>
-
-${
-  @input  = ""
-  @result = null
-  function compute() { <#worker>.send({ input: @input }) }
-  when message from <#worker> (data) { @result = data }
+  if (not @loggedIn) {
+    @phase = .Promoting
+  }
 }
 ```
 
-Each of these uses three to five primitives from this tutorial in combination. The language does not have special "hooks" for optimistic updates or schema-driven forms or worker-backed derivations; you build them from the basic pieces. The result is fewer rules to remember and more freedom in how you combine them.
-
-### 4.7 Where to go next
-
-You now know the language. From here:
-
-- **Longer runnable apps** — see `examples/` in this repository; each is a single-file program that you can compile and run. They demonstrate the primitives from this tutorial in combinations: a chat app, a kanban, a small admin panel, and so on.
-- **Full language reference** — see `compiler/SPEC.md`. It documents every primitive, every error code, and the exact grammar. This tutorial covered the common 80%; the SPEC covers the edges.
-- **Error codes** — when the compiler flags an error, the code (`E-SCOPE-001`, `E-RI-002`, and so on) is your best search term. Each code has a dedicated section in the SPEC explaining the rule that was violated and the usual fix.
-
-### Frequently-asked questions
-
-**Why a new file format instead of TypeScript plus a framework?** Because the framework part and the server-vs-client part are exactly the piece most full-stack setups get wrong. A single file where the compiler sees the whole program eliminates the tier-split at the source level — no separate build for the client, no separate build for the server, no out-of-sync types describing an API between the two. It is a small re-arrangement at the file-format level that opens up a lot of simplification downstream.
-
-**How big can a single `.scrml` file get before I have to split?** There is no hard limit; the compiler handles large files fine. The practical limit is reader comfort — around a few hundred lines of logic-and-markup before scrolling starts to hurt. Split into helper modules (Section 4.5) earlier if a file is doing two distinct things.
-
-**Does scrml work with my existing database?** `<db src="...">` currently wraps a SQLite file. Other databases will follow; in the meantime, for non-SQLite databases, use server functions that call whatever client library you prefer and return results the client can consume. The `?{ ... }` ergonomics are SQLite-specific today; the rest of the language does not care.
-
-**What's the story for server-side rendering?** Every scrml page renders server-side by default; the initial HTML that reaches the browser is fully-populated markup, and the client-side JavaScript hydrates it in place. The client/server boundary is separate from the render-side question — server functions are RPCs, server-side rendering is a render-time operation. You get both without configuring either.
-
-**Can I use React components?** Not directly. React components assume a React runtime that scrml does not provide; the two reactivity models are distinct. If you have a React component you want to reuse, the usual path is to write a thin scrml component that wraps it with a web-component or portal. For most cases, rewriting the component in scrml is shorter than wrapping it.
-
-**Is scrml typed strongly enough to replace TypeScript?** The type system is strong for its built-in primitives (`string`, `number`, `boolean`, struct, enum, union, optional, array). It is more focused than TypeScript: it does not do structural-subtyping gymnastics, conditional types, or mapped types. For a web app's domain modeling, this is usually enough; for library authors exposing an API, TypeScript's flexibility is sometimes useful. You can mix the two when needed.
-
-**How does hot-reload work?** The compiler's dev server watches the source file and recompiles on save. The browser reconnects automatically and re-applies state where it can. `@vars` persist across edits when their declarations have not changed; styles update in place without a full reload; markup changes replace only the affected subtree. For most small edits, the effect is Svelte-like: change the source, see the result, state intact.
-
-**What happens when I break the rules — for example, write to `@var` from a server function?** The compiler rejects the program with an error code (`E-RI-002` in this case), points at the offending line, and suggests the fix. These errors are the language's main teaching mechanism: if a rule exists, the compiler knows about it, and you find out at compile time rather than at runtime.
-
-**Should I use `#{ ... }` or Tailwind?** Whichever fits the team's existing habits. There is no performance difference that matters, no idiomatic preference that the language enforces. Pick one, be consistent across a project, and reach for the other when it genuinely fits better for a specific case.
-
-**How does testing work beyond `~{ ... }`?** Inline tests cover pure functions and small client-side flows. For browser-level end-to-end testing, the compiled output is a normal web app; any framework (Playwright, Puppeteer) works. For server-function testing, write a test that calls the function directly from inside a `~{ ... }` block and asserts the database state afterwards. The two styles cover the two ends; most projects use some of each.
+Equality uses `==` and `!=`. There is no `===` or `!==` — the comparison is always strict at the value level (the compiler enforces type compatibility statically), so the second `=` adds no information.
 
 ---
 
-## Glossary of primitives
+## 8. Channels — real-time state, one tag
 
-A fast reference for the keywords and sigils you met in this tutorial. Each line is a pointer back to the section that explains it in context.
+Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. The channel lives at file level (sibling of `<program>`, never inside it). State declared inside the channel body is auto-synced to every connected client:
 
-- `<program>` — the top-level element wrapping everything in a scrml file. Section 1.1.
-- `${ ... }` — logic block (in statement position) or interpolation (in expression position). Section 1.2.
-- `@var` — reactive state. Assignment creates it; reads subscribe; writes re-run subscribers. Section 1.3.
-- `const @name = expr` — derived reactive, recomputed when any input changes. Section 1.4.
-- `bind:attr=@var` — two-way binding on form inputs and similar. Section 1.5.
-- `class:name=@var` — conditional class attachment. Section 1.5.
-- `on<event>=expr` — event handlers as call expressions, not strings. Section 1.5.
-- `#{ ... }` — scoped CSS, rewritten per-program. Section 1.6.
-- `for (...) { lift <li>...</li> }` — iteration in markup via `for` + `lift`. Section 2.1.
-- `type Name:struct = { ... }` — structural record type. Section 2.2.
-- `type Name:enum = { A, B(n: number), ... }` — tagged sum type. Section 2.3.
-- `match expr { .A => {...} .B(n) => {...} }` — exhaustive destructuring with positional payload binding. Section 2.4.
-- `< machine name=Name for=EnumType>` / `@var: Name = EnumType.First` — machine-governed reactive state. Section 2.10.
-- `< machine name=P for=ProjEnum derived=@source>` — projected read-only reactive. Section 2.10.
-- `if=expr` / `else-if=expr` / `else` — conditional rendering chain on sibling elements (`else` is bare). Section 1.8.
-- `show=expr` — visibility toggle; element stays in the DOM. Section 2.5.
-- `const Name = <...>` — component declaration as a const expression. Section 2.6.
-- `${children}` — the caller's positional children inside a component body. Section 2.6.
-- `props={ name: type, ... }` — typed props on a component. Sections 2.6/2.7.
-- `snippet` / `slot="name"` / `${render name()}` — named slot children. Section 2.7.
-- `is some`, `is not not`, `not x` — presence and negation operators. Section 2.8.
-- `fn` — pure, typed function. Section 2.9.
-- `function` — impure function; can mutate `@vars`. Section 1.3.
-- `<db src="..." tables="..." protect="...">` — database connection scope. Sections 3.1/3.4.
-- `?{ `...` }.all()` / `.run()` / `.get()` — parameterized SQL. Section 3.2.
-- `server function` — a function that runs on the server. Section 3.3.
-- `auth="required"` — page-level authentication gate. Section 3.4.
-- `renders <...>` — per-variant rendering markup on an enum. Section 3.5.
-- `function name()! -> Err { ... fail Err::Variant ... }` — failable function. Section 3.5.
-- `caller() !{ | ::Variant -> {...} | _ -> {...} }` — error destructuring at call sites. Section 3.5.
-- `<errorBoundary>` — catches unhandled failures; renders the variant's `renders` markup. Section 3.5.
-- `~{ "group" test "..." { ... assert ... } }` — inline tests, stripped from production. Section 3.6.
-- `^{ ... emit(\`...\`) ... }` — compile-time metaprogramming. Section 4.1.
-- `reflect(TypeName)` — compile-time type introspection. Section 4.2.
-- `<program name="...">` + `<#name>.send(...)` + `when message ... { ... }` — Web Worker. Section 4.3.
-- `<channel name="..."> ${ @shared var = ... } </>` — real-time shared state. Section 4.4.
-- `import { x } from './file.scrml'` / `export fn ...` — multi-file composition. Section 4.5.
+```scrml
+// 07-channel-chat.scrml — chat room with shared state.
 
-If you spot a sigil in someone else's scrml code that is not in this list, the authoritative reference is `compiler/SPEC.md`. The tutorial covers the primitives you need; the SPEC covers the ones you might occasionally see.
+<channel name="chat" topic="lobby">
+  <messages> = []
 
-## Footnotes and hazards
+  server function postMessage(author, body) {
+    @messages = [...@messages, { author, body, ts: Date.now() }]
+  }
+</>
 
-- `lin` (linear type) is normative in `SPEC.md` §35. Approach B was ratified after the redesign; basic exactly-once semantics ship today, with cross-`${}` block usage (§35.2.2) under final implementation polish. See `examples/19-lin-token.scrml` and `docs/lin.md` for working code. The keyword is intentionally not taught in the main tutorial flow because the use cases are advanced; it earns its own appendix when the polish settles.
-- Match arm separator is `=>` (canonical per `SPEC.md` §18.2). `->` is an accepted alias; `:>` still compiles but is deprecated and should not appear in new code.
-- Derived values use `const @name = expression`. The form `~name = expression` is **not supported** — if you see it in older material, treat it as an early sketch and translate to `const @`.
-- Database access uses a **nested `<db src="...">` block**, not a `db=` attribute on `<program>`. The attribute form does not compile.
+<program>
+
+${
+  <username> = ""
+  <draft>    = ""
+
+  function send() {
+    if (@draft.trim() == "" || @username.trim() == "") return
+    postMessage(@username, @draft)
+    reset(@draft)
+  }
+}
+
+<div class="chat">
+  <input type="text" bind:value=@username placeholder="Your name"/>
+  <ul>
+    ${
+      for (let m of @messages) {
+        lift <li><strong>${m.author}</strong>: ${m.body}</li>
+      }
+    }
+  </ul>
+  <form onsubmit=send()>
+    <input type="text" bind:value=@draft placeholder="Message"/>
+    <button type="submit">Send</button>
+  </form>
+</div>
+
+</program>
+```
+
+Three things to notice:
+
+1. **`<channel>` is a sibling of `<program>`, not a child.** Putting a channel inside `<program>` is `E-CHANNEL-INSIDE-PROGRAM`.
+2. **`<messages> = []`** declared inside the channel body is auto-synced. Every connected client sees the same `@messages`; a write from any client propagates to all the others. There is no `@shared` modifier — synchronization comes from being inside the channel body.
+3. **`@messages` is reachable from inside `<program>`** via canonical `@messages` access. The channel-declared cells are file-scope visible.
+
+The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` by default), the message-broadcast plumbing, and the reconnection logic. You declare what state is shared; the compiler handles the transport.
+
+> **Channels are heavy operationally.** A live channel requires a running WebSocket server, which means you're committed to running a scrml app (not just shipping static HTML). Use channels for genuinely multi-client features — chat, multiplayer cursors, live dashboards. For single-user state, plain reactive cells are simpler and have no infrastructure cost.
 
 ---
 
-*Tags: tutorial, scrml, language introduction, full-stack, reactive, SQLite, WebSocket, Web Worker, compile-time metaprogramming.*
+## 9. The shape, all together
 
-*For the full language reference: `compiler/SPEC.md`. For runnable apps: `examples/`. For the hook showing all of this in action: Section 0, top of this tutorial.*
+By now you have seen every primitive you need to build a working scrml app. Let's collect them in one place — this is the idiomatic shape of a non-trivial scrml file:
+
+```scrml
+<schema>
+  table_one { ... }
+  table_two { ... }
+</>
+
+<channel name="...">      <!-- (optional, file level) -->
+  <synced_state> = ...
+</>
+
+${
+  // Types — structs and enums
+  type Foo:struct = { ... }
+  type Phase:enum = { Idle, Loading, Loaded(rows), Failed(msg: string) }
+}
+
+// Engine — declared at file level (sibling of <program>)
+<engine for=Phase initial=.Idle>
+  <Idle    rule=.Loading></>
+  <Loading rule=(.Loaded | .Failed)></>
+  <Loaded  rule=.Idle></>
+  <Failed  rule=.Idle></>
+</>
+
+<program>
+
+<db src="..." tables="..." protect="...">
+
+  ${
+    // State — declared structurally, accessed canonically
+    <local> = init                          // plain reactive
+    const <derived> = @local * 2            // derived reactive
+    <form>                                  // compound with validators
+      <name req length(>=2)> = <input/>
+      <email req pattern(...)> = <input/>
+    </>
+
+    // Server-escalated fns — touch ?{}; must not write @state.
+    // No `server` keyword — body-content inference promotes them.
+    function persist(...)! -> Err { ... }
+    function loadAll() {
+      lift ?{ `SELECT ... FROM ...` }.all()
+    }
+
+    // Client fns — orchestrate; own @state writes
+    function submit() {
+      persist(...) !{ | .Variant -> { ... } }
+    }
+
+    // Components — multi-instance
+    const Row = <li class="row" props={ item: Foo }>...</li>
+  }
+
+  <div>
+    ${
+      match @phase {
+        .Idle => { lift <button onclick=load()>Load</button> }
+        .Loading => { lift <p>Loading…</p> }
+        .Loaded(rows) => {
+          lift <ul>${ for (let r of rows) { lift <Row item=r/> } }</ul>
+        }
+        .Failed(msg) => { lift <p class="err">${msg}</p> }
+      }
+    }
+  </div>
+
+</>
+
+</program>
+
+#{ /* scoped CSS */ }
+```
+
+That shape is the idiomatic scrml file. Once it feels natural, the language is no longer doing anything new at you — you are combining primitives you already know.
+
+A practical note on the parts: the **engine** owns the top-level lifecycle (the screen's modes), **compound state with validators** owns each form, the **failable function** is the call site between client and server, and the **derived state** stays the right value automatically. Most non-trivial scrml programs have this exact spine.
+
+---
+
+## 10. Where to go next
+
+You now know enough scrml to write working programs. From here:
+
+- **Examples** — `examples/` in this repository holds longer runnable apps. Each is a single-file program you can compile and run. Of particular interest:
+  - `examples/02-counter.scrml` — the in-memory counter from §2.
+  - `examples/03-contact-book.scrml` — full-stack CRUD against SQLite.
+  - `examples/05-multi-step-form.scrml` — multi-step wizard with components and enums.
+  - `examples/14-mario-state-machine.scrml` — engine with payload variants and a derived engine projecting onto another enum.
+  - `examples/15-channel-chat.scrml` — real-time chat across multiple clients.
+  - `examples/22-multifile/` — cross-file imports for larger apps.
+
+- **The PA primer** — `docs/PA-SCRML-PRIMER.md` is the canonical syntax + semantics reference, organized by §-section. Use it as a quick-lookup when you need to confirm a rule.
+
+- **The kickstarter** — `docs/articles/llm-kickstarter-v2-2026-05-04.md` is the LLM-targeted one-paste context. It is more compact than this tutorial and useful as a refresher.
+
+- **The full specification** — `compiler/SPEC.md` (about 26,000 lines) is the formal grammar and semantics. The tutorial covers the common 80%; the SPEC covers the edges. `compiler/SPEC-INDEX.md` is the quick-lookup table of contents.
+
+- **Error codes** — when the compiler flags an error, the code (`E-NAME-COLLIDES-STATE`, `E-RI-002`, `E-DERIVED-WRITE`, ...) is your best search term. Each code has a dedicated section in the SPEC explaining the rule that was violated and the usual fix.
+
+---
+
+## Glossary — the v0.2.4 primitives
+
+A fast reference for the keywords and sigils in this tutorial. Each line links back to the section that explains it.
+
+- **`<program>`** — the top-level element wrapping a scrml app's UI. §1.
+- **`${ ... }`** — logic block (statement position) or interpolation (expression position). §1.
+- **`<name> = init`** — V5-strict reactive state declaration. §2.
+- **`@name`** — canonical expression access (read, write, compound assignment). §2.
+- **`const <name> = expr`** — derived reactive; recomputes when inputs change. §2.1.
+- **`<name>` inside a compound** — field declaration inside a compound parent. §5.1.
+- **`<form><field req .../>... </>`** — compound state with validators. §5.
+- **`<name req length(>=2)> = <input/>`** — decl-coupled-with-render-spec form. §5.2.
+- **`@form.isValid` / `@form.errors` / `@form.touched`** — auto-synth validity surface (read-only). §5.4.
+- **`<errors of=expr/>`** — first-class error-rendering element. §5.5.
+- **`bind:value=@var`** — two-way binding on a form control. §3.4.
+- **`class:active=@var`** — conditional class attachment. §3.4.
+- **`onclick=fn()`** — bare-call event handler. §3.4.
+- **`if=expr` / `else-if=expr` / `else`** — conditional rendering chain on sibling elements (`else` is bare). §3.5.
+- **`for (let x of @xs) { lift <li>...</li> }`** — markup iteration. §3.2.
+- **`type Name:struct = { ... }`** — structural record type. §3.1.
+- **`type Name:enum = { A, B(n: number), ... }`** — tagged sum type. §4.2.
+- **`match expr { .V => { lift ... } }`** — Tier 1 exhaustive dispatch inside a logic block. §4.2.
+- **`<engine for=Type initial=.V>`** — Tier 2 engine (file level); auto-declares the engine variable. §4.3.
+- **`<Variant rule=.A | .B>`** — state-child with legal-transitions contract. §4.3.
+- **`<onTransition from=A to=B>`** — cross-state effect. §4.3.
+- **`<engine for=T derived=@source>`** — derived (read-only) projection engine. §4.5.
+- **`<db src="..." tables="..." protect="...">`** — database connection scope. §2.2.
+- **`<schema> ... </>`** — declarative SQL schema; compiler diffs and migrates. §2.2.
+- **`?{ ` ` ` ... ` ` ` }.all() / .get() / .run()`** — parameterized SQL. §2.2.
+- **Server-escalated function** — a function that touches `?{}` SQL or another server-only resource is auto-classified as server-side. The legacy `server function` keyword still compiles but is deprecated. §2.2.
+- **`function f()! -> Err { fail .Variant ... }`** — failable function. §6.
+- **`caller() !{ | .Variant -> {...} }`** — error destructuring at call sites. §6.
+- **`is some` / `is not` / `not`** — presence and negation operators. §7.
+- **`==` / `!=`** — equality operators (no `===`/`!==`). §7.
+- **`reset(@cell)`** — language-keyword for resetting state to its default. §5.7.
+- **`<channel name="..." topic="...">`** — real-time shared state, file-level. §8.
+- **`#{ ... }`** — scoped CSS block. §2.3.
+
+---
+
+## Things scrml does NOT have (anti-patterns)
+
+The convergent failures every developer makes coming from another framework. If your reflex tells you to write the left column, use the right column instead.
+
+| You're about to write… | Use this in scrml | Section |
+|---|---|---|
+| `useState(0)` / `signal(0)` / `$state(0)` | `<count> = 0` | §2 |
+| `@count = 0` to declare (legacy v1) | `<count> = 0` (V5-strict) | §2 |
+| `let count = 5` (intending reactive) | `<count> = 5` | §2 |
+| `computed(() => ...)`, `$:`, `useMemo()` | `const <derived> = expr` | §2.1 |
+| `useEffect(() => ...)` | Reactive expressions update automatically | §2.1 |
+| `await fetchUser()` | `const user = fetchUser()` (compiler auto-awaits) | §6 |
+| `try { ... } catch { ... }` | `f() !{ | .Variant -> { ... } }` | §6 |
+| `throw new Error(...)` | `fail .Variant` (typed error enum) | §6 |
+| `if (@phase === 'loading') ...` chains | `<engine for=Phase initial=.Idle>` | §4.3 |
+| Many booleans gating UI | One enum + engine | §4 |
+| `null` / `undefined` literals | `is some` / `is not` | §7 |
+| `===` / `!==` | `==` / `!=` | §7 |
+| `!x` | `not x` (canonical) | §7 |
+| `< machine name=...>` (legacy v0.1) | `<engine for=Type initial=...>` | §4.3 |
+| `function validate() { if (@form.name == "") ... }` | `<name req> = <input/>` (decl-coupled) | §5 |
+| `if (@signup.errors.name.length > 0) <p>...</p>` | `<errors of=@signup.name/>` | §5.5 |
+| `<input bind:value=@signup.name>` written separately | `<name req> = <input/>` (decl-coupled) | §5.2 |
+| `import { useState } from 'react'` | nothing — `<var> = init` is built in | §2 |
+| `import Database from 'better-sqlite3'` | `<db src="..."> ... ?{} ... </>` | §2.2 |
+| `bcrypt` / `jsonwebtoken` via npm | `import { hashPassword } from 'scrml:auth'` | §6 |
+| `server function f()` (legacy v0.1) | plain `function f()` — body-content inference escalates | §2.2 |
+| `socket.io`, custom WebSocket setup | `<channel name="..."> ... </>` | §8 |
+| `<MyEngine/>` for a same-file engine | The engine renders at its declaration position | §4.3 |
+| Multi-statement inline handler `onclick=fn(); @x = .Y` | Name the function: `function go() { fn(); @x = .Y }` | §3.4 |
+
+If you don't see your case in the table, default to the shape from §9. Don't invent syntax — when in doubt, the canonical reference is the PA primer (`docs/PA-SCRML-PRIMER.md`).
+
+---
+
+*Last updated: 2026-05-11 — v0.2.4 canonical (post-S84 Wave 1 + Wave 1.5 robust-v0.2 bundle).*

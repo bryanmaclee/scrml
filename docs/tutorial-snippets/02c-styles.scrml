@@ -1,0 +1,31 @@
+// 02c-styles.scrml — scoped CSS via #{}.
+
+<program>
+
+${
+  <count> = 0
+  function inc() { @count = @count + 1 }
+}
+
+<div class="card">
+  <h1>${@count}</h1>
+  <button onclick=inc()>+</button>
+</div>
+
+#{
+  .card {
+    max-width: 280px;
+    margin: 2rem auto;
+    padding: 1.5rem;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+  }
+  button {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 1.25rem;
+  }
+}
+
+</program>

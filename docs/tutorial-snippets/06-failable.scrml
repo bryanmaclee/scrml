@@ -1,0 +1,80 @@
+// 06-failable.scrml — failable function with a typed error enum.
+//
+// `function f()! -> Err { fail .Variant }` declares a failable function;
+// the `!{}` block at the call site pattern-matches each variant.
+// No try/catch, no throw, no async/await — failures are typed values.
+
+${
+  type SaveError:enum = {
+    EmptyName
+    InvalidEmail(input: string)
+    DuplicateEmail(email: string)
+  }
+
+  type Phase:enum = { Editing, Saving, Saved, Errored(msg: string) }
+}
+
+<engine for=Phase initial=.Editing>
+  <Editing rule=.Saving></>
+  <Saving  rule=(.Saved | .Errored)></>
+  <Saved   rule=.Editing></>
+  <Errored rule=.Editing></>
+</>
+
+<program>
+
+<db src="users.db" tables="users">
+
+  ${
+    <form>
+      <name  req length(>=2)>             = <input type="text"/>
+      <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
+    </>
+
+    // Failable + server-escalated. The `!` after the param list marks the
+    // function as failable; `-> SaveError` names the error enum type.
+    function persistUser(name, email)! -> SaveError {
+      if (name == "")                          fail SaveError.EmptyName
+      if (not email.includes("@"))             fail SaveError.InvalidEmail(email)
+      const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
+      if (existing is some)                    fail SaveError.DuplicateEmail(email)
+      ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${"placeholder"})`}.run()
+    }
+
+    function save() {
+      @phase = Phase.Saving
+      persistUser(@form.name, @form.email) !{
+        | .EmptyName        -> { @phase = Phase.Errored("Name can't be empty.") ; return }
+        | .InvalidEmail(e)  -> { @phase = Phase.Errored("Not an email: " + e) ; return }
+        | .DuplicateEmail(e)-> { @phase = Phase.Errored(e + " is already taken.") ; return }
+      }
+      @phase = Phase.Saved
+    }
+  }
+
+  <div>
+    ${
+      match @phase {
+        .Editing => {
+          lift <form onsubmit=save()>
+            <label>Name  <name/>  <errors of=@form.name/></label>
+            <label>Email <email/> <errors of=@form.email/></label>
+            <button type="submit" disabled=not @form.isValid>Save</button>
+          </form>
+        }
+        .Saving => { lift <p>Saving…</p> }
+        .Saved => {
+          lift <p>Saved!</p>
+          lift <button onclick=${@phase = Phase.Editing}>Add another</button>
+        }
+        .Errored(msg) => {
+          lift <p class="err">${msg}</p>
+          lift <button onclick=${@phase = Phase.Editing}>Try again</button>
+        }
+      }
+    }
+  </div>
+
+</>
+
+</program>

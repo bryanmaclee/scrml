@@ -1,0 +1,39 @@
+// 07-channel-chat.scrml — chat room with shared state.
+
+<channel name="chat" topic="lobby">
+  <messages> = []
+
+  server function postMessage(author, body) {
+    @messages = [...@messages, { author, body, ts: Date.now() }]
+  }
+</>
+
+<program>
+
+${
+  <username> = ""
+  <draft>    = ""
+
+  function send() {
+    if (@draft.trim() == "" || @username.trim() == "") return
+    postMessage(@username, @draft)
+    reset(@draft)
+  }
+}
+
+<div class="chat">
+  <input type="text" bind:value=@username placeholder="Your name"/>
+  <ul>
+    ${
+      for (let m of @messages) {
+        lift <li><strong>${m.author}</strong>: ${m.body}</li>
+      }
+    }
+  </ul>
+  <form onsubmit=send()>
+    <input type="text" bind:value=@draft placeholder="Message"/>
+    <button type="submit">Send</button>
+  </form>
+</div>
+
+</program>

@@ -1,0 +1,8 @@
+// 01-hello.scrml — the minimal program. Plain text in markup, no state.
+
+<program>
+
+<h1>Hello, scrml!</h1>
+<p>This file compiles to HTML + JS + CSS.</p>
+
+</program>

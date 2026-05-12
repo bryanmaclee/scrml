@@ -1,0 +1,57 @@
+// 03-todos.scrml — in-memory todos with for/lift, components, and bind:value.
+
+<program>
+
+${
+  type Todo:struct = { id: number, body: string, done: boolean }
+
+  <items>: Todo[] = []
+  <draft> = ""
+  <nextId> = 1
+
+  function add() {
+    if (@draft == "") return
+    @items = [...@items, { id: @nextId, body: @draft, done: false }]
+    @nextId = @nextId + 1
+    @draft = ""
+  }
+
+  function toggle(id) {
+    @items = @items.map(t => t.id == id ? { ...t, done: not t.done } : t)
+  }
+
+  function remove(id) {
+    @items = @items.filter(t => t.id != id)
+  }
+
+  const TodoRow = <li class="row" props={ item: Todo }>
+    <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
+    <span class:done=@item.done>${@item.body}</span>
+    <button onclick=remove(@item.id)>x</button>
+  </li>
+}
+
+<div class="todo-app">
+  <h1>Todos</h1>
+  <form onsubmit=add()>
+    <input type="text" bind:value=@draft placeholder="What's next?"/>
+    <button type="submit">Add</button>
+  </form>
+  <ul>
+    ${
+      for (let t of @items) {
+        lift <TodoRow item=t/>
+      }
+    }
+  </ul>
+</div>
+
+#{
+  .todo-app { max-width: 420px; margin: 2rem auto; font-family: sans-serif; }
+  form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  input[type="text"] { flex: 1; padding: 0.5rem; }
+  .row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+  .row .done { text-decoration: line-through; color: #999; }
+}
+
+</program>

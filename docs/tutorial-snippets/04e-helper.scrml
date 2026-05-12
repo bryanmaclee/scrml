@@ -1,7 +1,0 @@
-// 04e-helper — sibling module. Exports a fn used by 04e-import.scrml.
-
-${
-  export fn greet(name: string) -> string {
-    return "Hello, " + name + "!"
-  }
-}

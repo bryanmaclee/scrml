@@ -1,0 +1,49 @@
+// 02b-counter-persisted.scrml — counter that survives a refresh.
+
+<schema>
+  counters {
+    id:    integer primary key
+    value: integer not null default(0)
+  }
+</>
+
+<program>
+
+<db src="counter.db" tables="counters">
+
+  ${
+    <count> = loadCount()
+
+    // The `server` keyword is no longer needed — these functions escalate
+    // to the server automatically because they touch a `?{}` SQL block.
+    // (Body-content inference, Insight 26.)
+    function loadCount() {
+      const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
+      return row is some ? row.value : 0
+    }
+
+    function persistCount(n) {
+      ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
+         ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run()
+    }
+
+    function inc() {
+      @count = @count + 1
+      persistCount(@count)
+    }
+
+    function dec() {
+      @count = @count - 1
+      persistCount(@count)
+    }
+  }
+
+  <div>
+    <h1>Persistent counter: ${@count}</h1>
+    <button onclick=dec()>−</button>
+    <button onclick=inc()>+</button>
+  </div>
+
+</>
+
+</program>

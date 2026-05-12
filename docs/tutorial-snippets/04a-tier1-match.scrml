@@ -1,0 +1,41 @@
+// 04a-tier1-match.scrml — Tier 1: enum + match expression dispatch.
+//
+// Note: the structural `<match for=Type on=expr>` block form is a planned
+// surface (deferred parser; tracked in primer §13.7). For dispatch in markup
+// today, use a JS-style `match expr { ... }` inside a logic block with `lift`
+// in each arm — same exhaustiveness check, same payload destructuring.
+
+<program>
+
+${
+  type LoadPhase:enum = {
+    Idle
+    Loading
+    Loaded(rows: number)
+    Failed(msg: string)
+  }
+
+  <phase>: LoadPhase = .Idle
+
+  function load() {
+    @phase = .Loading
+    @phase = LoadPhase.Loaded(42)        // fake result for the demo
+  }
+
+  function reset_phase() { @phase = .Idle }
+}
+
+<div>
+  ${
+    match @phase {
+      .Idle        => { lift <button onclick=load()>Load</button> }
+      .Loading     => { lift <p>Loading…</p> }
+      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                        lift <button onclick=reset_phase()>Reset</button> }
+      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                        lift <button onclick=reset_phase()>Try again</button> }
+    }
+  }
+</div>
+
+</program>

@@ -1,0 +1,44 @@
+// 04b-tier2-engine.scrml — Tier 2: <engine> with rule= contracts.
+//
+// The engine is declared at file level (NOT inside <program>). State-children
+// carry rule= attributes that declare the legal transitions out. Bodies are
+// empty (</>) in v0.2.4 — markup is driven by a `match` block inside <program>
+// that reads the engine's auto-declared variable.
+
+${
+  type LoadPhase:enum = {
+    Idle
+    Loading
+    Loaded(rows: number)
+    Failed(msg: string)
+  }
+
+  function load() {
+    @loadPhase = .Loading
+    @loadPhase = LoadPhase.Loaded(42)        // fake result for the demo
+  }
+}
+
+<engine for=LoadPhase initial=.Idle>
+  <Idle    rule=.Loading></>
+  <Loading rule=(.Loaded | .Failed)></>
+  <Loaded  rule=.Idle></>
+  <Failed  rule=.Idle></>
+</>
+
+<program>
+
+<div>
+  ${
+    match @loadPhase {
+      .Idle        => { lift <button onclick=load()>Load</button> }
+      .Loading     => { lift <p>Loading…</p> }
+      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                        lift <button onclick=${@loadPhase = .Idle}>Reset</button> }
+      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                        lift <button onclick=${@loadPhase = .Idle}>Try again</button> }
+    }
+  }
+</div>
+
+</program>
