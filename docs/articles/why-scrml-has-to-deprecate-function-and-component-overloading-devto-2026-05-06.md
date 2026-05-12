@@ -155,11 +155,11 @@ Then I asked the question that killed it.
 
 The drafts all included a helper called `checkRateLimit(actorId, kind) -> boolean`. Inside the helper was a SQL query that counted how many notifications the actor had sent in the last minute. The function returned true if the count was under ten.
 
-I looked at it and said: hold on. That is not a function. That is a derived view of state: a query against the notifications log, scoped to an actor, bounded by a window. scrml already expresses derived state directly. `const <recentSendCount> = ?{ ... }` on the actor's body. `const <isRateLimited> = @recentSendCount.n >= 10`. Reactive. Updated when the log changes. Asking "is this user rate-limited?" is `@user.isRateLimited`, a fact, not a function call.
+I looked at it and said: hold on. The helper is a derived view of state — a SQL query against the notifications log, scoped to an actor, bounded by a window. That query *is* the data; the rate-limit gate is one expression on top of it (`recentSendCount(target) >= 10`). scrml routes the query server-side automatically; no boilerplate, no separate "service layer," no helper-of-a-helper-of-a-helper.
 
-And once that question lands, the next one is unavoidable. The whole `sendNotification` body (*gate, act, tag the result with a stringly-typed status*) is morally a state machine collapsed into procedural goo. `"rate-limited"`, `"queued:5"`, `"paged:7"`. A sum-type return value smuggled in as a string. Exactly the bug class that `enum` and `match` and `engine` were specifically designed to kill.
+And once the gate is one expression, the stringly-typed return is the other half of the problem. `"rate-limited"`, `"queued:5"`, `"paged:7"` — a sum-type return value smuggled in as a string. The call site loses every typed-variant guarantee; downstream consumers stringly-compare instead of pattern-matching. Exactly the bug class that `enum` and `match` were specifically designed to kill.
 
-Claude rewrote the example. The new version had no `sendNotification` function at all:
+Claude rewrote the example. The new version had no `sendNotification` overload at all — one function, dispatched at the match-arm:
 
 ```scrml
 <program>${
@@ -167,54 +167,69 @@ Claude rewrote the example. The new version had no `sendNotification` function a
   type SendOutcome:enum = {
     RateLimited,
     Queued(id: string),
-    Paged(id: string),
-    Failed(reason: string)
+    Paged(id: string)
   }
 
-  <UserFlow userId(string) email(string) name(string)>
-    ${
-      const <recentSendCount> = ?{
-        SELECT COUNT(*) AS n FROM notifications_log
-        WHERE actor_id = ${userId}
-          AND kind = 'user'
-          AND created_at > NOW() - INTERVAL '1 minute'
-      }
-      const <isRateLimited> = @recentSendCount.n >= 10
+  type Actor:enum = {
+    User(userId: string, email: string, name: string),
+    Admin(adminId: string, pagerToken: string, role: string)
+  }
+
+  fn actorKey(a: Actor) -> string {
+    match a {
+      .User u  -> u.userId
+      .Admin a -> a.adminId
     }
-  </>
+  }
 
-  <AdminFlow adminId(string) pagerToken(string) role(string)>
-    ${
-      const <recentSendCount> = ?{
-        SELECT COUNT(*) AS n FROM notifications_log
-        WHERE actor_id = ${adminId}
-          AND kind = 'admin'
-          AND created_at > NOW() - INTERVAL '1 minute'
-      }
-      const <isRateLimited> = @recentSendCount.n >= 10
+  // Derived view of state: how many messages has this actor sent recently?
+  // The body is a SQL query; the compiler routes it server-side automatically.
+  function recentSendCount(target: Actor) -> number {
+    const result = ?{
+      SELECT COUNT(*) AS n FROM notifications_log
+      WHERE actor_id = ${actorKey(target)}
+        AND created_at > NOW() - INTERVAL '1 minute'
     }
-  </>
+    return result.n
+  }
 
-  <engine for=SendNotification initial=.Idle>
-    | Idle    ! send(target: UserFlow,  msg: string) -> Limited        if @target.isRateLimited
-    | Idle    ! send(target: UserFlow,  msg: string) -> SendingUser(target, msg)
-    | Idle    ! send(target: AdminFlow, msg: string) -> Limited        if @target.isRateLimited
-    | Idle    ! send(target: AdminFlow, msg: string) -> SendingAdmin(target, msg)
+  // One send. No overloading. Match-on-arm IS the dispatch.
+  function send(target: Actor, message: string) -> SendOutcome {
+    if (recentSendCount(target) >= 10) { return .RateLimited }
 
-    | SendingUser(t, m)  ! tick -> Done(.Queued(emailId)) where const emailId = ?{ INSERT INTO email_queue (...) RETURNING id }
-    | SendingAdmin(t, m) ! tick -> Done(.Paged(pagerId))  where const pagerId = ?{ INSERT INTO pager_queue (...) RETURNING id }
-
-    | Limited            ! _    -> Done(.RateLimited)
-  </engine>
+    match target {
+      .User u -> {
+        let emailId = ?{
+          INSERT INTO email_queue (to_addr, subject, body)
+          VALUES (${u.email},
+                  "Notification for " + u.name,
+                  "Hi " + u.name + ",\n\n" + message)
+          RETURNING id
+        }
+        return .Queued(emailId)
+      }
+      .Admin a -> {
+        let pagerId = ?{
+          INSERT INTO pager_queue (token, payload)
+          VALUES (${a.pagerToken},
+                  "[ALERT][" + a.role + "] " + message)
+          RETURNING id
+        }
+        ?{ INSERT INTO admin_audit (admin_id, action)
+           VALUES (${a.adminId}, 'paged') }
+        return .Paged(pagerId)
+      }
+    }
+  }
 
 }</program>
 ```
 
-Look at what disappeared. There is no `sendNotification` function to overload because there is no function. "Is this actor rate-limited?" is `@user.isRateLimited`, a fact about state, automatically updated when the log changes. The send flow is an `engine`, exhaustively typed, every transition explicit, every guard visible, every outcome a typed variant of the `SendOutcome` enum. The `for=` qualifier on the engine and the typed parameters in the transition arms (`target: UserFlow` and `target: AdminFlow`) already discriminate by state-type. The match-on-arm syntax *is* the dispatch.
+Look at what disappeared. There is no `sendNotification` *overload*, because there is no need for one. There is one `send` function, written once, whose body dispatches by match-on-arm over the `Actor` enum. Each arm gets the variant's payload statically typed (`u: { userId, email, name }` in the User arm, `a: { adminId, pagerToken, role }` in the Admin arm) — the same per-actor type-safety that the overload mechanism was trying to provide, but uniformly, in one body, with the return type a typed `SendOutcome` variant instead of a string sum-type smuggled through `"queued:5"` / `"paged:7"` / `"rate-limited"`.
 
-No string sum-type. No `if`-ladder over a runtime tag. No two function bodies that have to stay in sync. No reaching under the hood for `__scrml_state_type`. The whole "where do I centralize the overload?" question dissolved, because nothing wanted to be a function in the first place.
+No string sum-type. No `if`-ladder over a runtime tag. No two function bodies that have to stay in sync. No reaching under the hood for `__scrml_state_type`. The whole "where do I centralize the overload?" question dissolved, because the dispatch primitive `match` does the discrimination directly. The actor types live in one enum, the send body lives in one function, and the arms of the match handle the variant-specific work with full type-system visibility into each variant's payload.
 
-That is the moment the feature died. Not because it was broken. Because the language already had three primitives (derived state, `enum`, `<engine>`) that did the same job at a higher level of expressiveness, with full type-system visibility, with no string contracts and no hand-rolled dispatch. The bridge I had insisted on building was already in the language.
+That is the moment the feature died. Not because it was broken. Because the language already had its dispatch primitives (typed `enum`s with payloads, `match` over discriminated unions, derived state for queries-as-data, and `<engine>` for genuinely stateful flows) that did the same job at a higher level of expressiveness, with full type-system visibility, with no string contracts and no hand-rolled dispatch. The bridge I had insisted on building was already in the language.
 
 If you want to see those three primitives in action, that is what the [companion piece, *The compiler that grows up with your app*](./tier-ladder-promotion-devto-2026-05-04.md), shows in detail. The `if=` → `<match>` → `<engine>` ladder where state-children migrate verbatim and the wrapper is the only thing that changes. That ladder is the canonical path for case analysis on a discriminated value. Function and component overloading were a parallel path that did not earn its keep against the ladder.
 
