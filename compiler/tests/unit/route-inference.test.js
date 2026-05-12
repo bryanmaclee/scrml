@@ -3198,3 +3198,232 @@ describe("§30 D5 — Insight 26: W-DEPRECATED-SERVER-MODIFIER", () => {
     expect(deprec).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §31 — Bug 4 (S87 Trio A) regression: walkMarkupContext must collect
+// identifiers from string-typed expression fields on AST nodes nested INSIDE
+// markup-context logic blocks. Without the string-fallback, functions called
+// from `if (fn() > 0)` / `for (let x of fn())` / `while (fn())` etc. inside
+// markup-level `${ ... }` blocks falsely trip W-DEAD-FUNCTION.
+//
+// TodoMVC fixture surfaced shape: `${ if (completedCount() > 0) { lift ... } }`
+// in footer markup. `completedCount` was flagged W-DEAD-FUNCTION even though
+// it IS called from the if-stmt condition string.
+//
+// Fix lives in `src/route-inference.ts` walkMarkupContext: scans
+// `expr|init|condition|value|test|header|iterable` STRING fields and
+// `condExpr|valueExpr|exprNode|testExpr|headerExpr` ExprNode siblings.
+// ---------------------------------------------------------------------------
+
+describe("§31 — Bug 4 / S87 Trio A: markup-context call detection through nested-stmt expr fields", () => {
+  /**
+   * Wrap a logic-stmt node (if-stmt / for-stmt / etc.) inside a markup-level
+   * logic block, itself nested inside a markup tree. Mirrors the AST shape
+   * produced by `${ if (...) { ... } }` inside markup.
+   */
+  function makeFileASTWithMarkupLogic(filePath, fnNodes, markupLogicStmt) {
+    const innerLogic = {
+      id: 200,
+      kind: "logic",
+      body: [markupLogicStmt],
+      span: span(200, filePath),
+    };
+    const markupRoot = {
+      id: 100,
+      kind: "markup",
+      tag: "footer",
+      attrs: [],
+      children: [innerLogic],
+      selfClosing: false,
+      closerForm: "</>",
+      isComponent: false,
+      span: span(100, filePath),
+    };
+    const topLogic = {
+      id: 1,
+      kind: "logic",
+      body: fnNodes,
+      span: span(0, filePath),
+    };
+    return {
+      filePath,
+      nodes: [markupRoot, topLogic],
+      imports: [],
+      exports: [],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+  }
+
+  test("function called from if-stmt.condition inside markup logic block — does NOT fire W-DEAD-FUNCTION", () => {
+    // Mirrors TodoMVC `${ if (completedCount() > 0) { lift <button .../> } }`.
+    const fn = makeFunctionDecl({
+      name: "completedCount",
+      body: [makeBareExpr("return 0")],
+      spanStart: 10,
+    });
+    const ifStmt = {
+      id: 220,
+      kind: "if-stmt",
+      condition: "( completedCount ( ) > 0 )",
+      consequent: [],
+      alternate: null,
+      span: span(220, "/test/markup-if.scrml"),
+    };
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-if.scrml", [fn], ifStmt);
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("completedCount"));
+    expect(dead).toHaveLength(0);
+  });
+
+  test("function called from for-stmt.header inside markup logic block — does NOT fire W-DEAD-FUNCTION", () => {
+    // Shape: `${ for (let item of getItems()) { lift ... } }`.
+    const fn = makeFunctionDecl({
+      name: "getItems",
+      body: [makeBareExpr("return []")],
+      spanStart: 10,
+    });
+    const forStmt = {
+      id: 230,
+      kind: "for-stmt",
+      header: "let item of getItems ( )",
+      body: [],
+      span: span(230, "/test/markup-for.scrml"),
+    };
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-for.scrml", [fn], forStmt);
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("getItems"));
+    expect(dead).toHaveLength(0);
+  });
+
+  test("function called from while-stmt.condition inside markup logic block — does NOT fire W-DEAD-FUNCTION", () => {
+    const fn = makeFunctionDecl({
+      name: "shouldRetry",
+      body: [makeBareExpr("return false")],
+      spanStart: 10,
+    });
+    const whileStmt = {
+      id: 240,
+      kind: "while-stmt",
+      condition: "shouldRetry ( )",
+      body: [],
+      span: span(240, "/test/markup-while.scrml"),
+    };
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-while.scrml", [fn], whileStmt);
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("shouldRetry"));
+    expect(dead).toHaveLength(0);
+  });
+
+  test("function called from let-decl.init inside markup logic block — does NOT fire W-DEAD-FUNCTION", () => {
+    // Shape: `${ let x = computeThing() ; ... }`.
+    const fn = makeFunctionDecl({
+      name: "computeThing",
+      body: [makeBareExpr("return 1")],
+      spanStart: 10,
+    });
+    const letDecl = makeLetDecl("x", "computeThing ( )", 250, "/test/markup-let.scrml");
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-let.scrml", [fn], letDecl);
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("computeThing"));
+    expect(dead).toHaveLength(0);
+  });
+
+  test("function called from nested if/for chain inside markup logic — does NOT fire", () => {
+    // Shape: `${ if (outerCheck()) { for (let x of innerList()) { ... } } }`.
+    const outerFn = makeFunctionDecl({
+      name: "outerCheck",
+      body: [makeBareExpr("return true")],
+      spanStart: 10,
+    });
+    const innerFn = makeFunctionDecl({
+      name: "innerList",
+      body: [makeBareExpr("return []")],
+      spanStart: 60,
+    });
+    const innerFor = {
+      id: 270,
+      kind: "for-stmt",
+      header: "let x of innerList ( )",
+      body: [],
+      span: span(270, "/test/markup-nested.scrml"),
+    };
+    const outerIf = {
+      id: 260,
+      kind: "if-stmt",
+      condition: "outerCheck ( )",
+      consequent: [innerFor],
+      alternate: null,
+      span: span(260, "/test/markup-nested.scrml"),
+    };
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-nested.scrml", [outerFn, innerFn], outerIf);
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION");
+    const deadNames = dead.map(e => e.message).join(" | ");
+    expect(dead, "outer + inner both reachable, expected zero dead-warns; got: " + deadNames).toHaveLength(0);
+  });
+
+  test("REGRESSION GUARD — truly-dead function inside same file STILL fires W-DEAD-FUNCTION", () => {
+    // Sanity: the new walker scan must NOT mask GENUINE dead-warns.
+    // `liveFn` is referenced in the markup-level if-stmt condition; `deadFn`
+    // is declared but not referenced anywhere.
+    const liveFn = makeFunctionDecl({
+      name: "liveFn",
+      body: [makeBareExpr("return 1")],
+      spanStart: 10,
+    });
+    const deadFn = makeFunctionDecl({
+      name: "deadFn",
+      body: [makeBareExpr("return 2")],
+      spanStart: 60,
+    });
+    const ifStmt = {
+      id: 280,
+      kind: "if-stmt",
+      condition: "liveFn ( ) > 0",
+      consequent: [],
+      alternate: null,
+      span: span(280, "/test/markup-mixed.scrml"),
+    };
+    const fileAST = makeFileASTWithMarkupLogic("/test/markup-mixed.scrml", [liveFn, deadFn], ifStmt);
+    const { errors } = runRIClean([fileAST]);
+
+    const liveDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("liveFn"));
+    expect(liveDead, "liveFn is referenced from if-stmt condition; should NOT be dead").toHaveLength(0);
+
+    const deadDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("deadFn"));
+    expect(deadDead, "deadFn is truly unreferenced; SHOULD still fire dead-warn").toHaveLength(1);
+  });
+
+  test("REGRESSION GUARD — function called only inside ANOTHER function body still fires (no markup ref)", () => {
+    // `helperX` is called only from `wrapper` body. `wrapper` itself is dead.
+    // The body-callee analysis sees helperX -> wrapper edge but neither is
+    // markup-referenced, so W-DEAD-FUNCTION SHOULD fire for both via the
+    // existing call-graph + non-markup-ref combination.
+    //
+    // Exception: the call graph DOES count `wrapper -> helperX` as a real
+    // caller of `helperX` (via inverseCallerMap), so helperX has callers
+    // and only `wrapper` actually fires W-DEAD-FUNCTION.
+    const helperFn = makeFunctionDecl({
+      name: "helperX",
+      body: [makeBareExpr("return 1")],
+      spanStart: 10,
+    });
+    const wrapperFn = makeFunctionDecl({
+      name: "wrapper",
+      body: [makeBareExpr("return helperX()")],
+      spanStart: 60,
+    });
+    const fileAST = makeFileAST("/test/no-markup.scrml", [helperFn, wrapperFn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const wrapperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("wrapper"));
+    expect(wrapperDead).toHaveLength(1);
+  });
+});

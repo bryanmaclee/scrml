@@ -2128,6 +2128,47 @@ export function runRI(input: RIInput): RIOutput {
     if (node.kind === "text" && typeof node.text === "string") {
       collectIdentsFromText(node.text);
     }
+    // Bug 4 / S87 Trio A: nodes nested INSIDE markup-context logic blocks
+    // (if-stmt / while-stmt / for-stmt / return-stmt / let-decl / etc.) carry
+    // their expression payloads in STRING fields (`condition`, `header`,
+    // `expr`, `value`, `init`, `test`). The recursion at the bottom of this
+    // walker only descends into Array values and child object-with-kind
+    // values, so string-typed expression fields are silently skipped.
+    //
+    // Example false-fire shape (TodoMVC fixture, footer markup-level logic):
+    //   `${ if (completedCount() > 0) { lift <button .../> } }`
+    // The if-stmt node carries `condition: "( completedCount ( ) > 0 )"`.
+    // Without the scan below, `completedCount` is never added to
+    // markupReferencedNames, and W-DEAD-FUNCTION false-fires.
+    //
+    // Mirrors the DG `sweepNodeForAtRefs` string-fallback at
+    // dependency-graph.ts:1785 (`exprFields = ["expr", "init", "condition",
+    // "value", "test", "header", "iterable"]`). Same union of field names.
+    //
+    // ExprNode-shaped sister fields (`condExpr`, `valueExpr`, `exprNode`)
+    // are walked by the kind-recursion below; this block adds the string
+    // fallback only.
+    {
+      const EXPR_STRING_FIELDS = [
+        "expr", "init", "condition", "value", "test", "header", "iterable",
+      ] as const;
+      for (const field of EXPR_STRING_FIELDS) {
+        const v = node[field];
+        if (typeof v === "string") collectIdentsFromText(v);
+      }
+      // ExprNode sister fields — emitStringFromTree + collectIdentsFromText
+      // catches identifiers regardless of whether the AST builder produced
+      // a string or an ExprNode for the same logical expression.
+      const EXPR_NODE_FIELDS = [
+        "condExpr", "valueExpr", "exprNode", "testExpr", "headerExpr",
+      ] as const;
+      for (const field of EXPR_NODE_FIELDS) {
+        const v = node[field];
+        if (v && typeof v === "object" && (v.type || v.kind)) {
+          try { collectIdentsFromText(emitStringFromTree(v)); } catch { /* ignore */ }
+        }
+      }
+    }
     // Recurse into children/body/etc.
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;
