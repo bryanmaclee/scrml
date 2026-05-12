@@ -1279,6 +1279,27 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (node.matchExpr) {
         return emitMatchExprDecl(node.name, node.matchExpr, "let", opts);
       }
+      // v0.2.4 bug-1-anomaly-2: `let x = ?{...}.method()` — sqlNode-bearing
+      // init. Recurse into case "sql" to produce the Bun.SQL tagged template,
+      // then strip the trailing `;` so the result can be wrapped as the RHS
+      // of `let x = ...;`. Mirrors case "return-stmt" / "lift-expr" / state-decl
+      // sqlNode handling.
+      //
+      // `_scrml_sql` is server-only (E-CG-006). Inside a server-inferred fn body
+      // (`opts.boundary === "server"`) this is correct. On the client boundary
+      // the variable cannot be populated from SQL; emit a `let x;` + explanatory
+      // comment so emitted JS still parses and the diagnostic is visible at
+      // inspection. (No silent `/_* sql-ref:-1 *_/` placeholder.) Note: the
+      // RI stage should classify any function containing a SQL `?{}` op as a
+      // server fn, so the client branch is best-effort defensive only.
+      if (node.sqlNode && node.sqlNode.kind === "sql") {
+        if (opts.boundary === "server") {
+          const sqlStmt = emitLogicNode(node.sqlNode, opts);
+          const sqlExpr = sqlStmt.replace(/;\s*$/, "");
+          return `let ${node.name} = ${sqlExpr};`;
+        }
+        return `let ${node.name}; // SQL-init for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server function.`;
+      }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
         const rhs = emitExpr(node.initExpr, _makeExprCtx(opts));
@@ -1352,6 +1373,22 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // Match-as-expression: `const result = match expr { .A => { lift val } }`
       if (node.matchExpr) {
         return emitMatchExprDecl(node.name, node.matchExpr, "const", opts);
+      }
+      // v0.2.4 bug-1-anomaly-2: `const x = ?{...}.method()` — sqlNode-bearing
+      // init. Mirror of the let-decl handling above. Tilde-decl shares this
+      // case branch but does NOT participate — tilde-decl never carries a
+      // sqlNode (the AST builder routes ?{...} only through the let/const
+      // entry points). Guard on `node.kind === "const-decl"` for safety.
+      if (node.kind === "const-decl" && node.sqlNode && node.sqlNode.kind === "sql") {
+        if (opts.boundary === "server") {
+          const sqlStmt = emitLogicNode(node.sqlNode, opts);
+          const sqlExpr = sqlStmt.replace(/;\s*$/, "");
+          return `const ${node.name} = ${sqlExpr};`;
+        }
+        // Client boundary: cannot evaluate; emit `const x = null;` (const must
+        // have an initializer) + comment so the JS parses and the cause is
+        // visible.
+        return `const ${node.name} = null; // SQL-init for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server function.`;
       }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {

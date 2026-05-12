@@ -687,6 +687,25 @@ export function walkBodyForTriggers(
         }
       }
 
+      // v0.2.4 bug-1-anomaly-2: when the AST builder attached a structured
+      // sqlNode (because the initializer was `?{...}.method()` — see
+      // ast-builder tryConsumeSqlInit, now wired into let/const-decl paths),
+      // `init` is "" and `initExpr` is undefined. The SQL site is no longer
+      // visible to detectServerOnlyResource(string), so we must trigger
+      // escalation explicitly here. Mirrors the state-decl path below
+      // (line ~731). Without this, server-inferred functions whose ONLY
+      // trigger was `const x = ?{...}.get()` lose their route classification
+      // (e.g. postNote() in examples/17-schema-migrations.scrml regressed
+      // pre-this-line: W-DEAD-FUNCTION + E-CG-006 leak as the body was
+      // emitted to the client unchanged).
+      if ((node as any).sqlNode && (node as any).sqlNode.kind === "sql") {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: "sql-query",
+          span: node.span,
+        });
+      }
+
       // Trigger 1: server-only resource in the init expression (e.g. ?{} SQL sigil, Bun.file(), etc.)
       const resourceType = detectServerOnlyResource(init);
       if (resourceType !== null) {

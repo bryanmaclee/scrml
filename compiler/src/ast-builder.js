@@ -4107,6 +4107,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const matchNode = parseOneMatchAsExpr(startTok);
           return { id: ++counter.next, kind: "let-decl", name, init: "", matchExpr: matchNode, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
+        // v0.2.4 bug-1-anomaly-2: `let x = ?{...}.method()` — when RHS is a SQL
+        // BLOCK_REF, build the SQL child via tryConsumeSqlInit and attach as
+        // `sqlNode` on the let-decl. emit-logic case "let-decl" routes through
+        // case "sql" when sqlNode is present. Mirrors the state-decl sites
+        // above (server @, @shared, @x:T, @x). Without this, the BLOCK_REF is
+        // captured in the `init` string, then safeParseExprToNode preprocesses
+        // it to `__scrml_sql_placeholder__` and emit-expr renders the broken
+        // `(slash-star) sql-ref:-1 (star-slash).get()` shape (server fn body
+        // postNote → `const user = ?{...}.get()` repro on
+        // examples/17-schema-migrations.scrml).
+        const _sqlInitLet = tryConsumeSqlInit();
+        if (_sqlInitLet) {
+          return { id: ++counter.next, kind: "let-decl", name, init: "", sqlNode: _sqlInitLet, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+        }
         const { expr, span } = collectExpr();
         // §19.5: `let x = fallible()?` — propagate-expr binding
         const strippedLet = expr.trimEnd();
@@ -4189,6 +4203,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().kind === "KEYWORD" && (peek().text === "match" || (peek().text === "partial" && peek(1)?.text === "match"))) {
           const matchNode = parseOneMatchAsExpr(startTok);
           return { id: ++counter.next, kind: "const-decl", name, init: "", matchExpr: matchNode, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+        }
+        // v0.2.4 bug-1-anomaly-2: `const x = ?{...}.method()` — see matching
+        // let-decl hook above for rationale.
+        const _sqlInitConst = tryConsumeSqlInit();
+        if (_sqlInitConst) {
+          return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitConst, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
         return { id: ++counter.next, kind: "const-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
@@ -6436,6 +6456,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
+        // v0.2.4 bug-1-anomaly-2: `let x = ?{...}.method()` — top-level branch
+        // (parallel to parseOneStatement above). Wire tryConsumeSqlInit so the
+        // BLOCK_REF flows through the structured sqlNode path.
+        const _sqlInitLetTop = tryConsumeSqlInit();
+        if (_sqlInitLetTop) {
+          nodes.push({
+            id: ++counter.next,
+            kind: "let-decl",
+            name,
+            init: "",
+            sqlNode: _sqlInitLetTop,
+            ...(typeAnnotation ? { typeAnnotation } : {}),
+            span: spanOf(startTok, peek()),
+          });
+        } else {
         const { expr, span } = collectExpr();
         // Check for `?` propagation suffix
         const stripped = expr.trimEnd();
@@ -6459,6 +6494,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
             span: spanOf(startTok, peek()),
           });
+        }
         }
         }
       } else {
@@ -6589,6 +6625,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
+        // v0.2.4 bug-1-anomaly-2: `const x = ?{...}.method()` — top-level branch.
+        const _sqlInitConstTop = tryConsumeSqlInit();
+        if (_sqlInitConstTop) {
+          nodes.push({
+            id: ++counter.next,
+            kind: "const-decl",
+            name,
+            init: "",
+            sqlNode: _sqlInitConstTop,
+            ...(typeAnnotation ? { typeAnnotation } : {}),
+            span: spanOf(startTok, peek()),
+          });
+        } else {
         const { expr, span } = collectExpr();
         // Check if this is a component definition. Per SPEC §(component defs),
         // a component-def requires BOTH an uppercase-initial name AND markup RHS
@@ -6616,6 +6665,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
             span: spanOf(startTok, peek()),
           });
+        }
         }
         }
       } else {

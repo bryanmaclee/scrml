@@ -10292,6 +10292,21 @@ function checkFnBodyProhibitions(
           stmtSpan,
         ));
       }
+      // v0.2.4 bug-1-anomaly-2: `let x = ?{...}` / `const x = ?{...}` now
+      // attaches a structured sqlNode (see ast-builder tryConsumeSqlInit
+      // wired into let/const-decl paths). The text-heuristic at line ~9555
+      // below scans nodeText(stmt) but with sqlNode the init text is "" —
+      // miss. Catch the structured form explicitly.
+      if ((stmt.kind === "let-decl" || stmt.kind === "const-decl") &&
+          (stmt as any).sqlNode && (stmt as any).sqlNode.kind === "sql") {
+        errors.push(new TSError(
+          "E-FN-001",
+          `E-FN-001: \`fn ${fnName}\` body contains a \`?{}\` SQL access. ` +
+          `\`fn\` is a pure function and may not perform database operations. ` +
+          `Move the \`?{}\` query outside \`fn\` and pass the result as a parameter.`,
+          stmtSpan,
+        ));
+      }
 
       // E-FN-005: await expression in body
       if (stmt.kind === "await-expr" || stmt.await === true) {

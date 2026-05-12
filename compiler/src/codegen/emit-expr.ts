@@ -743,6 +743,20 @@ function emitSqlRef(node: SqlRefExpr, _ctx: EmitExprContext): string {
   // SqlRefExpr carries a nodeId referencing the SQLNode — codegen resolves this
   // at the file level. For now, return a placeholder that the outer emitter
   // can fill in (SQL blocks are handled at the statement level, not expression level).
+  //
+  // v0.2.4 bug-1-anomaly-2 defense-in-depth: when `nodeId === -1` (the parser
+  // sentinel set at expression-parser.ts:889 for `__scrml_sql_placeholder__`
+  // identifiers), emit a JS-valid `null` with a diagnostic comment instead of
+  // the broken `(slash-star) sql-ref:-1 (star-slash)` shape. The broken comment
+  // shape silently parsed (a Block-comment followed by `.get()` is legal JS),
+  // producing wrong runtime semantics with no parse failure. The upstream fix
+  // (ast-builder.js sqlNode hook in let-decl/const-decl) prevents this path
+  // for the known repro (examples/17-schema-migrations.scrml, S84 Wave 1 #2);
+  // this guard catches future regressions and surfaces them as runtime
+  // TypeErrors instead of opaque comments.
+  if (node.nodeId < 0) {
+    return `null /* sql-ref unresolved: nodeId=${node.nodeId} — upstream parser/AST bug, please report */`;
+  }
   return `/* sql-ref:${node.nodeId} */`;
 }
 

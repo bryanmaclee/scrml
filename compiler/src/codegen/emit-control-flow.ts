@@ -403,6 +403,28 @@ function substituteHoistedSqlInBody(
     }
     const clone: any = { ...stmt };
     let replaced = false;
+    // v0.2.4 bug-1-anomaly-2: when a let-decl/const-decl carries a structured
+    // sqlNode (from the ast-builder tryConsumeSqlInit hook), the body's SQL
+    // site no longer lives in any string field — so the per-key string regex
+    // below would never match. Detect the structured form first: if the
+    // clone has a `sqlNode` whose reconstructed `?{` form matches the hoist
+    // source pattern, strip the sqlNode and inject the replacement as a
+    // plain `init` string. emit-logic case "let-decl"/"const-decl" then
+    // falls through to the Phase-4 fallback path (init string → emitExprField).
+    if (clone.sqlNode && clone.sqlNode.kind === "sql") {
+      const sqlBody = typeof clone.sqlNode.query === "string"
+        ? clone.sqlNode.query
+        : (typeof clone.sqlNode.body === "string" ? clone.sqlNode.body : "");
+      const chainCalls = Array.isArray(clone.sqlNode.chainedCalls) ? clone.sqlNode.chainedCalls : [];
+      const argsStr = (chainCalls[0]?.args ?? "").toString();
+      const termName = (chainCalls[0]?.method ?? "").toString();
+      const reconstructed = `?{\`${sqlBody}\`}.${termName}(${argsStr})`;
+      if (sqlSourcePattern.test(reconstructed)) {
+        delete clone.sqlNode;
+        clone.init = replacement;
+        replaced = true;
+      }
+    }
     for (const k of Object.keys(clone)) {
       if (k === "span" || k === "id" || k === "kind") continue;
       if (k === "exprNode" || k.endsWith("Expr")) {

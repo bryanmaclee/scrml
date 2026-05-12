@@ -595,6 +595,11 @@ export function bodyContainsSqlContext(body: LogicNode[]): LogicNode | null {
         if ((node as any).exprNode) { const s = emitStringFromTree((node as any).exprNode); if (SQL_CONTEXT_RE.test(s)) return node; }
       }
       if (node.kind === "let-decl" || node.kind === "const-decl") {
+        // v0.2.4 bug-1-anomaly-2: when the ast-builder attaches a structured
+        // sqlNode (because the init was `?{...}.method()`), the SQL site no
+        // longer appears in `initExpr`/`init`. Detect via the structured field
+        // first to keep E-META-007 firing for `let x = ?{...}` inside runtime ^{}.
+        if ((node as any).sqlNode && (node as any).sqlNode.kind === "sql") return node;
         if ((node as any).initExpr) { const s = emitStringFromTree((node as any).initExpr); if (SQL_CONTEXT_RE.test(s)) return node; }
         else if (node.init && SQL_CONTEXT_RE.test(node.init)) return node;
       }
