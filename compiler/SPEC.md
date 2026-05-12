@@ -14671,6 +14671,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PAGE-INVALID-ATTR | §4.15, §40 | (v0.3 Wave 1) A `<page>` element carries an attribute that is not in the per-route attribute set `{ db=, auth=, csrf=, ratelimit= }`. App-wide attributes like `title=`, `description=`, `version=`, `cors=`, `log=`, `headers=` belong on `<program>` (the application-host scope), not on a per-route container. For per-element documentary metadata, use the appropriate markup element (e.g. `<title>` inside the page body). | Error |
 | E-CHANNEL-SHARED-MODIFIER | §38.4 | The `@shared` modifier is used in the source. The modifier is removed in v0.next (M19); reactive cells declared inside a channel body auto-sync by virtue of being declared in the channel body. Remove the `@shared` keyword and use `<name> = init` (V5-strict). | Error |
 | W-PROGRAM-REDUNDANT-LOGIC | §40.8 | (v0.3 Wave 1, info-level) A `<program>` body wraps top-level declarations in a redundant `${...}` logic block. Under v0.3, `<program>` body parses in default-logic mode — bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. Remove the redundant `${...}` for cleaner source. **Deprecation cycle:** warning in v0.3; v0.4 escalates to error per Q5. | Warning |
+| W-PROGRAM-SPA-INFERRED | §40.8.1 | (v0.3, info-level) The compiler has inferred SPA (single-page application) shape from the filesystem: the entry file declares a top-level `<program>` element, the `<program>` body contains zero `<page>` siblings, and no `pages/` directory exists at the project root. If SPA is your intent, this lint is informational only — no action required. If you intended a multi-page app, add `<page>` declarations to the entry-file `<program>` body or create a `pages/` directory at the project root. To suppress this lint, create an empty `pages/` directory at the project root (signals adopter awareness of the multi-page option). Per §40.8.1 the SPA-vs-multi-page-app shape is filesystem-inferred exclusively; no `<program spa>` boolean attribute exists. | Info |
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; etc. The owning section's error subsection documents the precise condition. (Stage 0b D4; S67 amendment.) | Error |
@@ -17517,31 +17518,52 @@ No `<page>` sibling is present; the application has a single route inferred from
 - §39.12.0 — db-anchor `<program db=>` workaround for schema/seeds files (v0.3 only; v0.4 promotes `<schema db=>` direct).
 - §43 — nested `<program>` (worker / sidecar execution-context boundary; distinct from the one-program-per-application rule which governs TOP-LEVEL `<program>`).
 - §47.9.2 — output path / route URL inference from source filesystem layout.
-- §34 — `E-PAGE-ROUTE-ATTR-FORBIDDEN`, `E-PAGE-INVALID-ATTR`, `E-CHANNEL-OUTSIDE-PROGRAM`, `E-CHANNEL-INSIDE-PAGE`, `W-PROGRAM-REDUNDANT-LOGIC`.
+- §34 — `E-PAGE-ROUTE-ATTR-FORBIDDEN`, `E-PAGE-INVALID-ATTR`, `E-CHANNEL-OUTSIDE-PROGRAM`, `E-CHANNEL-INSIDE-PAGE`, `W-PROGRAM-REDUNDANT-LOGIC`, `W-PROGRAM-SPA-INFERRED`.
 
-### 40.8.1 OPEN QUESTION — `<program spa>` boolean marker
+### 40.8.1 RESOLVED — SPA-vs-multi-page is filesystem-inferred + `W-PROGRAM-SPA-INFERRED` info lint (Option C)
 
-**Status:** OPEN QUESTION (v0.3 Wave 1, surfaced 2026-05-12; decision deferred).
+**Status:** RESOLVED (v0.3, surfaced as OQ 2026-05-12 S85 Wave 1; ratified 2026-05-12 S86).
 
-The question: should `<program>` carry a boolean `spa` attribute that explicitly marks a single-page application, or should SPA-vs-multi-page-app be inferred entirely from filesystem layout (the absence of `<page>` declarations)?
+**Verdict:** SPA-vs-multi-page application shape SHALL be inferred from filesystem layout exclusively. NO `<program spa>` boolean attribute is introduced. The compiler emits the info-level lint `W-PROGRAM-SPA-INFERRED` (§34) when the entry file shape is unambiguously SPA — i.e., the entry file declares `<program>` with no `<page>` siblings inside the `<program>` body AND no `pages/` directory exists at the project root.
 
-**Arguments for `<program spa>` (explicit marker):**
+**Lint suppression mechanism.** Presence of a `pages/` directory (even empty) at the project root signals adopter awareness of the multi-page option and suppresses `W-PROGRAM-SPA-INFERRED`. This gives adopters a deterministic opt-out: create `pages/` (even empty) to acknowledge multi-page is intentionally available; omit `pages/` to receive the lint surfacing the inference.
 
-- **Readability.** A reader scanning the entry file sees `spa` and immediately knows the application is single-page; no need to inspect the filesystem layout.
-- **Toolchain affordance.** LSP hovers and `scrml inspect` can present SPA-vs-multi-page status as a first-class attribute, rather than as derived from absence-of-`<page>`.
-- **Symmetry with other modal attributes.** `<program>` already carries explicit-mode attributes (`title=`, `description=`, `db=`); `spa` would fit the same shape.
-- **Build-step disambiguation.** When the build root contains exactly one file and no `pages/` directory, an explicit `spa` removes ambiguity about whether the developer INTENDED a SPA or has simply not yet added `<page>` siblings.
+**Why Option C (vs the original FOR / AGAINST binary):**
 
-**Arguments against `<program spa>` (filesystem-only inference):**
+The original OQ framed a binary — explicit `<program spa>` marker vs pure filesystem inference. The S86 ratified option (C) is filesystem inference + an info-level lint. The lint delivers the FOR-side readability + toolchain-affordance + build-step-disambiguation benefits without paying the AGAINST-side costs (Pillar 3 violation; co-location violation; vocabulary growth precedent for `<program worker>` / `<program server-only>` / etc.).
 
-- **Filesystem is already authoritative.** Routing is filesystem-inferred (per Pillar 3); SPA-vs-multi-page is a routing-shape question. Adding a redundant marker that must stay synced with the filesystem layout is a future-stale-comments risk.
-- **Pillar 3 cleanliness.** "The compiler owns the wiring" — the filesystem layout dictates routes; adopters never write routes. Adding a marker that overrides or duplicates filesystem-inferred routing is a regression vs the Pillar.
-- **Implementation simplicity.** No marker means no validation logic for "marker disagrees with filesystem" cases — the filesystem is the only source.
-- **Out-of-vocabulary risk.** Adding a single boolean attribute for SPA-vs-multi-page makes other shape questions ("is this a worker app?", "is this a server-only app?") candidates for similar markers, growing the `<program>` attribute surface.
+**Normative statements:**
 
-**PA recommendation (deferred):** PA leans toward "do NOT require it" (filesystem already signals SPA via absence of `<page>` files). User S86 directive: "I'm trying to juggle the consequences in my mind." — the question is surfaced here as a deliberate OPEN QUESTION; the decision is deferred to a later Wave or v0.3.x revision.
+- SPA-vs-multi-page-app shape SHALL be inferred from filesystem layout. The absence of `<page>` declarations inside the entry-file `<program>` body, AND the absence of a `pages/` directory at the project root, identify the application as a SPA.
+- `<program>` SHALL NOT accept a `spa` (or equivalent) boolean attribute. An attempt to use `<program spa>` SHALL emit `E-PROGRAM-UNKNOWN-ATTR` (or the closest existing diagnostic) per the existing `<program>` attribute-validation surface.
+- The compiler SHALL emit `W-PROGRAM-SPA-INFERRED` at source-position of the entry-file `<program>` opener when:
+  1. The entry file declares a top-level `<program>` element.
+  2. The `<program>` body contains zero `<page>` siblings.
+  3. No `pages/` directory exists at the project root.
+- The compiler SHALL NOT emit `W-PROGRAM-SPA-INFERRED` when ANY of the above conditions fails. In particular, presence of an EMPTY `pages/` directory suppresses the lint.
+- The lint message text follows the §34 row content (§34 row: `W-PROGRAM-SPA-INFERRED`).
 
-**Disposition:** Wave 1 does NOT introduce `<program spa>`. The filesystem-only inference is in effect. This OQ remains open; downstream waves MAY revisit.
+**Arguments that drove the decision (preserved for historical context):**
+
+**For `<program spa>` (the rejected explicit-marker approach):**
+- *Readability* (reader sees `spa` immediately) — addressed by the lint surfacing the inference at compile + by LSP affordances.
+- *Toolchain affordance* (LSP/CLI present SPA as first-class) — addressed by the lint emission site (LSP can render the same inference signal).
+- *Symmetry with `title=`/`description=`/`db=`* — these are FUNCTIONAL attributes (runtime behavior); `spa` would be DOCUMENTARY (filesystem already does the work). Different category; symmetry argument is shape-blind.
+- *Build-step disambiguation* (intended SPA vs not-yet-added pages) — addressed by the lint catching the ambiguous case at compile time.
+
+**Against (the ratified filesystem-only approach):**
+- *Filesystem is authoritative* (Pillar 3 — compiler-owns-the-wiring).
+- *Co-location cleanliness* (S86 co-location-of-behavior principle — SPA-vs-multi-page signal lives in ONE place: filesystem layout).
+- *Implementation simplicity* (no "marker disagrees with filesystem" validation logic).
+- *Out-of-vocabulary precedent* (introducing `<program spa>` opens door to `<program worker>`, `<program server-only>`, `<program ssr>`, etc. — vocabulary creep on the `<program>` attribute surface).
+
+**Methodology signal recorded:** the "third option" pattern. When a binary OQ has real costs on both sides, surfacing a synthesis option that captures both sides' load-bearing benefits without their costs is often the right shape. Same pattern as Insight 22 (test-bind effects-as-data middle path). User S86 verbatim: "I like c."
+
+**Cross-references:**
+- §34 — `W-PROGRAM-SPA-INFERRED` diagnostic row.
+- §40.8 — v0.3 program-shape (the parent context).
+- §4.15 — `<page>` structural-element registration.
+- §47.9.2 — filesystem-to-route-URL inference (the broader Pillar 3 surface).
 
 ---
 
