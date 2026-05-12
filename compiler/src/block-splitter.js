@@ -1156,9 +1156,25 @@ export function splitBlocks(filePath, source) {
         // (SPEC §38.4): `<messages> = []` declares an auto-synced reactive
         // cell at channel scope. Apply the same peek as top-level when
         // immediately inside a `<channel>` markup context.
+        //
+        // S86 v0.3 Wave 2 follow-up — `<program>` and `<page>` bodies parse
+        // in default-logic mode under v0.3 (SPEC §40.8 normative statement:
+        // "Inside `<program>`, the body parses in default-logic mode. Bare
+        // top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift
+        // to the logic context without explicit `${...}` wrapping."). The
+        // V5-strict state-decl shape (`<x>=0`, `<x>:Type=…`, derived
+        // `const <x>=…`, Shape 2 `<userName req>=<input/>`) is one of the
+        // declaration shapes that must auto-lift inside both contexts —
+        // parallel to the existing `<channel>`-body recognition. The TAB-layer
+        // lift (ast-builder.js liftBareDeclarations) already recognizes
+        // isProgramRoot/isPageRoot from Wave 2 item (b) commit `9201c4e`; this
+        // BS-layer extension closes the upstream gap so the recognition fires
+        // before the markup-opener path is taken.
         const tf = topFrame();
         const isChannelBody = tf && tf.type === "markup" && tf.name === "channel";
-        if ((stack.length === 0 || isChannelBody) && peekTopLevelStateDeclSignal()) {
+        const isProgramBody = tf && tf.type === "markup" && tf.name === "program";
+        const isPageBody = tf && tf.type === "markup" && tf.name === "page";
+        if ((stack.length === 0 || isChannelBody || isProgramBody || isPageBody) && peekTopLevelStateDeclSignal()) {
           // Don't flush text; don't step. Let the default raw-content path
           // accumulate the entire `<NAME [attrs]> = expr` line as text.
           beginText();
