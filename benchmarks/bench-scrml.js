@@ -76,25 +76,27 @@ const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
 const bodyHtml = bodyMatch ? bodyMatch[1] : htmlContent;
 const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
 
+// Combined runtime+client script. Evaluated via indirect-eval so it runs in
+// the global scope — this matches how a browser loads both as top-level
+// <script> tags, and lets the runtime's internal `let`/`const`-scoped
+// closures be reachable by the client script through shared lexical scope.
+//
+// The previous IIFE-with-explicit-window-export pattern broke against
+// v0.2.6+ codegen because the export list could not enumerate every
+// internal symbol the client side relies on (see
+// docs/changes/wave-3-d3/D3a-CRASH-DIAGNOSIS.md). Indirect eval — the
+// `(0, eval)(...)` form — runs the script in the global lexical scope:
+//   * `function` declarations hoist to globalThis (so the test harness can
+//     call `_scrml_reactive_get`/`_set` directly below).
+//   * `let`/`const` declarations stay in script-global scope but remain
+//     reachable to other code evaluated in the same script-global scope,
+//     including the client.js portion concatenated below.
+const combinedScript = runtimeJs + "\n;\n" + clientJs;
+const globalEval = (0, eval);
+
 function loadApp() {
   document.body.innerHTML = cleanHtml;
-
-  eval(`(function() {
-    ${runtimeJs}
-    window._scrml_reactive_get = _scrml_reactive_get;
-    window._scrml_reactive_set = _scrml_reactive_set;
-    window._scrml_reactive_subscribe = _scrml_reactive_subscribe;
-    window._scrml_lift = _scrml_lift;
-    window._scrml_reconcile_list = _scrml_reconcile_list;
-    window._scrml_deep_reactive = _scrml_deep_reactive;
-    window._scrml_effect = _scrml_effect;
-    window._scrml_effect_static = typeof _scrml_effect_static !== "undefined" ? _scrml_effect_static : _scrml_effect;
-    window._scrml_deep_set = typeof _scrml_deep_set !== "undefined" ? _scrml_deep_set : undefined;
-    window._scrml_register_cleanup = typeof _scrml_register_cleanup !== "undefined" ? _scrml_register_cleanup : function(){};
-  })();`);
-
-  eval(`(function() { ${clientJs} })();`);
-
+  globalEval(combinedScript);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 }
 

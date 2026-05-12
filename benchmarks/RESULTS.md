@@ -1,4 +1,6 @@
-# TodoMVC Benchmark Results — 2026-04-13
+# TodoMVC Benchmark Results — 2026-05-12
+
+> **Update 2026-05-12 (S86 / v0.2.6+):** happy-dom runtime numbers regenerated against HEAD with the indirect-eval `bench-scrml.js` fix (see `docs/changes/wave-3-d3/`). The Chrome-via-Puppeteer section below is the 2026-04-13 v0.2.4-era baseline preserved for trend tracking; rerun Chrome benchmarks under v0.2.6+ to refresh that section.
 
 ## Runtime Performance — Real Browser (headless Chrome, medians in ms)
 
@@ -40,9 +42,30 @@ The happy-dom results (below) differ significantly from real Chrome. Key differe
 - happy-dom's `cloneNode(true)` and `innerHTML` are slower than `createElement` (opposite of real browsers)
 - Chrome is 1.2-2x faster than happy-dom at DOM creation
 
-## Runtime Performance — happy-dom (medians in ms)
+## Runtime Performance — happy-dom (medians in ms, lower is better)
 
-Included for reference from 2026-04-05. These numbers are less reliable than the Chrome results above.
+Regenerated 2026-05-12 against HEAD (post v0.2.6+ Wave 2 / Approach A spec anchor).
+Bun 1.3.13, happy-dom. 3 warmup + 10 measured iterations per benchmark; medians shown.
+These numbers are less reliable than the Chrome results above (the prior Chrome run is
+v0.2.4-era and should be re-run under v0.2.6+ to refresh).
+
+| Operation | scrml | React 19 | Svelte 5 | Vue 3 | scrml vs React | scrml vs Svelte | scrml vs Vue |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| initial-render | 5.03 | **1.09** | 0.96 | **0.96** | 0.2x | 0.2x | 0.2x |
+| create-1000 | 67.6 | 87.5 | **38.4** | 70.7 | 1.3x | 0.6x | 1.0x |
+| replace-1000 | **48.5** | 70.8 | 55.5 | 65.7 | 1.5x | 1.1x | 1.4x |
+| partial-update | **4.08** | 37.7 | 19.4 | 4.16 | 9.2x | 4.8x | 1.0x |
+| delete-every-10th | **4.66** | 28.6 | 17.1 | 5.06 | 6.1x | 3.7x | 1.1x |
+| clear-all | 8.90 | **6.94** | 7.33 | 7.24 | 0.8x | 0.8x | 0.8x |
+| select-row | **0.023** | 5.50 | 0.054 | 0.027 | 237x | 2.3x | 1.2x |
+| swap-rows | 4.39 | 40.1 | 19.3 | **2.81** | 9.1x | 4.4x | 0.6x |
+| remove-row | 6.78 | 28.2 | 15.1 | **3.30** | 4.2x | 2.2x | 0.5x |
+| create-10000 | 432 | 668 | **256** | 403 | 1.5x | 0.6x | 0.9x |
+| append-1000 | 54.1 | 90.8 | **41.0** | 50.4 | 1.7x | 0.8x | 0.9x |
+
+**Across-the-board: scrml beats React in 9/11; Svelte in 6/11; Vue in 5/11 (happy-dom; v0.2.6+ HEAD).**
+
+### Historical: happy-dom (2026-04-05, v0.1.x baseline; preserved for trend tracking)
 
 | Operation | scrml | React 19 | Svelte 5 | Vue 3 |
 |---|---|---|---|---|
@@ -134,3 +157,4 @@ All TodoMVC implementations cover the same features:
 |---|---|---|---|
 | 2026-04-05 | 30.9 ms | 13.4 KB | Initial benchmarks |
 | 2026-04-13 | 43.7 ms | 14.8 KB | Post ExprNode migration (Phase 4d), E-SCOPE-001 fix, enum pipe-syntax. Build +41% from ExprNode parsing overhead; bundle +1.4 KB from runtime additions. Runtime perf unchanged. |
+| 2026-05-12 (v0.2.6+ HEAD) | not re-measured | not re-measured | Runtime happy-dom regenerated for HEAD `149c979` (S86 wrap + Wave 2 + Approach A spec anchor); Chrome row carried forward from 2026-04-13 (rerun pending separate dispatch). `bench-scrml.js` switched from IIFE-with-explicit-window-export to indirect-eval `(0, eval)(combinedScript)` after the prior eval pattern broke against v0.2.6+ codegen (D3a finding, D3b fix). TodoMVC `activeCount`/`completedCount` source split into two-statement form to dodge a `.filter(cb).<member>` compiler bug (out-of-scope; separate dispatch pending). Build-time and bundle-size rows not re-measured this pass — they'd need a separate timer-instrumented build script run. happy-dom runtime numbers: scrml beats React in 9/11, Svelte in 6/11, Vue in 5/11. |
