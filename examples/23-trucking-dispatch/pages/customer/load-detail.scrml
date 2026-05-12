@@ -27,14 +27,14 @@
       import { "load-events" as loadEvents } from '../../channels/load-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors, trailers, log_entries, invoices, lin_tokens">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors, trailers, log_entries, invoices, lin_tokens">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
@@ -42,12 +42,12 @@
         // (load.customer_id == customer.id where customer = user's customers row).
         server function fetchLoadDetail(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
 
             const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             const load = ?{`
                 SELECT
@@ -58,7 +58,7 @@
                 FROM loads
                 WHERE id = ${loadId}
             `}.get()
-            if (!load) return { notFound: true }
+            if (load is not) return { notFound: true }
 
             // Cross-customer guard.
             if (load.customer_id != customer.id) {
@@ -66,7 +66,7 @@
             }
 
             // Active assignment (most recent unassigned_at IS NULL).
-            const assignment = ?{`
+            const assignmentRow = ?{`
                 SELECT
                     a.id, a.assigned_at,
                     d.name AS driver_name, d.current_status AS driver_status,
@@ -84,7 +84,7 @@
             `}.get()
 
             // Full log timeline for this load (most recent first).
-            const logEntries = ?{`
+            const logEntryRows = ?{`
                 SELECT
                     le.id, le.type, le.at, le.payload,
                     d.name AS driver_name
@@ -95,7 +95,7 @@
             `}.all()
 
             // Invoice for this load (if any) — used for "View invoice" link.
-            const invoice = ?{`
+            const invoiceRow = ?{`
                 SELECT id, amount_dollars, sent_at, due_at, paid_at, payment_reference
                 FROM invoices
                 WHERE load_id = ${loadId}
@@ -117,9 +117,9 @@
 
             return {
                 user: user, customer: customer, load: load,
-                assignment: assignment,
-                logEntries: logEntries,
-                invoice: invoice,
+                assignment: assignmentRow,
+                logEntries: logEntryRows,
+                invoice: invoiceRow,
                 acceptanceToken: acceptance ? acceptance.token : ""
             }
         }
@@ -134,15 +134,15 @@
         // guard is the durable backstop.
         server function signRateConfirmationServer(sessionToken, loadId, lin token: string) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
             const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             // Cross-customer guard.
             const load = ?{`SELECT id, customer_id, status FROM loads WHERE id = ${loadId}`}.get()
-            if (!load) return { error: "Load not found." }
+            if (load is not) return { error: "Load not found." }
             if (load.customer_id != customer.id) return { unauthorized: true }
             if (load.status != "booked") return { error: "Load is not awaiting acceptance." }
 
@@ -173,17 +173,17 @@
             return { ok: true }
         }
 
-        @user = null
-        @customer = null
-        @load = null
-        @assignment = null
-        @logEntries = []
-        @invoice = null
-        @loaded = false
-        @notFound = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentCustomer> = not
+        <currentLoad> = not
+        <assignment> = not
+        <logEntries> = []
+        <invoice> = not
+        <loaded> = false
+        <notFound> = false
+        <errorMessage> = ""
         // M6: lin acceptance token (string). Empty string when no active token.
-        @acceptanceToken = ""
+        <acceptanceToken> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -221,9 +221,9 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
-            @load = data.load
+            @currentUser = data.user
+            @currentCustomer = data.customer
+            @currentLoad = data.load
             @assignment = data.assignment
             @logEntries = data.logEntries
             @invoice = data.invoice
@@ -242,7 +242,7 @@
                 @errorMessage = "No acceptance token available."
                 return
             }
-            const result = signRateConfirmationServer(tok, @load.id, acceptance)
+            const result = signRateConfirmationServer(tok, @currentLoad.id, acceptance)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
                 return
@@ -251,7 +251,7 @@
                 @errorMessage = result.error
                 return
             }
-            publishLoadEvent("rate-confirmed", @load.id, "dispatched", "")
+            publishLoadEvent("rate-confirmed", @currentLoad.id, "dispatched", "")
             refresh()
         }
 
@@ -297,7 +297,7 @@
             return false
         }
 
-        @lastSeenLoadEventCount = 0
+        <lastSeenLoadEventCount> = 0
         function ackLoadEvents() {
             @lastSeenLoadEventCount = @loadEvents.length
             refresh()
@@ -330,7 +330,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -352,61 +352,61 @@
               </button>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@loaded && @notFound) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               Load not found, or you don't have permission to view it.
           </div>
 
-          <div if=(@loaded && !@notFound && @load == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && not @notFound && @currentLoad is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @load != null) class="space-y-6">
+          <div if=(@loaded && @currentLoad is some) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between mb-2">
                       <div>
-                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@load.id}</div>
+                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@currentLoad.id}</div>
                           <h1 class="text-xl font-bold text-slate-900">
-                              ${@load.origin_city}, ${@load.origin_state}
+                              ${@currentLoad.origin_city}, ${@currentLoad.origin_state}
                               <span class="text-slate-400 mx-2">→</span>
-                              ${@load.destination_city}, ${@load.destination_state}
+                              ${@currentLoad.destination_city}, ${@currentLoad.destination_state}
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              ${@load.commodity}
-                              <span if=(@load.weight_lbs != null)> · ${@load.weight_lbs} lbs</>
+                              ${@currentLoad.commodity}
+                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClasses(@load.status)}">
-                              ${statusLabel(@load.status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClasses(@currentLoad.status)}">
+                              ${statusLabel(@currentLoad.status)}
                           </span>
-                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@load.rate_dollars)}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@currentLoad.rate_dollars)}</div>
                       </div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 text-sm">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900 font-semibold">${formatPickupAt(@load.pickup_at)}</div>
+                          <div class="text-slate-900 font-semibold">${formatPickupAt(@currentLoad.pickup_at)}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@load.origin_address == null ? "" : @load.origin_address}
+                              ${@currentLoad.origin_address is not ? "" : @currentLoad.origin_address}
                           </div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Estimated delivery</div>
-                          <div class="text-slate-900 font-semibold">${formatPickupAt(@load.deliver_by)}</div>
+                          <div class="text-slate-900 font-semibold">${formatPickupAt(@currentLoad.deliver_by)}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@load.destination_address == null ? "" : @load.destination_address}
+                              ${@currentLoad.destination_address is not ? "" : @currentLoad.destination_address}
                           </div>
                       </div>
                   </div>
               </section>
 
               <!-- Driver / current location (only when in transit) -->
-              <section if=(@assignment != null) class="bg-white rounded-lg border border-slate-200 p-6">
+              <section if=(@assignment is some) class="bg-white rounded-lg border border-slate-200 p-6">
                   <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
                       Carrier &amp; equipment
                   </h2>
@@ -414,11 +414,11 @@
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Driver</div>
                           <div class="text-slate-900 font-semibold">${@assignment.driver_name}</div>
-                          <div if=showDriverLocation(@load.status) class="text-xs text-slate-600 mt-1">
-                              <span if=(@assignment.driver_location != null && @assignment.driver_location != "")>
+                          <div if=showDriverLocation(@currentLoad.status) class="text-xs text-slate-600 mt-1">
+                              <span if=(@assignment.driver_location is some && @assignment.driver_location != "")>
                                   Last seen: ${@assignment.driver_location}
                               </>
-                              <span if=(@assignment.driver_location == null || @assignment.driver_location == "") class="text-slate-400">
+                              <span if=(@assignment.driver_location is not || @assignment.driver_location == "") class="text-slate-400">
                                   Location not yet reported
                               </>
                           </div>
@@ -426,27 +426,27 @@
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Tractor</div>
                           <div class="text-slate-900 font-semibold">
-                              ${@assignment.tractor_unit == null ? "—" : @assignment.tractor_unit}
+                              ${@assignment.tractor_unit is not ? "—" : @assignment.tractor_unit}
                           </div>
                           <div class="text-xs text-slate-500">
-                              ${@assignment.tractor_make == null ? "" : @assignment.tractor_make}
-                              ${@assignment.tractor_model == null ? "" : @assignment.tractor_model}
+                              ${@assignment.tractor_make is not ? "" : @assignment.tractor_make}
+                              ${@assignment.tractor_model is not ? "" : @assignment.tractor_model}
                           </div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Trailer</div>
                           <div class="text-slate-900 font-semibold">
-                              ${@assignment.trailer_unit == null ? "—" : @assignment.trailer_unit}
+                              ${@assignment.trailer_unit is not ? "—" : @assignment.trailer_unit}
                           </div>
                           <div class="text-xs text-slate-500">
-                              ${@assignment.trailer_type == null ? "" : @assignment.trailer_type}
+                              ${@assignment.trailer_type is not ? "" : @assignment.trailer_type}
                           </div>
                       </div>
                   </div>
               </section>
 
               <!-- No-driver-yet card for pre-dispatched states -->
-              <section if=(@assignment == null && @load.status != "tendered" && @load.status != "cancelled") class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+              <section if=(@assignment is not && @currentLoad.status != "tendered" && @currentLoad.status != "cancelled") class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
                   Carrier not yet assigned. Your dispatcher is matching equipment now.
               </section>
 
@@ -456,15 +456,15 @@
                    (single-use guard at the DB) + advances load to dispatched.
                    Replay protection: the second click hits a row with
                    consumed_at != NULL → server returns "already used". -->
-              <section if=(@load.status == "booked" && @acceptanceToken != "") class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <section if=(@currentLoad.status == "booked" && @acceptanceToken != "") class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div class="flex items-start justify-between gap-4">
                       <div class="text-sm text-blue-900">
                           <strong>Rate confirmation pending.</strong> Your dispatcher has
                           booked this load. Sign the rate confirmation to release it
                           for driver dispatch.
                           <div class="text-xs text-blue-700 mt-1">
-                              Total rate: <strong>${formatRate(@load.rate_dollars)}</strong>
-                              · Pickup: ${formatPickupAt(@load.pickup_at)}
+                              Total rate: <strong>${formatRate(@currentLoad.rate_dollars)}</strong>
+                              · Pickup: ${formatPickupAt(@currentLoad.pickup_at)}
                           </div>
                       </div>
                       <button
@@ -479,29 +479,29 @@
               </div>
 
               <!-- Tendered: awaiting rate -->
-              <section if=(@load.status == "tendered") class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+              <section if=(@currentLoad.status == "tendered") class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
                   <strong>Quote pending.</strong> The dispatcher is preparing a rate for this load.
                   You'll see it here once it's ready.
               </section>
 
               <!-- Cancelled -->
-              <section if=(@load.status == "cancelled") class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
+              <section if=(@currentLoad.status == "cancelled") class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
                   This load has been cancelled.
               </section>
 
               <!-- Invoice link -->
-              <section if=hasInvoice(@load.status) class="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+              <section if=hasInvoice(@currentLoad.status) class="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-emerald-900">
                           <strong>Invoice ready.</strong>
-                          <span if=(@invoice != null && @invoice.paid_at == null)>
-                              Outstanding · due ${@invoice == null ? "" : (@invoice.due_at == null ? "" : @invoice.due_at.substring(0, 10))}
+                          <span if=(@invoice is some && @invoice.paid_at is not)>
+                              Outstanding · due ${@invoice && @invoice.due_at ? @invoice.due_at.substring(0, 10) : ""}
                           </>
-                          <span if=(@invoice != null && @invoice.paid_at != null) class="text-emerald-700">
+                          <span if=(@invoice is some && @invoice.paid_at is some) class="text-emerald-700">
                               Paid.
                           </>
                       </div>
-                      <a href="/customer/invoices?load=${@load.id}" class="text-sm px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium">
+                      <a href="/customer/invoices?load=${@currentLoad.id}" class="text-sm px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium">
                           View invoice
                       </a>
                   </div>
@@ -521,7 +521,7 @@
                   <ul if=(@loadEvents.length > 0) class="space-y-2">
                       ${
                           for (let ev of @loadEvents) {
-                              if (!isForThisLoad(ev.loadId, @load.id)) continue
+                              if (!isForThisLoad(ev.loadId, @currentLoad.id)) continue
                               lift <li class="flex items-start gap-3 text-sm">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
                                       ${ev.at == "" ? "" : ev.at.substring(11, 16)}
@@ -552,14 +552,14 @@
                           for (let entry of @logEntries) {
                               lift <li class="flex items-start gap-3 text-sm">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at == null ? "" : entry.at.substring(0, 16)}
+                                      ${entry.at is not ? "" : entry.at.substring(0, 16)}
                                   </span>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${logTypeIconClass(entry.type)}">
                                       ${logTypeLabel(entry.type)}
                                   </span>
                                   <span class="text-slate-600 flex-1">
-                                      ${entry.driver_name == null ? "" : entry.driver_name}
-                                      <span if=(entry.payload != null && entry.payload != "") class="text-xs text-slate-500 block break-all">
+                                      ${entry.driver_name is not ? "" : entry.driver_name}
+                                      <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block break-all">
                                           ${entry.payload}
                                       </>
                                   </span>

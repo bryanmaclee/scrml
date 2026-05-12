@@ -1,63 +1,60 @@
-// Trucking Dispatch — dispatcher board (M2).
+// Trucking Dispatch — dispatcher board.
 //
 // Route: /dispatch — main landing for the dispatcher persona. 3-column
 // kanban view of the load pipeline, plus a top bar with "Book new load"
 // link and the logged-in dispatcher's identity.
 //
-// Per F-AUTH-001 + F-AUTH-002 (M1): the `auth="role:dispatcher"` attribute
-// on `<page>` is silently inert — we layer a server-side `checkDispatcher`
-// guard that calls getCurrentUser + checks role and redirects to /login
-// on failure. The auth helpers (getCurrentUser, checkDispatcher) are
-// INLINED here per F-AUTH-002 — cross-file `?{}`-using server fns hit
-// E-SQL-004.
+// Per F-AUTH-001 + F-AUTH-002: the `auth="role:dispatcher"` attribute is
+// silently inert (W-ATTR-002 fires on the value); we layer a server-side
+// role guard via getCurrentUser. Auth helpers INLINED here per F-AUTH-002.
 //
-// Real-time wiring (M5): subscribes to `<channel name="dispatch-board">`.
-// Publishers (status changes from dispatch/load-detail, driver/load-detail,
-// new tenders from dispatch/load-new + customer/quote) write to
-// `@shared boardEvents`. The `boardEvents` watcher below triggers a
-// refresh() so the kanban columns reflect the new state. Per F-CHANNEL-001
-// (M5), channel names are STATIC strings — name interpolation is silently
-// taken literal — so this is a single broadcast channel scoped to all
-// dispatchers (auth-gated by the page's role check). All event payloads
-// carry { type, loadId, status?, at } so client-side handlers can dispatch.
+// Real-time wiring: subscribes to the "dispatch-board" channel via
+// cross-file import + dispatchBoard mount. The channel-scoped cell
+// boardEvents (V5-strict, auto-syncs by virtue of being in channel body)
+// grows on each publishBoardEvent(...) call; subscribers watch its length
+// and offer a manual "Refresh" button. Per F-CHANNEL-001, channel names
+// are static strings — name interpolation is silently inert — so this is
+// a single broadcast channel scoped to all dispatchers.
+//
+// v0.2.4 canonical: V5-strict structural-decl form; db opener no-whitespace;
+// `is some` / `is not` for absence; `not` operator for boolean negation.
 
 <program db="../../dispatch.db" auth="required">
 
   ${
-      // Imports at <program> scope so component visibility works in markup
-      // (cf. F-COMPONENT-001 below — imports inside `< db>` block scope
+      // Imports at program-block scope so component visibility works in
+      // markup (cf. F-COMPONENT-001 — imports inside the db-block scope
       // hit E-COMPONENT-020 even though the import resolves).
       import { LoadCard } from '../../components/load-card.scrml'
       import { readSessionCookie } from '../../models/auth.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
-      // M5: centralized real-time channel — see SPEC §38.12.6.
+      // Centralized real-time channel — see SPEC §38.12.6.
       import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers">
 
     ${
         // F-AUTH-002 inlined: getCurrentUser walks the session store +
         // users table. Cross-file SQL access fails E-SQL-004.
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         // F-AUTH-001 fallback: dispatch the role gate ourselves. The
-        // `auth="role:dispatcher"` attribute below is documentation —
-        // does nothing at compile time.
+        // `auth="role:dispatcher"` attribute is documentation only.
         server function loadBoardData(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
-            const loads = ?{`
+            const loadRows = ?{`
                 SELECT
                     l.id, l.customer_id, l.origin_city, l.origin_state,
                     l.destination_city, l.destination_state, l.commodity,
@@ -69,23 +66,23 @@
                 ORDER BY l.pickup_at ASC
             `}.all()
 
-            return { user: user, loads: loads }
+            return { user: user, loadRows: loadRows }
         }
 
-        @user = null
-        @loads = []
-        @loaded = false
+        <currentUser> = not
+        <loadRows> = []
+        <loaded> = false
 
         function refresh() {
             const sessionToken = document.cookie ? document.cookie.split("scrml_session=")[1] : ""
-            const tok = sessionToken == null ? "" : sessionToken.split(";")[0]
+            const tok = sessionToken ? sessionToken.split(";")[0] : ""
             const data = loadBoardData(tok)
             if (data.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            @user = data.user
-            @loads = data.loads
+            @currentUser = data.user
+            @loadRows = data.loadRows
             @loaded = true
         }
 
@@ -109,7 +106,7 @@
             return status == "delivered" || status == "invoiced" || status == "paid"
         }
 
-        @lastSeenEventCount = 0
+        <lastSeenEventCount> = 0
         function ackEvents() {
             @lastSeenEventCount = @boardEvents.length
             refresh()
@@ -120,12 +117,12 @@
         }
     }
 
-      <!-- M5: dispatch-board channel — see channels/dispatch-board.scrml.
-           Inlined at compile time by CHX (SPEC §38.12). The shared
-           `boardEvents` array grows on each publishBoardEvent(...) call;
-           subscribers watch its length and offer a "Refresh" button
-           (we do NOT auto-refresh because scrml's @shared mechanism
-           doesn't expose an on-change effect hook — F-CHANNEL-002). -->
+      <!-- Real-time dispatch-board channel — see channels/dispatch-board.scrml.
+           Inlined at compile time by CE (SPEC §38.12). The channel-scoped
+           boardEvents cell grows on each publishBoardEvent(...) call;
+           subscribers watch its length and offer a "Refresh" button (we do
+           NOT auto-refresh; F-CHANNEL-002 — channel-write side effects
+           don't trigger client-side reactive recompute). -->
       <dispatchBoard/>
 
       <!-- F-AUTH-001 carryover: the role gate runs server-side in
@@ -143,8 +140,8 @@
                 <a href="/dispatch/drivers" class="hover:text-blue-300">Drivers</a>
                 <a href="/dispatch/customers" class="hover:text-blue-300">Customers</a>
                 <a href="/dispatch/billing" class="hover:text-blue-300">Billing</a>
-                <span class="text-slate-400 text-xs" if=(@user != null)>
-                    ${@user.email}
+                <span class="text-slate-400 text-xs" if=(@currentUser is some)>
+                    ${@currentUser.email}
                 </span>
                 <button onclick=logout() class="hover:text-blue-300">Logout</button>
             </nav>
@@ -154,9 +151,9 @@
             <div class="flex items-center justify-between mb-6">
                 <h1 class="text-2xl font-bold">Load board</h1>
 
-                <!-- Live updates indicator. Increments via @shared sync as
+                <!-- Live updates indicator. Increments via channel-cell sync as
                      dispatchers / drivers / customers publish to dispatch-board.
-                     Click "Refresh" to merge the live state into @loads. -->
+                     Click "Refresh" to merge the live state into @loadRows. -->
                 <div class="flex items-center gap-3 text-sm">
                     <span class="text-slate-500">
                         Live events: <strong>${@boardEvents.length}</strong>
@@ -169,7 +166,7 @@
                 </div>
             </div>
 
-            <p if=(!@loaded) class="text-slate-500">Loading…</p>
+            <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
             <div if=@loaded class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -183,8 +180,8 @@
                     </header>
                     <div class="space-y-3">
                         ${
-                            for (let l of @loads) {
-                                if (!isLeftColumn(l.status)) continue
+                            for (let l of @loadRows) {
+                                if (not isLeftColumn(l.status)) continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }
@@ -201,8 +198,8 @@
                     </header>
                     <div class="space-y-3">
                         ${
-                            for (let l of @loads) {
-                                if (!isMiddleColumn(l.status)) continue
+                            for (let l of @loadRows) {
+                                if (not isMiddleColumn(l.status)) continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }
@@ -219,8 +216,8 @@
                     </header>
                     <div class="space-y-3">
                         ${
-                            for (let l of @loads) {
-                                if (!isRightColumn(l.status)) continue
+                            for (let l of @loadRows) {
+                                if (not isRightColumn(l.status)) continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }

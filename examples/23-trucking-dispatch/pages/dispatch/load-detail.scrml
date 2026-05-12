@@ -51,20 +51,20 @@
       }
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers, tractors, trailers, log_entries, lin_tokens">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers, tractors, trailers, log_entries, lin_tokens">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchDetail(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
@@ -80,10 +80,10 @@
                 WHERE l.id = ${loadId}
             `}.get()
 
-            if (!load) return { notFound: true }
+            if (load is not) return { notFound: true }
 
             // Active assignment (most recent unassigned_at IS NULL).
-            const assignment = ?{`
+            const assignmentRow = ?{`
                 SELECT a.id, a.driver_id, a.tractor_id, a.trailer_id, a.assigned_at,
                     d.name AS driver_name,
                     t.unit_number AS tractor_number, t.make AS tractor_make, t.model AS tractor_model,
@@ -102,7 +102,7 @@
             const tractors = ?{`SELECT id, unit_number, make, model, status FROM tractors ORDER BY unit_number`}.all()
             const trailers = ?{`SELECT id, unit_number, type, length_ft FROM trailers ORDER BY unit_number`}.all()
 
-            const logEntries = ?{`
+            const logEntryRows = ?{`
                 SELECT le.id, le.driver_id, le.type, le.at, le.payload, d.name AS driver_name
                 FROM log_entries le
                 LEFT JOIN drivers d ON d.id = le.driver_id
@@ -112,20 +112,20 @@
 
             return {
                 user: user, load: load,
-                assignment: assignment,
+                assignment: assignmentRow,
                 drivers: drivers, tractors: tractors, trailers: trailers,
-                logEntries: logEntries
+                logEntries: logEntryRows
             }
         }
 
         server function transitionStatusServer(sessionToken, loadId, newStatus) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
             const load = ?{`SELECT id, status FROM loads WHERE id = ${loadId}`}.get()
-            if (!load) return { error: "Load not found." }
+            if (load is not) return { error: "Load not found." }
 
             // Validate transition with the same helper the picker uses.
             const valid = _validNextStatesInline(load.status)
@@ -163,7 +163,7 @@
         // (used by the dispatcher page to display "rate confirmation pending").
         server function getActiveAcceptanceTokenServer(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
             const row = ?{`
@@ -180,7 +180,7 @@
 
         server function assignServer(sessionToken, loadId, driverId, tractorId, trailerId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
@@ -195,18 +195,18 @@
             return { ok: true }
         }
 
-        @user = null
-        @load = null
-        @assignment = null
-        @drivers = []
-        @tractors = []
-        @trailers = []
-        @logEntries = []
-        @loaded = false
-        @errorMessage = ""
-        @currentDriverId = 0
-        @currentTractorId = 0
-        @currentTrailerId = 0
+        <currentUser> = not
+        <currentLoad> = not
+        <assignment> = not
+        <driverOptions> = []
+        <tractorOptions> = []
+        <trailerOptions> = []
+        <logEntries> = []
+        <loaded> = false
+        <errorMessage> = ""
+        <currentDriverId> = 0
+        <currentTractorId> = 0
+        <currentTrailerId> = 0
         // M6: acceptance token UI state — populated after refresh().
         @acceptanceToken = ""
 
@@ -242,12 +242,12 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @load = data.load
+            @currentUser = data.user
+            @currentLoad = data.load
             @assignment = data.assignment
-            @drivers = data.drivers
-            @tractors = data.tractors
-            @trailers = data.trailers
+            @driverOptions = data.drivers
+            @tractorOptions = data.tractors
+            @trailerOptions = data.trailers
             @logEntries = data.logEntries
             const a = data.assignment
             @currentDriverId  = a ? a.driver_id  : 0
@@ -265,7 +265,7 @@
             // is no longer needed — RI capture-taint correctly excludes
             // string-literal contents from closure captures.
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = transitionStatusServer(tok, loadId, target)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -283,7 +283,7 @@
 
         function saveAssignment(event) {
             if (event && event.preventDefault) event.preventDefault()
-            const form = event ? event.target : null
+            const form = event ? event.target : not
             if (!form) return
             const driverId = parseInt(form.elements["driver_id"].value, 10)
             const tractorId = parseInt(form.elements["tractor_id"].value, 10)
@@ -293,7 +293,7 @@
                 return
             }
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = assignServer(tok, loadId, driverId, tractorId, trailerId)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -386,49 +386,49 @@
               </button>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-          <p if=(@loaded && @load == null) class="text-slate-500">${@errorMessage}</p>
+          <p if=(@loaded && @currentLoad is not) class="text-slate-500">${@errorMessage}</p>
 
-          <div if=(@loaded && @load != null) class="space-y-6">
+          <div if=(@loaded && @currentLoad is some) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
                       <div>
-                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@load.id}</div>
+                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@currentLoad.id}</div>
                           <h1 class="text-xl font-bold text-slate-900">
-                              ${@load.origin_city}, ${@load.origin_state}
+                              ${@currentLoad.origin_city}, ${@currentLoad.origin_state}
                               <span class="text-slate-400 mx-2">→</span>
-                              ${@load.destination_city}, ${@load.destination_state}
+                              ${@currentLoad.destination_city}, ${@currentLoad.destination_state}
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              ${@load.commodity}
-                              <span if=(@load.weight_lbs != null)> · ${@load.weight_lbs} lbs</>
+                              ${@currentLoad.commodity}
+                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
-                          ${ lift <div><LoadStatusBadge status=@load.status/></div> }
-                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@load.rate_dollars)}</div>
+                          ${ lift <div><LoadStatusBadge status=@currentLoad.status/></div> }
+                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@currentLoad.rate_dollars)}</div>
                       </div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-sm">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer</div>
-                          <div class="font-semibold text-slate-900">${@load.customer_name}</div>
-                          <div class="text-slate-600">${@load.customer_contact == null ? "" : @load.customer_contact}</div>
-                          <div class="text-slate-500 text-xs">${@load.customer_phone == null ? "" : @load.customer_phone}</div>
+                          <div class="font-semibold text-slate-900">${@currentLoad.customer_name}</div>
+                          <div class="text-slate-600">${@currentLoad.customer_contact ? @currentLoad.customer_contact : ""}</div>
+                          <div class="text-slate-500 text-xs">${@currentLoad.customer_phone ? @currentLoad.customer_phone : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900">${formatPickupAt(@load.pickup_at)}</div>
-                          <div class="text-xs text-slate-500">${@load.origin_address == null ? "" : @load.origin_address}</div>
+                          <div class="text-slate-900">${formatPickupAt(@currentLoad.pickup_at)}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad.origin_address ? @currentLoad.origin_address : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Deliver</div>
-                          <div class="text-slate-900">${formatPickupAt(@load.deliver_by)}</div>
-                          <div class="text-xs text-slate-500">${@load.destination_address == null ? "" : @load.destination_address}</div>
+                          <div class="text-slate-900">${formatPickupAt(@currentLoad.deliver_by)}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad.destination_address ? @currentLoad.destination_address : ""}</div>
                       </div>
                   </div>
               </section>
@@ -439,8 +439,8 @@
                       Advance status
                   </h2>
                   ${ lift <div><StatusPicker
-                      currentStatus=@load.status
-                      nextStates=validNextStates(@load.status)
+                      currentStatus=@currentLoad.status
+                      nextStates=validNextStates(@currentLoad.status)
                       onTransition=transition
                   /></div> }
 
@@ -457,12 +457,12 @@
                    already consumed) provides the durable lin enforcement,
                    and at the call site each fn declares its lin parameter
                    exactly once per §35.2.1. -->
-              <section if=(@load.status == "booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <section if=(@currentLoad.status == "booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-amber-900">
                           <strong>Rate confirmation pending.</strong>
                           Customer must sign on
-                          <a class="underline" href="/customer/loads/${@load.id}">/customer/loads/${@load.id}</a>
+                          <a class="underline" href="/customer/loads/${@currentLoad.id}">/customer/loads/${@currentLoad.id}</a>
                           to release the load to driver dispatch.
                       </div>
                       <div class="text-xs text-amber-700 font-mono">
@@ -472,12 +472,12 @@
               </section>
 
               <!-- Assignment block -->
-              <section if=isAssignableStatus(@load.status) class="bg-white rounded-lg border border-slate-200 p-6">
+              <section if=isAssignableStatus(@currentLoad.status) class="bg-white rounded-lg border border-slate-200 p-6">
                   <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
                       Assignment
                   </h2>
 
-                  <div if=(@assignment != null) class="bg-emerald-50 border border-emerald-200 rounded-md p-4 mb-4 text-sm">
+                  <div if=(@assignment is some) class="bg-emerald-50 border border-emerald-200 rounded-md p-4 mb-4 text-sm">
                       <div class="font-semibold text-emerald-900 mb-1">Currently assigned</div>
                       <div class="text-emerald-800">
                           Driver: <strong>${@assignment.driver_name}</strong>
@@ -487,9 +487,9 @@
                   </div>
 
                   ${ lift <div><AssignmentPicker
-                      drivers=@drivers
-                      tractors=@tractors
-                      trailers=@trailers
+                      drivers=@driverOptions
+                      tractors=@tractorOptions
+                      trailers=@trailerOptions
                       currentDriverId=@currentDriverId
                       currentTractorId=@currentTractorId
                       currentTrailerId=@currentTrailerId
@@ -512,14 +512,14 @@
                           for (let entry of @logEntries) {
                               lift <li class="flex items-start gap-3 text-sm">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at == null ? "" : entry.at.substring(0, 16)}
+                                      ${entry.at ? entry.at.substring(0, 16) : ""}
                                   </span>
                                   <span class="font-medium text-slate-900 w-48 flex-shrink-0">
                                       ${logTypeLabel(entry.type)}
                                   </span>
                                   <span class="text-slate-600">
-                                      ${entry.driver_name == null ? "—" : entry.driver_name}
-                                      <span if=(entry.payload != null && entry.payload != "") class="text-xs text-slate-500 block">
+                                      ${entry.driver_name ? entry.driver_name : "—"}
+                                      <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block">
                                           ${entry.payload}
                                       </>
                                   </span>

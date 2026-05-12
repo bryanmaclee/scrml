@@ -17,27 +17,27 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, log_entries">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, log_entries">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchLogServer(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const load = ?{`SELECT id, origin_city, origin_state, destination_city, destination_state FROM loads WHERE id = ${loadId}`}.get()
-            if (!load) return { notFound: true }
+            if (load is not) return { notFound: true }
 
             const entries = ?{`
                 SELECT le.id, le.driver_id, le.type, le.at, le.payload,
@@ -51,12 +51,12 @@
             return { user: user, load: load, entries: entries }
         }
 
-        @user = null
-        @load = null
-        @entries = []
-        @loaded = false
-        @notFound = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentLoad> = not
+        <entryRows> = []
+        <loaded> = false
+        <notFound> = false
+        <errorMessage> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -98,9 +98,9 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @load = data.load
-            @entries = data.entries
+            @currentUser = data.user
+            @currentLoad = data.load
+            @entryRows = data.entries
             @loaded = true
         }
 
@@ -147,30 +147,30 @@
       </header>
 
       <main class="max-w-3xl mx-auto px-6 py-8">
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@loaded && @notFound) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               Load not found.
           </div>
 
-          <div if=(@loaded && !@notFound && @load == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && not @notFound && @currentLoad is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @load != null) class="space-y-4">
+          <div if=(@loaded && @currentLoad is some) class="space-y-4">
 
               <header class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
                       <div>
-                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@load.id}</div>
+                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@currentLoad.id}</div>
                           <h1 class="text-lg font-bold text-slate-900">
-                              ${@load.origin_city}, ${@load.origin_state}
+                              ${@currentLoad.origin_city}, ${@currentLoad.origin_state}
                               <span class="text-slate-400 mx-2">→</span>
-                              ${@load.destination_city}, ${@load.destination_state}
+                              ${@currentLoad.destination_city}, ${@currentLoad.destination_state}
                           </h1>
                           <div class="text-xs text-slate-500 mt-1">Activity log — newest first</div>
                       </div>
-                      <a href="/driver/loads/${@load.id}" class="text-sm text-blue-600 hover:underline">
+                      <a href="/driver/loads/${@currentLoad.id}" class="text-sm text-blue-600 hover:underline">
                           ← Back to load
                       </a>
                   </div>
@@ -178,25 +178,25 @@
 
               <section class="bg-white rounded-lg border border-slate-200 p-6">
 
-                  <p if=(@entries.length == 0) class="text-sm text-slate-500">
+                  <p if=(@entryRows.length == 0) class="text-sm text-slate-500">
                       No log entries for this load yet.
                   </p>
 
-                  <ol if=(@entries.length > 0) class="space-y-3">
+                  <ol if=(@entryRows.length > 0) class="space-y-3">
                       ${
-                          for (let entry of @entries) {
+                          for (let entry of @entryRows) {
                               lift <li class="flex items-start gap-3 text-sm border-b border-slate-100 pb-3 last:border-0 last:pb-0">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-1">
-                                      ${entry.at == null ? "" : entry.at.substring(0, 16)}
+                                      ${entry.at ? entry.at.substring(0, 16) : ""}
                                   </span>
                                   <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border w-40 flex-shrink-0 ${logTypeBadgeClasses(entry.type)}">
                                       ${logTypeLabel(entry.type)}
                                   </span>
                                   <span class="flex-1">
                                       <span class="text-slate-700">
-                                          ${entry.driver_name == null ? "—" : entry.driver_name}
+                                          ${entry.driver_name ? entry.driver_name : "—"}
                                       </span>
-                                      <span if=(entry.payload != null && entry.payload != "") class="text-xs text-slate-500 block mt-1 break-all">
+                                      <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block mt-1 break-all">
                                           ${entry.payload}
                                       </>
                                   </span>

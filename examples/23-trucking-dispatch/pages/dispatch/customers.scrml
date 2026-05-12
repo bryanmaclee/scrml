@@ -1,4 +1,4 @@
-// Trucking Dispatch — customers list (M2).
+// Trucking Dispatch — customers list.
 //
 // Route: /dispatch/customers. Table of customers with name, contact,
 // billing address, payment terms, account status, outstanding-invoices
@@ -6,6 +6,9 @@
 //
 // Per F-COMPONENT-001 special case: import the helper fns, inline the
 // row markup directly. Same tr-in-table issue as drivers.scrml.
+//
+// v0.2.4 canonical forms: V5-strict <var> = init; <db> no-whitespace;
+// `is some` / `is not` for absence (no `null` literal).
 
 <program db="../../dispatch.db" auth="required">
 
@@ -17,20 +20,20 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchCustomersServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
@@ -50,10 +53,10 @@
             return { user: user, customers: customers }
         }
 
-        @user = null
-        @customers = []
-        @loaded = false
-        @expandedId = 0
+        <currentUser> = not
+        <customerRows> = []
+        <loaded> = false
+        <expandedId> = 0
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -71,8 +74,8 @@
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            @user = data.user
-            @customers = data.customers
+            @currentUser = data.user
+            @customerRows = data.customers
             @loaded = true
         }
 
@@ -101,7 +104,7 @@
       <main class="max-w-6xl mx-auto px-6 py-8">
           <h1 class="text-2xl font-bold mb-6">Customers</h1>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=@loaded class="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <table class="w-full">
@@ -117,25 +120,25 @@
                   </thead>
                   <tbody>
                       ${
-                          for (let c of @customers) {
+                          for (let c of @customerRows) {
                               lift <tr class="border-b border-slate-200 hover:bg-slate-50">
                                   <td class="px-3 py-3">
                                       <button onclick=toggle(c.id) class="text-sm font-semibold text-slate-900 hover:text-blue-700 text-left">
                                           ${c.name}
                                       </button>
                                       <div class="text-xs text-slate-500">
-                                          ${c.contact_name == null ? "—" : c.contact_name}
+                                          ${c.contact_name ? c.contact_name : "—"}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">
-                                      <div>${c.contact_email == null ? "—" : c.contact_email}</div>
+                                      <div>${c.contact_email ? c.contact_email : "—"}</div>
                                       <div class="text-xs text-slate-500">
-                                          ${c.contact_phone == null ? "" : c.contact_phone}
+                                          ${c.contact_phone ? c.contact_phone : ""}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700 max-w-xs">
                                       <div class="truncate">
-                                          ${c.billing_address == null ? "—" : c.billing_address}
+                                          ${c.billing_address ? c.billing_address : "—"}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">
@@ -170,7 +173,7 @@
                                               </div>
                                               <div>
                                                   <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Customer since</div>
-                                                  <div class="font-semibold text-slate-900">${c.created_at == null ? "—" : c.created_at.substring(0, 10)}</div>
+                                                  <div class="font-semibold text-slate-900">${c.created_at ? c.created_at.substring(0, 10) : "—"}</div>
                                               </div>
                                           </div>
                                           <div class="mt-3 text-sm text-slate-600">
@@ -190,7 +193,7 @@
                   </tbody>
               </table>
 
-              <p if=(@customers.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
+              <p if=(@customerRows.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
                   No customers yet.
               </p>
           </div>

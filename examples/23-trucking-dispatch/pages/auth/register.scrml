@@ -1,17 +1,22 @@
-// Trucking Dispatch — register page (M1).
+// Trucking Dispatch — register page.
 //
-// Route: /register. Customers self-register (drivers + dispatchers are
-// seeded only). On success: creates a `users` row (role='customer') + a
-// `customers` row (account_status='active', payment_terms='net_30'),
-// auto-logs the user in, and redirects to /customer.
+// Route: /register. Customers self-register (drivers + dispatchers are seeded
+// only). On success: creates a `users` row (role='customer') + a `customers`
+// row (account_status='active', payment_terms='net_30'), auto-logs the user
+// in, and redirects to /customer.
 //
 // Form fields: email, password, name (company), contact_phone, billing_address.
 //
 // `auth="optional"` so this page is reachable without a session.
+//
+// v0.2.4 canonical forms used:
+//   - V5-strict state decls: <email> = "" (structural form)
+//   - <db> attribute opener (no leading whitespace)
+//   - `server function` modifier dropped — body content escalates structurally
 
 <program db="../../dispatch.db" auth="optional">
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers">
 
     ${
         import { hashPassword } from 'scrml:auth'
@@ -19,25 +24,25 @@
         import { createSessionStore } from 'scrml:store'
         import { SESSION_TTL_SECONDS, SESSION_DB_PATH, buildSessionSetCookie } from '../../models/auth.scrml'
 
-        @email = ""
-        @password = ""
-        @name = ""
-        @contactPhone = ""
-        @billingAddress = ""
-        @errorMessage = ""
-        @submitting = false
+        <email> = ""
+        <password> = ""
+        <companyName> = ""
+        <contactPhone> = ""
+        <billingAddress> = ""
+        <errorMessage> = ""
+        <submitting> = false
 
-        server function registerServer(email, password, name, contactPhone, billingAddress) {
-            const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-            if (existing) return { error: "Email already registered" }
+        function registerServer(emailArg, passwordArg, nameArg, contactPhoneArg, billingAddressArg) {
+            const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get()
+            if (existing is some) return { error: "Email already registered" }
 
-            const hash = hashPassword(password)
-            ?{`INSERT INTO users (email, password_hash, role) VALUES (${email}, ${hash}, 'customer')`}.run()
-            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${email}`}.get()
+            const hash = hashPassword(passwordArg)
+            ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run()
+            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${emailArg}`}.get()
 
             ?{`
                 INSERT INTO customers (user_id, name, contact_email, contact_phone, billing_address, payment_terms, account_status)
-                VALUES (${userRow.id}, ${name}, ${email}, ${contactPhone}, ${billingAddress}, 'net_30', 'active')
+                VALUES (${userRow.id}, ${nameArg}, ${emailArg}, ${contactPhoneArg}, ${billingAddressArg}, 'net_30', 'active')
             `}.run()
 
             const token = generateToken(32)
@@ -60,13 +65,13 @@
                 @errorMessage = "Email is required, password must be 6+ characters."
                 return
             }
-            if (@name.trim() == "" || @billingAddress.trim() == "") {
+            if (@companyName.trim() == "" || @billingAddress.trim() == "") {
                 @errorMessage = "Company name and billing address are required."
                 return
             }
 
             @submitting = true
-            const result = registerServer(@email, @password, @name, @contactPhone, @billingAddress)
+            const result = registerServer(@email, @password, @companyName, @contactPhone, @billingAddress)
             if (result.error) {
                 @errorMessage = result.error
                 @submitting = false
@@ -92,7 +97,7 @@
             <input
               id="reg-name"
               type="text"
-              bind:value=@name
+              bind:value=@companyName
               required
               class="w-full px-3 py-2 border border-slate-300 rounded-md"
             />

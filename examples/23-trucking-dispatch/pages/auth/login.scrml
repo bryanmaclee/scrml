@@ -1,19 +1,23 @@
-// Trucking Dispatch — login page (M1).
+// Trucking Dispatch — login page.
 //
-// Route: /login (handled by app.scrml route dispatch — M1 ships this as a
-// standalone page that can be rendered when the route matches).
-//
-// Form posts to login() server fn (defined in app.scrml's `< db>` block;
-// imported transitively when this page is rendered as part of the same
-// program). On success, the returned redirectTo path drives the navigate.
-// On failure, @errorMessage shows inline.
+// Route: /login. Form posts to a local `loginServer` server fn defined here
+// (since cross-file `?{}`-using server fns hit E-SQL-004 per F-AUTH-002).
+// On success, document.cookie is set + window.location.href triggers the
+// role-based redirect. On failure, @errorMessage shows inline.
 //
 // `auth="optional"` overrides app.scrml's `auth="required"` global gate
 // so this page is reachable without a session.
+//
+// v0.2.4 canonical forms used:
+//   - V5-strict state decls: <email> = "" (structural form)
+//   - @email reads/writes from expressions
+//   - <db> attribute opener (no leading whitespace)
+//   - `server function` modifier dropped — body content escalates structurally
+//     (W-DEPRECATED-SERVER-MODIFIER, Insight 26)
 
 <program db="../../dispatch.db" auth="optional">
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users">
+  <db src="../../dispatch.db" protect="password_hash" tables="users">
 
     ${
         import { hashPassword, verifyPassword } from 'scrml:auth'
@@ -21,19 +25,20 @@
         import { createSessionStore } from 'scrml:store'
         import { rolePath, SESSION_TTL_SECONDS, SESSION_DB_PATH, buildSessionSetCookie } from '../../models/auth.scrml'
 
-        @email = ""
-        @password = ""
-        @errorMessage = ""
-        @submitting = false
+        <email> = ""
+        <password> = ""
+        <errorMessage> = ""
+        <submitting> = false
 
-        // Inlined login server fn — see F-AUTH-002 for why this can't
-        // be imported across files when it uses `?{}`.
-        server function loginServer(email, password) {
-            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${email}`}.get()
-            if (!row) return { error: "Invalid email or password" }
+        // Inlined login server fn — F-AUTH-002 documents why this can't be
+        // imported across files when it uses `?{}`. The `server` modifier is
+        // not needed — the `?{}` block escalates the fn structurally.
+        function loginServer(emailArg, passwordArg) {
+            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${emailArg}`}.get()
+            if (row is not) return { error: "Invalid email or password" }
 
-            const ok = verifyPassword(password, row.password_hash)
-            if (!ok) return { error: "Invalid email or password" }
+            const ok = verifyPassword(passwordArg, row.password_hash)
+            if (not ok) return { error: "Invalid email or password" }
 
             ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
 
@@ -60,12 +65,12 @@
                 return
             }
 
-            // Persist session cookie via document.cookie (browser-side
-            // fallback — production would set HttpOnly via Set-Cookie on
-            // the server response).
+            // Persist session cookie via document.cookie (browser-side fallback
+            // — production would set HttpOnly via Set-Cookie on the server
+            // response).
             document.cookie = buildSessionSetCookie(result.token)
 
-            // Redirect by role. M2-M4 implement these targets.
+            // Redirect by role.
             window.location.href = result.redirectTo
         }
     }
@@ -73,7 +78,7 @@
     <div class="min-h-screen bg-slate-50 flex items-center justify-center px-4 font-sans">
       <div class="w-full max-w-md bg-white border border-slate-200 rounded-lg shadow-sm p-8">
         <h1 class="text-2xl font-bold text-slate-900 mb-1">Sign in</h1>
-        <p class="text-sm text-slate-600 mb-6">Trucking Dispatch — M1 demo.</p>
+        <p class="text-sm text-slate-600 mb-6">Trucking Dispatch — demo.</p>
 
         <form onsubmit=submit() class="space-y-4">
           <div>

@@ -31,22 +31,22 @@
       import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries">
 
     ${
         // F-AUTH-002 inline: cookie → user → drivers JOIN.
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         // F-AUTH-001 fallback: role gate. Returns the user + the driver row.
         server function fetchHomeData(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
 
@@ -56,11 +56,11 @@
                 FROM drivers
                 WHERE user_id = ${user.id}
             `}.get()
-            if (!driver) return { error: "No driver record found for this account." }
+            if (driver is not) return { error: "No driver record found for this account." }
 
             // Active assignment + load join. Driver is "active" when they have
             // an open assignment AND the load is not yet delivered/closed.
-            const currentLoad = ?{`
+            const currentLoadRow = ?{`
                 SELECT
                     l.id, l.origin_address, l.origin_city, l.origin_state,
                     l.destination_address, l.destination_city, l.destination_state,
@@ -78,7 +78,7 @@
                 LIMIT 1
             `}.get()
 
-            const recentEntries = ?{`
+            const recentEntryRows = ?{`
                 SELECT id, type, at, payload, load_id
                 FROM log_entries
                 WHERE driver_id = ${driver.id}
@@ -88,8 +88,8 @@
 
             return {
                 user: user, driver: driver,
-                currentLoad: currentLoad,
-                recentEntries: recentEntries
+                currentLoad: currentLoadRow,
+                recentEntries: recentEntryRows
             }
         }
 
@@ -97,11 +97,11 @@
         // hos_change log entry. Returns the (refreshed) status string.
         server function changeHosServer(sessionToken, newStatus) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             // Validate transition per HOS rules (simplified 11/14 — see hos.scrml).
             const cur = driver.current_status
@@ -114,7 +114,7 @@
             if (cur == "driving"       && newStatus == "on_duty")        { allowed = true }
             if (cur == "sleeper_berth" && newStatus == "on_duty")        { allowed = true }
             if (cur == "sleeper_berth" && newStatus == "off_duty")       { allowed = true }
-            if (!allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            if (not allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
 
             ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
 
@@ -127,12 +127,12 @@
             return { ok: true }
         }
 
-        @user = null
-        @driver = null
-        @currentLoad = null
-        @recentEntries = []
-        @loaded = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentDriver> = not
+        <currentLoad> = not
+        <recentEntries> = []
+        <loaded> = false
+        <errorMessage> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -155,8 +155,8 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @driver = data.driver
+            @currentUser = data.user
+            @currentDriver = data.driver
             @currentLoad = data.currentLoad
             @recentEntries = data.recentEntries
             @loaded = true
@@ -221,43 +221,43 @@
               <a href="/driver/hos" class="hover:text-blue-300">HOS</a>
               <a href="/driver/messages" class="hover:text-blue-300">
                   Messages
-                  <span if=(@driverEvents.length > 0) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
-                      ${@driverEvents.length}
+                  <span if=(@currentDriverEvents.length > 0) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
+                      ${@currentDriverEvents.length}
                   </span>
               </a>
               <a href="/driver/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
 
       <main class="max-w-3xl mx-auto px-6 py-8">
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-          <div if=(@loaded && @driver == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && @currentDriver is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @driver != null) class="space-y-6">
+          <div if=(@loaded && @currentDriver is some) class="space-y-6">
 
               <!-- Greeting + status -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Driver</div>
-                          <h1 class="text-2xl font-bold">Hi, ${@driver.name}</h1>
+                          <h1 class="text-2xl font-bold">Hi, ${@currentDriver.name}</h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              <span if=(@driver.current_location != null && @driver.current_location != "")>
-                                  ${@driver.current_location}
+                              <span if=(@currentDriver.current_location is some && @currentDriver.current_location != "")>
+                                  ${@currentDriver.current_location}
                               </>
-                              <span if=(@driver.current_location == null || @driver.current_location == "") class="text-slate-400">
+                              <span if=(@currentDriver.current_location is not || @currentDriver.current_location == "") class="text-slate-400">
                                   Location not yet reported
                               </>
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClasses(@driver.current_status)}">
-                              ${driverStatusLabel(@driver.current_status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClasses(@currentDriver.current_status)}">
+                              ${driverStatusLabel(@currentDriver.current_status)}
                           </span>
                       </div>
                   </div>
@@ -272,22 +272,22 @@
                       <button
                           onclick=setStatus("off_duty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                          disabled=(@driver.current_status == "off_duty")
+                          disabled=(@currentDriver.current_status == "off_duty")
                       >Off duty</button>
                       <button
                           onclick=setStatus("on_duty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                          disabled=(@driver.current_status == "on_duty")
+                          disabled=(@currentDriver.current_status == "on_duty")
                       >On duty</button>
                       <button
                           onclick=setStatus("driving")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                          disabled=(@driver.current_status == "driving")
+                          disabled=(@currentDriver.current_status == "driving")
                       >Driving</button>
                       <button
                           onclick=setStatus("sleeper_berth")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                          disabled=(@driver.current_status == "sleeper_berth")
+                          disabled=(@currentDriver.current_status == "sleeper_berth")
                       >Sleeper berth</button>
                   </div>
 
@@ -306,11 +306,11 @@
                       Current load
                   </h2>
 
-                  <div if=(@currentLoad == null) class="text-sm text-slate-500">
+                  <div if=(@currentLoad is not) class="text-sm text-slate-500">
                       No active load assignment. Check back when dispatch assigns one.
                   </div>
 
-                  <a if=(@currentLoad != null) href="/driver/loads/${@currentLoad.id}" class="block bg-white border border-slate-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition">
+                  <a if=(@currentLoad is some) href="/driver/loads/${@currentLoad.id}" class="block bg-white border border-slate-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition">
                       <div class="flex items-start justify-between mb-2">
                           <div class="text-xs text-slate-500 font-medium">
                               LOAD #${@currentLoad.id}
@@ -326,7 +326,7 @@
                       </div>
                       <div class="text-xs text-slate-600 mb-2">
                           ${@currentLoad.commodity}
-                          <span if=(@currentLoad.weight_lbs != null) class="text-slate-400">
+                          <span if=(@currentLoad.weight_lbs is some) class="text-slate-400">
                               · ${@currentLoad.weight_lbs} lbs
                           </>
                       </div>
@@ -342,7 +342,7 @@
                       </div>
                       <div class="flex items-center justify-between mt-3 text-xs">
                           <span class="text-slate-600">
-                              ${@currentLoad.customer_name == null ? "" : @currentLoad.customer_name}
+                              ${@currentLoad.customer_name is not ? "" : @currentLoad.customer_name}
                           </span>
                           <span class="font-semibold text-slate-900">${formatRate(@currentLoad.rate_dollars)}</span>
                       </div>
@@ -364,14 +364,14 @@
                           for (let entry of @recentEntries) {
                               lift <li class="flex items-start gap-3 text-sm">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at == null ? "" : entry.at.substring(0, 16)}
+                                      ${entry.at is not ? "" : entry.at.substring(0, 16)}
                                   </span>
                                   <span class="font-medium text-slate-900 flex-1">
                                       ${logTypeLabel(entry.type)}
-                                      <span if=(entry.load_id != null) class="text-xs text-slate-500 block">
+                                      <span if=(entry.load_id) class="text-xs text-slate-500 block">
                                           Load #${entry.load_id}
                                       </>
-                                      <span if=(entry.payload != null && entry.payload != "") class="text-xs text-slate-500 block break-all">
+                                      <span if=(entry.payload is some && entry.payload != "") class="text-xs text-slate-500 block break-all">
                                           ${entry.payload}
                                       </>
                                   </span>

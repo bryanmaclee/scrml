@@ -8,7 +8,7 @@
 //   - DB persistence stays (sendMessageServer still INSERTs into messages
 //     table) so reload + history work.
 //   - <channel name="driver-events"> publishes a live event on each send.
-//   - The thread renders @messages (DB history) + @driverEvents (live
+//   - The thread renders @messageHistory (DB history) + @currentDriverEvents (live
 //     since page load) merged and filtered by targetDriverId. New live
 //     messages are visible without reload.
 //
@@ -26,26 +26,26 @@
       import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, messages">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, messages">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchMessages(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id, name FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
-            const channelId = `driver-${driver.id}`
+            const channelIdStr = `driver-${driver.id}`
 
             // Pull driver-:id and dispatch-board messages — joined on
             // sender role for display.
@@ -54,7 +54,7 @@
                     u.email AS from_email, u.role AS from_role
                 FROM messages m
                 LEFT JOIN users u ON u.id = m.from_user_id
-                WHERE m.channel_id = ${channelId}
+                WHERE m.channel_id = ${channelIdStr}
                    OR m.channel_id = 'dispatch-board'
                 ORDER BY m.at ASC
                 LIMIT 200
@@ -63,38 +63,38 @@
             return {
                 user: user,
                 driver: driver,
-                channelId: channelId,
+                channelId: channelIdStr,
                 messages: messages
             }
         }
 
         server function sendMessageServer(sessionToken, body) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const trimmed = body.trim()
             if (trimmed == "") return { error: "Message body required." }
 
-            const channelId = `driver-${driver.id}`
+            const channelIdStr = `driver-${driver.id}`
             ?{`
                 INSERT INTO messages (channel_id, from_user_id, body)
-                VALUES (${channelId}, ${user.id}, ${trimmed})
+                VALUES (${channelIdStr}, ${user.id}, ${trimmed})
             `}.run()
 
             return { ok: true }
         }
 
-        @user = null
-        @driver = null
-        @channelId = ""
-        @messages = []
-        @loaded = false
-        @errorMessage = ""
-        @draft = ""
+        <currentUser> = not
+        <currentDriver> = not
+        <channelId> = ""
+        <messageHistory> = []
+        <loaded> = false
+        <errorMessage> = ""
+        <draft> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -117,10 +117,10 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @driver = data.driver
+            @currentUser = data.user
+            @currentDriver = data.driver
             @channelId = data.channelId
-            @messages = data.messages
+            @messageHistory = data.messages
             @loaded = true
         }
 
@@ -145,8 +145,8 @@
             // live. The DB write already happened inside sendMessageServer;
             // this is the "live wire" so subscribers update without
             // reload.
-            const driverId = @driver ? @driver.id : 0
-            const userId = @user ? @user.id : 0
+            const driverId = @currentDriver ? @currentDriver.id : 0
+            const userId = @currentUser ? @currentUser.id : 0
             publishDriverEvent("message", driverId, userId, body, 0)
             @draft = ""
             refresh()
@@ -206,13 +206,13 @@
         </header>
 
         <main class="max-w-2xl mx-auto px-6 py-8">
-            <p if=(!@loaded) class="text-slate-500">Loading…</p>
+            <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-            <div if=(@loaded && !@driver) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+            <div if=(@loaded && @currentDriver is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
                 ${@errorMessage}
             </div>
 
-            <div if=(@loaded && @driver) class="space-y-4">
+            <div if=(@loaded && @currentDriver) class="space-y-4">
 
                 <header class="bg-white rounded-lg border border-slate-200 p-6">
                     <h1 class="text-lg font-bold mb-1">Dispatch chat</h1>
@@ -225,13 +225,13 @@
                 </header>
 
                 <section class="bg-white rounded-lg border border-slate-200 p-6">
-                    <p if=(@messages.length == 0) class="text-sm text-slate-500 text-center py-8">
+                    <p if=(@messageHistory.length == 0) class="text-sm text-slate-500 text-center py-8">
                         No messages yet. Start a conversation with dispatch.
                     </p>
 
-                    <div if=(@messages.length > 0) class="space-y-3">
+                    <div if=(@messageHistory.length > 0) class="space-y-3">
                         ${
-                            for (let m of @messages) {
+                            for (let m of @messageHistory) {
                                 lift <div class="max-w-md rounded-lg px-4 py-2 ${bubbleClasses(m.from_role)}">
                                     <div class="text-xs opacity-75 mb-0.5">
                                         ${senderLabel(m.from_role, m.from_email)}
@@ -248,9 +248,9 @@
                              persistence) but we render the live ones here
                              so they appear without a refresh. -->
                         ${
-                            for (let ev of @driverEvents) {
+                            for (let ev of @currentDriverEvents) {
                                 if (ev.type != "message") continue
-                                if (!isForThisDriver(ev.targetDriverId, @driver.id)) continue
+                                if (!isForThisDriver(ev.targetDriverId, @currentDriver.id)) continue
                                 lift <div class="max-w-md rounded-lg px-4 py-2 bg-blue-50 border border-blue-200 text-blue-900 ml-auto">
                                     <div class="text-xs opacity-75 mb-0.5">
                                         Live · ${ev.at == "" ? "" : ev.at.substring(11, 16)}

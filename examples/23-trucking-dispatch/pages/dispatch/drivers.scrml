@@ -1,11 +1,16 @@
-// Trucking Dispatch — drivers roster (M2).
+// Trucking Dispatch — drivers roster.
 //
 // Route: /dispatch/drivers. Table of all drivers with name, phone, current
 // status, current location, current assignment (load_id if any), CDL
 // expiration. Optional ?status filter via dropdown.
 //
 // Per F-AUTH-001 + F-AUTH-002 + F-COMPONENT-001: same auth pattern; imports
-// at <program> scope; DriverCard call site wrapped in `${ lift <tbody> }`.
+// at <program> scope; DriverCard call site inlined into table rows.
+//
+// v0.2.4 canonical forms used:
+//   - V5-strict <var> = init decls
+//   - <db> opener (no whitespace)
+//   - `null` eliminated: `is some` / `is not` for absence
 
 <program db="../../dispatch.db" auth="required">
 
@@ -21,20 +26,20 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, assignments, loads">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, assignments, loads">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchDriversServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
@@ -58,10 +63,10 @@
             return { user: user, drivers: drivers }
         }
 
-        @user = null
-        @drivers = []
-        @loaded = false
-        @statusFilter = "all"
+        <currentUser> = not
+        <driverRows> = []
+        <loaded> = false
+        <statusFilter> = "all"
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -79,8 +84,8 @@
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            @user = data.user
-            @drivers = data.drivers
+            @currentUser = data.user
+            @driverRows = data.drivers
             @loaded = true
         }
 
@@ -124,7 +129,7 @@
               </div>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=@loaded class="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <table class="w-full">
@@ -140,8 +145,8 @@
                   </thead>
                   <tbody>
                       ${
-                          for (let d of @drivers) {
-                              if (!matchesFilter(d.current_status, @statusFilter)) continue
+                          for (let d of @driverRows) {
+                              if (not matchesFilter(d.current_status, @statusFilter)) continue
                               lift <tr class="border-b border-slate-200 hover:bg-slate-50">
                                   <td class="px-3 py-3">
                                       <div class="text-sm font-semibold text-slate-900">${d.name}</div>
@@ -154,26 +159,26 @@
                                       </span>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">
-                                      <span if=(d.current_location != null && d.current_location != "")>
+                                      <span if=(d.current_location is some && d.current_location != "")>
                                           ${d.current_location}
                                       </>
-                                      <span if=(d.current_location == null || d.current_location == "") class="text-slate-400">
+                                      <span if=(d.current_location is not || d.current_location == "") class="text-slate-400">
                                           —
                                       </>
                                   </td>
                                   <td class="px-3 py-3 text-sm">
-                                      <a if=(d.current_load_id != null) class="text-blue-600 hover:underline" href="/dispatch/loads/${d.current_load_id}">
+                                      <a if=(d.current_load_id is some) class="text-blue-600 hover:underline" href="/dispatch/loads/${d.current_load_id}">
                                           Load #${d.current_load_id}
                                           <span class="text-xs text-slate-500 block">
                                               ${d.current_origin_city} → ${d.current_destination_city}
                                           </span>
                                       </a>
-                                      <span if=(d.current_load_id == null) class="text-slate-400">
+                                      <span if=(d.current_load_id is not) class="text-slate-400">
                                           Unassigned
                                       </>
                                   </td>
                                   <td class="px-3 py-3 text-sm ${cdlExpiresClass(d.cdl_expires)}">
-                                      ${d.cdl_expires == null ? "—" : d.cdl_expires}
+                                      ${d.cdl_expires ? d.cdl_expires : "—"}
                                   </td>
                               </tr>
                           }
@@ -181,7 +186,7 @@
                   </tbody>
               </table>
 
-              <p if=(@drivers.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
+              <p if=(@driverRows.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
                   No drivers match the current filter.
               </p>
           </div>

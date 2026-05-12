@@ -20,7 +20,7 @@
       import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, invoices, customers, loads, lin_tokens">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, invoices, customers, loads, lin_tokens">
 
     ${
         // Today as ISO date — used for overdue detection. Hardcoded to seed
@@ -28,16 +28,16 @@
         const TODAY_ISO = "2026-04-29"
 
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchInvoicesServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
@@ -74,7 +74,7 @@
         // consumes the token on Mark Paid. Replays return error.
         server function ensureInvoicesServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") return { ok: false }
+            if (user is not || user.role != "dispatcher") return { ok: false }
 
             ?{`
                 INSERT INTO invoices (load_id, customer_id, amount_dollars, due_at)
@@ -112,7 +112,7 @@
 
         server function markPaidServer(sessionToken, invoiceId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
             const ref = `PAY-DEMO-${invoiceId}`
@@ -124,11 +124,11 @@
             return { ok: true }
         }
 
-        @user = null
-        @invoices = []
-        @loaded = false
-        @filter = "all"
-        @errorMessage = ""
+        <currentUser> = not
+        <invoiceRows> = []
+        <loaded> = false
+        <filter> = "all"
+        <errorMessage> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -146,8 +146,8 @@
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            @user = data.user
-            @invoices = data.invoices
+            @currentUser = data.user
+            @invoiceRows = data.invoices
             @loaded = true
         }
 
@@ -164,7 +164,7 @@
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            if (!result.ok) {
+            if (not result.ok) {
                 @errorMessage = "Could not mark invoice paid."
                 return
             }
@@ -233,7 +233,7 @@
               </div>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@errorMessage != "") class="mb-4 bg-red-50 border border-red-200 text-red-800 text-sm rounded-md px-3 py-2">
               ${@errorMessage}
@@ -254,17 +254,17 @@
                   </thead>
                   <tbody>
                       ${
-                          for (let inv of @invoices) {
-                              if (!matchesFilter(inv, @filter, TODAY_ISO)) continue
+                          for (let inv of @invoiceRows) {
+                              if (not matchesFilter(inv, @filter, TODAY_ISO)) continue
                               lift <tr class="border-b border-slate-200 hover:bg-slate-50">
                                   <td class="px-3 py-3 text-sm">
                                       <a class="text-blue-600 hover:underline font-medium" href="/dispatch/loads/${inv.load_id}">
                                           #${inv.load_id}
                                       </a>
                                       <div class="text-xs text-slate-500">
-                                          ${inv.load_origin_city == null ? "" : inv.load_origin_city}
-                                          <span if=(inv.load_origin_city != null && inv.load_destination_city != null) class="text-slate-400 mx-1">→</span>
-                                          ${inv.load_destination_city == null ? "" : inv.load_destination_city}
+                                          ${inv.load_origin_city ? inv.load_origin_city : ""}
+                                          <span if=(inv.load_origin_city is some && inv.load_destination_city is some) class="text-slate-400 mx-1">→</span>
+                                          ${inv.load_destination_city ? inv.load_destination_city : ""}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">${inv.customer_name}</td>
@@ -277,24 +277,24 @@
                                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${invoiceStatusClasses(invoiceStatus(inv, TODAY_ISO))}">
                                           ${invoiceStatusLabel(invoiceStatus(inv, TODAY_ISO))}
                                       </span>
-                                      <div if=(inv.payment_reference != null && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
+                                      <div if=(inv.payment_reference is some && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
                                           ${inv.payment_reference}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-right space-y-1">
-                                      <button if=(!inv.paid_at)
+                                      <button if=(inv.paid_at is not)
                                           onclick=markPaid(inv.id, inv.customer_id)
                                           class="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium block w-full"
                                       >
                                           Mark paid
                                       </button>
-                                      <button if=(!inv.paid_at)
+                                      <button if=(inv.paid_at is not)
                                           onclick=announceInvoice(inv.id, inv.customer_id, inv.load_id)
                                           class="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium block w-full"
                                       >
                                           Notify customer
                                       </button>
-                                      <span if=(inv.paid_at) class="text-xs text-slate-400">
+                                      <span if=(inv.paid_at is some) class="text-xs text-slate-400">
                                           ${formatIsoDate(inv.paid_at)}
                                       </>
                                   </td>
@@ -304,7 +304,7 @@
                   </tbody>
               </table>
 
-              <p if=(@invoices.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
+              <p if=(@invoiceRows.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
                   No invoices yet. Mark a delivered load as invoiced from the load detail page.
               </p>
           </div>

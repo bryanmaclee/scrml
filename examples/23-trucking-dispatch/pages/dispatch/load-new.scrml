@@ -24,21 +24,21 @@
       import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
 
     ${
         // F-AUTH-002 inline.
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchCustomersServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
             const customers = ?{`
@@ -58,13 +58,13 @@
             commodity, weightLbs, rateDollars
         ) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "dispatcher") {
+            if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
 
             // Server-side guard: customer must be active.
             const cust = ?{`SELECT id, account_status FROM customers WHERE id = ${customerId}`}.get()
-            if (!cust) return { error: "Customer not found." }
+            if (cust is not) return { error: "Customer not found." }
             if (cust.account_status != "active") {
                 return { error: "Cannot tender a load for an inactive customer." }
             }
@@ -96,27 +96,27 @@
                 LIMIT 1
             `}.get()
 
-            return { ok: true, loadId: newRow ? newRow.id : null }
+            return { ok: true, loadId: newRow ? newRow.id : not }
         }
 
-        @user = null
-        @customers = []
-        @loaded = false
+        <currentUser> = not
+        <customerOptions> = []
+        <loaded> = false
 
-        @customerId = 0
-        @originAddress = ""
-        @originCity = ""
-        @originState = "UT"
-        @destinationAddress = ""
-        @destinationCity = ""
-        @destinationState = "UT"
-        @pickupAt = ""
-        @deliverBy = ""
-        @commodity = ""
-        @weightLbs = 0
-        @rateDollars = 0
-        @errorMessage = ""
-        @submitting = false
+        <customerId> = 0
+        <originAddress> = ""
+        <originCity> = ""
+        <originState> = "UT"
+        <destinationAddress> = ""
+        <destinationCity> = ""
+        <destinationState> = "UT"
+        <pickupAt> = ""
+        <deliverBy> = ""
+        <commodity> = ""
+        <weightLbs> = 0
+        <rateDollars> = 0
+        <errorMessage> = ""
+        <submitting> = false
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -134,8 +134,8 @@
                 window.location.href = "/login?reason=unauthorized"
                 return
             }
-            @user = data.user
-            @customers = data.customers
+            @currentUser = data.user
+            @customerOptions = data.customers
             @loaded = true
         }
 
@@ -231,7 +231,7 @@
               </span>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <form if=@loaded onsubmit=submit() class="space-y-5 bg-white border border-slate-200 rounded-lg p-6">
 
@@ -240,7 +240,7 @@
                   <select id="customer" bind:value=@customerId class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white">
                       <option value="0">— Select customer —</option>
                       ${
-                          for (let c of @customers) {
+                          for (let c of @customerOptions) {
                               lift <option value=c.id disabled=(c.account_status != "active")>
                                   ${c.name}
                                   <span if=(c.account_status != "active")>

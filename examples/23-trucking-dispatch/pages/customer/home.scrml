@@ -35,15 +35,15 @@
       import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, invoices">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, invoices">
 
     ${
         // F-AUTH-002 inline: cookie -> user.
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
@@ -51,7 +51,7 @@
         // 5 most recent active loads + 5 most recent invoices.
         server function fetchHomeData(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
 
@@ -61,7 +61,7 @@
                 FROM customers
                 WHERE user_id = ${user.id}
             `}.get()
-            if (!customer) return { error: "No customer record found for this account." }
+            if (customer is not) return { error: "No customer record found for this account." }
 
             // Active loads = anything not yet paid or cancelled. Tendered
             // loads count as active (they're awaiting dispatcher rate).
@@ -96,12 +96,12 @@
             }
         }
 
-        @user = null
-        @customer = null
-        @activeLoads = []
-        @recentInvoices = []
-        @loaded = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentCustomer> = not
+        <activeLoadRows> = []
+        <recentInvoiceRows> = []
+        <loaded> = false
+        <errorMessage> = ""
 
         // Today's ISO date — used by invoiceStatus() to detect overdue.
         // Hardcoded to seed window so demo isn't anchored to a moving target.
@@ -128,10 +128,10 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
-            @activeLoads = data.activeLoads
-            @recentInvoices = data.recentInvoices
+            @currentUser = data.user
+            @currentCustomer = data.customer
+            @activeLoadRows = data.activeLoads
+            @recentInvoiceRows = data.recentInvoices
             @loaded = true
         }
 
@@ -161,43 +161,43 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">
                   Invoices
-                  <span if=(@customerEvents.length > 0) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
-                      ${@customerEvents.length}
+                  <span if=(@currentCustomerEvents.length > 0) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
+                      ${@currentCustomerEvents.length}
                   </span>
               </a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
 
       <main class="max-w-4xl mx-auto px-6 py-8">
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-          <div if=(@loaded && @customer == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && @currentCustomer is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @customer != null) class="space-y-6">
+          <div if=(@loaded && @currentCustomer is some) class="space-y-6">
 
               <!-- Greeting + account status -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Account</div>
-                          <h1 class="text-2xl font-bold">${@customer.name}</h1>
+                          <h1 class="text-2xl font-bold">${@currentCustomer.name}</h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              <span if=(@customer.contact_name != null && @customer.contact_name != "")>
-                                  ${@customer.contact_name}
+                              <span if=(@currentCustomer.contact_name is some && @currentCustomer.contact_name != "")>
+                                  ${@currentCustomer.contact_name}
                               </>
-                              <span if=(@customer.contact_email != null && @customer.contact_email != "") class="text-slate-400">
-                                  &middot; ${@customer.contact_email}
+                              <span if=(@currentCustomer.contact_email is some && @currentCustomer.contact_email != "") class="text-slate-400">
+                                  &middot; ${@currentCustomer.contact_email}
                               </>
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@customer.account_status)}">
-                              ${accountStatusLabel(@customer.account_status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@currentCustomer.account_status)}">
+                              ${accountStatusLabel(@currentCustomer.account_status)}
                           </span>
                       </div>
                   </div>
@@ -229,13 +229,13 @@
                       </a>
                   </header>
 
-                  <p if=(@activeLoads.length == 0) class="text-sm text-slate-500">
+                  <p if=(@activeLoadRows.length == 0) class="text-sm text-slate-500">
                       No active loads. <a class="text-blue-600 hover:underline" href="/customer/quote">Request a quote</a> to get started.
                   </p>
 
-                  <ul if=(@activeLoads.length > 0) class="space-y-2">
+                  <ul if=(@activeLoadRows.length > 0) class="space-y-2">
                       ${
-                          for (let l of @activeLoads) {
+                          for (let l of @activeLoadRows) {
                               lift <li>
                                   <a href="/customer/loads/${l.id}" class="block bg-white border border-slate-200 rounded-lg p-3 hover:border-blue-300 hover:shadow-sm transition">
                                       <div class="flex items-start justify-between mb-1">
@@ -253,7 +253,7 @@
                                       </div>
                                       <div class="text-xs text-slate-600 mb-1">
                                           ${l.commodity}
-                                          <span if=(l.weight_lbs != null) class="text-slate-400">
+                                          <span if=(l.weight_lbs) class="text-slate-400">
                                               · ${l.weight_lbs} lbs
                                           </>
                                       </div>
@@ -283,13 +283,13 @@
                       </a>
                   </header>
 
-                  <p if=(@recentInvoices.length == 0) class="text-sm text-slate-500">
+                  <p if=(@recentInvoiceRows.length == 0) class="text-sm text-slate-500">
                       No invoices yet. They'll appear once a delivered load is invoiced.
                   </p>
 
-                  <ul if=(@recentInvoices.length > 0) class="space-y-2">
+                  <ul if=(@recentInvoiceRows.length > 0) class="space-y-2">
                       ${
-                          for (let inv of @recentInvoices) {
+                          for (let inv of @recentInvoiceRows) {
                               lift <li class="flex items-center justify-between border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
                                   <div class="flex-1">
                                       <div class="flex items-center gap-3">
@@ -301,9 +301,9 @@
                                           </span>
                                       </div>
                                       <div class="text-xs text-slate-500 mt-0.5">
-                                          ${inv.load_origin_city == null ? "" : inv.load_origin_city}
-                                          <span if=(inv.load_origin_city != null && inv.load_destination_city != null) class="text-slate-400 mx-1">→</span>
-                                          ${inv.load_destination_city == null ? "" : inv.load_destination_city}
+                                          ${inv.load_origin_city ? inv.load_origin_city : ""}
+                                          <span if=(inv.load_origin_city && inv.load_destination_city) class="text-slate-400 mx-1">→</span>
+                                          ${inv.load_destination_city ? inv.load_destination_city : ""}
                                           <span class="text-slate-400 ml-2">
                                               Sent ${formatIsoDate(inv.sent_at)}
                                           </span>
@@ -313,10 +313,10 @@
                                       <div class="text-sm font-semibold text-slate-900">
                                           ${formatRate(inv.amount_dollars)}
                                       </div>
-                                      <div if=(inv.paid_at != null && inv.paid_at != "") class="text-xs text-emerald-700">
+                                      <div if=(inv.paid_at is some && inv.paid_at != "") class="text-xs text-emerald-700">
                                           Paid ${formatIsoDate(inv.paid_at)}
                                       </div>
-                                      <div if=(inv.paid_at == null || inv.paid_at == "") class="text-xs text-amber-700">
+                                      <div if=(inv.paid_at is not || inv.paid_at == "") class="text-xs text-amber-700">
                                           Due ${formatIsoDate(inv.due_at)}
                                       </div>
                                   </div>

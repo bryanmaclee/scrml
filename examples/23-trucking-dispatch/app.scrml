@@ -1,27 +1,38 @@
-// Trucking Dispatch — root program (M1).
+// Trucking Dispatch — root program.
 //
 // Owns:
 //   - <program db="./dispatch.db" auth="required"> — global auth gate
-//   - < schema> with all 9 tables (so M2-M6 don't have to migrate)
-//   - < db> with the auth-related server fns (login/logout/register/getCurrentUser)
+//   - <schema> with all 9 tables (so subsequent pages don't migrate)
+//   - <db> with the auth-related server fns (login/logout/register/getCurrentUser)
 //   - on mount { runSeeds() } — idempotent seed of the demo dataset
 //   - nav shell — shows logged-in role + logout, or login/register links
-//   - route-aware page rendering — /login + /register ship in M1; everything
-//     else is a 404-ish placeholder until M2-M6 wire pages in
 //
 // AUTH GATE — `<program auth="required">`:
-//   This forces login on EVERY route by default. The compiler / runtime
+//   This forces login on every route by default. The compiler / runtime
 //   handles the cookie check + redirect to /login automatically (§40 +
 //   §52). We add `/login` and `/register` to the public allow-list via
-//   `auth="optional"` overrides on those page wrappers below.
+//   `auth="optional"` overrides on those page wrappers.
 //
 //   Per F-AUTH-001: the per-route ROLE gate (`auth="role:dispatcher"`)
-//   does NOT work in scrml today. Pages in M2-M4 will declare it for
-//   documentation but layer their own `checkRole()` server-side fallback.
+//   does NOT work in scrml today (W-ATTR-002 fires; semantics deferred).
+//   Pages declare it for documentation but layer their own server-side
+//   checkRole() fallback.
+//
+// v0.2.4 canonical forms used:
+//   - <schema> / <db> openers (no leading whitespace)
+//   - V5-strict — no @var declarations introduced in this file
+//   - `null` literal eliminated: use `is some` / `is not` for absence
+//
+// Compiler anomaly (S84): the `server function` modifier emits
+// W-DEPRECATED-SERVER-MODIFIER ("redundant; body already escalates
+// structurally") — but DROPPING it on functions defined for cross-file
+// import (no in-file caller) triggers E-CG-006 in client JS output.
+// Workaround: keep `server` explicit on app.scrml's auth fns until
+// W5a/W5b cross-file ?{} resolve lands.
 
 <program db="./dispatch.db" auth="required">
 
-< schema>
+<schema>
     users {
         id:             integer primary key
         email:          text not null unique
@@ -145,7 +156,7 @@
     }
 </>
 
-< db src="./dispatch.db" protect="password_hash" tables="users, customers, drivers, tractors, trailers, loads, assignments, log_entries, invoices, messages, lin_tokens">
+<db src="./dispatch.db" protect="password_hash" tables="users, customers, drivers, tractors, trailers, loads, assignments, log_entries, invoices, messages, lin_tokens">
 
     ${
         import { hashPassword, verifyPassword } from 'scrml:auth'
@@ -165,21 +176,20 @@
         }
 
         // ---------------------------------------------------------------
-        // Auth server functions — INLINED here per F-AUTH-002.
+        // Auth fns — INLINED here per F-AUTH-002 (cross-file ?{}-using
+        // server fns hit E-SQL-004; the importing page has no `<db>`
+        // ancestor that resolves the SQL block).
         //
-        // Cross-file `?{}` SQL access via exported server fn doesn't work
-        // (E-SQL-004) — the importing page has no `< db>` ancestor that
-        // resolves the SQL block. So login/register/logout/getCurrentUser
-        // live INSIDE this `< db>` block and are imported as server fns
-        // by the auth pages directly via the parent `<program>` scope.
+        // `server` modifier retained (anomaly-workaround above): dropping
+        // it on these cross-file-import functions triggers E-CG-006.
         // ---------------------------------------------------------------
 
-        server function login(email, password) {
-            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${email}`}.get()
-            if (!row) return { error: "Invalid email or password" }
+        server function login(emailArg, password) {
+            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${emailArg}`}.get()
+            if (row is not) return { error: "Invalid email or password" }
 
             const ok = verifyPassword(password, row.password_hash)
-            if (!ok) return { error: "Invalid email or password" }
+            if (not ok) return { error: "Invalid email or password" }
 
             ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
 
@@ -195,24 +205,24 @@
         }
 
         server function logout(sessionToken) {
-            if (sessionToken) {
+            if (sessionToken is some) {
                 const store = _sessionStore()
                 store.delete(sessionToken)
             }
             return { ok: true }
         }
 
-        server function register(email, password, name, contact_phone, billing_address) {
-            const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-            if (existing) return { error: "Email already registered" }
+        server function register(emailArg, password, name, contact_phone, billing_address) {
+            const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get()
+            if (existing is some) return { error: "Email already registered" }
 
             const hash = hashPassword(password)
-            ?{`INSERT INTO users (email, password_hash, role) VALUES (${email}, ${hash}, 'customer')`}.run()
-            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${email}`}.get()
+            ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run()
+            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${emailArg}`}.get()
 
             ?{`
                 INSERT INTO customers (user_id, name, contact_email, contact_phone, billing_address, payment_terms, account_status)
-                VALUES (${userRow.id}, ${name}, ${email}, ${contact_phone}, ${billing_address}, 'net_30', 'active')
+                VALUES (${userRow.id}, ${name}, ${emailArg}, ${contact_phone}, ${billing_address}, 'net_30', 'active')
             `}.run()
 
             const token = generateToken(32)
@@ -227,35 +237,17 @@
         }
 
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = _sessionStore()
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${userId}`}.get()
         }
-
-        // ---------------------------------------------------------------
-        // Reactive UI state.
-        //
-        // @currentUser is set by login/register flows on the page side; in
-        // M1 we don't auto-populate it from the cookie at mount because
-        // that requires a request binding the single-file demo doesn't
-        // expose. M2-M4 will use middleware (§40 handle()) to push the
-        // user into a server @var.
-        // ---------------------------------------------------------------
-
-        // NOTE: M1 doesn't materialize a `@currentUser` reactive — there's
-        // no consumer in the nav shell yet. M2 will introduce it once the
-        // dispatcher / driver / customer landing pages need to render
-        // logged-in identity. Adding it here as an unused @var triggers
-        // E-DG-002 (declared-but-unused) which is correct.
 
         // ---------------------------------------------------------------
         // Idempotent seed-on-mount. seeds.scrml exports runSeeds() which
         // INSERTs the demo dataset using ON CONFLICT DO NOTHING so re-runs
         // are safe.
-        //
-        // M2-M6 will keep this hook and add their own demo data on top.
         // ---------------------------------------------------------------
 
         on mount {
@@ -267,7 +259,7 @@
         <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <span class="text-xl font-bold">Trucking Dispatch</span>
-                <span class="text-xs uppercase tracking-wider text-slate-400">M1 — auth scaffold</span>
+                <span class="text-xs uppercase tracking-wider text-slate-400">auth scaffold</span>
             </div>
             <nav class="flex items-center gap-4 text-sm">
                 <a href="/login" class="hover:text-blue-300">Login</a>
@@ -278,8 +270,8 @@
         <main class="max-w-3xl mx-auto px-6 py-10">
             <h1 class="text-3xl font-bold mb-2">Welcome</h1>
             <p class="text-slate-600 mb-6">
-                NE Utah oil &amp; gas dispatch demo. M1 ships the schema, the
-                auth scaffold, and the login / register pages. M2-M6 add the
+                NE Utah oil &amp; gas dispatch demo. Ships the schema, the
+                auth scaffold, and the login / register pages plus the
                 dispatcher, driver, and customer slices.
             </p>
 
@@ -303,8 +295,8 @@
 </>
 
 #{
-  /* Scoped CSS reserved for app-level overrides. M1 styling is Tailwind 3
-     utility classes only (per scoping §10 + S49 row 184). */
+  /* Scoped CSS reserved for app-level overrides. Styling is Tailwind 3
+     utility classes only (per scoping §10). */
 }
 
 </program>

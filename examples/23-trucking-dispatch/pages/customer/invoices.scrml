@@ -27,7 +27,7 @@
       import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads, lin_tokens">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads, lin_tokens">
 
     ${
         // Today as ISO date — used for overdue detection. Hardcoded to seed
@@ -35,10 +35,10 @@
         const TODAY_ISO = "2026-04-29"
 
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
@@ -50,12 +50,12 @@
         // pass the lin token through markPaid().
         server function fetchInvoicesServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
 
             const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             const invoices = ?{`
                 SELECT
@@ -90,17 +90,17 @@
         // gives a compile-time exactly-once-consume guarantee per §35.2.1.
         server function markPaidServer(sessionToken, invoiceId, lin token: string) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
             const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             // Verify ownership.
             const inv = ?{`
                 SELECT id, load_id, customer_id, paid_at FROM invoices WHERE id = ${invoiceId}
             `}.get()
-            if (!inv) return { error: "Invoice not found." }
+            if (inv is not) return { error: "Invoice not found." }
             if (inv.customer_id != customer.id) {
                 return { unauthorized: true }
             }
@@ -133,16 +133,16 @@
             return { ok: true }
         }
 
-        @user = null
-        @customer = null
-        @invoices = []
-        @loaded = false
-        @errorMessage = ""
-        @filter = "all"
+        <currentUser> = not
+        <currentCustomer> = not
+        <invoiceRows> = []
+        <loaded> = false
+        <errorMessage> = ""
+        <filter> = "all"
 
         // Optional ?load=<id> query param highlights one row when navigating
         // here from /customer/loads/:id "View invoice" links.
-        @highlightLoadId = 0
+        <highlightLoadId> = 0
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -177,9 +177,9 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
-            @invoices = data.invoices
+            @currentUser = data.user
+            @currentCustomer = data.customer
+            @invoiceRows = data.invoices
             @highlightLoadId = readHighlightFromQuery()
             @loaded = true
         }
@@ -204,7 +204,7 @@
             }
             // M5: broadcast invoice-paid so other tabs / dispatcher's
             // billing view update live.
-            const customerId = @customer ? @customer.id : 0
+            const customerId = @currentCustomer ? @currentCustomer.id : 0
             publishCustomerEvent("invoice-paid", customerId, invoiceId, 0)
             refresh()
         }
@@ -225,9 +225,9 @@
             return s == filter
         }
 
-        @lastSeenCustomerEventCount = 0
+        <lastSeenCustomerEventCount> = 0
         function ackCustomerEvents() {
-            @lastSeenCustomerEventCount = @customerEvents.length
+            @lastSeenCustomerEventCount = @currentCustomerEvents.length
             refresh()
         }
 
@@ -252,7 +252,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -263,9 +263,9 @@
 
               <div class="flex items-center gap-3">
                   <span class="text-xs text-slate-500">
-                      Live: <strong>${@customerEvents.length}</strong>
+                      Live: <strong>${@currentCustomerEvents.length}</strong>
                   </span>
-                  <button if=(@customerEvents.length > @lastSeenCustomerEventCount)
+                  <button if=(@currentCustomerEvents.length > @lastSeenCustomerEventCount)
                       onclick=ackCustomerEvents()
                       class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium">
                       Refresh
@@ -280,7 +280,7 @@
               </div>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@errorMessage != "") class="mb-4 bg-red-50 border border-red-200 text-red-800 text-sm rounded-md px-3 py-2">
               ${@errorMessage}
@@ -300,7 +300,7 @@
                   </thead>
                   <tbody>
                       ${
-                          for (let inv of @invoices) {
+                          for (let inv of @invoiceRows) {
                               if (!matchesFilter(inv, @filter, TODAY_ISO)) continue
                               const rowClass = (inv.load_id == @highlightLoadId) ? "border-b border-slate-200 bg-yellow-50" : "border-b border-slate-200 hover:bg-slate-50"
                               lift <tr class="${rowClass}">
@@ -309,12 +309,12 @@
                                           #${inv.load_id}
                                       </a>
                                       <div class="text-xs text-slate-500">
-                                          ${inv.load_origin_city == null ? "" : inv.load_origin_city}
-                                          <span if=(inv.load_origin_city != null && inv.load_destination_city != null) class="text-slate-400 mx-1">→</span>
-                                          ${inv.load_destination_city == null ? "" : inv.load_destination_city}
+                                          ${inv.load_origin_city ? inv.load_origin_city : ""}
+                                          <span if=(inv.load_origin_city && inv.load_destination_city) class="text-slate-400 mx-1">→</span>
+                                          ${inv.load_destination_city ? inv.load_destination_city : ""}
                                       </div>
                                       <div class="text-xs text-slate-500">
-                                          ${inv.load_commodity == null ? "" : inv.load_commodity}
+                                          ${inv.load_commodity ? inv.load_commodity : ""}
                                       </div>
                                   </td>
                                   <td class="px-3 py-3 text-sm font-semibold text-slate-900 text-right">
@@ -326,7 +326,7 @@
                                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${invoiceStatusClasses(invoiceStatus(inv, TODAY_ISO))}">
                                           ${invoiceStatusLabel(invoiceStatus(inv, TODAY_ISO))}
                                       </span>
-                                      <div if=(inv.payment_reference != null && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
+                                      <div if=(inv.payment_reference && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
                                           ${inv.payment_reference}
                                       </div>
                                   </td>
@@ -355,7 +355,7 @@
                   </tbody>
               </table>
 
-              <p if=(@invoices.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
+              <p if=(@invoiceRows.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
                   No invoices yet. They'll appear once a delivered load is invoiced by your dispatcher.
               </p>
           </div>

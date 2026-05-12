@@ -14,20 +14,20 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchProfile(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`
@@ -35,18 +35,18 @@
                 FROM drivers
                 WHERE user_id = ${user.id}
             `}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             return { user: user, driver: driver }
         }
 
         server function saveProfileServer(sessionToken, name, phone) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const trimmedName = name.trim()
             const trimmedPhone = phone.trim()
@@ -61,16 +61,16 @@
             return { ok: true }
         }
 
-        @user = null
-        @driver = null
-        @loaded = false
-        @errorMessage = ""
-        @editing = false
-        @successMessage = ""
+        <currentUser> = not
+        <currentDriver> = not
+        <loaded> = false
+        <errorMessage> = ""
+        <editing> = false
+        <successMessage> = ""
 
-        // Form state — populated from @driver on edit click.
-        @editName = ""
-        @editPhone = ""
+        // Form state — populated from @currentDriver on edit click.
+        <editName> = ""
+        <editPhone> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -93,14 +93,14 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @driver = data.driver
+            @currentUser = data.user
+            @currentDriver = data.driver
             @loaded = true
         }
 
         function startEdit() {
-            @editName = @driver.name
-            @editPhone = @driver.phone == "" ? "" : @driver.phone
+            @editName = @currentDriver.name
+            @editPhone = @currentDriver.phone == "" ? "" : @currentDriver.phone
             @errorMessage = ""
             @successMessage = ""
             @editing = true
@@ -157,18 +157,18 @@
         </header>
 
         <main class="max-w-2xl mx-auto px-6 py-8">
-            <p if=(!@loaded) class="text-slate-500">Loading…</p>
+            <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-            <div if=(@loaded && !@driver) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+            <div if=(@loaded && @currentDriver is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
                 ${@errorMessage}
             </div>
 
-            <div if=(@loaded && @driver) class="space-y-4">
+            <div if=(@loaded && @currentDriver) class="space-y-4">
 
                 <header class="bg-white rounded-lg border border-slate-200 p-6">
                     <h1 class="text-lg font-bold mb-1">Profile</h1>
                     <p class="text-sm text-slate-600">
-                        Account: <code class="bg-slate-100 px-1 rounded">${@user.email}</code>
+                        Account: <code class="bg-slate-100 px-1 rounded">${@currentUser.email}</code>
                     </p>
                 </header>
 
@@ -177,30 +177,30 @@
                 </div>
 
                 <!-- Read-only display when not editing. -->
-                <section if=(!@editing) class="bg-white rounded-lg border border-slate-200 p-6">
+                <section if=(not @editing) class="bg-white rounded-lg border border-slate-200 p-6">
                     <div class="space-y-4">
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Name</div>
-                            <div class="text-base text-slate-900">${@driver.name}</div>
+                            <div class="text-base text-slate-900">${@currentDriver.name}</div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Phone</div>
                             <div class="text-base text-slate-900">
-                                <span if=(@driver.phone != "")>${@driver.phone}</>
-                                <span if=(@driver.phone == "") class="text-slate-400">—</>
+                                <span if=(@currentDriver.phone != "")>${@currentDriver.phone}</>
+                                <span if=(@currentDriver.phone == "") class="text-slate-400">—</>
                             </div>
                         </div>
                         <div class="border-t border-slate-200 pt-4">
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">CDL number</div>
-                            <div class="text-base text-slate-900">${@driver.cdl_number}</div>
+                            <div class="text-base text-slate-900">${@currentDriver.cdl_number}</div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">CDL state</div>
-                            <div class="text-base text-slate-900">${@driver.cdl_state}</div>
+                            <div class="text-base text-slate-900">${@currentDriver.cdl_state}</div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">CDL expires</div>
-                            <div class="text-base text-slate-900">${@driver.cdl_expires}</div>
+                            <div class="text-base text-slate-900">${@currentDriver.cdl_expires}</div>
                             <p class="text-xs text-slate-500 mt-1">
                                 CDL info is admin-managed. Contact dispatch to update.
                             </p>

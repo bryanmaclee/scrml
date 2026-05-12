@@ -1,29 +1,34 @@
 // PURE-CHANNEL-FILE — SPEC §38.12.6.
-// Centralized declaration for the `load-events` real-time channel
-// (M5). Subscribers: customer/load-detail, dispatch/load-detail,
-// driver/load-detail — all watching status / location / log events
-// for one specific load. Per F-CHANNEL-001 channel name interpolation
-// is silently inert, so the broadcast is per-app and subscribers
-// filter on payload.loadId for relevance.
+// Centralized declaration for the `load-events` real-time channel.
+// Subscribers: customer/load-detail, dispatch/load-detail, driver/load-detail
+// — all watching status / location / log events for one specific load. Per
+// F-CHANNEL-001 channel name interpolation is silently inert, so the
+// broadcast is per-app and subscribers filter on payload.loadId for
+// relevance.
 //
 // Publishers: dispatch/load-detail (status changes), driver/load-detail
-// (status transitions + location pings). The customer page is
-// effectively read-only here; the publish helper is still declared
-// because the @shared sync infrastructure registers the server-side
-// hook (per the example 15 pattern).
+// (status transitions + location pings). The customer page is effectively
+// read-only here; the publish helper is still declared because the
+// channel-body sync infrastructure registers the server-side hook (per the
+// example 15 pattern).
+//
+// V5-strict channel-cell pattern (SPEC §38.4): `<loadEvents>` reactive cell
+// auto-syncs across every connected client by virtue of being declared in
+// the channel body. No `@shared` modifier — that was retired in v0.next
+// (E-CHANNEL-SHARED-MODIFIER).
 //
 // To consume from a page:
 //   ${ import { "load-events" as loadEvents } from '../../channels/load-events.scrml' }
 //   <loadEvents/>
-// CHX (CE phase 2) inlines the channel body at the consumer site at compile
-// time; no runtime module is loaded.
+// CE (component-expansion) inlines the channel body at the consumer site at
+// compile time; no runtime module is loaded.
 
 export <channel name="load-events">
     ${
-        @shared loadEvents = []
+        <loadEvents> = []
 
         server function publishLoadEvent(eventType, loadId, status, location) {
-            loadEvents = [...loadEvents, {
+            @loadEvents = [...@loadEvents, {
                 type: eventType,
                 loadId: loadId,
                 status: status,

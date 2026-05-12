@@ -24,26 +24,26 @@
       import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchCustomerServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
             const customer = ?{`
                 SELECT id, name, account_status FROM customers WHERE user_id = ${user.id}
             `}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
             return { user: user, customer: customer }
         }
 
@@ -55,13 +55,13 @@
             commodity, weightLbs
         ) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
             const customer = ?{`
                 SELECT id, account_status FROM customers WHERE user_id = ${user.id}
             `}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
             if (customer.account_status != "active") {
                 return { error: "Account is not active. Contact your dispatcher." }
             }
@@ -108,23 +108,23 @@
             return { ok: true, loadId: newRow ? newRow.id : 0 }
         }
 
-        @user = null
-        @customer = null
-        @loaded = false
-        @errorMessage = ""
-        @submitting = false
+        <currentUser> = not
+        <currentCustomer> = not
+        <loaded> = false
+        <errorMessage> = ""
+        <submitting> = false
 
         // Form state.
-        @originAddress = ""
-        @originCity = ""
-        @originState = "UT"
-        @destinationAddress = ""
-        @destinationCity = ""
-        @destinationState = "UT"
-        @pickupAt = ""
-        @deliverBy = ""
-        @commodity = ""
-        @weightLbs = 0
+        <originAddress> = ""
+        <originCity> = ""
+        <originState> = "UT"
+        <destinationAddress> = ""
+        <destinationCity> = ""
+        <destinationState> = "UT"
+        <pickupAt> = ""
+        <deliverBy> = ""
+        <commodity> = ""
+        <weightLbs> = 0
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -147,8 +147,8 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
+            @currentUser = data.user
+            @currentCustomer = data.customer
             @loaded = true
         }
 
@@ -226,7 +226,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -244,18 +244,18 @@
               <a class="text-blue-600 hover:underline" href="/customer/loads">your loads list</a> until the rate is set.
           </p>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-          <div if=(@loaded && @customer == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && @currentCustomer is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @customer != null && @customer.account_status != "active") class="bg-amber-50 border border-amber-200 text-amber-900 rounded-md px-4 py-3 mb-4">
-              <strong>Account ${@customer.account_status}.</strong>
+          <div if=(@loaded && @currentCustomer is some && @currentCustomer.account_status != "active") class="bg-amber-50 border border-amber-200 text-amber-900 rounded-md px-4 py-3 mb-4">
+              <strong>Account ${@currentCustomer.account_status}.</strong>
               You cannot tender new loads until the account is reactivated by your dispatcher.
           </div>
 
-          <form if=(@loaded && @customer != null && @customer.account_status == "active") onsubmit=submit() class="space-y-6 bg-white border border-slate-200 rounded-lg p-6">
+          <form if=(@loaded && @currentCustomer is some && @currentCustomer.account_status == "active") onsubmit=submit() class="space-y-6 bg-white border border-slate-200 rounded-lg p-6">
 
               <fieldset>
                   <legend class="text-sm font-semibold text-slate-700 mb-2">Origin</legend>

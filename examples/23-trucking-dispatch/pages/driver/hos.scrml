@@ -47,11 +47,11 @@ ${
     import { DriverStatus } from '../../schema.scrml'
 }
 
-< engine name=HOSMachine for=DriverStatus>
-    .OffDuty      => .OnDuty | .SleeperBerth
-    .OnDuty       => .OffDuty | .Driving
-    .Driving      => .OffDuty | .OnDuty
-    .SleeperBerth => .OnDuty | .OffDuty
+<engine for=DriverStatus initial=.OffDuty>
+    <OffDuty      rule=(.OnDuty | .SleeperBerth)></>
+    <OnDuty       rule=(.OffDuty | .Driving)></>
+    <Driving      rule=(.OffDuty | .OnDuty)></>
+    <SleeperBerth rule=(.OnDuty | .OffDuty)></>
 </>
 
 <program db="../../dispatch.db" auth="required">
@@ -62,20 +62,20 @@ ${
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, log_entries">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, log_entries">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchHosData(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`
@@ -83,7 +83,7 @@ ${
                 FROM drivers
                 WHERE user_id = ${user.id}
             `}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             // 24h cycle history — hos_change entries for THIS driver from
             // the last day. SQLite datetime("now", "-1 day") is our window.
@@ -122,11 +122,11 @@ ${
         // emit hos_change log entry.
         server function changeHosServer(sessionToken, newStatus) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const cur = driver.current_status
             let allowed = false
@@ -138,7 +138,7 @@ ${
             if (cur == "driving"       && newStatus == "on_duty")        { allowed = true }
             if (cur == "sleeper_berth" && newStatus == "on_duty")        { allowed = true }
             if (cur == "sleeper_berth" && newStatus == "off_duty")       { allowed = true }
-            if (!allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            if (not allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
 
             ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
 
@@ -151,21 +151,21 @@ ${
             return { ok: true }
         }
 
-        @user = null
-        @driver = null
-        @cycleEntries = []
-        @lastChangeAt = ""
-        @loaded = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentDriver> = not
+        <cycleEntryRows> = []
+        <lastChangeAt> = ""
+        <loaded> = false
+        <errorMessage> = ""
 
         // Hours-driven-today / hours-on-duty-today are derived from the
         // 24h cycle history. `computeHoursIn(target)` walks entries and
         // sums durations where the FROM state matches `target`. The
         // current state's run-up to "now" is tacked on at the end.
         function computeHoursIn(target) {
-            const list = @cycleEntries
+            const list = @cycleEntryRows
             const len = list.length
-            const driver = @driver
+            const driver = @currentDriver
             if (!driver) return 0
 
             if (len == 0) {
@@ -248,9 +248,9 @@ ${
                 @loaded = true
                 return
             }
-            @user = data.user
-            @driver = data.driver
-            @cycleEntries = data.cycleEntries
+            @currentUser = data.user
+            @currentDriver = data.driver
+            @cycleEntryRows = data.cycleEntries
             @lastChangeAt = data.lastChangeAt
             @loaded = true
         }
@@ -306,13 +306,13 @@ ${
         </header>
 
         <main class="max-w-3xl mx-auto px-6 py-8">
-            <p if=(!@loaded) class="text-slate-500">Loading…</p>
+            <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-            <div if=(@loaded && !@driver) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+            <div if=(@loaded && !@currentDriver) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
                 ${@errorMessage}
             </div>
 
-            <div if=(@loaded && @driver) class="space-y-6">
+            <div if=(@loaded && @currentDriver) class="space-y-6">
 
                 <!-- Current state header -->
                 <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -321,8 +321,8 @@ ${
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Current state</div>
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClasses(@driver.current_status)}">
-                                ${driverStatusLabel(@driver.current_status)}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClasses(@currentDriver.current_status)}">
+                                ${driverStatusLabel(@currentDriver.current_status)}
                             </span>
                         </div>
                         <div>
@@ -354,22 +354,22 @@ ${
                         <button
                             onclick=setStatus("off_duty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                            disabled=(@driver.current_status == "off_duty")
+                            disabled=(@currentDriver.current_status == "off_duty")
                         >Off duty</button>
                         <button
                             onclick=setStatus("on_duty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                            disabled=(@driver.current_status == "on_duty")
+                            disabled=(@currentDriver.current_status == "on_duty")
                         >On duty</button>
                         <button
                             onclick=setStatus("driving")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                            disabled=(@driver.current_status == "driving")
+                            disabled=(@currentDriver.current_status == "driving")
                         >Driving</button>
                         <button
                             onclick=setStatus("sleeper_berth")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                            disabled=(@driver.current_status == "sleeper_berth")
+                            disabled=(@currentDriver.current_status == "sleeper_berth")
                         >Sleeper berth</button>
                     </div>
 
@@ -388,13 +388,13 @@ ${
                         24h cycle history
                     </h2>
 
-                    <p if=(@cycleEntries.length == 0) class="text-sm text-slate-500">
+                    <p if=(@cycleEntryRows.length == 0) class="text-sm text-slate-500">
                         No state changes in the last 24 hours.
                     </p>
 
-                    <ol if=(@cycleEntries.length > 0) class="space-y-2">
+                    <ol if=(@cycleEntryRows.length > 0) class="space-y-2">
                         ${
-                            for (let entry of @cycleEntries) {
+                            for (let entry of @cycleEntryRows) {
                                 lift <li class="flex items-start gap-3 text-sm border-b border-slate-100 pb-2 last:border-0 last:pb-0">
                                     <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
                                         ${entry.at == "" ? "" : entry.at.substring(0, 16)}

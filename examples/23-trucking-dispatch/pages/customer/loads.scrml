@@ -26,14 +26,14 @@
       import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
@@ -41,14 +41,14 @@
         // load for the customer with current-assignment join.
         server function fetchLoadsServer(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
 
             const customer = ?{`
                 SELECT id, name FROM customers WHERE user_id = ${user.id}
             `}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             // Load + current active assignment (LEFT JOIN; assignments.unassigned_at IS NULL).
             const loads = ?{`
@@ -70,11 +70,11 @@
             return { user: user, customer: customer, loads: loads }
         }
 
-        @user = null
-        @customer = null
-        @loads = []
-        @loaded = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentCustomer> = not
+        <loadRows> = []
+        <loaded> = false
+        <errorMessage> = ""
 
         // Filter dropdown state. Default "all". Other values:
         //   "active"    -> booked / dispatched / loaded / in_transit
@@ -83,7 +83,7 @@
         //   "invoiced"  -> invoiced
         //   "paid"      -> paid
         //   "cancelled" -> cancelled
-        @statusFilter = "all"
+        <statusFilter> = "all"
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -106,9 +106,9 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
-            @loads = data.loads
+            @currentUser = data.user
+            @currentCustomer = data.customer
+            @loadRows = data.loads
             @loaded = true
         }
 
@@ -132,7 +132,7 @@
 
         @lastSeenCustomerEventCount = 0
         function ackCustomerEvents() {
-            @lastSeenCustomerEventCount = @customerEvents.length
+            @lastSeenCustomerEventCount = @currentCustomerEvents.length
             refresh()
         }
 
@@ -157,7 +157,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -168,9 +168,9 @@
 
               <div class="flex items-center gap-3">
                   <span class="text-xs text-slate-500">
-                      Live: <strong>${@customerEvents.length}</strong>
+                      Live: <strong>${@currentCustomerEvents.length}</strong>
                   </span>
-                  <button if=(@customerEvents.length > @lastSeenCustomerEventCount)
+                  <button if=(@currentCustomerEvents.length > @lastSeenCustomerEventCount)
                       onclick=ackCustomerEvents()
                       class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium">
                       Refresh
@@ -191,7 +191,7 @@
               </div>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@loaded && @errorMessage != "") class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3 mb-4">
               ${@errorMessage}
@@ -212,7 +212,7 @@
                   </thead>
                   <tbody>
                       ${
-                          for (let l of @loads) {
+                          for (let l of @loadRows) {
                               if (!matchesFilter(l.status, @statusFilter)) continue
                               lift <tr class="border-b border-slate-200 hover:bg-slate-50">
                                   <td class="px-3 py-3 text-sm">
@@ -228,7 +228,7 @@
                                       </div>
                                       <div class="text-xs text-slate-500">
                                           ${l.commodity}
-                                          <span if=(l.weight_lbs != null) class="text-slate-400">
+                                          <span if=(l.weight_lbs) class="text-slate-400">
                                               · ${l.weight_lbs} lbs
                                           </>
                                       </div>
@@ -248,13 +248,13 @@
                                       ${formatRate(l.rate_dollars)}
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">
-                                      <span if=(l.driver_name != null && l.driver_name != "")>
+                                      <span if=(l.driver_name && l.driver_name != "")>
                                           ${l.driver_name}
-                                          <span if=(l.tractor_unit != null && l.tractor_unit != "") class="text-xs text-slate-500 block">
+                                          <span if=(l.tractor_unit && l.tractor_unit != "") class="text-xs text-slate-500 block">
                                               Tractor ${l.tractor_unit}
                                           </>
                                       </>
-                                      <span if=(l.driver_name == null || l.driver_name == "") class="text-slate-400">
+                                      <span if=(not l.driver_name || l.driver_name == "") class="text-slate-400">
                                           —
                                       </>
                                   </td>
@@ -264,7 +264,7 @@
                   </tbody>
               </table>
 
-              <p if=(@loads.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
+              <p if=(@loadRows.length == 0) class="px-3 py-8 text-center text-slate-500 text-sm">
                   No loads yet. <a class="text-blue-600 hover:underline" href="/customer/quote">Request your first rate quote.</a>
               </p>
           </div>

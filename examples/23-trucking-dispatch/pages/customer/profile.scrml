@@ -17,20 +17,20 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, customers">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, customers">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${userId}`}.get()
         }
 
         server function fetchProfile(sessionToken) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "customer") {
+            if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
             const customer = ?{`
@@ -39,15 +39,15 @@
                 FROM customers
                 WHERE user_id = ${user.id}
             `}.get()
-            if (!customer) return { error: "No customer record." }
+            if (customer is not) return { error: "No customer record." }
 
             return { user: user, customer: customer }
         }
 
-        @user = null
-        @customer = null
-        @loaded = false
-        @errorMessage = ""
+        <currentUser> = not
+        <currentCustomer> = not
+        <loaded> = false
+        <errorMessage> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -70,8 +70,8 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @customer = data.customer
+            @currentUser = data.user
+            @currentCustomer = data.customer
             @loaded = true
         }
 
@@ -95,30 +95,30 @@
                 <a href="/customer" class="hover:text-blue-300">Home</a>
                 <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
                 <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
-                <span class="text-slate-400 text-xs" if=(@user != null)>${@user.email}</span>
+                <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
                 <button onclick=logout() class="hover:text-blue-300">Logout</button>
             </nav>
         </header>
 
         <main class="max-w-2xl mx-auto px-6 py-8">
-            <p if=(!@loaded) class="text-slate-500">Loading…</p>
+            <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
-            <div if=(@loaded && @customer == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+            <div if=(@loaded && @currentCustomer is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
                 ${@errorMessage}
             </div>
 
-            <div if=(@loaded && @customer != null) class="space-y-4">
+            <div if=(@loaded && @currentCustomer is some) class="space-y-4">
 
                 <header class="bg-white rounded-lg border border-slate-200 p-6">
                     <div class="flex items-start justify-between">
                         <div>
-                            <h1 class="text-lg font-bold mb-1">${@customer.name}</h1>
+                            <h1 class="text-lg font-bold mb-1">${@currentCustomer.name}</h1>
                             <p class="text-sm text-slate-600">
-                                Account: <code class="bg-slate-100 px-1 rounded">${@user.email}</code>
+                                Account: <code class="bg-slate-100 px-1 rounded">${@currentUser.email}</code>
                             </p>
                         </div>
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@customer.account_status)}">
-                            ${accountStatusLabel(@customer.account_status)}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@currentCustomer.account_status)}">
+                            ${accountStatusLabel(@currentCustomer.account_status)}
                         </span>
                     </div>
                 </header>
@@ -132,22 +132,22 @@
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Contact name</div>
                             <div class="text-slate-900">
-                                <span if=(@customer.contact_name != null && @customer.contact_name != "")>${@customer.contact_name}</>
-                                <span if=(@customer.contact_name == null || @customer.contact_name == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_name is some && @currentCustomer.contact_name != "")>${@currentCustomer.contact_name}</>
+                                <span if=(@currentCustomer.contact_name is not || @currentCustomer.contact_name == "") class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Email</div>
                             <div class="text-slate-900">
-                                <span if=(@customer.contact_email != null && @customer.contact_email != "")>${@customer.contact_email}</>
-                                <span if=(@customer.contact_email == null || @customer.contact_email == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_email is some && @currentCustomer.contact_email != "")>${@currentCustomer.contact_email}</>
+                                <span if=(@currentCustomer.contact_email is not || @currentCustomer.contact_email == "") class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Phone</div>
                             <div class="text-slate-900">
-                                <span if=(@customer.contact_phone != null && @customer.contact_phone != "")>${@customer.contact_phone}</>
-                                <span if=(@customer.contact_phone == null || @customer.contact_phone == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_phone is some && @currentCustomer.contact_phone != "")>${@currentCustomer.contact_phone}</>
+                                <span if=(@currentCustomer.contact_phone is not || @currentCustomer.contact_phone == "") class="text-slate-400">—</>
                             </div>
                         </div>
                     </div>
@@ -162,20 +162,20 @@
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Billing address</div>
                             <div class="text-slate-900">
-                                <span if=(@customer.billing_address != null && @customer.billing_address != "")>${@customer.billing_address}</>
-                                <span if=(@customer.billing_address == null || @customer.billing_address == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer.billing_address is some && @currentCustomer.billing_address != "")>${@currentCustomer.billing_address}</>
+                                <span if=(@currentCustomer.billing_address is not || @currentCustomer.billing_address == "") class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Payment terms</div>
                             <div class="text-slate-900">
-                                ${paymentTermsLabel(@customer.payment_terms)}
+                                ${paymentTermsLabel(@currentCustomer.payment_terms)}
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer since</div>
                             <div class="text-slate-900">
-                                ${@customer.created_at == null ? "—" : @customer.created_at.substring(0, 10)}
+                                ${@currentCustomer.created_at is not ? "—" : @currentCustomer.created_at.substring(0, 10)}
                             </div>
                         </div>
                     </div>

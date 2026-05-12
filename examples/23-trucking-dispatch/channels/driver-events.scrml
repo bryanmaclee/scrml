@@ -1,26 +1,31 @@
 // PURE-CHANNEL-FILE — SPEC §38.12.6.
-// Centralized declaration for the `driver-events` real-time channel
-// (M5). Subscribers: driver/home (badge count for unread messages /
-// assignments), driver/messages (chat-thread sync). Each event payload
-// carries `targetDriverId` so the driver UI filters to its own thread.
+// Centralized declaration for the `driver-events` real-time channel.
+// Subscribers: driver/home (badge count for unread messages / assignments),
+// driver/messages (chat-thread sync). Each event payload carries
+// `targetDriverId` so the driver UI filters to its own thread.
 //
-// Publishers: driver/messages (driver send), and dispatcher pages
-// when sending messages to a driver. Per F-CHANNEL-001 channel name
-// interpolation does not work, so all driver-events arrive on a single
-// broadcast and subscribers filter by payload.targetDriverId.
+// Publishers: driver/messages (driver send), and dispatcher pages when
+// sending messages to a driver. Per F-CHANNEL-001 channel name interpolation
+// does not work, so all driver-events arrive on a single broadcast and
+// subscribers filter by payload.targetDriverId.
+//
+// V5-strict channel-cell pattern (SPEC §38.4): `<driverEvents>` reactive cell
+// auto-syncs across every connected client by virtue of being declared in
+// the channel body. No `@shared` modifier — that was retired in v0.next
+// (E-CHANNEL-SHARED-MODIFIER).
 //
 // To consume from a page:
 //   ${ import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml' }
 //   <driverEvents/>
-// CHX (CE phase 2) inlines the channel body at the consumer site at compile
-// time; no runtime module is loaded.
+// CE (component-expansion) inlines the channel body at the consumer site at
+// compile time; no runtime module is loaded.
 
 export <channel name="driver-events">
     ${
-        @shared driverEvents = []
+        <driverEvents> = []
 
         server function publishDriverEvent(eventType, targetDriverId, fromUserId, body, loadId) {
-            driverEvents = [...driverEvents, {
+            @driverEvents = [...@driverEvents, {
                 type: eventType,
                 targetDriverId: targetDriverId,
                 fromUserId: fromUserId,

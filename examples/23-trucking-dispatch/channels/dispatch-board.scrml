@@ -1,25 +1,28 @@
 // PURE-CHANNEL-FILE — SPEC §38.12.6.
-// Centralized declaration for the `dispatch-board` real-time channel
-// (M5). Subscribers: dispatcher pages, customer/quote (publishes
-// new tenders), driver/load-detail (publishes status transitions).
-// The shared `boardEvents` array is updated by `publishBoardEvent(...)`
-// and any client subscribed to the WebSocket route `/_scrml_ws/dispatch-board`
-// observes the change reactively.
+// Centralized declaration for the `dispatch-board` real-time channel.
+// Subscribers: dispatcher pages, customer/quote (publishes new tenders),
+// driver/load-detail (publishes status transitions).
+//
+// V5-strict channel-cell pattern (SPEC §38.4): the `<boardEvents>` reactive
+// cell declared inside the channel body auto-syncs across every connected
+// client by virtue of being declared in the channel body. No `@shared`
+// modifier — that was retired in v0.next (E-CHANNEL-SHARED-MODIFIER).
 //
 // To consume from a page:
 //   ${ import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml' }
 //   <dispatchBoard/>
-// CHX (CE phase 2) inlines the channel body at the consumer site at compile
-// time; no runtime module is loaded.
+// CE (component-expansion) inlines the channel body at the consumer site at
+// compile time; no runtime module is loaded.
 
 export <channel name="dispatch-board">
     ${
-        @shared boardEvents = []
+        <boardEvents> = []
 
-        // Publish helper. Callers from outside the channel scope
-        // invoke this via the auto-injected client → server bridge.
+        // Publish helper. Callers from outside the channel scope invoke this
+        // via the auto-injected client→server bridge. Writes to @boardEvents
+        // lower to broadcast({__type:"__sync", __key, __val}) per §38.4.
         server function publishBoardEvent(eventType, loadId, status) {
-            boardEvents = [...boardEvents, {
+            @boardEvents = [...@boardEvents, {
                 type: eventType,
                 loadId: loadId,
                 status: status,

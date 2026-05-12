@@ -50,14 +50,14 @@
       import { "load-events" as loadEvents } from '../../channels/load-events.scrml'
   }
 
-  < db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries, lin_tokens">
+  <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries, lin_tokens">
 
     ${
         server function getCurrentUser(sessionToken) {
-            if (!sessionToken) return null
+            if (sessionToken is not) return not
             const store = createSessionStore(SESSION_DB_PATH)
             const userId = store.get(sessionToken)
-            if (!userId) return null
+            if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
@@ -67,11 +67,11 @@
         // they aren't assigned to).
         server function fetchLoadDetail(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const load = ?{`
                 SELECT
@@ -85,9 +85,9 @@
                 LEFT JOIN customers c ON c.id = l.customer_id
                 WHERE l.id = ${loadId}
             `}.get()
-            if (!load) return { notFound: true }
+            if (load is not) return { notFound: true }
 
-            const assignment = ?{`
+            const assignmentRow = ?{`
                 SELECT id, driver_id, assigned_at
                 FROM assignments
                 WHERE load_id = ${loadId}
@@ -98,7 +98,7 @@
             `}.get()
 
             // Recent (5) log entries for this load.
-            const recentEntries = ?{`
+            const recentEntryRows = ?{`
                 SELECT id, type, at, payload, driver_id
                 FROM log_entries
                 WHERE load_id = ${loadId}
@@ -108,7 +108,7 @@
 
             return {
                 user: user, driver: driver, load: load,
-                assignment: assignment, recentEntries: recentEntries
+                assignment: assignmentRow, recentEntries: recentEntryRows
             }
         }
 
@@ -117,24 +117,24 @@
         // target. Returns ok or error.
         server function transitionLoadServer(sessionToken, loadId, newStatus) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             // Driver must be currently assigned.
-            const assignment = ?{`
+            const assignmentRow = ?{`
                 SELECT id FROM assignments
                 WHERE load_id = ${loadId}
                   AND driver_id = ${driver.id}
                   AND unassigned_at IS NULL
                 LIMIT 1
             `}.get()
-            if (!assignment) return { error: "You are not assigned to this load." }
+            if (assignmentRow is not) return { error: "You are not assigned to this load." }
 
             const load = ?{`SELECT status FROM loads WHERE id = ${loadId}`}.get()
-            if (!load) return { error: "Load not found." }
+            if (load is not) return { error: "Load not found." }
 
             // Driver-allowed transitions only.
             let allowed = false
@@ -176,7 +176,7 @@
         // (used by driver page to display BOL upload eligibility).
         server function getActiveBolTokenServer(sessionToken, loadId) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const row = ?{`
@@ -198,11 +198,11 @@
         // is to copy the lin var into a template literal first.
         server function uploadBolServer(sessionToken, loadId, filename, lin token: string) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const consumeMarker = `consume:${token}`
             const result = ?{`
@@ -228,11 +228,11 @@
         // POD upload (mocked) — stores filename in log_entries.payload.
         server function uploadPodServer(sessionToken, loadId, filename) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const payload = `{"filename":"${filename}"}`
             ?{`
@@ -244,11 +244,11 @@
 
         server function logFuelStopServer(sessionToken, loadId, amount, odometer) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const payload = `{"amount":"${amount}","odometer":"${odometer}"}`
             ?{`
@@ -260,11 +260,11 @@
 
         server function logBreakdownServer(sessionToken, loadId, description) {
             const user = getCurrentUser(sessionToken)
-            if (!user || user.role != "driver") {
+            if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
             const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (!driver) return { error: "No driver record." }
+            if (driver is not) return { error: "No driver record." }
 
             const payload = `{"description":"${description}"}`
             ?{`
@@ -274,28 +274,28 @@
             return { ok: true }
         }
 
-        @user = null
-        @driver = null
-        @load = null
-        @assignment = null
-        @recentEntries = []
-        @loaded = false
-        @errorMessage = ""
-        @notFound = false
+        <currentUser> = not
+        <currentDriver> = not
+        <currentLoad> = not
+        <assignment> = not
+        <recentEntries> = []
+        <loaded> = false
+        <errorMessage> = ""
+        <notFound> = false
 
         // M6: BOL acceptance lin-token for this load. Empty string when no
         // active token (load.status < loaded, or BOL already submitted).
-        @bolToken = ""
+        <bolToken> = ""
 
         // Form state for the BOL/POD/fuel/breakdown blocks.
-        @bolFilename = ""
-        @podFilename = ""
-        @fuelAmount = ""
-        @fuelOdometer = ""
-        @breakdownDescription = ""
+        <bolFilename> = ""
+        <podFilename> = ""
+        <fuelAmount> = ""
+        <fuelOdometer> = ""
+        <breakdownDescription> = ""
 
         // Which inline form is currently expanded. "" means none.
-        @openForm = ""
+        <openForm> = ""
 
         function getSessionToken() {
             const c = document.cookie ? document.cookie : ""
@@ -332,9 +332,9 @@
                 @loaded = true
                 return
             }
-            @user = data.user
-            @driver = data.driver
-            @load = data.load
+            @currentUser = data.user
+            @currentDriver = data.driver
+            @currentLoad = data.load
             @assignment = data.assignment
             @recentEntries = data.recentEntries
             // M6: query active BOL token for the load (if any).
@@ -345,7 +345,7 @@
 
         function transition(target) {
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = transitionLoadServer(tok, loadId, target)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -362,7 +362,7 @@
             // customer's loads list flips to "delivered" without
             // reload.
             if (target == "delivered") {
-                const customerId = @load.customer_id
+                const customerId = @currentLoad.customer_id
                 publishCustomerEvent("load-delivered", customerId, 0, loadId)
             }
             refresh()
@@ -381,7 +381,7 @@
                 return
             }
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             // M6: pass the lin BOL token to the server fn. Server consumes
             // it via the DB-side single-use guard; replays return error.
             const result = uploadBolServer(tok, loadId, filename, bolTok)
@@ -406,7 +406,7 @@
                 return
             }
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = uploadPodServer(tok, loadId, filename)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -430,7 +430,7 @@
                 return
             }
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = logFuelStopServer(tok, loadId, amount, odometer)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -454,7 +454,7 @@
                 return
             }
             const tok = getSessionToken()
-            const loadId = @load.id
+            const loadId = @currentLoad.id
             const result = logBreakdownServer(tok, loadId, desc)
             if (result.unauthorized) {
                 window.location.href = "/login?reason=unauthorized"
@@ -531,10 +531,10 @@
         // After mount, we send a one-shot location ping so the customer's
         // tracking page sees a recent update. No polling.
         function sendLocationPing() {
-            if (!@load || !@driver) return
-            const loc = @driver.current_location ? @driver.current_location : ""
+            if (@currentLoad is not || @currentDriver is not) return
+            const loc = @currentDriver.current_location ? @currentDriver.current_location : ""
             if (loc == "") return
-            publishLoadEvent("location", @load.id, "", loc)
+            publishLoadEvent("location", @currentLoad.id, "", loc)
         }
 
         on mount {
@@ -588,57 +588,57 @@
               </button>
           </div>
 
-          <p if=(!@loaded) class="text-slate-500">Loading…</p>
+          <p if=(not @loaded) class="text-slate-500">Loading…</p>
 
           <div if=(@loaded && @notFound) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               Load not found.
           </div>
 
-          <div if=(@loaded && !@notFound && @load == null) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
+          <div if=(@loaded && !@notFound && @currentLoad is not) class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-3">
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @load != null) class="space-y-6">
+          <div if=(@loaded && @currentLoad is some) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
                       <div>
-                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@load.id}</div>
+                          <div class="text-xs text-slate-500 font-medium mb-1">LOAD #${@currentLoad.id}</div>
                           <h1 class="text-xl font-bold text-slate-900">
-                              ${@load.origin_city}, ${@load.origin_state}
+                              ${@currentLoad.origin_city}, ${@currentLoad.origin_state}
                               <span class="text-slate-400 mx-2">→</span>
-                              ${@load.destination_city}, ${@load.destination_state}
+                              ${@currentLoad.destination_city}, ${@currentLoad.destination_state}
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              ${@load.commodity}
-                              <span if=(@load.weight_lbs != null)> · ${@load.weight_lbs} lbs</>
+                              ${@currentLoad.commodity}
+                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClasses(@load.status)}">
-                              ${statusLabel(@load.status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClasses(@currentLoad.status)}">
+                              ${statusLabel(@currentLoad.status)}
                           </span>
-                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@load.rate_dollars)}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@currentLoad.rate_dollars)}</div>
                       </div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-sm">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer</div>
-                          <div class="font-semibold text-slate-900">${@load.customer_name}</div>
-                          <div class="text-slate-600">${@load.customer_contact == null ? "" : @load.customer_contact}</div>
-                          <div class="text-slate-500 text-xs">${@load.customer_phone == null ? "" : @load.customer_phone}</div>
+                          <div class="font-semibold text-slate-900">${@currentLoad.customer_name}</div>
+                          <div class="text-slate-600">${@currentLoad.customer_contact is not ? "" : @currentLoad.customer_contact}</div>
+                          <div class="text-slate-500 text-xs">${@currentLoad.customer_phone is not ? "" : @currentLoad.customer_phone}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900">${formatPickupAt(@load.pickup_at)}</div>
-                          <div class="text-xs text-slate-500">${@load.origin_address == null ? "" : @load.origin_address}</div>
+                          <div class="text-slate-900">${formatPickupAt(@currentLoad.pickup_at)}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad.origin_address is not ? "" : @currentLoad.origin_address}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Deliver</div>
-                          <div class="text-slate-900">${formatPickupAt(@load.deliver_by)}</div>
-                          <div class="text-xs text-slate-500">${@load.destination_address == null ? "" : @load.destination_address}</div>
+                          <div class="text-slate-900">${formatPickupAt(@currentLoad.deliver_by)}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad.destination_address is not ? "" : @currentLoad.destination_address}</div>
                       </div>
                   </div>
               </section>
@@ -650,15 +650,15 @@
                   </h2>
 
                   <!-- Status advance button when there's a valid next status. -->
-                  <div if=(nextDriverStatus(@load.status) != "") class="mb-4">
+                  <div if=(nextDriverStatus(@currentLoad.status) != "") class="mb-4">
                       <button
-                          onclick=transition(nextDriverStatus(@load.status))
+                          onclick=transition(nextDriverStatus(@currentLoad.status))
                           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md"
-                      >${nextDriverButtonLabel(@load.status)}</button>
+                      >${nextDriverButtonLabel(@currentLoad.status)}</button>
                   </div>
 
-                  <p if=(nextDriverStatus(@load.status) == "") class="text-sm text-slate-500 mb-4">
-                      No driver-driven transition available from <strong>${statusLabel(@load.status)}</strong>.
+                  <p if=(nextDriverStatus(@currentLoad.status) == "") class="text-sm text-slate-500 mb-4">
+                      No driver-driven transition available from <strong>${statusLabel(@currentLoad.status)}</strong>.
                   </p>
 
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -669,12 +669,12 @@
                            to the driver as a UI affordance. -->
                       <button
                           onclick=openForm("bol")
-                          disabled=(!isBolEligible(@load.status) || @bolToken == "")
+                          disabled=(!isBolEligible(@currentLoad.status) || @bolToken == "")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
                       >Upload BOL</button>
                       <button
                           onclick=openForm("pod")
-                          disabled=(!isPodEligible(@load.status))
+                          disabled=(!isPodEligible(@currentLoad.status))
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
                       >Upload POD</button>
                       <button
@@ -706,7 +706,7 @@
                               id="bol-filename"
                               type="text"
                               bind:value=@bolFilename
-                              placeholder="bol-load-${@load.id}.pdf"
+                              placeholder="bol-load-${@currentLoad.id}.pdf"
                               class="w-full text-sm px-3 py-2 border border-slate-300 rounded-md"
                               required
                           />
@@ -732,7 +732,7 @@
                               id="pod-filename"
                               type="text"
                               bind:value=@podFilename
-                              placeholder="pod-load-${@load.id}.pdf"
+                              placeholder="pod-load-${@currentLoad.id}.pdf"
                               class="w-full text-sm px-3 py-2 border border-slate-300 rounded-md"
                               required
                           />
@@ -813,7 +813,7 @@
                       <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider">
                           Recent activity
                       </h2>
-                      <a href="/driver/loads/${@load.id}/log" class="text-xs text-blue-600 hover:underline">
+                      <a href="/driver/loads/${@currentLoad.id}/log" class="text-xs text-blue-600 hover:underline">
                           Full log
                       </a>
                   </header>
@@ -827,11 +827,11 @@
                           for (let entry of @recentEntries) {
                               lift <li class="flex items-start gap-3 text-sm">
                                   <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at == null ? "" : entry.at.substring(0, 16)}
+                                      ${entry.at is not ? "" : entry.at.substring(0, 16)}
                                   </span>
                                   <span class="font-medium text-slate-900 flex-1">
                                       ${logTypeLabel(entry.type)}
-                                      <span if=(entry.payload != null && entry.payload != "") class="text-xs text-slate-500 block break-all">
+                                      <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block break-all">
                                           ${entry.payload}
                                       </>
                                   </span>
