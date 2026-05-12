@@ -109,6 +109,13 @@ const ALLOWED = {
   "codegen/context.ts": 2,         // type-signature mention only (CompileContext.exportRegistry shape)
   "codegen/index.ts": 2,           // type-signature mention only (CgInput.exportRegistry shape)
   "codegen/emit-engine.ts": 3,     // type-signature mentions + lookupSourceMap path-shape comment
+  // Task #17 (S85) — cross-file channel-import emit suppression carries the
+  // same exportRegistry value shape `{kind, category, isComponent}` as
+  // MOD's registry. The `isComponent` field appears in the TYPE ANNOTATION
+  // only (filterChannelImportSpecifiers signature + local `sourceMap`
+  // declaration); the routing read uses `category === "channel"`, never
+  // `.isComponent`.
+  "codegen/emit-channel.ts": 2,    // type-signature mentions only
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

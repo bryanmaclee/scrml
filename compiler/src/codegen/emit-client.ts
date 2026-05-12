@@ -6,6 +6,7 @@ import { escapeRegex } from "./utils.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
+import { filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
@@ -504,6 +505,13 @@ export function generateClientJs(ctx: CompileContext): string {
   // Local .scrml imports are rewritten to .client.js (compiled browser output).
   // scrml: and vendor: prefixed imports pass through unchanged — they are valid
   // Bun module specifiers and resolve at runtime against the bundled stdlib.
+  //
+  // Task #17 (S85): cross-file channel imports (kebab-named, string-literal
+  // form in source — `import { "dispatch-board" as alias } from '...'`) are
+  // filtered out via `filterChannelImportSpecifiers`. Channels are inlined
+  // by CHX at the consumer site, not resolved via ES module bindings, so
+  // emitting a JS import for them either produces a SyntaxError (bare kebab)
+  // or a module-link error (no matching export on the channel-file side).
   const allImports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
   for (const stmt of allImports) {
     if ((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0) {
@@ -513,12 +521,15 @@ export function generateClientJs(ctx: CompileContext): string {
       if (jsSource.endsWith(".scrml")) {
         jsSource = jsSource.replace(/\.scrml$/, ".client.js");
       }
-      const names: string = stmt.names.join(", ");
       if (stmt.isDefault) {
+        const names: string = stmt.names.join(", ");
         lines.push(`import ${names} from ${JSON.stringify(jsSource)};`);
-      } else {
-        lines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
+        continue;
       }
+      const kept = filterChannelImportSpecifiers(stmt, filePath, ctx.exportRegistry ?? null);
+      if (kept.length === 0) continue; // All specifiers are channels — skip emit entirely.
+      const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
+      lines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
     }
   }
   lines.push("");

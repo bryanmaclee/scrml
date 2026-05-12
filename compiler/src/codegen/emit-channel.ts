@@ -90,6 +90,104 @@ export function collectChannelNodes(nodes: any[]): any[] {
 }
 
 // ---------------------------------------------------------------------------
+// Import-emit suppression (cross-file channel imports)
+// ---------------------------------------------------------------------------
+
+/**
+ * Type alias for MOD's exportRegistry shape, matching `CompileContext.exportRegistry`.
+ */
+type CrossFileExportRegistry = Map<
+  string,
+  Map<string, { kind: string; category: string; isComponent: boolean }>
+>;
+
+/**
+ * Given a single import-decl statement (from `fileAST.ast.imports`), filter out
+ * any specifier whose imported name resolves to a `<channel>` export in MOD's
+ * exportRegistry. Returns the remaining (non-channel) specifiers — caller emits
+ * the JS `import { ... } from "..."` over these, or skips emission entirely
+ * when the result is empty.
+ *
+ * Why this exists (Task #17, S85): a consumer file using
+ *   ${ import { "dispatch-board" as dispatchBoard } from './channels/x.scrml' }
+ * was producing an emitted line like
+ *   import { dispatch-board } from "./channels/x.server.js";
+ * — a JS SyntaxError ("Unexpected token '-'"). Quoting the name would only
+ * promote the error to a module-link failure, because the channel's compiled
+ * exporter does NOT bind the channel name as an ES export — channels are
+ * inlined by CHX at the consumer site, not resolved via module bindings.
+ * The correct fix is therefore to suppress JS import emission for the
+ * channel-only specifiers entirely.
+ *
+ * Path-shape resilience: production exportRegistry is keyed by ABSOLUTE
+ * post-resolveModulePath paths; unit-test harnesses sometimes use relative
+ * keys. We try both, mirroring `collectCrossFileEngineMounts` in emit-engine.ts.
+ *
+ * Falls back to a syntactic check when no exportRegistry is provided: if an
+ * imported name contains characters that are not valid in a JS IdentifierName
+ * (e.g., `-`, `.`), we assume it's a string-literal channel import and drop
+ * it — emitting `import { kebab-name } from ...` is never valid JS.
+ *
+ * @param stmt — the import-decl or use-decl AST node
+ * @param importerPath — absolute path of the file containing the import
+ * @param exportRegistry — MOD's exportRegistry (may be null in tests)
+ * @returns filtered specifiers: [{imported, local}] for each non-channel
+ *          binding, in original order. Empty array means the import should
+ *          be skipped entirely.
+ */
+export function filterChannelImportSpecifiers(
+  stmt: any,
+  importerPath: string | null | undefined,
+  exportRegistry: CrossFileExportRegistry | null | undefined,
+): Array<{ imported: string; local: string }> {
+  // Specifier source-of-truth: prefer `stmt.specifiers` (carries `{imported,
+  // local}`); fall back to `stmt.names` (legacy / use-decl shape).
+  const specs: Array<{ imported: string; local: string }> = Array.isArray(stmt.specifiers) && stmt.specifiers.length > 0
+    ? stmt.specifiers.map((s: any) => ({ imported: String(s.imported), local: String(s.local ?? s.imported) }))
+    : (Array.isArray(stmt.names) ? stmt.names.map((n: string) => ({ imported: n, local: n })) : []);
+
+  if (specs.length === 0) return [];
+
+  const sourcePath: string = stmt.source ?? "";
+  // Non-.scrml sources (scrml:*, vendor:*, plain JS) — pass through unchanged.
+  if (!sourcePath.endsWith(".scrml")) return specs;
+
+  // Try exportRegistry lookup first (the authoritative signal).
+  let sourceMap: Map<string, { kind: string; category: string; isComponent: boolean }> | undefined;
+  if (exportRegistry) {
+    sourceMap = exportRegistry.get(sourcePath);
+    if ((!sourceMap || sourceMap.size === 0) && importerPath && (sourcePath.startsWith("./") || sourcePath.startsWith("../"))) {
+      // Resolve relative → absolute via module-resolver. Lazy require to
+      // avoid the static dependency at this codegen module's import time
+      // (mirrors emit-engine.ts:2484).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { resolveModulePath } = require("../module-resolver.js");
+        const absSource: string = resolveModulePath(sourcePath, importerPath);
+        sourceMap = exportRegistry.get(absSource);
+      } catch {
+        // resolveModulePath unavailable or threw — fall through to the
+        // syntactic fallback below.
+      }
+    }
+  }
+
+  return specs.filter(({ imported }) => {
+    // (1) authoritative — exportRegistry says category === "channel".
+    if (sourceMap) {
+      const entry = sourceMap.get(imported);
+      if (entry && entry.category === "channel") return false;
+    }
+    // (2) syntactic fallback — when no registry is available (tests, isolated
+    // codegen calls). Channel names are quoted in source because they aren't
+    // valid JS IdentifierNames; if we still see a non-identifier here, it
+    // must be a channel binding that we cannot validly emit as a JS import.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(imported)) return false;
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Channel attribute extraction helpers
 // ---------------------------------------------------------------------------
 

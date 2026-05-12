@@ -181,10 +181,16 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     expect(pinnedImport[0]).toBe(plainImport[0]);
   });
 
-  test("§C20.1.4 aliased pinned import (`{ X as Y pinned }`) emits LOCAL name only", () => {
-    // ES module syntax does not allow re-stating the original name when
-    // an alias is in play; the LOCAL alias is what consumers reference.
-    // The `pinned` flag is upstream of emission.
+  test("§C20.1.4 aliased pinned import (`{ X as Y pinned }`) emits canonical `imported as local` ES form", () => {
+    // ES module syntax requires `{ imported as local }` when the imported
+    // name differs from the local binding name. The `pinned` flag is upstream
+    // of emission and never reaches the JS surface.
+    //
+    // Task #17 (S85): prior to the cross-file-channel-import-emit fix, the
+    // emitter joined `stmt.names` (the IMPORTED-name array per ast-builder.js
+    // line 5832 _stripQuotes path) and emitted `import { foo } from ...` —
+    // dropping the `as bar` alias and breaking source references to `bar`.
+    // The post-fix shape preserves the alias when imported !== local.
     const fileAST = makeFileAST(
       "/app/app.scrml",
       [makeImportDecl("./m.scrml", [{ imported: "foo", local: "bar", pinned: true }])],
@@ -192,10 +198,7 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // Today's emitter writes the LOCAL name (matches non-pinned aliased behavior).
-    // The current emitter joins `names` (which is the LOCAL name array per
-    // ast-builder.js:5511-5516); pinned is irrelevant to this shape.
-    expect(clientJs).toContain('import { bar } from "./m.client.js"');
+    expect(clientJs).toContain('import { foo as bar } from "./m.client.js"');
     expect(clientJs).not.toContain("pinned");
   });
 });
