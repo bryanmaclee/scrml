@@ -31,6 +31,9 @@
  *   §3  `<request>` without url= emits no fetch machinery
  *   §4  `<request url="...">` still emits the machinery (regression guard)
  *   §5  Non-server-fn assignment stays synchronous (regression guard)
+ *   §6  GITI-001 in EXPRESSION CONTEXT (S84 fix-lift-async-iife-paren) —
+ *       the same wrap, when nested inside `el.textContent = await (...)`,
+ *       must NOT append a trailing `;` (would produce malformed `await ((...)();)`)
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -47,7 +50,7 @@ function fix(name, src) {
   return path;
 }
 
-let gitiFx, urlFx, plainFx;
+let gitiFx, urlFx, plainFx, exprCtxFx;
 
 beforeAll(() => {
   mkdirSync(FIXTURE_DIR, { recursive: true });
@@ -93,6 +96,42 @@ beforeAll(() => {
 
 <button onclick=bump()>inc</button>
 <p>\${@count}</p>
+
+</program>
+`);
+
+  // §6 fixture: `server <var>` + `on mount { @var = serverFn() }` + `${@var}` render.
+  //
+  // This minimal pattern reproduces the 18-state-authority emit path. The
+  // `on mount` block somehow generates a reactive-display wiring whose
+  // expression is `@var = serverFn()` (the assignment, not just `@var`).
+  //
+  // That wiring lives at emit-event-wiring.ts:854-855 and wraps the rewritten
+  // expression in `el.textContent = await (...)`. The rewritten expression is
+  // `_scrml_reactive_set("var", _scrml_fetch_X_N())` — and GITI-001 then
+  // converts it to an async IIFE wrap.
+  //
+  // BEFORE S84 fix: GITI-001 always appended a trailing `;` even in
+  // expression context, producing `await ((async () => ...)();)` which is
+  // invalid JS (`;)` token sequence).
+  //
+  // AFTER S84 fix: GITI-001 detects statement vs expression context via
+  // the source's trailing `;` and only appends `;` when present.
+  exprCtxFx = fix("expr-ctx.scrml", `<program db="./fixture.db">
+
+\${
+  server function loadValue() {
+    lift 42
+  }
+  <data server> = 0
+  on mount {
+    @data = loadValue()
+  }
+}
+
+<div>
+  <p>\${@data}</p>
+</div>
 
 </program>
 `);
@@ -181,5 +220,59 @@ describe("§5: `@count = @count + 1` stays synchronous (regression guard)", () =
     expect(js).toContain('_scrml_reactive_set("count"');
     // And NOT inside an async IIFE
     expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("count"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6: GITI-001 in EXPRESSION CONTEXT — S84 fix-lift-async-iife-paren
+// ---------------------------------------------------------------------------
+//
+// When `@var = serverFn()` appears as a MARKUP EXPRESSION (e.g. `<p>${@x = load()}</p>`),
+// the rewrite-reactive-display-wiring path emits `el.textContent = await (${rewrittenExpr})`.
+// The rewrittenExpr is the expression form `_scrml_reactive_set("x", _scrml_fetch_load_N())`
+// (NO trailing `;`). GITI-001 then wraps it in `(async () => _scrml_reactive_set(..., await ...))()`.
+//
+// BEFORE FIX: GITI-001 always appended a trailing `;` regardless of context,
+// producing malformed `await ((async () => ...)();)` (`;)` is invalid JS).
+//
+// AFTER FIX: GITI-001 detects whether the source had a trailing `;` (statement
+// context) and only appends `;` if so. Expression context → no semicolon →
+// well-formed `await ((async () => ...)())`.
+
+describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", () => {
+  test("compile succeeds", () => {
+    const result = compile(exprCtxFx);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("client.js parses as valid JS (no `;)` from extra semicolon)", () => {
+    const result = compile(exprCtxFx);
+    const js = result.outputs.get(exprCtxFx).clientJs;
+    const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
+    expect(() => new Function(stripped)).not.toThrow();
+  });
+
+  test("no malformed `(async () => ...)();)` token sequence in output", () => {
+    const result = compile(exprCtxFx);
+    const js = result.outputs.get(exprCtxFx).clientJs;
+    // The bug signature: `;)` immediately after an IIFE invocation.
+    expect(js).not.toMatch(/\)\(\);\s*\)/);
+  });
+
+  test("the wrap inside `el.textContent = await (...)` ends with `)())` not `)();)`", () => {
+    const result = compile(exprCtxFx);
+    const js = result.outputs.get(exprCtxFx).clientJs;
+    // Must contain the well-formed expression wrap
+    expect(js).toMatch(/el\.textContent\s*=\s*await\s*\(\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\s*\)/);
+  });
+
+  test("statement-context wrap (top-level or in fn body) still ends with `();`", () => {
+    // The original §1 fixture has `@data = loadValue()` inside a `<request>`
+    // body, which compiles to a statement-context wrap. Verify that path
+    // still emits the trailing `;` — must not regress.
+    const result = compile(gitiFx);
+    const js = result.outputs.get(gitiFx).clientJs;
+    // Match the statement-form: `(async () => _scrml_reactive_set("data", await _scrml_fetch_loadValue_N()))();`
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\);/);
   });
 });

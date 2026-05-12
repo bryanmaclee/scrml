@@ -890,10 +890,18 @@ export function generateClientJs(ctx: CompileContext): string {
           continue;
         }
         let stmtEnd = outerClose + 1;
-        if (clientCode[stmtEnd] === ";") stmtEnd++;
+        // S84 fix-lift-async-iife-paren: detect statement vs expression context.
+        // The original `_scrml_reactive_set(name, fetchStub(args))` may appear in
+        // EXPRESSION position (e.g. inside `el.textContent = await (...)` at
+        // emit-event-wiring.ts:826/854/855 — markup that renders an `@var = serverFn()`
+        // assignment). Always appending a trailing `;` to the IIFE wrap there
+        // produces invalid `await ((async () => ...)();)` — a `;)` token sequence.
+        // Preserve the trailing `;` only if the source had one (statement context).
+        const hadTrailingSemi = clientCode[stmtEnd] === ";";
+        if (hadTrailingSemi) stmtEnd++;
         const args = clientCode.slice(valStart + callPrefix.length, k);
         parts.push(clientCode.slice(i, setIdx));
-        parts.push(`(async () => _scrml_reactive_set(${nameArg}, await ${mangledName}(${args})))();`);
+        parts.push(`(async () => _scrml_reactive_set(${nameArg}, await ${mangledName}(${args})))()${hadTrailingSemi ? ";" : ""}`);
         i = stmtEnd;
       }
       clientCode = parts.join("");
