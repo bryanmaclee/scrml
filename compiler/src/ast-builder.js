@@ -2772,35 +2772,73 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   /**
    * §53 Inline Type Predicates — type annotation collector (parseLogicBody closure).
    * Called after consuming `@name` when peek() is `:`.
-   * Consumes `:` and collects the type expression (including balanced parens and
-   * optional [label] suffix) up to `=` or `,` at paren depth 0.
-   * Returns the annotation string (e.g. "number(>0 && <10000)[valid_x]") or null.
+   * Consumes `:` and collects the type expression (including balanced parens,
+   * braces, brackets, and optional [label] suffix) up to `=` or `,` at top
+   * level (i.e., when all three depth counters are zero).
+   *
+   * v024-4 — extended to track BRACE (`{`/`}`) and BRACKET (`[`/`]`) depth
+   * alongside paren depth. Previous version tracked only paren depth, which
+   * caused multi-field object-type annotations like
+   * `{ id: number, title: string }[]` to terminate at the first comma inside
+   * the braces. That made the typed-decl `<cards>: { id, title }[] = [...]`
+   * fall through to html-fragment and never reach SYM PASS 1 — the kanban
+   * registration gap. Object-type, tuple-array, and array-of-record forms are
+   * all natural shapes in scrml's type grammar (SPEC §6.2 / §6.5 / §14).
+   *
+   * Top-level terminators (only when depth === 0 across ALL three):
+   *   - `=` (assignment to RHS) — but not `==` (operator).
+   *   - `,` (defensive — function-param parsing has its own collector and does
+   *     not call this; left in place for callers in expression-list contexts).
+   *
+   * Returns the annotation string (e.g. "number(>0 && <10000)[valid_x]",
+   * "{a:number,b:string}[]") or null.
    */
   function collectTypeAnnotation() {
     if (peek().text !== ':') return null;
     consume(); // consume ':'
     const parts = [];
-    let depth = 0;
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    const atTopLevel = () => parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
     while (peek().kind !== 'EOF') {
       const t = peek();
       if (t.text === '(') {
-        depth++;
+        parenDepth++;
         parts.push(t.text);
         consume();
       } else if (t.text === ')') {
-        if (depth === 0) break; // unmatched ')' — stop
-        depth--;
+        if (parenDepth === 0) break; // unmatched ')' — stop
+        parenDepth--;
         parts.push(t.text);
         consume();
-        // Check for label suffix [ident] immediately after closing paren at depth 0
-        if (depth === 0 && peek().text === '[') {
+        // Check for label suffix [ident] immediately after closing paren at top level
+        if (atTopLevel() && peek().text === '[') {
           parts.push(peek().text); consume(); // consume '['
           while (peek().kind !== 'EOF' && peek().text !== ']') {
             parts.push(peek().text); consume();
           }
           if (peek().text === ']') { parts.push(peek().text); consume(); } // consume ']'
         }
-      } else if (t.text === '=' && depth === 0) {
+      } else if (t.text === '{') {
+        braceDepth++;
+        parts.push(t.text);
+        consume();
+      } else if (t.text === '}') {
+        if (braceDepth === 0) break; // unmatched '}' — stop
+        braceDepth--;
+        parts.push(t.text);
+        consume();
+      } else if (t.text === '[') {
+        bracketDepth++;
+        parts.push(t.text);
+        consume();
+      } else if (t.text === ']') {
+        if (bracketDepth === 0) break; // unmatched ']' — stop
+        bracketDepth--;
+        parts.push(t.text);
+        consume();
+      } else if (t.text === '=' && atTopLevel()) {
         // Stop at assignment (but not ==)
         const next = peek(1);
         if (next && next.text === '=') {
@@ -2809,8 +2847,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else {
           break;
         }
-      } else if (t.text === ',' && depth === 0) {
-        break; // stop at comma (param lists)
+      } else if (t.text === ',' && atTopLevel()) {
+        break; // stop at top-level comma (defensive — see docstring)
       } else {
         parts.push(t.text);
         consume();
