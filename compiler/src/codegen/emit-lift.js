@@ -551,13 +551,42 @@ export function emitCreateElementFromMarkup(node, lines) {
         const childVar = emitCreateElementFromMarkup(child, lines);
         lines.push(`${elVar}.appendChild(${childVar});`);
       } else if (child.kind === "logic") {
-        // Logic block in markup — emit as a text node with the evaluated expression
+        // Logic block in markup — dispatch each body node by kind:
+        //   - bare-expr      → text-node interpolation (${expr})
+        //   - lift-expr      → nested lift, routed to elVar as container
+        //   - for-stmt       → for-of loop with inner lift routed to elVar (S87 Bug-6 fix)
+        //   - if-stmt        → ${if (cond) { lift ... }} routed to elVar
+        //   - bare statements → emitted via emitLogicNode (e.g. const/let decls
+        //                      inside ${ ... } such as `${ const x = f() }`)
+        //
+        // Bug-6 fix: previously, only bare-expr was handled and for-stmt/if-stmt
+        // children were silently dropped, causing `lift <ul>${ for (r of rows) {
+        // lift <li>${r.name}/ }}</ul>` to emit a bare <ul> with NO <li> children.
         if (child.body) {
           for (const logicChild of child.body) {
+            if (!logicChild) continue;
             // Phase 4d Step 8: ExprNode-only (bare-expr.expr deleted)
-            if (logicChild && logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
+            if (logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
               const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), { mode: "client" }));
               lines.push(`${elVar}.appendChild(document.createTextNode(String(${rewritten} ?? "")));`);
+            } else if (logicChild.kind === "lift-expr") {
+              // Nested ${ lift <inner/> } inside markup — route to current element
+              const code = emitLiftExpr(logicChild, { containerVar: elVar });
+              if (code) lines.push(code);
+            } else if (logicChild.kind === "for-stmt") {
+              // ${ for (r of @rows) { lift <li>...</li> } } — route inner lifts to elVar
+              const code = emitForStmtWithContainer(logicChild, elVar);
+              if (code) lines.push(code);
+            } else if (logicChild.kind === "if-stmt") {
+              // ${ if (cond) { lift <inner/> } } — recurse with elVar as container.
+              // Walk consequent/alternate, routing lift-expr/for-stmt to elVar;
+              // emit a JS if/else around the result.
+              const code = emitIfStmtWithContainer(logicChild, elVar);
+              if (code) lines.push(code);
+            } else {
+              // Bare statement (e.g. `const x = f()` inside ${...}) — pass through
+              const code = emitLogicNode(logicChild, {});
+              if (code) lines.push(code);
             }
           }
         }
@@ -869,6 +898,17 @@ function emitForStmtWithContainer(forNode, containerElVar) {
       if (code) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
+    } else if (child.kind === 'for-stmt') {
+      // Doubly-nested for-of with inner lift — route to same container
+      const code = emitForStmtWithContainer(child, containerElVar);
+      if (code) {
+        for (const line of code.split('\n')) lines.push('  ' + line);
+      }
+    } else if (child.kind === 'if-stmt') {
+      const code = emitIfStmtWithContainer(child, containerElVar);
+      if (code) {
+        for (const line of code.split('\n')) lines.push('  ' + line);
+      }
     } else {
       const code = emitLogicNode(child, {});
       if (code) lines.push('  ' + code);
@@ -876,6 +916,62 @@ function emitForStmtWithContainer(forNode, containerElVar) {
   }
 
   lines.push('}');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// emitIfStmtWithContainer — if-stmt emitter that routes inner lift to parent
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit an if-statement where inner lift-expr calls target containerElVar instead
+ * of calling _scrml_lift() globally. Used by emitCreateElementFromMarkup and
+ * emitForStmtWithContainer to correctly scope nested lift inside a lifted
+ * element when the source shape is `${ if (cond) { lift <inner/> } }`.
+ *
+ * Body children are dispatched recursively by kind so for-stmt / if-stmt /
+ * lift-expr inside the consequent or alternate all flow to containerElVar.
+ *
+ * @param {object} ifNode — if-stmt AST node
+ * @param {string} containerElVar — variable name of the enclosing element to
+ *   append to
+ * @returns {string}
+ */
+function emitIfStmtWithContainer(ifNode, containerElVar) {
+  const lines = [];
+  const cond = ifNode.condition ?? ifNode.test ?? "true";
+  const rewrittenCond = emitExprField(ifNode.condExpr, cond, { mode: "client" });
+
+  const emitBody = (body) => {
+    const out = [];
+    const arr = Array.isArray(body) ? body : (body ? [body] : []);
+    for (const child of arr) {
+      if (!child) continue;
+      if (child.kind === 'lift-expr') {
+        const code = emitLiftExpr(child, { containerVar: containerElVar });
+        if (code) for (const line of code.split('\n')) out.push('  ' + line);
+      } else if (child.kind === 'for-stmt') {
+        const code = emitForStmtWithContainer(child, containerElVar);
+        if (code) for (const line of code.split('\n')) out.push('  ' + line);
+      } else if (child.kind === 'if-stmt') {
+        const code = emitIfStmtWithContainer(child, containerElVar);
+        if (code) for (const line of code.split('\n')) out.push('  ' + line);
+      } else {
+        const code = emitLogicNode(child, {});
+        if (code) out.push('  ' + code);
+      }
+    }
+    return out;
+  };
+
+  lines.push(`if (${rewrittenCond}) {`);
+  for (const l of emitBody(ifNode.consequent ?? ifNode.body)) lines.push(l);
+  lines.push('}');
+  if (ifNode.alternate) {
+    lines.push('else {');
+    for (const l of emitBody(ifNode.alternate)) lines.push(l);
+    lines.push('}');
+  }
   return lines.join('\n');
 }
 
