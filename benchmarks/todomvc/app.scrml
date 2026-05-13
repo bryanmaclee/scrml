@@ -109,19 +109,11 @@
         }
 
         function activeCount() {
-            // NOTE [wave-3-d3b]: split off `.length` to dodge a compiler bug
-            // where `.filter(cb).length` (member-access AFTER filter-with-cb)
-            // strips the inner callback in the compiled output. Bug is part
-            // of the TodoMVC family in the "4 latent compiler bugs surfaced
-            // by D2" backlog — surface for separate dispatch.
-            let actives = @todos.filter(function(t) { return !t.completed })
-            return actives.length
+            return @todos.filter(function(t) { return !t.completed }).length
         }
 
         function completedCount() {
-            // see activeCount() above; same compiler-bug dodge
-            let dones = @todos.filter(function(t) { return t.completed })
-            return dones.length
+            return @todos.filter(function(t) { return t.completed }).length
         }
 
         function visibleTodos() {
