@@ -10,50 +10,43 @@
  *       Wave 3 D3b shape and is the reason the v0.3 TodoMVC e2e re-verify
  *       dispatch was filed.
  *
- *   §B  Reproduces FOUR lift-template-attribute-parser gaps surfaced by the
- *       v0.3 TodoMVC e2e re-verify dispatch (2026-05-12). The dispatch
- *       attempted to land canonical TodoMVC edit-mode markup
- *       (`<input class="edit" if=@editingId == todo.id bind:value=@editText
- *       onkeydown=handleEditKey() onblur=commitEdit() />`) inside the
- *       per-item `for (let todo of visibleTodos()) { lift <li>... }` loop,
- *       which is the canonical TodoMVC shape (see https://todomvc.com).
+ *       S89 update: §A also anchors the edit-mode markup landing. After
+ *       S88's LIFT-1..5 closure, the fixture now wires canonical TodoMVC
+ *       edit-mode markup (`<input class="edit" if=@editingId == todo.id
+ *       bind:value=@editText onkeydown=handleEditKey() onblur=commitEdit(
+ *       todo.id) />`) inside the per-item `for (let todo of visibleTodos())
+ *       { lift <li>... }` loop. The §A.3 test asserts the edit input + the
+ *       three previously-W-DEAD functions (commitEdit / cancelEdit /
+ *       visibleTodos) are now emitted and referenced from markup.
  *
- *       The lift-attribute parser in compiler/src/codegen/emit-lift.js has
- *       FOUR gaps that block the canonical shape:
+ *   §B  Originally reproduced FOUR lift-template-attribute-parser gaps
+ *       surfaced by the v0.3 TodoMVC e2e re-verify dispatch (2026-05-12).
+ *       Each test asserted the CURRENT BROKEN OUTPUT to fail when the gap
+ *       was fixed, prompting test upgrade. S88 LIFT-1..5 fixes closed ALL
+ *       FOUR gaps end-to-end:
  *
  *       §B.1  Parens-wrapped attribute expression (`if=(expr)` or
- *             `class:NAME=(expr)`) causes the PARENT element to be elided
- *             from the emitted lift create-item factory AND text content
- *             duplicated. Repro: a `<li class:editing=(@x == item.id)>...</li>`
- *             emits `_scrml_lift_el_N = document.createElement("div")` (NOT
- *             "li") and duplicates inner text nodes.
+ *             `class:NAME=(expr)`) — FIXED by LIFT-1 (`be7b261`,
+ *             ast-builder.js cursor desync fix). Parent element preserved;
+ *             single text node emitted.
  *
- *       §B.2  `bind:value=@var` inside lift template emits a literal
- *             `setAttribute("bind:value", _scrml_reactive_get("var"))` call.
- *             No `addEventListener("input", ...)`, no two-way wiring. Diverges
- *             from top-level `bind:value=` which emits proper bind wiring.
+ *       §B.2  `bind:value=@var` inside lift template — FIXED by LIFT-2
+ *             (`14e21de`). Two-way wiring emitted (addEventListener("input")
+ *             + reactive_get/set/subscribe).
  *
- *       §B.3  `if=@expr` inside lift template emits a literal
- *             `setAttribute("if", String(expr ?? ""))` call. No display:none
- *             toggle, no conditional rendering. Diverges from top-level `if=`.
+ *       §B.3  `if=@expr` inside lift template — FIXED by LIFT-3 (`14e21de`).
+ *             Display-style toggle + reactive subscription emitted.
  *
- *       §B.4  `onkeydown=fn()` (or any non-click handler, bare-call empty-args
- *             form) inside lift template does NOT auto-inject the `event`
- *             argument. The emitted call is `_scrml_fn_N()` (empty parens)
- *             instead of `_scrml_fn_N(event)`. Diverges from the top-level
- *             behavior locked in by event-handler-args-e2e.test.js §4 "bare-call
- *             onkeydown=handleKey() threads event".
+ *       §B.4  `onkeydown=fn()` bare-call inside lift template — FIXED by
+ *             LIFT-4 (`14e21de`). `event` argument auto-injected.
  *
- *       Each §B test asserts the CURRENT BROKEN OUTPUT so the test fails when
- *       any of the four gaps is later fixed — at which point the test should
- *       be UPGRADED to assert the new (correct) output. This is a deliberate
- *       repro-anchor pattern (cf. PA primer §"latent compiler bugs surfaced").
- *
- * Scope of fix per dispatch brief: STOP when fixture editing surfaces
- * additional compiler bugs. All four §B gaps are out of scope here and
- * are surfaced for separate dispatch(es).
+ *       §B tests have been UPGRADED to assert the CORRECT (post-fix)
+ *       output — the canonical "per-item interactive markup inside for/lift"
+ *       pattern is now end-to-end functional.
  *
  * Created: 2026-05-12 (S88 v0.3 TodoMVC e2e re-verify dispatch).
+ * Updated: 2026-05-13 (S89 TodoMVC edit-mode markup landing; §B upgraded
+ *          from broken-output to correct-output anchors).
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -173,10 +166,34 @@ afterAll(() => {
 // §A: TodoMVC fixture — compiles + Bug 5 fix locked in
 // ---------------------------------------------------------------------------
 
-describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix", () => {
-  test("compiles with zero errors (warnings allowed: W-PROGRAM-001 + 3× W-DEAD-FUNCTION + E-DG-002)", () => {
+describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix + S89 edit-mode landing", () => {
+  test("compiles with zero errors (only W-PROGRAM-001 warning expected post-S89-edit-mode)", () => {
     const result = compileScrml({ inputFiles: [TODOMVC_PATH], outputDir: FIXTURE_OUTPUT, write: false });
     expect(result.errors).toEqual([]);
+    // S89 edit-mode landing wires commitEdit/cancelEdit/visibleTodos/@editingId
+    // into markup; W-DEAD-FUNCTION × 3 + E-DG-002 should no longer fire.
+    // Only remaining warning is W-PROGRAM-001 (fixture uses bare <div class="todoapp">
+    // root not <program>; out of scope for edit-mode landing).
+    const warnings = result.warnings ?? [];
+    const codes = warnings.map((w) => w.code);
+    expect(codes).not.toContain("W-DEAD-FUNCTION");
+    expect(codes).not.toContain("E-DG-002");
+  });
+
+  test("edit-mode markup is wired (<input class=\"edit\"> emitted inside lift body) — S89 anchor", () => {
+    const result = compileScrml({ inputFiles: [TODOMVC_PATH], outputDir: FIXTURE_OUTPUT, write: false });
+    expect(result.errors).toEqual([]);
+    const js = result.outputs.get(TODOMVC_PATH).clientJs;
+    // The edit input element must be created in the lift create-item factory.
+    expect(js).toMatch(/document\.createElement\("input"\)/);
+    // The edit input class is "edit" (canonical TodoMVC).
+    expect(js).toMatch(/"edit"/);
+    // handleEditKey is referenced (wired via onkeydown).
+    expect(js).toMatch(/_scrml_handleEditKey_\d+/);
+    // commitEdit is referenced (wired via onblur — was W-DEAD pre-S89).
+    expect(js).toMatch(/_scrml_commitEdit_\d+/);
+    // visibleTodos is referenced (wired as for-iterable — was W-DEAD pre-S89).
+    expect(js).toMatch(/_scrml_visibleTodos_\d+/);
   });
 
   test("activeCount() preserves .filter(cb).length callback (Bug 5 anchor)", () => {
