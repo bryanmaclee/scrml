@@ -1,0 +1,9 @@
+<program>
+
+${
+  <firstName> = ""
+}
+
+<input type="text" bind:value=@firstName/>
+
+</program>

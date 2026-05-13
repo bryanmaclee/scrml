@@ -1,0 +1,15 @@
+<program>
+
+${
+  <firstName> = ""
+}
+
+${
+  const Field = <input props={ name: string, type: string } type="text" bind:value=@firstName/>
+}
+
+<div>
+  <Field name="x" type="text"/>
+</div>
+
+</program>

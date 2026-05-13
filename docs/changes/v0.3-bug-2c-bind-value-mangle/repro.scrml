@@ -1,0 +1,19 @@
+<program>
+
+${
+  <firstName> = ""
+  <lastName> = ""
+}
+
+${
+  const InfoStep = <div class="step">
+    <input type="text" bind:value=@firstName/>
+    <input type="text" bind:value=@lastName/>
+  </div>
+}
+
+<div class="wizard">
+  <InfoStep/>
+</div>
+
+</program>
