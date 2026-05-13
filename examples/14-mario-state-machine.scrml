@@ -13,12 +13,8 @@
 //          @marioState changes.
 //
 // Plus the usual: enums, reactive `if=` conditionals, `const <derived>`
-// markup-typed reactives, Tailwind utility classes, and a sprinkle of
-// `#{}` for the body font.
-
-#{
-    body { background: #1a1a2e; font-family: 'Press Start 2P', 'Courier New', monospace; }
-}
+// markup-typed reactives, and Tailwind utility classes for layout +
+// typography on the root container.
 
 ${
     // §1a — payload variants. Each power-up carries a coin reward.
@@ -135,7 +131,7 @@ ${
 </>
 
 <program>
-<div class="flex justify-center items-center min-h-screen text-white">
+<div class="flex justify-center items-center min-h-screen text-white font-mono bg-[#1a1a2e]">
     <div class="bg-gray-800 rounded-2xl p-8 w-96 border border-gray-700 shadow-2xl">
         <h1 class="text-center text-lg text-yellow-400 mb-6">SUPER MARIO STATE MACHINE</>
 

@@ -14,7 +14,7 @@ ${
     // Pure formatter — pickup date string → human-readable. Falls through
     // to the raw string when parsing fails, so seed dates display fine.
     export fn formatPickupAt(at: string) -> string {
-        if (at == null || at == "") return "—"
+        if (at is not || at == "") return "—"
         // ISO datetime -> "Apr 30 7:00 AM"-ish. Keep simple: substring out.
         const date = at.substring(0, 10)
         const time = at.substring(11, 16)
@@ -23,7 +23,7 @@ ${
 
     // Pure formatter — dollars to "$2,350".
     export fn formatRate(dollars: number) -> string {
-        if (dollars == null) return "—"
+        if (dollars is not) return "—"
         const cents = Math.round(dollars * 100)
         const whole = Math.floor(cents / 100)
         if (whole >= 1000) {
@@ -56,7 +56,7 @@ ${
 
         <div class="text-xs text-slate-600 mb-2">
             ${load.commodity}
-            <span if=(load.weight_lbs != null) class="text-slate-400">
+            <span if=(load.weight_lbs is some) class="text-slate-400">
                 · ${load.weight_lbs} lbs
             </>
         </div>
@@ -70,7 +70,7 @@ ${
             </span>
         </div>
 
-        <div if=(customerName != null) class="text-xs text-slate-500 mt-1 truncate">
+        <div if=(customerName is some) class="text-xs text-slate-500 mt-1 truncate">
             ${customerName}
         </div>
     </>

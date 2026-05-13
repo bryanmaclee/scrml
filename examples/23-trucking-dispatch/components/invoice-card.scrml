@@ -12,8 +12,8 @@ ${
     //   overdue    — paid_at null AND due_at < today
     //   outstanding — paid_at null AND due_at >= today
     export fn invoiceStatus(inv: any, todayIso: string) -> string {
-        if (inv.paid_at != null && inv.paid_at != "") return "paid"
-        if (inv.due_at != null && inv.due_at != "" && inv.due_at < todayIso) return "overdue"
+        if (inv.paid_at is some && inv.paid_at != "") return "paid"
+        if (inv.due_at is some && inv.due_at != "" && inv.due_at < todayIso) return "overdue"
         return "outstanding"
     }
 
@@ -32,7 +32,7 @@ ${
     }
 
     export fn formatIsoDate(at: string) -> string {
-        if (at == null || at == "") return "—"
+        if (at is not || at == "") return "—"
         return at.substring(0, 10)
     }
 
@@ -49,9 +49,9 @@ ${
                 #${invoice.load_id}
             </a>
             <div class="text-xs text-slate-500">
-                ${loadOriginCity == null ? "" : loadOriginCity}
-                <span if=(loadOriginCity != null && loadDestinationCity != null) class="text-slate-400 mx-1">→</span>
-                ${loadDestinationCity == null ? "" : loadDestinationCity}
+                ${loadOriginCity is not ? "" : loadOriginCity}
+                <span if=(loadOriginCity is some && loadDestinationCity is some) class="text-slate-400 mx-1">→</span>
+                ${loadDestinationCity is not ? "" : loadDestinationCity}
             </div>
         </td>
 
@@ -68,19 +68,19 @@ ${
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${invoiceStatusClasses(invoiceStatus(invoice, todayIso))}">
                 ${invoiceStatusLabel(invoiceStatus(invoice, todayIso))}
             </span>
-            <div if=(invoice.payment_reference != null && invoice.payment_reference != "") class="text-xs text-slate-500 mt-1">
+            <div if=(invoice.payment_reference is some && invoice.payment_reference != "") class="text-xs text-slate-500 mt-1">
                 ${invoice.payment_reference}
             </div>
         </td>
 
         <td class="px-3 py-3 text-right">
-            <button if=(invoice.paid_at == null || invoice.paid_at == "")
+            <button if=(invoice.paid_at is not || invoice.paid_at == "")
                 onclick=onMarkPaid(invoice.id)
                 class="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium"
             >
                 Mark paid
             </button>
-            <span if=(invoice.paid_at != null && invoice.paid_at != "") class="text-xs text-slate-400">
+            <span if=(invoice.paid_at is some && invoice.paid_at != "") class="text-xs text-slate-400">
                 ${formatIsoDate(invoice.paid_at)}
             </>
         </td>

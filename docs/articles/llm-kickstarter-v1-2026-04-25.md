@@ -297,18 +297,19 @@ If the user's prompt mentions auth, real-time, reactive state, schema, or multi-
   ${
     import { hashPassword, verifyPassword, signJwt } from 'scrml:auth'
 
+    type LoginError:enum = { UnknownUser, InvalidPassword }
+
     server function signup(email, password) {
       const hash = hashPassword(password)
       ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${hash})`}.run()
       return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
 
-    server function login(email, password) {
+    server function login(email, password)! -> LoginError {
       const user = ?{`SELECT password_hash FROM users WHERE email = ${email}`}.get()
-      if (!user) return null
-      return verifyPassword(password, user.password_hash)
-        ? signJwt({ email }, process.env.JWT_SECRET, 3600)
-        : null
+      if (user is not) fail LoginError::UnknownUser
+      if (not verifyPassword(password, user.password_hash)) fail LoginError::InvalidPassword
+      return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
   }
 
@@ -325,6 +326,7 @@ Notes:
 - No `connect-sqlite3`, no `express-session`, no `passport`. The session token from `signJwt` is the session.
 - `verifyPassword` uses Argon2id (Bun.password defaults).
 - For multi-field protection, use **comma-separated** values: `protect="password_hash, session_token"`.
+- `login()` is a **failable function** (the `!` after the parameter list, `-> LoginError` declares the failure type). `fail LoginError::Variant` is the canonical error signal — never `return null`, never `throw new Error`, never `try/catch`. Callers handle the failure via the `!{}` arm: `const token = login(email, pw) !{ | ::UnknownUser -> ... | ::InvalidPassword -> ... }`. See §6 below.
 
 ### Real-time recipe (`<channel>` + `@shared`)
 

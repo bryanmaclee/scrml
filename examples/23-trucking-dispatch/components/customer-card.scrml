@@ -36,20 +36,20 @@ ${
                 ${customer.name}
             </button>
             <div class="text-xs text-slate-500">
-                ${customer.contact_name == null ? "—" : customer.contact_name}
+                ${customer.contact_name is not ? "—" : customer.contact_name}
             </div>
         </td>
 
         <td class="px-3 py-3 text-sm text-slate-700">
-            <div>${customer.contact_email == null ? "—" : customer.contact_email}</div>
+            <div>${customer.contact_email is not ? "—" : customer.contact_email}</div>
             <div class="text-xs text-slate-500">
-                ${customer.contact_phone == null ? "" : customer.contact_phone}
+                ${customer.contact_phone is not ? "" : customer.contact_phone}
             </div>
         </td>
 
         <td class="px-3 py-3 text-sm text-slate-700 max-w-xs">
             <div class="truncate">
-                ${customer.billing_address == null ? "—" : customer.billing_address}
+                ${customer.billing_address is not ? "—" : customer.billing_address}
             </div>
         </td>
 

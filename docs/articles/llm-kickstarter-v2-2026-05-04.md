@@ -847,18 +847,19 @@ Notes:
   ${
     import { hashPassword, verifyPassword, signJwt } from 'scrml:auth'
 
+    type LoginError:enum = { UnknownUser, InvalidPassword }
+
     server function signup(email, password) {
       const hash = hashPassword(password)
       ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${hash})`}.run()
       return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
 
-    server function login(email, password) {
+    server function login(email, password)! -> LoginError {
       const user = ?{`SELECT password_hash FROM users WHERE email = ${email}`}.get()
-      if (!user) return null
-      return verifyPassword(password, user.password_hash)
-        ? signJwt({ email }, process.env.JWT_SECRET, 3600)
-        : null
+      if (user is not) fail LoginError::UnknownUser
+      if (not verifyPassword(password, user.password_hash)) fail LoginError::InvalidPassword
+      return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
   }
 
@@ -873,6 +874,7 @@ Notes:
 - No `connect-sqlite3`, no `express-session`, no `passport`. The session token from `signJwt` is the session.
 - For multi-field protection, use **comma-separated** values: `protect="password_hash, session_token"`.
 - For auth-as-engine (login → loggedIn → tokenRefresh → expired), use the engine recipe (§11.1) with an `AuthPhase` enum. This is the post-S55 idiom.
+- `login()` is a **failable function** (the `!` after the parameter list, `-> LoginError` declares the failure type). `fail LoginError::Variant` is the canonical error signal — never `return null`, never `throw new Error`, never `try/catch`. Callers handle the failure via the `!{}` arm: `const token = login(email, pw) !{ | ::UnknownUser -> ... | ::InvalidPassword -> ... }`. See the error-model section for the full pattern.
 
 #### 11.2.1 OAuth recipe — sign in with Google (or GitHub, Microsoft, Discord)
 

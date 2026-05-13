@@ -28,7 +28,7 @@ ${
     // Pure formatter — CDL expiration is an ISO date. We highlight if it's
     // within ~60 days of "now". Today is hardcoded for the demo (April 2026).
     export fn cdlExpiresClass(cdlExpires: string) -> string {
-        if (cdlExpires == null || cdlExpires == "") return "text-slate-500"
+        if (cdlExpires is not || cdlExpires == "") return "text-slate-500"
         // Lex-compare ISO dates — works because they're zero-padded.
         if (cdlExpires < "2026-07-01") return "text-red-600 font-semibold"
         if (cdlExpires < "2026-12-01") return "text-amber-700"
@@ -55,16 +55,16 @@ ${
         </td>
 
         <td class="px-3 py-3 text-sm text-slate-700">
-            <span if=(driver.current_location != null && driver.current_location != "")>
+            <span if=(driver.current_location is some && driver.current_location != "")>
                 ${driver.current_location}
             </>
-            <span if=(driver.current_location == null || driver.current_location == "") class="text-slate-400">
+            <span if=(driver.current_location is not || driver.current_location == "") class="text-slate-400">
                 —
             </>
         </td>
 
         <td class="px-3 py-3 text-sm">
-            <span if=(currentLoadId != null)>
+            <span if=(currentLoadId is some)>
                 <a class="text-blue-600 hover:underline" href="/dispatch/loads/${currentLoadId}">
                     Load #${currentLoadId}
                 </a>
@@ -72,13 +72,13 @@ ${
                     ${currentLoadOriginCity} → ${currentLoadDestinationCity}
                 </span>
             </>
-            <span if=(currentLoadId == null) class="text-slate-400">
+            <span if=(currentLoadId is not) class="text-slate-400">
                 Unassigned
             </>
         </td>
 
         <td class="px-3 py-3 text-sm ${cdlExpiresClass(driver.cdl_expires)}">
-            ${driver.cdl_expires == null ? "—" : driver.cdl_expires}
+            ${driver.cdl_expires is not ? "—" : driver.cdl_expires}
         </td>
     </>
 }
