@@ -23,6 +23,18 @@ ${
     // For UNVERIFIED claim extraction use parseIdToken() below.
     // ---------------------------------------------------------------------------
 
+    import { safeCall, HostError } from 'scrml:host'
+
+    /**
+     * OAuthError — error type for scrml:oauth/google failable operations.
+     *
+     * ParseFailed is produced by parseIdToken when the base64url decode or
+     * JSON.parse throws (malformed id_token payload).
+     */
+    export type OAuthError:enum = {
+        ParseFailed(message: string)
+    }
+
     /**
      * Build a Google OAuth config.
      *
@@ -70,8 +82,9 @@ ${
      *
      * @param tokens — the object returned by exchangeCode()
      * @returns object — claims (sub, email, ...) or null if no id_token
+     * @fails OAuthError::ParseFailed if base64url decode or JSON.parse throws
      */
-    export function parseIdToken(tokens) {
+    export function parseIdToken(tokens) ! -> OAuthError {
         if (!tokens || !tokens.idToken) return null
         const parts = tokens.idToken.split(".")
         if (parts.length != 3) {
@@ -81,11 +94,15 @@ ${
         // base64url → base64
         const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
         const pad = b64.length % 4 == 0 ? "" : "=".repeat(4 - (b64.length % 4))
-        try {
-            const json = atob(b64 + pad)
-            return JSON.parse(json)
-        } catch (e) {
-            throw new Error("[scrml:oauth/google] parseIdToken: failed to decode payload")
+        const json = safeCall(() => atob(b64 + pad)) !{
+            | ::Thrown(msg, name) -> {
+                fail OAuthError::ParseFailed(msg)
+            }
+        }
+        return safeCall(() => JSON.parse(json)) !{
+            | ::Thrown(msg, name) -> {
+                fail OAuthError::ParseFailed(msg)
+            }
         }
     }
 }

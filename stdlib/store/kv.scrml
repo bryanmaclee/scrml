@@ -24,6 +24,17 @@ ${
     // ---------------------------------------------------------------------------
 
     import Database from "bun:sqlite"
+    import { safeCall, HostError } from 'scrml:host'
+
+    /**
+     * KvError — error type for scrml:store/kv failable operations.
+     *
+     * ParseFailed is produced by store.get() when the stored JSON value is
+     * malformed and JSON.parse throws.
+     */
+    export type KvError:enum = {
+        ParseFailed(message: string)
+    }
 
     function _initDb(db) {
         db.run(`
@@ -47,7 +58,7 @@ ${
      * Example:
      *   const store = createStore("./data/app.db")
      *   store.set("user:1", { name: "Alice" })
-     *   const user = store.get("user:1")  // → { name: "Alice" }
+     *   const user = store.get("user:1") !{ ::ParseFailed(m) -> null }
      *
      *   // With TTL (auto-expires after 60 seconds):
      *   store.set("session:abc", { userId: 1 }, 60)
@@ -86,8 +97,9 @@ ${
             /**
              * Get a value by key.
              * Returns parsed JSON value, or null if not found or expired.
+             * Fails with KvError::ParseFailed if the stored value is malformed JSON.
              */
-            get(key) {
+            get(key) ! -> KvError {
                 const now = Date.now()
                 const row = stmtGet.get(ns, key)
                 if (!row) return null
@@ -95,10 +107,10 @@ ${
                     stmtDelete.run(ns, key)
                     return null
                 }
-                try {
-                    return JSON.parse(row.value)
-                } catch(e) {
-                    return row.value
+                return safeCall(() => JSON.parse(row.value)) !{
+                    | ::Thrown(msg, name) -> {
+                        fail KvError::ParseFailed(msg)
+                    }
                 }
             },
 
@@ -203,7 +215,7 @@ ${
              * Increment a counter by `by` (default: 1). Returns new value.
              */
             increment(key, by) {
-                const current = store.get(key) || 0
+                const current = store.get(key) !{ ::ParseFailed(m) -> 0 } || 0
                 const next = current + (by != undefined ? by : 1)
                 store.set(key, next)
                 return next
@@ -213,7 +225,7 @@ ${
              * Decrement a counter by `by` (default: 1). Returns new value.
              */
             decrement(key, by) {
-                const current = store.get(key) || 0
+                const current = store.get(key) !{ ::ParseFailed(m) -> 0 } || 0
                 const next = current - (by != undefined ? by : 1)
                 store.set(key, next)
                 return next
@@ -230,7 +242,7 @@ ${
              * Get the current value of a counter (default: 0 if not set).
              */
             get(key) {
-                return store.get(key) || 0
+                return store.get(key) !{ ::ParseFailed(m) -> 0 } || 0
             },
 
             /**
@@ -248,13 +260,13 @@ ${
         // Use :memory: for tests — no filesystem side effects
         const store = createStore(":memory:")
 
-        // set + get
+        // set + get — store.get is now failable, handle with !{}
         store.set("hello", "world")
-        assertEqual(store.get("hello"), "world")
+        assertEqual(store.get("hello") !{ ::ParseFailed(m) -> null }, "world")
 
         // JSON value
         store.set("user", { name: "Alice", age: 30 })
-        const user = store.get("user")
+        const user = store.get("user") !{ ::ParseFailed(m) -> null }
         assertEqual(user.name, "Alice")
         assertEqual(user.age, 30)
 
@@ -265,7 +277,7 @@ ${
         // delete
         store.delete("hello")
         assertFalsy(store.has("hello"))
-        assertFalsy(store.get("hello") != null)
+        assertFalsy(store.get("hello") !{ ::ParseFailed(m) -> null } != null)
 
         // keys
         store.set("a", 1)

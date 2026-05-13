@@ -57,6 +57,11 @@ ${
                 await new Promise(resolve => setTimeout(resolve, retryDelay * attempt))
             }
             let timeoutId = null
+            // safeCallAsync-gap: await fetch() and await raw.json()/text() are
+            // async-throwing JS-host calls. synchronous safeCall cannot catch
+            // async throws. This try/catch is retained until safeCallAsync is
+            // available. The whole _request function should be refactored to
+            // failable once safeCallAsync lands. Tracked as Phase 3a partial.
             try {
                 const controller = new AbortController()
                 fetchOptions.signal = controller.signal
@@ -241,6 +246,10 @@ ${
      * @param opts — { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2,
      *                shouldRetry: (err) => boolean }
      * @returns the resolved value of fn, or rethrows the last error after exhaustion
+     *
+     * safeCallAsync-gap: await fn() is an async-throwing call. synchronous
+     * safeCall cannot catch async throws. This try/catch is retained until
+     * safeCallAsync is available. Tracked as Phase 3a partial.
      */
     export async function retry(fn, opts) {
         const o = opts || {}

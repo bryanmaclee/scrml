@@ -12,6 +12,18 @@ ${
     // is required. decodeJwt is pure and safe in any context.
     // ---------------------------------------------------------------------------
 
+    import { safeCall, HostError } from 'scrml:host'
+
+    /**
+     * JwtError — error type for scrml:auth/jwt failable operations.
+     *
+     * DecodeFailed is produced when decodeJwt's base64url-decode or
+     * JSON.parse call throws (e.g., malformed token payload).
+     */
+    export type JwtError:enum = {
+        DecodeFailed(message: string)
+    }
+
     // ---------------------------------------------------------------------------
     // Base64url helpers (pure)
     // ---------------------------------------------------------------------------
@@ -95,9 +107,19 @@ ${
      * Example:
      *   const result = await verifyJwt(token, process.env.JWT_SECRET)
      *   if (result.valid) { @currentUser = result.payload }
+     *
+     * NOTE(safeCallAsync-gap): The inner `await crypto.subtle.importKey/sign`
+     * calls are async and throw asynchronously. synchronous safeCall cannot
+     * catch async throws. Until safeCallAsync is available, this function
+     * retains its original error-swallowing try/catch for the async crypto
+     * operations. This case is intentionally deferred — see Phase 3a notes.
      */
     export async function verifyJwt(token, secret) {
-        const decoded = decodeJwt(token)
+        const decoded = decodeJwt(token) !{
+            | ::DecodeFailed(msg) -> {
+                return { valid: false, reason: "malformed" }
+            }
+        }
         if (!decoded) {
             return { valid: false, reason: "malformed" }
         }
@@ -109,6 +131,10 @@ ${
         }
 
         // Verify signature
+        // safeCallAsync-gap: crypto.subtle.importKey/sign are async-throwing.
+        // synchronous safeCall wraps a thunk that returns a Promise — it does
+        // not catch rejections. This block retains try/catch until safeCallAsync
+        // is available. Tracked as a Phase 3a partial for async cases.
         try {
             const parts = token.split(".")
             if (parts.length != 3) return { valid: false, reason: "malformed" }
@@ -149,22 +175,31 @@ ${
      * Use for reading non-sensitive fields from a token you already verified.
      *
      * @param token — JWT string
-     * @returns payload object or null if malformed
+     * @returns payload object or null if token is absent
+     * @fails JwtError::DecodeFailed if base64url decode or JSON.parse throws
      *
      * Example:
-     *   const payload = decodeJwt(token)
+     *   const payload = decodeJwt(token) !{ ::DecodeFailed(m) -> null }
      *   if (payload && payload.role == "admin") { ... }
      */
-    export function decodeJwt(token) {
+    export function decodeJwt(token) ! -> JwtError {
         if (!token || typeof token != "string") return null
         const parts = token.split(".")
         if (parts.length != 3) return null
-        try {
-            const bytes = base64urlDecode(parts[1])
-            const json = new TextDecoder().decode(bytes)
-            return JSON.parse(json)
-        } catch(e) {
-            return null
+        const bytes = safeCall(() => base64urlDecode(parts[1])) !{
+            | ::Thrown(msg, name) -> {
+                fail JwtError::DecodeFailed(msg)
+            }
+        }
+        const json = safeCall(() => new TextDecoder().decode(bytes)) !{
+            | ::Thrown(msg, name) -> {
+                fail JwtError::DecodeFailed(msg)
+            }
+        }
+        return safeCall(() => JSON.parse(json)) !{
+            | ::Thrown(msg, name) -> {
+                fail JwtError::DecodeFailed(msg)
+            }
         }
     }
 
@@ -181,15 +216,21 @@ ${
             .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
         const fakeToken = `${header}.${payload}.fakesig`
 
-        const decoded = decodeJwt(fakeToken)
+        // decodeJwt is now failable — use !{} to handle DecodeFailed
+        const decoded = decodeJwt(fakeToken) !{
+            | ::DecodeFailed(m) -> null
+        }
         assertTruthy(decoded != null)
         assertEqual(decoded.sub, "1234")
         assertEqual(decoded.name, "Alice")
 
-        // decodeJwt null cases
-        assertFalsy(decodeJwt(null) != null)
-        assertFalsy(decodeJwt("not.a.token.at.all.extra") != null)
-        assertFalsy(decodeJwt("") != null)
+        // decodeJwt null cases — invalid structure returns null (not failable)
+        const r1 = decodeJwt(null) !{ ::DecodeFailed(m) -> null }
+        assertFalsy(r1 != null)
+        const r2 = decodeJwt("not.a.token.at.all.extra") !{ ::DecodeFailed(m) -> null }
+        assertFalsy(r2 != null)
+        const r3 = decodeJwt("") !{ ::DecodeFailed(m) -> null }
+        assertFalsy(r3 != null)
     }
 }
 </program>

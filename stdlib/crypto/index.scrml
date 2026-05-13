@@ -21,6 +21,19 @@ ${
     //   }
     // ---------------------------------------------------------------------------
 
+    import { safeCall, HostError } from 'scrml:host'
+
+    /**
+     * CryptoError — error type for scrml:crypto failable operations.
+     *
+     * VerifyFailed is produced when the hash verification call throws —
+     * for example when the stored hash is malformed or uses an unsupported
+     * format.
+     */
+    export type CryptoError:enum = {
+        VerifyFailed(message: string)
+    }
+
     /**
      * Hash a value using the specified algorithm.
      *
@@ -62,22 +75,27 @@ ${
      * For argon2: uses Bun.password.verifySync (constant-time).
      * For other algorithms: rehashes the input and compares hex strings.
      *
-     * Returns true if the input matches the stored hash, false otherwise.
-     * NEVER throws on mismatch — returns false.
+     * Returns true if the input matches the stored hash.
+     * Fails with CryptoError::VerifyFailed if the verification call throws
+     * (e.g., malformed or incompatible hash string).
      */
-    export function verifyHash(algorithm, input, storedHash) {
+    export function verifyHash(algorithm, input, storedHash) ! -> CryptoError {
         if (typeof input != "string") {
             input = String(input)
         }
-        try {
-            if (algorithm == "argon2") {
-                return Bun.password.verifySync(input, storedHash)
+        if (algorithm == "argon2") {
+            return safeCall(() => Bun.password.verifySync(input, storedHash)) !{
+                | ::Thrown(msg, name) -> {
+                    fail CryptoError::VerifyFailed(msg)
+                }
             }
-            const computed = hash(algorithm, input)
-            return computed == storedHash
-        } catch(e) {
-            return false
         }
+        const computed = safeCall(() => hash(algorithm, input)) !{
+            | ::Thrown(msg, name) -> {
+                fail CryptoError::VerifyFailed(msg)
+            }
+        }
+        return computed == storedHash
     }
 
     /**
