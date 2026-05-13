@@ -19,6 +19,8 @@
  *   | { kind: 'sql-query', nodeId, query,    hasLift, span }
  *   | { kind: 'import',    nodeId, source,   hasLift, span }
  *   | { kind: 'meta',      nodeId, deterministic, hasLift, span }
+ *   | { kind: 'markup-read', nodeId, sourceRenderNodeId, ownerScope, hasLift, span }
+ *      (A-1.2: per-interpolation markup-context read node; edge emission in A-1.3)
  *
  * DGEdge = { from: NodeId, to: NodeId, kind: 'calls'|'reads'|'writes'|'renders'|'awaits'|'invalidates' }
  *
@@ -95,13 +97,45 @@ interface MetaDGNode extends BaseDGNode {
   deterministic: boolean;
 }
 
+/**
+ * A-1.2 — Per-interpolation markup-context read node (Option Y).
+ *
+ * Each site where a reactive variable is read from markup context gets its
+ * own MarkupReadDGNode. This gives the §40.9.3 closure analysis per-
+ * interpolation reachability precision — it can ask "which render block
+ * reads @counter?" instead of only "does anything read @counter?".
+ *
+ * Fields:
+ *   sourceRenderNodeId  — the NodeId of the enclosing RenderDGNode (the
+ *                         markup block that contains this interpolation).
+ *                         Resolved by findOwningRenderDGNode. Null when
+ *                         the owning render block cannot be statically
+ *                         determined (e.g. top-level orphan interpolation).
+ *   ownerScope          — string key identifying the lexical scope of the
+ *                         containing markup block. Typically the filePath
+ *                         plus a stable positional discriminator.
+ *
+ * Lifecycle:
+ *   A-1.2: node kind defined; createMarkupReadNode factory present;
+ *          markupContextEmitEdges flag is false — no nodes emitted yet.
+ *   A-1.3: markupContextEmitEdges = true; nodes + reads edges emitted.
+ */
+interface MarkupReadDGNode extends BaseDGNode {
+  kind: "markup-read";
+  /** NodeId of the RenderDGNode that lexically contains this interpolation. */
+  sourceRenderNodeId: NodeId | null;
+  /** Lexical scope key — filePath::blockStart, used for grouping. */
+  ownerScope: string;
+}
+
 type DGNode =
   | FunctionDGNode
   | ReactiveDGNode
   | RenderDGNode
   | SqlQueryDGNode
   | ImportDGNode
-  | MetaDGNode;
+  | MetaDGNode
+  | MarkupReadDGNode;
 
 interface DGEdge {
   from: NodeId;
@@ -205,6 +239,80 @@ let _nodeCounter = 0;
 function makeNodeId(filePath: string, span: Span, prefix: string): NodeId {
   _nodeCounter++;
   return `${prefix}::${filePath}::${span.start}::${_nodeCounter}`;
+}
+
+// ---------------------------------------------------------------------------
+// A-1.2 — MarkupReadDGNode helpers (module-level, exported for testability)
+// ---------------------------------------------------------------------------
+
+/**
+ * findOwningRenderDGNode — given an AST node that lives inside a markup
+ * context, return the NodeId of the RenderDGNode for the tightest enclosing
+ * markup block in the given nodes map. Returns null when no enclosing render
+ * node is registered (e.g. a top-level orphan interpolation).
+ *
+ * Strategy: linear scan over all DGNodes looking for RenderDGNode candidates
+ * whose span contains astNode.span. Prefers the innermost (tightest) match.
+ * The scan is O(n) in the number of registered DG nodes — acceptable because
+ * the set of render nodes per compilation unit is small. A-1.3 may replace
+ * this with a pre-built interval tree if profiling shows a bottleneck.
+ *
+ * Exported for unit-testing in A-1.2; consumed by the emission logic in A-1.3.
+ */
+export function findOwningRenderDGNode(
+  astNode: ASTNode,
+  dgNodes: Map<NodeId, DGNode>,
+): NodeId | null {
+  const nodeSpan = astNode.span;
+  if (!nodeSpan) return null;
+  let bestId: NodeId | null = null;
+  let bestSize = Infinity;
+  for (const [candidateId, candidate] of dgNodes) {
+    if (candidate.kind !== "render") continue;
+    const cs = candidate.span;
+    if (!cs) continue;
+    // A render node encloses the astNode if it starts at or before the
+    // astNode's start and ends at or after the astNode's end.
+    if (cs.start <= nodeSpan.start && cs.end >= nodeSpan.end) {
+      const size = cs.end - cs.start;
+      // Prefer the tightest (innermost) enclosing render block.
+      if (size < bestSize) {
+        bestSize = size;
+        bestId = candidateId;
+      }
+    }
+  }
+  return bestId;
+}
+
+/**
+ * createMarkupReadNode — factory for MarkupReadDGNode (A-1.2 Option Y shape).
+ *
+ * Generates a unique NodeId using the same makeNodeId convention as all other
+ * DG node factories. Returns both the ID and the constructed node so the
+ * caller can insert into nodes and emit the associated 'reads' edge.
+ *
+ * Exported for unit-testing in A-1.2; called from the emission logic in A-1.3.
+ *
+ * @param astSpan            Span of the interpolation site in the source.
+ * @param sourceRenderNodeId NodeId of the enclosing RenderDGNode, or null.
+ * @param ownerScope         Lexical scope key (typically filePath).
+ */
+export function createMarkupReadNode(
+  astSpan: Span,
+  sourceRenderNodeId: NodeId | null,
+  ownerScope: string,
+): { nodeId: NodeId; dgNode: MarkupReadDGNode } {
+  const nodeId = makeNodeId(ownerScope, astSpan, "markup-read");
+  const dgNode: MarkupReadDGNode = {
+    kind: "markup-read",
+    nodeId,
+    sourceRenderNodeId,
+    ownerScope,
+    hasLift: false,
+    span: astSpan,
+  };
+  return { nodeId, dgNode };
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,6 +1865,21 @@ export function runDG(input: DGInput): DGOutput {
         if (upstreamReaders) upstreamReaders.add(MARKUP_READER_SENTINEL);
       }
     };
+
+    // -------------------------------------------------------------------------
+    // A-1.2 — markup-context read scaffolding flag
+    //
+    // When true: every creditReader call site SHOULD also push a MarkupReadDGNode
+    // into nodes and a 'reads' edge. Today (A-1.2) this is FALSE — the
+    // scaffolding helpers exist (findOwningRenderDGNode, createMarkupReadNode,
+    // both exported at module level) but emit nothing. A-1.3 flips this to
+    // true and wires the emission logic at each creditReader call site.
+    //
+    // The flag lives here (inside the per-file for loop) so the walker closure
+    // captures it. A-1.3 may promote it to a runDG parameter.
+    // -------------------------------------------------------------------------
+    const markupContextEmitEdges = false as boolean;
+    void markupContextEmitEdges; // intentional no-op until A-1.3
 
     function sweepNodeForAtRefs(node: ASTNode): void {
       // Phase 4d: ExprNode-first reactive ref + callee detection, string fallback
