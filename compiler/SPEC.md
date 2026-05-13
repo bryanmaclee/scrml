@@ -6484,6 +6484,10 @@ The compiler inserts `await` automatically per §13.
 
 The developer SHALL NOT write `async`, `await`, `Promise`, `Promise.all`, or any other explicit asynchrony construct in scrml source code.
 
+**Stdlib carve-out (S89, Q5 ratified).** The keyword restrictions in this section apply to **user source** — `.scrml` files in the project root and `vendor:` directories outside `vendor/scrml/`. Stdlib modules (the `scrml:*` namespace, per §41.4) occupy a special status: stdlib `.scrml` source files MAY declare `export async function name(...)` in their export surfaces. The `async` modifier on a stdlib declaration is **informational**: it surfaces the `Promise<T>` return shape to the type system, which uses it to populate the auto-await classifier per §13.2.1. The stdlib carve-out applies only to declarations (function-signature `async` modifier); explicit `await` in stdlib bodies follows the same auto-await regime as user source (the compiler auto-awaits statically-known `Promise<T>` callees per §13.2.1).
+
+**Compiler-bundled stdlib precedent.** This carve-out is the same pattern as the S88 `bun:` / `node:` protocol prefix amendment (§41.4 amendment note): stdlib authors require constructs that user source does not. The carve-out preserves §13.1's user-facing strict rule while making explicit the stdlib's elevated authoring surface. Vendor overrides (a `vendor/scrml/<module>/` shadow of a stdlib module per §41.5) inherit the stdlib carve-out for the duration of the override — the vendor copy is treated as stdlib for §13.1 purposes.
+
 ### 13.2 Compiler-Managed Asynchrony
 
 The compiler SHALL:
@@ -6500,6 +6504,39 @@ The compiler SHALL:
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
+
+#### 13.2.1 Auto-await for statically-known `Promise<T>` callees
+
+**Added:** 2026-05-13 (S89 — §13.2 Sub-Phase A). Source: `docs/changes/§13.2-auto-await-stdlib-scoping/SCOPING.md` §2.1 + §7 (Q1 BROAD ratification). Origin: S88 close — `compiler/runtime/stdlib/host.js:117-143` `safeCallAsync` docstring identified the await-discipline gap (the two-step explicit-`await` pattern at `stdlib/auth/password.scrml:60-69`).
+
+The compiler SHALL extend its auto-await behavior (per §13.2) to apply to ANY call site whose statically-resolved callee returns `Promise<T>`. This includes — but is not limited to:
+
+1. **Server functions** — the existing surface; covered by §13.2 normative bullets 1–2.
+2. **Stdlib `Promise<T>`-returning functions** — any function exported by a `scrml:*` stdlib module (per §41.4) whose typed signature declares `Promise<T>` return. The canonical inventory at S89 is ~40 surfaces across `scrml:host`, `scrml:auth`, `scrml:oauth`, `scrml:redis`, `scrml:http`, and `scrml:crypto` (see SCOPING.md §3 for the per-module breakdown).
+3. **Cross-program function calls** (`<#name>.foo(...)` per §43.5.1) — see §13.2.2 below for the E-PROG-004 interaction.
+
+**Normative statements:**
+
+- A "statically-known callee" is a `CallExpr` whose callee resolves at compile time to a `FunctionDeclNode` (or stdlib export) for which the type system can decide `Promise<T>` return. The decision SHALL be made before code generation (Stage 6 TS) and recorded as an AST annotation consumed at Stage 8 CG.
+- The compiler SHALL NOT auto-await calls whose callee is dynamic (function reference, higher-order argument, indexed lookup). Such cases require the callee to be wrapped in a named statically-resolvable thunk (e.g., `safeCallAsync(() => dynamicFn())`) for auto-await to apply.
+- When auto-await fires at a call site, the result of the call site SHALL be the **unwrapped** value `T`, not `Promise<T>`. Downstream operations on that result (assignment, propagation `?`, failable handler `!{}` per §19.4) operate on the unwrapped value.
+- The failable `!{}` handler (§19.4) SHALL receive the unwrapped value. The S88 two-step pattern (`const raw = await safeCallAsync(thunk); raw !{ ... }`) collapses under §13.2.1 to a single line (`const ok = safeCallAsync(thunk) !{ ... }`); the compiler emits the `await` between the call site and the `!{}` guard automatically. This closes the host.js `safeCallAsync` await-discipline finding (S88).
+- Independent stdlib `Promise<T>` calls in the same function body SHALL be parallelized via `Promise.all` per §13.2 bullet 3 unless there is a data dependency between them.
+
+#### 13.2.2 Cross-program calls and E-PROG-004
+
+**Added:** 2026-05-13 (S89 — §13.2 Sub-Phase A). Disposition: Q2 Position C AMEND (ratified S89).
+
+Cross-program calls (`<#name>.foo(...)` per §43.5.1) return `Promise<T>` and are statically-known callees per §13.2.1. The compiler SHALL auto-await cross-program call sites.
+
+**Normative statements:**
+
+- Auto-await SHALL fire at cross-program call sites (§43.5.1).
+- An explicit `await` written at a cross-program call site SHALL be permitted and SHALL be idempotent — the compiler SHALL NOT emit `await await` in compiled output. The detection of an existing explicit `await` is a Stage 8 CG concern; the emit transform is a single-pass de-duplication.
+- E-PROG-004 SHALL no longer fire as an Error when an explicit `await` is absent at a cross-program call site. Per Q2 Position C ratification (S89), E-PROG-004 is downgraded to an **Info-level lint** indicating "auto-await is firing here; explicit `await` is permitted but redundant". The error code is **not** retired (catalog stability per S88 BS-layer-over-SPEC-retreat precedent); only its severity is amended.
+- The boundary-visibility affordance for adopters who prefer explicit `await` at process boundaries (the load-bearing argument for Position B in SCOPING.md §5) is preserved: writing `await <#worker>.foo()` remains legal and idiomatic; the compiler's auto-await is a no-op on call sites already carrying `await`.
+
+**Precedent.** This amendment mirrors `W-ENGINE-SELF-WRITE-DETECTED` (Option d synthesis, S87, §51.0.F.1): a previously-error condition becomes a permitted operation with an informational lint surfacing the affordance. The pattern is the synthesis-pattern methodology — when a binary OQ has real costs both sides, surface a synthesis option preserving both load-bearing benefits.
 
 ### 13.3 Worked Example
 
@@ -14870,7 +14907,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
-| E-PROG-004 | §40.4 | A cross-program function call is not `await`-ed. Cross-program calls return `Promise<T>`; the result must be awaited. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18009.) | Error |
+| E-PROG-004 | §13.2.2, §43.5.1 | A cross-program function call site at which the compiler's auto-await fires. **S89 amendment (Q2 Position C):** auto-await per §13.2.2 fires at all cross-program call sites; explicit `await` is permitted and idempotent. This code now surfaces as an **Info-level lint** indicating "auto-await is firing here; explicit `await` is permitted but redundant". Severity downgraded from Error to Info; the code is **not** retired (catalog stability per S88 BS-layer-over-SPEC-retreat precedent). Prose at §13.2.2 + §43.5.1. | Info |
 | E-PROG-005 | §40.4 | Circular nested-program dependency detected. Program A nests/uses program B, B nests/uses A. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18040.) | Error |
 | E-SCHEMA-001 | §39.12 | A `< schema>` block appears in a file whose `<program>` root has no `db=` attribute. The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
 | E-SCHEMA-002 | §39.12 | A file contains more than one `< schema>` block. Each file declares at most one schema. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16684.) | Error |
@@ -18006,6 +18043,20 @@ scrml defines five protocol prefixes for non-relative module specifiers (S88 ame
 
 **S88 amendment note (2026-05-13):** `bun:` and `node:` were added because stdlib hand-authored JS shims (e.g., `compiler/runtime/stdlib/host.js` and `stdlib/auth/*`) already use these specifiers via `import { SQL } from "bun"`, `import { Database } from "bun:sqlite"`, etc. Per S86 BS-layer-over-SPEC-retreat ratification, when implementation needs a surface that SPEC did not authorize, the right answer is SPEC catches up. The runtime built-in import surface is a real engineering need; restricting scrml source to only `scrml:` + `vendor:` + relative forced stdlib module authors to use circuitous JS-shim files instead of inline `bun:sqlite` imports. The two new prefixes restore parity with what stdlib authors actually need. The server-context-only restriction (E-IMPORT-007) preserves the security invariant that no Bun-/Node-specific code reaches client.scrml output.
 
+#### 41.4.1 Stdlib API authoring rule — Promise<T> returns
+
+**Added:** 2026-05-13 (S89, Q6 ratified — §13.2 Sub-Phase A). Cross-ref: §13.1 stdlib carve-out, §13.2.1 auto-await classifier.
+
+Stdlib modules (`scrml:*` namespace) MAY export `async function` declarations whose typed return is `Promise<T>` (per §13.1 stdlib carve-out). The auto-await classifier (§13.2.1) decides at compile time whether a call site receives `await` based on a **static** classification of the callee's return shape. To keep this classification decidable, stdlib API authoring SHALL observe the following rule:
+
+**Normative statement:**
+
+- A stdlib exported function whose return shape is `Promise<T>` SHALL **always** return `Promise<T>` across all execution paths. Conditional return shapes — for example, "returns `Promise<T>` when calling a remote service, returns the bare value `T` when a cached result is available" — SHALL NOT be permitted in stdlib exports. The author SHALL wrap the synchronous branch in `Promise.resolve(value)` (or equivalent) so the call always yields a `Promise<T>`.
+- The rationale is that conditional return shapes cannot be classified statically; the auto-await classifier would have to inspect runtime state to decide whether `await` is required. Forcing a uniform `Promise<T>` return preserves the static classification surface and prevents the "Promise sometimes, bare value other times" footgun that breaks `!{}` failable handling (§19.4) when the bare-value path is taken (the failable handler expects an unwrapped value with `__scrml_error` sentinel; a Promise on that path silently misses error arms).
+- This rule is **stdlib-only**. User-source functions cannot return `Promise<T>` anyway (user `async` is forbidden per §13.1); the rule applies to the stdlib authoring surface and to vendor stdlib overrides (`vendor/scrml/<module>/`).
+
+This rule formalizes the convention that `safeCallAsync` (and every other stdlib `Promise<T>`-returning function inventoried at S89 SCOPING §3) already follows — always wrapping the result in `Promise<T>` even when the underlying operation is synchronous. The rule promotes that convention to a normative requirement so the auto-await classifier (§13.2.1) has a clean static signal.
+
 ### 41.5 Resolution Hierarchy
 
 For `scrml:` prefixed specifiers, the compiler resolves in this order:
@@ -18553,10 +18604,12 @@ By default, a nested program starts when its enclosing scope mounts and stops wh
 <program name="compute">
     ${ export function add(a: number, b: number) -> number { return a + b } }
 </>
-${ const result = await <#compute>.add(1, 2) }
+${ const result = <#compute>.add(1, 2) }
 ```
 
-Cross-program calls return `Promise<T>`. Unawaited cross-program calls SHALL be compile error E-PROG-004.
+Cross-program calls return `Promise<T>`. Per §13.2.2 (added S89), the compiler SHALL auto-await cross-program call sites; the developer SHALL NOT need to write `await` explicitly. An explicit `await` is permitted and idempotent (the compiler de-duplicates at codegen — no `await await` is emitted). E-PROG-004 (formerly Error) is amended to an **Info-level lint** at S89 (Q2 Position C ratification) indicating that auto-await is firing at the call site.
+
+**Pre-S89 behavior (preserved for context):** the developer was required to write `await <#compute>.add(1, 2)` explicitly; missing `await` was compile error E-PROG-004 (Error). The S89 amendment retains the legal idiom (explicit `await` still works and remains the visually-explicit form for boundary-visibility-conscious adopters) while bringing cross-program semantics in line with §13.1 (developer SHALL NOT write `async`/`await`) and §13.2.1 (auto-await for all statically-known `Promise<T>` callees).
 
 #### 43.5.2 Message Passing
 
@@ -18586,7 +18639,7 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 | E-PROG-001 | Ambiguous `<program>` attribute combination | Error |
 | E-PROG-002 | Missing required attribute for detected execution context | Error |
 | E-PROG-003 | Reference to parent-scope name from inside nested `<program>` | Error |
-| E-PROG-004 | Cross-program function call not awaited | Error |
+| E-PROG-004 | Cross-program call site at which auto-await fires (informational; see §13.2.2). **S89 amendment:** severity downgraded from Error to Info per Q2 Position C; not retired. | Info |
 | E-PROG-005 | Circular nested program dependency | Error |
 
 ---
