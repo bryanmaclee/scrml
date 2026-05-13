@@ -19,7 +19,7 @@
 // v0.2.4 canonical: V5-strict structural-decl form; db opener no-whitespace;
 // `is some` / `is not` for absence; `not` operator for boolean negation.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       // Imports at program-block scope so component visibility works in
@@ -230,4 +230,4 @@
 
   </>
 
-</program>
+</page>

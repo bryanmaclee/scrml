@@ -7,7 +7,7 @@
 //
 // Per F-COMPONENT-001 special case: import the helper fns, inline the row.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import {
@@ -313,4 +313,4 @@
 
   </>
 
-</program>
+</page>

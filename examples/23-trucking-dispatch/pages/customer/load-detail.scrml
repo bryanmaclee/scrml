@@ -16,7 +16,7 @@
 // name interpolation does not work, so all load-events arrive on a
 // single broadcast and we filter by payload.loadId.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
@@ -575,4 +575,4 @@
 
   </>
 
-</program>
+</page>

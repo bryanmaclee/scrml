@@ -19,7 +19,7 @@
 // Real-time hookpoint (M5): subscribe to driver-:id channel for dispatcher
 // messages and load assignment notifications. Not wired in M3.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
@@ -387,4 +387,4 @@
 
   </>
 
-</program>
+</page>

@@ -22,7 +22,7 @@
 // Real-time hookpoint (M5): `customer-:id` channel for paid-invoice
 // notifications + load arrival. Not wired in M4.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
@@ -332,4 +332,4 @@
 
   </>
 
-</program>
+</page>

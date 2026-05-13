@@ -21,7 +21,7 @@
 //     filter. See F-CHANNEL-002 (no on-event hook) and F-CHANNEL-003 (per-page
 //     channel duplication) for context.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { LoadStatusBadge } from '../../components/load-status-badge.scrml'
@@ -535,4 +535,4 @@
 
   </>
 
-</program>
+</page>

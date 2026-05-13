@@ -15,7 +15,7 @@
 // after the tender is created so the dispatcher's board lights up
 // without reload.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { createSessionStore } from 'scrml:store'
@@ -346,4 +346,4 @@
 
   </>
 
-</program>
+</page>

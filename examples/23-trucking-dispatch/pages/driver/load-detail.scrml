@@ -36,7 +36,7 @@
 // stored current_location string in the payload. Real GPS will need
 // a geolocation API hookup (M6).
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
@@ -847,4 +847,4 @@
 
   </>
 
-</program>
+</page>

@@ -14,7 +14,7 @@
 // + invoice-sent notifications. The customer-self-pay markPaid action
 // also publishes invoice-paid here so other tabs / dispatchers see it.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { formatRate } from '../../components/load-card.scrml'
@@ -369,4 +369,4 @@
 
   </>
 
-</program>
+</page>

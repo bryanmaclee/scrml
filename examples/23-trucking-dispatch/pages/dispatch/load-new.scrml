@@ -14,7 +14,7 @@
 // page must declare its own `<channel>` block — channels are per-file,
 // not cross-file.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { AddressForm } from '../../components/address-form.scrml'
@@ -325,4 +325,4 @@
 
   </>
 
-</program>
+</page>

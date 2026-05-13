@@ -17,7 +17,7 @@
 // interpolation does not work, so per-driver scoping is achieved via
 // targetDriverId in the payload + client-side filter.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { createSessionStore } from 'scrml:store'
@@ -290,4 +290,4 @@
 
   </>
 
-</program>
+</page>

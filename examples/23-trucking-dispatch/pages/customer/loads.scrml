@@ -15,7 +15,7 @@
 // payload.targetCustomerId since channel name interpolation is
 // silently inert.
 
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
@@ -273,4 +273,4 @@
 
   </>
 
-</program>
+</page>
