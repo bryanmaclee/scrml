@@ -9,11 +9,12 @@
  *     unique nodeId on each call.
  *   - findOwningRenderDGNode locates the tightest enclosing render DGNode by
  *     span containment, including a nested (inner) markup block preference.
- *   - A full compilation with markup interpolations (`${@x}`) emits zero
- *     markup-read nodes (markupContextEmitEdges is false in A-1.2).
- *
- * A-1.3 will flip markupContextEmitEdges to true; at that point T4 must be
- * updated to assert nodes.size > 0 for "markup-read" kind.
+ *   - T4 (end-to-end zero-emission): was meaningful in A-1.2 when the flag was
+ *     false. In A-1.3 markupContextEmitEdges is flipped to true — markup-read
+ *     nodes ARE now emitted for the 4 high-frequency shapes. T4 now confirms
+ *     only that compilation succeeds without fatal errors (depGraph is not
+ *     exposed on the compileScrml result, so the nodes check is a no-op).
+ *     Full emission coverage is in dg-markup-read-emission-a13.test.js.
  *
  * Spec authority: SPEC §40.9.3 (markup-context edge emission requirement),
  *   §31 (DG normative), §34 (error catalog).
@@ -182,15 +183,21 @@ describe("A-1.2: findOwningRenderDGNode span-containment logic", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T4 — end-to-end: markupContextEmitEdges is false in A-1.2
+// T4 — end-to-end: compilation invariants (A-1.2: zero markup-read nodes; A-1.3: emission active)
 // ---------------------------------------------------------------------------
 
-describe("A-1.2: scaffolding flag is off — zero markup-read nodes emitted", () => {
-  test("T4: compilation with markup interpolations produces zero markup-read DG nodes", () => {
+describe("A-1.2: end-to-end compilation invariants (A-1.3: flag now active, depGraph not exposed)", () => {
+  test("T4: compilation with markup interpolations produces zero fatal errors", () => {
     // This source has three ${@x} markup reads, an if= attribute read, and
     // a bind:value= read — all the surfaces enumerated in SPEC §40.9.3 as
-    // "unlifted markup reads" (256 in corpus). With markupContextEmitEdges=false
-    // (A-1.2 default), the DG output MUST NOT contain any "markup-read" nodes.
+    // "unlifted markup reads" (256 in corpus).
+    //
+    // A-1.2: With markupContextEmitEdges=false (A-1.2), the DG output contained
+    // no "markup-read" nodes.
+    // A-1.3 UPDATE: markupContextEmitEdges is now true — the 4 high-frequency
+    // shapes DO emit markup-read nodes. The nodes.size check below is a NO-OP
+    // because compileScrml does not expose depGraph on its return value. Full
+    // markup-read node/edge assertions are in dg-markup-read-emission-a13.test.js.
     const source = [
       "${",
       "  <counter> = 0",

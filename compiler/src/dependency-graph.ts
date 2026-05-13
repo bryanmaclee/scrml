@@ -1867,19 +1867,40 @@ export function runDG(input: DGInput): DGOutput {
     };
 
     // -------------------------------------------------------------------------
-    // A-1.2 — markup-context read scaffolding flag
+    // A-1.3 — markup-context read emission (flag activated)
     //
-    // When true: every creditReader call site SHOULD also push a MarkupReadDGNode
-    // into nodes and a 'reads' edge. Today (A-1.2) this is FALSE — the
-    // scaffolding helpers exist (findOwningRenderDGNode, createMarkupReadNode,
-    // both exported at module level) but emit nothing. A-1.3 flips this to
-    // true and wires the emission logic at each creditReader call site.
+    // Flipped to true in A-1.3. The high-frequency shapes (text interpolation,
+    // variable-ref attribute, bind:value, if-condition) now push a MarkupReadDGNode
+    // into nodes and a reads edge into edges at each creditReader call site that
+    // corresponds to one of those 4 shapes. creditReader calls are KEPT (additive);
+    // E-DG-002 sentinel credit is unchanged. A-1.6 will audit all consumers.
     //
-    // The flag lives here (inside the per-file for loop) so the walker closure
-    // captures it. A-1.3 may promote it to a runDG parameter.
+    // A-1.4 will wire the remaining shapes (call-ref, for-iterable, lift-template).
+    // A-1.5 will wire engine state-child + onTransition/onTimeout/onIdle.
     // -------------------------------------------------------------------------
-    const markupContextEmitEdges = false as boolean;
-    void markupContextEmitEdges; // intentional no-op until A-1.3
+    const markupContextEmitEdges = true;
+
+    // Depth counter: incremented when entering a markup node's children, decremented
+    // on exit. Shape 1 emission (bare-expr text interpolation) gates on depth > 0
+    // to avoid emitting edges for bare-expr nodes that appear in top-level logic
+    // blocks, which are already captured by the function-body DG scan above.
+    let markupChildDepth = 0;
+
+    // Helper: push one MarkupReadDGNode + one reads edge for a reactive var read
+    // discovered at a markup-context site. Called from the 4 high-frequency shapes
+    // below. attrSpan is the span of the interpolation or attribute site.
+    function emitMarkupReadEdge(attrSpan: Span, varName: string): void {
+      const reactiveNodeId = reactiveVarNodeIds.get(varName);
+      if (!reactiveNodeId) return; // var not in DG — nothing to link to
+      const sourceRenderNodeId = findOwningRenderDGNode({ span: attrSpan } as ASTNode, nodes);
+      const { nodeId: mrNodeId, dgNode: mrDGNode } = createMarkupReadNode(
+        attrSpan,
+        sourceRenderNodeId,
+        fileAST.filePath,
+      );
+      nodes.set(mrNodeId, mrDGNode);
+      edges.push({ from: mrNodeId, to: reactiveNodeId, kind: "reads" });
+    }
 
     function sweepNodeForAtRefs(node: ASTNode): void {
       // Phase 4d: ExprNode-first reactive ref + callee detection, string fallback
@@ -1887,6 +1908,15 @@ export function runDG(input: DGInput): DGOutput {
       const exprCallees = collectCalleesFromExprNode(node as Record<string, unknown>);
       for (const varName of exprRefs) {
         creditReader(varName);
+        // A-1.3 Shape 1 — ${@x} text interpolation inside markup.
+        // Only emit markup-read nodes when (a) the flag is on, (b) the node is
+        // specifically a bare-expr (the interpolation AST shape), and (c) we are
+        // inside a markup element's children (markupChildDepth > 0), distinguishing
+        // markup-context reads from top-level logic reads already in the DG.
+        if (markupContextEmitEdges && node.kind === "bare-expr" && markupChildDepth > 0) {
+          const interSpan = node.span;
+          if (interSpan) emitMarkupReadEdge(interSpan, varName);
+        }
       }
       for (const callee of exprCallees) {
         const transitiveReads = fnTransitiveReads.get(callee);
@@ -1948,22 +1978,46 @@ export function runDG(input: DGInput): DGOutput {
               } else if (attrVal && typeof attrVal === "object") {
                 const valObj = attrVal as Record<string, unknown>;
                 // e.g. bind:value={ kind: "variable-ref", name: "@country" }
+                // Also handles attr=@x simple variable-ref attribute.
+                // A-1.3 Shapes 2 + 3: variable-ref attr + bind:value=@x.
                 const varRefName = valObj.name;
                 if (typeof varRefName === "string" && varRefName.startsWith("@")) {
-                  creditReader(varRefName.slice(1));
+                  const vrName = varRefName.slice(1);
+                  creditReader(vrName);
+                  // Emit markup-read node + reads edge for this variable-ref attribute site.
+                  if (markupContextEmitEdges) {
+                    const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
+                    emitMarkupReadEdge(attrSpan ?? node.span, vrName);
+                  }
                 }
                 // Expression-valued attributes (e.g. `if=(@a && @b == false)`)
                 // are stored as `{ kind: "expr", raw, refs, exprNode }`. The AST
                 // builder already collects reactive refs into `refs`; fall back
                 // to scanning `raw` for the compound case if `refs` is missing.
+                // A-1.3 Shape 4 — if=@x / if=(expr) condition attribute.
+                // valObj.refs is pre-populated by the AST builder; valObj.raw is the
+                // fallback. Emit one markup-read node per reactive var in the expr.
                 if (Array.isArray(valObj.refs)) {
                   for (const ref of valObj.refs) {
-                    if (typeof ref === "string") creditReader(ref);
+                    if (typeof ref === "string") {
+                      creditReader(ref);
+                      if (markupContextEmitEdges) {
+                        const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
+                        emitMarkupReadEdge(attrSpan ?? node.span, ref);
+                      }
+                    }
                   }
                 } else if (typeof valObj.raw === "string") {
                   const rawRefs = (valObj.raw as string).match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
                   if (rawRefs) {
-                    for (const r of rawRefs) creditReader(r.slice(1));
+                    for (const r of rawRefs) {
+                      const rName = r.slice(1);
+                      creditReader(rName);
+                      if (markupContextEmitEdges) {
+                        const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
+                        emitMarkupReadEdge(attrSpan ?? node.span, rName);
+                      }
+                    }
                   }
                 }
                 // Bug 4.5 / S87 — call-ref attribute values
@@ -2108,13 +2162,18 @@ export function runDG(input: DGInput): DGOutput {
           }
         }
       }
-      // Recurse into children/body/consequent/alternate
+      // Recurse into children/body/consequent/alternate.
+      // When recursing into a markup node's children, increment markupChildDepth
+      // so that bare-expr nodes encountered within emit markup-read edges (Shape 1).
       for (const listKey of ["children", "body", "consequent", "alternate"] as const) {
         const list = (node as Record<string, unknown>)[listKey];
         if (Array.isArray(list)) {
+          const enteringMarkupChildren = node.kind === "markup" && listKey === "children";
+          if (enteringMarkupChildren) markupChildDepth++;
           for (const child of list as ASTNode[]) {
             sweepNodeForAtRefs(child);
           }
+          if (enteringMarkupChildren) markupChildDepth--;
         }
       }
     }
