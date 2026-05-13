@@ -1875,8 +1875,8 @@ export function runDG(input: DGInput): DGOutput {
     // corresponds to one of those 4 shapes. creditReader calls are KEPT (additive);
     // E-DG-002 sentinel credit is unchanged. A-1.6 will audit all consumers.
     //
-    // A-1.4 will wire the remaining shapes (call-ref, for-iterable, lift-template).
-    // A-1.5 will wire engine state-child + onTransition/onTimeout/onIdle.
+    // A-1.4 wired the remaining shapes (call-ref, for-iterable, lift-template-body).
+    // A-1.5 wired engine state-child + onTransition/onTimeout/onIdle.
     // -------------------------------------------------------------------------
     const markupContextEmitEdges = true;
 
@@ -1917,6 +1917,17 @@ export function runDG(input: DGInput): DGOutput {
           const interSpan = node.span;
           if (interSpan) emitMarkupReadEdge(interSpan, varName);
         }
+        // A-1.4 Shape 2 — for-iterable @var ref inside markup context.
+        // A for-stmt / for-expr whose iterable is a reactive cell (e.g.
+        // `for (item of @items)`) reads @items at the loop site. The iterable
+        // ExprNode is walked by collectReactiveRefsFromExprNode via iterExpr.
+        // Emit a markup-read edge when the for node is inside markup children.
+        if (markupContextEmitEdges &&
+            (node.kind === "for-stmt" || node.kind === "for-expr") &&
+            markupChildDepth > 0 &&
+            node.span) {
+          emitMarkupReadEdge(node.span, varName);
+        }
       }
       for (const callee of exprCallees) {
         const transitiveReads = fnTransitiveReads.get(callee);
@@ -1942,7 +1953,18 @@ export function runDG(input: DGInput): DGOutput {
             const atRefs = val.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
             if (atRefs) {
               for (const ref of atRefs) {
-                creditReader(ref.slice(1));
+                const fbVarName = ref.slice(1);
+                creditReader(fbVarName);
+                // A-1.4 Shape 2 string-fallback — for-iterable @var via "iterable" field.
+                // The iterExpr path (edit 2) handles ExprNode-parsed iterables; this
+                // covers the string-only fallback when iterExpr is absent.
+                if (markupContextEmitEdges &&
+                    field === "iterable" &&
+                    (node.kind === "for-stmt" || node.kind === "for-expr") &&
+                    markupChildDepth > 0 &&
+                    node.span) {
+                  emitMarkupReadEdge(node.span, fbVarName);
+                }
               }
             }
             const callees = extractCallees(val);
@@ -2041,11 +2063,19 @@ export function runDG(input: DGInput): DGOutput {
                   // ExprNode-first walk for `@var` references (preferred —
                   // robust against nested member-access like `@compound.field`,
                   // unary/binary operators, conditional expressions, etc.).
+                  // A-1.4 Shape 1 — call-ref attr @var args emit markup-read edges.
+                  // `onclick=fn(@x)` — @x is read at the event-wiring call site.
+                  // Emit one markup-read node + reads edge per @var found in the args.
+                  const callRefAttrSpan = (attr as Record<string, unknown>).span as Span | undefined;
                   if (Array.isArray(valObj.argExprNodes)) {
                     for (const en of valObj.argExprNodes) {
                       if (en && typeof en === "object" && (en as { kind?: string }).kind) {
                         forEachIdentInExprNode(en as ExprNode, (ident) => {
-                          if (ident.name.startsWith("@")) creditReader(ident.name.slice(1));
+                          if (ident.name.startsWith("@")) {
+                            const crVarName = ident.name.slice(1);
+                            creditReader(crVarName);
+                            if (markupContextEmitEdges) emitMarkupReadEdge(callRefAttrSpan ?? node.span, crVarName);
+                          }
                         });
                       }
                     }
@@ -2059,7 +2089,11 @@ export function runDG(input: DGInput): DGOutput {
                       if (typeof arg === "string") {
                         const argRefs = arg.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
                         if (argRefs) {
-                          for (const r of argRefs) creditReader(r.slice(1));
+                          for (const r of argRefs) {
+                            const crVarName2 = r.slice(1);
+                            creditReader(crVarName2);
+                            if (markupContextEmitEdges) emitMarkupReadEdge(callRefAttrSpan ?? node.span, crVarName2);
+                          }
                         }
                       }
                     }
@@ -2244,8 +2278,18 @@ export function runDG(input: DGInput): DGOutput {
             }
             for (const varName of liftRefs) {
               creditReader(varName);
+              // A-1.4 Shape 3 — lift-expr body expression @var ref.
+              // `lift @x` (non-markup lift target) inside markup context reads @x
+              // to produce the lifted value. Emit a markup-read edge when inside
+              // markup children (markupChildDepth > 0).
+              if (markupContextEmitEdges && markupChildDepth > 0 && node.span) {
+                emitMarkupReadEdge(node.span, varName);
+              }
             }
           } else if (target.kind === "markup" && target.node) {
+            // A-1.4 Shape 3 — lift-expr with markup body. Recurse into the lift
+            // markup so its attrs + interpolations get edges via A-1.3 shapes 2/3
+            // (variable-ref attrs) and shape 1 (bare-expr children).
             sweepNodeForAtRefs(target.node as ASTNode);
           }
         }

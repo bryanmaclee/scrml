@@ -10,10 +10,10 @@
  *   Shape 3: bind:value=@x two-way binding (same valObj.kind === "variable-ref" path)
  *   Shape 4: if=@x / if=(@x && @y) condition attribute
  *
- * Also verifies that the 4 NOT-in-scope shapes (call-ref, for-iterable,
- * lift-template body, engine state-child body) emit NOTHING from the
- * markup-read path. These are regression guards for A-1.4/A-1.5 scope
- * boundaries.
+ * Also verifies that the raw-string-attr shape (NOT activated in A-1.3)
+ * emits nothing, and that call-ref (activated in A-1.4) now emits.
+ * A-1.4 wired call-ref, for-iterable, and lift-template-body.
+ * A-1.5 wired engine state-child + onTransition/onTimeout/onIdle.
  *
  * Spec authority: SPEC §40.9.3 (markup-context edge emission requirement),
  *   §31 (DG normative), §34 (error catalog), Option Y per S88 user ratification.
@@ -446,12 +446,16 @@ describe("A-1.3 Shape 4: if=@x / if=(expr) condition attribute", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Regression guards — NOT-in-scope shapes must emit NO markup-read nodes
+// Regression guards — shapes outside A-1.3's 4 high-freq set
+// OOS-T1 was a pre-A-1.4 guard; A-1.4 activated call-ref so the test now
+// asserts POSITIVE emission for call-ref.
+// OOS-T2 remains: raw-string-typed attr values are NOT activated (no shape).
 // ---------------------------------------------------------------------------
 
-describe("A-1.3 out-of-scope shapes: call-ref, string-attr-raw — no markup-read emission", () => {
-  test("OOS-T1: call-ref attribute value (Shape A-1.4) emits NO markup-read node", () => {
-    // onclick=fn(@x) — call-ref shape. A-1.4 territory. A-1.3 must NOT emit.
+describe("A-1.3 regression guards: call-ref now emits (A-1.4), raw-string still does not", () => {
+  test("OOS-T1: call-ref attribute value emits markup-read node + reads edge (A-1.4 activated)", () => {
+    // onclick=fn(@x) — call-ref shape. A-1.4 activated this shape.
+    // Now the call-ref @x arg DOES emit a markup-read node + reads edge.
     const xDecl = mkStateDecl("x", 10);
     const logicBlock = mkLogicBlock([xDecl], 0);
 
@@ -461,10 +465,15 @@ describe("A-1.3 out-of-scope shapes: call-ref, string-attr-raw — no markup-rea
     const fileAST = mkFileAST([logicBlock, markupEl]);
     const { depGraph } = runDG({ files: [fileAST], routeMap: mkRouteMap() });
 
-    // call-ref attr creditReader is called (for E-DG-002), but NO markup-read
-    // node should be emitted (that is A-1.4 work).
+    // A-1.4 activated: call-ref attr @x DOES emit a markup-read node.
     const mrNodes = markupReadNodes(depGraph);
-    expect(mrNodes).toHaveLength(0);
+    expect(mrNodes.length).toBeGreaterThanOrEqual(1);
+
+    // And a reads edge points to the @x reactive node.
+    const xId = reactiveNodeId(depGraph, "x");
+    expect(xId).not.toBeNull();
+    const mrEdges = markupReadEdges(depGraph);
+    expect(mrEdges.some((e) => e.to === xId)).toBe(true);
   });
 
   test("OOS-T2: string-typed attribute value with @var (raw-string path) emits NO markup-read node", () => {
