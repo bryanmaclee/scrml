@@ -14936,6 +14936,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-COMPONENT-023 | §16.5 | A `slot="name"` fill (or `render name`) targets a prop that is not declared as `snippet`-typed in the target component. (Catalog addition S84 Wave 2 #5; full prose at §16.5 lines 8539, 8574.) | Error |
 | E-COMPONENT-024 | §16.5 | A `slot="name"` fill is used to fill a parametric snippet prop. Parametric snippets are invoked with `render name(arg)`; slot-fill is the zero-argument form only. (Catalog addition S84 Wave 2 #5; full prose at §16.5 lines 8564, 8575.) | Error |
 | E-INPUT-005 | §36 | Two input-state-type elements (`<keyboard id=>`, `<mouse id=>`, `<gamepad id=>`) in the same scope use the same `id` value. Input state ids must be unique within their scope. (Catalog addition S84 Wave 2 #5; full prose at §36 lines 15628-15644.) | Error |
+| W-INPUT-001 | §36.7.1 | (v0.3, info-level) The `target=` expression on `<mouse>` (or any future input-state element that gains a `target=` attribute) reads a single ref variable that is statically proven to have NO assignment site anywhere in the file (no `ref=@var`, no direct `@var = ...`, no `bind:` write, no other write form). At mount time the runtime will silently fall back to `document` scope per §36.7.1 normative behavior (matches `compiler/src/runtime-template.js:1590`), so the program is well-formed; W-INPUT-001 surfaces the smell that the adopter likely intended an element-scoped target but the ref is dead. Suppression: bind the ref to the intended element (`<canvas ref=@canvasEl/>`), or remove the `target=` attribute to make the document-scope intent explicit. The S89 OQ-A ratification (Option γ) explicitly chooses this lint over a mount-time `E-INPUT-006` error so canvas / ref-binding flows where the ref attaches on the second effect tick are not gratuitously broken. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` / `W-TRY-CATCH-IN-SCRML-SOURCE` family of synthesis-pattern info / warning lints. (Catalog addition S89 §36 impl Phase 1 sub-phase 1.B 2026-05-13; emission site TBD in Phase 2 — likely `compiler/src/codegen/emit-html.ts` near the `INPUT_STATE_TAGS` branch or a dedicated validator pass.) | Info |
 | E-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is rejected. Deprecation cycle endpoint — activates after the W-DEPRECATED-001 deprecation window when the parser stops accepting `<machine>` and adopters MUST migrate to `<engine>`. Mirrors the `server function` → plain `function` deprecation cycle (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER). (Catalog addition S84 Wave 2 #5; spec body at §51.3.2 line 22018, W-DEPRECATED-001 row at line 14432.) | Error |
 | E-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener with whitespace between `<` and the identifier. Deprecation cycle endpoint — activates after the W-WHITESPACE-001 deprecation window (P3 of state-as-primary unification, 2026-04-30) when the parser stops accepting the space-after-`<` form. (Catalog addition S84 Wave 2 #5; spec body at §15.15.5 lines 372, 8418, W-WHITESPACE-001 row at line 14431.) | Error |
 | E-ENGINE-006 | §51.5 | Machine rebinding: an attempt to shadow a machine-bound variable with a different machine. A given `@variable` may be bound by at most one machine in a file scope. (Catalog addition S84 Wave 2 #5; full prose at §51.5 line 22245.) | Error |
@@ -15680,6 +15681,64 @@ guarantee holds even if the scope is destroyed during an active animation frame.
 every `<keyboard>`, `<mouse>`, and `<gamepad>` element. Failure to emit this call is a
 compiler bug, not a user error.
 
+#### 36.5.1 Nested-scope cleanup boundary (S89 OQ-B ratification — Option α)
+
+When a `<keyboard>`, `<mouse>`, or `<gamepad>` element is declared inside a nested
+`<program>` (or any other nested scope that owns its own mount/unmount lifecycle),
+cleanup SHALL fire at the **immediately enclosing scope's unmount** — not at the
+top-level program unmount.
+
+```scrml
+<program>
+    <keyboard id="outer"/>      <!-- cleanup at top-level unmount -->
+
+    <program name="sub">
+        <keyboard id="inner"/>  <!-- cleanup when <program name="sub"> unmounts -->
+    </>
+</>
+```
+
+**Normative statement:** The compiler SHALL register each input state type's
+`_scrml_register_cleanup` call against the **immediately enclosing element scope** as
+defined by §6.7.2 (canonical teardown sequence). The cleanup fires when that enclosing
+scope unmounts, regardless of whether parent scopes remain mounted. This matches the
+lifecycle parity of `<timer>` and `<poll>` (§6.7.5 / §6.7.6 — "When the enclosing scope
+destroys, all `<timer>` instances in that scope are stopped") and the engine-state
+mount-position semantics of §51.0.D ("decl=mount; cross-file singleton").
+
+**Rationale:** the per-call `scopeVar` uniqueness pattern used by
+`compiler/src/codegen/emit-reactive-wiring.ts:841` (`scopeVar = JSON.stringify(genVar("scope"))`)
+already produces a fresh scope id per emitted `_scrml_input_*_create` call. Routing
+cleanup through the **immediately enclosing** scope is the canonical sub-mount point —
+no divergence from existing lifecycle elements.
+
+#### 36.5.2 SSR / server-side emission — client-only (S89 OQ-input-3 ratification)
+
+Input state types are client-only. They depend on `document`, browser event APIs,
+`requestAnimationFrame`, and `navigator.getGamepads()` — none of which exist in a
+server JS environment.
+
+**Normative statement:** The compiler SHALL NOT emit input-state runtime setup —
+`_scrml_input_keyboard_create`, `_scrml_input_mouse_create`,
+`_scrml_input_gamepad_create`, or their `_destroy` counterparts — into server JS
+output. The runtime helpers themselves SHALL NOT appear in any server-targeted
+bundle. The `_scrml_input_state_registry` Map (used by `<#id>` lookup) is similarly
+client-only.
+
+The compiler SHALL emit the input-state setup only into the client IR / client JS
+output. Compiled scrml programs that reference `<#id>` on an input state type
+SHALL guard those references behind the `animationFrame` / event-driven client-only
+execution path implied by §36.6.
+
+This mirrors the `<timer>` server-side posture: timers are scheduled into client
+runtime only; SSR HTML emission produces inert markup until hydration. Input state
+types follow the same discipline.
+
+**Conformance hook:** a regression-guard test (`compiler/tests/unit/
+input-state-types.test.js` §17, scheduled by SCOPING §3 sub-phase 3.A) SHALL assert
+that the compiled server output for any `<keyboard>` / `<mouse>` / `<gamepad>`
+fixture contains no `_scrml_input_*` substrings.
+
 ---
 
 ### 36.6 Interaction with `animationFrame`
@@ -15718,6 +15777,39 @@ Input state is read at the moment of the `animationFrame` callback — no reacti
 subscriptions are set up. This is intentional: input drives imperative game logic, not
 reactive state updates. If you need to trigger a reactive update from input, assign to an
 `@variable` inside the loop.
+
+#### `_clearFrameState()` discipline (S89 OQ-E ratification — SHOULD-level normative)
+
+Frame-loop consumers of `<#id>.justPressed(...)` / `<#id>.justReleased(...)` SHOULD
+call `<#id>._clearFrameState()` at the top of each animation frame to obtain
+frame-accurate edge detection. Without the per-frame clear, `justPressed("Space")`
+returns `true` for every frame between the keydown event and the next event that
+mutates the just-set (typically the corresponding keyup) — which collapses the
+frame-accurate edge into a multi-frame plateau.
+
+```scrml
+function gameLoop() {
+    <#keys>._clearFrameState()         // SHOULD call at top of each frame
+    <#cursor>._clearFrameState()
+
+    if (<#keys>.justPressed("Space"))  // true for exactly one frame post-keydown
+        jump()
+    animationFrame(gameLoop)
+}
+```
+
+**Normative statement (SHOULD):** Animation-frame-driven consumers of input state
+SHOULD call `_clearFrameState()` once at the top of each frame. Event-driven
+consumers (callbacks attached via `on*=` handlers that read input state inside the
+handler) MAY skip this call — the `justPressed` / `justReleased` semantics are
+event-local in that path. The SHOULD-level discipline is advisory: the compiler
+does NOT emit a lint when `_clearFrameState()` is absent, because the call-site
+discipline is context-dependent (frame loop vs. event handler) and not statically
+inferable in general.
+
+The S89 OQ-E ratification (Option α) chooses SHOULD over SHALL because non-animation
+consumers are a legitimate (if rare) use-case; mandating the call would penalize
+event-driven game-input shapes.
 
 ---
 
@@ -15778,6 +15870,64 @@ reactive state updates. If you need to trigger a reactive update from input, ass
 - The compiler SHALL emit E-INPUT-005 when two input state type elements in the same scope
   share the same `id`.
 - All E-INPUT-* errors are CG stage errors (Stage 8). They do not block earlier stages.
+
+#### 36.7.1 `<mouse target=@el>` null-at-mount — silent fallback + W-INPUT-001 (S89 OQ-A ratification — Option γ)
+
+When `<mouse id="cursor" target=@canvasEl/>` (or any `<mouse target=…/>` form) mounts
+and the `target=` expression evaluates to `not` at mount time, the runtime SHALL
+silently fall back to `document` as the event-listener scope. No error is raised.
+
+**Normative runtime behavior:** The runtime `_scrml_input_mouse_create` SHALL resolve
+the target via `(targetFn ? targetFn() : null) || (typeof document !== "undefined" ? document : null)`.
+The fallback to `document` is canonical when the target expression evaluates to `not`,
+to a value coerced to falsy, or when the target binding has not yet attached (typical
+during the first effect on a `ref=@el` binding before the element is in the DOM).
+Implementations SHALL match `compiler/src/runtime-template.js:1590` semantics: if
+neither the target callback nor `document` is available, no listeners are attached
+(SSR / non-DOM contexts).
+
+**Compile-time lint W-INPUT-001 (info-level):** When the compiler can statically prove
+that the variable bound to the `target=` expression is **never assigned anywhere in
+the file**, it SHALL emit `W-INPUT-001`. The lint surfaces the smell that the
+adopter likely intended a specific element target but the ref binding is dead. The
+runtime still falls back silently — W-INPUT-001 is purely advisory.
+
+**Suppression:** assign the ref binding (`ref=@canvasEl` on the intended element), or
+remove the `target=@canvasEl` attribute to make the document-scope intent explicit.
+
+```scrml
+<!-- W-INPUT-001 fires: @canvasEl is never assigned in this file -->
+<mouse id="cursor" target=@canvasEl/>
+
+<!-- W-INPUT-001 suppressed: @canvasEl is bound via ref= below -->
+<canvas ref=@canvasEl/>
+<mouse id="cursor" target=@canvasEl/>
+
+<!-- W-INPUT-001 suppressed: no target= attribute means document scope -->
+<mouse id="cursor"/>
+```
+
+**Rationale and synthesis-pattern lineage:** the synthesis lineage is the same Option-d
+engine-self-write methodology recorded in §51.0.F.1 — "do the safe thing at runtime,
+surface the smell at compile time." W-INPUT-001 joins the small `W-PROGRAM-SPA-INFERRED`
+/ `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` / `W-TRY-CATCH-IN-SCRML-SOURCE`
+family of synthesis-pattern info / warning lints.
+
+**Note on E-INPUT-006:** debate-04 surfaced an alternative — a mount-time
+`E-INPUT-006` error firing when `target=` resolves to `not`. The S89 OQ-A ratification
+(Option γ) **does not create E-INPUT-006**. W-INPUT-001 replaces the proposed error
+because the silent fallback ergonomic is required for canvas / ref-binding flows
+where the ref attaches on the second effect tick.
+
+**Normative statements (W-INPUT-001):**
+
+- The compiler SHALL emit W-INPUT-001 when a `target=` expression on `<mouse>` (or
+  any future input-state type that gains a `target=` attribute) reads a single ref
+  variable AND that ref variable is statically proven to have no assignment site in
+  the same file.
+- The compiler SHALL NOT emit W-INPUT-001 when the file contains at least one
+  assignment, `ref=`, `bind:`, or expression-based write to the target ref variable.
+- W-INPUT-001 is an info-level lint (CG stage). It does not block compilation.
 
 
 ---
