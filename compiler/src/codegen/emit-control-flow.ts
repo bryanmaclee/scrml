@@ -1239,10 +1239,111 @@ export function rewriteBlockBody(
 }
 
 /**
- * Emit a match expression compiled to a JS if/else IIFE.
+ * Bug 1.7 inline-arm (S88 v0.3) — detect a `@<name> = <expr>` shape at the
+ * head of a match-arm result string AND check whether `<name>` is engine-bound.
+ * When detected, returns the parsed binding + the precomputed
+ * `emitEngineWriteGuard` lines so the caller can splice them into the arm
+ * emission directly (replacing the bare `_scrml_reactive_set` that
+ * `emitExprField → emit-expr.ts:emitAssign` would have emitted).
+ *
+ * Why a separate helper (vs upgrading `emitAssign`):
+ *   - `emitEngineWriteGuard` returns an array of statements (multi-line for
+ *     hookless engines too: a comment + the call). `emitAssign` returns a single
+ *     expression string and is composed inside `emitExpr` which expects an
+ *     expression — no place to splice multi-line statement output cleanly.
+ *   - The match-arm-result emission path is statement-level (the IIFE
+ *     `return` wraps it), so we have a natural splicing site.
+ *   - Mirrors the same precedent shape used by `rewriteBlockBody`'s
+ *     reactive-assign branch (lines 1189-1217 — `^@<name>\s*=...` regex →
+ *     `engineBindings?.get(name)` → `emitEngineWriteGuard`).
+ *
+ * Mirrors `detectHistoryFormFromString` for the `.Variant.history` restore-form
+ * RHS (so inline-arm engine writes targeting a history form work the same way
+ * as block-arm + non-match-arm sites).
+ *
+ * Returns null when the arm result is NOT a `@<name> = ...` shape OR when
+ * `<name>` is not engine-bound. The caller falls through to the standard
+ * `emitExprField`-based emission in those cases.
  */
-export function emitMatchExpr(node: any): string {
-  const _matchCtx: EmitExprContext = { mode: "client" };
+function detectInlineEngineWrite(
+  armResult: string,
+  engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo>,
+): { binding: import("./emit-engine.ts").EngineBindingInfo; guardLines: string[] } | null {
+  // Permit only the assignment-form prefix; compound `@x += y` etc. are out of
+  // scope (engine vars are `.Variant`-typed; arithmetic compound-assign isn't
+  // a meaningful engine operation). Mirror rewriteBlockBody:1189 regex.
+  const m = armResult.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)\s*([\s\S]+)$/);
+  if (!m) return null;
+  const name = m[1];
+  const rawRhs = m[2].trim();
+  const binding = engineBindings.get(name);
+  if (!binding) return null;
+  // §51.0.N + §51.0.Q.1 — strip the `.Variant.history` suffix when present;
+  // pass `isHistoryRestore=true` to the guard emitter.
+  const hist = detectHistoryFormFromString(rawRhs);
+  // Build a fresh EmitExprContext for the RHS so `.advance()` / engine refs
+  // inside it route via the C13 detection arm. (No engine-write recursion: an
+  // engine write inside an engine write's RHS isn't a meaningful shape.)
+  const exprCtx: EmitExprContext = { mode: "client" };
+  const valueExpr = emitExprField(null, hist.strippedRhs, exprCtx);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { emitEngineWriteGuard } = require("./emit-engine.ts") as {
+    emitEngineWriteGuard: (
+      binding: import("./emit-engine.ts").EngineBindingInfo,
+      newValueExpr: string,
+      isHistoryRestore?: boolean,
+    ) => string[];
+  };
+  const guardLines = emitEngineWriteGuard(binding, valueExpr, hist.isHistoryForm);
+  return { binding, guardLines };
+}
+
+/**
+ * Emit a match expression compiled to a JS if/else IIFE.
+ *
+ * `opts` is an opaque pass-through used by emitLogicBody for the structured
+ * (match-arm-block) path. Thread it from the caller so engineBindings /
+ * machineBindings / declaredNames / boundary survive INTO arm bodies — without
+ * it, an `@engineCell = .X` write inside `match v { .V => { @engineCell = ... } }`
+ * routes to bare `_scrml_reactive_set` instead of `_scrml_engine_direct_set`,
+ * silently bypassing the rule= contract guard. (Bug 1 follow-on, S88.)
+ *
+ * Bug 1.7 inline-arm follow-on (S88, v0.3 dispatch):
+ * Inline-arm results (`. Variant => @engineCell = .X`) flow through
+ * `emitExprField` and historically emitted bare `_scrml_reactive_set` (because
+ * `emit-expr.ts:emitAssign` is engine-routing-naïve). We now read
+ * `opts.engineBindings` + the engine-substrate extras and (a) build an
+ * `engineCtx` for `rewriteBlockBody` (used by `{ ... }` arm-result shapes) and
+ * (b) detect the `@<name> = expr` shape on inline-arm results, dispatching to
+ * `emitEngineWriteGuard` when `<name>` is engine-bound. This brings inline-arm
+ * bodies into structural parity with block-arm bodies for engine-write routing
+ * (rule= enforcement / <onTransition> hooks / timer arm-clear / history capture
+ * / Option-d self-write semantics per §51.0.F.1).
+ */
+export function emitMatchExpr(node: any, opts?: any): string {
+  // Bug 1.7 inline-arm (S88 v0.3) — build an engineCtx from `opts` so the
+  // inline-arm result path can dispatch @engineCell writes through the
+  // canonical write-guard. `opts` may be undefined (legacy call-sites that
+  // don't carry engine context — those have no @engine writes by definition).
+  const engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null =
+    opts?.engineBindings ?? null;
+  const engineCtx: EngineRewriteCtx | null = (engineBindings || opts?.engineVarNames) ? {
+    engineBindings,
+    exprCtxExtras: {
+      engineVarNames: opts?.engineVarNames ?? null,
+      enginesWithHooks: opts?.enginesWithHooks ?? null,
+      enginesWithOnTimeout: opts?.enginesWithOnTimeout ?? null,
+      enginesWithIdleWatchdog: opts?.enginesWithIdleWatchdog ?? null,
+      enginesWithInternalRules: opts?.enginesWithInternalRules ?? null,
+      enginesWithHistory: opts?.enginesWithHistory ?? null,
+    },
+  } : null;
+  // Enrich the EmitExprContext used to lower arm results so `.advance(.X)`
+  // calls inside inline-arm RHS reach the C13 detection arm in emit-expr.ts.
+  const _matchCtx: EmitExprContext = {
+    mode: "client",
+    ...(engineCtx?.exprCtxExtras ?? {}),
+  };
   const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
   const body: any[] = node.body ?? [];
 
@@ -1253,19 +1354,21 @@ export function emitMatchExpr(node: any): string {
     if (!child) continue;
     // Handle structured match-arm-block nodes (from AST builder block body parsing).
     // These come from `. VariantName => { ... }` arms where the body was parsed as AST.
+    //
+    // Bug 1 fix (S88 dispatch — 14-mario): block-form payload-binding arms
+    // (`. Variant(n) => { ... }`) carry `payloadBindings: string[]` from
+    // ast-builder.js (Form 1b). Project them into MatchArm.binding so
+    // emitVariantBindingPrelude can produce the `const n = tmp.data.field;`
+    // statements before the arm body. Without this, references like `n` inside
+    // the body emit as unbound JS identifiers → ReferenceError at runtime.
+    // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
-      // `child.binding` is the raw paren-contents text captured by the
-      // ast-builder Form 1b parser (e.g., "name : who, count : n" or
-      // "w, h"). When present, emitVariantBindingPrelude will emit the
-      // `const <local> = subject.data.<field>;` lines for the arm body.
-      // Wildcard / not arms have no payload binding by construction.
-      const armBinding = (!child.isWildcard && !child.isNotArm && typeof child.binding === "string" && child.binding.length > 0)
-        ? child.binding
-        : null;
+      const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
+      const binding = payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding: armBinding,
+        binding,
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       };
@@ -1326,8 +1429,13 @@ export function emitMatchExpr(node: any): string {
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
     // This path is taken for match-arm-block nodes parsed by the AST builder.
+    // Bug 1 fix-C (S88 dispatch — 14-mario engine writes): thread `opts` so
+    // engine/machine bindings + declaredNames + boundary reach _emitReactiveSet
+    // in the arm body. Without this, `@engineCell = .X` inside an arm emits
+    // bare `_scrml_reactive_set` and bypasses the rule= contract guard +
+    // engine timer/history bookkeeping.
     if (arm.structuredBody) {
-      const bodyLines = emitLogicBody(arm.structuredBody).filter(Boolean);
+      const bodyLines = emitLogicBody(arm.structuredBody, opts).filter(Boolean);
       const structuredInner = bodyLines.join("; ");
       const structuredEmit = structuredInner
         ? `{ ${bindingPrelude}${structuredInner} }`
@@ -1350,20 +1458,39 @@ export function emitMatchExpr(node: any): string {
     // Block bodies contain statements (reactive assignments, lift calls) — they must NOT
     // be passed to rewriteExpr directly or @name becomes _scrml_reactive_get("name")
     // on the left side of =. Route through rewriteBlockBody instead.
+    //
+    // Bug 1.7 inline-arm (S88 v0.3) — thread engineCtx so `{ @engineCell = .X }`
+    // braced-statement arm bodies route through emitEngineWriteGuard (mirrors
+    // the C13 routing already in place for non-match-arm body usage).
     const isBlockBody = arm.result.trimStart().startsWith("{") && arm.result.trimEnd().endsWith("}");
+    // Bug 1.7 inline-arm (S88 v0.3) — for the inline-arm (`. V => @e = .X`)
+    // shape, detect engine-write at the result level. When detected, swap the
+    // standard `return _scrml_reactive_set(...)` emission for a brace-wrapped
+    // emission of the canonical `_scrml_engine_direct_set(...)` guard lines.
+    // The IIFE return value isn't consumed for assignment-statement arm bodies
+    // (the outer `match-stmt` discards it), so dropping `return` is safe.
+    const inlineEngineWrite = !isBlockBody && engineBindings
+      ? detectInlineEngineWrite(arm.result, engineBindings)
+      : null;
     const emitResult = isBlockBody
       ? (() => {
           const inner = arm.result.trim().slice(1, -1).trim();
-          return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
+          return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner, null, engineCtx)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
         })()
-      : (bindingPrelude
-          ? `{ ${bindingPrelude}return ${emitExprField(null, arm.result, _matchCtx)}; }`
-          : `return ${emitExprField(null, arm.result, _matchCtx)};`);
+      : inlineEngineWrite
+        ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
+        : (bindingPrelude
+            ? `{ ${bindingPrelude}return ${emitExprField(null, arm.result, _matchCtx)}; }`
+            : `return ${emitExprField(null, arm.result, _matchCtx)};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
         // §42 presence arm: (x) => expr — bind x to the matched value
         if (isBlockBody) {
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
+        } else if (inlineEngineWrite) {
+          // Bug 1.7 inline-arm (S88 v0.3) — engine-write in a presence arm result.
+          // The `emitResult` already wraps the guard lines in braces.
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${emitExprField(null, arm.result, _matchCtx)}; }`);
