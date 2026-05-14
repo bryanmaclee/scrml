@@ -27,6 +27,7 @@ import { runDG } from "./dependency-graph.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { runAuthGraph } from "./auth-graph.ts";
+import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { runCG } from "./code-generator.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
@@ -422,6 +423,17 @@ export function compileScrml(options = {}) {
      * runnable bun:test file with `test-bind` dispatch hooks already wired.
      */
     testMode = false,
+    /**
+     * S91 A-4.1 — Opt-in flag for the per-route artifact splitter
+     * (SPEC §40.9.7). When TRUE, runCG produces per-(EP, role, tier)
+     * chunk descriptors AND a chunks.json manifest; the api.js write
+     * loop writes one file per chunk under `<outputDir>/<route-path>/`
+     * plus `<outputDir>/chunks.json`.
+     *
+     * Default `false` per OQ-A4-F (S91 ratification). Default-on at
+     * the v0.3.0 cut release once A-4.1..A-4.7 have all landed.
+     */
+    emitPerRoute = false,
     log = console.log,
     selfHostModules = null,
   } = options;
@@ -1382,6 +1394,10 @@ export function compileScrml(options = {}) {
     // A-2.1 — pass Stage 7.6 ReachabilityRecord. Empty at A-2.1; consumed
     // by A-4 codegen wave once A-2.2..A-2.7 land the closure analysis.
     reachabilityRecord: rsResult.record,
+    // A-4.1 (S91) — Opt-in per-route artifact splitter (§40.9.7).
+    // Off by default per OQ-A4-F; enables per-(EP, role, tier) chunk
+    // descriptor production + chunks.json manifest emission.
+    emitPerRoute,
   }));
   collectErrors("CG", cgResult.errors);
 
@@ -1541,6 +1557,34 @@ export function compileScrml(options = {}) {
         }
       }
     }
+
+    // -------------------------------------------------------------------------
+    // S91 A-4.1 — Per-route chunk file writes.
+    //
+    // When `--emit-per-route` is set AND runCG produced chunk descriptors,
+    // write one file per chunk at `<outputDir>/<route-path>/<RoleVariant>.
+    // <tier>.<8-char-hash>.js` (OQ-A4-C filename convention). Also write
+    // `<outputDir>/chunks.json` per OQ-A4-A always-emit ratification.
+    //
+    // At A-4.1 every chunk file is empty (placeholder payload).
+    // A-4.2..A-4.7 populate real content. A-4.6 replaces the placeholder
+    // `00000000` hash segment with a content-addressed FNV-1a base36
+    // hash (§47.1.3).
+    // -------------------------------------------------------------------------
+    if (emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
+      for (const chunk of cgResult.chunks.values()) {
+        // The chunk filename is dist-relative; join with outputDir.
+        const chunkPath = join(outputDir, chunk.filename);
+        mkdirSync(dirname(chunkPath), { recursive: true });
+        writeFileSync(chunkPath, chunk.payloadJs);
+        fileCount++;
+        if (verbose) log(`  [CG] Wrote chunk: ${chunk.filename}`);
+      }
+      const manifestPath = join(outputDir, "chunks.json");
+      writeFileSync(manifestPath, serializeChunksManifest(cgResult.chunksManifest));
+      fileCount++;
+      if (verbose) log(`  [CG] Wrote chunks manifest: chunks.json`);
+    }
   } else if (!write && cgResult.outputs) {
     // Still count outputs even when not writing
     for (const [, output] of cgResult.outputs) {
@@ -1579,5 +1623,17 @@ export function compileScrml(options = {}) {
     // tests and adopter debug tools can inspect classifier output without
     // re-running the auth-graph pass.
     authGraph: agResult.graph,
+    // S91 A-4.1 — per-(EP, role, tier) chunk descriptors. Present only
+    // when `emitPerRoute: true` was passed AND runCG produced chunks.
+    // Surface the splitter output on the public return so adopter tools
+    // (and tests at A-4.1) can introspect without re-running the
+    // splitter. The function form mirrors `batchPlanJson` /
+    // `reachabilityRecordJson`.
+    chunks: cgResult.chunks,
+    chunksManifest: cgResult.chunksManifest,
+    chunksManifestJson: () =>
+      cgResult.chunksManifest
+        ? serializeChunksManifest(cgResult.chunksManifest)
+        : null,
   };
 }

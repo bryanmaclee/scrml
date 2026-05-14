@@ -46,6 +46,8 @@ Options:
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --emit-batch-plan       Print the Stage 7.5 BatchPlan as JSON (§PIPELINE)
   --emit-reachability     Emit <base>.reachability.json for each source (§PIPELINE Stage 7.6 / SPEC §40.9)
+  --emit-per-route        Emit per-(entry-point, role, tier) JS chunks + chunks.json
+                          (SPEC §40.9.7; opt-in during A-4 wave; default-on at v0.3.0 cut)
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --watch, -w             Watch for changes and recompile
   --convert-legacy-css    Convert <style> blocks to #{...}
@@ -83,6 +85,7 @@ function parseArgs(args) {
   let selfHost = false;
   let emitBatchPlan = false;
   let emitReachability = false;
+  let emitPerRoute = false;
   let emitMachineTests = false;
   // W2 §21.7: auto-gather defaults ON. `--no-gather` opts out.
   let gather = true;
@@ -120,6 +123,11 @@ function parseArgs(args) {
       emitBatchPlan = true;
     } else if (arg === "--emit-reachability") {
       emitReachability = true;
+    } else if (arg === "--emit-per-route") {
+      // S91 A-4.1 — opt-in per-route artifact splitter (SPEC §40.9.7).
+      // Default-off during A-4 wave development per OQ-A4-F; default-on
+      // at the v0.3.0 cut release once A-4.1..A-4.7 all land.
+      emitPerRoute = true;
     } else if (arg === "--emit-machine-tests") {
       emitMachineTests = true;
     } else if (arg === "--no-gather") {
@@ -160,7 +168,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitMachineTests, gather };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, emitMachineTests, gather };
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +291,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitMachineTests, gather } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, emitMachineTests, gather } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -304,6 +312,9 @@ function runOnce(opts, selfHostModules = null) {
       embedRuntime,
       mode,
       emitMachineTests,
+      // S91 A-4.1 — opt-in per-route artifact splitter; emits chunk
+      // files + chunks.json when set.
+      emitPerRoute,
       gather,
       write: true,
       log: verbose ? (msg) => console.log(c.dim(msg)) : () => {},

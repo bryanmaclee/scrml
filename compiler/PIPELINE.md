@@ -2515,6 +2515,16 @@ interface ChunkContents {
     synthesised validity properties, and transition-handler bodies use the encoded-name scheme
     of §47 (kind `t` for state cells, `p` for boolean computed cells, `a` for arrays, `f` for
     functions). `reflect()` decodes back to developer-visible dotted form.
+  - **Per-route artifact splitter (S91, A-4.1):** when `CgInput.emitPerRoute === true` runCG
+    invokes `compiler/src/codegen/route-splitter.ts:emitPerRouteChunks` after the per-file Emit
+    phase completes. The splitter iterates `reachabilityRecord.closures` per (entry-point, role,
+    tier) and produces per-chunk descriptors surfaced as `CgOutput.chunks` +
+    `CgOutput.chunksManifest`. Chunk filenames follow OQ-A4-C
+    `<route-path>/<RoleVariant>.<tier>.<8-char-hash>.js`; manifest follows OQ-A4-A always-emit
+    when the flag is set. At A-4.1 the splitter is iteration-only — payload bodies are empty
+    placeholders; A-4.2..A-4.7 populate per SPEC §40.9.7. Default-off during the A-4 wave per
+    OQ-A4-F; default-on at the v0.3.0 cut release. Cross-ref:
+    `docs/changes/a-4-per-route-artifact-splitter-SCOPING/SCOPING.md`.
 - Consumer: Compiler output writer (writes files to disk)
 
 **Error contract:**

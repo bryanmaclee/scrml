@@ -43,6 +43,12 @@ import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
+import {
+  emitPerRouteChunks,
+  type ChunkKey,
+  type ChunkOutput,
+  type ChunksManifest,
+} from "./route-splitter.ts";
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -118,6 +124,20 @@ export interface CgInput {
    * Optional; falls back to an empty record when absent.
    */
   reachabilityRecord?: ReachabilityRecord | null;
+  /**
+   * S91 A-4.1 — Opt-in flag for the per-route artifact splitter
+   * (SPEC §40.9.7). When TRUE, after the per-file Emit phase completes,
+   * `runCG` invokes `emitPerRouteChunks` and surfaces the per-(EP, role,
+   * tier) chunk descriptors on the output via `chunks` + `chunksManifest`.
+   *
+   * Default `false` per OQ-A4-F (S91 ratification): opt-in during the
+   * A-4 wave development; default-on at the v0.3.0 cut release once
+   * A-4.1..A-4.7 have all landed.
+   *
+   * When false, the splitter is NOT invoked — per-file `.client.js`
+   * emission proceeds unchanged. This is the v0.2.x default behaviour.
+   */
+  emitPerRoute?: boolean;
 }
 
 export interface CgFileOutput {
@@ -142,6 +162,25 @@ export interface CgOutput {
   errors: CGError[];
   runtimeJs?: string | null;
   runtimeFilename?: string;
+  /**
+   * S91 A-4.1 — Per-(entry-point, role, tier) chunk descriptors.
+   *
+   * Populated only when `CgInput.emitPerRoute === true` AND the input
+   * `reachabilityRecord` carries closure entries. At A-4.1 each chunk
+   * has `payloadJs: ""` (empty placeholder body) and a placeholder
+   * `chunkHash = "00000000"`; A-4.2 populates the initial-tier payload
+   * and A-4.6 lands real content-addressed hashes.
+   *
+   * Absent (undefined) when the splitter is not invoked.
+   */
+  chunks?: Map<ChunkKey, ChunkOutput>;
+  /**
+   * S91 A-4.1 — Per-app chunks.json manifest shape per OQ-A4-A (always-
+   * emit when the flag is set).
+   *
+   * Absent (undefined) when the splitter is not invoked.
+   */
+  chunksManifest?: ChunksManifest;
 }
 
 /**
@@ -163,6 +202,7 @@ export function runCG(input: CgInput): CgOutput {
     batchPlannerErrors = [],
     exportRegistry: exportRegistryInput = null,
     reachabilityRecord: reachabilityRecordInput = null,
+    emitPerRoute = false,
   } = input;
 
   // Resolve encoding configuration (§47)
@@ -179,6 +219,11 @@ export function runCG(input: CgInput): CgOutput {
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
+  // S91 A-4.1 — per-file CompileContext map, populated during the per-
+  // file Plan/Emit phase. Passed to the route-splitter when
+  // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
+  // analysis state when composing chunk payloads. Unused at A-4.1.
+  const cgContextByFile = new Map<string, CompileContext>();
 
   // Validate inputs
   if (!files || files.length === 0) {
@@ -819,6 +864,11 @@ export function runCG(input: CgInput): CgOutput {
       ...(serverJsMap !== null && { serverJsMap }),
     };
     outputs.set(filePath, browserOutput);
+    // S91 A-4.1 — stash per-file CompileContext for the route-splitter
+    // post-pass below. The splitter is reserved (A-4.2+) but the
+    // recording is unconditional so the contract is stable across
+    // sub-phases.
+    cgContextByFile.set(filePath, compileCtx);
 
     // M-7C-D-12 Track 3 (S90): W-CG-UNDEFINED-INTERPOLATION regression guard.
     // Scans the just-emitted compiled JS for bare `undefined` JS-keyword usage
@@ -841,7 +891,47 @@ export function runCG(input: CgInput): CgOutput {
   // S79 C.2 — same lifecycle for the batch-in-list cap override.
   setBatchInListCap(null);
 
-  return { outputs, errors, runtimeJs, runtimeFilename: RUNTIME_FILENAME };
+  // -------------------------------------------------------------------------
+  // S91 A-4.1 — Per-route artifact splitter (SPEC §40.9.7).
+  //
+  // Opt-in via `CgInput.emitPerRoute === true` per OQ-A4-F (S91
+  // ratification). When set, iterate the Stage 7.6 ReachabilityRecord's
+  // per-(EP, role) ChunkPlan shape and produce per-(EP, role, tier)
+  // chunk descriptors. At A-4.1 each chunk carries an empty `payloadJs`
+  // and placeholder hash; A-4.2..A-4.7 fill these in incrementally.
+  //
+  // Splitter diagnostics are surfaced into the standard `errors` array
+  // so existing collectErrors machinery in api.js routes them
+  // alongside per-file emit errors. No diagnostics are produced at
+  // A-4.1 (W-CG-CHUNK-* lints land at A-4.7).
+  //
+  // When `emitPerRoute` is false (default), the splitter is NOT
+  // invoked — per-file emission proceeds unchanged and the chunks /
+  // chunksManifest fields are absent from the output.
+  // -------------------------------------------------------------------------
+  let chunks: Map<ChunkKey, ChunkOutput> | undefined;
+  let chunksManifest: ChunksManifest | undefined;
+  if (emitPerRoute && reachabilityRecordInput) {
+    const splitterResult = emitPerRouteChunks({
+      reachabilityRecord: reachabilityRecordInput,
+      cgContextByFile,
+      perFileOutputs: outputs,
+    });
+    chunks = splitterResult.chunks;
+    chunksManifest = splitterResult.manifest;
+    if (splitterResult.diagnostics.length > 0) {
+      errors.push(...splitterResult.diagnostics);
+    }
+  }
+
+  return {
+    outputs,
+    errors,
+    runtimeJs,
+    runtimeFilename: RUNTIME_FILENAME,
+    ...(chunks !== undefined && { chunks }),
+    ...(chunksManifest !== undefined && { chunksManifest }),
+  };
 }
 
 export { CGError } from "./errors.ts";
