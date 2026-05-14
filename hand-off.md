@@ -98,6 +98,58 @@ Surface at next user interaction; append once user confirms the verbatim slate.
 
 ---
 
+---
+
+## S91 mid-session activity log
+
+### Commits landed (5 in scrmlTS + 1 in scrml-support)
+
+| # | Commit | Description |
+|---|---|---|
+| 1 | scrmlTS `199940e` | s91-open hygiene — hand-off rotation + FULL_COLD_START map refresh (11 maps) |
+| 2 | scrmlTS `399fc81` | pa.md amendments — F4 step 1 sharpened + new "S90 addendum" CWD-routing subsection |
+| 3 | scrml-support `8d13012` | user-voice S90 OQ-A3-A override verbatim backfill |
+| 4 | scrmlTS `bf2b098` | **A-3.5 wave-closure** — 7 §34 catalog rows + 5 §40.9.11 rows + api.js Stage 7.55 AG wire-in + §40.9.9 13-test integration suite + normalizeFileAST helper + cross-ref consistency audit |
+| 5 | scrmlTS `1d1ceef` | SPEC §40.9.9 case-fix — 6 sites `role="admin"` → `role="Admin"` (closes A-3.5 deferred #1) |
+| 6 | scrmlTS (master-list S91 mid-section addendum + this hand-off update) | Pending — PA-direct work in progress |
+
+### Q-OPEN dispositions at S91-mid
+
+| Q | Status | Notes |
+|---|---|---|
+| Q-OPEN-1 (A-3.5) | ✅ CLOSED `bf2b098` | A-3 wave fully wave-closed; 13-test §40.9.9 integration replay green |
+| Q-OPEN-2 (A-2.7 outer fixpoint) | 🟡 IN FLIGHT | Background agent dispatched; 8-14h walltime |
+| Q-OPEN-3 (A-2.8 + A-2.9 polish) | ⏸️ BLOCKED on A-2.7 | Queue after A-2.7 lands |
+| Q-OPEN-4 (A-4 per-route splitter) | ⏸️ BLOCKED on A-2.7 | Major 60-120h wave; sequence after A-2.7 |
+| Q-OPEN-5 (Wave 4.A A+R adopter-content) | ⏸️ Rule 1 (marketing-shaped; do not surface unless user raises) | — |
+| Q-OPEN-6 (paired migration packets re-grep) | ⏸️ unblocked but deferred | Low-value re-grep audit; defer |
+| Q-OPEN-7 (pa.md S90 memory fold-in) | ✅ CLOSED `399fc81` | Sharpened F4 step 1 + new CWD-routing subsection |
+| Q-OPEN-8 (default=null audit-doc closure) | ✅ CLOSED as no-edit-needed | Audit doc already incorporates S89 ruling at authorship; BORDERLINE article items still require user ratification per Rule 1 |
+| Q-OPEN-9 (`/map` refresh) | ✅ CLOSED `199940e` | FULL_COLD_START refresh; 11 maps reflecting S90 state |
+| Q-OPEN-S91-NEW-1 (S90 user-voice append) | ✅ CLOSED `8d13012` | OQ-A3-A verbatim landed in scrml-support |
+| Q-OPEN-NEW (SPEC §40.9.9 case-fix) | ✅ CLOSED `1d1ceef` | 6 sites mechanical |
+| Q-OPEN-NEW (03-contact-book auth-redirect SCOPING) | 🟡 IN FLIGHT | Background scrml-deep-dive scoping agent; 2-4h walltime; output at `docs/changes/03-contact-book-auth-redirect-SCOPING/SCOPING.md` |
+
+### In-flight at S91-mid
+
+- **A-2.7 outer fixpoint operator** — agent `a-2-7-agent-id-tracked-via-task-list`; closes A-2 wave.
+- **03-contact-book auth-redirect SCOPING** — scrml-deep-dive agent; produces fix-shape proposals + recommendation + OQs for user ratification.
+
+### CWD-routing precedent count this session
+
+**Three trap-and-catches** validating the S91 pa.md fold-in:
+1. Session-open Bash batch leaked CWD to scrml-support (caught next batch via relative-path Read failure)
+2. User-voice S90 append CWD-leak (caught immediately; reset)
+3. A-3.5 file-delta initially landed in worktree before reset (caught via empty staged-diff + `git status` "On branch worktree-...")
+
+### Push state at S91-mid
+
+scrmlTS: 5 commits ahead of origin (`199940e..1d1ceef`).
+scrml-support: 1 commit ahead of origin (`8d13012`).
+**Push deferred to wrap per user authorization at session-open.**
+
+---
+
 ## Tags
 
-#session-91 #open #post-S90-landmark-17-commits #A-3-substantively-complete-A-3.5-pending #A-2-Components-1-5-wired-A-2.7-pending #map-refresh-due #user-voice-S90-append-gap #pa.md-S91-amendments-queued
+#session-91 #open #post-S90-landmark-17-commits #A-3-FULLY-CLOSED-S91 #A-2.7-in-flight #03-contact-book-scoping-in-flight #map-refresh-DONE #user-voice-S90-DONE #pa.md-S91-amendments-DONE #§40.9.9-case-fix-DONE #5-commits-pending-push
