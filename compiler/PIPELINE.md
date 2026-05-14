@@ -2335,6 +2335,8 @@ interface LoopHoist {
 
 **Status:** SPEC ANCHOR ONLY. The Stage 7.6 stage contract is defined here as normative spec text; the compiler implementation is staged across subsequent v0.3 waves (300-640h band per Insight 29 — markup-context edge emission ~40-80h, reachability solver ~120-240h, §40 auth-graph integration ~40-120h, per-route artifact splitter ~60-120h, integration tests ~40-80h). This stage is INACTIVE in the current pipeline; no compiler source emits it as of S86. Subsequent waves wire it on per the contract below.
 
+**A-2.7 (S91) — outer fixed-point operator wired.** Components 1-5 wired across waves A-2.2..A-2.6 (S89-S90); A-2.7 closes the A-2 wave by wiring the outer `closure(...)` operator from SPEC §40.9.1. After Components 1-5 produce the initial union for each (entry-point, role) pair, the orchestrator (`compiler/src/reachability-solver.ts:runReachabilitySolver`) invokes `runOuterFixpoint` (`compiler/src/reachability/outer-fixpoint.ts`). The fixpoint iterates the closure step (re-runs Components 2/3/5 over the current `componentNodeIds` view; Component 1 is NOT re-run — entry-point seed is bound) until no operator admits new elements. Iteration cap defaults to 16 (`DEFAULT_ITER_CAP`); cap overflow surfaces `E-CLOSURE-001` per §40.9.11. Monotonicity invariant guards against closure steps that lose elements (subset-returning steps throw — under-inclusion is the disallowed failure mode per §40.9.2).
+
 **Stage number rationale:** Stage 7.5 is taken by Batch Planner (BP). Stage 7.6 places Reachability Solver immediately after BP and before CG (Stage 8). Both BP and RS consume Stage 7 (DG) output; RS is downstream of BP (RS may consume BP's per-handler coalescing decisions when computing server-fn reachability for `N=0` calls, though the dependency is informational, not strict). The dispatch SCOPING.md §1.6 working title was "Stage 7.5"; renumbered to 7.6 to avoid collision with the landed Stage 7.5 (BP).
 
 **Input contract:**
@@ -2391,7 +2393,7 @@ interface ChunkContents {
 - **Determinism:** same input produces identical `ReachabilityRecord`. All inputs are static (no telemetry, no env, no timestamp) per SPEC.md §40.9.8.
 - **Monotonicity in N:** for any `E` and `R`, `ChunkPlan.initialChunk ⊆ initialChunk ∪ prefetchTier1 ⊆ ... ∪ prefetchTierN`.
 - **No mutation of upstream output:** RS produces a fresh `ReachabilityRecord` and does NOT mutate DG, BatchPlan, RouteMap, AuthGraph, ServerFnBoundary, or VendorUnitDeclarations.
-- **Termination:** the fixed-point operator over finite input graphs terminates by construction; `E-CLOSURE-001` is defensive against compiler-internal-invariant violations only.
+- **Termination:** the fixed-point operator over finite input graphs terminates by construction; `E-CLOSURE-001` is defensive against compiler-internal-invariant violations only. (Wired S91 A-2.7 — implementation at `compiler/src/reachability/outer-fixpoint.ts`; iteration cap = 16; surfaced via `runReachabilitySolver` per-(entry-point, role) loop.)
 
 **CLI exposure:** `scrml compile --emit-reachability` SHOULD emit the `ReachabilityRecord` as JSON for debugging and test visibility (analogous to `--emit-batch-plan` at §Stage 7.5). Implementation deferred to the compiler-impl wave.
 

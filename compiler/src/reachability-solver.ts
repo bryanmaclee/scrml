@@ -68,6 +68,7 @@ import {
   type Component4Result,
 } from "./reachability/component-4.ts";
 import { computeVendorUnitsUsed } from "./reachability/component-5.ts";
+import { runOuterFixpoint } from "./reachability/outer-fixpoint.ts";
 import type { VendorUnitId } from "./types/reachability.ts";
 import type { ConstFoldEnv } from "./codegen/constant-folder.ts";
 
@@ -87,13 +88,21 @@ import type { ConstFoldEnv } from "./codegen/constant-folder.ts";
 /**
  * Run the Stage 7.6 Reachability Solver.
  *
+ * **A-2.7 (S91):** Outer fixed-point operator wired. After Components
+ * 1-5 produce the initial union for each (entry-point, role) pair, the
+ * orchestrator runs `runOuterFixpoint` over the union per SPEC §40.9.1.
+ * The fixed point is reached when no operator (C2 / C3 / C5) adds new
+ * elements to the union. `E-CLOSURE-001` (§40.9.11) surfaces when the
+ * iteration cap (default 16 per `DEFAULT_ITER_CAP`) is reached without
+ * convergence — defensive, SHOULD NOT fire on valid source given the
+ * finite-graph guarantees of §31 / §40 / §52 / §41.
+ *
  * **A-2.5 (S90):** Component 4 (`auth_gated_boundaries_visible_to`)
  * lands. Per-role ChunkPlan emission replaces the single-anonymous
  * floor: each entry point's `RolePlayableSurface.byRole` carries one
  * ChunkPlan per role variant when the application declares a role
  * enum (§40.1.1); the single-anonymous floor is preserved for
  * applications with no enum or `isImplicitAnonymous === true`.
- * Subsequent wave A-2.7 wires the outer fixpoint operator.
  *
  * Current scope:
  *   1. Enumerate entry points from `input.files` per §40.8 shapes.
@@ -225,9 +234,46 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
     const rps: RolePlayableSurface = { byRole: new Map() };
     for (const role of c4.effectiveRoles) {
       const roleComponents = filterComponentsByRole(componentIds, role, c4);
-      const plan = makeChunkPlan(
-        roleComponents,
-        reactiveCellIds,
+
+      // -------------------------------------------------------------
+      // A-2.7 — outer fixpoint over the five-component union.
+      // -------------------------------------------------------------
+      //
+      // Build the initial union (`C1 ∪ C2 ∪ C3 ∪ C4 ∪ C5`) for this
+      // (entry-point, role) pair. The fixpoint operator iterates until
+      // no operator (C2 / C3 / C5) admits new elements. C1 is NOT
+      // re-run — the entry-point seed is bound; the fixpoint enriches
+      // via the leaf-atom unions.
+      //
+      // The fixpoint's `serverFnNodeIds` field carries the UNION of
+      // all tier sets (per-tier differencing happens at chunk-plan
+      // materialization, not inside the fixpoint). Tier1/tier2 deltas
+      // are preserved from the initial-pass Component 3 output —
+      // Component 3 is pure-functional given the same componentSet +
+      // DG + files, so re-running it inside the fixpoint produces the
+      // same tier shape on stable input.
+      //
+      // E-CLOSURE-001 surfaces as a per-(entry-point, role) error when
+      // the iteration cap is reached without convergence.
+      const initialUnion = {
+        componentNodeIds: roleComponents,
+        reactiveCellNodeIds: reactiveCellIds,
+        // Union all tiers for the fixpoint's playable-surface superset.
+        serverFnNodeIds: unionTierIds(serverFnTiers),
+        vendorUnitNames,
+      };
+      const fp = runOuterFixpoint({
+        entryPoint: ep.id,
+        viewerRole: role,
+        initialUnion,
+        depGraph: dg as any,
+        files,
+        env,
+      });
+      for (const e of fp.errors) errors.push(e);
+
+      const plan = makeChunkPlanFromFixpoint(
+        fp.result,
         serverFnTiers,
         vendorUnitNames,
       );
@@ -237,6 +283,25 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
   }
 
   return { record, errors };
+}
+
+/**
+ * Union the per-tier server-fn id sets (tier0 ∪ tier1 ∪ tier2) into a
+ * single superset for the fixpoint's `serverFnNodeIds` field.
+ *
+ * The fixpoint operates over the playable-surface SUPERSET (Σ_N
+ * playable_surface(E, N) for N=0..2); per-tier differencing is
+ * preserved at chunk-plan materialization.
+ */
+function unionTierIds(t: {
+  tier0: Set<NodeId>;
+  tier1: Set<NodeId>;
+  tier2: Set<NodeId>;
+}): Set<NodeId> {
+  const out = new Set<NodeId>(t.tier0);
+  for (const v of t.tier1) out.add(v);
+  for (const v of t.tier2) out.add(v);
+  return out;
 }
 
 /**
@@ -276,42 +341,58 @@ function filterComponentsByRole(
 // ---------------------------------------------------------------------------
 
 /**
- * Build the per-tier ChunkPlan for a single (entry-point, role) pair.
+ * Build the per-tier ChunkPlan for a single (entry-point, role) pair
+ * from the outer-fixpoint result.
  *
- * At A-2.4 + A-2.6 (Components 1 + 2 + 3 + 5):
- *   - `initialChunk` admits the initially-rendered component set
- *     (Component 1), the transitive reactive-dep closure (Component 2),
- *     the **tier-0 server-fns** (Component 3, `serverFnTiers.tier0`),
- *     AND the vendor units referenced by the component set (Component 5).
- *   - `prefetchTier1` admits the **tier-1-minus-tier-0** delta of
- *     server-fns (Component 3) — these are reachable via one user
- *     interaction step (onclick / onsubmit / bind:value write paths /
- *     onserver:message).
- *   - `prefetchTier2` admits the **tier-2-minus-tier-1** delta of
- *     server-fns (Component 3) — cascade reachability from N=1
- *     interactions admitting new components whose initial-render
- *     calls additional server-fns, plus engine state-child arm-body
- *     callees (`<onTimeout>` / `<onIdle>` / `<onTransition>` firing paths).
- *   - `prefetchTierN` remains empty (per OQ-A2-B Option a: N≥3 is
- *     on-demand at runtime).
+ * The fixpoint output (`fp.result`) carries the post-closure
+ * playable-surface SUPERSET for this (entry-point, role) pair:
+ * `componentNodeIds` (post-per-role-filter), `reactiveCellNodeIds`
+ * (post-C2-enrichment), `serverFnNodeIds` (union of all tiers,
+ * post-C3-enrichment), and `vendorUnitNames` (post-C5-enrichment).
  *
- * Monotonicity (PIPELINE Stage 7.6 line 2392): server-fn admission is
- * tier-cumulative in the SOLVER output (tier1 ⊇ tier0; tier2 ⊇ tier1),
- * differenced here into per-tier deltas for the chunk plan. The
- * cumulative property is preserved in the underlying solver state.
+ * The orchestrator decomposes the server-fn superset back into per-tier
+ * deltas via the initial-pass Component 3 output (`serverFnTiers`):
+ *   - `initialChunk.serverFnNodeIds` = tier-0 ∪ any fixpoint-admitted
+ *     server-fns that are NOT in tier0/tier1/tier2 (eager-ship floor —
+ *     newly-admitted server-fns from the fixpoint enrichment go to the
+ *     initial chunk since we have no tier metadata for them).
+ *   - `prefetchTier1.serverFnNodeIds` = tier-1 − tier-0 (initial-pass
+ *     tier-cumulative delta; preserved verbatim).
+ *   - `prefetchTier2.serverFnNodeIds` = tier-2 − tier-1.
+ *
+ * Reactive cells + components + vendor units use the fixpoint result
+ * verbatim — they are not tiered per the §40.9.7 contract (tiers
+ * differentiate server-fn prefetch cadence; components/reactive/vendor
+ * ship as part of the initial chunk).
+ *
+ * Monotonicity (PIPELINE Stage 7.6 line 2392) is preserved: the
+ * initial-pass tier sets are tier-cumulative by C3 construction; the
+ * fixpoint enriches without reordering.
  */
-function makeChunkPlan(
-  componentNodeIds: Set<NodeId>,
-  reactiveCellNodeIds: Set<NodeId>,
+function makeChunkPlanFromFixpoint(
+  fpResult: ChunkContents,
   serverFnTiers: { tier0: Set<NodeId>; tier1: Set<NodeId>; tier2: Set<NodeId> },
-  vendorUnitNames: Set<VendorUnitId>,
+  initialPassVendorUnits: Set<VendorUnitId>,
 ): ChunkPlan {
+  // Identify any server-fns admitted by the fixpoint that are NOT in
+  // the initial-pass tier sets. These come from fixpoint-driven
+  // enrichment (e.g., a custom closureStepFn in tests, or a future
+  // feedback edge from C2/C5 admitting components that C3 then sees).
+  // Eager-ship them in the initial chunk — no tier metadata available.
+  const fixpointAdmittedExtras = new Set<NodeId>();
+  for (const id of fpResult.serverFnNodeIds) {
+    if (!serverFnTiers.tier2.has(id)) fixpointAdmittedExtras.add(id);
+  }
+
+  const initialServerFns = new Set<NodeId>(serverFnTiers.tier0);
+  for (const id of fixpointAdmittedExtras) initialServerFns.add(id);
+
   return {
     initialChunk: {
-      componentNodeIds: new Set(componentNodeIds),
-      reactiveCellNodeIds: new Set(reactiveCellNodeIds),
-      serverFnNodeIds: new Set(serverFnTiers.tier0),
-      vendorUnitNames: new Set(vendorUnitNames),
+      componentNodeIds: new Set(fpResult.componentNodeIds),
+      reactiveCellNodeIds: new Set(fpResult.reactiveCellNodeIds),
+      serverFnNodeIds: initialServerFns,
+      vendorUnitNames: new Set(fpResult.vendorUnitNames),
     },
     prefetchTier1: {
       componentNodeIds: new Set(),
@@ -333,15 +414,6 @@ function differenceSet<T>(a: Set<T>, b: Set<T>): Set<T> {
   const out = new Set<T>();
   for (const v of a) if (!b.has(v)) out.add(v);
   return out;
-}
-
-function emptyChunkContents(): ChunkContents {
-  return {
-    componentNodeIds: new Set(),
-    reactiveCellNodeIds: new Set(),
-    serverFnNodeIds: new Set(),
-    vendorUnitNames: new Set(),
-  };
 }
 
 // ---------------------------------------------------------------------------
