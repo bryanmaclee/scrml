@@ -2,7 +2,52 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-13 S89 CLOSE — landmark 36-commit session): **12,065 pass / 117 skip / 1 todo / 0 fail / 604 files** (+148 vs S88; 0 regressions). v0.2.6 `efbd1e8` is still the shipped baseline.
+Current baseline (2026-05-14 S90 CLOSE — landmark 17-commit A-track-momentum session): **12,275 pass / 117 skip / 1 todo / 0 fail / 617 files** (+210 vs S89; 0 regressions). v0.2.6 `efbd1e8` is still the shipped baseline.
+
+### 2026-05-13 → 2026-05-14 (S90 CLOSE — landmark 17-commit A-track-momentum session — M-7C-D-12 wave CLOSED + A-2 Components 2-5 wired + A-3 substantively complete + 5 NEW first fire-sites + OQ-A3-A user override (d) full interpolation)
+
+S90 spanned midnight. Two major surfaces advanced end-to-end this session.
+
+**M-7C-D-12 runtime sentinel wave CLOSED end-to-end (5 of 5 tracks):**
+- T1 AST cleanup at `850a298`: LitExpr canonical `"not"` discriminator migration. Parser sites in expression-parser.ts (6 sites) + ast-builder.js + tokenizer.ts manufacture only `litType:"not"` with `raw` field discriminating user-source forbidden tokens. Gauntlet-phase3 detector migrated to raw-aware discrimination. component-expander default="null" path canonicalized. type-system whitelists cleaned. +23 tests. Semantic refinement: array holes `[1,,3]` now emit JS `null` (was `undefined`).
+- T3 codegen + lint at `887f420`: 16-site `?? "undefined"` → `?? "null"` migration + 3 consumer guards in lockstep. NEW `compiler/src/codegen/lint-undefined-interpolation.ts` lint (~280 LOC) firing `W-CG-UNDEFINED-INTERPOLATION` post-emission. Idiom-aware exemptions (paired absence-check / typeof env-detection / comments / strings / runtime-block masking). +28 tests. Corpus sanity 0/334 findings.
+- T4 SPEC amendments at `8cef7f5`: §12.5.1 wire-format amendment + **NEW §57 Wire Format normative section** (slot note: §50 was already Assignment-as-Expression; landed at §57). §51.0.J rename `E-DERIVED-ENGINE-INITIAL-UNDEFINED → ABSENT`. §42.8 "Runtime Representation — DevTools" subsection (OQ-7). SPEC-INDEX refresh 47 rows. SPEC.md 27,037 → 27,144 lines. PA-amendment during landing: §34 W-CG-UNDEFINED-INTERPOLATION row added (both T3 and T4 agents punted; PA closed coordination gap).
+- T5 audit closure docs at `956184f`: CLOSURE banners on null-audit + undefined-audit + master-list §0.6 + re-grep counts (null 2,777 → 2,925 / undefined 861 → 933; ZERO new M-class drift; increases entirely additive context).
+- T2 wire envelope encoder + dual-decoder at `06987dc` (continuation after 600s-watchdog stall): NEW `compiler/src/codegen/wire-format.ts` (228 LOC). Type-gated envelope wrapping at CSRF + non-CSRF emit sites in emit-server.ts. **Post-emit helper-injection pattern** at emit-server.ts L1357-1375 mirrors structural-equality precedent. Decoder wiring single-site at emit-functions.ts L268-289 (covers direct + CPS paths). `_scrml_wire_decode` helper in runtime-template.js. +33 tests (CSRF + non-CSRF + dual-decoder per OQ-4 (b) + §42.1.1 defined-value-passthrough + §42.9 interop). Lint sanity 0 new findings.
+
+**M-7C-D-12 first-attempt CWD-routing finding** (process discipline learning): first-attempt T1/T3/T4 dispatches all reported BLOCKED at startup-verification — harness provisioned `isolation: "worktree"` worktrees under `scrml-support/.claude/worktrees/` instead of `scrmlTS/.claude/worktrees/`. Root cause: PA's earlier `cd /home/.../scrml-support && git commit` persisted shell CWD; subsequent `git -C` calls don't change CWD. F4 startup-verification caught wrong-repo `pwd`; agents stopped without writes. Recovery: TaskStop + worktree cleanup + `cd scrmlTS && pwd` + re-dispatch with sharpened F4 path-prefix check. **NEW memory rule `feedback_agent_isolation_cwd_routing.md` saved.**
+
+**M-7C-D-12 T2 600s-watchdog stall recovery** (substantive re-dispatch precedent): first T2 agent stalled mid-deliberation with high-quality scaffolding (wire-format.ts 228 LOC + emit-server.ts integration + runtime-template.js decoder helper) UNCOMMITTED in working tree. Agent identified right pattern (post-emit `finalEmitted.includes(...)` detection) but stalled before applying. Recovery: retain partial-worktree as read-only WIP source; dispatch continuation agent with explicit "finish-from-WIP" brief. Continuation completed in 6 commits. Zero work-lost.
+
+**Approach A Components 2-5 wired through orchestrator end-to-end:**
+- A-2.3 Component 2 (`reactive_dep_closure`) at `687fba1`: NEW component-2.ts (537 LOC + 8 helpers). Forward-DFS over `reads`/`validator-reads`/`engine-derived-reads` edges per OQ-A2-J. Dynamic-key recovery hook. markup-read intermediary excluded. +15 tests. ZERO A-1 gaps surfaced.
+- A-2.6 Component 5 (`vendor_units_used_by`) at `4ed04f2`: NEW component-5.ts (451 LOC). Per-file vendor-unit attribution (v0.3 floor; per-component refinement deferred). Opacity rule (§40.9.6). +12 tests.
+- A-2.4 Component 3 (`server_fn_reachable_within`) at `ba3f75c` (PA-merged with A-2.6): NEW component-3.ts (~1023 LOC). Interaction-graph projection per OQ-A2-H Option α (pure AST, NO DG extension). Bounded BFS N=0/1/2 per OQ-A2-B Option a (N≥3 NOT emitted; on-demand runtime). Strategy-B function-source exclusion load-bearing. N=2 cascade via engine state-child arm-body callees. Worst-case-union for ambiguous callees. +17 tests. **PA-merge required**: agent based pre-A-2.6 main; unified `makeChunkPlan(componentNodeIds, reactiveCellNodeIds, serverFnTiers, vendorUnitNames)` signature with `differenceSet` helper.
+- A-2.5 Component 4 (`auth_gated_boundaries_visible_to`) at `4059532`: NEW component-4.ts (~558 LOC). RSInput.authGraph narrowed. **Per-role ChunkPlan emission** lands (ChunkPlan moves from single-`_anonymous`-keyed to per-role-variant classification). Per-gate per-role classifier (IN/OUT/RUNTIME-FALLBACK) consumes AuthGate.classification field. **NEW W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 first fire-sites.** +21 tests. Per-role filtering applies to componentNodeIds only (DG-id atoms don't carry markup-tree ancestry; A-2.7 + A-4 can extend).
+
+**A-3 §40 AuthGraph SUBSTANTIVELY COMPLETE (4 of 5 sub-phases):**
+- A-3.1 enumerator + `<auth>` registration at `0960fd5`: NEW types/auth-graph.ts (~354 LOC) + auth-graph.ts (~418 LOC). `<auth>` registered in html-elements.js + attribute-registry.js (role/check/else/redirect attrs). 4 AuthSiteKind variants (program-auth / page-auth / auth-role-block / channel-auth). Trucking-dispatch corpus verification: 21 gates / 0 errors. +15 tests + 2 fixture extensions.
+- A-3.4 redirect cross-ref at `e3fa180`: EXTEND auth-graph.ts with `crossRefRedirects` + `collectUrlPatterns`. **NEW info-severity `I-AUTH-REDIRECT-UNRESOLVED` first fire-site** (severity union extended to include "info"). +12 tests.
+- A-3.2 role-enum resolution at `6fca620`: EXTEND auth-graph.ts with `resolveRoleEnum` + 12 helpers. OQ-A3-F (b)+(c) dual rule. **NEW E-AUTH-GRAPH-002 first fire-site.** +12 tests. **PA-merge** with A-3.4 (cherry-pick conflict on auth-graph.ts; resolved additively). **A-3.4 test cascade fix**: 12 assertions changed to filter-by-code pattern.
+- A-3.3 per-gate classifier at `d52a7a2`: EXTEND auth-graph.ts with `classifyGates` + 11 helpers. REUSES META constant-folder primitive (S89 A-2.2.b; OQ-A2-D shared-primitive working). OQ-A3-A (d) full-interpolation grammar. `<auth role=>` attribute-registry.js `supportsInterpolation: false → true`. **NEW W-AUTH-PAGE-INFERRED first fire-site.** +21 tests + 6 baseline tests updated.
+
+**A-3 OQ batch ratification (6 OQs)** at `3b2a79c`:
+- **OQ-A3-A → (d) FULL INTERPOLATION (USER OVERRIDE of agent recommendation (b))**. User-voice S90: *"the idea that user defined state has full interpolation but first class compiler supported state doesn't is confusing, counter intuitive, and hints that the language is still in a 'toy' status."* Per Rule 2 full-production-language fidelity — value-bearing attrs uniformly accept string-literal / variable-ref / `${expr}` shapes. Grammar open; A-3.3 classifier discriminates closed-form vs runtime-fallback at analysis layer.
+- 5 batch-ratified on agent recommendations: OQ-A3-B (a) bare-string · OQ-A3-C (b) explicit-per-page + W-AUTH-PAGE-INFERRED · OQ-A3-D binary channel-auth · OQ-A3-E (a) compile-time only · OQ-A3-F (b)+(c) dual rule with E-AUTH-GRAPH-002.
+
+**M-7C-D-12 OQ batch ratification (9 OQs total)** at `725e07c`:
+- OQ-2 envelope `{"__scrml_absent": true}` · OQ-5 `?? "undefined"` → `?? "null"` · OQ-6 rename UNDEFINED-RT → ABSENT-RT · OQ-3 parallel-aggressive · OQ-4 (b) dual-decoder + (a) v1.0 clean break · OQ-7 (a) accept JS null in DevTools · OQ-8 defer M-7C-D-15 · OQ-9 concurrent with Wave 4 A+R.
+
+**5 NEW first fire-site diagnostics** (§34 catalog rows deferred to A-3.5): W-CG-UNDEFINED-INTERPOLATION · I-AUTH-REDIRECT-UNRESOLVED · E-AUTH-GRAPH-002 · W-AUTH-RUNTIME-FALLBACK · E-CLOSURE-002 · W-AUTH-PAGE-INFERRED.
+
+**Session-open hygiene** (S90 Phase 1): hand-off rotated; `scrml-support/user-voice-scrmlTS.md` S89 section appended (4 verbatim directives); FULL_COLD_START map refresh via project-mapper.
+
+**Process discipline patterns validated/saved S90**:
+- F4 startup-verification's repo-prefix check protects against harness CWD-routing trap (permanent memory rule saved).
+- PA-merge orchestrator-collision pattern for sibling parallel dispatches: file-delta NEW files cleanly + PA-author merged shared-file integration. Two precedents (A-2.4 + A-2.6 reachability-solver.ts; A-3.2 + A-3.4 auth-graph.ts).
+- Test cascade pattern for new pipeline diagnostics: filter-by-code in assertions, forward-compatible.
+- "Continuation agent with finish-from-WIP brief" pattern for 600s-watchdog stalls.
+- "Surface agent recommendations as deliberation points when they invoke 'scope tractable' framings on first-class-language-shape questions" — OQ-A3-A precedent.
 
 ### 2026-05-13 (S89 CLOSE — landmark 36-commit session — chain closures + null/undefined eradication + A-2 advances)
 
