@@ -562,6 +562,46 @@ REGISTRY.set("errorboundary", {
 });
 
 // ---------------------------------------------------------------------------
+// <auth> — sub-page role-gate element (SPEC §40.9.9 worked example, A-3.1).
+//
+// Per SCOPING §1.5 finding: SPEC §40.9.9 lines 17818-17820 reference
+// `<auth role="admin">...</auth>` as if registered, but no compiler-side
+// registration existed pre-A-3.1. This entry registers <auth> as a
+// structural compile-time element (analogous to <errorBoundary>) — it
+// gates rendering of its body markup on a closed-form role-predicate
+// classified by A-3.3.
+//
+// Allowed attributes (per SCOPING §A-3.1.a):
+//   role     — closed-form role predicate (e.g. "admin"). OQ-A3-A pins
+//              the grammar (recommendation: single-variant + comma-OR).
+//   check    — server-fn ref for runtime-fallback predicate
+//              (`<auth check="hasPermission">`); per SPEC §40.9.5 line
+//              17724 these are classified `closed_form: false` →
+//              W-AUTH-RUNTIME-FALLBACK fires from A-2.5.
+//   else     — fallback redirect path or markup (e.g. "/login"); per
+//              SPEC §40.9.9 worked example.
+//   redirect — alias for `else` when only a path is intended; OQ-A3-B
+//              records as bare-string path (recommendation (a)).
+//
+// Does NOT render to DOM — A-3 / A-4 emit conditional render glue based
+// on the per-role classification. rendersToDom: false matches the
+// <errorBoundary> precedent for compiler-level structural elements.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("auth", {
+  tag: "auth",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["role",     attr("string")],   // closed-form role predicate (A-3.3 classifies)
+    ["check",    attr("string")],   // server-fn ref for runtime-fallback path
+    ["else",     attr("string")],   // fallback markup/redirect (SPEC §40.9.9)
+    ["redirect", attr("string")],   // alias of `else` when only a path is meant
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
 // <errors> — first-class validation errors element (SPEC §55.8, L13, A1c C11).
 //
 // Renders error messages from a state cell's auto-synthesized `errors` array

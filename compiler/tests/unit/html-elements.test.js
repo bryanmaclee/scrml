@@ -101,7 +101,7 @@ describe("void elements", () => {
 
 describe("rendersToDom", () => {
   it("is true for all HTML elements", () => {
-    const nonDomElements = new Set(["program", "errorboundary", "errors"]);
+    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth"]);
     for (const tag of getAllElementNames()) {
       if (nonDomElements.has(tag)) continue; // scrml structural elements
       expect(getElementShape(tag).rendersToDom).toBe(true);
@@ -124,6 +124,15 @@ describe("rendersToDom", () => {
   // expands to placeholder span at codegen time, not a DOM-rendering tag.
   it("is false for errors (scrml validation errors element)", () => {
     const shape = getElementShape("errors");
+    expect(shape).not.toBeNull();
+    expect(shape.rendersToDom).toBe(false);
+  });
+
+  // S90 A-3.1: <auth role="X"> sub-page role-gate element (SPEC §40.9.9).
+  // Compiler-level structural — A-3 / A-4 emit conditional render glue,
+  // the <auth> tag itself does not render to DOM.
+  it("is false for auth (scrml role-gate element)", () => {
+    const shape = getElementShape("auth");
     expect(shape).not.toBeNull();
     expect(shape.rendersToDom).toBe(false);
   });

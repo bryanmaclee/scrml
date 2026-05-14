@@ -1911,10 +1911,11 @@ describe("§35 State Type Registry", () => {
       }
     });
 
-    test("all HTML entries have isHtml=true, rendersToDom=true (except program, errorBoundary, errors)", () => {
+    test("all HTML entries have isHtml=true, rendersToDom=true (except program, errorBoundary, errors, auth)", () => {
       const reg = buildStateTypeRegistry();
       // C11: <errors of=expr/> is structural (SPEC §55.8) — non-DOM-rendering.
-      const nonDomElements = new Set(["program", "errorboundary", "errors"]);
+      // S90 A-3.1: <auth> role-gate is structural (SPEC §40.9.9) — non-DOM-rendering.
+      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth"]);
       for (const [name, st] of reg) {
         if (nonDomElements.has(name)) {
           expect(st.isHtml).toBe(false);

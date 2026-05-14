@@ -208,6 +208,38 @@ ELEMENT_ATTR_REGISTRY.set("machine", {
 });
 
 // ---------------------------------------------------------------------------
+// <auth> — sub-page role-gate element (SPEC §40.9.9 worked example).
+//
+// Registered S90 wave A-3.1 — the §40 auth-graph derivation pass requires
+// <auth> to be a known structural element so attribute validation gates
+// silent-acceptance of malformed gates (e.g. `<auth roles="admin">` typo).
+//
+// `role=` is the closed-form predicate per SPEC §40.1.1 line 17150 ("closed-
+// form boolean predicate over the role enum"). Per OQ-A3-A recommendation (b)
+// single-variant + comma-OR is the v0.3 grammar — interpolation is NOT
+// supported (forms like `role="${roleVar}"` are rejected). Interpolation-
+// bearing predicates fall through to runtime-fallback per SPEC §40.9.5 line
+// 17724; A-3.3 classifies, A-2.5 fires W-AUTH-RUNTIME-FALLBACK.
+//
+// `check=` is the async server-fn form per SPEC §40.9.5 (`<auth check=
+// "hasPermission">`). The function name is a literal reference; interpolation
+// is not allowed at the attribute layer.
+//
+// `else=` / `redirect=` are the fallback path. SPEC §40.9.9 worked example
+// uses `else=`; `redirect=` is the explicit alias when only a redirect target
+// is intended. Both are literal path strings; interpolation is not supported.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("auth", {
+  allowedAttrs: new Map([
+    ["role",       attrSpec({ supportsInterpolation: false })],
+    ["check",      attrSpec({ supportsInterpolation: false })],
+    ["else",       attrSpec({ supportsInterpolation: false })],
+    ["redirect",   attrSpec({ supportsInterpolation: false })],
+  ]),
+});
+
+// ---------------------------------------------------------------------------
 // <errorBoundary> — error rendering boundary. Already in html-elements.js.
 // ---------------------------------------------------------------------------
 
