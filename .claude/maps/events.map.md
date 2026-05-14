@@ -1,6 +1,6 @@
 # events.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
 ## Status
 
@@ -29,6 +29,10 @@ Violation shape that fires `E-CHANNEL-INSIDE-PAGE`: `<channel>` inside `<page>`.
 
 Channel placement pre-check enforced by shared AST walker in `compiler/src/validators/ast-walk.ts`.
 
+### §36 Input Device Event Model (NEW S89 — CLOSED)
+
+`<keyboard id=...>`, `<mouse id=...>`, `<gamepad id=...>` elements compile to input-state capture loops. These are NOT pub/sub channels — they are polled-state mirrors captured via requestAnimationFrame event handlers. Input state is addressed by id and read as reactive cells in scrml source. Duplicate `id=` within a scope fires E-INPUT-005.
+
 ### meta.emit() Runtime Placement (compiler/src/runtime-template.js)
 
 The runtime has a `meta.emit()` mechanism for compile-time-controlled DOM injection at ^{} block positions. One-way compiler-to-DOM; not pub/sub.
@@ -44,7 +48,7 @@ Reactive subscriptions in compiled client runtime:
 None in the compiler process. Compiled outputs use Bun's WebSocket pub/sub API (topic-based) for channel features.
 
 ## Tags
-#scrmlts #map #events #websocket #pubsub #reactive #channels #s87 #pure-channel-file
+#scrmlts #map #events #websocket #pubsub #reactive #channels #s89 #pure-channel-file #input-devices
 
 ## Links
 - [primary.map.md](./primary.map.md)

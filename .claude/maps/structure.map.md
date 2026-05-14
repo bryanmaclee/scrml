@@ -1,83 +1,105 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
 ## Entry Points
 compiler/src/cli.js            — CLI entry; routes compile/dev/build/serve/migrate/promote/init subcommands
-compiler/src/api.js            — programmatic API; orchestrates full BS→TAB→NR→MOD→CE→PA→RI→TS→META→DG→CG pipeline
+compiler/src/api.js            — programmatic API; orchestrates full BS→TAB→NR→MOD→CE→PA→RI→TS→META→DG→CG pipeline (includes Stage 3.007 LINT-TRY-CATCH + Stage 3.105 STDLIB-EXPORT-SEED passes added S89)
 compiler/bin/scrml.js          — installed binary (points to cli.js via package.json `bin`)
 lsp/server.js                  — Language Server Protocol server; started via `scrml lsp --stdio`
 compiler/src/codegen/index.ts  — Stage 8 CG entry point; runCG() exported
 
 ## Directory Ownership
 
-compiler/                     — workspace root; compiler/package.json declares acorn + astring deps
-compiler/src/                 — all pipeline stage implementations: tokenizer, block-splitter, ast-builder, type-system, etc.
-compiler/src/codegen/         — Stage 8 (CG) emitters; 30+ emit-*.ts files + IR, BindingRegistry, CompileContext, errors
-compiler/src/codegen/compat/  — integration shim: parser-workarounds.js (setBPPOverrides hook for self-hosted BPP modules)
-compiler/src/commands/        — CLI subcommand implementations: compile.js, dev.js, build.js, serve.js, migrate.js, init.js, promote.js
-compiler/src/types/           — AST type definitions (ast.ts — single source of truth, 1,828 LOC)
-compiler/src/validators/      — UVB sub-passes: post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts, ast-walk.ts
-compiler/runtime/             — server-side runtime JS shims; copied to dist/_scrml/ at compile time
-compiler/runtime/stdlib/      — hand-written ES modules for stdlib (auth.js, crypto.js, store.js, host.js [NEW S88])
-compiler/tests/               — 590 test files (bun test); organized by category
-compiler/tests/unit/          — unit tests (~427 files) covering individual pipeline passes
-compiler/tests/integration/   — integration tests (~39 files) covering multi-stage scenarios
-compiler/tests/conformance/   — conformance tests (~17 files) testing SPEC error-code compliance per §34
-compiler/tests/browser/       — browser-environment tests (11 files, happy-dom)
-compiler/tests/lsp/           — LSP server protocol tests (10 files)
-compiler/tests/self-host/     — compiler self-host tests (4 files)
-compiler/tests/commands/      — CLI command tests (4 files)
-compiler/tests/fixtures/      — shared test fixtures (promote-match-canonical.scrml, expr.ts, extract-user-fns.js)
-compiler/tests/helpers/       — test utilities (expr.ts — ExprNode construction helpers, extract-user-fns.js)
-compiler/self-host/           — self-hosted compiler; dist/tab.js is gitignored (built locally per machine)
-compiler/SPEC.md              — authoritative language spec (26,976 lines); use SPEC-INDEX.md for navigation
-compiler/SPEC-INDEX.md        — spec section index (308 lines); read this first for navigation
-compiler/PIPELINE.md          — stage pipeline contracts (v0.7.1; authoritative)
-lsp/                          — LSP server (hover, diagnostics, completion, workspace management)
-stdlib/                       — scrml standard library source .scrml files organized by module name (20 modules)
-stdlib/host/                  — NEW S88: scrml:host module (index.scrml + runtime shim in compiler/runtime/stdlib/host.js)
-samples/                      — sample .scrml programs; samples/compilation-tests/ has ~288 .scrml fixtures
-scripts/                      — build, test, and maintenance scripts (shell + .ts)
-scripts/git-hooks/            — pre-commit hook (source-controlled; activate via git config core.hooksPath scripts/git-hooks)
-docs/                         — project documentation: articles, audits, changelog, changes, deep-dives
-docs/changes/                 — active dispatch directories
-docs/audits/                  — audit snapshots: compiler-forgotten-surface, happy-dom-perf, self-host-spec-conformance, scope-c-findings-tracker
-editors/                      — editor integrations (VSCode extension, neovim)
-examples/                     — standalone scrml usage examples; 23-trucking-dispatch fully migrated to v0.3
-benchmarks/                   — performance benchmarks (todomvc-react, todomvc-svelte, fullstack-react, sql-batching)
-e2e/                          — Playwright e2e test suite (3-browser; 5 spec files)
-handOffs/                     — historical hand-offs (read-only; current session hand-off at hand-off.md)
+compiler/                      — workspace root; compiler/package.json declares acorn + astring deps
+compiler/src/                  — all pipeline stage implementations: tokenizer, block-splitter, ast-builder, type-system, etc.
+compiler/src/codegen/          — Stage 8 (CG) emitters; 30+ emit-*.ts files + IR, BindingRegistry, CompileContext, errors; emit-variant-guard.ts [NEW S89] factored variant-dispatch helper
+compiler/src/codegen/compat/   — integration shim: parser-workarounds.js (setBPPOverrides hook for self-hosted BPP modules)
+compiler/src/commands/         — CLI subcommand implementations: compile.js, dev.js, build.js, serve.js, migrate.js, init.js, promote.js
+compiler/src/types/            — AST type definitions (ast.ts — single source of truth, ~1,828 LOC); reachability.ts [NEW S89 A-2.1] — RSInput/RSOutput/ChunkPlan type surface (247 LOC)
+compiler/src/validators/       — UVB sub-passes: post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts, ast-walk.ts, lint-try-catch.ts [NEW S89], lint-async-user-source.ts
+compiler/src/reachability/     — NEW S89 A-2.1: Component 1 sub-modules (component-1.ts, entry-points.ts, gate-classifier.ts)
+compiler/runtime/              — server-side runtime JS shims; copied to dist/_scrml/ at compile time
+compiler/runtime/stdlib/       — hand-written ES modules for stdlib (auth.js, crypto.js, store.js, host.js [S88])
+compiler/tests/                — 604 test files (bun test); organized by category
+compiler/tests/unit/           — unit tests (~433 files) covering individual pipeline passes
+compiler/tests/conformance/    — conformance tests (~101 files in 4 subtrees) testing SPEC §34 error-code compliance; conf-INPUT-001..005 [NEW S89]
+compiler/tests/integration/    — integration tests (~41 files) covering multi-stage scenarios; input-canvas-integration.test.js + input-frame-accurate.test.js [NEW S89]
+compiler/tests/browser/        — browser-environment tests (11 files, happy-dom)
+compiler/tests/lsp/            — LSP server protocol tests (10 files)
+compiler/tests/self-host/      — compiler self-host tests (4 files)
+compiler/tests/commands/       — CLI command tests (4 files)
+compiler/tests/fixtures/       — shared test fixtures
+compiler/tests/helpers/        — test utilities (expr.ts, extract-user-fns.js)
+compiler/self-host/            — self-hosted compiler; dist/tab.js is gitignored (built locally)
+compiler/SPEC.md               — authoritative language spec (27,037 lines; §42.1.1 Defined-Values-vs-Absence normative subsection added S89; §36 E-INPUT-005 + W-INPUT-001 added S89)
+compiler/SPEC-INDEX.md         — spec section index (313 lines); read this first for navigation
+compiler/PIPELINE.md           — stage pipeline contracts (v0.7.1; authoritative; 2,758 lines)
+lsp/                           — LSP server (hover, diagnostics, completion, workspace management)
+stdlib/                        — scrml standard library source .scrml files organized by module name (21 modules including scrml:host)
+stdlib/host/                   — S88: scrml:host module (index.scrml + runtime shim in compiler/runtime/stdlib/host.js)
+samples/                       — sample .scrml programs; samples/compilation-tests/ has ~289 .scrml fixtures including input-canvas-demo.scrml [NEW S89]
+scripts/                       — build, test, and maintenance scripts (shell + .ts)
+scripts/git-hooks/             — pre-commit hook (source-controlled; activate via git config core.hooksPath scripts/git-hooks)
+docs/                          — project documentation: articles, audits, changelog, changes dirs, curation, pinned-discussions
+docs/changes/                  — active dispatch directories (~50 entries including S89: §36-impl-phase-1..4, §13.2-impl-phase-A..D-E, a1-closeout, a2-1..2, a2-reachability-solver-scoping, a3-auth-graph-scoping, null-eradication-*, undefined-eradication-*, m-7c-d-12-runtime-sentinel-scoping, stdlib-phase-1-5-null-sweep, wave-4-t-track, wave-4-d-track, w-try-catch-lint)
+docs/audits/                   — audit snapshots: null-audit-compiler-src-2026-05-13.md, undefined-audit-compiler-src-2026-05-13.md, articles-currency-table-2026-05-13.md, scope-c-findings-tracker.md, self-host-spec-conformance-2026-05-11.md, happy-dom-perf-regression-s87-2026-05-12.md [S89 additions]
+editors/                       — editor integrations (VSCode extension, neovim)
+examples/                      — standalone scrml usage examples
+benchmarks/                    — performance benchmarks (todomvc-react, todomvc-svelte, fullstack-react, sql-batching)
+e2e/                           — Playwright e2e test suite (3-browser; 5 spec files)
+handOffs/                      — historical hand-offs (read-only; current session hand-off at hand-off.md)
 
-## Notable New Files (S88 — 2026-05-13)
+## Notable New Files (S89 — 2026-05-13)
 
-compiler/runtime/stdlib/host.js           — NEW: JS runtime shim for scrml:host; safeCall/safeCallAsync/HostError
-stdlib/host/index.scrml                   — NEW: scrml:host stdlib module declaration; safeCall + safeCallAsync signatures
-compiler/tests/unit/safe-call.test.js     — NEW: 24 tests for safeCall primitive (SC-01..SC-24)
-compiler/tests/unit/safe-call-async.test.js — NEW: 20 tests for safeCallAsync primitive
-compiler/tests/unit/dg-markup-read-node-a12.test.js — NEW: A-1.2 MarkupReadDGNode shape + walker tests
-compiler/tests/unit/dg-markup-read-emission-a13.test.js — NEW: A-1.3 markup-read edge emission (4 high-freq shapes)
-compiler/tests/unit/dg-markup-read-emission-a14.test.js — NEW: A-1.4 call-ref/for-iterable/lift-template edge emission
-compiler/tests/unit/dg-markup-read-emission-a15.test.js — NEW: A-1.5 engine state-child + onTransition/Timeout/Idle edge emission (14 tests)
-compiler/tests/unit/lift-5-reconciler-ambient.test.js  — NEW: LIFT-5 fix regression test
-samples/compilation-tests/lift-5-repro.scrml           — NEW: LIFT-5 compilation fixture
+**§36 input devices chain:**
+compiler/tests/conformance/conf-INPUT-001..005.test.js — §36 input-device conformance suite (5 new files)
+compiler/tests/integration/input-canvas-integration.test.js — canvas input integration test
+compiler/tests/integration/input-frame-accurate.test.js — frame-accurate input test
+compiler/tests/unit/input-state-types.test.js — input state type unit tests
+samples/compilation-tests/input-canvas-demo.scrml — canvas input demo sample
 
-## Notable Modified Files (S88)
+**§13.2 auto-await chain:**
+compiler/tests/unit/auto-await-promise-stdlib.test.js — §13.2 Sub-Phase B stdlib Promise<T> auto-await
+compiler/tests/integration/oq-2-stdlib-runtime-resolution.test.js — OQ-2 stdlib runtime resolution
 
-compiler/src/dependency-graph.ts      — A-1.2 MarkupReadDGNode kind added; A-1.3/A-1.4/A-1.5 emission logic activated (markupContextEmitEdges = true)
-compiler/src/codegen/emit-lift.js     — LIFT-1 fix (parseLiftTag paren-attr null return); LIFT-2/3/4 fixes (bind:*/if=/event-arg parity)
-compiler/src/codegen/emit-control-flow.ts — LIFT-5 fix: if/for children route through container helpers in reconciler factory
-compiler/src/ast-builder.js           — A-1.4/A-1.5 AST annotations for call-ref, for-iterable, lift-template-body edges
-stdlib/auth/password.scrml            — Phase 3a async: verifyPassword migrated to safeCallAsync
-stdlib/crypto/index.scrml             — Phase 3a sync: safeCall integrated for verifySync + hash
-compiler/SPEC.md                      — §4.7 BS-comment-skip amendment + §18.7 mixed positional+named binding + §41.4 bun:/node: protocol prefixes
+**Approach A-2 reachability:**
+compiler/src/types/reachability.ts — RSInput/RSOutput/ChunkPlan/ReachabilityRecord types (247 LOC; A-2.1)
+compiler/src/reachability-solver.ts — runReachabilitySolver() entry point (152 LOC; A-2.1)
+compiler/src/reachability/component-1.ts — Component 1 implementation (A-2.2)
+compiler/src/reachability/entry-points.ts — entry-point detection (A-2.2)
+compiler/src/reachability/gate-classifier.ts — gate classification (A-2.2)
+compiler/tests/unit/reachability-solver-scaffold.test.js — A-2.1 scaffold tests
+compiler/tests/unit/reachability-entry-points.test.ts — A-2.2 entry-point tests
+compiler/tests/unit/reachability-gate-classifier.test.ts — A-2.2 gate classifier tests
+compiler/tests/unit/reachability-solver-component-1.test.ts — +82 tests A-2.2 Component 1
+
+**Codegen factored helper:**
+compiler/src/codegen/emit-variant-guard.ts — variant-guarded markup render dispatcher helper (engine + future match-block-form consumers)
+
+**W-TRY-CATCH lint:**
+compiler/src/validators/lint-try-catch.ts — W-TRY-CATCH-IN-SCRML-SOURCE walker (Stage 3.007)
+
+**Wave 4 / content:**
+compiler/tests/unit/todomvc-fixture-edit-mode.test.js — todomvc edit-mode markup fixture + anchor test (landed post-LIFT-5)
+compiler/tests/unit/api-js-stdlib-enum-reexport.test.js — stdlib enum re-export tests
+
+## Notable Modified Files (S89)
+
+compiler/src/api.js               — Stage 3.007 LINT-TRY-CATCH pass added; Stage 3.105 STDLIB-EXPORT-SEED TAB-only pass added (§13.2 Sub-Phase B); --emit-reachability CLI flag wired
+compiler/src/codegen/emit-html.ts — E-INPUT-005 duplicate input-state-id-within-scope check (§36 Phase 2.B)
+compiler/src/ast-builder.js       — §36 input device AST support; W-TRY-CATCH-IN-SCRML-SOURCE walker support
+stdlib/auth/jwt.scrml             — verifyJwt migrated to one-line auto-await (§13.2 Sub-Phase D-E)
+stdlib/auth/password.scrml        — verifyPassword already migrated S88; confirmed clean
+stdlib/*/index.scrml (21 files)   — null→not/is-some/is-not sweep: 21 files / 124 sites (stdlib Phase 1.5, 8c608a7)
+compiler/SPEC.md                  — §42 §42.1.1 normative "Defined Values vs. Absence" + W-ABSENCE-IN-SCRML-SOURCE catalog rename + §36 E-INPUT-005 + W-ABSENCE catalog additions; SPEC grew to 27,037 lines
 
 ## Ignored / Generated Paths
 node_modules/, compiler/node_modules/, dist/, compiler/dist/self-host/, compiler/self-host/dist/,
 build/, .git/, .jj/, samples/compilation-tests/dist/, handOffs/
 
 ## Tags
-#scrmlts #map #structure #compiler #cli #pipeline #s88 #v0.3 #approach-a #lift-fixes #safecall #stdlib-host
+#scrmlts #map #structure #compiler #cli #pipeline #s89 #v0.3 #approach-a #approach-a2 #input-devices #auto-await #null-eradication #reachability
 
 ## Links
 - [primary.map.md](./primary.map.md)

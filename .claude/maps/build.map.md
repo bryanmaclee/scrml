@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
 ## Development Commands (root package.json > scripts)
 
@@ -30,12 +30,13 @@
 | `scripts/assemble-spec.sh` | Assemble SPEC.md from section files |
 | `bun run scripts/regen-spec-index.ts` | Regenerate SPEC-INDEX.md line ranges + sizes in-place (idempotent) |
 | `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
+| `bun run scripts/measure-markup-read-edges.ts` | [NEW S89 A-1.7] Measure markup-read node ceiling (523 nodes vs 256 ceiling = 2.04x) |
 
 ## CLI Subcommands
 
 | Subcommand | What it does |
 |------------|--------------|
-| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS |
+| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON [NEW S89] |
 | `scrml dev <file\|dir>` | Dev server with hot-reload |
 | `scrml build <dir>` | Production build |
 | `scrml serve <dir>` | Serve compiled output |
@@ -84,7 +85,7 @@ Gitignored; must be built locally on each machine:
 Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s88
+#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s89
 
 ## Links
 - [primary.map.md](./primary.map.md)

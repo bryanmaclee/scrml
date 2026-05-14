@@ -1,6 +1,6 @@
 # config.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
 ## Environment Variables
 
@@ -13,7 +13,7 @@ No `.env.example` or `.env.template` present. The compiler is a CLI tool — no 
 
 ## Feature Flags
 
-No compile-time feature flags detected in source. Compiler behavior is controlled via CLI arguments (see build.map.md).
+No compile-time feature flags detected in source. Compiler behavior is controlled via CLI arguments.
 
 ## Config Files
 
@@ -40,11 +40,12 @@ name: "scrmlts", version: "0.2.0", engines: { bun: ">=1.3.13" }, workspaces: ["c
 | --embed-runtime | boolean | Embed runtime inline instead of separate file |
 | --emit-batch-plan | boolean | Print Stage 7.5 BatchPlan as JSON |
 | --emit-machine-tests | boolean | Emit .machine.test.js per source (§51.13) |
+| --emit-reachability | boolean | Emit `<base>.reachability.json` (Stage 7.6 / SPEC §40.9) [NEW S89 A-2.1] |
 | --watch, -w | boolean | Watch for changes (compile command only) |
 | --port | number | HTTP port for dev server (default: 3000) |
 
 ## Tags
-#scrmlts #map #config #environment
+#scrmlts #map #config #environment #cli-flags #s89
 
 ## Links
 - [primary.map.md](./primary.map.md)

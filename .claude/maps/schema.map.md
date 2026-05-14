@@ -1,8 +1,8 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
-## TypeScript AST — `compiler/src/types/ast.ts` (1,828 LOC)
+## TypeScript AST — `compiler/src/types/ast.ts` (~1,828 LOC)
 
 Single source of truth for all AST node shapes. All nodes carry `id: number` and `span: Span`.
 
@@ -119,7 +119,7 @@ kind: "function-decl", name, params: string[], body: LogicStatement[], fnKind: "
 isServer, canFail, errorType?, route?, method?, isHandleEscapeHatch?
 
 ### EngineDeclNode  [ast.ts:772]
-kind: "engine-decl"; state-machine declaration with state-child body (see file for full shape)
+kind: "engine-decl"; state-machine declaration with state-child body (see ast.ts for full shape)
 
 ### Control Flow  [ast.ts:833+]
 IfStmtNode, IfExprNode, ForExprNode, ForStmtNode, WhileStmtNode, ReturnStmtNode, ThrowStmtNode,
@@ -173,12 +173,31 @@ function | reactive | render | sql-query | import | meta | markup-read (NEW A-1.
 kind: "markup-read", nodeId: NodeId, sourceRenderNodeId: NodeId | null, ownerScope: string,
 hasLift: boolean, span: Span
 
-Purpose: per-interpolation markup-context read node (Option Y); tracks where each reactive var
-is read from markup context. Activated in A-1.3 (markupContextEmitEdges = true at S88).
-Emission sub-waves: A-1.3 (text-interpolation/attr/bind/if), A-1.4 (call-ref/for-iterable/lift-template), A-1.5 (engine state-child/onTransition/onTimeout/onIdle).
+Purpose: per-interpolation markup-context read node; tracks where each reactive var is read from markup context.
+Emission sub-waves: A-1.3 (text-interpolation/attr/bind/if), A-1.4 (call-ref/for-iterable/lift-template), A-1.5 (engine state-child/onTransition/onTimeout/onIdle). All active.
 
 ### DGEdgeKind  [dependency-graph.ts:58]
 "calls" | "reads" | "writes" | "renders" | "awaits" | "invalidates" | "validator-reads" | "engine-derived-reads"
+
+## Reachability Solver Types — `compiler/src/types/reachability.ts` (NEW S89 A-2.1, 247 LOC)
+
+### RSInput  [reachability.ts:267]
+depGraph: DependencyGraph, fileAST: FileAST, entryPoints?: ReachabilityEntryPoint[]
+
+### RSOutput  [reachability.ts:299]
+record: ReachabilityRecord, diagnostics: RSError[]
+
+### ReachabilityRecord  [reachability.ts:98]
+closures: Map<EntryPointId, RolePlayableSurface>, diagnostics: ReachabilityDiagnostic[]
+
+### ChunkPlan  [reachability.ts:123]
+initialChunk: ChunkContents, prefetchTier1: ChunkContents, prefetchTier2: ChunkContents, prefetchTierN: ChunkContents[]
+
+### ChunkContents  (per PIPELINE.md Stage 7.6 verbatim)
+componentNodeIds: Set<NodeId>, reactiveCellNodeIds: Set<NodeId>, serverFnNodeIds: Set<NodeId>, vendorUnitNames: Set<VendorUnitId>
+
+### ReachabilityEntryPoint  [reachability.ts:195]
+id: EntryPointId, role: RoleVariant
 
 ## Codegen Key Interfaces — `compiler/src/codegen/*.ts`
 
@@ -192,7 +211,7 @@ exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | nul
 ### CGError  [errors.ts:11]
 code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning'
 
-## scrml:host Runtime Types — `compiler/runtime/stdlib/host.js` (NEW S88)
+## scrml:host Runtime Types — `compiler/runtime/stdlib/host.js` (S88)
 
 ### HostError
 Variant constructor object: `HostError.Thrown(message, name) → { variant: "Thrown", data: { message, name } }`
@@ -205,7 +224,7 @@ Wraps a synchronous JS-host call; catches any throw and returns `{ __scrml_error
 Async sibling of safeCall; wraps an async thunk; resolves to error shape on rejection.
 
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s88 #markup-read-dg-node #approach-a #safecall
+#scrmlts #map #schema #ast #types #codegen #ir #s89 #markup-read-dg-node #approach-a #approach-a2 #reachability #safecall
 
 ## Links
 - [primary.map.md](./primary.map.md)

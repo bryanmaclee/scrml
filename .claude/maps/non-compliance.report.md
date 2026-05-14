@@ -1,150 +1,110 @@
 # non-compliance.report.md
 # project: scrmlts
-# generated: 2026-05-13T15:00:00Z
-# scan mode: FULL_COLD_START (S88 close — commit 9b98118)
-# prior baseline: 2026-05-12T21:42:04Z @ f1555b4 (S87 INCREMENTAL_UPDATE)
+# generated: 2026-05-13T23:00:00Z
+# scan mode: FULL_COLD_START (S89 close — commit 71305fe)
+# prior baseline: 2026-05-13T15:00:00Z @ 9b98118 (S88 close)
 
 ## Summary
 
-Total docs scanned: 70 (excl. .git/, node_modules/, .claude/, archive/, handOffs/, dist/)
-Compliant: 46
-Non-compliant (carry-forward from S87 + new S88): 30+
-Uncertain: 9
+Total docs scanned: 118 (excluding node_modules, .git, .claude, handOffs/, dist/, build/)
+Compliant: 104
+Non-compliant: 4
+Uncertain: 10
 
 ---
 
-## NEW non-compliant items (S88)
+## Non-compliant docs
 
-### docs/changes/v0.3-batch-2-trio-a/, v0.3-batch-2-trio-b/, v0.3-bs-layer-comment-skip/, v0.3-bug-1.5-engine-var-markup/, v0.3-bug-1.6-1.7-match-arm-bundle/, v0.3-bug-2c-bind-value-mangle/, v0.3-bug-3a-sql-emission/, v0.3-bug-4.5-call-ref-args/, v0.3-bug-6.5-inline-markup-arm-payload/, v0.3-bug-6.5.1-named-binding-parser/, v0.3-channel-dispensation-spec-walker/, v0.3-emit-expr-option-a-comprehensive-engine-routing/, v0.3-engine-self-write-option-d/, v0.3-stdlib-cleanup/, v0.3-wave-3.5-migrate-bundle/, v0.3-wave-3.6-trucking-remigration/, v03-wave-1/, v0.3-wave-2/, v0.3-wave-3-fixture-sweep/, w-program-spa-inferred-impl/, wave-3-d2/, wave-3-d3/, migrate-safety-harness-import-fix/, promote-safety-harness-import-fix/, playwright-e2e-dispatch-1/
-**Reason:** content-heuristic — all S87 dispatch dirs are SHIPPED/CLOSED. 25 dispatch dirs confirmed shipped in S87 final commits or earlier.
-**Suggested disposition:** archive all to `scrml-support/archive/dispatches/`.
+### docs/articles/llm-kickstarter-v0-2026-04-25.md
+**Reason:** content-heuristic — doc self-identifies as RETRACTED/SUPERSEDED
+**Detail:** Header states "Status: RETRACTED / SUPERSEDED — archived 2026-05-13 (S89 Wave 4.A D-3)." Body is a stub. Belongs in archive, not live docs tree.
+**Suggested disposition:** deref to archive/ or delete (stub; no informational content remaining)
 
-### docs/audits/happy-dom-perf-regression-s87-2026-05-12.md
-**Reason:** content-heuristic — describes aspirational future investigation "post-v0.3.0 6-12h bisect-and-profile dispatch"; NOT current truth about the codebase.
-**Suggested disposition:** keep in `docs/audits/` as a known-issue register with no action, OR move to `scrml-support/archive/audits/` after v0.3.0 ships. PA decides.
+### docs/changes/undefined-eradication-self-host/SUPERSEDED-CLOSURE.md
+**Reason:** content-heuristic — doc self-identifies as CLOSED-AS-NO-OP / SUPERSEDED
+**Detail:** Header states "Status: CLOSED-AS-NO-OP (work already complete on main at dispatch time)" — an agent was dispatched against work already done. Historical artifact only.
+**Suggested disposition:** deref to scrml-support/archive/ or delete
 
-### docs/changes/scrml-dev-codegen-divergence/progress.md
-**Reason:** content-heuristic + uncertain status — references "ongoing" scrml-dev codegen divergence but the Bug 3a fix (SQL emission gap) closed in S87 may address this. Compile errors shown in the progress.md are now E-CHANNEL-OUTSIDE-PROGRAM not codegen divergence.
-**Suggested disposition:** review master-list.md §OQ; if confirmed closed or subsumed by Bug 3a fix, archive.
-
----
-
-## S88-updated status: dispatch dirs now CLOSED
-
-The following dirs were "uncertain" in S87 but are now confirmed-shipped in S88:
-
-### docs/changes/v0.3-approach-a-spec/ (SCOPING.md + progress.md)
-**S87 status:** uncertain (flagged as potentially deferred to v0.4).
-**S88 update:** user reversed v0.4 deferral at S88 start ("start on those tasks as they are unblocked"). A-1.1 through A-1.5 all shipped in S88 (5/5 sub-phases). SCOPING.md header still reads "DRAFT" but authority section documents the S88 ratification.
-**Suggested disposition:** SCOPING.md is now mostly historical (plan doc for a completed effort). Update header status field from "DRAFT" to "SHIPPED (A-1.1..A-1.5)" and archive the dispatch dir to `scrml-support/archive/dispatches/`.
-
-### docs/changes/v0.3-todomvc-e2e-reverify/progress.md
-**S87 status:** uncertain (dispatch was PARTIAL; 5 LIFT bugs blocked completion).
-**S88 update:** LIFT-1..5 all closed at S88. The TodoMVC e2e re-verify is now unblocked. The dispatch is complete as of the LIFT-5 fix.
-**Suggested disposition:** archive to `scrml-support/archive/dispatches/`.
-
----
-
-## Carry-forwards from S87 baseline (UNCHANGED)
-
-### docs/audits/compiler-forgotten-surface-2026-05-06.md
-**Reason:** location-heuristic — deep forensic audit; belongs in scrml-support/docs/. However, the PA SCRML PRIMER references it. Carry-forward.
-**Status:** uncertain — may be intentionally kept here for primer cross-ref.
-
-### docs/changes/predicate-gaps-deep-dive-prep/SCOPE.md
-**Reason:** content-heuristic — status "SCOPE PREPARED — awaits convener authorization". Describes future work not yet dispatched.
-**Status:** compliant as a pending-dispatch scope document per project convention.
+### docs/changes/wave-4-adopter-content/SCOPING.md
+**Reason:** content-heuristic — describes future/aspirational work that is now CLOSED
+**Detail:** Header states "Status: SCOPED — awaits PA dispatch sequencing" with HEAD at `9b98118` (S88 close). Wave 4 adopter content CLOSED at S89. This SCOPING predates the closure — it no longer describes current state. The work described is done.
+**Suggested disposition:** Archive to scrml-support/archive/ or note as closed in-file header
 
 ### docs/changes/promotion-ergonomics/TIER-C-SCOPE.md
-**Reason:** content-heuristic — status "SCOPED — queued, not yet dispatched". Tier C is future work.
-**Status:** compliant as a pending-dispatch scope document per project convention.
-
-### docs/changes/fix-lift-async-iife-paren/ (anomaly-report.md, pre-snapshot.md, progress.md)
-**Reason:** SHIPPED — fix-lift-async-iife-paren closed per changelog (pre-S87). Progress files are historical.
-**Suggested disposition:** archive to `scrml-support/archive/dispatches/`.
-
-### All S78 carry-forward non-compliant items
-See prior report for full list. 14 items remain flagged:
-- docs/audits/hardcoded-thresholds-2026-05-10.md + hardcoded-thresholds-followup-2026-05-11.md — shipped S81
-- docs/articles/lsp-and-giti-advantages-draft-2026-04-25.md, npm-myth-draft-2026-04-25.md — draft artifacts
-- docs/changes/v0next-spec-impact/IMPLEMENTATION-ROADMAP.md — self-declares SUPERSEDED
-- docs/changes/reactive-derived-decl-divergence/ADR.md — belongs in scrml-support
-- docs/audits/ historical rule-4 audit files (7 files)
-- Shipped A1a/A1b/A1c/A7/A8/A9/A10/server-keyword dispatch dirs (large batch)
+**Reason:** content-heuristic — describes future planned work not yet implemented
+**Detail:** Status "SCOPED — queued, not yet dispatched" from S66. No corresponding implementation found in compiler/src or test suite. Describes aspirational `--engine` flag + `W-MATCH-TRANSITIONS-ACCRUING` lint that grep cannot find in source. Nearly 1 year old relative to current HEAD.
+**Suggested disposition:** Verify if this work has been deferred indefinitely; if so, deref to scrml-support/archive/
 
 ---
 
 ## Uncertain docs (needs human review)
 
-### docs/changes/v0.3-approach-a-impl/SCOPING.md
-**Reason:** Header still reads "DRAFT — awaits PA + user OQ ratification". However the authority block states S88 reversed the v0.4 deferral AND A-1.1..A-1.5 all shipped. The DRAFT status field is stale but the sub-phase estimates are now historical plan data.
-**What to check:** Update header status to "SHIPPED" and archive the dispatch dir to scrml-support, OR decide this remains as a reference for waves A-2..A-5 (which are still future). If A-2..A-5 will re-use this scoping file as their plan, keep as active. If A-2..A-5 will have their own dispatch, archive.
+### docs/changes/v0next-audit/PARSER-AUDIT-2026-05-05.md
+**Reason:** old dated audit doc referencing `"reactive-decl"` kind (now `"state-decl"`) with a mass-rename banner; may contain stale AST identifiers
+**What to check:** Verify the 25+ feature-probe entries are still accurate against current parser. If primarily historical context, deref to scrml-support/archive/.
 
-### docs/audits/self-host-spec-conformance-2026-05-11.md
-**Reason:** S87 uncertain carry-forward. Self-declares deferred; the strict self-host rebuild gate (S81) was the implementation. Whether additional conformance work is planned is unclear from the doc alone.
-**What to check:** Is self-host-spec-conformance still being tracked? If closed as "gate = sufficient", archive.
+### docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md
+**Reason:** dated 2026-05-05 (S59), references B4 self-host as "DEFERRED to post-v1.0.0" and v0.2.0 scope tracking — both now historical
+**What to check:** Is this still consulted for active planning, or is it pure historical context? If historical, deref to scrml-support/archive/.
+
+### docs/changes/v0next-inventory/ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md
+**Reason:** dated 2026-05-05 (S59) audit of article accuracy at that commit; articles have been updated significantly since
+**What to check:** Does this audit still reflect current article state? If not, deref to scrml-support/archive/.
+
+### docs/changes/scrml-dev-codegen-divergence/progress.md
+**Reason:** progress.md describes a worktree-based fix to `emit-server.ts`/`emit-client.ts` channel import filtering. Content is well-curated implementation history. Uncertain whether this belongs here or in scrml-support.
+**What to check:** Did this dispatch produce committed code on main? (It references commit artifacts; grep confirms `cross-file-channel-import-emit.test.js` exists.) If so, compliant as implementation record. If worktree-only, uncertain.
+
+### docs/changes/predicate-gaps-deep-dive-prep/SCOPE.md
+**Reason:** content-heuristic — status "SCOPE PREPARED — awaits convener authorization to fire deep-dive (when corpus signal warrants)"; trigger conditions unmet; aspirational
+**What to check:** Has the deep-dive been authorized? If trigger conditions remain unmet, this is a queued-but-unfired scope. Deref to scrml-support/archive/ if no active dispatch planned.
+
+### docs/changes/v0.3-approach-a-impl/SCOPING.md
+**Reason:** parent scoping for "Approach A impl" — may be superseded now that A-1 CLOSED and A-2 is active with its own sub-docs
+**What to check:** Is this SCOPING still the living authority for A-2..A-5, or has authority transferred to a2-reachability-solver-scoping/SCOPING.md? If superseded, note in-file or deref.
+
+### docs/changes/v0.3-approach-a-spec/SCOPING.md
+**Reason:** "spec" variant of approach-a scoping. Separate from impl scoping. Check if still current authority.
+**What to check:** Is §40.9 SPEC contract now locked in SPEC.md or does this SCOPING still carry forward-contract content? If content landed in SPEC, deref.
+
+### docs/changes/v0.3-todomvc-e2e-reverify/progress.md
+**Reason:** uncertain whether this dispatch closed. Title implies a re-verify task post LIFT fixes.
+**What to check:** Did the todomvc e2e reverify complete? The `browser-todomvc.test.js` and `todomvc-e2e.test.js` pass. If re-verify is done, mark this closed or deref.
 
 ### docs/audits/scope-c-findings-tracker.md
-**Reason:** Active tracking doc — S42 origin. Some findings from 2026-04-25 may be closed by now (over 40 commits later).
-**What to check:** Are any Scope C findings in "CLOSED" status that warrant removal or archival of the tracker itself? If still useful as a live register, keep.
+**Reason:** uncertain whether Scope C audit findings are still open or resolved
+**What to check:** Are Scope C findings tracked here still open issues? Or have they been resolved by subsequent dispatches? If resolved, deref to scrml-support/archive/.
 
-### docs/changes/v0next-inventory/SCOPE-SUPPLEMENT-2026-05-07.md
-**Reason:** A7 fully shipped; supplement was written to feed A7 planning. Content may be fully absorbed.
-**What to check:** Is any content in SCOPE-SUPPLEMENT still forward-looking (waves A-2..A-5 planning)? If so, keep. If all content is historical, archive.
-
-### docs/changes/v0next-audit/ + docs/changes/v0next-inventory/ (excluding SCOPE-SUPPLEMENT)
-**Reason:** S59 origin. Describe the v0.next parser/scope audit. As of S88, V5-strict AST shapes are fully implemented. Some diagnostic findings may be stale.
-**What to check:** Do PARSER-AUDIT-2026-05-05.md §1 findings (17 features parsing as html-fragment at S59) still reflect reality at HEAD? If the major gaps are now closed, these audit docs are historical. Verify one or two findings against HEAD.
-
-### docs/articles/realtime-and-workers-as-syntax-devto-2026-04-29.md:200
-**Reason:** references `<channel protect=>` which was renamed to `<channel auth=>` at S80. Published article — immutable.
-**What to check:** Known drift per pa.md Rule 1. No action unless re-published; note for next article sweep.
+### docs/articles/llm-kickstarter-v1-2026-04-25.md
+**Reason:** dated 2026-04-25 but references commit `b1ce432` which predates S89 by weeks. Null/absence rules (§42.1.1) and §36 input devices and §13.2 auto-await are not in this version.
+**What to check:** Has this kickstarter been superseded by v2 (llm-kickstarter-v2-2026-05-04.md)? If v2 is the live authority, mark v1 as historical or confirm v1 is still distributed.
 
 ---
 
-## Compliant (current — do not flag)
+## Compliant (no action needed)
 
-- `compiler/SPEC.md` — authoritative (26,976 lines; §4.7 + §18.7 + §41.4 amended S88). Compliant.
-- `compiler/SPEC-INDEX.md` — generated index artifact. Compliant.
-- `compiler/PIPELINE.md` — v0.7.1; authoritative. Compliant.
-- `compiler/src/codegen/README.md` — codegen module overview. Compliant.
-- `compiler/tests/conformance/s32-fn-state-machine/REGISTRY.md` — conformance registry. Compliant.
-- `master-list.md` — current through S88. Compliant.
-- `hand-off.md` — current S88 CLOSE. Compliant.
-- `pa.md` — current (isolation-parameter dispatch rule + hook-policy amendment). Compliant.
-- `docs/changelog.md` — current through S88 close. Compliant.
-- `docs/PA-SCRML-PRIMER.md` — current; §13.5 staleness fix landed S88. Compliant.
-- `docs/lin.md` — linear types; compliant.
-- `docs/external-js.md` — external JS interop; compliant.
-- `docs/tutorial.md` — compliant.
-- `docs/pinned-discussions/w-program-001-warning-scope.md` — pinned decision; compliant.
-- `docs/audits/scope-c-findings-tracker.md` — active tracking doc; compliant.
-- `docs/audits/compiler-forgotten-surface-2026-05-06.md` — compliant (historical forensic; informational).
-- `docs/changes/predicate-gaps-deep-dive-prep/SCOPE.md` — pending-dispatch scope; compliant.
-- `docs/changes/promotion-ergonomics/TIER-C-SCOPE.md` — pending-dispatch scope; compliant.
-- `docs/changes/v0.3-approach-a-spec/progress.md` — active spec-drafting; compliant.
-- `docs/changes/v0next-audit/PARSER-AUDIT-2026-05-05.md` — historical; compliant.
-- `docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md` — historical inventory; compliant.
-- `docs/curation/2026-05-05-changes-dir-disposition.md` — curation record; compliant.
-- `docs/website/v0.2.0-announce-2026-05-05.md` — published announcement; compliant.
-- All `docs/articles/*-devto-*.md` (published articles) — compliant (see realtime article for known drift).
-- `benchmarks/RESULTS.md`, `benchmarks/sql-batching/RESULTS.md` — compliant.
-- `benchmarks/fullstack-react/README.md`, `benchmarks/todomvc-react/README.md`, `benchmarks/todomvc-svelte/README.md` — framework comparison; compliant.
-- `examples/README.md`, `examples/VERIFIED.md`, `examples/23-trucking-dispatch/README.md`, `examples/23-trucking-dispatch/FRICTION.md` — compliant.
-- `scripts/git-hooks/README.md` — compliant.
-- `e2e/README.md` — compliant.
-- `editors/neovim/README.md` — compliant.
-- `README.md` — compliant.
-- `DESIGN.md` — compliant.
-- `scrmlFormula.md` — compliant.
-- `samples/compilation-tests/gauntlet-s19-*/README.md` — compliant.
-- `compiler/tests/commands/migrate-program-shape-fixtures/README.md` — compliant.
+The following categories were scanned and found compliant:
+- compiler/SPEC.md, compiler/SPEC-INDEX.md, compiler/PIPELINE.md — authoritative specs, current
+- docs/articles/* (14 articles) — devto content; VERIFIED.md confirms status per examples/
+- docs/audits/* (null-audit, undefined-audit, articles-currency-table, happy-dom-perf, self-host-spec-conformance, wave-3-7-corpus-ouroboros) — dated audit snapshots, compliant as historical records
+- docs/changes/§13.2-*, §36-*, a1-closeout, a2-1, a2-2, a2-reachability-solver-scoping, a3-auth-graph-scoping — active/closed dispatch records, compliant
+- docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep — S89 eradication dispatch records, compliant
+- docs/changes/m-7c-d-12-runtime-sentinel-scoping, m-7c-d-paired-migration — active SCOPING, compliant
+- docs/changes/w-try-catch-lint, fix-lift-async-iife-paren, phase-3a-async-jwt, todomvc-edit-mode-landing — closed dispatch records, compliant
+- docs/changes/wave-4-t-track, wave-4-d-track, wave-4-adopter-content-scoping — Wave 4 execution records, compliant
+- docs/changes/wave-3-7-audit, wave-3-7-backlog-migration, v0next-inventory/SCOPE-SUPPLEMENT-2026-05-07.md — planning records, compliant
+- docs/changelog.md, docs/PA-SCRML-PRIMER.md, docs/tutorial.md, docs/lin.md, docs/external-js.md — reference docs, compliant
+- docs/pinned-discussions/w-program-001-warning-scope.md — pinned decision record, compliant
+- docs/curation/2026-05-05-changes-dir-disposition.md — curation record, compliant
+- docs/website/v0.2.0-announce-2026-05-05.md — historic announcement stub, compliant
+- DESIGN.md, README.md, scrmlFormula.md, pa.md, master-list.md, hand-off.md — live project documents, compliant
+- examples/, e2e/, samples/, benchmarks/, lsp/, editors/, scripts/ READMEs — operational docs, compliant
+- compiler/src/codegen/README.md, compiler/tests/ READMEs — test fixtures docs, compliant
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrmlts #s88 #lift-fixes-complete #approach-a-a1-shipped #dispatch-archival
+#non-compliance #project-mapper #cleanup #scrmlts #s89
 
 ## Links
+- [project master-list](../../master-list.md)
+- [project pa.md](../../pa.md)
 - [primary.map.md](./primary.map.md)
-- [master-list.md](../../master-list.md)
-- [pa.md](../../pa.md)
-- [scrml-support pa.md](../../../scrml-support/pa.md)

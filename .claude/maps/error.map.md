@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-13T15:00:00Z  commit: 9b98118
+# updated: 2026-05-13T23:00:00Z  commit: 71305fe
 
 ## Error Code System
 
@@ -54,9 +54,10 @@ All extend `_ScrmlError extends Error`.
 | E-DEBOUNCED-WITH-SERVER | §6.13 | Debounced attr on server-context cell |
 | E-DG-* | 001, 002 | Dependency graph (Stage 7) |
 | E-ENGINE-* | 001, 003, 004, 005, 010, 013 | Engine declaration/transition |
-| E-ENGINE-INVALID-TRANSITION | §51.0.F | Direct write violating rule= contract; self-writes (§51.0.F.1) are NO-OPs, not violations |
+| E-ENGINE-INVALID-TRANSITION | §51.0.F | Direct write violating rule= contract |
 | E-ERROR-* | 008 | Error handling surface |
 | E-IMPORT-* | 005, 006, 007 | Import violations |
+| E-INPUT-* | 001–005 | §36 input device errors; E-INPUT-005 = duplicate input-state id in scope [NEW S89 §36 Phase 2.B, emit-html.ts:260] |
 | E-LIFT-* | 001 | Concurrent lift detection (DG) |
 | E-LOOP-* | 005, 006, 007 | Loop/for-expression errors |
 | E-META-EVAL-* | 002 | Meta-eval errors |
@@ -68,6 +69,7 @@ All extend `_ScrmlError extends Error`.
 | E-PAGE-ROUTE-ATTR-FORBIDDEN | §4.15 | `route=` specifically forbidden on `<page>` |
 | E-PARSE-* | 001, 002 | Parse-time errors |
 | E-PARSEVARIANT-* | 001 | Variant parsing failures |
+| E-PROG-* | 001–005 | `<program>` attribute/context errors; E-PROG-004 = cross-program call not awaited (demoted Error→Info S89 §13.2) |
 | E-REPLAY-* | 001-RT | Runtime: replay index errors |
 | E-REACTIVITY-ATTR-CONFLICT | §6.13 | Both debounced + throttled on same cell |
 | E-RESET-* | INVALID-TARGET, NO-ARG | Reset keyword errors |
@@ -75,7 +77,7 @@ All extend `_ScrmlError extends Error`.
 | E-SQL-* | 005, 006, 008 | SQL validation errors |
 | E-STATE-* | 004, 005, 006, COMPLETE, PINNED-FORWARD-REF, TERMINAL-MUTATION, TRANSITION-ILLEGAL | State/engine errors |
 | E-STYLE-* | 001 | CSS validation errors |
-| E-SYNTAX-* | 002, 010, 011, 042, 043, 044, 050 | Syntax violations |
+| E-SYNTAX-* | 002, 010, 011, 042, 043, 044, 050 | Syntax violations; E-SYNTAX-042 = `null`/`undefined` in scrml source position |
 | E-TAILWIND-* | 001 | Tailwind class validation |
 | E-TEST-* | 001–006 | Test block violations (§19.13) |
 | E-TILDE-* | 001, 002 | Tilde-decl must-use violations |
@@ -84,21 +86,14 @@ All extend `_ScrmlError extends Error`.
 | E-USE-* | 001, 002, 005 | Usage analysis errors |
 | E-VALIDATOR-* | CIRCULAR-DEP, INLINE-DYNAMIC | Validator graph errors |
 | E-VARIANT-AMBIGUOUS | §34 | Variant inference ambiguity |
+| W-ABSENCE-IN-SCRML-SOURCE | §42.1, §6.8, §34 | [S89 — renamed from W-NULL-IN-SCRML-SOURCE] Info-level: `null` or `undefined` in scrml source position; canonical absence is `not` |
 | W-CG-* | 001 | Codegen warnings |
-| W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | Info-level: engine self-write detected; runtime NO-OP. Two fire-sites: PASS 16 (inside-state-child) + PASS 12.B (outside-state-child) in symbol-table.ts |
+| W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | Info-level: engine self-write detected; runtime NO-OP. Two fire-sites: PASS 16 + PASS 12.B in symbol-table.ts |
+| W-INPUT-001 | §36 | [NEW S89] Input-device warning (SPEC §36 catalog) |
 | W-PROGRAM-REDUNDANT-LOGIC | §4.14 | `<program>`/`<page>` body wraps top-level decls in redundant `${}` block |
+| W-TRY-CATCH-IN-SCRML-SOURCE | §34 | [NEW S89] Try/catch in scrml source; Stage 3.007 LINT-TRY-CATCH walker (validators/lint-try-catch.ts); fires on stdlib/http lines 65/264 |
 
-## LIFT-template Codegen Bug Families (S88 STATUS)
-
-| ID | Status | Description |
-|----|--------|-------------|
-| LIFT-1 | FIXED S88 | `parseLiftTag` returns null for paren-wrapped attr values — cursor desync FIXED; `class:NAME=(parens-expr)` no longer elides parent element |
-| LIFT-2/3/4 BUNDLE | FIXED S88 | `bind:*` two-way wiring / `if=` conditional display / event-arg parity inside lift template — all three wired in emit-lift.js |
-| LIFT-5 | FIXED S88 | `if (cond) { lift ... }` inside `for` — `if/for` children now route through container helpers in reconciler factory (emit-control-flow.ts) |
-
-All 5 LIFT families closed at S88. Anchor tests in `lift-li-text-template.test.js` + `todomvc-fixture-edit-mode.test.js` + `lift-5-reconciler-ambient.test.js` now pass.
-
-## scrml:host HostError Type (NEW S88)
+## scrml:host HostError Type (S88)
 
 HostError is NOT a subclass of _ScrmlError. It is a variant-constructor object matching the scrml enum variant shape:
 ```
@@ -115,8 +110,8 @@ Used by `safeCall` / `safeCallAsync` return values when a JS-host throw is caugh
 | `throw new Error("E-REPLAY-001-RT: ...")` | Runtime guard in compiled output — replay index out of bounds |
 | `try/catch` in pipeline orchestration | api.js wraps each stage; errors collected, not re-thrown |
 | `!{}` error-effect blocks | Compiled user error handlers (pattern-matched on error type) |
-| `safeCall(() => ...)` | S88: JS-host throw containment in stdlib; returns HostError shape instead of throwing |
-| `await safeCallAsync(() => ...)` | S88: async variant of safeCall for async-throwing JS-host APIs |
+| `safeCall(() => ...)` | S88: JS-host throw containment in stdlib; returns HostError shape |
+| `await safeCallAsync(() => ...)` | S88: async variant; W-TRY-CATCH-IN-SCRML-SOURCE fires on stdlib/http remaining try-catch sites |
 
 ## Global Error Boundaries
 
@@ -126,20 +121,23 @@ Used by `safeCall` / `safeCallAsync` return values when a JS-host throw is caugh
 | _scrml_error_boundary | runtime-template.js | Per-server-function HTTP handler; catches and serializes errors |
 | `!{}` arm dispatch | emit-html.ts + emit-event-wiring.ts | User-authored match-on-error reactive blocks |
 
-## Diagnostic Walkers (Post-TAB)
+## Diagnostic Walkers and Passes
 
-| File | What it checks |
-|------|----------------|
+| File / Pass | What it checks |
+|-------------|----------------|
 | compiler/src/gauntlet-phase1-checks.js | Post-TAB diagnostics for Stage 1 issues |
 | compiler/src/gauntlet-phase3-eq-checks.js | Post-TAB equality and Phase 3 semantic checks |
 | compiler/src/lint-ghost-patterns.js | Pre-Stage-2 lint for ghost/phantom patterns |
 | compiler/src/lint-i-match-promotable.js | Lint for promotable i-match patterns |
-| compiler/src/validators/ast-walk.ts | Shared read-only walker; channel placement pre-check (E-CHANNEL-OUTSIDE-PROGRAM) |
-| compiler/src/symbol-table.ts PASS 12.B | `walkEngineSelfWriteOutside` — W-ENGINE-SELF-WRITE-DETECTED outside-state-child |
+| compiler/src/validators/ast-walk.ts | Shared read-only walker; channel placement pre-check |
+| compiler/src/validators/lint-try-catch.ts | Stage 3.007 W-TRY-CATCH-IN-SCRML-SOURCE [NEW S89] |
+| compiler/src/validators/lint-async-user-source.ts | Async user-source lint pass |
+| compiler/src/symbol-table.ts PASS 12.B | W-ENGINE-SELF-WRITE-DETECTED outside-state-child |
 | compiler/src/symbol-table.ts PASS 16 | Inside-state-child W-ENGINE-SELF-WRITE-DETECTED fire-site |
+| compiler/src/codegen/emit-html.ts §36 Phase 2.B | E-INPUT-005 duplicate input-state-id-within-scope [NEW S89] |
 
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s88 #lift-fixes-complete #safecall #host-error
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s89 #lift-fixes-complete #safecall #host-error #null-eradication #w-absence #w-try-catch #input-devices
 
 ## Links
 - [primary.map.md](./primary.map.md)
