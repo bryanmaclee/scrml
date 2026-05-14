@@ -54,6 +54,10 @@ import {
 import type { FileAST } from "./types/ast.ts";
 import { enumerateEntryPoints } from "./reachability/entry-points.ts";
 import { computeInitiallyRenderedComponents } from "./reachability/component-1.ts";
+import {
+  computeReactiveDepClosure,
+  type ReadOnlyDependencyGraph,
+} from "./reachability/component-2.ts";
 import type { ConstFoldEnv } from "./codegen/constant-folder.ts";
 
 // ---------------------------------------------------------------------------
@@ -78,28 +82,33 @@ const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
 /**
  * Run the Stage 7.6 Reachability Solver.
  *
- * **A-2.2 (S89):** Component 1 (`initially_rendered_components`) lands.
- * Subsequent waves (A-2.3..A-2.7) extend the body — Component 2
- * reactive-dep closure, Component 3 server-fn reachability, Component 4
- * auth-gated boundaries, Component 5 vendor units, then the outer
- * fixpoint operator.
+ * **A-2.3 (S90):** Component 2 (`reactive_dep_closure`) lands.
+ * Subsequent waves (A-2.4..A-2.7) extend the body — Component 3
+ * server-fn reachability, Component 4 auth-gated boundaries,
+ * Component 5 vendor units, then the outer fixpoint operator.
  *
  * Current scope:
  *   1. Enumerate entry points from `input.files` per §40.8 shapes.
  *   2. For each entry point, compute `initially_rendered_components`
  *      per §40.9.2 (Component 1) — populates `ChunkContents.componentNodeIds`.
- *   3. Emit a single-role ChunkPlan keyed `_anonymous` (PIPELINE
+ *   3. For each entry point, compute `reactive_dep_closure` per
+ *      §40.9.3 (Component 2) — populates `ChunkContents.reactiveCellNodeIds`.
+ *      Walks the post-A-1 DG forward from the markup-read substrate
+ *      across `reads`/`validator-reads`/`engine-derived-reads` edges
+ *      (per OQ-A2-J disposition).
+ *   4. Emit a single-role ChunkPlan keyed `_anonymous` (PIPELINE
  *      Stage 7.6 line 2380 placeholder).
- *   4. `reactiveCellNodeIds` + `serverFnNodeIds` + `vendorUnitNames`
- *      remain empty Sets at this wave (A-2.3..A-2.6 land them).
+ *   5. `serverFnNodeIds` + `vendorUnitNames` remain empty Sets at
+ *      this wave (A-2.4..A-2.6 land them).
  *
  * **Determinism:** entry points + walked nodes are emitted in source
  * order (PIPELINE Stage 7.6 line 2391).
  *
  * **No mutation:** does not mutate `input`. PIPELINE Stage 7.6 line 2393.
  *
- * **Termination:** O(N) where N = total markup nodes across files.
- * No fixed-point iteration at this wave; that lands at A-2.7.
+ * **Termination:** Component 1 is O(markup-nodes); Component 2 is
+ * O(|C| × |MarkupReads| + |reactive-edges|) with a visited-set
+ * cycle guard. No fixed-point iteration at this wave; that lands at A-2.7.
  */
 export function runReachabilitySolver(input: RSInput): RSOutput {
   const record: ReachabilityRecord = emptyReachabilityRecord();
@@ -118,10 +127,18 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
   const env: ConstFoldEnv = { constBindings: new Map() };
   const irc = computeInitiallyRenderedComponents(entryPoints, files, env);
 
+  // Component 2 — reactive-dep closure over the post-A-1 DG. The DG
+  // is duck-typed at the boundary; when absent (tests bypassing the
+  // full pipeline) Component 2 returns empty closures per entry point.
+  const dg = input.depGraph as ReadOnlyDependencyGraph | null | undefined;
+  const reactiveClosures = computeReactiveDepClosure(irc, dg);
+
   // Materialize per-entry-point per-role ChunkPlans.
   for (const ep of entryPoints) {
     const componentIds: Set<NodeId> = irc.get(ep.id) ?? new Set();
-    const plan = makeChunkPlan(componentIds);
+    const reactiveCellIds: Set<NodeId> =
+      reactiveClosures.get(ep.id) ?? new Set();
+    const plan = makeChunkPlan(componentIds, reactiveCellIds);
     const rps: RolePlayableSurface = { byRole: new Map() };
     rps.byRole.set(ANONYMOUS_ROLE, plan);
     record.closures.set(ep.id satisfies EntryPointId, rps);
@@ -137,19 +154,23 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
 /**
  * Build the per-tier ChunkPlan for a single (entry-point, role) pair.
  *
- * At A-2.2 (Component 1 only), all components are admitted to the
- * `initialChunk` (N=0). prefetchTier1 / prefetchTier2 are empty —
- * those tiers consume Component 3's interaction-graph projection
- * (A-2.4) which is not yet wired.
+ * At A-2.3 (Components 1 + 2), the `initialChunk` admits both the
+ * initially-rendered component set (Component 1) AND the transitive
+ * reactive-dep closure (Component 2). prefetchTier1 / prefetchTier2
+ * remain empty — those tiers consume Component 3's interaction-graph
+ * projection (A-2.4) which is not yet wired.
  *
  * Monotonicity (PIPELINE Stage 7.6 line 2392): trivially satisfied —
  * `initialChunk ⊆ initialChunk ∪ ∅ ∪ ∅ ∪ ...`.
  */
-function makeChunkPlan(componentNodeIds: Set<NodeId>): ChunkPlan {
+function makeChunkPlan(
+  componentNodeIds: Set<NodeId>,
+  reactiveCellNodeIds: Set<NodeId>,
+): ChunkPlan {
   return {
     initialChunk: {
       componentNodeIds: new Set(componentNodeIds),
-      reactiveCellNodeIds: new Set(),
+      reactiveCellNodeIds: new Set(reactiveCellNodeIds),
       serverFnNodeIds: new Set(),
       vendorUnitNames: new Set(),
     },
