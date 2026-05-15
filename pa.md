@@ -152,6 +152,43 @@ When the user says "wrap" (or PA proposes wrap), execute ALL of:
 
 If the user says just "wrap" without further context, default to executing all 8 steps. If the user says "wrap and push" — same plus authorize step 7. If the user says "wrap, no push" — execute 1-6 + 8, leave 7 explicit-pending.
 
+## Versioning convention — `package.json` bump-on-tag (S94 ratification)
+
+**Added 2026-05-15 (S94, formalizing the S92 Q-OPEN-4 surfaced policy implication).**
+
+`package.json`'s `version` field is the **single source of truth** for the `compiler` identity field emitted into `chunks.json` manifest (per SPEC §47.5 + Q-OPEN-4 ratification S92). The drift between three sources (pkg.json claiming 0.2.0, hard-coded constant claiming 0.3.0, reality between v0.2.6 and v0.3.0-alpha.0) was masked S82-S92 because the field is informational-only — but would have surfaced loudly the moment an adopter built tooling against `chunks.json`. Single-source-of-truth resolution closed the structural drift at S92 (`package.json` 0.2.0 → 0.3.0-alpha.0 → 0.3.0 at the v0.3.0 cut).
+
+**Standing rule:** every release tag MUST be preceded by a `package.json` version bump. The bump and the tag are paired operations.
+
+Precedent of NOT doing this (formalized as the anti-pattern to avoid going forward):
+- v0.2.0 (S83 `022ee02`) — first semver tag; pkg.json at 0.2.0 (correct)
+- v0.2.1 (S83 `d72c074`) — pkg.json NOT bumped (drift starts)
+- v0.2.2 (S83 `98e872d`) — pkg.json NOT bumped
+- v0.2.3 (S84 `d512266`) — pkg.json NOT bumped
+- v0.2.4 (S84 `28cd2ac`) — pkg.json NOT bumped
+- v0.2.5 (S85 `2c687b5`) — pkg.json NOT bumped
+- v0.2.6 (S85 `efbd1e8`) — pkg.json NOT bumped
+- v0.3.0 (S92 `c520369`) — pkg.json BUMPED to 0.3.0 (drift closed)
+
+Going forward — operational rule for any release tag (semver minor / patch / pre-release):
+
+1. Decide the new version (semver patch for bug-fix releases; minor for feature releases; major for breaking changes; pre-release suffix `-alpha.N` / `-beta.N` for in-flight cuts).
+2. Bump `package.json` `version` to the new value FIRST. Commit alone: `release(sNN): vX.Y.Z — <one-line description>` OR fold into the same commit as the final substantive landing for the release, with a clear bump-and-tag intent in the message.
+3. Tag the commit: `git tag -a vX.Y.Z -m "vX.Y.Z — <short release notes>"`.
+4. Push the commit + tag together: `git push origin main && git push origin vX.Y.Z`.
+
+The order is **bump-commit-tag-push-tags** — the tag must point at a commit where `package.json` already reflects the tagged version. If a release tag is created on a commit where `package.json` still shows the previous version, the chunks.json `compiler` field of any artifact built between that commit and the next bump will be wrong.
+
+**Pre-release suffix convention** (S92 precedent): in-flight cuts use `0.X.Y-alpha.N` (or `-beta.N`). The S92 sequence `0.3.0-alpha.0` (alpha cut on `c520369^`) → `0.3.0` (STABLE on `c520369`) is the canonical pattern.
+
+**Patch releases (v0.X.Y → v0.X.Y+1)** bump the patch number. The historical v0.2.1-v0.2.6 cuts SHOULD have each bumped patch (0.2.0 → 0.2.1 → 0.2.2 ... → 0.2.6). Going forward, every patch release tag is paired with a patch bump.
+
+**No retroactive renumber.** The v0.2.x history with stale pkg.json is accepted-as-is; the chunks.json `compiler` field for builds in that window is documented-as-known-drift in benchmarks/RESULTS.md if relevant, but not retro-fixed.
+
+**Wrap-step interaction:** when the wrap operation includes a release tag (step 7 push + tag), step 7 now implicitly requires the pkg.json bump to have already happened. PA must confirm pkg.json reflects the tag's intended version BEFORE pushing the tag. If not bumped: bump-commit-push-tag in sequence, not wrap-push-then-fix.
+
+**Rationale.** The chunks.json `compiler` field is adopter-observable: any tooling that reads `chunks.json` to identify compiler-version-of-build (cache invalidation logic, debug telemetry, error reports, future SLSA-style verification) needs the field to match the actual release. Single-source-of-truth eliminates the class of "which version is this?" confusion bugs.
+
 ## Context budget — when to suggest wrap (PERMANENT)
 
 **This PA runs on Opus 4.7 with a 1M-token context window.** Wrap-suggestion timing must reflect that, not earlier-Claude-era 200k-context heuristics.
