@@ -108,6 +108,28 @@ Self-host is sequenced after v1.0 stable. It is the destination, not the path.
 
 ---
 
+## Surfaces that will likely change visibility in adopter docs
+
+A few language features sit in a particular spot — they have spec real-estate and compiler implementation but a narrowing or atypical adopter surface. Honest about each:
+
+**Compile-time meta blocks (`^{}`).** Three current use shapes: (1) compile-time markup generation via `emit()` from data arrays, (2) compile-time reflection via `reflect(TypeName)` for type inspection, (3) self-host compiler internals (extensive use in `stdlib/compiler/*.scrml`). The L22 type-as-argument family (`parseVariant` shipped at v0.next; `serialize`, `formFor`, `schemaFor`, `tableFor` planned) is structurally undercutting shape #2 — adopters who want "compile-time type introspection" will reach for `formFor(StructType)` rather than `^{ reflect(StructType) ... }`. Shape #1 (markup-from-data unrolling) and shape #3 (self-host internals) remain. `^{}` won't deprecate; the primitive is what the L22 family rides on internally. But its visibility in adopter docs will likely narrow over v0.4 → v0.5 as family primitives ship as the recommended surface. The flagship marketing pitch shifts to "define struct → get form" via `formFor`, not "you can write compile-time code" via raw `^{}`.
+
+**The last-unbound-expression carry-forward (`~`).** Substantive spec real-estate and compiler implementation (linearity-tracked, with discrete diagnostics — `E-TILDE-001`, `E-TILDE-002`, `E-MU-001`) but currently zero adopter-facing corpus usage. The primitive captures the result of an unbound expression or lift — `fetchUser(id)` initializes `~`, `process(~)` consumes it. Designed for pipeline shapes where naming each intermediate value would be noise. The closest existing-language analogue is Perl's `$_`, but `~` has full linearity + scope rules rather than being a global magic.
+
+**Naming intermediates is a real cost.** The design intent here is load-bearing: the time cost of choosing a good name for a value you're going to use exactly once in the next line is a tax the language shouldn't impose. The cleanliness of `fetchUser(id); validate(~); save(~)` over `let u = fetchUser(id); let v = validate(u); save(v)` is the point — same shape of motivation that makes ternary expressions feel clean.
+
+**Adoption path: v0.4 body-split is the natural discovery moment.** The v0.4 anchor introduces failable batches + `!{}` handler propagation across CPS-split function bodies — exactly the pipeline shape where `~` shines. Post-v0.4 the canonical failable-pipeline example reads:
+
+```scrml
+fetchUser(id) !{ | ::NotFound -> { return } }
+validateUser(~) !{ | ::Invalid -> { return } }
+saveToDB(~)    !{ | ::DBError -> { return } }
+```
+
+The empty corpus is a documentation surface, not an adoption signal. v0.4's example refresh + recipes are the natural place to make `~` visible — adopters learn the pipeline shape and the `~` primitive together.
+
+---
+
 ## The shape, not the schedule
 
 Three patterns repeat across the work above:
