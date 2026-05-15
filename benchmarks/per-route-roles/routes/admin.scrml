@@ -1,0 +1,80 @@
+// per-route-roles bench — Admin route ("/admin")
+// Admin-only subtree. Maximum-overhead role with admin controls.
+
+<program title="Admin" auth="required">
+
+server function loadAllUsers() {
+  lift [
+    { id: 1, email: "alex@example.com", role: "Driver", lastLogin: "2026-05-13" },
+    { id: 2, email: "sam@example.com", role: "Driver", lastLogin: "2026-05-13" },
+    { id: 3, email: "ops@example.com", role: "Dispatch", lastLogin: "2026-05-14" },
+    { id: 4, email: "boss@example.com", role: "Admin", lastLogin: "2026-05-14" },
+    { id: 5, email: "customer1@example.com", role: "Customer", lastLogin: "2026-05-12" },
+  ]
+}
+
+server function loadAuditLog() {
+  lift [
+    { ts: "2026-05-14T08:01:00Z", actor: "boss", action: "user.role.change", target: "alex" },
+    { ts: "2026-05-14T08:14:00Z", actor: "ops", action: "load.reassign", target: "load-7" },
+    { ts: "2026-05-14T09:02:00Z", actor: "boss", action: "user.disable", target: "deprecated@x.com" },
+  ]
+}
+
+server function changeUserRole(userId, newRole) {
+  lift true
+}
+
+server function disableUser(userId) {
+  lift true
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Admin</h1>
+  <a href="/" class="text-blue-600">Home</a>
+  <a href="/loads" class="text-blue-600">Loads</a>
+  <a href="/dispatch" class="text-blue-600">Dispatch</a>
+</nav>
+
+<auth role="Admin">
+  <section class="p-4 border border-red-500 bg-red-50">
+    <h2 class="text-lg font-medium text-red-700">User management</h2>
+    <p class="text-sm text-red-600">
+      Admin-only: change roles, disable accounts.
+    </p>
+    <table class="w-full">
+      <thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Last login</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${
+          for (let user of loadAllUsers()) {
+            lift <tr class="border-b">
+              <td>#${user.id}</td>
+              <td>${user.email}</td>
+              <td>${user.role}</td>
+              <td>${user.lastLogin}</td>
+              <td>
+                <button onclick=changeUserRole(user.id, "Admin") class="text-xs underline">promote</button>
+                <button onclick=disableUser(user.id) class="text-xs text-red-700 underline">disable</button>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="p-4">
+    <h2 class="text-lg font-medium mb-2">Audit log</h2>
+    <ul class="font-mono text-xs">
+      ${
+        for (let entry of loadAuditLog()) {
+          lift <li class="py-1">
+            ${entry.ts} - ${entry.actor} - ${entry.action} on ${entry.target}
+          </li>
+        }
+      }
+    </ul>
+  </section>
+</auth>
+
+</program>

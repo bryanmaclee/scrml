@@ -1,0 +1,78 @@
+// per-route-roles bench — Dispatch route ("/dispatch")
+// Dispatcher console — heavyweight subtree to bulk up the Dispatch chunk.
+
+<program title="Dispatcher Console" auth="required">
+
+server function loadAllActiveLoads() {
+  lift [
+    { id: 1, pickup: "Houston, TX", delivery: "Atlanta, GA", driver: "Alex", priority: "high" },
+    { id: 2, pickup: "Dallas, TX", delivery: "Memphis, TN", driver: "Sam", priority: "medium" },
+    { id: 3, pickup: "Austin, TX", delivery: "Nashville, TN", driver: "Jordan", priority: "low" },
+    { id: 4, pickup: "San Antonio, TX", delivery: "Birmingham, AL", driver: "Casey", priority: "high" },
+  ]
+}
+
+server function loadFleetStatus() {
+  lift [
+    { unit: "TRK-001", driver: "Alex", location: "Houston", fuel: 84 },
+    { unit: "TRK-002", driver: "Sam", location: "Dallas", fuel: 32 },
+    { unit: "TRK-003", driver: "Jordan", location: "Austin", fuel: 67 },
+    { unit: "TRK-004", driver: "Casey", location: "San Antonio", fuel: 91 },
+    { unit: "TRK-005", driver: "Riley", location: "Tyler", fuel: 12 },
+  ]
+}
+
+server function dispatchEmergency(loadId, message) {
+  lift true
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Dispatch Console</h1>
+  <a href="/" class="text-blue-600">Home</a>
+  <a href="/loads" class="text-blue-600">Loads</a>
+</nav>
+
+<auth role="Dispatch">
+  <section class="p-4">
+    <h2 class="text-lg font-medium mb-2">Active loads</h2>
+    <table class="w-full">
+      <thead><tr><th>ID</th><th>Pickup</th><th>Delivery</th><th>Driver</th><th>Priority</th></tr></thead>
+      <tbody>
+        ${
+          for (let load of loadAllActiveLoads()) {
+            lift <tr class="border-b">
+              <td>#${load.id}</td>
+              <td>${load.pickup}</td>
+              <td>${load.delivery}</td>
+              <td>${load.driver}</td>
+              <td><span class="priority-${load.priority}">${load.priority}</span></td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="p-4">
+    <h2 class="text-lg font-medium mb-2">Fleet status</h2>
+    <ul class="grid grid-cols-2 gap-2">
+      ${
+        for (let truck of loadFleetStatus()) {
+          lift <li class="p-2 border">
+            <strong>${truck.unit}</strong> - ${truck.driver} @ ${truck.location} - fuel ${truck.fuel}%
+          </li>
+        }
+      }
+    </ul>
+  </section>
+
+  <section class="p-4 border border-purple-500 bg-purple-50">
+    <h2 class="text-lg font-medium text-purple-700">Emergency dispatch</h2>
+    <p class="text-sm">Send emergency broadcasts to active drivers.</p>
+    <button onclick=dispatchEmergency(1, "Detour required") class="px-3 py-1 bg-purple-600 text-white rounded">
+      Broadcast detour
+    </button>
+  </section>
+</auth>
+
+</program>

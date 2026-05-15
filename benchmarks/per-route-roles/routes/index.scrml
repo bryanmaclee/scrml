@@ -1,0 +1,34 @@
+// per-route-roles bench — Home route ("/")
+// Hosts the role enum (5 roles to maximize chunk variance signal).
+// Cross-links every role's primary page to exercise hover-prefetch.
+
+<program title="Dispatch Home" auth="required">
+
+type UserRole:enum = { Anonymous, Customer, Driver, Dispatch, Admin }
+
+<count> = 0
+
+function increment() {
+  @count = @count + 1
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Dispatch</h1>
+  <a href="/loads" class="text-blue-600">Loads</a>
+  <auth role="Customer">
+    <a href="/customer" class="text-green-600">Customer Portal</a>
+  </auth>
+  <auth role="Dispatch">
+    <a href="/dispatch" class="text-purple-600">Dispatcher Console</a>
+  </auth>
+  <auth role="Admin">
+    <a href="/admin" class="text-red-600">Admin</a>
+  </auth>
+</nav>
+
+<button onclick=increment()
+        class="px-3 py-1 rounded bg-slate-100">
+  ${@count}
+</button>
+
+</program>

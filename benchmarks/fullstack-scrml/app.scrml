@@ -54,7 +54,7 @@
     @emailErr = ""
     @messageErr = ""
 
-    fn validate() {
+    function validate() {
       let valid = true
       if (@name.trim().length < 2) {
         @nameErr = "Name must be at least 2 characters"
@@ -80,7 +80,7 @@
       return valid
     }
 
-    fn handleSubmit() {
+    function handleSubmit() {
       if (validate()) {
         @submissions = [...@submissions, { name: @name, email: @email, subject: @subject, message: @message, priority: @priority, subscribe: @subscribe }]
         @name = ""

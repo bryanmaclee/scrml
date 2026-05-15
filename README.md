@@ -161,7 +161,7 @@ ${x.id}}.get() }` pattern is rewritten to one pre-loop `WHERE id IN (...)`
 fetch plus a keyed `Map` lookup — no DataLoader, no manual batching.
 Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT`
 envelope for snapshot consistency. [Measured Tier 2 wins](benchmarks/sql-batching/RESULTS.md):
-~2× at N=10, ~3× at N=100, ~4× at N=1000 on on-disk WAL `bun:sqlite`.
+~1.7× at N=10, ~2.3× at N=100, ~3.3× at N=1000 on on-disk WAL `bun:sqlite` (v0.3.0 refresh).
 
 **Realtime and workers as language primitives.** A `<channel>` block declares
 a WebSocket endpoint — the compiler emits the upgrade route, client connection
@@ -409,39 +409,52 @@ Five things the compiler does that you don't write:
 > Re-published numbers + delta commentary will land in a forthcoming v0.2.x
 > patch alongside the refresh.
 
-Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation (2026-04-13, v0.1.0-era).
+Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation (2026-05-14, v0.3.0 STABLE refresh — see [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) for the full v0.3.0 refresh including the NEW per-route per-role chunk variance bench).
 
 **Bundle size (gzip):**
 
 | Framework | JS | Total | Dependencies | node_modules |
 |-----------|---:|------:|---:|---:|
-| **scrml** | **14.8 KB** | **15.9 KB** | **0** | **0 bytes** |
-| Svelte 5  | 15.9 KB | 17.0 KB | 33 | 29 MB |
-| Vue 3     | 26.8 KB | 27.9 KB | 22 | 38 MB |
-| React 19  | 62.1 KB | 63.2 KB | 38 | 46 MB |
+| Svelte 5  | **15.7 KB** | **16.8 KB** | 3 | ~30 MB |
+| Vue 3     | 26.5 KB | 27.6 KB | 3 | ~25 MB |
+| **scrml** | 39.9 KB | 41.1 KB | **0** | **0 bytes** |
+| React 19  | 61.5 KB | 62.6 KB | 4 | ~46 MB |
+
+> scrml's bundle grew from 14.8 KB (v0.2.x) to 39.9 KB at v0.3.0 — the Approach A
+> runtime adds per-route chunk loading, FNV-1a content addressing, role-detection
+> bootstrap, prefetch helpers, dual-decoder wire format, and mount-hydration
+> coalescing. Zero dependencies are preserved. The growth is paid back in apps with
+> multiple routes and roles — per-route per-role chunking achieves a 96% reduction
+> in the per-page chunk vs a single-bundle alternative. See the [per-route per-role chunk variance section](benchmarks/RESULTS.md#per-route-per-role-chunk-variance-v030-new) for the v0.3 narrative.
 
 **Runtime performance (headless Chrome, medians in ms, lower is better):**
 
 | Operation | scrml | React 19 | Svelte 5 | Vue 3 |
 |-----------|------:|---------:|---------:|------:|
-| Create 1000 | 19.8 | **19.2** | 27.2 | 24.6 |
-| Partial update | **0.4** | 3.3 | 2.9 | 9.2 |
-| Swap rows | **1.3** | 17.0 | 2.2 | 5.8 |
-| Select row | **0.0** | 0.3 | 0.0 | 0.1 |
-| Remove row | **1.2** | 2.8 | 2.2 | 6.6 |
-| Append 1000 | **19.3** | 21.1 | 35.2 | 29.7 |
-| Create 10,000 | 209.5 | **181.9** | 534.9 | 244.0 |
+| Create 1000 | 45.0 | **39.9** | 59.3 | 48.9 |
+| Partial update | 52.5 | 8.5 | **8.2** | 22.9 |
+| Swap rows | 51.0 | 39.4 | **5.9** | 15.4 |
+| Select row | 168.2 | 0.9 | **0.1** | 0.1 |
+| Remove row | 51.9 | 6.7 | **5.9** | 16.6 |
+| Append 1000 | 95.95 | **46.5** | 69.6 | 60.3 |
+| Create 10,000 | 399.2 | **365.4** | 565.9 | 465.6 |
 
-scrml wins 6 of 10 benchmarks. Partial update is 8x faster than React; swap-rows is 13x faster. Full results in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+scrml wins 0 of 10 TodoMVC benchmarks at v0.3.0 (was 6 of 10 at v0.2.4-era). Approach A
+runtime additions pay the full bundle/runtime cost on a single-page TodoMVC without
+the per-route amortization benefit. The v0.3 narrative is per-route per-role chunk
+splitting on multi-route apps — see [full results](benchmarks/RESULTS.md) including the
+v0.2.4-era baseline preserved for trend tracking.
 
 **Build time (TodoMVC, median of 10):**
 
 | Framework | Build Time |
 |-----------|---:|
-| **scrml** | **43.7 ms** |
-| Svelte 5  | 345 ms |
-| Vue 3     | 379 ms |
-| React 19  | 506 ms |
+| **scrml** | **65.6 ms** |
+| Svelte 5  | 668 ms |
+| Vue 3     | 706 ms |
+| React 19  | 944 ms |
+
+scrml is ~10-14x faster to build than Vite at v0.3.0 (was 8-12x at v0.2.x).
 
 ## Features
 
@@ -511,7 +524,7 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
 - **Auto-split via whole-program inference.** The compiler walks the call graph and infers what runs where. Functions that touch SQL, `protect=` fields, `Bun.*` APIs, `process.*`, `scrml:auth`/`scrml:crypto`/`scrml:fs`/`scrml:store`/`scrml:redis`/`scrml:cron`/`scrml:oauth` (server-only stdlib modules) are classified server-side automatically. Caller-context propagates the classification through transitive call chains (Insight 26 Trigger 5). The `server` keyword still parses but is redundant when inference can prove server-classification — `W-DEPRECATED-SERVER-MODIFIER` fires at redundant uses; `W → E → parser-strip` deprecation cycle follows `<machine>` precedent and lands in v0.3.0. **Dead, never-called functions are warned (`W-DEAD-FUNCTION`) and tree-shaken.**
 - **SQL passthrough (`?{}`)** — query SQLite directly inside logic blocks. The compiler generates parameterized queries and handles serialization.
-- **Automatic N+1 elimination (Tier 2).** A `for` loop whose body does `?{...WHERE id = ${x.id}}.get()` is rewritten to one pre-loop `WHERE id IN (?,?,?,...)` fetch plus a keyed `Map` lookup. No DataLoader, no manual batching. Measured ~2×/3×/4× at N=10/100/1000 on on-disk WAL `bun:sqlite` — see [benchmarks/sql-batching/RESULTS.md](benchmarks/sql-batching/RESULTS.md).
+- **Automatic N+1 elimination (Tier 2).** A `for` loop whose body does `?{...WHERE id = ${x.id}}.get()` is rewritten to one pre-loop `WHERE id IN (?,?,?,...)` fetch plus a keyed `Map` lookup. No DataLoader, no manual batching. Measured ~1.7×/2.3×/3.3× at N=10/100/1000 on on-disk WAL `bun:sqlite` (v0.3.0 refresh) — see [benchmarks/sql-batching/RESULTS.md](benchmarks/sql-batching/RESULTS.md).
 - **Implicit transaction envelopes (Tier 1).** Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT` for snapshot consistency under concurrent writers. Explicit `transaction { }` blocks are left alone; a `W-BATCH-001` warning fires if the two would conflict.
 - **Mount-hydration coalescing.** Multiple on-mount `<x server>` loads on the same page are folded into a single `__mountHydrate` round-trip (§8.11) instead of one request per variable.
 - **Opt-out per call site.** `?{...}.nobatch()` disables rewriting when you need an exact query shape — useful for `EXPLAIN`, stored-procedure calls, or measured hot paths.

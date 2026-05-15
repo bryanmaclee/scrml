@@ -1,0 +1,58 @@
+// per-route-roles bench — Loads route ("/loads")
+// Driver-and-Dispatch flavored. Driver content visible to Driver+Dispatch+Admin;
+// dispatch-specific actions gated to Dispatch+Admin.
+
+<program title="Loads" auth="required">
+
+server function loadDrivers() {
+  lift [
+    { id: 1, name: "Alex", phone: "555-0001", status: "active" },
+    { id: 2, name: "Sam", phone: "555-0002", status: "active" },
+    { id: 3, name: "Jordan", phone: "555-0003", status: "off-duty" },
+    { id: 4, name: "Casey", phone: "555-0004", status: "active" },
+    { id: 5, name: "Riley", phone: "555-0005", status: "active" },
+  ]
+}
+
+server function reassignLoad(loadId, driverId) {
+  // pretend this writes
+  lift true
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Loads</h1>
+  <a href="/" class="text-blue-600">Home</a>
+</nav>
+
+<auth role="Driver">
+  <section class="p-4">
+    <h2 class="text-lg font-medium mb-2">Driver roster</h2>
+    <ul class="list-disc pl-6">
+      ${
+        for (let driver of loadDrivers()) {
+          lift <li class="py-1">${driver.name} (${driver.status})</li>
+        }
+      }
+    </ul>
+  </section>
+</auth>
+
+<auth role="Dispatch">
+  <section class="p-4 border border-purple-500 bg-purple-50">
+    <h2 class="text-lg font-medium text-purple-700">Dispatcher reassignment controls</h2>
+    <p class="text-sm text-purple-600">
+      Dispatch role: can reassign loads between drivers.
+    </p>
+    <ul class="list-decimal pl-6">
+      ${
+        for (let driver of loadDrivers()) {
+          lift <li class="py-1">
+            ${driver.name} - <button onclick=reassignLoad(1, driver.id) class="text-xs text-purple-800 underline">reassign load #1 here</button>
+          </li>
+        }
+      }
+    </ul>
+  </section>
+</auth>
+
+</program>

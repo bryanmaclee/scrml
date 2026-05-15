@@ -119,7 +119,7 @@ ${
 
   <h3>The compiler eliminates N+1 automatically</h3>
   <p>
-    Because scrml owns both the query context and the loop context, a <code>for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }</code> pattern is rewritten to one pre-loop <code>WHERE id IN (...)</code> fetch plus a keyed <code>Map</code> lookup. Independent reads in a <code>!</code> handler share one <code>BEGIN DEFERRED</code>..<code>COMMIT</code> envelope. On-mount <code>server @var</code> loads coalesce into a single <code>__mountHydrate</code> round-trip. <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/benchmarks/sql-batching">Measured wins</a>: ~2× at N=10, ~3× at N=100, ~4× at N=1000 on on-disk WAL SQLite.
+    Because scrml owns both the query context and the loop context, a <code>for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }</code> pattern is rewritten to one pre-loop <code>WHERE id IN (...)</code> fetch plus a keyed <code>Map</code> lookup. Independent reads in a <code>!</code> handler share one <code>BEGIN DEFERRED</code>..<code>COMMIT</code> envelope. On-mount <code>server @var</code> loads coalesce into a single <code>__mountHydrate</code> round-trip. <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/benchmarks/sql-batching">Measured wins</a> (v0.3.0 refresh): ~1.7× at N=10, ~2.3× at N=100, ~3.3× at N=1000 on on-disk WAL SQLite.
   </p>
 
   <h3>The compiler knows what code is reachable to whom</h3>

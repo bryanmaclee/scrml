@@ -1,0 +1,35 @@
+// per-route-roles bench — Customer route ("/customer")
+// Customer-flavored subtree showing only-Customer content.
+
+<program title="Customer Portal" auth="required">
+
+server function loadOrders() {
+  lift [
+    { id: 101, item: "Industrial widgets", status: "in-transit", eta: "2026-05-20" },
+    { id: 102, item: "Steel beams x40", status: "delivered", eta: "2026-05-12" },
+    { id: 103, item: "Concrete blocks", status: "pending", eta: "2026-05-22" },
+  ]
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Customer Portal</h1>
+  <a href="/" class="text-blue-600">Home</a>
+</nav>
+
+<auth role="Customer">
+  <section class="p-4">
+    <h2 class="text-lg font-medium mb-2">Your orders</h2>
+    <ul class="list-none">
+      ${
+        for (let order of loadOrders()) {
+          lift <li class="py-2 border-b">
+            <span class="font-medium">#${order.id}</span> -
+            ${order.item} - <em>${order.status}</em>
+          </li>
+        }
+      }
+    </ul>
+  </section>
+</auth>
+
+</program>
