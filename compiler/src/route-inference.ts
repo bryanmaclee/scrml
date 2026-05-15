@@ -2687,6 +2687,43 @@ export function runRI(input: RIInput): RIOutput {
 // ---------------------------------------------------------------------------
 
 /**
+ * Recognized route-directory prefixes, in lookup order.
+ *
+ * `pages/` is the v0.3 canonical convention per SPEC §47.9.2 (line 19314 —
+ * "adopters arrange .scrml files under a `pages/` (or equivalent) directory")
+ * and §40.8.1 (an empty `pages/` directory at project root suppresses
+ * W-PROGRAM-SPA-INFERRED). `routes/` is the legacy/pre-v0.3 convention; it is
+ * grandfathered for backward compatibility but is no longer the canonical
+ * adopter signal. SPEC §47.9.2 line 19316 explicitly tracked harmonization of
+ * the two as a compiler-internal cleanup target — D-RI-PAGES closes that loop.
+ *
+ * Lookup order matters when a file path contains BOTH segments (uncommon but
+ * possible — e.g. `proj/pages/routes/foo.scrml`): the FIRST match wins. The
+ * order here prefers `routes/` over `pages/` so existing routes-based projects
+ * with `routes/_anything_/...` continue to resolve via the legacy keying with
+ * no surprise URL shifts. Greenfield projects use `pages/` and never hit this
+ * tiebreaker.
+ */
+const ROUTE_PREFIXES: readonly string[] = ["/routes/", "/pages/"];
+
+/**
+ * Find the first matching route-directory prefix in a file path.
+ *
+ * Returns the matched prefix string and the index where it appears, or `null`
+ * if the file is not under any recognized route directory (i.e. a single-page
+ * application file at the project root). The matched prefix is returned so
+ * callers can compute `routesIdx + prefix.length` without re-hardcoding either
+ * prefix literal.
+ */
+function findRoutePrefix(filePath: string): { idx: number; prefix: string } | null {
+  for (const prefix of ROUTE_PREFIXES) {
+    const idx = filePath.indexOf(prefix);
+    if (idx !== -1) return { idx, prefix };
+  }
+  return null;
+}
+
+/**
  * Build a page route tree from file paths — AUTH-MIDDLEWARE PATH MAP.
  *
  * IMPORTANT: This function is NOT the canonical URL-inference site.
@@ -2695,22 +2732,28 @@ export function runRI(input: RIInput): RIOutput {
  * §47.9.2 / §40.8. This function exists specifically to build the per-page
  * auth-middleware map (which routes require `auth=`, layout inheritance, etc.).
  *
- * The corpus convention is `pages/**` (e.g. `examples/23-trucking-dispatch/pages/`)
- * — but this function keys on `routes/` for historical reasons and applies only when
- * the auth-middleware tree is being computed. The v0.3 `<page>` element (SPEC §4.15
- * + §40.8) does NOT carry a `route=` attribute; route URL comes from filesystem
- * path inference exclusively (§47.9.2), not from this function.
+ * Recognized route-directory prefixes (per `ROUTE_PREFIXES`):
+ *   - `pages/` — v0.3 canonical convention (SPEC §47.9.2 / §40.8.1).
+ *   - `routes/` — legacy/pre-v0.3 convention; grandfathered for backward
+ *     compatibility but not the canonical adopter signal. The v0.3 `<page>`
+ *     element (SPEC §4.15 + §40.8) does NOT carry a `route=` attribute;
+ *     route URL comes from filesystem path inference exclusively (§47.9.2),
+ *     not from this function.
  *
  * Convention (auth-middleware tree only):
- *   - Files under a `routes/` directory are page routes.
- *   - `index.scrml` maps to the directory's path (e.g., routes/index.scrml → /).
- *   - `[param].scrml` maps to a dynamic segment (e.g., routes/users/[id].scrml → /users/:id).
+ *   - Files under any recognized prefix directory are page routes.
+ *   - `index.scrml` maps to the directory's path (e.g., pages/index.scrml → /).
+ *   - `[param].scrml` maps to a dynamic segment (e.g., pages/users/[id].scrml → /users/:id).
  *   - `_layout.scrml` provides a shared layout wrapper for sibling routes.
  *   - `[...slug].scrml` is a catch-all route.
- *   - Files NOT under a `routes/` directory are treated as single-page apps (route = /).
+ *   - Files NOT under a recognized prefix directory are treated as single-page
+ *     apps (route = /).
  *
- * v0.4 follow-up: harmonize this function's `routes/` keying with the v0.3 corpus
- * convention `pages/**` — either rename or accept both as equivalent prefixes.
+ * D-RI-PAGES (2026-05-15): closes the v0.4 follow-up that previously gated this
+ * function on `routes/` only. Both prefixes are now recognized; the
+ * auth-redirect cross-ref (auth-graph.ts crossRefRedirects) can resolve
+ * loginRedirect targets to pages under `pages/...`, closing the Batch A.1 loop
+ * on `scrml generate auth` scaffold output.
  */
 export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
   const pages = new Map<string, PageRoute>();
@@ -2718,9 +2761,9 @@ export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
   for (const fileAST of files) {
     const filePath = fileAST.filePath;
 
-    const routesIdx = filePath.indexOf("/routes/");
-    if (routesIdx === -1) {
-      // Not under a routes/ directory — single-page app, mount at /
+    const match = findRoutePrefix(filePath);
+    if (match == null) {
+      // Not under a recognized route directory — single-page app, mount at /
       pages.set(filePath, {
         filePath,
         urlPattern: "/",
@@ -2731,8 +2774,10 @@ export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
       continue;
     }
 
-    // Extract the relative path after routes/
-    const relativePath = filePath.slice(routesIdx + "/routes/".length);
+    const { idx: routesIdx, prefix } = match;
+
+    // Extract the relative path after the matched prefix
+    const relativePath = filePath.slice(routesIdx + prefix.length);
 
     // Skip _layout.scrml files — they are layout wrappers, not pages
     const fileName = relativePath.split("/").pop();
@@ -2742,7 +2787,7 @@ export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
     const { urlPattern, params, isCatchAll } = filePathToUrlPattern(relativePath);
 
     // Look for a _layout.scrml in the same directory or ancestor directories
-    const layoutFilePath = findLayoutFile(filePath, routesIdx);
+    const layoutFilePath = findLayoutFile(filePath, routesIdx, prefix);
 
     pages.set(filePath, {
       filePath,
@@ -2757,7 +2802,8 @@ export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
 }
 
 /**
- * Convert a relative file path (under routes/) to a URL pattern.
+ * Convert a relative file path (under a recognized route-directory prefix —
+ * `pages/` or `routes/`) to a URL pattern.
  *
  * Examples:
  *   "index.scrml"              → { urlPattern: "/", params: [], isCatchAll: false }
@@ -2765,6 +2811,7 @@ export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
  *   "users/[id].scrml"         → { urlPattern: "/users/:id", params: ["id"], isCatchAll: false }
  *   "users/index.scrml"        → { urlPattern: "/users", params: [], isCatchAll: false }
  *   "posts/[...slug].scrml"    → { urlPattern: "/posts/*slug", params: ["slug"], isCatchAll: true }
+ *   "auth/login.scrml"         → { urlPattern: "/auth/login", params: [], isCatchAll: false }
  */
 function filePathToUrlPattern(relativePath: string): { urlPattern: string; params: string[]; isCatchAll: boolean } {
   // Remove .scrml extension
@@ -2811,10 +2858,14 @@ function filePathToUrlPattern(relativePath: string): { urlPattern: string; param
 
 /**
  * Find the nearest _layout.scrml file for a given page file.
- * Searches the same directory and ancestor directories up to the routes/ root.
+ *
+ * Searches the same directory and ancestor directories up to the route-directory
+ * root (the directory matched by `findRoutePrefix` — `pages/` or `routes/`).
+ * The matched prefix is passed in so that boundary arithmetic works correctly
+ * for either convention.
  */
-function findLayoutFile(filePath: string, routesIdx: number): string | null {
-  const routesRoot = filePath.slice(0, routesIdx + "/routes/".length);
+function findLayoutFile(filePath: string, routesIdx: number, prefix: string): string | null {
+  const routesRoot = filePath.slice(0, routesIdx + prefix.length);
   let dir = filePath.slice(0, filePath.lastIndexOf("/"));
 
   while (dir.length >= routesRoot.length - 1) {

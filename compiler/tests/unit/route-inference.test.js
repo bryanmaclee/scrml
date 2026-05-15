@@ -1945,6 +1945,146 @@ describe("buildPageRouteTree", () => {
     expect(pages.get("/app/src/routes/users/index.scrml").urlPattern).toBe("/users");
   });
 
+  // -------------------------------------------------------------------------
+  // D-RI-PAGES — v0.3 canonical pages/ prefix recognition (SPEC §47.9.2,
+  // §40.8). The original implementation only recognized routes/ (legacy
+  // pre-v0.3 convention); v0.3 codified pages/ as canonical (e.g. the
+  // `scrml generate auth` scaffold writes to pages/auth/login.scrml).
+  // Both prefixes are accepted; routes/ remains for backward compatibility.
+  // -------------------------------------------------------------------------
+
+  test("pages/index.scrml maps to /", () => {
+    const files = [makeFileAST("/app/src/pages/index.scrml", [])];
+    const pages = buildPageRouteTree(files);
+    expect(pages.size).toBe(1);
+    const page = pages.get("/app/src/pages/index.scrml");
+    expect(page).toBeDefined();
+    expect(page.urlPattern).toBe("/");
+    expect(page.params).toEqual([]);
+    expect(page.isCatchAll).toBe(false);
+  });
+
+  test("pages/ static file maps to its name as URL segment", () => {
+    const files = [makeFileAST("/app/src/pages/about.scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/about.scrml");
+    expect(page.urlPattern).toBe("/about");
+    expect(page.params).toEqual([]);
+  });
+
+  test("pages/users/[id].scrml maps to dynamic segment :id", () => {
+    const files = [makeFileAST("/app/src/pages/users/[id].scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/users/[id].scrml");
+    expect(page.urlPattern).toBe("/users/:id");
+    expect(page.params).toEqual(["id"]);
+    expect(page.isCatchAll).toBe(false);
+  });
+
+  test("pages/auth/login.scrml maps to /auth/login (scrml generate auth scaffold case)", () => {
+    // This is the load-bearing test for Batch A.1 / D-RI-PAGES:
+    // `scrml generate auth` lands its scaffold at pages/auth/login.scrml,
+    // and post-fix the route-inference pass recognises it. Adopters who
+    // set <program loginRedirect="/auth/login"> will then see the
+    // I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING diagnostics
+    // clear on the next compile (Phase 3 integration test below).
+    const files = [makeFileAST("/app/src/pages/auth/login.scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/auth/login.scrml");
+    expect(page.urlPattern).toBe("/auth/login");
+    expect(page.params).toEqual([]);
+    expect(page.isCatchAll).toBe(false);
+  });
+
+  test("pages/posts/[...slug].scrml maps to catch-all", () => {
+    const files = [makeFileAST("/app/src/pages/posts/[...slug].scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/posts/[...slug].scrml");
+    expect(page.urlPattern).toBe("/posts/*slug");
+    expect(page.params).toEqual(["slug"]);
+    expect(page.isCatchAll).toBe(true);
+  });
+
+  test("pages/users/index.scrml maps to parent directory URL", () => {
+    const files = [makeFileAST("/app/src/pages/users/index.scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/users/index.scrml");
+    expect(page.urlPattern).toBe("/users");
+  });
+
+  test("pages/_layout.scrml is excluded from page routes", () => {
+    const files = [
+      makeFileAST("/app/src/pages/_layout.scrml", []),
+      makeFileAST("/app/src/pages/index.scrml", []),
+    ];
+    const pages = buildPageRouteTree(files);
+    expect(pages.has("/app/src/pages/_layout.scrml")).toBe(false);
+    expect(pages.has("/app/src/pages/index.scrml")).toBe(true);
+  });
+
+  test("pages/sub/_layout.scrml binds to pages/sub/index.scrml as layoutFilePath", () => {
+    // The nested _layout.scrml file should be recorded on the sibling
+    // page's `layoutFilePath`. This exercises findLayoutFile against the
+    // new prefix-aware route-root computation.
+    const files = [
+      makeFileAST("/app/src/pages/sub/_layout.scrml", []),
+      makeFileAST("/app/src/pages/sub/index.scrml", []),
+    ];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/app/src/pages/sub/index.scrml");
+    expect(page).toBeDefined();
+    expect(page.layoutFilePath).toBe("/app/src/pages/sub/_layout.scrml");
+  });
+
+  test("mixed routes/ + pages/ inputs build a unified tree", () => {
+    // Demonstrates backward compatibility: legacy routes/-using fixtures
+    // and v0.3 pages/-using fixtures can coexist in the same compilation
+    // without collision or surprise URL shifts.
+    const files = [
+      makeFileAST("/app/src/routes/index.scrml", []),
+      makeFileAST("/app/src/routes/about.scrml", []),
+      makeFileAST("/app/src/pages/contact.scrml", []),
+      makeFileAST("/app/src/pages/users/[id].scrml", []),
+    ];
+    const pages = buildPageRouteTree(files);
+    expect(pages.size).toBe(4);
+    expect(pages.get("/app/src/routes/index.scrml").urlPattern).toBe("/");
+    expect(pages.get("/app/src/routes/about.scrml").urlPattern).toBe("/about");
+    expect(pages.get("/app/src/pages/contact.scrml").urlPattern).toBe("/contact");
+    expect(pages.get("/app/src/pages/users/[id].scrml").urlPattern).toBe("/users/:id");
+  });
+
+  test("path containing both /routes/ and /pages/ prefers routes/ (lookup-order precedence)", () => {
+    // Edge case: a file path that literally contains both segments —
+    // e.g. an authored layout like /proj/pages/routes/foo.scrml. The
+    // ROUTE_PREFIXES lookup order picks routes/ first, so the file
+    // resolves as /foo (relative to the routes/ segment) rather than
+    // /routes/foo (relative to the pages/ segment). This is a backward-
+    // compatibility tiebreaker — greenfield v0.3 projects use pages/
+    // exclusively and never hit this path.
+    const files = [makeFileAST("/proj/pages/routes/foo.scrml", [])];
+    const pages = buildPageRouteTree(files);
+    const page = pages.get("/proj/pages/routes/foo.scrml");
+    expect(page.urlPattern).toBe("/foo");
+  });
+
+  test("multiple pages/ files build complete route tree", () => {
+    const files = [
+      makeFileAST("/app/src/pages/index.scrml", []),
+      makeFileAST("/app/src/pages/about.scrml", []),
+      makeFileAST("/app/src/pages/users/[id].scrml", []),
+      makeFileAST("/app/src/pages/users/index.scrml", []),
+      makeFileAST("/app/src/pages/auth/login.scrml", []),
+    ];
+    const pages = buildPageRouteTree(files);
+    expect(pages.size).toBe(5);
+    expect(pages.get("/app/src/pages/index.scrml").urlPattern).toBe("/");
+    expect(pages.get("/app/src/pages/about.scrml").urlPattern).toBe("/about");
+    expect(pages.get("/app/src/pages/users/[id].scrml").urlPattern).toBe("/users/:id");
+    expect(pages.get("/app/src/pages/users/index.scrml").urlPattern).toBe("/users");
+    expect(pages.get("/app/src/pages/auth/login.scrml").urlPattern).toBe("/auth/login");
+  });
+
   test("runRI includes pages in routeMap", () => {
     const files = [makeFileAST("/app/src/routes/index.scrml", [])];
     const { routeMap } = runRI({ files, protectAnalysis: { views: new Map() } });
