@@ -1,8 +1,12 @@
-# TodoMVC Benchmark Results — 2026-05-14 (v0.3.0 STABLE)
+# TodoMVC Benchmark Results — 2026-05-14 (v0.3.0 STABLE) + Bundle re-measure 2026-05-15 (v0.3.x Phase B)
 
+> **Update 2026-05-15 (v0.3.x Phase B SPA tree-shake landed at HEAD `1f73732`):** The Bundle Size section below is re-measured against HEAD `1f73732`. The runtime + build + full-stack tables still reflect the 2026-05-14 v0.3.0 STABLE measurement and are queued for re-measurement; the tree-shake cut the scrml-runtime payload from 38.7 KB → 11.8 KB gzip on same-source TodoMVC, which should reduce parse + load cost (in-memory dispatch unchanged). See [docs/changes/v0.3.x-spa-tree-shake/SCOPING.md](../docs/changes/v0.3.x-spa-tree-shake/SCOPING.md) for the Phase A measurement basis + Phase B implementation plan.
+>
 > **Update 2026-05-14 (v0.3.0 STABLE refresh):** All benchmark categories regenerated against HEAD `13154ba` (v0.3.0 STABLE + post-cut docs). Runtime, bundle, build, and full-stack tables re-measured; SQL-batching re-measured. A NEW Per-Route Per-Role Chunk Variance section added — Approach A's load-bearing v0.3 narrative.
 >
-> **Honesty note (Approach A regression):** Approach A ships per-route/per-role chunks but increases the baseline runtime size (FNV-1a content addressing, chunk prefetch helpers, role-detection bootstrap, mount-hydration coalescing, dual-decoder wire format). Single-page TodoMVC pays the full runtime tax without leveraging per-route splitting; the v0.3 narrative is the per-route per-role bench below. Runtime perf in happy-dom regressed across-the-board; the per-route chunk story is the v0.3 thesis.
+> **Honesty note (Approach A — bundle delta as actually measured, 2026-05-15):** Same-source TodoMVC at v0.2.6 (pre-Approach-A) measures 36.5 KB total gzip; at v0.3.0 STABLE it measured 40.8 KB (a +4.3 KB delta — per-route chunk loader, FNV-1a content addressing, role-detection bootstrap, prefetch helpers, dual-decoder wire format). Post-Phase-B at HEAD measures **15.8 KB total gzip / 13.9 KB JS-only** — Phase B's shared-runtime union assembly recovered the v0.3.0 delta AND closed a pre-existing tree-shake gap that pre-dates Approach A. The historical "14.8 KB v0.2.x" framing in earlier RESULTS revisions traces to a pre-v0.2.0 measurement era and is not reproducible against any v0.2.x release tag.
+>
+> Runtime perf in happy-dom + Chrome regressed across-the-board at v0.3.0 STABLE; the regression measurement is preserved below. Re-measurement post-Phase-B is queued. The per-route per-role chunk story (multi-route multi-role apps) is unchanged by Phase B and remains the v0.3 thesis for production app shapes.
 >
 > **Update 2026-05-12 (S86 / v0.2.6+):** [PRIOR — preserved for trend tracking] happy-dom runtime numbers regenerated against HEAD with the indirect-eval `bench-scrml.js` fix (see `docs/changes/wave-3-d3/`). The Chrome-via-Puppeteer section below is the 2026-04-13 v0.2.4-era baseline preserved for trend tracking; rerun Chrome benchmarks under v0.2.6+ to refresh that section.
 
@@ -32,10 +36,10 @@ timing with `performance.now()` + forced layout (`offsetHeight`). Lower is bette
 **React wins: 4/10** — create-1000, replace-1000, create-10000, append-1000
 **Vue wins: 0/10**
 
-### v0.3.0 regression analysis
+### v0.3.0 regression analysis (re-measurement queued post-Phase-B)
 
 The v0.2.4-era baseline (preserved below) showed scrml winning 6/10. v0.3.0 STABLE
-flips to scrml winning 0/10. Causes:
+flipped to scrml winning 0/10. Causes (as analysed at v0.3.0 STABLE, 2026-05-14):
 
 - **Approach A runtime tax** — chunk loader, FNV-1a content addressing, role-detection
   bootstrap, dual-decoder wire format, mount-hydration coalescing. Single-page TodoMVC
@@ -44,8 +48,13 @@ flips to scrml winning 0/10. Causes:
   per-route per-role chunk story (below) is where v0.3 wins.
 - **Reactivity attribute registries hoisted to module top** (S79 / §6.13) — adds work
   to every state set. The cost is dominated by attribute lookups in reactive set.
-- The honest narrative for v0.3 is "per-route per-role wins on real apps" (per-route
-  bench below); single-page TodoMVC is a worst-case for v0.3's bundle/runtime trade.
+
+**Post-Phase-B follow-up (2026-05-15):** Phase B's shared-runtime tree-shake cut the
+scrml-runtime payload from 38.7 KB → 11.8 KB gzip on same-source TodoMVC. Parse-time
++ initial-script-execution cost should drop materially; in-memory dispatch (the
+dominant cost on most runtime operations) is unchanged. **Runtime perf has not been
+re-measured against Phase B at HEAD** — the rows above remain the v0.3.0 STABLE
+measurement. Refresh queued.
 
 ### Historical: Real Browser (2026-04-13, v0.2.4-era; preserved for trend tracking)
 
@@ -131,24 +140,43 @@ v0.3 wins.
 | create-10000 | 249 | 430 | 218 | 295 |
 | append-1000 | 27.4 | 45.5 | 22.5 | 26.5 |
 
-## Bundle Size (gzipped) — 2026-05-14 v0.3.0 STABLE
+## Bundle Size (gzipped) — 2026-05-15 v0.3.x Phase B SPA tree-shake landed
 
-Re-measured 2026-05-14 against HEAD `13154ba`. **Approach A grew the scrml runtime
-significantly** — chunk loader, FNV-1a content addressing, role-detection bootstrap,
-prefetch helpers, dual-decoder wire format, mount-hydration coalescing. The user-app
-code (`app.client.js`) stayed small (2 KB gzip); the runtime (`scrml-runtime.js`)
-ballooned to ~38 KB gzip.
+Re-measured 2026-05-15 against HEAD `1f73732`. v0.3.x Phase B landed at `1f73732`:
+shared-runtime union assembly (`scrml-runtime.<hash>.js` now ships only the chunks the
+compile unit actually uses, where the legacy path shipped the full template
+unconditionally) + new `wire` chunk gates the §57 dual-decoder behind a server-fn /
+sidecar-import predicate + FNV-1a content-hashed runtime filename for deterministic
+cache-busting. See [docs/changes/v0.3.x-spa-tree-shake/SCOPING.md](../docs/changes/v0.3.x-spa-tree-shake/SCOPING.md).
 
 | Framework | JS (gzip) | CSS (gzip) | Total (gzip) | Raw JS | Dependencies | node_modules |
 |---|---:|---:|---:|---:|---:|---:|
-| Svelte 5 | **15.7 KB** | 1.1 KB | **16.8 KB** | 40 KB | 3 | ~30 MB |
+| **scrml** | **13.9 KB** | 1.2 KB | **15.8 KB** | 52 KB | **0** | **0 bytes** |
+| Svelte 5 | 15.7 KB | 1.1 KB | 16.8 KB | 40 KB | 3 | ~30 MB |
 | Vue 3 | 26.5 KB | 1.1 KB | 27.6 KB | 66 KB | 3 | ~25 MB |
-| **scrml** | **39.9 KB** | 1.2 KB | **41.1 KB** | 142 KB | **0** | **0 bytes** |
 | React 19 | 61.5 KB | 1.1 KB | 62.6 KB | 194 KB | 4 | ~46 MB |
 
-scrml at v0.3.0 sits between Vue and React on JS bundle (was below Svelte at v0.2.x).
-Zero dependencies are preserved. The growth is paid back in apps with multiple routes
-and roles — see "Per-Route Per-Role Chunk Variance" below for the v0.3 narrative.
+scrml at HEAD beats Svelte 5 on JS bundle, with zero dependencies. The per-route
+per-role chunking benefit (multi-route multi-role apps) is unchanged by Phase B —
+see "Per-Route Per-Role Chunk Variance" below for that v0.3 narrative.
+
+**Approach A measured cost (now closed):** same-source TodoMVC at v0.2.6 measured
+36.5 KB total gzip; v0.3.0 STABLE measured 40.8 KB (+4.3 KB Approach-A delta). Phase B
+recovered the delta AND closed a pre-existing tree-shake gap that pre-dates Approach A
+(the legacy shared-runtime path always shipped the full template). Net: HEAD is below
+every prior v0.2.x measurement.
+
+### Historical: Bundle Size at v0.3.0 STABLE (2026-05-14, pre-Phase-B)
+
+Preserved for trend tracking. Measured 2026-05-14 against HEAD `13154ba` (v0.3.0 STABLE).
+
+| Framework | JS (gzip) | CSS (gzip) | Total (gzip) | Raw JS |
+|---|---:|---:|---:|---:|
+| **scrml** v0.3.0 STABLE | 39.9 KB | 1.2 KB | 41.1 KB | 142 KB |
+
+The 39.9 KB figure was the v0.3.0 STABLE bundle pre-Phase-B. The +25 KB Δ vs the
+post-Phase-B 13.9 KB is mostly closing a pre-existing shared-runtime tree-shake gap;
+the genuine Approach-A footprint above that gap is +4.3 KB.
 
 ### Historical: Bundle Size (2026-04-13, v0.2.x; preserved for trend tracking)
 
@@ -158,6 +186,13 @@ and roles — see "Per-Route Per-Role Chunk Variance" below for the v0.3 narrati
 | Svelte 5 | 15.9 KB | 17.0 KB | 41 KB |
 | Vue 3 | 26.8 KB | 27.9 KB | 67 KB |
 | React 19 | 62.1 KB | 63.2 KB | 198 KB |
+
+The 14.8 KB figure dates to 2026-04-13 (pre-v0.2.0). Same-source TodoMVC compiled at
+every v0.2.x release tag (v0.2.0 through v0.2.6) measures 36.5 KB total gzip — the
+14.8 KB baseline is not reproducible against a v0.2.x release. Earlier framings
+elsewhere in the docs that cited "14.8 KB → 39.9 KB" as the Approach-A delta
+compressed a much older regression into the Approach-A story. The honestly-attributed
+Approach-A delta is +4.3 KB; Phase B recovered the delta and then some.
 
 ## Build Performance — TodoMVC (10 runs, median) — 2026-05-14 v0.3.0 STABLE
 
@@ -333,4 +368,5 @@ All TodoMVC implementations cover the same features:
 | 2026-04-05 | 30.9 ms | 13.4 KB | Initial benchmarks |
 | 2026-04-13 | 43.7 ms | 14.8 KB | Post ExprNode migration (Phase 4d), E-SCOPE-001 fix, enum pipe-syntax. Build +41% from ExprNode parsing overhead; bundle +1.4 KB from runtime additions. Runtime perf unchanged. |
 | 2026-05-12 (v0.2.6+ HEAD) | not re-measured | not re-measured | Runtime happy-dom regenerated for HEAD `149c979` (S86 wrap + Wave 2 + Approach A spec anchor); Chrome row carried forward from 2026-04-13 (rerun pending separate dispatch). `bench-scrml.js` switched from IIFE-with-explicit-window-export to indirect-eval `(0, eval)(combinedScript)` after the prior eval pattern broke against v0.2.6+ codegen (D3a finding, D3b fix). TodoMVC `activeCount`/`completedCount` source split into two-statement form to dodge a `.filter(cb).<member>` compiler bug (out-of-scope; separate dispatch pending). Build-time and bundle-size rows not re-measured this pass — they'd need a separate timer-instrumented build script run. happy-dom runtime numbers: scrml beats React in 9/11, Svelte in 6/11, Vue in 5/11. |
-| 2026-05-14 (v0.3.0 STABLE, HEAD `13154ba`) | 65.6 ms | 39.9 KB | Full bench refresh against v0.3.0 STABLE — Chrome runtime, happy-dom runtime, bundle size, build time, full-stack, SQL-batching ALL re-measured. NEW per-route per-role chunk variance bench added (`benchmarks/per-route-roles/`). scrml bundle grew 2.7x (14.8→39.9 KB gzip) from Approach A runtime additions; build time grew 1.5x (43.7→65.6 ms) from ExprNode parser. TodoMVC runtime regressed (Chrome: 0/10 wins at v0.3.0 vs 6/10 at v0.2.4-era). The v0.3 win is per-route per-role chunking — anonymous visitors get strictly-smaller initial bundles than admins (96% reduction vs single-bundle hypothetical). FNV-1a content addressing byte-deterministic across 10 compiles. Honesty note added to RESULTS.md top framing the regression. |
+| 2026-05-14 (v0.3.0 STABLE, HEAD `13154ba`) | 65.6 ms | 39.9 KB | Full bench refresh against v0.3.0 STABLE — Chrome runtime, happy-dom runtime, bundle size, build time, full-stack, SQL-batching ALL re-measured. NEW per-route per-role chunk variance bench added (`benchmarks/per-route-roles/`). scrml bundle grew 2.7x (14.8→39.9 KB gzip) from Approach A runtime additions; build time grew 1.5x (43.7→65.6 ms) from ExprNode parser. TodoMVC runtime regressed (Chrome: 0/10 wins at v0.3.0 vs 6/10 at v0.2.4-era). The v0.3 win is per-route per-role chunking — anonymous visitors get strictly-smaller initial bundles than admins (96% reduction vs single-bundle hypothetical). FNV-1a content addressing byte-deterministic across 10 compiles. Honesty note added to RESULTS.md top framing the regression. (Note: the "14.8 → 39.9 KB" framing here compresses two separate changes — see 2026-05-15 row.) |
+| 2026-05-15 (v0.3.x Phase B, HEAD `1f73732`) | not re-measured | **13.9 KB JS / 15.8 KB total** | Bundle re-measure only; runtime + build + full-stack queued. Phase B landed three integrated fixes (shared-runtime union assembly + new `wire` chunk gating `_scrml_wire_decode` + FNV-1a content-hashed runtime filename). Bundle 40.8 → 15.8 KB total gzip (-61.4%). The recovery exceeds the +4.3 KB v0.3.0 Approach-A delta because Phase B closes a pre-existing shared-runtime tree-shake gap — the legacy `!embedRuntime` path shipped the full `SCRML_RUNTIME` regardless of `usedRuntimeChunks`. Same-source TodoMVC at every v0.2.x release tag (v0.2.0 — v0.2.6) measures 36.5 KB total gzip; HEAD beats every prior release. **The "14.8 KB v0.2.x" baseline cited in earlier framings is a 2026-04-13 pre-v0.2.0 measurement, not reproducible against any v0.2.x release tag.** Runtime + build + full-stack re-measurement queued. |
