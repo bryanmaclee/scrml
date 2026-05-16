@@ -72,20 +72,18 @@
 
   <h2>A reactive counter, the whole file</h2>
   <pre><code>&lt;program&gt;
+  &lt;count&gt; = 0
+  &lt;step&gt;  = 1
 
-
-&lt;count&gt; = 0
-&lt;step&gt;  = 1
-
-&lt;div class="counter"&gt;
-  &lt;span class="value"&gt;${@count}&lt;/&gt;
-  &lt;button onclick=${@count = @count + @step}&gt;+&lt;/&gt;
-  &lt;button onclick=${@count = @count - @step}&gt;-&lt;/&gt;
-  &lt;select onchange=${@step = event.target.value}&gt;
-    &lt;option value="1"&gt;step 1&lt;/&gt;
-    &lt;option value="5"&gt;step 5&lt;/&gt;
+  &lt;div class="counter"&gt;
+    &lt;span class="value"&gt;${@count}&lt;/&gt;
+    &lt;button onclick=${@count = @count + @step}&gt;+&lt;/&gt;
+    &lt;button onclick=${@count = @count - @step}&gt;-&lt;/&gt;
+    &lt;select onchange=${@step = event.target.value}&gt;
+      &lt;option value="1"&gt;step 1&lt;/&gt;
+      &lt;option value="5"&gt;step 5&lt;/&gt;
+    &lt;/&gt;
   &lt;/&gt;
-&lt;/&gt;
 
 &lt;/program&gt;</code></pre>
 
