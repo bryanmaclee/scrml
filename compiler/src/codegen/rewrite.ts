@@ -1764,41 +1764,74 @@ export function rewriteTildeRef(expr: string, tildeVar: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Fix leaked reactive assignments: _scrml_reactive_get("name") = expr
- * → _scrml_reactive_set("name", expr)
+ * Fix leaked reactive assignments + compound updates + postfix updates:
+ *   _scrml_reactive_get("name") = expr
+ *     → _scrml_reactive_set("name", expr)
+ *   _scrml_reactive_get("name") <op>= expr   (S97 — compound assignment)
+ *     → _scrml_reactive_set("name", _scrml_reactive_get("name") <op> (expr))
+ *   _scrml_reactive_get("name")++  /  --     (S97 — postfix update)
+ *     → _scrml_reactive_set("name", _scrml_reactive_get("name") + 1)
  *
- * This pattern arises when rewriteReactiveRefs converts @name in LHS position
- * of an assignment expression to _scrml_reactive_get("name"), then a later
- * expression-aware pass (e.g. rewriteMatchExpr) embeds it in a return statement.
+ * These patterns arise when rewriteReactiveRefs converts @name in LHS
+ * position to _scrml_reactive_get("name"), then a later expression-aware
+ * pass (e.g. rewriteMatchExpr) or the SPEC §5.2.3 bare-form event-handler
+ * tokenizer path embeds them in expression context. Without conversion,
+ * `_scrml_reactive_get("X") = expr` is a JS reference error (can't assign
+ * to a function-call return value). Same applies to `... += expr` and
+ * `...++`.
  *
- * The fix: detect assignment to reactive getter and convert to reactive setter.
+ * SCOPE LIMITATION — postfix vs prefix update semantics: `x++` returns
+ * the OLD value of x, while `++x` returns the NEW value. The compound
+ * lowering `setter(X, getter(X) + 1)` returns the NEW value (matches
+ * setter's return semantic). For event handlers (statement context) the
+ * difference is invisible. For value-position uses the postfix return
+ * semantic is silently wrong. Acceptable trade-off: postfix updates in
+ * value position are vanishingly rare in scrml source, and a precise
+ * fix (`((__v = getter(X)), setter(X, __v + 1), __v)`) would balloon
+ * complexity for negligible benefit. Filed inline for future revisit.
+ *
  * Uses balanced-paren extraction to handle nested expressions in the RHS.
- *
  * Only operates outside string literals.
  */
 export function rewriteReactiveAssign(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   if (!expr.includes('_scrml_reactive_get')) return expr;
 
-  // Pattern: _scrml_reactive_get("name") = <expr>
-  // where <expr> is everything up to the next ; or end of string (not inside parens).
-  // We use a character-walk to handle nested expressions correctly.
+  // Pattern: _scrml_reactive_get("name") <op> where op is one of:
+  //   `++` / `--`              — postfix update (no RHS)
+  //   `**=` / `<<=` / `>>>=` / `>>=` / `&&=` / `||=` / `??=`  — 3-char compound
+  //   `+=` / `-=` / `*=` / `/=` / `%=` / `&=` / `|=` / `^=`   — 2-char compound
+  //   `=`                      — plain assignment
+  // Alternation order matters — longer ops MUST come first so `**=` isn't
+  // matched as `*` then `*=`. The `(?!=)` lookahead at the end ensures the
+  // final `=` (when present) isn't followed by another `=` (which would
+  // make it a comparison, not assignment).
+  const OP_PATTERN = /^_scrml_reactive_get\("([^"]+)"\)\s*(\*\*=|<<=|>>>=|>>=|&&=|\|\|=|\?\?=|\+\+|--|\+=|-=|\*=|\/=|%=|&=|\|=|\^=|=)(?!=)/;
+
   const result: string[] = [];
   let i = 0;
 
   while (i < expr.length) {
-    // Look for _scrml_reactive_get("name") = pattern
-    const getterRe = /^_scrml_reactive_get\("([^"]+)"\)\s*=(?!=)/;
     const slice = expr.slice(i);
-    const m = slice.match(getterRe);
+    const m = slice.match(OP_PATTERN);
 
     if (m) {
       const varName = m[1];
-      const afterAssign = i + m[0].length;
-      // Skip whitespace after =
-      let rhsStart = afterAssign;
+      const op = m[2];
+
+      if (op === "++" || op === "--") {
+        // Postfix update — no RHS to read.
+        const sign = op === "++" ? "+" : "-";
+        result.push(`_scrml_reactive_set("${varName}", _scrml_reactive_get("${varName}") ${sign} 1)`);
+        i += m[0].length;
+        continue;
+      }
+
+      // `=` or compound assign — read the RHS.
+      const afterOp = i + m[0].length;
+      let rhsStart = afterOp;
       while (rhsStart < expr.length && /\s/.test(expr[rhsStart])) rhsStart++;
-      // Walk RHS to find end (up to ; or end of string at depth 0)
+      // Walk RHS to find end (up to ; or matching closer at depth 0)
       let depth = 0;
       let j = rhsStart;
       let inStr: string | null = null;
@@ -1819,10 +1852,21 @@ export function rewriteReactiveAssign(expr: string): string {
         j++;
       }
       const rhs = expr.slice(rhsStart, j).trim();
-      result.push(`_scrml_reactive_set("${varName}", ${rhs})`);
+
+      if (op === "=") {
+        result.push(`_scrml_reactive_set("${varName}", ${rhs})`);
+      } else {
+        // Compound assign: strip the trailing `=` from `op` to get the binary
+        // op (`+=` → `+`, `??=` → `??`, etc.). Lower to
+        // `setter(X, getter(X) <binop> (rhs))`. Parens around rhs preserve
+        // precedence for cases like `@x += a + b` vs `@x = (getter + a) + b`.
+        const binOp = op.slice(0, -1);
+        result.push(`_scrml_reactive_set("${varName}", _scrml_reactive_get("${varName}") ${binOp} (${rhs}))`);
+      }
       i = j;
     } else {
-      // Check for string literal — skip it
+      // Check for string literal — skip it (preserves nested compound-op
+      // text inside strings as opaque content)
       if (expr[i] === '"' || expr[i] === "'" || expr[i] === '`') {
         const q = expr[i];
         result.push(q);

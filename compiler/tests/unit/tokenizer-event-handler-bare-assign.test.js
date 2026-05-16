@@ -1,10 +1,17 @@
 /**
- * S97 — bare-assignment in event-handler attribute value
+ * S97 — bare-form shapes in event-handler attribute value
  *
  * SPEC §5.2.3 L19 normatively recognizes three bare-form event handler shapes:
  *   1. Bare call           — `onclick=fn()`
- *   2. Bare assignment     — `onclick=@phase = .Loading`        ← this fix
- *   3. Bare single-expr    — `onclick=@count++` (postfix update; v0.3.x deferred)
+ *   2. Bare assignment     — `onclick=@phase = .Loading`        ← S97 fix
+ *   3. Bare single-expr    — `onclick=@count++`, `onclick=@count += 5` ← S97 fix
+ *
+ * Both `++`/`--` postfix updates AND compound assigns (`+=`/`??=`/etc.)
+ * are covered. Compound assigns lower to `setter(X, getter(X) <op> (rhs))`
+ * via the extended `rewriteReactiveAssign`. Postfix updates lower to
+ * `setter(X, getter(X) +/- 1)` (and the routing in emit-event-wiring.ts
+ * excludes `unary` kind so the string-rewrite path is taken instead of
+ * the structured emitUnary which would produce invalid `getter()++`).
  *
  * SPEC §5.2.3 worked example (line 1170-1177):
  *   <engine for=Phase initial=.Idle>
@@ -116,6 +123,69 @@ describe("§1 — bare-assignment in event handler value", () => {
     expect(client).not.toBeNull();
     expect(client).toMatch(/_scrml_reactive_set\("mode",\s*"Active"\)/);
     expect(client).toMatch(/_scrml_reactive_set\("mode",\s*"Idle"\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §1b — Postfix update + compound assigns (S97 follow-up)
+// ---------------------------------------------------------------------------
+
+describe("§1b — postfix update + compound assigns in event handler value", () => {
+  test("§1b.1 onclick=@count++ lowers to setter(getter + 1)", () => {
+    const src = `<program>
+    <count> = 0
+    <button onclick=@count++>Inc</button>
+</program>`;
+    const { client } = compileSrcToTmp(src);
+    expect(client).not.toBeNull();
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*1\)/);
+    // Pre-fix shape that we MUST NOT regress to:
+    expect(client).not.toMatch(/_scrml_reactive_get\("count"\)\+\+/);
+    expect(() => new Function(client)).not.toThrow();
+  });
+
+  test("§1b.2 onclick=@count-- lowers to setter(getter - 1)", () => {
+    const src = `<program>
+    <count> = 10
+    <button onclick=@count-->Dec</button>
+</program>`;
+    const { client } = compileSrcToTmp(src);
+    expect(client).not.toBeNull();
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*-\s*1\)/);
+    expect(() => new Function(client)).not.toThrow();
+  });
+
+  test("§1b.3 onclick=@count += 5 lowers to setter(getter + (5))", () => {
+    const src = `<program>
+    <count> = 0
+    <button onclick=@count += 5>Add 5</button>
+</program>`;
+    const { client } = compileSrcToTmp(src);
+    expect(client).not.toBeNull();
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
+    expect(() => new Function(client)).not.toThrow();
+  });
+
+  test("§1b.4 onclick=@count *= 2 lowers to setter(getter * (2))", () => {
+    const src = `<program>
+    <count> = 3
+    <button onclick=@count *= 2>Double</button>
+</program>`;
+    const { client } = compileSrcToTmp(src);
+    expect(client).not.toBeNull();
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\*\s*\(2\)\)/);
+    expect(() => new Function(client)).not.toThrow();
+  });
+
+  test("§1b.5 multiple compound-assign handlers on same element", () => {
+    const src = `<program>
+    <count> = 0
+    <button onclick=@count += 5 onmouseenter=@count -= 1>Sym</button>
+</program>`;
+    const { client } = compileSrcToTmp(src);
+    expect(client).not.toBeNull();
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
+    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*-\s*\(1\)\)/);
   });
 });
 

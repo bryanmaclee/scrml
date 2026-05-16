@@ -415,8 +415,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // the engine assign-regex arm (also added by Bug #6) catches them
         // and dispatches to `emitEngineWriteGuard` — `emitAssign` itself
         // does NOT have engine-binding interception.
+        //
+        // S97 — `unary` is also excluded so postfix `@count++` / `@count--`
+        // (UnaryExpr in the AST) routes through `rewriteBlockBody` and the
+        // extended `rewriteReactiveAssign` (rewrite.ts) lowers
+        // `_scrml_reactive_get("X")++` → `_scrml_reactive_set("X", _scrml_reactive_get("X") + 1)`.
+        // Without this exclusion, `emitUnary` emits the raw `getter()++`
+        // which is invalid JS (can't increment a function-call return value).
         const exprNode = binding.handlerExprNode as { kind?: string } | undefined;
-        if (exprNode && exprNode.kind !== "assign" && exprNode.kind !== "lambda") {
+        if (exprNode && exprNode.kind !== "assign" && exprNode.kind !== "lambda" && exprNode.kind !== "unary") {
           // Single structured expression — use emitExprField so engine
           // `.advance(.X)` (and any other structured-only detection in
           // emit-expr.ts) routes correctly.

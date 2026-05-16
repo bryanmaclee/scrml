@@ -168,28 +168,29 @@ function isEventHandlerAttrName(name: string): boolean {
 }
 
 /**
- * Detect whether the chars at `pos` look like a bare-assignment continuation
- * (`=` not-comparison-not-arrow). Used to decide whether to extend an
- * event-handler attribute value reader past the initial ident into
- * expression-mode for the SPEC §5.2.3 bare-assignment shape.
+ * Detect whether the chars at `pos` look like a bare-form event-handler
+ * expression-continuation: assignment (`=`), compound assignment
+ * (`+=`/`-=`/etc.), or postfix update (`++`/`--`). Used to decide whether
+ * to extend an event-handler attribute value reader past the initial
+ * ident into expression-mode for SPEC §5.2.3 bare-form shapes.
  *
  * Skips leading inline whitespace (` ` and `\t`). Does NOT skip newlines —
- * a newline between the ident and `=` is unusual in attribute values and
- * likely indicates a tag-split shape (caller should fall through to
- * ATTR_IDENT).
+ * a newline between the ident and the operator is unusual in attribute
+ * values and likely indicates a tag-split shape (caller should fall
+ * through to ATTR_IDENT).
  *
- * SCOPE NOTE — postfix `++`/`--` and compound assigns (`+=`/`-=`/etc.)
- * are recognized at SPEC §5.2.3 line 1144 but NOT detected here. They
- * require complementary codegen support that `rewriteReactiveAssign`
- * (`rewrite.ts:1779`) does not yet provide — its pattern matches only
- * `_scrml_reactive_get("X") = expr` (not `... += expr` or `...++`).
- * Detecting them here without that codegen support would produce invalid
- * JS like `_scrml_reactive_get("X")++` (can't increment a function-call
- * return value). Filed as v0.3.x follow-up; closing it requires either
- * (a) extending `rewriteReactiveAssign` to recognize compound-update
- * patterns and lower to `setter(X, getter(X) <op> expr)`, OR
- * (b) routing through a new structured emit path. Both are bigger than
- * this surgical fix.
+ * Recognized continuations:
+ *   - `=`               — assignment (rejects `==` comparison and `=>` arrow)
+ *   - `+= -= *= /= %=`  — arithmetic compound assigns
+ *   - `**=`             — exponent compound assign
+ *   - `<<= >>= >>>=`    — shift compound assigns
+ *   - `&= |= ^=`        — bitwise compound assigns
+ *   - `&&= ||= ??=`     — logical compound assigns
+ *   - `++ --`           — postfix updates (SPEC §5.2.3 line 1144 example)
+ *
+ * All shapes flow through `rewriteReactiveAssign` (`rewrite.ts:1779`) which
+ * lowers them to the appropriate setter call (S97 — rewriter extended in
+ * the same commit to cover compound + postfix shapes).
  */
 function isBareExprContinuation(raw: string, pos: number): boolean {
   let i = pos;
@@ -200,6 +201,26 @@ function isBareExprContinuation(raw: string, pos: number): boolean {
 
   // `=` (assignment) — reject `==` (comparison) and `=>` (arrow body)
   if (c === "=" && n !== "=" && n !== ">") return true;
+
+  // `++` / `--` (postfix update)
+  if ((c === "+" || c === "-") && n === c) return true;
+
+  // Compound assignment: `op=` where op is one of the recognized prefixes
+  // Scan up to 4 chars for the longest match (covers `>>>=`).
+  for (let len = 2; len <= 4 && i + len <= raw.length; len++) {
+    const slice = raw.slice(i, i + len);
+    const after = i + len < raw.length ? raw[i + len] : "";
+    if (!slice.endsWith("=") || after === "=" || after === ">") continue;
+    const op = slice.slice(0, -1);
+    if (
+      op === "+" || op === "-" || op === "*" || op === "/" || op === "%" ||
+      op === "&" || op === "|" || op === "^" ||
+      op === "**" || op === "<<" || op === ">>" || op === ">>>" ||
+      op === "&&" || op === "||" || op === "??"
+    ) {
+      return true;
+    }
+  }
 
   return false;
 }
@@ -456,7 +477,17 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
           const vl = line;
           const vc = col;
           let ident = "";
-          while (pos < raw.length && /[A-Za-z0-9_\-\.@]/.test(raw[pos])) {
+          // For event handler attributes, exclude `-` from the value-ident
+          // regex so postfix `--` (e.g. `onclick=@count--`) terminates the
+          // ident at the boundary. JS identifiers don't allow `-`, and
+          // event-handler values are always JS-expression-shaped (call,
+          // assignment, member chain), so the exclusion is safe. For all
+          // other attributes (e.g. `class=foo-bar`), the legacy regex
+          // continues to allow hyphenated unquoted values.
+          const valueIdentRe = isEventHandlerAttrName(name)
+            ? /[A-Za-z0-9_\.@]/
+            : /[A-Za-z0-9_\-\.@]/;
+          while (pos < raw.length && valueIdentRe.test(raw[pos])) {
             ident += raw[pos];
             advance();
           }
@@ -505,67 +536,89 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             //   - §34 / multi-statement-scan E-MULTI-STATEMENT-HANDLER stays
             //     intact — the multi-statement scanner runs on the captured
             //     ATTR_EXPR raw text in ast-builder.js post-tokenization.
-            // Read until the bare-form expression ends. Boundary detection:
-            //   - Inside strings / parens / brackets / braces (depth > 0):
-            //     keep reading regardless of whitespace.
-            //   - At depth 0 outside strings: STOP on whitespace ONLY after
-            //     we've consumed the `=` and at least one non-whitespace
-            //     RHS char. (Without this guard, multiple bare-assignment
-            //     handlers on the same element collide — the first reader
-            //     would swallow `onmouseenter=...` etc. up to the tag close.)
-            //   - Also STOP on `>` or `/>` at depth 0 outside strings (tag close).
+            // Two bare-form shapes per SPEC §5.2.3, distinguished by the
+            // operator following the LHS ident:
+            //   - Postfix update (`++` / `--`): self-contained, no RHS to read.
+            //   - Assignment / compound assignment: consume the op then read
+            //     RHS until the next attribute boundary (whitespace at depth
+            //     0 outside strings) or tag close (`>` / `/>`).
             let expr = ident;
-            let parenDepth = 0;
-            let braceDepth = 0;
-            let bracketDepth = 0;
-            let stringCh: string | null = null;
-            let consumedEq = false;        // have we passed the `=` of the bare-assignment?
-            let consumedRhsChar = false;   // and at least one non-ws RHS char?
-            while (pos < raw.length) {
-              const c2 = raw[pos];
-              if (stringCh !== null) {
-                if (c2 === '\\' && pos + 1 < raw.length) {
-                  expr += c2 + raw[pos + 1];
-                  advance(2);
-                  continue;
-                }
-                if (c2 === stringCh) { stringCh = null; }
-                expr += c2;
-                advance();
-                continue;
-              }
-              const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-              if (atDepthZero) {
-                // Tag close ends the value
-                if (c2 === '/' && raw[pos + 1] === '>') break;
-                if (c2 === '>') break;
-                // Next-attribute boundary: whitespace at depth 0 ends the RHS
-                if (consumedEq && consumedRhsChar && /[ \t\r\n\f]/.test(c2)) break;
-              }
-              if (c2 === '"' || c2 === "'" || c2 === '`') { stringCh = c2; expr += c2; advance(); continue; }
-              if (c2 === '(') { parenDepth++; expr += c2; advance(); continue; }
-              if (c2 === ')') { parenDepth--; expr += c2; advance(); continue; }
-              if (c2 === '[') { bracketDepth++; expr += c2; advance(); continue; }
-              if (c2 === ']') { bracketDepth--; expr += c2; advance(); continue; }
-              if (c2 === '{') { braceDepth++; expr += c2; advance(); continue; }
-              if (c2 === '}') { braceDepth--; expr += c2; advance(); continue; }
-              if (atDepthZero) {
-                if (!consumedEq && c2 === '=') {
-                  consumedEq = true;
+            // Skip whitespace between LHS ident and the operator.
+            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) {
+              expr += raw[pos];
+              advance();
+            }
+            const opC = pos < raw.length ? raw[pos] : "";
+            const opN = pos + 1 < raw.length ? raw[pos + 1] : "";
+            if ((opC === "+" || opC === "-") && opN === opC) {
+              // Postfix update — consume 2 chars and we're done.
+              expr += opC + opN;
+              advance(2);
+              tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
+            } else {
+              // Assignment / compound assignment — read until boundary.
+              // Boundary detection:
+              //   - Inside strings / parens / brackets / braces (depth > 0):
+              //     keep reading regardless of whitespace.
+              //   - At depth 0 outside strings: STOP on whitespace ONLY after
+              //     we've consumed the `=` and at least one non-whitespace
+              //     RHS char. (Without this guard, multiple bare-assignment
+              //     handlers on the same element collide — the first reader
+              //     would swallow `onmouseenter=...` etc. up to the tag close.)
+              //   - Also STOP on `>` or `/>` at depth 0 outside strings.
+              let parenDepth = 0;
+              let braceDepth = 0;
+              let bracketDepth = 0;
+              let stringCh: string | null = null;
+              let consumedEq = false;        // have we passed the `=` of the assignment?
+              let consumedRhsChar = false;   // and at least one non-ws RHS char?
+              while (pos < raw.length) {
+                const c2 = raw[pos];
+                if (stringCh !== null) {
+                  if (c2 === '\\' && pos + 1 < raw.length) {
+                    expr += c2 + raw[pos + 1];
+                    advance(2);
+                    continue;
+                  }
+                  if (c2 === stringCh) { stringCh = null; }
                   expr += c2;
                   advance();
                   continue;
                 }
-                if (consumedEq && !/[ \t\r\n\f]/.test(c2)) {
-                  consumedRhsChar = true;
+                const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
+                if (atDepthZero) {
+                  if (c2 === '/' && raw[pos + 1] === '>') break;
+                  if (c2 === '>') break;
+                  if (consumedEq && consumedRhsChar && /[ \t\r\n\f]/.test(c2)) break;
                 }
+                if (c2 === '"' || c2 === "'" || c2 === '`') { stringCh = c2; expr += c2; advance(); continue; }
+                if (c2 === '(') { parenDepth++; expr += c2; advance(); continue; }
+                if (c2 === ')') { parenDepth--; expr += c2; advance(); continue; }
+                if (c2 === '[') { bracketDepth++; expr += c2; advance(); continue; }
+                if (c2 === ']') { bracketDepth--; expr += c2; advance(); continue; }
+                if (c2 === '{') { braceDepth++; expr += c2; advance(); continue; }
+                if (c2 === '}') { braceDepth--; expr += c2; advance(); continue; }
+                if (atDepthZero) {
+                  // `consumedEq` flips on the `=` that ENDS the assignment
+                  // operator. For plain `=`, that's the only char. For
+                  // compound `+=` / `??=` / etc., the `=` is the last char
+                  // of the op; the earlier chars (`+`, `?`, etc.) flow
+                  // through the plain append below and don't toggle the flag.
+                  if (!consumedEq && c2 === '=') {
+                    consumedEq = true;
+                    expr += c2;
+                    advance();
+                    continue;
+                  }
+                  if (consumedEq && !/[ \t\r\n\f]/.test(c2)) {
+                    consumedRhsChar = true;
+                  }
+                }
+                expr += c2;
+                advance();
               }
-              expr += c2;
-              advance();
+              tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
             }
-            // Trim trailing whitespace from the captured expression so the
-            // downstream ExprNode parser doesn't see a trailing space.
-            tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
           } else {
             tokens.push(makeToken("ATTR_IDENT", ident, vs, absOff(), vl, vc));
           }
