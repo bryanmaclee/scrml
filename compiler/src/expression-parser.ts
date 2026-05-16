@@ -902,17 +902,50 @@ function preprocessMatchExprs(s: string): string {
 
 /** Split match arms content into individual arm strings. */
 function splitMatchArms(content: string): string[] {
-  // Arms are separated by `.` at the start of a line or whitespace-dot pattern
-  // Simple split on ` .` or `\n.` boundaries, keeping the dot
+  // Arms are separated by line-starts of arm-shape tokens.
+  // Recognised arm-start patterns:
+  //   - `.UpperCase`  (variant arm)
+  //   - `else`        (wildcard arm)
+  //   - `_` followed by `=>` / `:>` / `->`  (Bug 1 S95 — JS-style wildcard
+  //     alias; previously this splitter only recognised `.` and `else`,
+  //     causing `_ => false` lines to be appended to the prior arm's result
+  //     and producing malformed JS via the emit-expr.ts:emitMatchExpr shim.)
+  //   - `not` followed by `=>` / `:>` / `->`  (§42 absence arm)
   const arms: string[] = [];
   // Split on newlines first, then re-join arm continuations
   const lines = content.split(/\n/);
+
+  // Predicate: does this trimmed line text start a new arm?
+  function isArmStart(t: string): boolean {
+    if (t.startsWith(".")) return true;
+    if (t.startsWith("else")) return true;
+    // `_` standalone followed by an arrow operator
+    if (t.startsWith("_")) {
+      // Look past `_` + whitespace for an arrow token.
+      let j = 1;
+      while (j < t.length && /\s/.test(t[j])) j++;
+      const arrow2 = t.slice(j, j + 2);
+      if (arrow2 === "=>" || arrow2 === ":>" || arrow2 === "->") return true;
+    }
+    // `not` standalone followed by an arrow operator (§42 absence arm)
+    if (t.startsWith("not")) {
+      const after = t.slice(3);
+      // Must not be a longer identifier like `notation`
+      if (after.length === 0 || /[\s=:\->]/.test(after[0])) {
+        let j = 0;
+        while (j < after.length && /\s/.test(after[j])) j++;
+        const arrow2 = after.slice(j, j + 2);
+        if (arrow2 === "=>" || arrow2 === ":>" || arrow2 === "->") return true;
+      }
+    }
+    return false;
+  }
+
   let current = "";
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // A new arm starts when line starts with `.` or `else`
-    if (current && (trimmed.startsWith(".") || trimmed.startsWith("else"))) {
+    if (current && isArmStart(trimmed)) {
       arms.push(current.trim());
       current = trimmed;
     } else {

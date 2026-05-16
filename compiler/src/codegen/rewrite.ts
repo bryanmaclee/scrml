@@ -821,6 +821,16 @@ function parseInlineMatchArm(text: string): InlineMatchArm | null {
     return { kind: "wildcard", test: null, result: stripTrailingComma(legacyWildcardMatch[1]) };
   }
 
+  // Bug 1 (S95) — NEW Form: `_ => expr` / `_ :> expr` — JS-style wildcard
+  // alias for `else`. Mirrors parseMatchArm in emit-control-flow.ts. Keeps
+  // the string-pipeline rewriteMatchExpr (used by the server-mode shim in
+  // emit-expr.ts and by Pass 13 of the legacy rewrite pipeline) in parity
+  // with the structured emitter.
+  const newUnderscoreWildcardMatch = text.match(/^_\s*(?:=>|:>)\s*([\s\S]+)$/);
+  if (newUnderscoreWildcardMatch) {
+    return { kind: "wildcard", test: null, result: stripTrailingComma(newUnderscoreWildcardMatch[1]) };
+  }
+
   // §42 presence arm: (identifier) => expr — counterpart to `not => expr`
   const presenceArmMatch = text.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>)\s*([\s\S]+)$/);
   if (presenceArmMatch) {
@@ -993,11 +1003,18 @@ function _splitMultiArmString(s: string): string[] {
       continue;
     }
 
-    // Legacy wildcard: _ ->
+    // Legacy wildcard `_ ->` AND JS-style wildcard alias `_ =>` / `_ :>`
+    // (Bug 1 S95 — parity with emit-control-flow.ts:splitMultiArmString).
+    // Requires the `_` to be a standalone token (preceded by start-of-string
+    // or whitespace) to avoid false positives on identifier-suffix `_`.
     if (ch === "_") {
+      const prevCh = i > 0 ? s[i - 1] : null;
+      const isStandalone = prevCh === null || /\s/.test(prevCh);
       let k = i + 1;
       while (k < s.length && /\s/.test(s[k])) k++;
-      if (s.slice(k, k + 2) === "->") {
+      const arrow2 = s.slice(k, k + 2);
+      const isArrow = arrow2 === "->" || arrow2 === "=>" || arrow2 === ":>";
+      if (isStandalone && isArrow) {
         armStartPositions.push(i);
       }
     }

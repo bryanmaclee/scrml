@@ -39,6 +39,7 @@ import type {
 } from "../types/ast.ts";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
+import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -810,14 +811,56 @@ function emitCast(node: CastExpr, ctx: EmitExprContext): string {
 // ---------------------------------------------------------------------------
 
 function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
-  // TODO(Phase 3 Slice 4): structured match-expr emission
-  // For now, reconstruct the string and fall back to rewriteExpr
-  const subject = emitExpr(node.subject, ctx);
-  const arms = node.rawArms.join(" ");
-  const reconstructed = `match ${subject} { ${arms} }`;
-  return ctx.mode === "server"
-    ? rewriteServerExpr(reconstructed, ctx.dbVar)
-    : rewriteExpr(reconstructed, ctx.errors);
+  // Bug 1 (S95) — route the expression-position MatchExpr through the
+  // structured emitter in emit-control-flow.ts. The structured emitter
+  // handles payload-binding lowering (`.Variant(d) => d == x` destructures
+  // `d` from `_scrml_match_N.data.<field>`) and the modern `_ =>` /
+  // `else =>` wildcard arms. Previously this shim reconstructed the match
+  // as a string and ran rewriteExpr / rewriteServerExpr, neither of which
+  // emits payload bindings and both of which leak unrecognised wildcards
+  // (`_ =>`) verbatim into the output, producing SyntaxError JS.
+  //
+  // The structured emitter expects `node.header` (string) /
+  // `node.headerExpr` (ExprNode) / `node.body` (array of arm nodes). We
+  // synthesize that shape from MatchExpr's `subject` / `rawArms`. Each
+  // raw arm string is wrapped as a `bare-expr` child — the structured
+  // emitter's body loop calls `parseMatchArm` on each `child.expr`,
+  // re-splitting with `splitMultiArmString` first so multiple arms that
+  // landed in a single rawArms element (because the upstream
+  // expression-parser's splitMatchArms missed an `_` boundary) still
+  // parse cleanly.
+  //
+  // Server boundary: the structured emitter always emits in client mode
+  // (its internal `_matchCtx` is `{ mode: "client" }`). For server-bound
+  // expressions we fall through to the legacy server-string pipeline so
+  // `@var` references rewrite to `_scrml_body["..."]` rather than the
+  // client-side `_scrml_reactive_get(...)`. The structured emitter's
+  // payload-binding lowering is client-shape; server-position match
+  // expressions are uncommon (they appear only in server-handler bodies
+  // referencing request-body shapes) and continue using the existing
+  // rewrite pipeline.
+  if (ctx.mode === "server") {
+    const subject = emitExpr(node.subject, ctx);
+    const arms = node.rawArms.join(" ");
+    const reconstructed = `match ${subject} { ${arms} }`;
+    return rewriteServerExpr(reconstructed, ctx.dbVar);
+  }
+
+  // The structured emitter uses `emitExprField(headerExpr, header, _matchCtx)`
+  // to lower the subject. When `headerExpr` is non-null it goes through
+  // emitExpr (the ExprNode walk); when null it falls back to
+  // rewriteExprWithDerived on the `header` string. We have a structured
+  // ExprNode here (`node.subject`), so pass it as `headerExpr` and let the
+  // structured emitter do its normal lowering — preserving `@var` →
+  // `_scrml_reactive_get("var")` (or `_scrml_derived_get` for derived
+  // names threaded via the inner context).
+  const bridgedNode = {
+    kind: "match-expr",
+    header: "",
+    headerExpr: node.subject,
+    body: node.rawArms.map((arm) => ({ kind: "bare-expr", expr: arm })),
+  };
+  return emitStructuredMatchExpr(bridgedNode);
 }
 
 function emitSqlRef(node: SqlRefExpr, _ctx: EmitExprContext): string {

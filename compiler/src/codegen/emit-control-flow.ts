@@ -864,6 +864,17 @@ export function parseMatchArm(trimmed: string): MatchArm | null {
     return { kind: "wildcard", test: null, binding: null, result: legacyWildcardMatch[1].trim() };
   }
 
+  // Bug 1 (S95) — NEW Form 5c: `_ => expr` / `_ :> expr` — JS-style wildcard
+  // arm alias for `else`. Mirrors ast-builder.js Inline Form 4 which already
+  // produces `match-arm-inline` nodes for this shape; this branch covers the
+  // residual paths where match arms arrive as raw strings (expression-position
+  // `return match { ... }` → rawArms → emit-expr.ts bridge → bare-expr children
+  // → parseMatchArm).
+  const newUnderscoreWildcardMatch = trimmed.match(/^_\s*(?:=>|:>)\s*([\s\S]+)$/);
+  if (newUnderscoreWildcardMatch) {
+    return { kind: "wildcard", test: null, binding: null, result: newUnderscoreWildcardMatch[1].trim() };
+  }
+
   // §42 presence arm: (identifier) => expr (or :>) — counterpart to `not => expr` in match
   // Acts as a wildcard/else arm with the variable bound to the matched value.
   const presenceArmMatch = trimmed.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>)\s*([\s\S]+)$/);
@@ -1110,11 +1121,27 @@ export function splitMultiArmString(s: string): string[] {
       continue;
     }
 
-    // Legacy wildcard: _ ->
+    // Legacy wildcard: `_ ->` AND JS-style wildcard alias: `_ =>` / `_ :>`
+    // (Bug 1 S95 — the JS-style form was previously missing here. Without
+    // this, `.Dragging(d) => d == targetId _ => false` arrived as one
+    // concatenated string and the wildcard arm was either dropped or had
+    // its `_ => false` text leak into the previous arm's result.)
+    //
+    // The check requires the `_` to be a STANDALONE token — preceded by
+    // start-of-string or whitespace AND followed (after optional whitespace)
+    // by `->` / `=>` / `:>`. The prior-char guard prevents false positives
+    // from JS identifiers that happen to end in `_` (e.g., a local named
+    // `_foo` would never appear at an arm-start position, but `bar_` could
+    // legally appear in an arm result and must not be split).
     if (ch === "_") {
+      const prevCh = i > 0 ? s[i - 1] : null;
+      const isStandalone = prevCh === null || /\s/.test(prevCh);
+      // Look past `_` and any whitespace for an arrow.
       let k = i + 1;
       while (k < s.length && /\s/.test(s[k])) k++;
-      if (s.slice(k, k + 2) === "->") {
+      const arrow2 = s.slice(k, k + 2);
+      const isArrow = arrow2 === "->" || arrow2 === "=>" || arrow2 === ":>";
+      if (isStandalone && isArrow) {
         armStartPositions.push(i);
       }
     }
