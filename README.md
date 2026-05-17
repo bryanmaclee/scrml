@@ -8,39 +8,45 @@ scrml lets you write a complete app in one file: markup, reactive state, scoped 
 SQL, server functions, and inline tests — no build config, no separate server file,
 no state management library.
 
-> ## scrml — current state: v0.2.6 shipped + v0.3.0-alpha in flight
+> ## scrml — current state: v0.3.0 STABLE shipped + v0.3.x patch arc in flight
 >
-> The latest shipped tag is **v0.2.6**. The compiler ships v0.2.6 codegen +
-> runtime semantics: **V5-strict** declaration (`<x> = init` decl form +
-> `@x` expression access), the **Tier 0/1/2 ladder** for case analysis
-> (booleans → `<match>` → `<engine>`), auto-synthesized validity surface for
-> forms, file-level `<channel>` blocks for realtime, schema shared-core
-> vocabulary, refinement-type predicates, hierarchical engines with `history`
-> + `<onTimeout>` + `<onIdle>` + `internal:rule=`, and 22 architectural
+> The latest shipped tag is **v0.3.0** (cut S92, 2026-05-14). The compiler
+> ships v0.3.0 codegen + runtime semantics: **V5-strict** declaration
+> (`<x> = init` decl form + `@x` expression access), the **Tier 0/1/2 ladder**
+> for case analysis (booleans → `<match>` → `<engine>`), auto-synthesized
+> validity surface for forms, file-level `<channel>` blocks for realtime,
+> schema shared-core vocabulary, refinement-type predicates, hierarchical
+> engines with `history` + `<onTimeout>` + `<onIdle>` + `internal:rule=`,
+> whole-stack closure analysis with per-route per-role content-addressed
+> chunk splitting and tiered prefetch, the **`{"__scrml_absent": true}`** wire
+> envelope for `T | not` server returns (SPEC §57), and 22 architectural
 > locks (L1–L22).
 >
-> **v0.3.0-alpha.0 is in flight** (pkg.json reflects the pre-release tag).
-> Approach A — the whole-stack closure analysis that powers `<auth role>`
-> first-class auth gates, per-route per-role content-addressed chunk splitting
-> with tier-1 / tier-2 / tier-N prefetching, and the W-CG-CHUNK-* + W-AUTH-*
-> diagnostic family — has closed end-to-end (sub-waves A-1 through A-5;
-> v0.3.0 critical path complete). The v0.3.0 cut is gated on Wave 4.A
-> adopter-content refresh.
+> **v0.3.x patch arc in flight.** Phase B SPA tree-shake landed post-v0.3.0
+> and cut the scrml-runtime payload from 38.7 KB → 11.8 KB gzip. The current
+> session arc is closing four A2-anomaly-2-surfaced compiler-engineering
+> gaps: `export function` body population, parseParamList default values,
+> RI promotion through `server { … }` blocks, scope-walker handling of
+> `export class` + destructuring, and `is some` member-access LHS
+> preservation. See [`docs/changelog.md`](./docs/changelog.md) for the
+> per-session ledger.
 >
 > v0.1.0 was the previous shipped baseline. **v0.1.0-syntax code (using
 > `@var = 0` implicit declaration, `< machine>` for state machines, `~var`
 > for derived values) will not compile against v0.2.x or later.** No
 > production adopters exist, so there is no v0.compat / migration-tool path.
 >
-> **Semver cadence:** v0.2.0 → v0.2.6 patches landed across S83 → S85.
-> v0.3.0-alpha.N pre-releases land during the v0.3 development cycle;
-> v0.3.0 stable cuts when Wave 4.A closes. Backward-breaking changes are
-> reserved for a future major.
+> **Semver cadence.** v0.2.0 → v0.2.6 patches landed across S83 → S85;
+> v0.3.0 stable cut at S92. v0.3.x patches land during the active
+> development cycle; v0.4 is the next minor horizon. Backward-breaking
+> changes are reserved for a future major.
 >
 > If you find articles or LLM-generated scrml that uses pre-v0.2 syntax,
 > they describe the prior language. Live phase status:
 > [`master-list.md` §0](./master-list.md) (the load-bearing dashboard);
-> recent landings: [`docs/changelog.md`](./docs/changelog.md).
+> recent landings: [`docs/changelog.md`](./docs/changelog.md); session
+> hand-offs: [`hand-off.md`](./hand-off.md) (current) +
+> [`handOffs/`](./handOffs/) (rotated).
 
 ## Quick start
 
@@ -67,9 +73,9 @@ bun test compiler/tests/
 
 ## What's in here
 
-- `compiler/` — compiler source, the authoritative `SPEC.md` (~26,000 lines) / `SPEC-INDEX.md` / `PIPELINE.md`, **12,500+ tests**, and reference self-host modules
-- `examples/` — **22 runnable single-file scrml apps + the trucking-dispatch multi-page app**
-- `samples/compilation-tests/` — **279 compilation tests** covering every accepted construct
+- `compiler/` — compiler source, the authoritative `SPEC.md` (~27,144 lines / §57 + appendices) / `SPEC-INDEX.md` / `PIPELINE.md`, **12,300+ tests**, and reference self-host modules
+- `examples/` — **23 runnable single-file scrml apps + the trucking-dispatch multi-page app**
+- `samples/compilation-tests/` — **289 compilation tests** covering every accepted construct
 - `stdlib/` — **16 user-facing stdlib modules** (`auth`, `crypto`, `data`, `format`, `fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`, `cron`, `regex`, `oauth`)
 - `benchmarks/` — runtime, build, and full-stack benchmarks vs React / Svelte / Vue
 - `editors/vscode/`, `editors/neovim/` — editor integrations
