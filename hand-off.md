@@ -1,118 +1,239 @@
-# scrmlTS — Session 98 (OPEN)
+# scrmlTS — Session 98 (CLOSE)
 
 **Date:** 2026-05-17
-**Previous:** `handOffs/hand-off-98.md` (S97 CLOSE rotated as S98 OPEN-pickup snapshot)
+**Previous:** `handOffs/hand-off-99.md` (S98 OPEN snapshot rotated as S99 OPEN-pickup; this file is S98 CLOSE)
 
 ---
 
-## Session-open state
+## TL;DR for S99 PA pickup
 
-- **scrmlTS HEAD:** `16d8aa4` (S97 CLOSE rotate hand-off-97)
-- **scrmlTS ahead/behind origin:** 0/0
-- **scrml-support HEAD:** `f14bb42` (S98-open: merge S85 machine-B user-voice additions into chronological slot)
-- **scrml-support ahead/behind origin:** **1/0 ahead** — push pending
-- **Working tree (scrmlTS):** `M docs/articles/teej_baiting_tweet.md` (pre-session WIP, see Open Question 1)
-- **Working tree (scrml-support):** clean tracked; 5 untracked `voice/articles/2026-05-09-*` files + untracked `tools/` (pre-session WIP, see Open Question 2)
-- **Worktrees:** main only
-- **Inbox (scrmlTS):** empty
-- **Inbox (scrml-support):** empty
-- **Hook config:** configuration B (pre-commit + post-commit + pre-push)
-- **Tests at HEAD:** not yet re-run this session; S97 close baseline was 13,019 pass / 117 skip / 1 todo / 0 fail / 667 files / 43,402 expect
+S98 was a **multi-track marathon** that opened with a comprehensive future-scrml inventory + parallel-machine split, executed the Acorn-replacement Phase 0 deep-dive + first implementation milestone (M1.1 lexer skeleton with composed engines), shipped two parallel SPEC amendments (§48.6.4 fn mutual-recursion + §51.0.B.1 payload-binding on engine state-children), landed the DG super-linear perf fix (closes "stable slope" half of comp-time story per S94 perf characterization), fixed two compiler bugs surfaced BY the M1.1 work (Anomaly 1 block tokenizer + Anomaly 3 SURVEY's spec amendment), and orchestrated with Machine B who closed 5 of 6 of their parallel queue items including the scrml.dev architecture deep-dive + 12 articles surface scaffolding.
+
+**16 commits scrmlTS + 5 commits scrml-support pushed end-to-end.** Velocity-mode active for second half of session per user use-it-or-lose-it directive.
 
 ---
 
-## S98 open — cross-machine sync reconciliation (already done)
+## Final state at S98 close (this commit)
 
-Session opened with a cross-machine divergence: this machine's `scrml-support` was 1 commit behind origin (carrying the S96 `pa-scrmlTS.md` canonical-home move), AND carried 5 uncommitted S85 user-voice entries that never reached origin. Origin meanwhile had S86 → S95 user-voice entries this machine never pulled.
+- **scrmlTS HEAD:** `7ba0268` (§51.0.B.1 SPEC amendment); this CLOSE-wrap commit lands on top
+- **scrml-support HEAD:** `592044b` (A3 SURVEY landing) — see scrml-support handOffs for its session state
+- **scrmlTS ahead/behind origin:** 0/0 pre-wrap; 1/0 post-wrap
+- **Working tree:** `M docs/articles/teej_baiting_tweet.md` (S98 pre-session WIP per user "leave as-is" directive)
+- **Worktrees retained (9):**
+  - `agent-a17929499b2a3ad56` (M1.1 native lexer)
+  - `agent-a020eb49167259169` (DG super-linear fix)
+  - `agent-ab5d1e70eb3dac830` (A3 SURVEY)
+  - `agent-ac612b544305232a4` (A1 fix block-tokenizer)
+  - `agent-a25354e1febdc3df0` (§51.0.B.1 SPEC amendment)
+  - `agent-a81c57ad2f4731425` (S98 P2 §48 amendment)
+  - `agent-a5305c03f000d78fe` (S98 conformance harness)
+  - `agent-a6c8edba1148c34f4` (A2 fix — in flight at wrap)
+  - `agent-afccf9a7ac1b3d0cd` (combined lint additions — in flight at wrap)
+- **Inbox (scrmlTS):** 1 unread — `2026-05-17-0811-machine-B-to-machine-A-S98B-P1-wrap-and-coordination.md` ALREADY PROCESSED (reply landed `0efe39f`; moved to read/ in `6281ec3+cfd4786`). PLUS `2026-05-17-0700-machine-A-to-machine-B-S98-parallel-work-split.md` + `2026-05-17-1100-machine-A-to-machine-B-S98A-queue-shift.md` (outgoing to Machine B; Machine B will move to read/ on their pickup).
 
-**Resolution executed S98 open (user-authorized via session-start question):**
-1. Stashed local 102-line `user-voice-scrmlTS.md` modification.
-2. `git pull --ff-only` brought local from `745adde` (S85) to `548a675` (S96).
-3. `git stash pop` produced conflict on user-voice (both sides modified the same region).
-4. Conflict resolved via deterministic Python script: inserted local S85 entries into chronological slot (between origin's S85 Wave-2.5 entry and the `## Session 86` header). No content lost on either side; verbatim preserved.
-5. Committed as `f14bb42 docs(user-voice): merge S85 machine-B additions in chronological slot`.
-
-**Status:** scrml-support has 1 unpushed commit (the merge). Push when user authorizes — likely batched with subsequent S98 work.
-
----
-
-## Carry-forward from S97 close (NOT yet picked up)
-
-### From hand-off-98.md (S97 close) §"Open questions to surface immediately"
-
-1. **Svelte `$store` auto-subscribe lint** — the only remaining generic-error in the brute-force stress harness. Needs $-prefix ident context detection. v0.3.x candidate. Three approach options listed in S97 hand-off.
-2. **pa-scrmlTS.md kickstarter v1→v2 reference staleness** — confirmed S98 open: `pa-scrmlTS.md:391` still cites `docs/articles/llm-kickstarter-v1-2026-04-25.md`. v2 (`llm-kickstarter-v2-2026-05-04.md`) self-declares as superseding v1. Quick doc decision needed.
-3. **Postfix value-semantic** — `rewriteReactiveAssign` returns NEW value (matches `++x` not `x++`); value-position silently wrong. Document-only finding; vanishingly rare. v0.3.x watch-item.
-4. **`feel-of-performance` empirical study** — S83-queued, deferred S94/S95/S96/S97. Is this still the right priority slot?
-5. **Brute-force harness extension candidates** — Alpine.js / HTMX / Lit / Stencil / Web Components. Trigger when adopter friction signals.
-
-### From user-voice-scrmlTS.md S94/S95 (most recent durable directives)
-
-6. **Heads-up coding session** — S94 verbatim: *"I don't think we have pushed the canonical of this language hard enough... next session I want to have a heads-up coding session to see what we can and cannot do with this language."* S95 was supposed to be this; per S95 user-voice it became partially bug-fix-heavy. Not explicitly named in the S97 hand-off carry-forward. Possibly already absorbed, possibly still owed.
-7. **Missing state-system primitive — event-with-payload → transition** — S95 user-direct: scrml currently has no state-system surface for "event with payload triggers transition consuming the payload." Forced into `function` glue today. Blocks the 90/10 fn/function ratio target. Filed as v0.4+ language-design dispatch candidate at `docs/changes/heads-up-s95-bugs/MISSING-PRIMITIVE.md`.
-8. **State-vs-logic boundary axiom (S94 corrected S95)** — the corrected reading: state system should be able to fully DESCRIBE its own transitions; logic CAN describe state mutations but SHOULDN'T HAVE TO. Apply during language-addition reviews + example-corpus audits.
-9. **Track 2 (LLM corpus presence)** — at least as important as Track 1 (compiler correctness). Concrete moves listed S95: LLM benchmark, open-source examples, honest current-state page, voice essays (3 candidates), synthetic corpus generation deferred.
-10. **`building anyway` essay scaffold** — drafted S95 at `scrml-support/voice/articles/building-anyway-draft-s95.md` (scaffold only; user authors). Marketing-adjacent — Rule 1 says don't volunteer unless user raises.
-
-### From master memory rules
-
-11. **lin redesign — Approach B ratified** — per memory rule `project_lin_redesign.md`: deep-dive done, spec amendments drafted, implementation is the next step (NOT another deep-dive/debate). Has this been picked up anywhere in S96/S97? Not visible in the bug-chip catalog work. Verify before any new dispatch on lin.
+**Tests at HEAD `7abb72f` (post-lint-land):** 15107 pass / 1 fail (pre-existing Bug 18 browser-runtime smoke; orthogonal) / 133+ skip / 1 todo / 670 files. M1.1 added +69 tests; A1 fix added +10 tests; §51.0.B.1 SPEC-only +0 tests; lint additions added +22 tests; Machine B P2 articles +0 tests (pure docs).
 
 ---
 
-## Open questions to surface immediately (S98 PA pickup)
+## S98 commit ledger (16 scrmlTS + 5 scrml-support)
 
-1. **The pre-session WIP in `docs/articles/teej_baiting_tweet.md` (scrmlTS) — 10 lines appending the actual tweet text back into a file that S89 explicitly archived as a stub (`# teej baiting tweet (RETRACTED)`).** This contradicts the S89 retraction. Likely cross-machine filesystem-sync residue or another session's experimental edit that never committed. Disposition needed: (a) revert (preserve the S89 retracted-stub shape, content stays in `scrml-support/archive/articles-skipped/`), (b) keep + reframe as un-retraction with intent stated, (c) leave as-is and surface in next session. Rule 1 (no marketing/article work unless user raises) means PA should NOT auto-decide.
-2. **The pre-session WIP in `scrml-support` — `user-voice-scrmlTS.md` merge already handled, but 5 untracked `voice/articles/2026-05-09-*` files (dev.to opener / modularity reply v1+v2 / server-keyword-deprecation) + untracked `tools/` directory remain.** These predate this session. Likely from S85+ adopter-content work that never got committed. Disposition pending user — same Rule 1 framing for the article drafts; `tools/` may be operational scaffolding.
-3. **scrml-support push** — `f14bb42` (S98 user-voice merge) is unpushed. Push now (low risk, append-only verbatim), batch with S98 substantive work, or defer to wrap?
-4. **What's the actual S98 priority?** Several live carry-forwards (heads-up coding from S94/S95; bug-catalog drain — though S97 hand-off says all filed compiler bugs are closed; perf-feel empirical study from S83; lin redesign implementation; Svelte `$store` lint). User direction needed before any dispatch.
+scrmlTS chronological:
+```
+f12926f  docs(s98-open): rotation + Machine-B inbox message for parallel-work split
+5122da6  docs(s98): primer §2 Pillar 5b "Reach discipline" — companion to Pillar 5
+80c148f  feat(spec): §48.6.4 fn mutual-recursion-via-hoisting (S98 P2 — Acorn-replacement DD §D4 P2)
+912a9af  test(parser-conformance): pre-M1 harness — driver + 4-tier diff + 1000-file corpus + 12 bench fixtures
+4469bdf  feat(native-parser): M1.1 lexer skeleton — composed engines + LexMode + InCode body
+0efe39f  docs(s98): page-helper §1.3 S86 fix + reply to S98B Machine-B coordination
+6281ec3  docs(handoff): move Machine-B S98B inbox message to read/ after action
+cfd4786  docs(handoff): remove S98B msg from incoming/ (already copied to read/)
+b179842  perf(dg): O(1) edge dedup + reverse fn-name index — close DG super-linear scaling
+3f27a6c  fix(engine-statechild-parser): skip ${...} inside comments + strings — Anomaly 1
+85bd8e4  docs(handoff): S98A → Machine-B queue shift — velocity-mode orchestrator-worker
+7ba0268  feat(spec): §51.0.B.1 payload-binding on engine state-children (A3 SURVEY track 1)
+```
+Plus this S98 CLOSE wrap commit landing master-list + changelog + hand-off.
+
+scrml-support chronological:
+```
+f14bb42  docs(user-voice): merge S85 machine-B additions in chronological slot
+124204e  docs(s98): Acorn-replacement Phase 0 DD + typestate-meta-shape design-horizon stub + user-voice S98
+4eba0ed  docs(deep-dive): scrml.dev MDN-style architecture Phase 0 (P1 Deliverable A)  [Machine B]
+59cc1f8  docs(pa): switch canonical dev-dispatch kickstarter v1 → v2  [Machine B]
+be2c864  docs(deep-dive): meta-system capability boundary SPEC prose draft (P5)  [Machine B]
+f1da6c1  docs(handoff): process Machine-A S98A coordination reply — move to read/  [Machine B]
+c411b99  docs(voice): 3 quote-anchored essay scaffolds (P6)  [Machine B]
+592044b  docs(deep-dive): Anomaly 3 SURVEY — payload-bearing engine state-child variants
+```
+
+Machine B's chronological in scrmlTS:
+```
+3b2dd1c  docs(articles): v0 stub redirect now points at v2 (kickstarter supersession)
+f838790  feat(website): scrml.dev Phase 0 skeleton + 3 flagship feature pages (P1 Deliverable B)
+01e0bc2  docs(handoff): S98B Machine-B → Machine-A — P1+P3 wrap + 3 coordination items
+c1a6e09  docs(articles): kickstarter v1+v2 idiomatic-examples S86 sweep (P4)
+702abc7  feat(website): articles surface — index + 1 flagship full-conversion + 11 skeletons (P2 partial)
+```
 
 ---
 
-## Session-start checklist status
+## IN-FLIGHT at wrap (S99 FIRST ACTION: land these via S83 protocol)
 
-- [x] Read `pa-scrmlTS.md` (852 lines, full)
-- [x] Read `docs/PA-SCRML-PRIMER.md` (898 lines, full)
-- [x] Read `compiler/SPEC-INDEX.md` (320 lines, full)
-- [x] Read `master-list.md` §0 dashboard (§0-§0.6, lines 100-271)
-- [x] Read `hand-off.md` (S97 CLOSE, full)
-- [x] Read recent contentful user-voice (S94 entries + all S95 entries, ~205 lines covering 8 substantive blocks)
-- [x] Rotate `hand-off.md` → `handOffs/hand-off-98.md`
-- [x] Create fresh `hand-off.md` (this file)
-- [x] Cross-machine sync hygiene reconciliation (scrml-support fast-forward + user-voice merge)
-- [ ] Confirm push policy with user
-- [ ] Surface priorities + open questions; await direction
+### Task #19 — A2 fix (function-body-stripping in SPA-shape .scrml files) — DONE BUT NOT LANDED
+
+**Worktree:** `agent-a6c8edba1148c34f4`  
+**Status at S98 close:** DONE; 3 commits in worktree (`f4ad8a7` first attempt source-slice superseded → `3a98cab` regression tests → `4512eb2` final fix token-slice approach). +10 regression tests pass; root cause located + fixed.
+
+**S99 first action — REQUIRES CAREFUL 3-WAY MERGE:**
+
+A2's `compiler/src/ast-builder.js` change + lint dispatch `7abb72f`'s `ast-builder.js` change BOTH apply to same file but A2's branch base (`4469bdf`) predates lint commit. Cannot do simple `git checkout` — would overwrite lint's `isNonEntryPageFile` suppression.
+
+**Recommended resolution path:**
+```bash
+# Inspect A2's diff against its branch base
+git diff 4469bdf worktree-agent-a6c8edba1148c34f4 -- compiler/src/ast-builder.js > /tmp/a2-ast-builder.patch
+
+# Apply on top of current main (which has lint's changes)
+git apply /tmp/a2-ast-builder.patch
+
+# If apply fails: manual 3-way — A2 adds body+params population at line ~6457-6495 export synth path; lint adds isNonEntryPageFile predicate elsewhere; both should coexist cleanly.
+```
+
+Plus checkout the other A2 files (regression tests are NEW files; no conflict):
+```bash
+git checkout worktree-agent-a6c8edba1148c34f4 -- \
+  compiler/tests/unit/ast-builder-grammar-fixes.test.js \
+  compiler/tests/integration/anomaly-2-export-fn-body-stripping.test.js
+```
+
+**9 NEW failures surfaced by A2 fix (Rule 3 right-answer disposition):** the fix correctly aligns AST semantics with SPEC; surfaced bugs are PRE-EXISTING source-file bugs that body-stripping defect was silently hiding. Per A2 DONE Option (a) RECOMMENDED: **land + file follow-ups; don't roll back.**
+
+The 9 surfaced failures + follow-up dispatch candidates:
+1. `compiler/self-host/module-resolver.scrml` uses bare `null` — self-host source-file cleanup
+2. `compiler/self-host/meta-checker.scrml` uses `switch` + `!= null` — self-host source-file cleanup
+3. `compiler/self-host/tab.scrml` default-parameter syntax — **parseParamList default-value handling bug** at `ast-builder.js parseParamList()` line 5942-5997 (separate dispatch candidate)
+4. `examples/23-trucking-dispatch/seeds.scrml runSeeds()` — RI doesn't promote `export function foo() { server { ... } }` to server-bound (separate RI dispatch candidate)
+5-9: bug-18 browser-runtime smoke isolation flake (pre-existing, orthogonal)
+
+**Shadow retirement status post-A2 (partial):**
+
+| File | Retire-able? | Reason if not |
+|---|---|---|
+| `compiler/native-parser/span.scrml` → `span.js` | YES | bodies populate correctly |
+| `bracket-stack.scrml` / `cursor.scrml` / `error-recovery.scrml` / `lex-mode.scrml` | YES | same |
+| `token.scrml` → `token.js` | **NO** | source has `if (kw == undefined)` line 296 (E-SYNTAX-042; per SPEC §42 use `is not`). Source needs rewrite first. |
+| `lex-in-code.scrml` / `lex.scrml` | **NO** | cross-file imports not resolved (E-SCOPE-001) when compiled in isolation. Needs gather-pass support OR explicit import decls. M1.2-side coordination. |
+
+Mangled-name caveat for ALL retire-able: M1.1 lexer-conformance tests import from `.js` shadow files. Pointing them at compiled `.client.js` requires resolving mangled-name issue (compiled exports use `_scrml_NAME_N` not `NAME`). M1.2-side coordination per A2 DONE report.
+
+**Sequence for S99:**
+1. Land A2 via 3-way merge (above)
+2. Triage 9 surfaced failures — file as separate dispatch candidates per A2 recommendation Option (a)
+3. M1.2 dispatch — partial shadow retirement (span / bracket-stack / cursor / error-recovery / lex-mode shadows can go; token + lex-in-code + lex stay until their source-side issues resolved)
+
+### Task #25 — Combined lint additions — ✓ LANDED `7abb72f`
+
+W-PROGRAM-001 fire-condition tightening + W-LINT-024 Svelte $store. 22 new tests; 17→0 docs/website W-PROGRAM-001; stress-harness generic-error 1→0. **Anomaly surfaced:** §34 W-LINT-016..024 catalog backfill needed (task #26).
 
 ---
 
-## Things S98 PA must NOT screw up (carry-forward, unchanged)
+## Carry-forward priorities (sequenced for S99)
 
-### pa-scrmlTS.md Rules permanently load-bearing
+### Immediate (S99 OPEN actions)
 
-- Rule 1 — no marketing/article/tweet work unless user brings up (relevant TODAY for `teej_baiting_tweet.md` WIP + 5 untracked voice/articles files)
-- Rule 2 — full-production-language fidelity; no "users won't notice" reasoning
-- Rule 3 — right answer beats easy answer 99.999%
-- Rule 4 — SPEC is normative; derived planning docs are NOT (verify against `compiler/SPEC.md` before encoding spec-derived claims)
-- Rule 5 — shoot straight; politeness-for-politeness rejected; push back when warranted
+1. **Land any in-flight dispatch landings** (#19 A2, #25 lint) via S83 protocol.
+2. **Process A2 SHADOW_RETIREMENT_STATUS** — if shadows retire-able, restore M1.1 lex-mode.scrml state-child bodies (lift A1 workaround note; restore prose using `//` line comments per A1 DONE).
 
-### S96/S97 PA-memory rules permanently load-bearing
+### Track 2 of A3 SURVEY (next dispatch candidate)
 
-- `feedback_read_spec_at_session_start.md` — SPEC-INDEX.md read at open; verify spec sections directly before spec-implication changes
-- `feedback_declaration_form_in_reproducers.md` — synthetic reproducers use V5-strict canonical shape
-- `feedback_dont_wrap_at_43_percent.md` — don't propose wrap above 50% remaining; 1M context budget actively tracked by user
+3. **§51.0.B.1 compiler-feature wiring** — track 2 of A3 SURVEY. SPEC amendment landed `7ba0268`; compiler now needs:
+   - `compiler/src/engine-statechild-parser.ts` — extract `payloadBindings` from state-child attribute list per the 3 forms (bare/named/parenthesized)
+   - `compiler/src/symbol-table.ts` PASS 11 — validate per §51.0.B.1 normative: arity match (E-ENGINE-PAYLOAD-ARITY-MISMATCH); unit-variant rejection (E-ENGINE-PAYLOAD-ON-UNIT-VARIANT); reserved-name precedence (E-ENGINE-PAYLOAD-RESERVED-COLLISION)
+   - `compiler/src/codegen/emit-variant-guard.ts` — wire-function payload-scope injection (sub-anomaly #3 from SURVEY)
+   - Tests for each
+   - Estimate: ~4-6h per SURVEY §5
+   - Fire as scrml-dev-pipeline isolation:worktree
 
-### S97-specific anti-patterns (carry into S98)
+### M1 parser arc (sequential post-A2)
 
-- DO NOT trust master-list "STILL PENDING" markers without cross-verifying against `docs/changelog.md`
-- DO NOT trust hand-off bug framing without reproduce-first verification
-- DO NOT extend the stress harness fixtures without classifying them
+4. **M1.2 lexer** — InSingleString + InDoubleString state-bodies. Dispatch shape depends on A2 outcome (if shadows retire, pure scrml-native; if not, continue shadow pattern). Lex-mode.scrml state-child bodies can be restored to non-bare form per A1 fix verified workaround-lift status.
+5. **M1.3 lexer** — InTemplateBody + nested LexMode engine per §51.0.Q.1 (the architecturally load-bearing piece). Sequences after M1.2.
+6. **M1.4 lexer** — InLineComment + InBlockComment + InRegexBody + FULL M1 conformance gate pass. Sequences after M1.3.
 
-### S98 NEW (this session — cross-machine sync)
+### Held pending user disposition
 
-- DO surface cross-machine divergence at session open. The `pa-scrmlTS.md` stub redirect to a file not-yet-pulled was a structural hint that pull was needed; merging the user-voice divergence was load-bearing because the local 102 lines were verbatim user statements (append-only verbatim rule applies). Always: stash → pull → reconcile → commit before any other work touches the divergent paths.
+7. **lin redesign Phase 1** (#4) — user explicitly paused S98: "I'll think about the lin situation before committing to work."
+8. **Typestate-primitive meta-shape** (#12) — design horizon stub filed at scrml-support `124204e`; default hold.
+
+### v0.3.x / v0.5+ backlog
+
+9. **CG hotspot deep characterization** (#18) — v0.5+ horizon per S94 doc.
+10. **BS-level /* */ bug** (#23) — sub-anomaly from A1 fix; v0.3.x backlog.
+11. **Two-machine wrap reconsolidation** (#22) — meta-process; defer to a session where user wants to tackle it.
+
+---
+
+## Three M1.1 anomalies status
+
+| # | Anomaly | Status | Disposition |
+|---|---------|--------|-------------|
+| **A1** | Block tokenizer `${}` inside `//` comments in engine state-child bodies | ✓ FIXED `3f27a6c` | 8 sites fixed; M1.1 workaround can be lifted in M1.2 |
+| **A2** | Function-body-stripping in SPA-shape .scrml files | IN FLIGHT (#19) | shadow workaround through M1.4 per user; fix in parallel |
+| **A3** | Payload-bearing engine variants on state-children | track 1 ✓ FIXED `7ba0268`; track 2 queued (#3) | SPEC amendment landed; compiler-feature wiring next session |
+
+PLUS **4 sub-anomalies surfaced by A3 SURVEY** (in `scrml-support/docs/deep-dives/payload-bearing-engine-state-child-variants-SURVEY-2026-05-17.md` §3):
+- §51.0.M `Done(rows: int)` vs `<Done count>` name-divergence → resolved as positional binding; editorial example update landed
+- Undocumented compiler heuristic too-permissive → addressed by §51.0.B.1 normative + new error codes
+- Wire-function payload-scope runtime gap → track 2 dispatch will fix
+- Parenthesized form `<Done(rows)>` parser mystery → track 2 dispatch will fix
+
+PLUS **1 sub-anomaly from A1 fix** (#23):
+- Pre-existing BS-level `/* */` bug in markup contexts → v0.3.x backlog
+
+---
+
+## Comp-time performance — user-surfaced thread S98
+
+User asked to surface + investigate the "comp-times back down or stable" speculation. Found:
+
+- **S94 perf-characterization landed at `docs/changes/perf-characterization/CLOSURE-ANALYSIS-COST.md`** (420 lines) — closure-analysis surface is NOT bottleneck (~3% of pipeline); CG = 78%; DG = only stage with super-linear scaling (per-file Δms 0.064 → 0.546 across 28→108 file sweep = 8.5× growth).
+- **DG super-linear root cause LOCATED + FIXED S98** at `dependency-graph.ts:1738-1830` (transitive-reactive-read fixpoint). 3 `edges.some()` + 1 `edges.filter()` + 1 missing reverse-index converted. ~52ms savings at current 108-file scale; prevents DG from becoming dominant at projected 500+ files. **Delivers "stable slope" half of comp-time story.**
+- **CG profiling remains v0.5+ horizon per S94 doc** for "back down" half. Task #18 holds.
+- **Cold-vs-warm 18% gap + stdlib auto-gather 72-file expansion** = additional levers documented in S98 initial investigation (not yet acted on).
+
+---
+
+## Things S99 PA must NOT screw up
+
+### Permanently load-bearing (from prior sessions)
+- pa.md Rules 1-5 (no marketing without prompt; full-production fidelity; right beats easy; SPEC normative; shoot straight)
+- All S96/S97/S98 PA-memory rules in `~/.claude/projects/-home-bryan-scrmlMaster-scrmlTS/memory/`
+- Cross-machine sync hygiene — fetch/pull both repos at session start; reconcile-before-work
+- S83 commit discipline two-sided rule (agent + PA)
+- S88 isolation:worktree mandatory on every dev-agent Agent() call
+- S91 CWD-routing rule (Bash `cd` to sibling repo + Agent dispatch = wrong-repo worktree allocation)
+
+### S98 NEW (this session)
+- **Pillar 5b "Reach discipline"** — PRIMER §2 amendment landed `5122da6`. State-shape first; logic when calculation. Applies to all future design + code review.
+- **Velocity-mode protocol** (S98A second half): primary orchestrator + parallel queue worker shape. Documented in `2026-05-17-1100-machine-A-to-machine-B-S98A-queue-shift.md`.
+- **A3 SURVEY pattern** — when M1.x surfaces a "spec/compiler iteration needed" gap, fire a SURVEY-ONLY (general-purpose, research-only) dispatch first; then split into SPEC track + compiler-feature track. Worked end-to-end S98.
+
+---
+
+## Open questions to surface immediately (S99 PA pickup)
+
+1. **Machine B's queue progress** — Inbox message `2026-05-17-1100-machine-A-to-machine-B-S98A-queue-shift.md` shipped them P2 remaining 10 articles + BACKLOG refresh + master-list §I commitments. Status unknown at S98 close; check `scrml-support/handOffs/incoming/` + Machine B's git log for activity since `c411b99`.
+
+2. **A2 fix outcome** — if shadows retired, M1.2 fires as pure scrml-native; if shadows continue, M1.2 follows M1.1 pattern.
+
+3. **Track 2 §51.0.B.1 compiler-feature wiring** — fire after A2 + lint lands, OR fire immediately if file-disjoint from in-flight work.
+
+4. **lin Phase 1** — user thinking; check if user has direction.
+
+5. **Two-machine wrap reconsolidation (#22)** — user flagged S98 as defer-til-pressure; track for forcing-function surfacing.
 
 ---
 
 ## Tags
 
-#session-98 #OPEN #cross-machine-sync-reconciled #user-voice-merge-S85-machine-B #pre-session-WIP-surfaced #carry-forward-from-S97-close #heads-up-coding-still-pending #lin-implementation-still-pending
+#session-98 #CLOSE #16-commits-scrmlts #5-commits-scrml-support #M1.1-lexer-shipped #DG-perf-fix #pillar-5b-ratified #spec-§48.6.4-fn-hoisting #spec-§51.0.B.1-payload-binding #A1-fixed #A3-survey-landed #A2-in-flight #lint-additions-in-flight #velocity-mode-second-half #cross-machine-coordination-active #machine-B-5-of-6-priorities-closed
