@@ -479,6 +479,67 @@ function needsIsLhsParenWrap(left: ExprNode): boolean {
   }
 }
 
+/**
+ * Phase B-2 — Single-evaluation predicate (SPEC §42.2.4 line 18436).
+ *
+ * For `<lhs> is some` / `is not` / `is not not`, the SPEC mandates the LHS be
+ * evaluated EXACTLY ONCE. The simple emit `<lhs> !== null && <lhs> !== undefined`
+ * inlines the LHS twice — fine when `<lhs>` is a bare-ident or literal (re-
+ * reading is observably free), but incorrect when `<lhs>` has side effects
+ * (calls, member access through getters, index access through Proxy traps,
+ * binary/ternary/assignment with embedded sub-effects, etc.).
+ *
+ * Returns true when the LHS is safe to inline twice without observable
+ * difference from a single evaluation. The trivial set is intentionally
+ * narrow: ONLY bare identifiers and literals. Everything else — including
+ * member access (could be a getter) and index access (could be a Proxy trap)
+ * — is wrapped in an IIFE for single-evaluation safety. This matches the
+ * SPEC's strict "Any side effects of `expr` occur exactly once" requirement.
+ *
+ * @see emitBinary case "is-some" / "is-not" / "is-not-not" for the IIFE wrap.
+ */
+function isTrivialIsLhs(left: ExprNode): boolean {
+  switch (left.kind) {
+    case "ident":
+      // Bare names. Re-reading a binding has no observable side effect in JS
+      // (except via Proxy/with — which scrml doesn't use). Note: reactive
+      // sigils like `@cell` parse as IdentExpr with name="@cell" and lower
+      // to a `_scrml_reactive_get(...)` call at emit time — at the AST level
+      // they ARE ident-kind, but their emitted form is a CALL with potential
+      // side effects (subscription touch). However, _scrml_reactive_get is
+      // pure-read by contract (no side effects beyond dependency tracking,
+      // which is idempotent), so we still treat `@cell` as trivial. This
+      // matches the historical inline emission and keeps output compact for
+      // the overwhelmingly common reactive-read shape.
+      return true;
+    case "lit":
+      // Literals are constants; re-reading is a no-op.
+      return true;
+    default:
+      // Everything else (member, index, call, binary, ternary, unary,
+      // assign, lambda, new, cast, match-expr, sql-ref, input-state-ref,
+      // escape-hatch, array, object, spread) is NON-TRIVIAL and SHALL be
+      // wrapped in an IIFE for single-evaluation safety per SPEC §42.2.4.
+      return false;
+  }
+}
+
+// Phase B-2 IIFE local-name convention.
+// ---------------------------------------------------------------------------
+// `__scrml_is_v` is the local introduced inside the IIFE that wraps a non-
+// trivial `is-some` / `is-not` / `is-not-not` LHS. Conventions:
+//   * `__scrml_*` prefix — matches the project-wide convention for compiler-
+//     generated locals; collides with no documented user-facing symbol
+//     (SPEC: identifiers starting with `__scrml_` are reserved).
+//   * Stable name (NOT counter-suffixed) — keeps chunk-content-addressed
+//     hashes identical for the same source across builds (SPEC §47.5 +
+//     §40.9.8 determinism normative).
+//   * Local IIFE scope — each `is-some` callsite emits its own `((v) => ...)`,
+//     so the same name reused across callsites does NOT collide.
+//   * Length is intentionally short to keep output compact while preserving
+//     the `__scrml_` prefix collision-shield.
+const IS_OP_IIFE_LOCAL = "__scrml_is_v";
+
 function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
   const left = emitExpr(node.left, ctx);
   const right = emitExpr(node.right, ctx);
@@ -504,33 +565,59 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
     // §42 presence/absence checks.
     //
     // The LHS may be any expression (per §42.2.4 — including binary, call,
-    // index, member chains). For bare-ident LHS the simple form `(x !== null
-    // && x !== undefined)` is correct and readable. For compound LHS — most
-    // notably a binary expression like `(a || b)` — we MUST wrap the emitted
-    // LHS in parens to preserve precedence; otherwise the surrounding `&&` /
-    // `||` operators in the absence check would re-associate with the LHS's
-    // operators (e.g. `a || b !== null` parses as `a || (b !== null)`).
+    // index, member chains). For a trivial LHS — bare ident or literal —
+    // re-reading has no observable side effect and the simple inline form
+    // `(x !== null && x !== undefined)` is correct, compact, and readable.
     //
-    // Single-evaluation note (SPEC §42.2.4): for a side-effecting LHS like
-    // `f() is some` or `(a || b) is some`, this AST emit path currently
-    // evaluates the LHS twice. The legacy STRING pipeline (rewrite.ts
-    // _rewriteParenthesizedIsOp) handled single-evaluation via a temp-var
-    // assignment for the parenthesized form. Single-eval in the AST emit
-    // path is a known follow-on (Phase B-2); the current double-eval is a
-    // strict improvement over the prior Phase A state — where compound
-    // bare-form LHS was either rejected at parse or routed through a broken
-    // multi-pass suffix substitution chain that produced invalid JS.
+    // For a NON-TRIVIAL LHS — anything that can side-effect on evaluation
+    // (calls, member access through getters, index access through Proxy
+    // traps, binary/ternary/assign sub-expressions, etc.) — SPEC §42.2.4
+    // line 18436 mandates exactly-once evaluation. Phase B-2 (2026-05-17)
+    // closes this by wrapping non-trivial LHS in a single-eval IIFE:
+    //
+    //     ((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(<lhs>)
+    //
+    // The IIFE form evaluates `<lhs>` exactly once, binds the result, and
+    // performs both null and undefined checks against the bound value. This
+    // satisfies SPEC §42.2.4: "The compiler SHALL evaluate `expr` exactly
+    // once. Any side effects of `expr` occur exactly once."
+    //
+    // The IIFE arg position naturally parenthesizes its argument (function
+    // call arg-list is its own paren scope), so for non-trivial LHS the
+    // `needsIsLhsParenWrap` defensive wrap becomes redundant — the IIFE
+    // arg list already provides the bracketing. Trivial LHS keeps the
+    // historical inline form + paren-wrap helper for binary/ternary/etc.
+    // shapes that need it (these can't be reached when LHS is "ident" or
+    // "lit", but the branch is retained for completeness / defense).
+    //
+    // The legacy STRING pipeline (rewrite.ts _rewriteParenthesizedIsOp)
+    // handled single-evaluation via a temp-var assignment for the parenth-
+    // esized form. That path remains intact for the older code paths still
+    // routing through string rewrites; this AST emit path now matches the
+    // single-eval guarantee for the same shapes.
     case "is-not": {
-      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-      return `(${lhs} === null || ${lhs} === undefined)`;
+      if (isTrivialIsLhs(node.left)) {
+        const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+        return `(${lhs} === null || ${lhs} === undefined)`;
+      }
+      // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
+      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} === null || ${IS_OP_IIFE_LOCAL} === undefined)(${left})`;
     }
     case "is-some": {
-      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-      return `(${lhs} !== null && ${lhs} !== undefined)`;
+      if (isTrivialIsLhs(node.left)) {
+        const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+        return `(${lhs} !== null && ${lhs} !== undefined)`;
+      }
+      // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
+      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
     }
     case "is-not-not": {
-      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-      return `(${lhs} !== null && ${lhs} !== undefined)`;
+      if (isTrivialIsLhs(node.left)) {
+        const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+        return `(${lhs} !== null && ${lhs} !== undefined)`;
+      }
+      // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
+      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
     }
 
     // §43 enum membership: x is .Variant → x === "Variant" (unit variant) OR

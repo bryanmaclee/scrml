@@ -503,8 +503,15 @@ describe("Phase B — end-to-end compile: emitted JS is well-formed", () => {
   test("paren-grouped binary `(@a || @b) is some` emits a paren-wrapped LHS (regression for precedence bug)", () => {
     // The whole binary `@a || @b` is the predicate target. The emitted JS
     // must NOT produce `a || b !== null && a || b !== undefined` (which
-    // would re-associate as a `||/&&/||` salad). Verify the paren-wrap
-    // around the LHS is present in the absence check.
+    // would re-associate as a `||/&&/||` salad).
+    //
+    // Phase B-2 (2026-05-17): non-trivial LHS (binary) is now wrapped in a
+    // single-eval IIFE per SPEC §42.2.4 line 18436. The emitted form is:
+    //   `((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(<a> || <b>)`
+    // The `||` connective still appears INSIDE the IIFE arg position
+    // (preserving the binary's own short-circuit semantics), and the
+    // null/undefined checks now happen against the bound `__scrml_is_v`
+    // rather than re-inlining the binary.
     const source = `<program>
 \${
   <a> = 0
@@ -521,16 +528,18 @@ describe("Phase B — end-to-end compile: emitted JS is well-formed", () => {
     const fatals = (result.errors ?? []).filter((e) => e.code !== "W-PROGRAM-SPA-INFERRED" && (e.severity ?? "error") === "error");
     expect(fatals).toEqual([]);
     expect(result.clientJs).not.toContain("__scrml_is_some_suffix__");
-    // The emission for `(binary) !== null` MUST have parens around the LHS
-    // binary. The output looks like:
-    //   `((_scrml_reactive_get("a") || _scrml_reactive_get("b")) !== null && ...)`
-    // so we match the closing-paren-immediately-before-`!== null` shape.
-    expect(result.clientJs).toMatch(/\)\s*!==\s*null/);
-    expect(result.clientJs).toMatch(/\)\s*!==\s*undefined/);
-    // Critical: the `||` must appear PRECEDING the `!== null` check (it's
-    // wrapped in parens whose details are runtime-helper-noisy, so we just
-    // check the relative ordering on a single line of the output).
-    expect(result.clientJs).toMatch(/\|\|.*\)\s*!==\s*null/);
+    // Phase B-2 IIFE wrap: the IIFE local `__scrml_is_v` must appear.
+    expect(result.clientJs).toContain("__scrml_is_v");
+    // The null + undefined checks now bind against the IIFE local.
+    expect(result.clientJs).toMatch(/__scrml_is_v\s*!==\s*null/);
+    expect(result.clientJs).toMatch(/__scrml_is_v\s*!==\s*undefined/);
+    // Critical: the `||` must still appear (the binary is preserved as the
+    // IIFE arg — short-circuit semantics retained).
+    expect(result.clientJs).toMatch(/\|\|/);
+    // The binary occurs INSIDE the IIFE arg-list parens. We verify the
+    // structural shape: the IIFE callsite is followed by an arg-list that
+    // contains the `||` connective.
+    expect(result.clientJs).toMatch(/\(__scrml_is_v\)\s*=>[\s\S]*?\|\|/);
   });
 
   test("nested-call LHS `re.exec(str.trim()) is some` emits the receiver-call chain intact", () => {
@@ -551,6 +560,14 @@ describe("Phase B — end-to-end compile: emitted JS is well-formed", () => {
     // The full chain `re.exec(str.trim())` must be the absence-check operand,
     // not just `str.trim()` (the inversion bug Phase A's multi-pass regex
     // chain produced before this fix).
-    expect(result.clientJs).toMatch(/re\.exec\(\s*str\.trim\(\)\s*\)\s*!==\s*null/);
+    //
+    // Phase B-2 (2026-05-17): the call-LHS is now wrapped in a single-eval
+    // IIFE. The emitted form is:
+    //   `((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(re.exec(str.trim()))`
+    // The original receiver-call chain still appears verbatim inside the
+    // IIFE arg position — verify both the chain integrity AND the IIFE wrap.
+    expect(result.clientJs).toMatch(/re\.exec\(\s*str\.trim\(\)\s*\)/);
+    expect(result.clientJs).toContain("__scrml_is_v");
+    expect(result.clientJs).toMatch(/__scrml_is_v\s*!==\s*null/);
   });
 });

@@ -91,7 +91,13 @@ describe("A1 — `@expr.member is not` ternary in ${} markup interpolation", () 
     expect(clientJs).toContain('_scrml_reactive_get("currentLoad").origin_address');
     // The `is not` lowering must produce a null/undefined narrowing check, not
     // a stray reference to a bare identifier or a placeholder leak.
-    expect(clientJs).toMatch(/origin_address === null \|\| .*origin_address === undefined/);
+    //
+    // Phase B-2 (2026-05-17): non-trivial LHS (member access) is now wrapped
+    // in a single-eval IIFE per SPEC §42.2.4 line 18436. The emitted absence
+    // check now binds against the IIFE local `__scrml_is_v` instead of
+    // re-inlining `origin_address` twice. The narrowing-check shape is now:
+    //   `((__scrml_is_v) => __scrml_is_v === null || __scrml_is_v === undefined)(<lhs>)`
+    expect(clientJs).toMatch(/__scrml_is_v === null \|\| __scrml_is_v === undefined/);
     expect(clientJs).not.toContain("__scrml_is_not__");
   });
 
