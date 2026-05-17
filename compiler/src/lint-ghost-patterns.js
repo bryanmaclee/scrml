@@ -519,6 +519,79 @@ const PATTERNS = [
     skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
   },
 
+  // Pattern 18: Vue composition-API calls (W-LINT-017, S97).
+  //
+  // Detects the most common reactivity / effect / lifecycle / composition
+  // entry points: `ref`, `reactive`, `computed`, `readonly`, `shallowRef`,
+  // `shallowReactive`, `toRef`, `toRefs`, `unref`, `watch`, `watchEffect`,
+  // `watchPostEffect`, `watchSyncEffect`, `onMounted`, `onUpdated`,
+  // `onUnmounted`, `onBeforeMount`, `onBeforeUpdate`, `onBeforeUnmount`,
+  // `onErrorCaptured`, `provide`, `inject`, `defineComponent`, `defineProps`,
+  // `defineEmits`, `defineExpose`.
+  //
+  // Skips: `useId` is omitted (also a React 19 hook; covered by W-LINT-016).
+  // `onMount`-without-the-`ed`-suffix is NOT included — too risky given
+  // scrml may grow its own lifecycle vocabulary using similar names.
+  //
+  // Match form is `\bword\s*\(` — the call. Skip in comments.
+  {
+    regex: /\b(ref|reactive|computed|readonly|shallowRef|shallowReactive|toRef|toRefs|unref|watch|watchEffect|watchPostEffect|watchSyncEffect|onMounted|onUpdated|onUnmounted|onBeforeMount|onBeforeUpdate|onBeforeUnmount|onErrorCaptured|provide|inject|defineComponent|defineProps|defineEmits|defineExpose)\s*\(/g,
+    ghost: "ref() / reactive() / computed() / watch() / onMounted() etc. (Vue composition API)",
+    correction: "scrml has no Vue composition API. State: `<x> = init` (read `@x`, write `@x = expr`). Computed: `const <x> = expr` (derived cell, deps auto-tracked). Watch / effect: reactive `${...}` blocks fire on dep change. Lifecycle: `<onMount>` / `<onCleanup>` (§6.7). Props: component `props={...}` block (§15.10). See SPEC §6 (state), §6.7 (lifecycle), §15 (components).",
+    see: "§6, §6.7, §15",
+    code: "W-LINT-017",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
+  // Pattern 19: Svelte store API calls (W-LINT-018, S97).
+  //
+  // Detects `writable`, `readable`, `derived` (from `svelte/store`), and
+  // `tick`, `setContext`, `getContext`, `hasContext`, `createEventDispatcher`,
+  // `beforeUpdate`, `afterUpdate` (lifecycle / context helpers from `svelte`).
+  //
+  // Skips: bare `derived` would collide with scrml's `derived=expr` engine
+  // attribute (§51.0.J L20). The pattern requires `derived\s*\(` (call form)
+  // to disambiguate — engine attribute is `derived=` not `derived(`.
+  //
+  // Also skips: `onMount` / `onDestroy` — too risky given scrml may grow its
+  // own lifecycle vocabulary using similar names. `$store` auto-subscribe is
+  // ALSO NOT detected here — distinguishing legitimate `$identifier` (rare
+  // but possible) from Svelte auto-subscribe needs more context than this
+  // pass has.
+  {
+    regex: /\b(writable|readable|derived|tick|setContext|getContext|hasContext|createEventDispatcher|beforeUpdate|afterUpdate)\s*\(/g,
+    ghost: "writable() / readable() / derived() etc. (Svelte store / lifecycle helper)",
+    correction: "scrml has no Svelte stores. State: `<x> = init` is automatically reactive (no store wrapper needed). Cross-component sharing: declare at `<program>` scope. Derived: `const <x> = expr` (auto-tracks deps). Effects: reactive `${...}` blocks. Lifecycle: `<onMount>` / `<onCleanup>` (§6.7). Context: component props + state passing. Events: `${dispatch(...)}` or direct handler call. See SPEC §6 (state), §6.7 (lifecycle), §15 (components).",
+    see: "§6, §6.7, §15",
+    code: "W-LINT-018",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
+  // Pattern 20: Solid reactivity / effect calls (W-LINT-019, S97).
+  //
+  // Detects: `createSignal`, `createEffect`, `createMemo`, `createStore`,
+  // `createResource`, `createComputed`, `createDeferred`, `createSelector`,
+  // `createReaction`, `createMutable`, `createRoot`, `createContext`,
+  // `mergeProps`, `splitProps`, `untrack`, `batch`.
+  //
+  // Skips: `For`, `Show`, `Switch`, `Match`, `Index` — these are Solid
+  // CONTROL-FLOW COMPONENTS used as markup tags. Detecting them needs the
+  // markup-tag context (which this pre-Stage-2 lint doesn't have); also
+  // PascalCase-bare-component-tags fire E-COMPONENT-020 if they're not
+  // declared. Adopter feedback already exists via that path.
+  //
+  // `useContext` from `solid-js` collides with `useContext` from React
+  // (covered by W-LINT-016 already — same lint message; one diagnostic
+  // per call site is fine).
+  {
+    regex: /\b(createSignal|createEffect|createMemo|createStore|createResource|createComputed|createDeferred|createSelector|createReaction|createMutable|createRoot|createContext|mergeProps|splitProps|untrack|batch)\s*\(/g,
+    ghost: "createSignal() / createEffect() / createMemo() / createStore() etc. (Solid primitive)",
+    correction: "scrml has no Solid primitives. State: `<x> = init` (Solid signal). Effects: reactive `${...}` blocks (Solid createEffect). Memo: `const <x> = expr` (Solid createMemo). Store: nested compound state `<obj><field> = init</>` (§6.3 Variant C). Resource: server functions `${ server function fetch() { ... } }` + RemoteData enum (§13.5). Lifecycle: `<onMount>` / `<onCleanup>` (§6.7). Untrack / batch are no-ops in scrml — the compiler manages reactivity granularity. See SPEC §6, §6.3, §6.7, §13.5.",
+    see: "§6, §6.3, §6.7, §13.5",
+    code: "W-LINT-019",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
   // Pattern 16: W-LIFECYCLE-CANDIDATE — string-discriminator trap.
   //
   // S64 debate-04 verdict A+ #2 (string-switch trap, gingerbill design insight):

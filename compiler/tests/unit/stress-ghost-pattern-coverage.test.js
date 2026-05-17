@@ -162,12 +162,12 @@ const VUE_FIXTURES = [
   {
     name: "Vue ref() composition API",
     src: `<program>\${ const count = ref(0) }<div>\${count}</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-017" },
   },
   {
     name: "Vue reactive() composition API",
     src: `<program>\${ const state = reactive({ count: 0 }) }<div>\${state.count}</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-017" },
   },
   {
     name: "Vue {{interpolation}} double-brace",
@@ -200,7 +200,7 @@ const SVELTE_FIXTURES = [
   {
     name: "Svelte writable() store",
     src: `<program>\${ const count = writable(0) }<div>\${count}</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-018" },
   },
 ];
 
@@ -208,12 +208,12 @@ const SOLID_FIXTURES = [
   {
     name: "Solid createSignal hook",
     src: `<program>\${ const [count, setCount] = createSignal(0) }<div>\${count}</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-019" },
   },
   {
     name: "Solid createEffect hook",
     src: `<program>\${ createEffect(() => { console.log("mount") }) }<div>x</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-019" },
   },
 ];
 
