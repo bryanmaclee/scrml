@@ -158,11 +158,11 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-ERRORS-001" class="text-rose-700 underline">E-ERRORS-001</a> — &lt;errors of=expr/&gt; missing of= attribute</li>
-            <li><a href="/reference/errors/E-ERRORS-002" class="text-rose-700 underline">E-ERRORS-002</a> — &lt;errors&gt; on a cell with no validators</li>
-            <li><a href="/reference/errors/E-SYNTHESIZED-WRITE" class="text-rose-700 underline">E-SYNTHESIZED-WRITE</a> — write to read-only @x.isValid / .errors / .touched</li>
-            <li><a href="/reference/errors/E-DERIVED-WITH-VALIDATORS" class="text-rose-700 underline">E-DERIVED-WITH-VALIDATORS</a> — validators on const-derived cells (forbidden)</li>
-            <li><a href="/reference/errors/E-VALIDATOR-CIRCULAR-DEP" class="text-rose-700 underline">E-VALIDATOR-CIRCULAR-DEP</a> — predicate-arg cycle across cells</li>
+            <li><a href="/pages/reference/errors/E-ERRORS-001" class="text-rose-700 underline">E-ERRORS-001</a> — &lt;errors of=expr/&gt; missing of= attribute</li>
+            <li><a href="/pages/reference/errors/E-ERRORS-002" class="text-rose-700 underline">E-ERRORS-002</a> — &lt;errors&gt; on a cell with no validators</li>
+            <li><a href="/pages/reference/errors/E-SYNTHESIZED-WRITE" class="text-rose-700 underline">E-SYNTHESIZED-WRITE</a> — write to read-only @x.isValid / .errors / .touched</li>
+            <li><a href="/pages/reference/errors/E-DERIVED-WITH-VALIDATORS" class="text-rose-700 underline">E-DERIVED-WITH-VALIDATORS</a> — validators on const-derived cells (forbidden)</li>
+            <li><a href="/pages/reference/errors/E-VALIDATOR-CIRCULAR-DEP" class="text-rose-700 underline">E-VALIDATOR-CIRCULAR-DEP</a> — predicate-arg cycle across cells</li>
         </ul>
 
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
@@ -174,7 +174,7 @@
                 <strong>The validity surface is read-only.</strong> Writing
                 to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@signup.isValid = true</code>
                 fires
-                <a href="/reference/errors/E-SYNTHESIZED-WRITE"
+                <a href="/pages/reference/errors/E-SYNTHESIZED-WRITE"
                    class="font-mono text-xs text-rose-700 underline">E-SYNTHESIZED-WRITE</a>
                 at compile time. To dismiss errors, fix the underlying
                 cell value. To bypass validity entirely, the cell shouldn't
@@ -184,7 +184,7 @@
                 <strong>Derived cells cannot carry validators.</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;fullName req&gt; = …</code>
                 fires
-                <a href="/reference/errors/E-DERIVED-WITH-VALIDATORS"
+                <a href="/pages/reference/errors/E-DERIVED-WITH-VALIDATORS"
                    class="font-mono text-xs text-rose-700 underline">E-DERIVED-WITH-VALIDATORS</a>.
                 Use a refinement-type predicate at the type level instead
                 — derived cells are an expression, not user input.
@@ -219,12 +219,12 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/keywords/req" class="text-blue-700 hover:text-blue-900 underline">req</a>
+                <a href="/pages/reference/keywords/req" class="text-blue-700 hover:text-blue-900 underline">req</a>
                 — required validator. The most common validator in scrml
                 code.
             </li>
             <li>
-                <a href="/reference/keywords/is-some" class="text-blue-700 hover:text-blue-900 underline">is some</a>
+                <a href="/pages/reference/keywords/is-some" class="text-blue-700 hover:text-blue-900 underline">is some</a>
                 — distinct from <code class="font-mono text-sm">req</code>.
                 <code class="font-mono text-sm">is some</code>
                 checks existence (<code class="font-mono text-sm">""</code> IS some);
@@ -232,19 +232,19 @@
                 (<code class="font-mono text-sm">""</code> fails req).
             </li>
             <li>
-                <a href="/reference/contexts/meta-^{}" class="text-blue-700 hover:text-blue-900 underline">registerMessages</a>
+                <a href="/pages/reference/contexts/meta-^{}" class="text-blue-700 hover:text-blue-900 underline">registerMessages</a>
                 via <code class="font-mono text-sm">scrml:data</code> — project-level message catalog
                 for the 4-level resolution chain.
             </li>
             <li>
-                <a href="/reference/elements/schema" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/schema" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;schema&gt;
                 </a>
                 — third locus for the universal-core vocabulary. Schema
                 columns can carry the same predicates.
             </li>
             <li>
-                <a href="/learn/validators" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/learn/validators" class="text-blue-700 hover:text-blue-900 underline">
                     Learn: Validators
                 </a>
                 — narrative walkthrough.

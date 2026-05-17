@@ -153,9 +153,9 @@ server function deleteContact(id)
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-SQL-006" class="text-rose-700 underline">E-SQL-006</a> — .prepare() removed (use template-string SQL directly)</li>
-            <li><a href="/reference/errors/E-SQL-008" class="text-rose-700 underline">E-SQL-008</a> — bracket-matched ?&#123; scanner caught unmatched brace</li>
-            <li><a href="/reference/errors/E-RI-002" class="text-rose-700 underline">E-RI-002</a> — server-side ?&#123;&#125; mutation outside expected scope</li>
+            <li><a href="/pages/reference/errors/E-SQL-006" class="text-rose-700 underline">E-SQL-006</a> — .prepare() removed (use template-string SQL directly)</li>
+            <li><a href="/pages/reference/errors/E-SQL-008" class="text-rose-700 underline">E-SQL-008</a> — bracket-matched ?&#123; scanner caught unmatched brace</li>
+            <li><a href="/pages/reference/errors/E-RI-002" class="text-rose-700 underline">E-RI-002</a> — server-side ?&#123;&#125; mutation outside expected scope</li>
         </ul>
 
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
@@ -171,7 +171,7 @@ server function deleteContact(id)
                 The pre-v0.next
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.prepare()</code>
                 method fires
-                <a href="/reference/errors/E-SQL-006"
+                <a href="/pages/reference/errors/E-SQL-006"
                    class="font-mono text-xs text-rose-700 underline">E-SQL-006</a>.
                 Use the template-string form directly:
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;`SELECT …`&#125;.all()</code>.
@@ -219,35 +219,35 @@ server function deleteContact(id)
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/elements/db" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/db" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;db src=… tables=…&gt;
                 </a> — database declaration. Pairs with
                 <code class="font-mono text-sm">?&#123;&#125;</code> sites by lexical
                 scope.
             </li>
             <li>
-                <a href="/reference/elements/schema" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/schema" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;schema&gt;
                 </a> — SQL-mirror schema declarations. Owns table shape
                 + migration diff.
             </li>
             <li>
-                <a href="/reference/keywords/lift" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/keywords/lift" class="text-blue-700 hover:text-blue-900 underline">
                     lift
                 </a> — value surfacing. The canonical "return rows" verb in
                 server function bodies that load data for the caller.
             </li>
             <li>
-                <a href="/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;program db=…&gt;
                 </a> — app-level database default. Each route can override
                 via
-                <a href="/reference/elements/page" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/page" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;page db=…&gt;
                 </a>.
             </li>
             <li>
-                <a href="/learn/server-boundary" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/learn/server-boundary" class="text-blue-700 hover:text-blue-900 underline">
                     Learn: The server boundary disappears
                 </a> — narrative walkthrough of route inference + auto-await.
             </li>

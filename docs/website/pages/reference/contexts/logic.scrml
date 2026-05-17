@@ -173,11 +173,11 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
             Common errors from logic context misuse
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-NAME-COLLIDES-STATE" class="text-rose-700 underline">E-NAME-COLLIDES-STATE</a> &mdash; local shadows registered state cell name</li>
-            <li><a href="/reference/errors/E-SCOPE-001" class="text-rose-700 underline">E-SCOPE-001</a> &mdash; undeclared identifier in logic expression</li>
-            <li><a href="/reference/errors/E-MULTI-STATEMENT-HANDLER" class="text-rose-700 underline">E-MULTI-STATEMENT-HANDLER</a> &mdash; multi-statement body in attribute-value position</li>
-            <li><a href="/reference/errors/E-PURE-VIOLATION" class="text-rose-700 underline">E-PURE-VIOLATION</a> &mdash; impure work inside a pure scope</li>
-            <li><a href="/reference/errors/E-EQ-004" class="text-rose-700 underline">E-EQ-004</a> &mdash; === / !== forbidden; scrml uses == / != per &sect;45</li>
+            <li><a href="/pages/reference/errors/E-NAME-COLLIDES-STATE" class="text-rose-700 underline">E-NAME-COLLIDES-STATE</a> &mdash; local shadows registered state cell name</li>
+            <li><a href="/pages/reference/errors/E-SCOPE-001" class="text-rose-700 underline">E-SCOPE-001</a> &mdash; undeclared identifier in logic expression</li>
+            <li><a href="/pages/reference/errors/E-MULTI-STATEMENT-HANDLER" class="text-rose-700 underline">E-MULTI-STATEMENT-HANDLER</a> &mdash; multi-statement body in attribute-value position</li>
+            <li><a href="/pages/reference/errors/E-PURE-VIOLATION" class="text-rose-700 underline">E-PURE-VIOLATION</a> &mdash; impure work inside a pure scope</li>
+            <li><a href="/pages/reference/errors/E-EQ-004" class="text-rose-700 underline">E-EQ-004</a> &mdash; === / !== forbidden; scrml uses == / != per &sect;45</li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
                     ?&#123; ... &#125;
                 </a> &mdash; SQL context. Per-handler coalescing,
                 N+1 loop hoist, multi-database adaptation.

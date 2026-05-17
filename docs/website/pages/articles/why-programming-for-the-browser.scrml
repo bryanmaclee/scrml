@@ -267,14 +267,14 @@
 
         <ul class="space-y-2 text-slate-700">
             <li>
-                <a href="/articles/npm-myth" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/articles/npm-myth" class="text-blue-700 hover:text-blue-900 underline">
                     What npm package do you actually need in scrml?
                 </a>
                 &mdash; The package-list-collapses argument worked through one tier at a
                 time.
             </li>
             <li>
-                <a href="/articles/lsp-and-giti-advantages" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/articles/lsp-and-giti-advantages" class="text-blue-700 hover:text-blue-900 underline">
                     What scrml's LSP can do that no other LSP can, and why giti follows from the same principle
                 </a>
                 &mdash; What vertical-integration unlocks, in two pieces of the

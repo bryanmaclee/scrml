@@ -70,19 +70,19 @@
             </h3>
             <ul class="space-y-1">
                 <li>
-                    <a href="/reference/elements/engine"
+                    <a href="/pages/reference/elements/engine"
                        class="text-blue-700 hover:text-blue-900 underline">
                         &lt;engine&gt; — state machines as a first-class element
                     </a>
                 </li>
                 <li>
-                    <a href="/reference/elements/errors"
+                    <a href="/pages/reference/elements/errors"
                        class="text-blue-700 hover:text-blue-900 underline">
                         &lt;errors of=…/&gt; — the auto-synthesized validity surface
                     </a>
                 </li>
                 <li>
-                    <a href="/reference/contexts/sql"
+                    <a href="/pages/reference/contexts/sql"
                        class="text-blue-700 hover:text-blue-900 underline">
                         ?{ } — SQL as syntax; the server boundary disappears
                     </a>
@@ -91,15 +91,15 @@
         </div>
 
         <div class="mt-8 flex flex-wrap gap-3">
-            <a href="/getting-started"
+            <a href="/pages/getting-started/index"
                class="px-5 py-2.5 bg-slate-900 text-white rounded-md font-medium hover:bg-slate-800">
                 New here? &rarr; Get started
             </a>
-            <a href="/reference"
+            <a href="/pages/reference/index"
                class="px-5 py-2.5 border border-slate-300 text-slate-900 rounded-md font-medium hover:bg-slate-50">
                 Ready to dig in &rarr; Reference
             </a>
-            <a href="/articles"
+            <a href="/pages/articles/index"
                class="px-5 py-2.5 border border-slate-300 text-slate-900 rounded-md font-medium hover:bg-slate-50">
                 Want the why? &rarr; Articles
             </a>

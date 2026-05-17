@@ -41,32 +41,32 @@
 
         <ul class="space-y-2 text-slate-700">
             <li>
-                <a href="/reference/elements/engine" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/engine" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;engine&gt;
                 </a> &mdash; Tier 2 state machine. The canonical structural form for UI as a fully-handled state machine.
             </li>
             <li>
-                <a href="/reference/elements/match" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/match" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;match&gt;
                 </a> &mdash; Tier 1 pattern matching. Structural exhaustiveness, no active rules; promotes mechanically to &lt;engine&gt;.
             </li>
             <li>
-                <a href="/reference/elements/errors" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/errors" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;errors&gt;
                 </a> &mdash; First-class element for rendering the auto-synthesized validity surface.
             </li>
             <li>
-                <a href="/reference/elements/program" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/program" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;program&gt;
                 </a> &mdash; The root container. Owns route inference, middleware, channels, documentary metadata.
             </li>
             <li>
-                <a href="/reference/elements/channel" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/channel" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;channel&gt;
                 </a> &mdash; Real-time multi-client state. V5-strict body, auto-sync, no &#64;shared modifier.
             </li>
             <li>
-                <a href="/reference/elements/auth" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/auth" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;auth&gt;
                 </a> &mdash; Per-role visibility constraint. Drives the per-route per-role artifact splitter.
             </li>
@@ -95,12 +95,12 @@
 
         <ul class="space-y-2 text-slate-700">
             <li>
-                <a href="/reference/contexts/logic" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/contexts/logic" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &#36;&#123; ... &#125;
                 </a> &mdash; Logic. The foundational context; reactive computation, control flow, inline writes.
             </li>
             <li>
-                <a href="/reference/contexts/sql" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/contexts/sql" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     ?&#123; ... &#125;
                 </a> &mdash; SQL. Per-handler coalescing, N+1 loop hoist, multi-database adaptation.
             </li>

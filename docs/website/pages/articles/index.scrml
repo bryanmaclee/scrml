@@ -28,7 +28,7 @@
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The why</h2>
         <ul class="space-y-3 text-slate-700">
             <li>
-                <a href="/articles/why-programming-for-the-browser"
+                <a href="/pages/articles/why-programming-for-the-browser"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     Why programming for the browser needs a different kind of language
                 </a>
@@ -38,7 +38,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/components-are-states"
+                <a href="/pages/articles/components-are-states"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     Components are states
                 </a>
@@ -49,7 +49,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/server-boundary-disappears"
+                <a href="/pages/articles/server-boundary-disappears"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     The server boundary disappears
                 </a>
@@ -64,7 +64,7 @@
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The what</h2>
         <ul class="space-y-3 text-slate-700">
             <li>
-                <a href="/articles/tier-ladder-promotion"
+                <a href="/pages/articles/tier-ladder-promotion"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     The Tier 0/1/2 promotion ladder
                 </a>
@@ -76,7 +76,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/why-deprecate-overloading"
+                <a href="/pages/articles/why-deprecate-overloading"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     Why scrml has to deprecate function and component overloading
                 </a>
@@ -87,7 +87,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/css-without-build-step"
+                <a href="/pages/articles/css-without-build-step"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     CSS without a build step
                 </a>
@@ -102,7 +102,7 @@
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The why-not (existing tools)</h2>
         <ul class="space-y-3 text-slate-700">
             <li>
-                <a href="/articles/npm-myth"
+                <a href="/pages/articles/npm-myth"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     What npm package do you actually need in scrml?
                 </a>
@@ -113,7 +113,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/orm-trap"
+                <a href="/pages/articles/orm-trap"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     The ORM trap
                 </a>
@@ -124,7 +124,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/lsp-and-giti-advantages"
+                <a href="/pages/articles/lsp-and-giti-advantages"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     What scrml's LSP can do that no other LSP can
                 </a>
@@ -140,7 +140,7 @@
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Release announcements</h2>
         <ul class="space-y-3 text-slate-700">
             <li>
-                <a href="/articles/v0.3.0-announce"
+                <a href="/pages/articles/v0.3.0-announce"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     scrml v0.3.0 — Approach A complete: per-route, per-role, content-addressed
                 </a>
@@ -150,7 +150,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/v0.2.0-announce"
+                <a href="/pages/articles/v0.2.0-announce"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     scrml v0.2.0 — the foundational reactive surface
                 </a>
@@ -160,7 +160,7 @@
                 </span>
             </li>
             <li>
-                <a href="/articles/roadmap-2026-05-14"
+                <a href="/pages/articles/roadmap-2026-05-14"
                    class="text-blue-700 hover:text-blue-900 underline font-medium">
                     Roadmap from v0.3 forward
                 </a>

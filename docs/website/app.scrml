@@ -32,13 +32,15 @@
 
     <header class="border-b border-slate-200 bg-white sticky top-0 z-10">
         <div class="max-w-6xl mx-auto px-6 py-3 flex items-center gap-8">
-            <a href="/" class="font-mono font-bold text-lg text-slate-900">scrml.dev</a>
+            <a href="/pages/index" class="font-mono font-bold text-lg text-slate-900">scrml.dev</a>
             <nav class="flex items-center gap-6 text-sm text-slate-700">
-                <a href="/getting-started" class="hover:text-slate-900">Get started</a>
-                <a href="/learn" class="hover:text-slate-900">Learn</a>
-                <a href="/reference" class="hover:text-slate-900">Reference</a>
-                <a href="/articles" class="hover:text-slate-900">Articles</a>
-                <a href="/about" class="hover:text-slate-900">About</a>
+                // S99 patch: hard-coded /pages/ prefixes pending dev-server
+                // route-inference URL-rewrite (bug filed to Machine A).
+                <a href="/pages/getting-started/index" class="hover:text-slate-900">Get started</a>
+                <a href="/pages/learn/index" class="hover:text-slate-900">Learn</a>
+                <a href="/pages/reference/index" class="hover:text-slate-900">Reference</a>
+                <a href="/pages/articles/index" class="hover:text-slate-900">Articles</a>
+                <a href="/pages/about/index" class="hover:text-slate-900">About</a>
             </nav>
             <div class="ml-auto flex items-center gap-4">
                 <span class="text-xs text-slate-500 font-mono">${VERSION}</span>
@@ -59,14 +61,14 @@
             <div>
                 <div class="font-semibold text-slate-900 mb-2">scrml</div>
                 <a href="https://github.com/bryanmaclee/scrmlTS" class="block hover:text-slate-900">GitHub</a>
-                <a href="/about/changelog" class="block hover:text-slate-900">Changelog</a>
-                <a href="/about/philosophy" class="block hover:text-slate-900">Philosophy</a>
+                <a href="/pages/about/changelog" class="block hover:text-slate-900">Changelog</a>
+                <a href="/pages/about/philosophy" class="block hover:text-slate-900">Philosophy</a>
             </div>
             <div>
                 <div class="font-semibold text-slate-900 mb-2">Docs</div>
-                <a href="/getting-started" class="block hover:text-slate-900">Get started</a>
-                <a href="/reference" class="block hover:text-slate-900">Reference</a>
-                <a href="/learn" class="block hover:text-slate-900">Learn</a>
+                <a href="/pages/getting-started/index" class="block hover:text-slate-900">Get started</a>
+                <a href="/pages/reference/index" class="block hover:text-slate-900">Reference</a>
+                <a href="/pages/learn/index" class="block hover:text-slate-900">Learn</a>
             </div>
             <div class="ml-auto text-xs">
                 MIT licensed. <span class="font-mono">${VERSION}</span> docs generated 2026-05-17.

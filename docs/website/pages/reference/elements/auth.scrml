@@ -60,7 +60,7 @@
             composition of statically-known operands) ship per-role
             bundles via the artifact splitter. Anything else falls
             back to a runtime gate and emits
-            <a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK"
+            <a href="/pages/reference/errors/W-AUTH-RUNTIME-FALLBACK"
                class="font-mono text-xs text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a>.
         </p>
 
@@ -128,7 +128,7 @@
                 calls, arbitrary
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>)
                 emit
-                <a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK"
+                <a href="/pages/reference/errors/W-AUTH-RUNTIME-FALLBACK"
                    class="font-mono text-xs text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a>
                 and ship the gated component eagerly with a runtime
                 gate. Per &sect;40.9.5.
@@ -139,10 +139,10 @@
                 value must resolve to a variant of an enum reachable
                 from the entry file. Ambiguous role-enum discovery
                 fires
-                <a href="/reference/errors/E-AUTH-GRAPH-002"
+                <a href="/pages/reference/errors/E-AUTH-GRAPH-002"
                    class="font-mono text-xs text-rose-700 underline">E-AUTH-GRAPH-002</a>.
                 Unknown role variants fire
-                <a href="/reference/errors/E-AUTH-GRAPH-003"
+                <a href="/pages/reference/errors/E-AUTH-GRAPH-003"
                    class="font-mono text-xs text-rose-700 underline">E-AUTH-GRAPH-003</a>.
             </li>
             <li>
@@ -153,7 +153,7 @@
                 isn't set AND no
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/login</code>
                 page exists, the compiler fires
-                <a href="/reference/errors/W-AUTH-LOGIN-MISSING"
+                <a href="/pages/reference/errors/W-AUTH-LOGIN-MISSING"
                    class="font-mono text-xs text-amber-700 underline">W-AUTH-LOGIN-MISSING</a>.
             </li>
             <li>
@@ -162,7 +162,7 @@
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>
                 attribute inherits the wrapper's role. The compiler
                 emits
-                <a href="/reference/errors/W-AUTH-PAGE-INFERRED"
+                <a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED"
                    class="font-mono text-xs text-blue-700 underline">W-AUTH-PAGE-INFERRED</a>
                 info-level so the inference is auditable.
             </li>
@@ -170,7 +170,7 @@
                 <strong>Redirect cross-ref check.</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">loginRedirect=</code>
                 strings that don't resolve to a known route emit
-                <a href="/reference/errors/I-AUTH-REDIRECT-UNRESOLVED"
+                <a href="/pages/reference/errors/I-AUTH-REDIRECT-UNRESOLVED"
                    class="font-mono text-xs text-blue-700 underline">I-AUTH-REDIRECT-UNRESOLVED</a>
                 info-level. Surfaces typos and missing scaffold pages.
             </li>
@@ -180,12 +180,12 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-AUTH-GRAPH-002" class="text-rose-700 underline">E-AUTH-GRAPH-002</a> &mdash; ambiguous role-enum discovery</li>
-            <li><a href="/reference/errors/E-AUTH-GRAPH-003" class="text-rose-700 underline">E-AUTH-GRAPH-003</a> &mdash; role variant not in resolved enum</li>
-            <li><a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK" class="text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a> &mdash; non-closed-form predicate</li>
-            <li><a href="/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherited role</li>
-            <li><a href="/reference/errors/W-AUTH-LOGIN-MISSING" class="text-amber-700 underline">W-AUTH-LOGIN-MISSING</a> &mdash; auth=required without login route</li>
-            <li><a href="/reference/errors/I-AUTH-REDIRECT-UNRESOLVED" class="text-blue-700 underline">I-AUTH-REDIRECT-UNRESOLVED</a> &mdash; redirect to unknown route</li>
+            <li><a href="/pages/reference/errors/E-AUTH-GRAPH-002" class="text-rose-700 underline">E-AUTH-GRAPH-002</a> &mdash; ambiguous role-enum discovery</li>
+            <li><a href="/pages/reference/errors/E-AUTH-GRAPH-003" class="text-rose-700 underline">E-AUTH-GRAPH-003</a> &mdash; role variant not in resolved enum</li>
+            <li><a href="/pages/reference/errors/W-AUTH-RUNTIME-FALLBACK" class="text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a> &mdash; non-closed-form predicate</li>
+            <li><a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherited role</li>
+            <li><a href="/pages/reference/errors/W-AUTH-LOGIN-MISSING" class="text-amber-700 underline">W-AUTH-LOGIN-MISSING</a> &mdash; auth=required without login route</li>
+            <li><a href="/pages/reference/errors/I-AUTH-REDIRECT-UNRESOLVED" class="text-blue-700 underline">I-AUTH-REDIRECT-UNRESOLVED</a> &mdash; redirect to unknown route</li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;program&gt;
                 </a> &mdash;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>

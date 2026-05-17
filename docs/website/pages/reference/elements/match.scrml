@@ -59,7 +59,7 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
             names the discriminating enum type. Every variant of that
             type must have an arm or the compiler fires
-            <a href="/reference/errors/E-MATCH-NOT-EXHAUSTIVE"
+            <a href="/pages/reference/errors/E-MATCH-NOT-EXHAUSTIVE"
                class="font-mono text-xs text-rose-700 underline">E-MATCH-NOT-EXHAUSTIVE</a>.
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">on=</code>
             picks the expression to &#109;atch against; if omitted, the
@@ -133,7 +133,7 @@
                 <strong>Exhaustiveness is structural.</strong> The
                 compiler reads the enum's variant list and requires an
                 arm per variant. Missing arms fire
-                <a href="/reference/errors/E-MATCH-NOT-EXHAUSTIVE"
+                <a href="/pages/reference/errors/E-MATCH-NOT-EXHAUSTIVE"
                    class="font-mono text-xs text-rose-700 underline">E-MATCH-NOT-EXHAUSTIVE</a>.
                 A
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_</code>
@@ -145,9 +145,9 @@
                 on a &lt;match&gt; arm is accepted syntactically but
                 does NOT enforce transitions &mdash; the surface is
                 the
-                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                <a href="/pages/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
                 feature. The compiler fires
-                <a href="/reference/errors/W-MATCH-RULE-INERT"
+                <a href="/pages/reference/errors/W-MATCH-RULE-INERT"
                    class="font-mono text-xs text-amber-700 underline">W-MATCH-RULE-INERT</a>
                 as an info lint nudging toward promotion. Per SPEC
                 &sect;18.0.2.
@@ -161,12 +161,12 @@
                 </strong>
                 &lt;match&gt; is pass-through case analysis &mdash;
                 state-machine effects belong on
-                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>.
+                <a href="/pages/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>.
                 Fires
-                <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
+                <a href="/pages/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
                    class="font-mono text-xs text-rose-700 underline">E-MATCH-EFFECT-FORBIDDEN</a>
                 or
-                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                <a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
                    class="font-mono text-xs text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>.
             </li>
             <li>
@@ -191,12 +191,12 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-MATCH-NOT-EXHAUSTIVE" class="text-rose-700 underline">E-MATCH-NOT-EXHAUSTIVE</a></li>
-            <li><a href="/reference/errors/W-MATCH-RULE-INERT" class="text-amber-700 underline">W-MATCH-RULE-INERT</a></li>
-            <li><a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN" class="text-rose-700 underline">E-MATCH-EFFECT-FORBIDDEN</a></li>
-            <li><a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a></li>
-            <li><a href="/reference/errors/E-VARIANT-AMBIGUOUS" class="text-rose-700 underline">E-VARIANT-AMBIGUOUS</a></li>
-            <li><a href="/reference/errors/I-MATCH-PROMOTABLE" class="text-blue-700 underline">I-MATCH-PROMOTABLE</a></li>
+            <li><a href="/pages/reference/errors/E-MATCH-NOT-EXHAUSTIVE" class="text-rose-700 underline">E-MATCH-NOT-EXHAUSTIVE</a></li>
+            <li><a href="/pages/reference/errors/W-MATCH-RULE-INERT" class="text-amber-700 underline">W-MATCH-RULE-INERT</a></li>
+            <li><a href="/pages/reference/errors/E-MATCH-EFFECT-FORBIDDEN" class="text-rose-700 underline">E-MATCH-EFFECT-FORBIDDEN</a></li>
+            <li><a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a></li>
+            <li><a href="/pages/reference/errors/E-VARIANT-AMBIGUOUS" class="text-rose-700 underline">E-VARIANT-AMBIGUOUS</a></li>
+            <li><a href="/pages/reference/errors/I-MATCH-PROMOTABLE" class="text-blue-700 underline">I-MATCH-PROMOTABLE</a></li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@
                 promotable.</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">if (@phase == .Idle) ... else if (@phase == .Loading) ...</code>
                 fires
-                <a href="/reference/errors/I-MATCH-PROMOTABLE"
+                <a href="/pages/reference/errors/I-MATCH-PROMOTABLE"
                    class="font-mono text-xs text-blue-700 underline">I-MATCH-PROMOTABLE</a>
                 info-level lint at the discrimination site. Run
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote --match &lt;file&gt;</code>
@@ -254,7 +254,7 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;engine&gt;
                 </a> &mdash; Tier 2 sibling. Same state-children
                 shape; rules ACTIVE; transitions enforced;
@@ -274,7 +274,7 @@
                 the I-MATCH-PROMOTABLE info-level lint.
             </li>
             <li>
-                <a href="/reference/elements/errors" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/errors" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;errors of=expr/&gt;
                 </a> &mdash; the canonical way to render the
                 ValidationError variants when a cell's validators fail.

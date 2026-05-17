@@ -62,7 +62,7 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
             names the discriminating enum type. Every variant of that type
             must have a corresponding state-child or the compiler fires
-            <a href="/reference/errors/E-ENGINE-INCOMPLETE-COVERAGE"
+            <a href="/pages/reference/errors/E-ENGINE-INCOMPLETE-COVERAGE"
                class="font-mono text-xs text-rose-700 underline">E-ENGINE-INCOMPLETE-COVERAGE</a>.
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
             picks the starting variant. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
@@ -143,7 +143,7 @@
                 </strong>
                 Compile-time when the target is statically resolvable;
                 runtime otherwise. Transitions not listed fire
-                <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+                <a href="/pages/reference/errors/E-ENGINE-INVALID-TRANSITION"
                    class="font-mono text-xs text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a>.
             </li>
             <li>
@@ -152,7 +152,7 @@
                     is required at top-level engines.
                 </strong>
                 Omission fires
-                <a href="/reference/errors/W-ENGINE-INITIAL-MISSING"
+                <a href="/pages/reference/errors/W-ENGINE-INITIAL-MISSING"
                    class="font-mono text-xs text-amber-700 underline">W-ENGINE-INITIAL-MISSING</a>.
                 Engines without an initial state are usually accidents.
             </li>
@@ -162,13 +162,13 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-ENGINE-VAR-DUPLICATE" class="text-rose-700 underline">E-ENGINE-VAR-DUPLICATE</a></li>
-            <li><a href="/reference/errors/E-ENGINE-INVALID-TRANSITION" class="text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a></li>
-            <li><a href="/reference/errors/W-ENGINE-INITIAL-MISSING" class="text-amber-700 underline">W-ENGINE-INITIAL-MISSING</a></li>
-            <li><a href="/reference/errors/W-ENGINE-SELF-WRITE-DETECTED" class="text-amber-700 underline">W-ENGINE-SELF-WRITE-DETECTED</a></li>
-            <li><a href="/reference/errors/E-COMPONENT-ENGINE-SCOPE" class="text-rose-700 underline">E-COMPONENT-ENGINE-SCOPE</a></li>
-            <li><a href="/reference/errors/E-HISTORY-NO-INNER-ENGINE" class="text-rose-700 underline">E-HISTORY-NO-INNER-ENGINE</a></li>
-            <li><a href="/reference/errors/E-INTERNAL-RULE-NOT-COMPOSITE" class="text-rose-700 underline">E-INTERNAL-RULE-NOT-COMPOSITE</a></li>
+            <li><a href="/pages/reference/errors/E-ENGINE-VAR-DUPLICATE" class="text-rose-700 underline">E-ENGINE-VAR-DUPLICATE</a></li>
+            <li><a href="/pages/reference/errors/E-ENGINE-INVALID-TRANSITION" class="text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a></li>
+            <li><a href="/pages/reference/errors/W-ENGINE-INITIAL-MISSING" class="text-amber-700 underline">W-ENGINE-INITIAL-MISSING</a></li>
+            <li><a href="/pages/reference/errors/W-ENGINE-SELF-WRITE-DETECTED" class="text-amber-700 underline">W-ENGINE-SELF-WRITE-DETECTED</a></li>
+            <li><a href="/pages/reference/errors/E-COMPONENT-ENGINE-SCOPE" class="text-rose-700 underline">E-COMPONENT-ENGINE-SCOPE</a></li>
+            <li><a href="/pages/reference/errors/E-HISTORY-NO-INNER-ENGINE" class="text-rose-700 underline">E-HISTORY-NO-INNER-ENGINE</a></li>
+            <li><a href="/pages/reference/errors/E-INTERNAL-RULE-NOT-COMPOSITE" class="text-rose-700 underline">E-INTERNAL-RULE-NOT-COMPOSITE</a></li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@
                 is silently discarded (v0.3 Option-d idempotent self-write
                 semantics). NOT a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
                 violation. The compiler emits
-                <a href="/reference/errors/W-ENGINE-SELF-WRITE-DETECTED"
+                <a href="/pages/reference/errors/W-ENGINE-SELF-WRITE-DETECTED"
                    class="font-mono text-xs text-amber-700 underline">W-ENGINE-SELF-WRITE-DETECTED</a>
                 to surface the no-op so it doesn't slip past code review.
             </li>
@@ -195,7 +195,7 @@
                 <strong>
                     <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
                     inside a component body fires
-                    <a href="/reference/errors/E-COMPONENT-ENGINE-SCOPE"
+                    <a href="/pages/reference/errors/E-COMPONENT-ENGINE-SCOPE"
                        class="font-mono text-xs text-rose-700 underline">E-COMPONENT-ENGINE-SCOPE</a>.
                 </strong>
                 Components are multi-instance; engines are singletons.
@@ -234,7 +234,7 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;match for=Type&gt;
                 </a> — Tier 1 sibling. Pattern matching as a block;
                 same exhaustiveness check, no active rules.
@@ -242,7 +242,7 @@
                 lifts to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>.
             </li>
             <li>
-                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;onTransition&gt;
                 </a> — effect on transition. Attributes:
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">from=</code>,
@@ -251,18 +251,18 @@
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">if=</code>.
             </li>
             <li>
-                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;onTimeout&gt;
                 </a> — temporal trigger as a state-child child element.
             </li>
             <li>
-                <a href="/reference/keywords/derived" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/keywords/derived" class="text-blue-700 hover:text-blue-900 underline">
                     derived=expr
                 </a> — derived engines. Compute the active variant from
                 another engine's state.
             </li>
             <li>
-                <a href="/reference/elements/auth" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/pages/reference/elements/auth" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;auth role=…&gt;
                 </a> — per-role visibility. Wraps engine state-children
                 that should only render for specific roles.
