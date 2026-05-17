@@ -12,8 +12,8 @@ v0 was the first LLM-context kickstarter draft (2026-04-25). Per S78 non-complia
 
 ## Where to look instead
 
-- **For dev-dispatch agent briefings:** use `docs/articles/llm-kickstarter-v1-2026-04-25.md` (pa.md S82 dispatch protocol authority).
-- **For v0.next surface (post-S52-S56 deliberation arc):** use `docs/articles/llm-kickstarter-v2-2026-05-04.md`.
+- **For dev-dispatch agent briefings:** use `docs/articles/llm-kickstarter-v2-2026-05-04.md` (pa.md authority — updated S98B from v1 to v2; v2 covers v0.next surface — engines as centerpiece, V5-strict structural decls, markup-as-value pillar, validity surface, S67 amendments).
+- **For pre-v0.next historical analysis (legacy assignment-form decls, pre-engines):** v1 remains at `docs/articles/llm-kickstarter-v1-2026-04-25.md` (not yet archived; see pa-scrmlTS.md v1-retention rationale).
 
 ## References
 
