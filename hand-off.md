@@ -1,182 +1,128 @@
-# scrmlTS — Session 99 (CLOSE)
+# scrmlTS — Session 100 (OPEN-pickup-pending)
 
-**Date:** 2026-05-17
-**Previous:** `handOffs/hand-off-100.md` (S98 CLOSE — comprehensive landing summary)
-**Machine:** B (the `bryan-maclee` filesystem; orchestrator role this session was the OTHER machine, "Machine A" on the `bryan` filesystem)
-
----
-
-## TL;DR for S100 PA pickup
-
-S99 was a **two-track parallel session** — Machine A (the other machine, on `bryan` filesystem) ran the compiler-fix arc + B1 §51.0.B.1 wiring + corpus-refresh + twitter-archive drop + S99 LIVE hand-off rotation. This machine (Machine B per current labeling, on `bryan-maclee` filesystem) ran the voice-author article-assembly + twitter corpus extraction (507 candidates) + 9-page Day-30 reference build-out batch.
-
-**Combined session output:** ~30 commits across both repos. v0.3.x patch arc continues; bug-k pre-push failure remains pre-existing orthogonal noise (1 fail consistent since S98).
-
-**3 distinct gaps surfaced during S99 docs-build-out review:** dev-server URL routing, shell composition, Tailwind engine coverage. Bug report filed back to Machine A at `handOffs/incoming/2026-05-17-1815-machine-B-to-machine-A-dev-server-routing-bug.md` with 3 fix-shape options per gap + PA recommendation. v0.3.x candidate.
+**Date:** 2026-05-17 (rolled forward; first commit of S100 fixes this)
+**Previous:** `handOffs/hand-off-101.md` (S99 CLOSE — comprehensive end-to-end summary; Machine-B-wrap-content + Machine-A-consolidation-section both present)
+**Machine:** TBD at session-open (either A or B; cross-machine state is symmetric)
 
 ---
 
-## Final state at S99 close
+## S100 first action — FIRE-NOW (user-authorized at S99 CLOSE)
 
-- **scrmlTS HEAD:** `83a902e` (feat(website): Day-30 reference build-out batch 3 — onTransition + page + schema + landing update)
-- **scrml-support HEAD:** `1527d42` (scripts: promote twitter-archive extractor + regen candidates metadata)
-- **Working tree:** clean both repos pre-wrap (verified at wrap start)
-- **Worktrees:** only main on this machine — zero agent worktrees retained (all S99 work was direct-PA + Machine A's worktrees live on the other filesystem)
+**Tailwind engine gap — option (a)** locked for next-session pickup. User verbatim S99 CLOSE: *"A the tailwid dir"*.
 
-**Tests at HEAD `83a902e` (post-wrap full suite):** **15325 pass / 129 skip / 1 todo / 1 fail / 685 files / 44181 expect**.
+**Dispatch shape:**
 
-The 1 fail is `compiler/tests/unit/bug-k-sync-effect-throw.test.js` — **pre-existing orthogonal**, same 1-fail count since S98 CLOSE. Authorized `--no-verify` pushes throughout S99 per user direction. Not caused by S99 work.
+| | |
+|---|---|
+| **Task** | Extend the built-in Tailwind engine to cover typography plugin + missing core utilities |
+| **Audit-surface utilities** (minimum) | `font-mono`, `prose` family (incl. `prose-slate`, `prose-lg`, `not-prose`, etc), `border-collapse` + spot-check pass across `docs/website/` for other missing utilities |
+| **SPEC impact** | Likely add §26.6 NEW "Typography Plugin" subsection. SPEC §26 currently covers integration model + variant prefixes (S49) + arbitrary values (S49) + Open Items (group-* / peer-* / custom-theme deferred). Typography plugin is NOT in scope today; this dispatch is BOTH compiler change AND SPEC amendment. |
+| **Likely files** | `compiler/src/codegen/emit-tailwind.ts` (or equivalent — verify location) + `compiler/SPEC.md` §26.6 + tests |
+| **Scope** | ~8-15h depending on typography plugin coverage breadth (full vs scoped-to-docs-usage) |
+| **Rationale** | Flagship-claim alignment per `docs/website/pages/articles/css-without-build-step.scrml` ("scrml has a built-in Tailwind engine ... No `tailwind.config.js`, No PostCSS. The engine is in the compiler."). Adopter-visible drift — Machine B's docs site uses `prose` family heavily; compiled output omits them; Tailwind Play CDN injection is the band-aid Machine B applied. |
+| **Authority** | pa.md Rule 2 (full-production fidelity) + Rule 3 (right answer beats easy 99.999%) + flagship-claim alignment |
+| **Bug-report context** | See archived `handOffs/incoming/read/2026-05-17-1815-machine-B-to-machine-A-dev-server-routing-bug.md` (S99 ADDENDUM section — Tailwind-engine-gap detail + repro + workaround + 3 fix-shape options + PA recommendation A) |
 
----
-
-## S99 commit ledger (this machine's contributions)
-
-scrmlTS (this machine):
-```
-83a902e  feat(website): Day-30 reference build-out batch 3 (+3 pages — onTransition + page + schema)
-5cb1e3b  docs(handoff): append Tailwind-engine-gap addendum to dev-server bug report
-74bcca9  fix(website): patch internal links with /pages/ prefix + file routing bug
-41086cd  feat(website): Day-30 reference build-out batch 2 (+3 pages — channel + auth + logic)
-bbdad7e  feat(website): start Day-30 reference build-out (+3 pages — engine extras + match + program)
-```
-Plus this S99 CLOSE wrap commit chain.
-
-scrml-support (this machine):
-```
-1527d42  scripts: promote twitter-archive extractor + regen candidates metadata
-2f04d28  docs(voice): extract twitter-archive corpus candidates (S99 Machine-A) [507 candidates]
-50f5d5d  docs(voice): state-vs-logic DRAFT rev-2 — Q3 swap to GingerBill tweet + Q2 extension
-e644ffd  docs(voice): S99 working-draft assembly of state-vs-logic axiom essay
-```
-
-Machine A contributions pulled in (chronological, scrmlTS):
-```
-8c0e8ff   docs(handoff): notify Machine B of corpus-audit-complete
-b07b37f   fix(A7): E-SWITCH-FORBIDDEN silent bypass — structural post-parse walker
-518ebc9   fix(is-some Phase B): bare-compound LHS for is some / is not / is .V
-23c0943   fix(A5-FUP): function-parameter destructuring in parseParamList
-9754f1f   fix(B1-FUP): TS scope walker for §51.0.B.1 named-form RHS identifiers
-c4c99e4   feat(B1): §51.0.B.1 payload-binding on engine state-children compiler-feature wiring
-805a21b   docs(handoff): S99 LIVE — A2-anomaly-2 cascade closed end-to-end
-c9b8821   docs(readme): refresh current-state to v0.3.0 STABLE + v0.3.x patch arc
-87426c8   fix(A4): is some / is not / is .V preprocessor — preserve member-access LHS
-bc475db   docs(handoff): notify Machine B of twitter-archive corpus source
-64b2e54   fix(A1): scope-walker gaps on export-class + destructuring (A2-anomaly-2-surfaced)
-dbd827f   fix(A2-FUP-2): RI promotion for `export function foo() { server { ... } }`
-79c0714   fix(A3): parseParamList default-value handling + token.scrml §42 migration
-c4fc98a   fix(ast-builder): A2 anomaly-2 — populate params+body on export function synth stubs
-```
-
-scrml-support Machine A contributions:
-```
-6ef8782   docs(voice): add twitter-archive 2026-05-17 corpus source (21.2 MB zip)
-bb6d51d   docs(voice): Machine-A corpus-refresh — 425 candidates + promote extraction script
-```
+**Fire as scrml-dev-pipeline isolation:worktree dispatch on session-open** after standard session-start checklist completes.
 
 ---
 
-## S99 substantive deliverables
+## Standard S100 session-open checklist (per pa-scrmlTS.md)
 
-### Voice-author work (this machine)
-
-1. **State-vs-logic axiom essay working-draft assembled** at `scrml-support/voice/articles/state-vs-logic-axiom-evolution-arc-DRAFT-2026-05-17.md`. User's S98 bridge-Q1 prose preserved verbatim; quotes inserted at user-marked `<insert qt>` placeholders; Quote 3 swapped from S95 shoot-straight (now reserved for building-anyway essay per cross-essay coordination) → GingerBill twitter reply 2026-05-15 (same controversy-drives-evolution thesis, public attestation). Quote 2 extended to include "When I reread what I originally typed, its totally not what I meant" sentence.
-
-2. **Twitter archive corpus extraction** at `scrml-support/voice/twitter-corpus-candidates-2026-05-17.json` — **507 candidates** (451 tweets + 56 note-tweets) from 21.2 MB archive. Schema-compatible with `machine-A-corpus-candidates-2026-05-17.json` (425 Claude-transcript candidates from other machine) and `machine-B-corpus-candidates-2026-05-17.json` (645 Claude-transcript candidates from this machine S98B). **Total candidate pool now 1,577 across 3 streams** awaiting user-review-curation into `quote-library.json`.
-
-3. **Extractor script promoted** to `scrml-support/scripts/regen-twitter-corpus-candidates.py` — parameterized, auto-discovers newest `twitter-archive-*.zip` in `voice/corpus-sources/`. Companion to other machine's `regen-corpus-candidates.py` (Claude-transcript source). Both follow same JSON output shape.
-
-### Website reference build-out (this machine)
-
-**Day-30 surface: 11 of ~22 element + context pages shipped.** Half the structural surface complete.
-
-| Category | Shipped (S99 + prior) | Queued |
-|---|---|---|
-| **Elements** | 9: engine, errors, match, program, channel, auth, onTransition, page, schema | onTimeout, onIdle |
-| **Contexts** | 2: logic, sql | `#{}` CSS, `^{}` meta, `_{}` foreign |
-| **Keywords** | 0 | fn, lift, lin, pinned, derived, is, not, req, pure, ~, reset (~11 pages) |
-| **Error codes** | 0 | ~30 most-common per-code pages |
-
-All 9 element + 2 context pages follow the established 8-section template (header / syntax / worked example / semantics + errors / edge cases / related features / availability / specification).
-
-**Authoring conventions captured for future feature pages:**
-- HTML-entity escape `{` `}` inside all `<code>` and `<pre>` blocks containing `${...}` or unbalanced braces
-- Escape `//` → `&#47;&#47;` inside inline `<code>` (parser otherwise consumes the closing tag as comment)
-- Escape `/*` `*/` slashes in display code as `&#47;` for same reason
-- File-top comments: avoid raw `<X attr="...">` tag shapes
-- Avoid `&lt;X&gt;'s` apostrophe-s in body text — rephrase
-- Bare `/` between tags / in `<td>` content parses as a closer — escape as `&#47;`
-- Avoid raw `match <ident>` in markup text — escape with `&#109;atch` or rephrase
-
-### Bugs filed / processed during S99
-
-4. **Dev-server multi-page-app routing + shell-composition + Tailwind-engine gaps** — 3 distinct gaps filed in single bug report at `handOffs/incoming/2026-05-17-1815-machine-B-to-machine-A-dev-server-routing-bug.md`. Workarounds applied this session (hard-coded `/pages/` prefixes in 16 .scrml files; Tailwind Play CDN injection script for dist HTMLs). Proper fixes are v0.3.x compiler/dev-server work.
-
-5. **bug-k-sync-effect-throw orthogonal failure** — same 1-fail count since S98 close; authorized `--no-verify` push throughout S99 per user direction. Surfaced per S88 protocol. Investigation candidate.
+1. Read pa.md pointer at `scrmlTS/pa.md` → `scrml-support/pa-scrmlTS.md` IN FULL
+2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies)
+3. Read `compiler/SPEC-INDEX.md` IN FULL
+4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL (load-bearing)
+5. Read this `hand-off.md` + S99 CLOSE rotation at `handOffs/hand-off-101.md`
+6. Read last ~10 contentful entries from `../scrml-support/user-voice-scrmlTS.md` (S99 has 7 new entries — 3 from Machine B + 4 from Machine A; all load-bearing)
+7. Cross-machine sync hygiene: fetch + ahead/behind both repos
+8. Check `handOffs/incoming/*.md` for unread messages
+9. Verify `git worktree list` shows only main
+10. Report: caught up + next priority
 
 ---
 
-## In-flight / open questions for S100 PA pickup
+## State at S99 CLOSE (S100 starting baseline)
 
-### Immediate (carry-forward)
-
-1. **Continue Day-30 reference build-out.** Remaining ~22-30 pages: `<onTimeout>` + `<onIdle>` (closes elements); `#{}` + `^{}` + `_{}` contexts; ~11 keyword pages; ~30 error code pages. Each follows the 8-section template + the authoring conventions above. Pacing: ~3 pages per dispatch batch is a sustainable cadence.
-
-2. **bug-k-sync-effect-throw investigation.** Pre-existing orthogonal failure blocking the pre-push gate. ~1-2h dispatch candidate. Until closed, every push needs `--no-verify` + explicit authorization.
-
-3. **Dev-server routing bug pickup by Machine A.** The 1815-MB-to-MA bug report sits in `handOffs/incoming/`. Machine A's next session should action — pick a fix shape (PA recommended Option C: emit `dist/<route>.html` directly with shell inlined) + dispatch.
-
-### User-driven (waiting for direction)
-
-4. **lin redesign Phase 1** (#4 from S98) — user paused S98 ("I'll think about lin"). Status unchanged this session.
-
-5. **Typestate-primitive meta-shape** (#12 from S98) — design horizon stub at `scrml-support/docs/deep-dives/typestate-primitive-meta-shape-design-horizon-2026-05-17.md`. Default hold.
-
-6. **Voice corpus curation pass.** 1,577 candidates across 3 streams. User selectively promotes to canonical `quote-library.json`.
-
-7. **State-vs-logic essay finalization.** Working-draft has user's bridge-Q1 prose + 3 quotes + user's "I would" lead-in for closing. User authors final prose; PA's role is substrate supply per S95 voice-author redesign.
-
-### v0.3.x / v0.5+ backlog (unchanged from S98)
-
-8. **CG hotspot deep characterization** (#18) — v0.5+ horizon.
-9. **BS-level `/* */` bug** (#23) — sub-anomaly from S98 A1 fix; v0.3.x backlog.
+- **scrmlTS HEAD:** Machine A consolidation wrap (after Machine B's `a6dd6af` + Machine A's `fc27960` MPA fix + `7fa0dab` inbox housekeeping + the wrap commit landing this file)
+- **scrml-support HEAD:** `e149662` (S99 Machine-A user-voice entries + user DRAFT refinements)
+- **Tests (full suite):** 15,342 pass / 133 skip / 1 todo / 2 fail / 1 error / 687 files / 44,255 expect
+- **Tests (pre-commit subset):** 12,555 pass / 92 skip / 1 todo / 0 fail / 654 files
+- **Worktrees:** main only (both machines per per-dispatch cleanup discipline)
+- **Inbox:** state per `handOffs/incoming/` — Machine B's MPA-revert reply pending; Machine A's S100 pickup awaits that
 
 ---
 
-## Inbox state at S99 close
+## Carry-forward priorities (sequenced for S100)
 
-**scrmlTS/handOffs/incoming/:**
-- `2026-05-17-1815-machine-B-to-machine-A-dev-server-routing-bug.md` — OUTGOING from this PA → Machine A. Machine A's next session should action.
+### Fire-now
 
-**Processed during S99 (moved to read/):**
-- `2026-05-17-1500-machine-A-to-machine-B-state-vs-logic-scaffold-update.md`
-- `2026-05-17-1700-machine-A-to-machine-B-twitter-archive-corpus-source.md`
-- `2026-05-17-1800-machine-A-to-machine-B-corpus-audit-complete.md`
+1. **Tailwind engine gap (option a)** — see top of this file. Estimated ~8-15h. SPEC §26.6 amendment likely.
+
+### High-impact compiler / docs work
+
+2. **MPA workaround revert** (Machine B territory). Once Machine B pulls Machine A's MPA fix landing, revert the hard-coded `/pages/` workaround in 8 files (`docs/website/app.scrml` + 7 page files). See `handOffs/incoming/2026-05-17-1900-machine-A-to-machine-B-mpa-fix-landed.md` for the checklist.
+
+3. **SPEC §47.9.5 worked-example amendment** — dist paths in §47.9.5 show the un-stripped `pages/` shape; should reflect the MPA fix's strip. Small editorial dispatch.
+
+4. **bug-k-sync-effect-throw investigation** — pre-existing orthogonal pre-push failure since S98. Each push needs `--no-verify` + explicit authorization until closed. ~1-2h dispatch candidate.
+
+5. **Continue Day-30 reference build-out.** Remaining ~22-30 pages: `<onTimeout>` + `<onIdle>` (closes elements); `#{}` + `^{}` + `_{}` contexts; ~11 keyword pages; ~30 error code pages. Each follows the 8-section template. ~3 pages per batch is sustainable.
+
+### Held by user
+
+6. **lin redesign Phase 1** — user paused S98.
+7. **Typestate-primitive meta-shape** — design horizon stub at scrml-support `124204e`.
+8. **Voice corpus curation pass** — 1,577 candidates across 3 streams awaiting selective promotion to canonical `quote-library.json`.
+9. **State-vs-logic essay finalization** — user-authored; PA's role is substrate per S95 voice-author redesign.
+
+### v0.5+ horizon
+
+10. **CG hotspot deep characterization**.
+11. **BS-level `/* */` bug** — sub-anomaly from S98 A1 fix.
+12. **Path-discipline platform-level fix** (PreToolUse hook rejecting absolute writes outside active worktree). 6 incidents in S99; escalating-urgency case. Filed since S42; still deferred (needs context-aware "is this PA or subagent" signal).
+13. **Phase B-2 pure-getter-elision optimization** — marginal output-bloat reduction for is-some/is-not LHS that's known-safe to inline (specific MemberExpr/IndexExpr shapes type-system can prove no getter/Proxy). Not blocking.
+14. **Legacy STRING pipeline retirement** (`rewrite.ts _rewriteParenthesizedIsOp`) — composes with Phase 3.5 escape-hatch elimination.
 
 ---
 
-## Things S100 PA must NOT screw up
+## Open observations for S100 PA awareness
 
-### Permanently load-bearing (from prior sessions)
+### gingerBill window context
 
-- pa.md Rules 1-5 (no marketing without prompt; full-production fidelity; right beats easy; SPEC normative; shoot straight)
-- All S96-S99 PA-memory rules in `~/.claude/projects/-home-bryan-maclee-scrmlMaster-scrmlTS/memory/`
-- Cross-machine sync hygiene — fetch/pull both repos at session start (S43)
+S99 surfaced the first peer-language-designer attention event (gingerBill DM mid-session). Triggered README + master-list + hand-off state-refresh so the README link chain reads current-truth. Voice-author cross-essay tie-in: Machine B's state-vs-logic essay rev-2 swapped Quote 3 → public reply to @TheGingerBill on twitter/X 2026-05-15. See user-voice S99 Machine-A entry "gingerBill DM event" for full context.
+
+### Path-discipline pattern (6 incidents in S99)
+
+`pa-scrmlTS.md` S99 addendum (scrml-support `65eaab7`) documents the 4 operational tightenings. Empirical-record convention: every PA-authored landing that hit a leak includes `PATH-DISCIPLINE INCIDENT` in commit body for grep-based audit. Rate of incidence makes the platform-level PreToolUse-hook fix (#12 above) load-bearing for v0.4+ dispatch quality.
+
+### Context budget operational datum (S99 Machine A)
+
+Per user-voice S99 Machine-A entry: session-start checklist consumes ~20% of the 1M-token context (pa.md + PRIMER + SPEC-INDEX + master-list §0 + hand-off + user-voice). Effective working budget = ~80% nominal. Wrap-suggestion threshold should subtract session-start overhead from the calculation.
+
+---
+
+## Things S100 PA must NOT screw up (carry-forwards from S99 CLOSE)
+
+### Permanently load-bearing
+- pa.md Rules 1-5
+- All S96-S99 PA-memory rules in `~/.claude/projects/-home-bryan-*scrmlMaster-scrmlTS/memory/`
+- Cross-machine sync hygiene (S43)
 - S83 commit discipline two-sided rule
 - S88 isolation:worktree mandatory on every dev-agent Agent() call + `--no-verify` requires explicit user authorization
 - S91 CWD-routing rule
-- S95 communication norms (shoot straight; politeness for politeness sake rejected)
+- S95 communication norms (shoot straight)
 - S96 SPEC-at-session-start
-- S98 Pillar 5b "Reach discipline"
+- S98 Pillar 5b (Reach discipline — state-shape first)
+- S99 path-discipline addendum (echo-pwd-in-first-commit + S99 leak-counter in briefs + PA-side dual-verify)
+- S99 voice-author "reuse-over-reinvent" rule
 
-### S99 NEW (carried into S100)
+### S100 NEW (fresh)
 
-- **Reuse-over-reinvent for voice work** — if user has already said something well, surface it from the substrate (quote-library / corpus-candidates / tweet-drafts / prior articles) before generating new prose. User-voice S99 verbatim: "If I have already said something well once, why come up with it again."
-- **Cross-essay quote-overstacking is signal** — when two scaffolds claim the same quote, surface a sibling-quote swap (S99 GingerBill-tweet swap is the canonical pattern).
-- **Visit-and-verify is part of the docs-build-out loop.** Compiling-in-isolation doesn't validate the site as a whole. Future build-out passes should include browser-visit-and-click-through before declaring shippable.
-- **`--no-verify` authorization scope is per-session.** S99 authorized for S99 pushes only; S100 needs fresh authorization until bug-k closes.
+(none yet — this is OPEN-pickup state)
 
 ---
 
 ## Tags
 
-#session-99 #CLOSE #voice-corpus-extraction #twitter-507-candidates #reference-build-out-9-elements-2-contexts #dev-server-routing-bug-filed #cross-machine-coordination #s99-tailwind-cdn-bandaid #bug-k-orthogonal-noise
+#session-100 #OPEN-pickup-pending #s100-fire-now-tailwind-option-a #post-s99-close #ginger-bill-window-context #path-discipline-pattern-tracking #v0.3.x-patch-arc-active

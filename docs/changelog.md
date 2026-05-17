@@ -50,6 +50,18 @@ All 11 element + context pages follow the 8-section template. Authoring conventi
 
 **Origin sync at S99 close:** both repos pushed mid-session 5×+4× + wrap chain. Both clean at wrap-start.
 
+**Post-Machine-B-wrap consolidation (Machine A wrap):** Machine B's S99 CLOSE wrap landed at `a6dd6af` and filed the dev-server-routing bug report to Machine A. Machine A read + acted on it the same session:
+
+- **`fc27960`** MPA fix — multi-page-app shell composition + clean-URL emit per SPEC §40.8.1 + Machine B's fix-shape (c) recommendation. Four sub-deliverables: (1) `api.js pathFor()` strips leading `pages/` segment from dist (`pages/X/index.scrml` → `dist/X/index.html`); (2) `codegen/index.ts` post-pass extracts entry's `<main>` slot + inlines shell per-page; (3) `commands/dev.js` directory-index resolution (`/reference` → `dist/reference/index.html`); (4) `app.scrml` keeps emitting `dist/app.html` as standalone shell-only artifact (option (i) — adopter dev-tool affordance). `<page>` tag emits transparently. Composition no-op when entry has no `<main>` (trucking-dispatch unchanged). +22 tests (17 integration + 5 unit). Closes Machine B's dev-server-routing bug end-to-end on the compiler side. Reply notification dropped at `handOffs/incoming/2026-05-17-1900-machine-A-to-machine-B-mpa-fix-landed.md` (8-file workaround-revert list for Machine B + SPEC §47.9.5 amendment surface). Path-discipline incident #6 captured (S99 leaked pre-snapshot commit `be1cff9` to local main; reset cleanly before pushing — `pa-scrmlTS.md` S99 addendum already in place at scrml-support `65eaab7`).
+
+- **`7fa0dab`** docs(handoff) — MPA fix landing notification + move processed dev-server bug to read/.
+
+- **Tailwind engine gap direction LOCKED** for next-session pickup: option (a) — extend the built-in Tailwind engine to cover typography plugin + missing core utilities (`font-mono`, `prose`, `prose-slate`, `not-prose`, `border-collapse` + audit-surface). Flagship-claim alignment per `css-without-build-step.scrml`. Scope ~8-15h; SPEC §26 may need a §26.6 "Typography Plugin" subsection. User-verbatim: *"A the tailwid dir"* (option A locked, surfaced for next session).
+
+- **Path-discipline pattern crystallized**. 6 leak incidents across S99 (A1, B1, A5, A7, MPA-fix, plus one I-am-uncertain-which-numbered-incident); `pa-scrmlTS.md` S99 addendum at scrml-support `65eaab7` documents the four operational tightenings + escalating-urgency case for the platform-level PreToolUse-hook fix (still deferred — needs context-aware "is this PA or subagent" signal).
+
+**Total S99 sustained tests at CLOSE (full suite):** 15,342 pass / 133 skip / 1 todo / 2 fail / 1 error / 687 files / 44,255 expect (+2,450 pass / +30 files / +1,053 expect vs S96 close clean baseline 12,892). Pre-commit subset (unit/integration/conformance only): 12,555 pass / 92 skip / 1 todo / 0 fail / 654 files. The 2 fail / 1 error are pre-existing orthogonal (bug-k-sync-effect-throw + browser-runtime smoke flakes per Bug 18 family).
+
 ### 2026-05-17 (S97 CLOSE — 18 commits · all S95/S96/B1 bugs closed end-to-end · ghost-pattern lint catalog +7 entries / +8 frameworks covered · stress harness scaffolded)
 
 **Session-defining outcome:** all three bug catalogs surfaced across S95-S96 closed end-to-end (S95 18/18, S96 followups 5/5, B1-surfaced 7/7 — including 1 new bug discovered during verification). Plus the brute-force syntax-stress harness landed as a living scorecard, and 5 new lint families closed all `uncovered-gap` cases. Lint catalog grew from 16 → 23 patterns. v0.3.x patch series continues — substantial adopter-protection surface added.
