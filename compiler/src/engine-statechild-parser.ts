@@ -1267,10 +1267,20 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // Strip-and-rerun pattern: capture the prefix, then remove the matched
     // substring from a working copy of `afterTag` before running the
     // canonical rule= regex.
+    //
+    // S97 — lookahead extended to recognize BOOLEAN attribute boundaries.
+    // Pre-fix lookahead `(?=\s+\w+\s*=|\s*\/?\s*$)` only stopped at
+    // `attr=value` or tag close; trailing boolean attrs (`history`,
+    // `pinned`, etc.) got swallowed into the rule value. New lookahead
+    // also stops at `\s+\w+(?=\s|>|\/|$)` — whitespace + word followed by
+    // whitespace / `>` / `/` / end (the boolean-attr terminator shape).
+    // Per §51.0.F rule values are limited to `.X`, `*`, or `(...)`; they
+    // never contain a bare word at depth 0, so the new boundary check
+    // doesn't false-trigger on valid values.
     let internalRuleForm: EngineRuleForm = { kind: "absent" };
     let afterTagForRule = afterTag;
     const internalRuleMatch = afterTag.match(
-      /(?:^|\s)internal:rule\s*=\s*(.+?)(?=\s+\w+\s*=|\s*\/?\s*$)/s,
+      /(?:^|\s)internal:rule\s*=\s*(.+?)(?=\s+\w+(?:\s*=|\s|>|\/|$)|\s*\/?\s*$)/s,
     );
     if (internalRuleMatch) {
       let val = internalRuleMatch[1]!.trim();
@@ -1294,7 +1304,9 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     //   rule="(.A | .B)"          (quoted multi)
     //   rule=.X.history           (§51.0.N — A5-2 sub-step 5)
     let ruleForm: EngineRuleForm = { kind: "absent" };
-    const ruleMatch = afterTagForRule.match(/(?:^|\s)rule\s*=\s*(.+?)(?=\s+\w+\s*=|\s*\/?\s*$)/s);
+    // S97 — boolean-attr boundary added to lookahead. See identical comment on
+    // the `internal:rule=` regex above.
+    const ruleMatch = afterTagForRule.match(/(?:^|\s)rule\s*=\s*(.+?)(?=\s+\w+(?:\s*=|\s|>|\/|$)|\s*\/?\s*$)/s);
     if (ruleMatch) {
       let val = ruleMatch[1]!.trim();
       // Strip surrounding quotes if present.
