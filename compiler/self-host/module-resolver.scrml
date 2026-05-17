@@ -32,7 +32,7 @@ ${
     // ---------------------------------------------------------------------------
 
     export class ModuleError {
-        constructor(code, message, span = null, severity = "error") {
+        constructor(code, message, span = not, severity = "error") {
             this.code = code
             this.message = message
             this.span = span
@@ -101,7 +101,7 @@ ${
                     source: imp.source,
                     absSource,
                     isDefault: imp.isDefault || false,
-                    span: imp.span || null,
+                    span: imp.span || not,
                 })
             }
 
@@ -114,8 +114,8 @@ ${
                         exports.push({
                             name,
                             kind: exp.exportKind || "unknown",
-                            reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
-                            span: exp.span || null,
+                            reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : not,
+                            span: exp.span || not,
                         })
                     }
                 }
@@ -145,7 +145,7 @@ ${
                 errors.push(new ModuleError(
                     "E-IMPORT-002",
                     `E-IMPORT-002: Circular import detected: ${cycleStr}`,
-                    null,
+                    not,
                 ))
                 return
             }

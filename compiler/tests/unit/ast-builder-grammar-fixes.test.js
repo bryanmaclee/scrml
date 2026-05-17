@@ -103,6 +103,90 @@ describe("F1: export function synthesizes a sibling function-decl", () => {
     expect(fnDecls[0].fromExport).toBeUndefined();
     expect(fnDecls[0].name).toBe("bar");
   });
+
+  // -------------------------------------------------------------------------
+  // Anomaly 2 (S99) — synth function-decl populates params + body
+  //
+  // Pre-fix, the synth function-decl emitted `params: []` and `body: []`,
+  // relying on emit-library.ts's sourceText-slice path for stdlib emit.
+  // That assumption failed for the SPA-shape client emit path
+  // (emit-functions.ts) which compiles function-decl into JS using
+  // params + body — empty body produced `function _scrml_NAME_N() {}`
+  // in `.client.js` output (M1.1 native-parser .scrml reproducer).
+  //
+  // Fix: re-parse the original source-text slice for `export function|fn`
+  // shapes so params + body are populated alongside the existing
+  // `fromExport: true` flag. The flag is preserved so emit-library.ts
+  // continues to skip these stubs.
+  // -------------------------------------------------------------------------
+
+  test("Anomaly 2: synth function-decl has populated params (named)", () => {
+    const result = parse("${ export function makeSpan(start, end, line, col) { return { start, end, line, col } } }");
+    const fnDecls = findAllNodesOfKind(result.ast, "function-decl");
+    const synthetic = fnDecls.find(n => n.fromExport === true && n.name === "makeSpan");
+    expect(synthetic).toBeDefined();
+    expect(Array.isArray(synthetic.params)).toBe(true);
+    expect(synthetic.params.length).toBe(4);
+    expect(synthetic.params.map(p => (typeof p === "string" ? p : p.name))).toEqual([
+      "start", "end", "line", "col",
+    ]);
+  });
+
+  test("Anomaly 2: synth function-decl has populated body (return-stmt)", () => {
+    const result = parse("${ export function makeSpan(start, end) { return { start, end } } }");
+    const fnDecls = findAllNodesOfKind(result.ast, "function-decl");
+    const synthetic = fnDecls.find(n => n.fromExport === true && n.name === "makeSpan");
+    expect(synthetic).toBeDefined();
+    expect(Array.isArray(synthetic.body)).toBe(true);
+    expect(synthetic.body.length).toBe(1);
+    expect(synthetic.body[0].kind).toBe("return-stmt");
+    // The return-stmt expr should reference the original idents.
+    expect(synthetic.body[0].expr).toContain("start");
+    expect(synthetic.body[0].expr).toContain("end");
+  });
+
+  test("Anomaly 2: export fn shorthand also has populated body", () => {
+    const result = parse("${ export fn double(n) { n * 2 } }");
+    const fnDecls = findAllNodesOfKind(result.ast, "function-decl");
+    const synthetic = fnDecls.find(n => n.fromExport === true && n.name === "double");
+    expect(synthetic).toBeDefined();
+    expect(synthetic.fnKind).toBe("fn");
+    expect(Array.isArray(synthetic.params)).toBe(true);
+    expect(synthetic.params.length).toBe(1);
+    expect((typeof synthetic.params[0] === "string" ? synthetic.params[0] : synthetic.params[0].name)).toBe("n");
+    expect(Array.isArray(synthetic.body)).toBe(true);
+    expect(synthetic.body.length).toBeGreaterThan(0);
+  });
+
+  test("Anomaly 2: synth function-decl body preserves multi-statement structure", () => {
+    const result = parse(`\${
+      export function compute(a, b) {
+        const sum = a + b
+        const product = a * b
+        return { sum, product }
+      }
+    }`);
+    const fnDecls = findAllNodesOfKind(result.ast, "function-decl");
+    const synthetic = fnDecls.find(n => n.fromExport === true && n.name === "compute");
+    expect(synthetic).toBeDefined();
+    expect(Array.isArray(synthetic.body)).toBe(true);
+    // 2 const-decls + 1 return-stmt = 3 body nodes.
+    expect(synthetic.body.length).toBe(3);
+    const kinds = synthetic.body.map(s => s.kind);
+    expect(kinds).toContain("return-stmt");
+  });
+
+  test("Anomaly 2: synth function-decl preserves fromExport flag for emit-library skip", () => {
+    // Regression: the fix must NOT drop fromExport: true. emit-library.ts
+    // (AST-fallback path) skips synth stubs via `fromExport === true`.
+    // Dropping the flag would cause double-emission in stdlib bundle output.
+    const result = parse("${ export function helper(x) { return x + 1 } }");
+    const fnDecls = findAllNodesOfKind(result.ast, "function-decl");
+    const synthetic = fnDecls.find(n => n.name === "helper");
+    expect(synthetic).toBeDefined();
+    expect(synthetic.fromExport).toBe(true);
+    expect(synthetic.exported).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

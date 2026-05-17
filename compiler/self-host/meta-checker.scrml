@@ -243,34 +243,34 @@ ${
         // for-of / for-in iterator variables
         const forOfRe = /\bfor\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+(?:of|in)\b/g
         let m
-        while ((m = forOfRe.exec(cleaned)) != null) {
+        while ((m = forOfRe.exec(cleaned)) is some) {
             inlineLocals.add(m[1])
         }
 
         // Named or anonymous function parameters
         const fnParamRe = /\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)/g
-        while ((m = fnParamRe.exec(cleaned)) != null) {
+        while ((m = fnParamRe.exec(cleaned)) is some) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) != null) {
+            while ((p = paramRe.exec(paramList)) is some) {
                 inlineLocals.add(p[0])
             }
         }
 
         // Arrow function — single unparenthesized parameter
         const arrowSingleRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g
-        while ((m = arrowSingleRe.exec(cleaned)) != null) {
+        while ((m = arrowSingleRe.exec(cleaned)) is some) {
             inlineLocals.add(m[1])
         }
 
         // Arrow function — parenthesized parameter list
         const arrowMultiRe = /\(([^)]*)\)\s*=>/g
-        while ((m = arrowMultiRe.exec(cleaned)) != null) {
+        while ((m = arrowMultiRe.exec(cleaned)) is some) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) != null) {
+            while ((p = paramRe.exec(paramList)) is some) {
                 inlineLocals.add(p[0])
             }
         }
@@ -278,7 +278,7 @@ ${
         // Step 3: Extract all identifiers not preceded by `.`, filtering out inline locals.
         const ids = []
         const re = /(?<![.\w$])([A-Za-z_$][A-Za-z0-9_$]*)/g
-        while ((m = re.exec(cleaned)) != null) {
+        while ((m = re.exec(cleaned)) is some) {
             if (!inlineLocals.has(m[1])) {
                 ids.push(m[1])
             }
@@ -433,24 +433,14 @@ ${
     fn typeToString(type) {
         if (!type || typeof type != "object") return "unknown"
 
-        switch (type.kind) {
-            case "primitive":
-                return type.name
-            case "struct":
-                return type.name || "struct"
-            case "enum":
-                return type.name || "enum"
-            case "array":
-                return `${typeToString(type.element)}[]`
-            case "union":
-                return (type.members || []).map(m => typeToString(m)).join(" | ")
-            case "asIs":
-                return "asIs"
-            case "unknown":
-                return "unknown"
-            default:
-                return type.kind || "unknown"
-        }
+        if (type.kind == "primitive") return type.name
+        if (type.kind == "struct") return type.name || "struct"
+        if (type.kind == "enum") return type.name || "enum"
+        if (type.kind == "array") return `${typeToString(type.element)}[]`
+        if (type.kind == "union") return (type.members || []).map(m => typeToString(m)).join(" | ")
+        if (type.kind == "asIs") return "asIs"
+        if (type.kind == "unknown") return "unknown"
+        return type.kind || "unknown"
     }
 
     // ---------------------------------------------------------------------------
@@ -471,92 +461,89 @@ ${
                     `The type must be declared before the ^{} block that calls reflect().`)
             }
 
-            switch (type.kind) {
-                case "enum": {
-                    const variants = Array.isArray(type.variants)
-                        ? type.variants.map(v => typeof v == "string" ? v : v.name)
-                        : []
-                    return {
-                        kind: "enum",
-                        name: typeName,
-                        variants,
+            if (type.kind == "enum") {
+                const variants = Array.isArray(type.variants)
+                    ? type.variants.map(v => typeof v == "string" ? v : v.name)
+                    : []
+                return {
+                    kind: "enum",
+                    name: typeName,
+                    variants,
+                }
+            }
+
+            if (type.kind == "struct") {
+                const fields = []
+                if (type.fields instanceof Map) {
+                    for (const [fieldName, fieldType] of type.fields) {
+                        fields.push({
+                            name: fieldName,
+                            type: typeToString(fieldType),
+                        })
+                    }
+                } else if (type.fields && typeof type.fields == "object") {
+                    for (const [fieldName, fieldType] of Object.entries(type.fields)) {
+                        fields.push({
+                            name: fieldName,
+                            type: typeToString(fieldType),
+                        })
                     }
                 }
+                return {
+                    kind: "struct",
+                    name: typeName,
+                    fields,
+                }
+            }
 
-                case "struct": {
-                    const fields = []
-                    if (type.fields instanceof Map) {
-                        for (const [fieldName, fieldType] of type.fields) {
-                            fields.push({
-                                name: fieldName,
-                                type: typeToString(fieldType),
-                            })
+            if (type.kind == "function") {
+                const params = (type.params || []).map(p => {
+                    if (typeof p == "string") {
+                        const colonIdx = p.indexOf(":")
+                        if (colonIdx >= 0) {
+                            return { name: p.slice(0, colonIdx).trim(), type: p.slice(colonIdx + 1).trim() }
                         }
-                    } else if (type.fields && typeof type.fields == "object") {
-                        for (const [fieldName, fieldType] of Object.entries(type.fields)) {
-                            fields.push({
-                                name: fieldName,
-                                type: typeToString(fieldType),
-                            })
-                        }
+                        return { name: p.trim(), type: "unknown" }
                     }
-                    return {
-                        kind: "struct",
-                        name: typeName,
-                        fields,
-                    }
+                    return { name: p.name || "?", type: p.type || "unknown" }
+                })
+                return {
+                    kind: "function",
+                    name: typeName,
+                    params,
+                    returnType: type.returnType || "unknown",
                 }
+            }
 
-                case "function": {
-                    const params = (type.params || []).map(p => {
-                        if (typeof p == "string") {
-                            const colonIdx = p.indexOf(":")
-                            if (colonIdx >= 0) {
-                                return { name: p.slice(0, colonIdx).trim(), type: p.slice(colonIdx + 1).trim() }
-                            }
-                            return { name: p.trim(), type: "unknown" }
-                        }
-                        return { name: p.name || "?", type: p.type || "unknown" }
-                    })
-                    return {
-                        kind: "function",
-                        name: typeName,
-                        params,
-                        returnType: type.returnType || "unknown",
-                    }
+            if (type.kind == "state") {
+                const attributes = (type.attributes || []).map(a => ({
+                    name: a.name,
+                    type: a.type || "unknown",
+                }))
+                return {
+                    kind: "state",
+                    name: typeName,
+                    attributes,
                 }
+            }
 
-                case "state": {
-                    const attributes = (type.attributes || []).map(a => ({
-                        name: a.name,
-                        type: a.type || "unknown",
-                    }))
-                    return {
-                        kind: "state",
-                        name: typeName,
-                        attributes,
-                    }
+            if (type.kind == "component") {
+                const props = (type.props || []).map(p => ({
+                    name: p.name,
+                    type: p.type || "unknown",
+                    optional: p.optional ?? false,
+                    bindable: p.bindable ?? false,
+                }))
+                return {
+                    kind: "component",
+                    name: typeName,
+                    props,
                 }
+            }
 
-                case "component": {
-                    const props = (type.props || []).map(p => ({
-                        name: p.name,
-                        type: p.type || "unknown",
-                        optional: p.optional ?? false,
-                        bindable: p.bindable ?? false,
-                    }))
-                    return {
-                        kind: "component",
-                        name: typeName,
-                        props,
-                    }
-                }
-
-                default:
-                    return {
-                        kind: type.kind || "unknown",
-                        name: typeName,
-                    }
+            return {
+                kind: type.kind || "unknown",
+                name: typeName,
             }
         }
     }
@@ -833,7 +820,7 @@ ${
         // Match reflect(Identifier) calls
         const re = /\breflect\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g
         let m
-        while ((m = re.exec(expr)) != null) {
+        while ((m = re.exec(expr)) is some) {
             const typeName = m[1]
             if (!typeRegistry.has(typeName)) {
                 errors.push(new MetaError(

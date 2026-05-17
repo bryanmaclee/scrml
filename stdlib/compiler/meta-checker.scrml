@@ -433,15 +433,13 @@ ${
     fn typeToString(type) {
         if (!type || typeof type != "object") return "unknown"
 
-        // S64 debate-04 verdict A+: switch is hard-error. Use if-else chain over kind string.
-        const k = type.kind
-        if (k == "primitive") return type.name
-        if (k == "struct") return type.name || "struct"
-        if (k == "enum") return type.name || "enum"
-        if (k == "array") return `${typeToString(type.element)}[]`
-        if (k == "union") return (type.members || []).map(m => typeToString(m)).join(" | ")
-        if (k == "asIs") return "asIs"
-        if (k == "unknown") return "unknown"
+        if (type.kind == "primitive") return type.name
+        if (type.kind == "struct") return type.name || "struct"
+        if (type.kind == "enum") return type.name || "enum"
+        if (type.kind == "array") return `${typeToString(type.element)}[]`
+        if (type.kind == "union") return (type.members || []).map(m => typeToString(m)).join(" | ")
+        if (type.kind == "asIs") return "asIs"
+        if (type.kind == "unknown") return "unknown"
         return type.kind || "unknown"
     }
 
@@ -463,9 +461,7 @@ ${
                     `The type must be declared before the ^{} block that calls reflect().`)
             }
 
-            // S64 debate-04 verdict A+: switch is hard-error. Use if-else over kind string.
-            const tk = type.kind
-            if (tk == "enum") {
+            if (type.kind == "enum") {
                 const variants = Array.isArray(type.variants)
                     ? type.variants.map(v => typeof v == "string" ? v : v.name)
                     : []
@@ -475,7 +471,8 @@ ${
                     variants,
                 }
             }
-            if (tk == "struct") {
+
+            if (type.kind == "struct") {
                 const fields = []
                 if (type.fields instanceof Map) {
                     for (const [fieldName, fieldType] of type.fields) {
@@ -498,7 +495,8 @@ ${
                     fields,
                 }
             }
-            if (tk == "function") {
+
+            if (type.kind == "function") {
                 const params = (type.params || []).map(p => {
                     if (typeof p == "string") {
                         const colonIdx = p.indexOf(":")
@@ -516,7 +514,8 @@ ${
                     returnType: type.returnType || "unknown",
                 }
             }
-            if (tk == "state") {
+
+            if (type.kind == "state") {
                 const attributes = (type.attributes || []).map(a => ({
                     name: a.name,
                     type: a.type || "unknown",
@@ -527,7 +526,8 @@ ${
                     attributes,
                 }
             }
-            if (tk == "component") {
+
+            if (type.kind == "component") {
                 const props = (type.props || []).map(p => ({
                     name: p.name,
                     type: p.type || "unknown",
@@ -540,6 +540,7 @@ ${
                     props,
                 }
             }
+
             return {
                 kind: type.kind || "unknown",
                 name: typeName,
@@ -621,11 +622,7 @@ ${
         const registry = new Map()
 
         // Seed with built-in type names
-        // S89 user ruling: scrml has no `null` type. The legacy `"null"` seed
-        // here was a JS-host artifact predating the canonical `not` sentinel —
-        // removed because scrml source can no longer reference a type named
-        // `null` (E-SYNTAX-042 fires on `null` as a token per §42).
-        for (const name of ["number", "string", "boolean", "bool", "asIs"]) {
+        for (const name of ["number", "string", "boolean", "bool", "null", "asIs"]) {
             registry.set(name, { kind: "primitive", name })
         }
 

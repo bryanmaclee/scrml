@@ -6288,7 +6288,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         prefixParts.push(consume().text);
       }
 
+      // ANOMALY-2-FIX (S99): capture token cursor BEFORE collectExpr so we
+      // can later slice the consumed tokens and re-parse them as a function-
+      // decl with full params + body. The source-text-slice approach is
+      // unreliable because token spans use baseOffset against the
+      // PRE-PROCESSED (worker/state-ref-substituted) bodyRaw, not the raw
+      // file source — a `<#worker>` substitution in an earlier statement
+      // shifts subsequent token spans by 11 chars per occurrence.
+      // Slicing the token array uses the canonical positions and avoids
+      // re-tokenization (which itself produces subtly different tokens for
+      // `?.`, `::`, `!{}`, etc. when fed the space-padded `rawStr`).
+      const _iBeforeCollect = i;
       const { expr, span } = collectExpr();
+      const _iAfterCollect = i;
       const rawStr = prefixParts.length > 0
         ? "export " + prefixParts.join(" ") + " " + expr
         : "export " + expr;
@@ -6475,18 +6487,110 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // ~6610 reads from the token stream directly so doesn't need this
         // tolerance.
         const hasIdempotentModifier = /\)\s*\.\s*idempotent\s*\(\s*\)/.test(rawStr);
+
+        // ANOMALY-2-FIX (S99): re-parse params + body by re-tokenizing the
+        // ORIGINAL source text (via parentBlock.raw slice) and recursively
+        // invoking parseLogicBody. Pre-fix, the synth stub emitted
+        // `params: []` and `body: []` — relying on emit-library.ts's primary
+        // path (sourceText.slice from spans) for stdlib bundling. That works
+        // for stdlib emit BUT FAILS for the SPA-shape client emit path
+        // (emit-functions.ts emits the function-decl as a real JS function
+        // from params+body, producing `function _scrml_name_N() {}` with
+        // empty body in `.client.js`).
+        //
+        // Reproducer pre-fix:
+        //   ${ export function makeSpan(a,b) { return {a,b} } } <program/>
+        //   compiles to `function _scrml_makeSpan_1() {}` (broken).
+        //
+        // Why slice from parentBlock.raw (original source) NOT from rawStr
+        // (collectExpr's space-padded reconstruction): the original source
+        // preserves `?.`, `::`, `!{}`, comments, and other syntax the
+        // re-tokenizer needs to reproduce identical tokens. rawStr is a
+        // space-tokenized reconstruction that loses these distinctions and
+        // produces subtly different tokens on re-tokenize (which then
+        // corrupts downstream TS scope-resolution and CG emission).
+        //
+        // The `fromExport: true` flag remains so emit-library.ts continues
+        // to skip these (its primary sourceText-slice path is canonical for
+        // stdlib; its AST-fallback path explicitly skips fromExport stubs).
+        let synthParams = [];
+        let synthBody = [];
+        let synthCanFail = false;
+        let synthIsGenerator = false;
+        let synthHasReturnType = false;
+        let synthReturnTypeAnnotation = undefined;
+        try {
+          // Slice the consumed tokens (from cursor before collectExpr to
+          // cursor after) and re-parse them via parseLogicBody. The token
+          // array IS the canonical representation — its tokens already
+          // carry correct positions and have already passed scrml-specific
+          // tokenization (`?.`, `::`, `!{}`, etc.), so re-parsing them
+          // produces an identical AST shape to what the inline non-export
+          // path would produce.
+          if (Array.isArray(tokens) && _iBeforeCollect < _iAfterCollect) {
+            let subToks = tokens.slice(_iBeforeCollect, _iAfterCollect);
+            // Strip leading `pure` / `server` modifier tokens (the `export`
+            // token itself was consumed BEFORE _iBeforeCollect was captured,
+            // so it's already excluded). The synth function-decl carries
+            // isPure/isServer flags via the outer export-decl branch.
+            let _stripCount = 0;
+            while (
+              _stripCount < subToks.length &&
+              ((subToks[_stripCount].text === "pure" &&
+                (subToks[_stripCount].kind === "IDENT" || subToks[_stripCount].kind === "KEYWORD")) ||
+               (subToks[_stripCount].text === "server" && subToks[_stripCount].kind === "KEYWORD"))
+            ) {
+              _stripCount++;
+            }
+            if (_stripCount > 0) subToks = subToks.slice(_stripCount);
+            // Append a synthetic EOF token so parseLogicBody's loop has a
+            // clean termination signal (it expects an EOF terminator from
+            // the tokenizer).
+            const lastTok = subToks[subToks.length - 1];
+            const eofTok = lastTok
+              ? { kind: "EOF", text: "", span: { start: lastTok.span?.end ?? 0, end: lastTok.span?.end ?? 0, line: lastTok.span?.line ?? 1, col: lastTok.span?.col ?? 1 } }
+              : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } };
+            subToks = subToks.concat([eofTok]);
+            const subNodes = parseLogicBody(
+              subToks,
+              filePath,
+              [],
+              parentBlock,
+              counter,
+              [],            // throw-away errors — duplicate-parse must not double-emit
+              blockContext,
+            );
+            const innerFn = Array.isArray(subNodes)
+              ? subNodes.find((n) => n && n.kind === "function-decl")
+              : null;
+            if (innerFn) {
+              synthParams = innerFn.params ?? [];
+              synthBody = innerFn.body ?? [];
+              synthCanFail = !!innerFn.canFail;
+              synthIsGenerator = !!innerFn.isGenerator;
+              synthHasReturnType = !!innerFn.hasReturnType;
+              synthReturnTypeAnnotation = innerFn.returnTypeAnnotation;
+            }
+          }
+        } catch (_synthErr) {
+          // Fall back to empty params/body on re-parse failure — preserves
+          // pre-fix behavior so this fix can never regress stdlib emit.
+        }
+
         nodes.push({
           id: ++counter.next,
           kind: "function-decl",
           name: exportNode.exportedName,
-          params: [],
-          body: [],
+          params: synthParams,
+          body: synthBody,
           fnKind: exportNode.exportKind,
           isServer,
           ...(isPure ? { isPure: true } : {}),
           ...(hasIdempotentModifier ? { idempotentModifier: true } : {}),
-          isGenerator: false,
-          canFail: false,
+          isGenerator: synthIsGenerator,
+          canFail: synthCanFail,
+          ...(synthHasReturnType ? { hasReturnType: true } : {}),
+          ...(synthReturnTypeAnnotation ? { returnTypeAnnotation: synthReturnTypeAnnotation } : {}),
           raw: rawStr,
           span,
           exported: true,
