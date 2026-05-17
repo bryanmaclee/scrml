@@ -1,0 +1,341 @@
+// scrml.dev /reference/elements/schema
+//
+// Reference page for the schema element. Declarative database schema
+// at file/program scope. Compiles to SQL DDL; cross-checked with ?{}
+// blocks at compile time; drives the compile-time migration diff.
+//
+// SPEC anchors: §39 (Schema and Migrations) + §39.5.7 (additive
+// shared-core validator vocabulary) + §39.5.8 (lowering to standard
+// SQL DDL) + §39.5.9 (when-to-use SQL-mirror vs shared-core).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;schema&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Declarative database schema. Lowers to SQL DDL at
+                compile time; the schema-differ compares declared
+                shape to live DB shape and emits migrations. SQL-
+                mirror canonical, with additive shared-core
+                vocabulary that lowers to CHECK constraints.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2 (D3 +3 subsections 2026-05-04)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§39"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §39 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;schema&gt;
+  tableName &#123;
+    columnName: sqlType [native-sql-constraints] [shared-core-validators]
+    ...
+  &#125;
+  ...
+&lt;/schema&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            Each table is a brace block; each column is a typed
+            declaration with optional constraints. Two constraint
+            vocabularies coexist on a column: native SQL constraints
+            (canonical) and shared-core validators (additive). Both
+            are legal; mixing is legal.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A users table with both vocabularies in play.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;schema&gt;
+  users &#123;
+    id:    integer primary key
+    email: text not null unique
+    name:  text req length(&gt;=2)
+    age:   integer min(18) max(120)
+    role:  text default('user') oneOf([user, admin])
+  &#125;
+
+  posts &#123;
+    id:        integer primary key
+    user_id:   integer not null references(users.id)
+    title:     text req length(&gt;=1) length(&lt;=200)
+    body:      text req
+    published: integer default(0)
+  &#125;
+&lt;/schema&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The compiler reads the schema, compares to the live DB
+            (via SQLite
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">PRAGMA table_info()</code>
+            or equivalent), and emits migration SQL for the diff.
+            Dev mode applies the migrations on reload; production
+            runs them as a versioned step.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>SQL-mirror canonical (&sect;39.5.9).</strong>
+                Native SQL constraints
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not null</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">unique</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">primary key</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">references(table.col)</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">default(literal)</code>)
+                are the source-level canonical form. They map 1:1 to
+                emitted DDL.
+            </li>
+            <li>
+                <strong>Shared-core additive (&sect;39.5.7).</strong>
+                The universal-core validator vocabulary
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">length</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">min</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">gt</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lt</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">gte</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lte</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">eq</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">neq</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oneOf</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">notIn</code>)
+                is admitted on schema columns and lowers to SQL
+                CHECK / NOT NULL constraints per &sect;39.5.8. The
+                same word fires the same constraint in three loci:
+                state-validator, refinement-type, and schema-column.
+            </li>
+            <li>
+                <strong>Lowering rules (&sect;39.5.8).</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                lowers to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">NOT NULL</code>;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">length(&gt;=N)</code>
+                lowers to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CHECK (length(col) &gt;= N)</code>;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern(re)</code>
+                lowers driver-dependent (Postgres &#126;, SQLite/MySQL
+                REGEXP);
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oneOf([a, b, c])</code>
+                lowers to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CHECK (col IN (a, b, c))</code>.
+            </li>
+            <li>
+                <strong>SQL passthrough is inviolable.</strong> SQL
+                strings sent to the database from
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;&#125;</code>
+                blocks are unchanged in shape. The shared-core
+                vocabulary touches scrml source only; the wire form
+                stays standard SQL.
+            </li>
+            <li>
+                <strong>Compile-time cross-check.</strong> The
+                schema is the source of truth for column types and
+                names used by
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;&#125;</code>
+                blocks. The compiler validates queries against the
+                schema at compile time; unknown columns / type
+                mismatches fire E-SQL-* errors before runtime.
+            </li>
+            <li>
+                <strong>Migration diff.</strong> The schema-differ at
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler/src/schema-differ.js</code>
+                (~273 LOC) compares desired
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+                AST) against actual
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">PRAGMA table_info()</code>
+                output) and emits migration SQL.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/pages/reference/errors/E-SQL-006" class="text-rose-700 underline">E-SQL-006</a> &mdash; deprecated SQL form in schema</li>
+            <li><a href="/pages/reference/errors/E-SQL-008" class="text-rose-700 underline">E-SQL-008</a> &mdash; bracket-matched ?&#123; scanner caught unmatched brace</li>
+            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;schema&gt; in unsupported context</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Mixed vocabularies on one column.</strong>
+                Legal:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">email: text not null req length(&gt;=3) pattern(/&#94;.+&#64;.+&#36;/)</code>.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not null</code>
+                + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                together is redundant but not erroneous &mdash; both
+                lower to NOT NULL semantics.
+            </li>
+            <li>
+                <strong>Driver-dependent lowering.</strong> Pattern
+                constraints emit different DDL by driver. Postgres
+                uses
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code>;
+                SQLite/MySQL use
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">REGEXP</code>.
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">db=</code>
+                attribute on &lt;program&gt; tells the schema-differ
+                which dialect to emit.
+            </li>
+            <li>
+                <strong>Schema lives at file or program scope.</strong>
+                A &lt;schema&gt; element is structural; it does not
+                live inside reactive scopes or per-page bodies.
+                Multiple &lt;schema&gt; blocks across files are
+                merged at compile time.
+            </li>
+            <li>
+                <strong>Migration safety.</strong> The schema-differ
+                emits forward migrations; destructive operations
+                (DROP COLUMN, DROP TABLE) require explicit opt-in.
+                Default behavior is additive-only.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/pages/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
+                    ?&#123; ... &#125;
+                </a> &mdash; SQL context. Queries cross-checked
+                against the schema at compile time.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">scrml:data</span>
+                stdlib module &mdash; runtime validator builders for
+                untrusted-payload parsing at boundaries the schema
+                doesn't cover.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">refinement types</span>
+                (&sect;53) &mdash; same shared-core vocabulary on
+                type annotations. Compile-time + runtime boundary
+                check; complementary layer to the schema's DBMS-
+                enforced constraints.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">validators on state cells</span>
+                (&sect;55) &mdash; same vocabulary again, this time
+                wired to the auto-synthesized validity surface for
+                forms.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;schema&gt; element</td>
+                    <td class="py-2 pr-4">v0.2</td>
+                    <td class="py-2 text-xs">Pre-D3 SQL-mirror canonical form</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Shared-core validators on schema columns</td>
+                    <td class="py-2 pr-4">D3 (2026-05-04)</td>
+                    <td class="py-2 text-xs">SPEC &sect;39.5.7 + &sect;39.5.8 lowering rules</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Migration diff</td>
+                    <td class="py-2 pr-4">v0.2</td>
+                    <td class="py-2 text-xs">compiler/src/schema-differ.js ~273 LOC</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">Multi-database lowering</td>
+                    <td class="py-2 pr-4">SPEC &sect;44</td>
+                    <td class="py-2 text-xs">Driver-dependent DDL via &lt;program db=&gt;</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;39</strong>
+            (Schema and Migrations), with cross-refs to
+            <strong>&sect;44</strong> (multi-database adaptation) and
+            <strong>&sect;53</strong> (refinement types) for the
+            cross-locus vocabulary unification. The normative text
+            lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+    </article>
+
+</>

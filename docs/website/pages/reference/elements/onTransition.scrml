@@ -1,0 +1,316 @@
+// scrml.dev /reference/elements/onTransition
+//
+// Reference page for the onTransition element. Engine effect element;
+// runs at the moment a transition commits.
+//
+// SPEC anchors: §51.0.H (effect= / onTransition to/from/once/if=) +
+// §51.0.B (state-child attribute surface) + §34 E-ONTRANSITION-NO-TARGET
+// + W-ENGINE-INITIAL-MISSING.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;onTransition&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Effect on transition. Runs when an engine variable
+                moves from one variant to another. Filterable by from
+                / to / if / once.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.3.0 Wave 1
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.H (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;onTransition [from=.Variant] [to=.Variant] [once] [if=cond]&gt;
+  &lt;!-- effect body --&gt;
+&lt;/onTransition&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            All filter attributes are optional individually, but at
+            least one of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">from=</code>
+            or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+            is required &mdash; without a target,
+            <a href="/pages/reference/errors/E-ONTRANSITION-NO-TARGET"
+               class="font-mono text-xs text-rose-700 underline">E-ONTRANSITION-NO-TARGET</a>
+            fires.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A loading flow with analytics on the success transition
+            and cleanup on the error transition.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Error(msg: string), Success(count: int) &#125;
+
+&lt;engine for=Phase initial=.Idle&gt;
+  &lt;Idle    rule=.Loading /&gt;
+  &lt;Loading rule=(.Success | .Error) /&gt;
+  &lt;Error   rule=.Loading /&gt;
+  &lt;Success rule=.Idle /&gt;
+
+  &lt;onTransition from=.Loading to=.Success&gt;
+    &#36;&#123; analytics.track("load.success") &#125;
+  &lt;/onTransition&gt;
+
+  &lt;onTransition to=.Error&gt;
+    &#36;&#123; cleanup() &#125;
+  &lt;/onTransition&gt;
+
+  &lt;onTransition from=.Idle to=.Loading once&gt;
+    &#36;&#123; firstLoadInstrumentation() &#125;
+  &lt;/onTransition&gt;
+&lt;/engine&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Three handlers, three filter shapes: from-and-to (specific
+            edge), to-only (any incoming Error), and from-and-to-once
+            (first occurrence only).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Fires after the transition commits.</strong>
+                The engine variable has already taken the new variant
+                when the handler runs. Reads of the engine var inside
+                the body see the destination state.
+            </li>
+            <li>
+                <strong>Lives inside an engine.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                is a child of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>,
+                not free-standing. It is also forbidden inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                blocks &mdash;
+                <a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                   class="font-mono text-xs text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>.
+                Match is pass-through case analysis; effects belong
+                on engines.
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">from=</code>
+                    &#47;
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+                    are filters.
+                </strong>
+                Omitting one means the handler fires for any source
+                / destination of the other. Omitting both is the
+                E-ONTRANSITION-NO-TARGET error.
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">once</code>
+                    is a bare attribute.
+                </strong>
+                Marks the handler to fire only on the first matching
+                transition. The compiler tracks a per-handler "has-
+                fired" flag.
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">if=</code>
+                    is a runtime guard.
+                </strong>
+                Expression evaluated at transition time; handler
+                fires only when truthy. Composes with from / to /
+                once.
+            </li>
+            <li>
+                <strong>Multiple handlers per engine are allowed.</strong>
+                The engine can have any number of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                children with overlapping filters. All matching
+                handlers fire in source order.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/pages/reference/errors/E-ONTRANSITION-NO-TARGET" class="text-rose-700 underline">E-ONTRANSITION-NO-TARGET</a> &mdash; neither from= nor to=</li>
+            <li><a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a> &mdash; inside &lt;match&gt; block</li>
+            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; outside &lt;engine&gt;</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Self-writes don't trigger the handler.</strong>
+                Idempotent self-writes (writing the current variant)
+                are runtime no-ops per
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-ENGINE-SELF-WRITE-DETECTED</code>;
+                no transition occurs so no handler fires.
+            </li>
+            <li>
+                <strong>internal:rule= transitions skip the handler.</strong>
+                Inside a composite state-child with
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">internal:rule=</code>,
+                the inner-engine transition preserves the outer
+                state &mdash; the outer engine's
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                does NOT fire. Per SPEC &sect;51.0.O.
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                    on a state-child is the per-rule alternative.
+                </strong>
+                For single-target rules, an inline
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute is the shorter form. Multi-target rules
+                fire
+                <a href="/pages/reference/errors/E-ENGINE-EFFECT-AMBIGUOUS"
+                   class="font-mono text-xs text-rose-700 underline">E-ENGINE-EFFECT-AMBIGUOUS</a>
+                because the destination is ambiguous; use
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                instead.
+            </li>
+            <li>
+                <strong>Once + if= compose.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">once if=cond</code>
+                fires only on the FIRST transition where cond is
+                truthy. Subsequent matching transitions are skipped
+                whether cond is truthy or not.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/pages/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a> &mdash; the container. Without an engine,
+                onTransition has nowhere to live.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">effect=</span>
+                attribute on a state-child &mdash; per-rule inline
+                form. Single-target only. Reference page queued.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">&lt;onTimeout&gt;</span>
+                &#47; <span class="font-mono text-slate-500">&lt;onIdle&gt;</span>
+                &mdash; sibling temporal triggers (per-state and
+                engine-wide watchdog respectively). Reference pages
+                queued.
+            </li>
+            <li>
+                <a href="/pages/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;match&gt;
+                </a> &mdash; forbidden context. Promote to engine
+                first if you need transition effects.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onTransition&gt; from / to / once / if</td>
+                    <td class="py-2 pr-4">S57 D2.8</td>
+                    <td class="py-2 text-xs">SPEC &sect;51.0.H; engine-only structural element</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">E-ONTRANSITION-NO-TARGET</td>
+                    <td class="py-2 pr-4">S74 A1b B17.3</td>
+                    <td class="py-2 text-xs">Caught neither-from-nor-to misuse</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">internal:rule= excludes onTransition</td>
+                    <td class="py-2 pr-4">S67 / S68 &sect;51.0.O</td>
+                    <td class="py-2 text-xs">Internal transitions preserve outer-engine lifecycle including handler skip</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;51.0.H</strong>
+            (effect= / onTransition) and <strong>&sect;51.0.O</strong>
+            (internal:rule= prefix). The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+    </article>
+
+</>

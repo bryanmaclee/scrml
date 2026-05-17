@@ -1,0 +1,327 @@
+// scrml.dev /reference/elements/page
+//
+// Reference page for the page element. Route declaration; lives in
+// the entry-file program OR as a standalone file in pages/ for
+// filesystem routing.
+//
+// SPEC anchors: §40.8 (multi-page-app shape) + §40.8.1 (filesystem-
+// inferred multi-page vs SPA) + §4.15 (structural elements registry)
+// + §24.4 (scrml-defined structural elements).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;page&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Route declaration. Filesystem-routed by default;
+                path= overrides. Lives inside the entry-file program,
+                or as a standalone file under pages/.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Core multi-page-app surface
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§40"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §40.8 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;page [path="/explicit-route"] [auth="required"]&gt;
+  &lt;!-- page body --&gt;
+&lt;/page&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            Two placement shapes:
+        </p>
+
+        <ul class="list-disc list-inside space-y-1 text-slate-700">
+            <li>
+                <strong>Inline in entry file.</strong>
+                A &lt;page&gt; declared inside the entry-file
+                &lt;program&gt; body. Useful for small apps. The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">path=</code>
+                attribute is REQUIRED when used inline.
+            </li>
+            <li>
+                <strong>Standalone file under pages/.</strong>
+                A &lt;page&gt; declared as the root element of a file
+                under
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages&#47;</code>.
+                The filesystem path determines the route; no
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">path=</code>
+                attribute needed. Canonical multi-page-app shape.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Filesystem layout for a four-page app. Each file is a
+            standalone &lt;page&gt; root; the filesystem determines
+            routes.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>app.scrml                       &lt;program&gt; root + nav chrome
+pages/
+  index.scrml                   /
+  about.scrml                   /about
+  reference/
+    index.scrml                 /reference
+    elements/
+      engine.scrml              /reference/elements/engine</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Inside each page file:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;page&gt;
+  &lt;article&gt;
+    Page content here.
+  &lt;/article&gt;
+&lt;/page&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The compiler reads the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages&#47;</code>
+            tree (per SPEC &sect;40.8.1 filesystem-inferred multi-
+            page-app shape) and emits per-route artifacts.
+            Approach A closure analysis runs per page; each route
+            ships its own chunk set.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Filesystem-inferred routing.</strong> Per
+                SPEC &sect;40.8.1, when a project has a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages&#47;</code>
+                directory at the project root, the compiler treats
+                the project as a multi-page app. Each
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>
+                file under pages/ becomes a route; the file path
+                (minus
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>)
+                is the URL.
+            </li>
+            <li>
+                <strong>SPA shape if no pages/ exists.</strong>
+                Projects with a top-level &lt;program&gt; but no
+                pages/ directory and no &lt;page&gt; children are
+                inferred as SPAs (W-PROGRAM-SPA-INFERRED info-level
+                lint surfaces the inference).
+            </li>
+            <li>
+                <strong>Auth inheritance.</strong>
+                A &lt;page&gt; nested inside an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role="X"&gt;</code>
+                wrapper inherits the role unless it has its own
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>
+                attribute. The compiler emits
+                <a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED"
+                   class="font-mono text-xs text-blue-700 underline">W-AUTH-PAGE-INFERRED</a>
+                info-level when the inference applies, so the
+                inheritance is auditable.
+            </li>
+            <li>
+                <strong>Per-route artifacts.</strong> Each page gets
+                its own initial chunk + tier-1 idle-prefetch + tier-2
+                hover-prefetch + tier-N on-demand chunks (Approach A
+                artifact splitter, v0.3.0). The chunk filenames
+                embed an FNV-1a content hash for adopter-cache
+                stability.
+            </li>
+            <li>
+                <strong>Per-role chunk variance.</strong>
+                For routes nested inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role=&gt;</code>,
+                the splitter emits role-specific chunks. Anonymous
+                visitors download strictly smaller initial bundles
+                than logged-in roles.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/pages/reference/errors/W-PROGRAM-SPA-INFERRED" class="text-blue-700 underline">W-PROGRAM-SPA-INFERRED</a> &mdash; top-level program with no pages/ tree (SPA inferred)</li>
+            <li><a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherits auth role from wrapper</li>
+            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;page&gt; in unsupported context</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Index resolution.</strong> A file at
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages/reference/index.scrml</code>
+                serves the route
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/reference</code>
+                &mdash; the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">index</code>
+                suffix is the canonical "directory landing" form.
+                Alternative file shape
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages/reference.scrml</code>
+                serves the same route &mdash; equivalent semantics
+                per route inference.
+            </li>
+            <li>
+                <strong>Dynamic segments via path= attribute.</strong>
+                For routes that need positional parameters
+                (e.g.,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/users/:id</code>),
+                use the explicit
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">path=</code>
+                attribute. Filesystem-inferred routes are static
+                only.
+            </li>
+            <li>
+                <strong>routes/ alias.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">routes&#47;</code>
+                is recognized as a synonym of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages&#47;</code>
+                (S94 D-RI-PAGES). Pick one; don't mix in the same
+                project.
+            </li>
+            <li>
+                <strong>Pages do NOT nest.</strong> A &lt;page&gt;
+                inside another &lt;page&gt; is invalid. For nested
+                routes, use the filesystem hierarchy
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages/parent/child.scrml</code>).
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/pages/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;program&gt;
+                </a> &mdash; root container; documents the multi-
+                page shape via filesystem-routed page children.
+            </li>
+            <li>
+                <a href="/pages/reference/elements/auth" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;auth role=&gt;
+                </a> &mdash; per-role visibility wrapper for pages;
+                drives per-role chunk variance.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">chunks.json</span>
+                &mdash; the per-route per-role manifest. Inspect to
+                see what each route ships.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">data-scrml-prefetch</span>
+                &mdash; markup attribute the compiler emits on
+                internal links for tier-2 hover-prefetch.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">filesystem-inferred multi-page-app shape</td>
+                    <td class="py-2 pr-4">SPEC &sect;40.8.1</td>
+                    <td class="py-2 text-xs">Top-level pages/ tree triggers multi-page mode</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">pages&#47; canonical prefix</td>
+                    <td class="py-2 pr-4">S94 D-RI-PAGES (c0503c5)</td>
+                    <td class="py-2 text-xs">buildPageRouteTree recognizes both pages&#47; and routes&#47;</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Per-route artifact splitter</td>
+                    <td class="py-2 pr-4">v0.3.0 (Approach A — S91)</td>
+                    <td class="py-2 text-xs">7 sub-phases; FNV-1a content-addressed chunks</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">Per-role chunk variance</td>
+                    <td class="py-2 pr-4">v0.3.0 (A-3 AuthGraph)</td>
+                    <td class="py-2 text-xs">Anonymous visitors download strictly smaller initial bundles</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;40.8</strong>
+            (multi-page-app shape) and <strong>&sect;40.8.1</strong>
+            (filesystem-inferred routing). Cross-refs to
+            <strong>&sect;40.9</strong> (Approach A artifact splitter)
+            apply when auth wrapping is involved. The normative text
+            lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+    </article>
+
+</>

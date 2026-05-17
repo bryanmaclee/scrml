@@ -70,12 +70,24 @@
                     &lt;auth&gt;
                 </a> &mdash; Per-role visibility constraint. Drives the per-route per-role artifact splitter.
             </li>
+            <li>
+                <a href="/pages/reference/elements/onTransition" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;onTransition&gt;
+                </a> &mdash; Engine effect element. Runs at transition commit; filterable by from / to / once / if.
+            </li>
+            <li>
+                <a href="/pages/reference/elements/page" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;page&gt;
+                </a> &mdash; Route declaration. Filesystem-routed; path= overrides. Per-route per-role artifacts.
+            </li>
+            <li>
+                <a href="/pages/reference/elements/schema" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;schema&gt;
+                </a> &mdash; Declarative DB schema. SQL-mirror canonical plus additive shared-core validators; migration diff at compile time.
+            </li>
             <li class="text-slate-500">
-                <span class="font-mono">&lt;onTransition&gt;</span>,
                 <span class="font-mono">&lt;onTimeout&gt;</span>,
-                <span class="font-mono">&lt;onIdle&gt;</span>,
-                <span class="font-mono">&lt;schema&gt;</span>,
-                <span class="font-mono">&lt;page&gt;</span>
+                <span class="font-mono">&lt;onIdle&gt;</span>
                 &mdash; queued for the Day-30 build-out.
             </li>
         </ul>
