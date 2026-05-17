@@ -402,13 +402,12 @@ describe("emit-library §7b: type-decl exclusion from source-text path", () => {
 // ---------------------------------------------------------------------------
 
 describe("emit-library §7: integration", () => {
-  // FOLLOW-ON (S99 — A2 surfaced): see
-  // compiler/tests/unit/self-host-module-resolver.test.js
-  // for the same E-SCOPE-001 cascade root cause. This test's
-  // expectation `result.errors.toHaveLength(0)` fails downstream of
-  // the same scope-walker gap. Reopen when self-host module-resolver
-  // compile-clean test re-enables.
-  test.skip("module-resolver.scrml produces importable output [A2-SURFACED — see self-host-module-resolver follow-on]", async () => {
+  // RESOLVED (A1 — S99 cascade): see
+  // compiler/tests/unit/self-host-module-resolver.test.js — the
+  // scope-walker gap that caused module-resolver.scrml's E-SCOPE-001
+  // cascade is fixed in changes/a1-scope-walker-export-class-closures
+  // (commits 8f16e01 + 92ce1f3 + de7af98).
+  test("module-resolver.scrml produces importable output [A2-SURFACED — fixed by A1]", async () => {
     const { resolve, dirname } = await import("path");
     const { existsSync, readFileSync } = await import("fs");
 

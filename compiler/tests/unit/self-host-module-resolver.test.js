@@ -65,19 +65,19 @@ describe("self-host: module-resolver.scrml compilation", () => {
     expect(existsSync(scrmlFile)).toBe(true);
   });
 
-  // FOLLOW-ON (S99 — A2 surfaced): A2's fix populates body+params on export
-  // function synth stubs (per `compiler/src/ast-builder.js parseLogicBody`
-  // anomaly-2 fix). With body now populated, the type/scope walker reaches
-  // bindings inside `export class ModuleError {...}` and function-local
-  // closures (filePath, graph, graphErrors) that it previously didn't see.
-  // It fires an E-SCOPE-001 cascade ("Undeclared identifier ModuleError",
-  // "Undeclared identifier filePath", etc.) on what should be valid in-scope
-  // bindings. Root cause is in symbol-table / type-system scope analysis
-  // when traversing populated export-class / export-function bodies — not
-  // an A2 bug but a real pre-existing scope-walker gap that A2 unmasked.
-  // Reopen once the scope walker handles export-class bodies + function-
-  // local-closure resolution correctly.
-  test.skip("compiles without errors [A2-SURFACED E-SCOPE-001 cascade — root cause TBD]", () => {
+  // RESOLVED (A1 — S99 cascade): A2 (c4fc98a) populated body+params on export
+  // function synth stubs which unmasked three pre-existing scope-walker gaps
+  // in type-system.ts:
+  //   §A `export class Foo {...}` — name not bound (preBindExportedNames only
+  //       looked at `exportedName`, which the AST builder left null for class).
+  //   §B `for (const [a, b] of x)` — destructured names not bound (for-stmt
+  //       arm only bound the synth `variable: "item"`).
+  //   §C `const { a, b: ren } = e` — destructured names not bound (const-decl
+  //       arm only bound when `name` was truthy; LHS pattern lived in sibling
+  //       bare-expr).
+  // All three fixed in changes/a1-scope-walker-export-class-closures
+  // (commits 8f16e01 + 92ce1f3 + de7af98).
+  test("compiles without errors [A2-SURFACED — fixed by A1]", () => {
     const compilerRoot = resolve(dirname(new URL(import.meta.url).pathname), "../../../compiler");
     const cli = resolve(compilerRoot, "src/cli.js");
 

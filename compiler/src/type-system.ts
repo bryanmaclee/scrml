@@ -3128,6 +3128,140 @@ function generateDbTypes(
 }
 
 // ---------------------------------------------------------------------------
+// A1 (2026-05-17) — Destructuring pattern name extraction
+// ---------------------------------------------------------------------------
+//
+// The AST builder does NOT (yet) emit structured destructuring patterns. The
+// information survives only in raw text:
+//
+//   `for (const [a, b] of x)` → for-stmt { variable: "item" (synth),
+//                                          iterable: "[ a , b ] of x" }
+//   `const { a, b: ren } = e` → const-decl { name: "", init: "" }
+//                              + bare-expr { expr: "{ a, b: ren } = e" }
+//
+// To prevent false E-SCOPE-001 on the destructured names, the scope walker
+// must extract names from these raw strings at bind time. This is a workaround
+// over the AST shape — once ast-builder.js emits proper destructuring AST,
+// this regex-based extractor can be retired and replaced with a structural
+// walk. The shape recognised here matches plain JS destructuring grammar with
+// scrml-specific tokenisation (tokenizer interleaves spaces around all
+// punctuation, so `{a,b}` arrives as `{ a , b }`).
+//
+// Returns the list of LHS-bound names (NOT renamed-from names — `{ a: ren }`
+// returns `["ren"]`, not `["a"]`). Defaults (`{ a = 1 }` → `a`) are honoured.
+// Nested patterns (`{ a: { b } }`) recurse one level — deeper nesting falls
+// back to greedy ident extraction, which is safe (over-binding tolerable for
+// scope-resolution, never under-binds).
+//
+// Per pa.md Rule 3 (right answer beats easy): this stays a localised
+// workaround in type-system; the AST builder fix is a separate dispatch.
+
+function extractDestructuredNames(patternText: string): string[] {
+  if (typeof patternText !== "string" || patternText.length === 0) return [];
+  const trimmed = patternText.trim();
+  if (trimmed.length === 0) return [];
+
+  // The pattern must begin with `{` (object) or `[` (array). Otherwise it's
+  // either not a destructuring pattern, or it's a single-name binding that
+  // the caller already handled.
+  if (trimmed[0] !== "{" && trimmed[0] !== "[") return [];
+
+  // Slice the matching opener...closer. The tokenizer's whitespace-interleaving
+  // makes a simple bracket-depth walk safe.
+  const open = trimmed[0];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) { endIdx = i; break; }
+    }
+  }
+  if (endIdx < 0) return [];
+  const inner = trimmed.slice(1, endIdx);
+
+  const names: string[] = [];
+
+  if (open === "[") {
+    // Array pattern: split by commas at top depth. Each element is either an
+    // ident (with optional `= default`), a `...rest` (binds rest), or a
+    // nested pattern (recurse). Empty slots ` , , ` skip a position.
+    let cur = "";
+    let d = 0;
+    for (let i = 0; i <= inner.length; i++) {
+      const ch = i < inner.length ? inner[i] : ",";
+      if (ch === "[" || ch === "{") d++;
+      else if (ch === "]" || ch === "}") d--;
+      if (ch === "," && d === 0) {
+        const piece = cur.trim();
+        cur = "";
+        if (piece.length === 0) continue;
+        const corePiece = piece.startsWith("...") ? piece.slice(3).trim() : piece;
+        const eqIdx = corePiece.indexOf("=");
+        const namePart = (eqIdx >= 0 ? corePiece.slice(0, eqIdx) : corePiece).trim();
+        if (namePart[0] === "{" || namePart[0] === "[") {
+          for (const sub of extractDestructuredNames(namePart)) names.push(sub);
+        } else {
+          const m = /^[A-Za-z_$][A-Za-z0-9_$]*$/.exec(namePart);
+          if (m) names.push(namePart);
+        }
+      } else {
+        cur += ch;
+      }
+    }
+  } else {
+    // Object pattern: split entries at top depth. Each entry is either
+    //   `name` / `name = default`         -> bind `name`
+    //   `name: alias` / `name: alias = d` -> bind `alias` (alias may nest)
+    //   `...rest`                          -> bind `rest`
+    let cur = "";
+    let d = 0;
+    for (let i = 0; i <= inner.length; i++) {
+      const ch = i < inner.length ? inner[i] : ",";
+      if (ch === "[" || ch === "{") d++;
+      else if (ch === "]" || ch === "}") d--;
+      if (ch === "," && d === 0) {
+        const piece = cur.trim();
+        cur = "";
+        if (piece.length === 0) continue;
+        const corePiece = piece.startsWith("...") ? piece.slice(3).trim() : piece;
+        // Split on the FIRST top-level `:` to detect renaming.
+        let colonIdx = -1;
+        let cd = 0;
+        for (let j = 0; j < corePiece.length; j++) {
+          const cch = corePiece[j];
+          if (cch === "[" || cch === "{") cd++;
+          else if (cch === "]" || cch === "}") cd--;
+          else if (cch === ":" && cd === 0) { colonIdx = j; break; }
+        }
+        let bindPart: string;
+        if (colonIdx >= 0) {
+          bindPart = corePiece.slice(colonIdx + 1);
+        } else {
+          bindPart = corePiece;
+        }
+        // Strip default `= expr` from the bind side.
+        const eqIdx2 = bindPart.indexOf("=");
+        const namePart2 = (eqIdx2 >= 0 ? bindPart.slice(0, eqIdx2) : bindPart).trim();
+        if (namePart2[0] === "{" || namePart2[0] === "[") {
+          for (const sub of extractDestructuredNames(namePart2)) names.push(sub);
+        } else {
+          const m = /^[A-Za-z_$][A-Za-z0-9_$]*$/.exec(namePart2);
+          if (m) names.push(namePart2);
+        }
+      } else {
+        cur += ch;
+      }
+    }
+  }
+
+  return names;
+}
+
+// ---------------------------------------------------------------------------
 // §2a — E-SCOPE-001 in logic expressions
 // ---------------------------------------------------------------------------
 
@@ -4863,6 +4997,61 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "bare-expr": {
         resolvedType = tAsIs();
+        // A1 (2026-05-17) — destructuring assignment as bare-expr.
+        //
+        // `const { graph, errors: graphErrors } = expr` is split by the AST
+        // builder into an empty `const-decl { name: "", init: "" }` followed
+        // by this bare-expr whose `expr` is the destructuring assignment
+        // text (`"{ graph , errors : graphErrors } = expr"`). The
+        // safeParseExprToNode walker emits the LHS as `escape-hatch` because
+        // it can't parse a bare destructuring pattern, so the LHS pattern's
+        // names never enter scope through the const-decl arm.
+        //
+        // Detect this shape on the raw `expr` text: trim and check whether
+        // it begins with `[` or `{`, then locate the matching `=` at top
+        // depth (NOT `==` / `=>` / `<=` / `>=` / `!=` — those would mean the
+        // LHS isn't an assignment target). If we find one, slice the LHS
+        // pattern and run extractDestructuredNames over it, binding the
+        // names BEFORE checkLogicExprIdents runs (so the LHS names appear
+        // declared when the walker visits the assign-expr target). The RHS
+        // is still walked normally — uses of `expr` on the right side
+        // still flag undeclared identifiers.
+        {
+          const beExprText = (n as Record<string, unknown>).expr;
+          if (typeof beExprText === "string" && beExprText.length > 0) {
+            const trimmed = beExprText.trimStart();
+            if (trimmed[0] === "[" || trimmed[0] === "{") {
+              const open = trimmed[0];
+              const close = open === "[" ? "]" : "}";
+              let pd = 0;
+              let endIdx = -1;
+              for (let i = 0; i < trimmed.length; i++) {
+                const ch = trimmed[i];
+                if (ch === open) pd++;
+                else if (ch === close) {
+                  pd--;
+                  if (pd === 0) { endIdx = i; break; }
+                }
+              }
+              if (endIdx > 0) {
+                // After the pattern, the next non-whitespace character must
+                // be `=` (and NOT `==` / `=>`) to qualify as a destructuring
+                // assignment. Otherwise this is an object/array literal at
+                // statement position — not a binding site.
+                const afterPattern = trimmed.slice(endIdx + 1).trimStart();
+                if (afterPattern.length > 0 && afterPattern[0] === "="
+                    && afterPattern[1] !== "=" && afterPattern[1] !== ">") {
+                  const patternText = trimmed.slice(0, endIdx + 1);
+                  for (const name of extractDestructuredNames(patternText)) {
+                    if (!scopeChain.lookup(name)) {
+                      scopeChain.bind(name, { kind: "variable", resolvedType: tAsIs() });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
         // §2a — E-SCOPE-001 on bare-expr statements (mid-block function calls,
         // assignments parsed as raw expressions, etc.). Tightest-coverage slice;
         // everything else in §2a came first so the bare-expr extension sits on
@@ -5637,6 +5826,37 @@ function annotateNodes(
         if (typeof forVar === "string" && forVar.length > 0) {
           scopeChain.bind(forVar, { kind: "variable", resolvedType: tAsIs() });
         }
+        // A1 (2026-05-17) — destructuring for-of pattern. The AST builder
+        // records a synth `variable: "item"` and preserves the destructuring
+        // pattern only in `iterable` text (e.g. `"[ a , b ] of items"`).
+        // Extract the destructured names from the pattern's prefix and bind
+        // them in the for-loop scope so the body's references resolve cleanly.
+        const iterableRaw = (n as Record<string, unknown>).iterable;
+        if (typeof iterableRaw === "string" && iterableRaw.length > 0) {
+          const trimIter = iterableRaw.trimStart();
+          if (trimIter[0] === "[" || trimIter[0] === "{") {
+            const open = trimIter[0];
+            const close = open === "[" ? "]" : "}";
+            let pd = 0;
+            let endIdx = -1;
+            for (let i = 0; i < trimIter.length; i++) {
+              const ch = trimIter[i];
+              if (ch === open) pd++;
+              else if (ch === close) {
+                pd--;
+                if (pd === 0) { endIdx = i; break; }
+              }
+            }
+            if (endIdx > 0) {
+              const patternText = trimIter.slice(0, endIdx + 1);
+              for (const name of extractDestructuredNames(patternText)) {
+                if (!scopeChain.lookup(name)) {
+                  scopeChain.bind(name, { kind: "variable", resolvedType: tAsIs() });
+                }
+              }
+            }
+          }
+        }
         // C-style form: extract the declared counter name from the initExpr
         // if the ExprNode surfaces a VariableDeclaration at its root.
         const cStyleParts = (n as Record<string, unknown>).cStyleParts as
@@ -5892,6 +6112,18 @@ function annotateNodes(
   // is emitted), so the normal scope-binding path misses the name. Binding
   // with kind: "variable" + asIs type is sufficient for scope-resolution
   // purposes — we're not tracking the exported symbol's real shape here.
+  //
+  // A1 (2026-05-17) — extended to recover names from export-decl `raw` text
+  // when `exportedName` is null. Notably `export class Foo { ... }` is parsed
+  // as `export-decl { exportedName: null, raw: "export class Foo { ... }" }`
+  // because the AST builder has no class-decl node kind — the class name
+  // would otherwise never enter file scope, so `new Foo(...)` in a sibling
+  // export function would surface a false E-SCOPE-001 (A2-SURFACED gap).
+  // Mirrors the same recovery shape used for `export function/fn/const/let/
+  // type/enum/struct/interface` declarations (defensive over the AST
+  // builder's current `exportedName` population).
+  const EXPORT_NAME_RECOVERY_RE =
+    /^\s*export\s+(?:async\s+)?(?:class|interface|type|enum|struct|fn|function|const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
   function preBindExportedNames(nodes: ASTNodeLike[]): void {
     for (const n of nodes) {
       if (!n || typeof n !== "object") continue;
@@ -5901,6 +6133,20 @@ function annotateNodes(
           for (const name of exportedName.split(",").map(s => s.trim()).filter(Boolean)) {
             if (!scopeChain.lookup(name)) {
               scopeChain.bind(name, { kind: "variable", resolvedType: tAsIs() });
+            }
+          }
+        } else {
+          // Fallback — recover the name from the raw `export …` text. Covers
+          // shapes the AST builder doesn't populate `exportedName` for, most
+          // notably `export class Foo { ... }`.
+          const raw = (n as Record<string, unknown>).raw;
+          if (typeof raw === "string" && raw.length > 0) {
+            const m = EXPORT_NAME_RECOVERY_RE.exec(raw);
+            if (m) {
+              const name = m[1];
+              if (!scopeChain.lookup(name)) {
+                scopeChain.bind(name, { kind: "variable", resolvedType: tAsIs() });
+              }
             }
           }
         }

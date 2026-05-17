@@ -89,19 +89,18 @@ describe("self-host: meta-checker.scrml compilation", () => {
     expect(existsSync(scrmlFile)).toBe(true);
   });
 
-  // FOLLOW-ON (S99 — A2 surfaced): same root cause as
-  // self-host-module-resolver.test.js — A2's `export function` body
-  // population unmasks an E-SCOPE-001 cascade on function-local bindings
-  // (`fn`, `testExpr`, `MetaError`, `fieldName`, `fieldType`,
-  // `resolvedType`, etc.) when the scope walker traverses populated
-  // bodies in self-host scrml. Pre-A2, body-stripping silently hid these
-  // gaps. The S99 source-file SPEC alignment (switch → if/else,
-  // `!= null` → `is some` per SPEC §17 / §42) closed the immediate
-  // syntax errors but the scope-walker gap remains and is the actual
-  // pickup-able follow-up. Reopen once scope walker handles
-  // export-class + function-local-closure resolution on populated
-  // bodies.
-  test.skip("compiles without errors [A2-SURFACED E-SCOPE-001 cascade — root cause TBD]", () => {
+  // PARTIALLY RESOLVED (A1 — S99 cascade): A1 fixed §A/§B/§C scope-walker
+  // gaps (changes/a1-scope-walker-export-class-closures, commits 8f16e01 +
+  // 92ce1f3 + de7af98). After A1, meta-checker.scrml's error count goes
+  // from 8 → 3 E-SCOPE-001. The residual 3 fire on `fn testExpr(...)` and
+  // its references — a SEPARATE gap: nested `fn name(...) { ... }` (the
+  // `fn` keyword form) inside another function. The TAB stage emits a
+  // "statement boundary not detected" warning and parses the nested fn
+  // as a bare-expr, so `testExpr` never enters scope. That is
+  // ast-builder.js parseLogicBody / parseParamList territory and is
+  // owned by the parallel A2-FUP-3 dispatch per A1 task brief. Keep
+  // skipped until A2-FUP-3 lands.
+  test.skip("compiles without errors [A2-SURFACED — A1 partial fix; residual nested-fn-keyword gap owned by A2-FUP-3]", () => {
     const compilerRoot = resolve(dirname(new URL(import.meta.url).pathname), "../../../compiler");
     const cli = resolve(compilerRoot, "src/cli.js");
 
