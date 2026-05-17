@@ -146,6 +146,75 @@ authentication.
 - `scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md` — the website architecture lock
 - This session's reference-build-out commits: `b4f976c` (engine/match/program) + `41086cd` (channel/auth/logic)
 
+## ADDENDUM — Tailwind engine has coverage gaps (S99 follow-up)
+
+While verifying the page styling after the URL-routing workaround
+landed, surfaced a third issue: the scrml built-in Tailwind engine
+(per `scrml has a built-in Tailwind engine` per
+`docs/website/pages/articles/css-without-build-step.scrml`) is
+generating CSS rules for only a SUBSET of the Tailwind utilities used
+across the docs site. Missing from compiled .css output:
+
+- **`.font-mono`** — used heavily in `<code>` spans, table headers,
+  the scrml.dev logo. Not in any compiled CSS.
+- **`.prose`** / **`.prose-slate`** / **`.not-prose`** — the
+  `@tailwindcss/typography` plugin classes. Every reference page and
+  every article page wraps content in `<article class="prose prose-slate">`.
+  Without these rules, default `<h1>`/`<p>`/`<code>`/`<ul>` styling
+  reverts to browser defaults — content reads as plain text.
+- **`.border-collapse`** — used in feature-page Availability tables.
+- Possibly more — these are just the ones surfaced by spot-check.
+
+**Repro:**
+```bash
+grep -c "prose" docs/website/dist/pages/reference/elements/engine.css
+# 0
+grep -c "font-mono" docs/website/dist/app.css
+# 0
+```
+
+But the SOURCE has both heavily used:
+```bash
+grep -c "prose" docs/website/pages/reference/elements/engine.scrml
+# multiple
+grep -c "font-mono" docs/website/pages/reference/elements/engine.scrml
+# multiple
+```
+
+**Impact:** every reference page and every article page renders
+unstyled in the browser. The site exists, links work (post-workaround
+above), but content has no typography styling.
+
+**Workaround applied this session — Tailwind Play CDN injection.** Sed
+script injects `<script src="https://cdn.tailwindcss.com?plugins=typography"></script>`
+into every `dist/**/*.html` after compile. Restores all missing
+utilities + typography plugin at the cost of a runtime CDN dependency.
+The injection is wiped on every recompile (dev server overwrites);
+re-run the script after edits.
+
+**Proper fixes (compiler-side, alternatives):**
+
+- (a) Extend the built-in Tailwind engine to cover the typography
+  plugin (`prose` + variants) + the missing core utilities
+  (`font-mono`, `border-collapse`, etc). Closes the gap structurally.
+- (b) Provide a `<program>` attribute or compile-time config to opt
+  into the Play CDN script tag emission. Simpler to ship; offloads
+  to a CDN.
+- (c) Document the supported subset and require docs authors to use
+  only those utilities. Brittle; restricts the design surface.
+
+PA recommendation: (a) — the css-without-build-step.scrml article
+explicitly markets the built-in Tailwind engine as a flagship
+feature ("scrml has a built-in Tailwind engine. It scans the source
+for used utility classes and emits only the CSS rules for what the
+source actually uses. No `tailwind.config.js`. No `content` array.
+No PostCSS. The engine is in the compiler."). The gap between that
+claim and the current coverage is adopter-facing — close it
+structurally.
+
+Cross-ref the article asset itself: `docs/website/pages/articles/css-without-build-step.scrml`
+lines 89, 107.
+
 ## Tags
 
-#bug #dev-server #routing #pages-prefix #shell-composition #v0.3.x #adopter-ux #s99
+#bug #dev-server #routing #pages-prefix #shell-composition #tailwind-engine-gap #typography-plugin #v0.3.x #adopter-ux #s99
