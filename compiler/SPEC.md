@@ -19433,15 +19433,17 @@ With `--output-dir dist/`, the artifact paths are:
 dist/app.html
 dist/app.client.js
 dist/app.server.js
-dist/pages/customer/home.html
-dist/pages/customer/home.client.js
-dist/pages/customer/home.server.js
-dist/pages/driver/home.html
-dist/pages/driver/home.client.js
-dist/pages/driver/home.server.js
+dist/customer/home.html
+dist/customer/home.client.js
+dist/customer/home.server.js
+dist/driver/home.html
+dist/driver/home.client.js
+dist/driver/home.server.js
 ```
 
-No collision occurs. `pages/customer/home.html` and `pages/driver/home.html` are distinct dist paths.
+No collision occurs. `customer/home.html` and `driver/home.html` are distinct dist paths.
+
+**Leading `pages/` segment strip (S100, MPA shell composition, 2026-05-17).** When the dist-relative directory of a source file begins with `pages/` as a segment-aligned prefix (matching the v0.3 canonical MPA convention per §40.8.1 + §47.9.2 filesystem-inferred routes), the `pages/` segment is stripped from the dist directory so that route URLs and dist paths coincide. `pages/customer/home.scrml` produces `dist/customer/home.html` (NOT `dist/pages/customer/home.html`); the URL `/customer/home` then resolves to the dist path without an inverse-rewrite step in the dev server. The strip is segment-aligned — a file literally named `pages.scrml` keeps its dist name; only a leading `pages/` directory segment matches. Legacy `routes/` prefix is preserved (un-stripped) to avoid URL shifts for existing applications on that convention. Implementation: `pathFor` in `compiler/src/api.js`.
 
 #### 47.9.6 Worked example — single-file flat invocation
 
