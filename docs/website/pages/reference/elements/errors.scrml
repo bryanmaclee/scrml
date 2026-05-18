@@ -79,7 +79,7 @@
     &lt;label&gt;Agree &lt;signup.agree/&gt;&lt;/label&gt;
     &lt;errors of=@signup.agree/&gt;
 
-    &lt;button type="submit" disabled=&#36;{!@signup.isValid}&gt;Submit&lt;/button&gt;
+    &lt;button type="submit" disabled=${!@signup.isValid}&gt;Submit&lt;/button&gt;
 
     &lt;errors of=@signup all/&gt;
 &lt;/form&gt;</code></pre>
