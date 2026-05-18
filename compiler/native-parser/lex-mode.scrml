@@ -43,28 +43,28 @@
 // commentary lives at file-top. Filed for follow-up review (DD §D4 P-type
 // classification: scrml-language tension surfaced; not blocking).
 //
-// ANOMALY-4 surfaced during M1.2: §51.0.Q.1 nested engines that share the
-// outer engine's enum type (`for=LexMode` inside an outer `for=LexMode`):
+// S101 reframe: Items 1 + 2 below are NOT compiler gaps. Both are
+// SPEC-CANONICAL patterns per cross-check against SPEC §51.0.C +
+// §51.0.Q.1 + §51.0.B (Rule 4 — SPEC is normative).
 //
-//   1. The compiler v0.3 SYM/TS stages fire E-ENGINE-VAR-DUPLICATE +
-//      E-ENGINE-003 against the inner engine's auto-declared `@lexMode`
-//      because both engines auto-derive the same variable name per §51.0.C.
-//      Per §51.0.Q.1's scope-gating rule ("inner variable reachable by
-//      canonical @ access only while outer is in the composite state-child")
-//      the inner SHOULD be able to share the variable name — but the v0.3
-//      checks do not yet implement that scope-gated semantic. Workaround:
-//      `var=innerLexMode` on the inner engine.
+//   1. `var=innerLexMode` is the spec-canonical disambiguation, not a
+//      workaround. SPEC §51.0.C: "Override via `var=` attribute when
+//      the auto-derived name collides with another identifier in scope."
+//      §51.0.Q.1 (verbatim): "Use the `var=` attribute on the inner
+//      engine if the auto-derived name collides with a file-scope
+//      identifier (§51.0.C disambiguation)." The scope-gating rule in
+//      §51.0.Q.1 governs WHERE the inner variable is reachable, not how
+//      its NAME is resolved against collisions — `var=` is the
+//      documented resolution.
 //
-//   2. The compiler v0.3 fires E-ENGINE-STATE-CHILD-MISSING against the
-//      inner engine for every variant not enumerated as a state-child —
-//      even when the spec example (DD §D2's snippet at line 257-264) shows
-//      only the immediately-needed variant. Workaround: enumerate all 7
-//      LexMode variants in the inner engine. (Architecturally OK because
-//      a template-interp body can in principle contain any lexer mode.)
+//   2. Full state-child enumeration is spec-canonical per §51.0.B
+//      exhaustiveness. A template-interp body can in principle contain
+//      any of the 7 LexMode variants; there is no spec-blessed
+//      "narrower-domain partial enumeration" shape. Full enumeration
+//      IS the right shape.
 //
-// Both items filed for follow-up: A) §51.0.Q.1 scope-gated var auto-decl
-// implementation; B) §51.0.B optional partial-enumeration when the variant
-// set is provably narrower in the inner engine's reach. Not blocking M1.2.
+// Both items are RESOLVED — not filing for compiler change; not v0.4
+// critical-path. The form below is the canonical §51.0.Q.1 pattern.
 
 ${
     type LexMode:enum = {
