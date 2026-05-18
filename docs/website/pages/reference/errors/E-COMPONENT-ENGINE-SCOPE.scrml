@@ -1,0 +1,210 @@
+// scrml.dev /reference/errors/E-COMPONENT-ENGINE-SCOPE
+//
+// Reference page for E-COMPONENT-ENGINE-SCOPE. A component declaration body
+// contains an <engine> element. Engines are singletons; instantiating a
+// component multiple times would produce multiple "singletons", violating
+// the invariant.
+//
+// SPEC anchors: §51.0.K + §15.13.5 + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-COMPONENT-ENGINE-SCOPE
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                A component declaration body contains an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+                element. Engines are singletons.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.K (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per PRIMER §7 + SPEC §51.0.K Machine Cohesion, engines are
+            singleton-by-design. One declaration site → one running
+            singleton instance for that scope. Components are the
+            multi-instance vehicle &mdash; each render of a component
+            spins up a fresh instance with its own internal state.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Engines and components are STRUCTURALLY DISTINCT. Declaring
+            an
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+            inside a component body would mean each component instance
+            spawns its own "singleton" &mdash; a contradiction in terms.
+            The compiler rejects at compile time.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+
+component LoadCard &#123;
+  &lt;engine for=Phase initial=.Idle&gt;
+  //^^^^^^
+  //E-COMPONENT-ENGINE-SCOPE: engine inside component body.
+    &lt;Idle    rule=.Loading /&gt;
+    &lt;Loading rule=.Done    /&gt;
+    &lt;Done    rule=.Idle    /&gt;
+  &lt;/&gt;
+&#125;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Use plain reactive cells inside the component.</strong>
+                If the state is per-instance, declare it as ordinary
+                reactive cells:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;phase&gt;: Phase = .Idle</code>.
+                No exhaustiveness check (engine&apos;s Tier 2 commitment
+                is per-app, not per-component), but per-instance state
+                works.
+            </li>
+            <li>
+                <strong>Move the engine outside the component.</strong>
+                If the state is genuinely app-singleton (e.g., a global
+                router phase, a session-lifecycle state), declare the
+                engine at file scope OR in a parent
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+                body. Components read the engine variable via the
+                canonical access path.
+            </li>
+            <li>
+                <strong>Use a derived engine for per-instance projection.</strong>
+                If you want engine-like exhaustive case-analysis but
+                per-instance value, the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine for=Type derived=expr&gt;</code>
+                form (§51.0.J) projects an enum from existing data
+                without owning the state. Derived engines are still
+                singletons but their value tracks an upstream cell.
+                NOTE: derived engines also can&apos;t be declared inside
+                components (same E-COMPONENT-ENGINE-SCOPE applies).
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Why this is structural, not stylistic
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            The component-vs-engine distinction is one of scrml&apos;s
+            architectural moves (Move 20 in the v0.next surface). Per
+            §15.13.5 + §51.0.K, the two abstractions answer different
+            questions:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                <strong>Component:</strong> "What&apos;s the UI shape of
+                this reusable piece, parameterized by props?"
+                Multi-instance; each render owns its state.
+            </li>
+            <li>
+                <strong>Engine:</strong> "What&apos;s the canonical state
+                machine governing this scope?" Singleton; one declaration
+                = one running instance.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Conflating them (engine inside component) breaks the engine
+            singleton invariant. The compiler enforces the distinction
+            structurally so the architectural decomposition holds at
+            scale &mdash; the moment you can have N engines from one
+            declaration, "engine" loses its semantic core.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Nested engines: legal in OTHER engines, NOT in components
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per §51.0.K Machine Cohesion (sharpened S67), engines MAY be
+            declared inside another engine&apos;s composite state-child
+            body &mdash; per §51.0.Q.1. Outer × 1 = 1 inner instance, so
+            the singleton invariant is preserved. Engines MAY NOT be
+            declared in:
+        </p>
+
+        <ul class="space-y-1 text-slate-700 mt-3">
+            <li>Component bodies (this error)</li>
+            <li>Function bodies</li>
+            <li>Snippet bodies</li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Multi-call surfaces (function / snippet / component) cannot
+            preserve singleton-ness, hence the structural rejection.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; element reference. Singleton lifecycle + declaration scope rules.
+            </li>
+            <li>
+                <a href="/reference/errors/E-IDLE-MISPLACED"
+                   class="text-rose-700 hover:text-rose-900 underline">E-IDLE-MISPLACED</a>
+                &mdash; sibling error class (structural-element placement).
+            </li>
+            <li>
+                <a href="/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED"
+                   class="text-rose-700 hover:text-rose-900 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a>
+                &mdash; generic structural-element-misuse error.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §51.0.K</strong> (Machine Cohesion — singleton
+            invariant; declaration-scope rules),
+            <strong>§15.13.5</strong> (components-vs-engines distinction
+            — Move 20, D4 ratification),
+            <strong>§51.0.Q.1</strong> (nested engines in composite
+            state-children — the ONE legal nesting form),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

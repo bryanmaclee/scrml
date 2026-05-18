@@ -1,0 +1,179 @@
+// scrml.dev /reference/errors/E-DERIVED-WITH-VALIDATORS
+//
+// Reference page for E-DERIVED-WITH-VALIDATORS. Validators applied to
+// a derived (const) cell. Derived cells are read-only; validators imply
+// gating which is incoherent on a computed value.
+//
+// SPEC anchors: §55.14 + §53 + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-DERIVED-WITH-VALIDATORS
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Validators applied to a derived (const) cell. Derived cells
+                are read-only; validators imply gating which is incoherent
+                on a computed value.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§55"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §55.14 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Validators (the universal-core predicate vocabulary
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">length</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">min</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max</code> &#47; etc.
+            per SPEC §55.1) describe constraints on a state cell&apos;s
+            value with the assumption that the value WILL change &mdash;
+            the validity surface (
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@cell.isValid</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@cell.errors</code>)
+            transitions as the cell mutates.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Derived cells (
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;x&gt; = expr</code>)
+            are read-only by definition &mdash; their value is recomputed
+            from dependency cells, never assigned directly. Applying
+            validators to a derived cell would either gate a value the
+            user can&apos;t change (incoherent), or invite mutation of a
+            cell that shouldn&apos;t be mutated (a contradiction with
+            the cell&apos;s read-only contract).
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;form&gt;
+  &lt;name&gt; = &lt;input type=&quot;text&quot;/&gt;
+  &lt;count req min(0)&gt; = 0
+  const &lt;doubled req min(0)&gt; = @count * 2
+  //              ^^^^^^^^^^
+  //              E-DERIVED-WITH-VALIDATORS: validators on a const cell.
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Use a refinement type instead.</strong>
+                The canonical fix &mdash; constrain the TYPE rather than
+                gate the VALUE. The refinement-type form is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;doubled&gt;: number(min(0)) = @count * 2</code>.
+                The predicate becomes part of the type contract; if the
+                derived expression ever yields a value violating the
+                refinement, a different error fires (E-TYPE-* family)
+                pinned to the COMPUTATION, not to a gate on the result.
+            </li>
+            <li>
+                <strong>Remove the validators</strong> if they were
+                redundant or wrong. If the source cells (
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count</code>
+                in the example) already have appropriate validators, the
+                derived cell inherits "valid in the meaningful sense" from
+                them &mdash; no per-derived gating needed.
+            </li>
+            <li>
+                <strong>Reconsider the design</strong> if you really
+                wanted user-mutable. If the cell needs to BE user input,
+                it&apos;s not derived &mdash; drop the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const</code>
+                modifier and make it a plain reactive cell that the user
+                writes to.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Validators vs refinement types
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml ships the same predicate vocabulary in two native loci:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                <strong>State-cell validators</strong> (§55.2) &mdash;
+                bareword attributes on a writable cell decl. Compile to
+                runtime gates that fire on writes; populate the
+                auto-synthesized validity surface.
+            </li>
+            <li>
+                <strong>Refinement-type predicates</strong> (§53.6) &mdash;
+                same vocabulary as part of a type annotation. Compile to
+                compile-time + runtime checks at expression positions.
+                Apply to any cell with a type annotation, INCLUDING
+                derived cells.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            E-DERIVED-WITH-VALIDATORS surfaces when the developer reached
+            for the first locus (state-cell validator) on a derived cell;
+            the second locus (refinement type) is the right tool.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/errors/E-SYNTHESIZED-WRITE"
+                   class="text-rose-700 hover:text-rose-900 underline">E-SYNTHESIZED-WRITE</a>
+                &mdash; companion error for writes to auto-synthesized validity properties.
+            </li>
+            <li>
+                <a href="/reference/elements/errors" class="text-blue-700 hover:text-blue-900 underline">&lt;errors&gt;</a>
+                &mdash; first-class element for rendering the validity surface.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §55.14</strong> (validators on derived cells
+            forbidden + refinement-type cross-ref),
+            <strong>§53.6</strong> (refinement-type predicate vocabulary),
+            <strong>§55.1</strong> (universal-core predicate catalog),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>
