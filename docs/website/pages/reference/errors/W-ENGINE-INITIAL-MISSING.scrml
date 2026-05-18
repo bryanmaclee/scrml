@@ -1,0 +1,156 @@
+// scrml.dev /reference/errors/W-ENGINE-INITIAL-MISSING
+//
+// Reference page for W-ENGINE-INITIAL-MISSING. initial= omitted on a
+// non-derived engine. Compiler defaults to the first state-child's variant.
+//
+// SPEC anchors: §51.0.E + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-amber-700 font-mono">
+                W-ENGINE-INITIAL-MISSING
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+                attribute omitted on a non-derived
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>.
+                Compiler defaults to the first state-child&apos;s variant.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded font-semibold">
+                    Warning
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.E (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            An
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+            must commit to a starting variant. Per §51.0.E, the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            attribute is REQUIRED on every non-derived engine. When omitted,
+            the compiler will not refuse compilation &mdash; it falls back
+            to the first state-child&apos;s variant declaration order &mdash;
+            but emits W-ENGINE-INITIAL-MISSING to surface the implicit
+            commitment.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Adopters using the prototyping shape (rapid sketch where state
+            order in the source IS the intended initial) get a working
+            engine. Adopters who care about explicit authoring intent get
+            a nudge to declare
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=.Variant</code>.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+
+&lt;engine for=Phase&gt;
+//      ^^^^^^^^^
+//      W-ENGINE-INITIAL-MISSING: initial= absent.
+//      Defaults to .Idle (first state-child).
+  &lt;Idle    rule=.Loading /&gt;
+  &lt;Loading rule=.Done    /&gt;
+  &lt;Done    rule=.Idle    /&gt;
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Add
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=.Variant</code></strong>
+                — the canonical form. Makes the starting variant explicit,
+                survives state-child reordering without behavior change,
+                and silences the warning.
+            </li>
+            <li>
+                <strong>Suppress the warning</strong> per SPEC §28 lint
+                suppression configs if the prototype shape is intentional.
+                Config:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lint.engine-initial-missing</code>.
+                Use sparingly; explicit
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+                is preferred for production code.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Derived engines: initial= is FORBIDDEN
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Derived engines (per §51.0.J,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine for=Type derived=expr&gt;</code>)
+            reject
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            entirely — the starting variant is whatever
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">expr</code>
+            evaluates to at module-init time, NOT an authored value.
+            Providing
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            on a derived engine fires
+            <a href="/reference/errors/E-DERIVED-ENGINE-NO-INITIAL"
+               class="text-rose-700 hover:text-rose-900 underline">E-DERIVED-ENGINE-NO-INITIAL</a>
+            (error, not warning).
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                — element reference.
+            </li>
+            <li>
+                <a href="/reference/errors/E-DERIVED-ENGINE-NO-INITIAL"
+                   class="text-rose-700 hover:text-rose-900 underline">E-DERIVED-ENGINE-NO-INITIAL</a>
+                — error for the opposite case (initial= on derived engine).
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §51.0.E</strong> (initial= required on non-derived
+            engines + first-state-child fallback rule),
+            <strong>§51.0.J</strong> (derived engines reject initial=),
+            <strong>§28</strong> (lint suppression configs),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

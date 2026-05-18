@@ -1,0 +1,197 @@
+// scrml.dev /reference/errors/E-IDLE-INVALID-VARIANT
+//
+// Reference page for E-IDLE-INVALID-VARIANT. <onIdle to=.X/> references
+// a variant X not in the engine's for= enum, or to= is missing/malformed.
+//
+// SPEC anchors: §51.0.R + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-IDLE-INVALID-VARIANT
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle to=.X/&gt;</code>
+                references a variant
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">X</code>
+                not in the engine&apos;s
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
+                enum, OR
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+                is missing/malformed.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Added S77 (A5-6)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.R (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+            target MUST be a variant of the engine&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
+            enum. The compiler validates this at compile time against the
+            statically-known enum definition. Three failure cases all fire
+            E-IDLE-INVALID-VARIANT:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                <strong>Unknown variant:</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=.TypoVariant</code>
+                where TypoVariant is not declared in the engine&apos;s
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
+                enum.
+            </li>
+            <li>
+                <strong>Missing
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>:</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle after=5m/&gt;</code>
+                without a target.
+            </li>
+            <li>
+                <strong>Malformed
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>:</strong>
+                non-variant expression in the target slot (e.g.,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=&quot;Idle&quot;</code>
+                as a string, or
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=&dollar;&lcub;@target&rcub;</code>
+                as a dynamic expression).
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Active, Idle &#125;
+
+&lt;engine for=Phase initial=.Active&gt;
+  &lt;Active rule=.Idle/&gt;
+  &lt;Idle/&gt;
+  &lt;onIdle after=5m to=.Asleep/&gt;
+  //               ^^^^^^^^^^^
+  //               E-IDLE-INVALID-VARIANT: .Asleep is not a variant of Phase.
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Use a declared variant.</strong>
+                The fix is usually a typo correction:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Asleep</code>
+                → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>.
+                Or extend the enum if the missing variant SHOULD exist
+                (and remember the additional state-children + rule= contracts).
+            </li>
+            <li>
+                <strong>Add the missing
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>.</strong>
+                Unlike
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>&apos;s
+                from / to filter pair (where either may be omitted),
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                is a transition-fire (not a handler), so
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+                is mandatory.
+            </li>
+            <li>
+                <strong>Express dynamic target via derived cell.</strong>
+                If you need different idle-targets per app state, model
+                the choice as a derived cell:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;idleTarget&gt; = condition ? .A : .B</code>,
+                then... wait, this isn&apos;t actually supported. The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+                attribute requires a literal variant per §51.0.R. For
+                dynamic dispatch use a per-state
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+                with rule=-constrained target options.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What this error does NOT check
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            The compile-time check verifies the variant exists in the
+            engine&apos;s enum, but does NOT check whether the current
+            state&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            permits the target (which is dynamic — the current state at
+            watchdog fire time depends on runtime). That check is deferred
+            to runtime:
+            <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+               class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-INVALID-TRANSITION</a>
+            fires at runtime if the current state forbids the target.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>
+                — element reference.
+            </li>
+            <li>
+                <a href="/reference/errors/E-IDLE-DUPLICATE"
+                   class="text-rose-700 hover:text-rose-900 underline">E-IDLE-DUPLICATE</a>
+                — sibling error for multiple &lt;onIdle&gt; in one engine.
+            </li>
+            <li>
+                <a href="/reference/errors/E-IDLE-MISPLACED"
+                   class="text-rose-700 hover:text-rose-900 underline">E-IDLE-MISPLACED</a>
+                — sibling error for &lt;onIdle&gt; inside a state-child body.
+            </li>
+            <li>
+                <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+                   class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-INVALID-TRANSITION</a>
+                — runtime fire when the current state&apos;s rule= forbids the watchdog target.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §51.0.R</strong> (to= must be a variant of the
+            engine&apos;s for= enum, required attribute),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

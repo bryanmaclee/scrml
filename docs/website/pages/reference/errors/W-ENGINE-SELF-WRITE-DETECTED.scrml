@@ -1,0 +1,244 @@
+// scrml.dev /reference/errors/W-ENGINE-SELF-WRITE-DETECTED
+//
+// Reference page for W-ENGINE-SELF-WRITE-DETECTED. v0.3 Option-d info lint
+// surfacing engine self-writes — writes whose target equals the current
+// variant. Per §51.0.F.1, self-writes are runtime no-ops, NOT violations.
+//
+// SPEC anchors: §51.0.F.1 + §51.0.F + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-blue-700 font-mono">
+                W-ENGINE-SELF-WRITE-DETECTED
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Engine self-write detected. Per §51.0.F.1, self-writes are
+                runtime no-ops &mdash; informational lint surfacing the
+                intentional or accidental no-op.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded font-semibold">
+                    Info
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Added v0.3 Option-d
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.F.1 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            An engine self-write is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@var = .CurrentVariant</code>
+            or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@var.advance(.CurrentVariant)</code>
+            where the target equals the engine&apos;s currently-active
+            variant. The v0.3 Option-d ratification (2026-05-12) carves out
+            self-writes as runtime no-ops rather than
+            <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+               class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-INVALID-TRANSITION</a>
+            violations (the pre-Option-d behavior). The W- prefix is
+            legacy naming; the severity is Info &mdash; informational only.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The lint surfaces two firing patterns:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                <strong>STRICT (inside-state-child fire):</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.CurrentVariant</code>
+                matches the enclosing state-child tag. The static check
+                is exact &mdash; the write target IS the surrounding state.
+            </li>
+            <li>
+                <strong>CONSERVATIVE (outside-state-child fire):</strong>
+                the write site is outside any state-child body AND
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.CurrentVariant</code>
+                is a declared variant of the engine. The current state at
+                runtime is dynamic, but the literal `.Variant` write target
+                is statically known &mdash; the lint surfaces the pattern
+                where it WILL be a no-op IF the engine happens to be in
+                that variant.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What a self-write skips
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per §51.0.F.1, a self-write is a runtime no-op:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                No
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>
+                handlers fire.
+            </li>
+            <li>
+                No
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute fires.
+            </li>
+            <li>
+                No history capture per §51.0.N (the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">history</code>
+                attribute on composite state-children).
+            </li>
+            <li>
+                No
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">&lt;onTimeout&gt;</a>
+                rearm (per §51.0.M, a self-write does NOT re-enter the
+                state-child).
+            </li>
+            <li>
+                No
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>
+                watchdog reset (per §51.0.R).
+            </li>
+            <li>
+                No subscriber notification &mdash; downstream reactive cells
+                that read the engine variable do NOT recompute.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Active, Idle &#125;
+
+function refresh() &#123;
+  @phase = .Active
+  //          ^^^^^^^
+  //          W-ENGINE-SELF-WRITE-DETECTED (CONSERVATIVE):
+  //          .Active is a declared variant; if @phase is currently
+  //          .Active, this write is a runtime no-op.
+&#125;
+
+&lt;engine for=Phase initial=.Active&gt;
+  &lt;Active rule=.Idle&gt;
+    &lt;button onclick=refresh()&gt;I&apos;m here&lt;/button&gt;
+  &lt;/&gt;
+  &lt;Idle/&gt;
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            When the lint is signal vs noise
+        </h2>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Intentional self-write (lint is noise)
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A defensive
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">set(.Current)</code>
+            reachable from multiple variants &mdash; e.g., a "reset to
+            Active state" handler that runs from any state including the
+            Active state. The no-op-when-already-Active behavior is
+            correct. No action required; the lint is informational.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Accidental self-write (lint is signal)
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A state change was expected unconditionally &mdash; but the
+            write target equals the current variant by mistake. The
+            adopter intended different state, but a copy-paste, typo, or
+            stale code-shape produced a no-op. The lint surfaces "this
+            write does nothing" so the bug is visible at compile time
+            instead of as silent-runtime-no-effect.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Suppression
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Rephrase via a derived cell.</strong>
+                Avoid the literal
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Variant</code>
+                form by computing the target dynamically:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = computeNext()</code>.
+                The compile-time literal-match no longer fires.
+            </li>
+            <li>
+                <strong>Remove the write</strong> if the no-op behavior is
+                accidental and the surrounding logic doesn&apos;t actually
+                need the assignment.
+            </li>
+            <li>
+                <strong>Suppress per SPEC §28</strong> if the lint is
+                noise in this specific call site. Config key:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lint.engine-self-write-detected</code>.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; element reference.
+            </li>
+            <li>
+                <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+                   class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-INVALID-TRANSITION</a>
+                &mdash; the pre-Option-d error that v0.3 carved out for self-writes.
+            </li>
+            <li>
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>
+                &mdash; does NOT fire on self-writes.
+            </li>
+            <li>
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>
+                &mdash; watchdog does NOT reset on self-writes.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §51.0.F.1</strong> (idempotent self-write
+            semantics — v0.3 Option-d synthesis),
+            <strong>§51.0.F</strong> (rule= contract — the pre-Option-d
+            error this lint replaces),
+            <strong>§28</strong> (lint suppression configs),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

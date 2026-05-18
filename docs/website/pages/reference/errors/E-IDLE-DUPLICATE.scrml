@@ -1,0 +1,182 @@
+// scrml.dev /reference/errors/E-IDLE-DUPLICATE
+//
+// Reference page for E-IDLE-DUPLICATE. An engine declares more than one
+// <onIdle> element. Per §51.0.R, an engine has at most one event-timeout
+// watchdog.
+//
+// SPEC anchors: §51.0.R + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-IDLE-DUPLICATE
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                An
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+                declares more than one
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                element. One per engine maximum.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Added S77 (A5-6)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.R (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>
+            is the engine-wide event-timeout watchdog. Per §51.0.R, every
+            engine has AT MOST ONE watchdog &mdash; multiple onIdle
+            declarations would race for the same runtime timer slot
+            (composite key
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;varName&gt;::__idle</code>
+            in
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_machine_timers</code>).
+            The compiler rejects multiple at compile time.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Active, Idle, Away &#125;
+
+&lt;engine for=Phase initial=.Active&gt;
+  &lt;Active rule=(.Idle | .Away) /&gt;
+  &lt;Idle rule=.Active /&gt;
+  &lt;Away rule=.Active /&gt;
+
+  &lt;onIdle after=5m  to=.Idle/&gt;
+  &lt;onIdle after=30m to=.Away/&gt;
+  // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  // E-IDLE-DUPLICATE: second &lt;onIdle&gt; in the same engine.
+  // One per engine maximum.
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Pick the right single watchdog.</strong>
+                If the intent is "idle for 5 minutes →
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>;
+                further idle for 30 minutes total →
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Away</code>,"
+                model the cascade as an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                that transitions to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>,
+                plus an
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">&lt;onTimeout&gt;</a>
+                on the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>
+                state-child that transitions to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Away</code>
+                after another 25 minutes.
+            </li>
+            <li>
+                <strong>Use per-state &lt;onTimeout&gt; for state-scoped timing.</strong>
+                If two timers reflect different states&apos; timing needs
+                rather than engine-wide silence, they belong on each
+                state-child as
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+                instances, NOT as multiple
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Cascade pattern (recommended)
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase initial=.Active&gt;
+  &lt;Active rule=(.Idle | .Away) /&gt;
+  &lt;Idle rule=(.Active | .Away)&gt;
+    &lt;onTimeout after=25m to=.Away/&gt;
+  &lt;/&gt;
+  &lt;Away rule=.Active /&gt;
+
+  &lt;onIdle after=5m to=.Idle/&gt;
+&lt;/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Composes cleanly: the engine-wide
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+            fires after 5m silence → moves to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>;
+            entering
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>
+            arms the per-state
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+            for another 25m → moves to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Away</code>
+            at the 30m total mark.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">&lt;onIdle&gt;</a>
+                &mdash; element reference. Engine-wide watchdog.
+            </li>
+            <li>
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">&lt;onTimeout&gt;</a>
+                &mdash; per-state timer; the composition partner for cascade patterns.
+            </li>
+            <li>
+                <a href="/reference/errors/E-IDLE-MISPLACED"
+                   class="text-rose-700 hover:text-rose-900 underline">E-IDLE-MISPLACED</a>
+                &mdash; sibling error when &lt;onIdle&gt; sits inside a state-child body.
+            </li>
+            <li>
+                <a href="/reference/errors/E-IDLE-INVALID-VARIANT"
+                   class="text-rose-700 hover:text-rose-900 underline">E-IDLE-INVALID-VARIANT</a>
+                &mdash; sibling error when to= references a non-enum variant.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §51.0.R</strong> (one-per-engine rule + runtime
+            composite-key encoding),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>
