@@ -1,0 +1,196 @@
+// scrml.dev /reference/errors/W-MATCH-RULE-INERT
+//
+// Reference page for W-MATCH-RULE-INERT. rule= declared on a state-child
+// inside a <match> block. Legal-but-inert (read-only on the matched-on
+// value); promote to <engine> to activate enforcement.
+//
+// SPEC anchors: §18.0.2 + §51.0.F + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-amber-700 font-mono">
+                W-MATCH-RULE-INERT
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+                declared on a state-child inside a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                block. Legal but inert.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded font-semibold">
+                    Warning
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §18.0.2 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Unlike
+            <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN" class="text-rose-700 hover:text-rose-900 underline">effect=</a>
+            and
+            <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 hover:text-rose-900 underline">&lt;onTransition&gt;</a>
+            (which are FORBIDDEN inside match), the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            attribute is LEGAL on a match arm but does nothing at runtime.
+            Match is rules-inert &mdash; the compiler reads
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            for documentation purposes only, NOT for active enforcement.
+            W-MATCH-RULE-INERT surfaces the mismatch between authored
+            intent (you declared a contract) and runtime behavior
+            (nothing enforces it).
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The warning is the lint that nudges adoption of the engine
+            tier &mdash; per the Tier 0/1/2 commitment ladder (PRIMER §1),
+            rule= belongs in Tier 2.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+
+&lt;match for=Phase&gt;
+  &lt;Idle    rule=.Loading /&gt;
+  //       ^^^^^^^^^^^^^^^
+  //       W-MATCH-RULE-INERT: rule= legal but does nothing in match.
+  //       Promote to &lt;engine&gt; to activate.
+  &lt;Loading rule=.Done    /&gt;
+  &lt;Done    rule=.Idle    /&gt;
+&lt;/match&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Promote to
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+                    if the intent IS a state machine.</strong>
+                State-children carry forward verbatim; the wrapper swap
+                activates rule= enforcement. The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote --match</code>
+                CLI automates this (per SPEC §56). Also see
+                <a href="/reference/errors/I-MATCH-PROMOTABLE"
+                   class="text-blue-700 hover:text-blue-900 underline">I-MATCH-PROMOTABLE</a>
+                &mdash; the info-level lint that detects promotion shape.
+            </li>
+            <li>
+                <strong>Remove the
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+                    attribute if it&apos;s purely documentary.</strong>
+                Match arms describe WHAT a variant is, not how it
+                transitions. If the rule= is just authoring intent that
+                won&apos;t be enforced, removing the noise keeps the match
+                arm focused on its case-analysis purpose.
+            </li>
+            <li>
+                <strong>Suppress the warning</strong> per SPEC §28 (lint
+                suppression configs) if the rule= is intentionally retained
+                as documentation in a context where promotion isn&apos;t
+                yet appropriate. Lint config:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lint.match-rule-inert</code>.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Why warning, not error
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            on a match arm is legal-but-inert because the promotion path
+            preserves it verbatim. An adopter sketching out a state
+            machine with match (because the engine wrapper feels heavy
+            during prototyping) can declare rule= intent on each arm; the
+            compiler accepts it; later promotion activates it without
+            changes to the state-child bodies. The warning surfaces the
+            "you declared this but it doesn&apos;t work yet" mismatch.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Compare:
+            <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
+               class="text-rose-700 hover:text-rose-900 underline">E-MATCH-EFFECT-FORBIDDEN</a>
+            and
+            <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+               class="text-rose-700 hover:text-rose-900 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>
+            are ERRORS, not warnings, because effect handlers and
+            transition handlers ASSUME the transition actually runs.
+            Carrying them through match arms silently would be a code
+            shape that pretends to run effects but doesn&apos;t &mdash;
+            actively misleading. rule= is just a contract declaration;
+            inert declaration is less harmful than inert effect.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                &mdash; element reference. Rules-inert Tier 1.
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; Tier 2 promotion target. rule= becomes active.
+            </li>
+            <li>
+                <a href="/reference/errors/I-MATCH-PROMOTABLE"
+                   class="text-blue-700 hover:text-blue-900 underline">I-MATCH-PROMOTABLE</a>
+                &mdash; info-level lint that detects when match shape is
+                ready for engine promotion.
+            </li>
+            <li>
+                <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
+                   class="text-rose-700 hover:text-rose-900 underline">E-MATCH-EFFECT-FORBIDDEN</a>
+                &mdash; sibling error for effect= attribute.
+            </li>
+            <li>
+                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                   class="text-rose-700 hover:text-rose-900 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>
+                &mdash; sibling error for &lt;onTransition&gt;.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §18.0.2</strong> (rule= legal-but-inert in match),
+            <strong>§51.0.F</strong> (rule= contract in engine context),
+            <strong>§56</strong> (promotion ergonomics + bun scrml promote CLI),
+            <strong>§28</strong> (lint suppression configs),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

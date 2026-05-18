@@ -1,0 +1,160 @@
+// scrml.dev /reference/errors/E-MATCH-NOT-EXHAUSTIVE
+//
+// Reference page for E-MATCH-NOT-EXHAUSTIVE. Block-form <match for=Type>
+// is missing variants of Type and has no wildcard <_> catch-all.
+//
+// SPEC anchors: §18.0.1 + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-MATCH-NOT-EXHAUSTIVE
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Block-form
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match for=Type&gt;</code>
+                is missing variants of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Type</code>
+                and has no wildcard
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;_&gt;</code>
+                catch-all.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §18.0.1 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Block-form match is the canonical Tier 1 commitment for case
+            analysis on an enum: a structural exhaustiveness check. The
+            compiler verifies at compile time that every variant of the
+            discriminating type has a state-child arm OR that a wildcard
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;_&gt;</code>
+            arm catches the rest. If neither, E-MATCH-NOT-EXHAUSTIVE fires.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done, Error &#125;
+
+&lt;match for=Phase&gt;
+  &lt;Idle&gt;Press load&lt;/&gt;
+  &lt;Loading&gt;Working&hellip;&lt;/&gt;
+  // missing .Done + .Error AND no &lt;_&gt; wildcard
+  // E-MATCH-NOT-EXHAUSTIVE fires here
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Add the missing variants.</strong> Preferred when
+                the missing states genuinely need rendered UI. The compiler
+                enforces this is the COMPLETE list of variants of the type
+                &mdash; adding a new variant to the enum LATER will
+                re-fire this error at every site, surfacing every place
+                that needs updating.
+            </li>
+            <li>
+                <strong>Add a wildcard
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;_&gt;</code>
+                    arm.</strong>
+                Catches anything not enumerated. Use when the missing
+                variants legitimately share UI &mdash; e.g., "any
+                non-Active state shows the same logout button."
+            </li>
+            <li>
+                <strong>Reconsider the type</strong> if you find yourself
+                routinely needing to wildcard most of an enum. The enum
+                may be carrying too many states; consider splitting or
+                refining.
+            </li>
+        </ol>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Promotion path
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Block-form
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+            is Tier 1 of the case-analysis ladder. State-children carry
+            forward verbatim to Tier 2
+            <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+            &mdash; the wrapper swap is the commitment moment. Same
+            exhaustiveness check, plus active rules + transition handlers.
+            See
+            <a href="/reference/errors/I-MATCH-PROMOTABLE"
+               class="text-blue-700 hover:text-blue-900 underline">I-MATCH-PROMOTABLE</a>
+            for the lint that nudges the promotion + SPEC §56 promotion
+            ergonomics.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                &mdash; element reference. Block-form Tier 1 shape.
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; Tier 2 promotion target. Same exhaustiveness; adds active rules.
+            </li>
+            <li>
+                <a href="/reference/errors/W-MATCH-RULE-INERT"
+                   class="text-amber-700 hover:text-amber-900 underline">W-MATCH-RULE-INERT</a>
+                &mdash; rule= legal-but-inert in match.
+            </li>
+            <li>
+                <a href="/reference/errors/E-VARIANT-AMBIGUOUS"
+                   class="text-rose-700 hover:text-rose-900 underline">E-VARIANT-AMBIGUOUS</a>
+                &mdash; arm pattern can&apos;t resolve to a unique enum context.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §18.0.1</strong> (block-form match shape and
+            exhaustiveness rule),
+            <strong>§14.10</strong> (bare-variant inference; cross-ref for
+            arm patterns),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

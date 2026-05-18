@@ -1,0 +1,157 @@
+// scrml.dev /reference/errors/E-MATCH-EFFECT-FORBIDDEN
+//
+// Reference page for E-MATCH-EFFECT-FORBIDDEN. effect= attribute used on
+// a state-child inside a <match> block. Effects presuppose transitions;
+// transitions don't occur in match.
+//
+// SPEC anchors: §18.0.2 + §51.0.H + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-MATCH-EFFECT-FORBIDDEN
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute used on a state-child inside a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                block.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §18.0.2 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+            attribute is the per-rule inline form of a transition effect
+            &mdash; sibling to
+            <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>.
+            Effects presuppose that a transition occurs. Block-form match
+            is rules-inert: nothing transitions inside it (the matched-on
+            value either is or isn&apos;t a given variant). So
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+            is structurally meaningless on a match arm. The compiler
+            forbids it as an error, not a lint &mdash; its presence
+            indicates the wrong primitive.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+
+&lt;match for=Phase&gt;
+  &lt;Idle&gt;&lt;/&gt;
+  &lt;Loading effect=&dollar;&lcub; analytics.track("load") &rcub;&gt;&lt;/&gt;
+  //       ^^^^^^^
+  //       E-MATCH-EFFECT-FORBIDDEN: effect= on match arm.
+  //       Promote to &lt;engine&gt; to activate effects.
+  &lt;Done&gt;&lt;/&gt;
+&lt;/match&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Promote to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>.
+            Same case-analysis shape;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            become legal:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase initial=.Idle&gt;
+  &lt;Idle    rule=.Loading /&gt;
+  &lt;Loading rule=.Done effect=&dollar;&lcub; analytics.track("load") &rcub; /&gt;
+  &lt;Done    rule=.Idle    /&gt;
+&lt;/engine&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            effect= vs &lt;onTransition&gt;
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Inside an engine,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+            is the shorter form for single-target rules. Multi-target
+            rules fire
+            <a href="/reference/errors/E-ENGINE-EFFECT-AMBIGUOUS"
+               class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-EFFECT-AMBIGUOUS</a>
+            because the destination is ambiguous &mdash; use
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            instead, which filters by from / to / once / if.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                &mdash; element reference. Rules-inert Tier 1.
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; Tier 2 promotion target. effect= becomes legal here.
+            </li>
+            <li>
+                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                   class="text-rose-700 hover:text-rose-900 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>
+                &mdash; sibling error for the &lt;onTransition&gt; long form.
+            </li>
+            <li>
+                <a href="/reference/errors/W-MATCH-RULE-INERT"
+                   class="text-amber-700 hover:text-amber-900 underline">W-MATCH-RULE-INERT</a>
+                &mdash; companion warning for rule= (legal but inert).
+            </li>
+            <li>
+                <a href="/reference/errors/E-ENGINE-EFFECT-AMBIGUOUS"
+                   class="text-rose-700 hover:text-rose-900 underline">E-ENGINE-EFFECT-AMBIGUOUS</a>
+                &mdash; effect= on a multi-target rule inside an engine.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §18.0.2</strong> (match attribute legality),
+            <strong>§51.0.H</strong> (effect= in engine context),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

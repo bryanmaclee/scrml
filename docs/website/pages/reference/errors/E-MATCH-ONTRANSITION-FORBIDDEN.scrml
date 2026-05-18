@@ -1,0 +1,184 @@
+// scrml.dev /reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN
+//
+// Reference page for E-MATCH-ONTRANSITION-FORBIDDEN — onTransition element
+// used inside a match block. Transition handlers are engine-only.
+//
+// SPEC anchors: §18.0.2 + §51.0.H + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-MATCH-ONTRANSITION-FORBIDDEN
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                element used inside a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                block. Transition handlers are engine-only.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §18.0.2 (normative)
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Block-form
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+            is rules-inert &mdash; case analysis on a value, NOT a state
+            machine. Transitions don&apos;t occur in match (the matched-on
+            value either is or isn&apos;t a given variant; nothing
+            transitions). So
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            handlers are structurally meaningless here. The compiler
+            forbids them &mdash; not as a lint, but as an error &mdash;
+            because their presence indicates the wrong primitive.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+
+&lt;match for=Phase&gt;
+  &lt;Idle&gt;&lt;/&gt;
+  &lt;Loading&gt;&lt;/&gt;
+  &lt;Done&gt;&lt;/&gt;
+
+  &lt;onTransition to=.Done&gt;
+    // ^^^^^^^^^^^^^^^^^^^^^^
+    // E-MATCH-ONTRANSITION-FORBIDDEN: transition handlers are engine-only.
+    &dollar;&lcub; analytics.track("done") &rcub;
+  &lt;/onTransition&gt;
+&lt;/match&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Promote the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+            to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>.
+            Same exhaustive case-analysis shape; adds active rules + the
+            ability to declare transition handlers. State-children carry
+            forward verbatim &mdash; the wrapper swap is the commitment
+            moment. The compiler emits
+            <a href="/reference/errors/I-MATCH-PROMOTABLE"
+               class="text-blue-700 hover:text-blue-900 underline">I-MATCH-PROMOTABLE</a>
+            on the original site when transition-shape intent is detected.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase initial=.Idle&gt;
+  &lt;Idle    rule=.Loading /&gt;
+  &lt;Loading rule=.Done    /&gt;
+  &lt;Done    rule=.Idle    /&gt;
+
+  &lt;onTransition to=.Done&gt;
+    &dollar;&lcub; analytics.track("done") &rcub;
+  &lt;/onTransition&gt;
+&lt;/engine&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Why match is rules-inert
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Match is one of two Tier-1 shapes (the other being JS-style
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#x6D;atch expr &lcub; &rcub;</code>
+            value-return form). Both are case analysis on a discriminating
+            type with compile-time exhaustiveness. NEITHER models
+            transitions &mdash; match looks at WHAT a value IS, not how it
+            moves between states. The engine wrapper adds:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                Active
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+                contract per state-child (single-target, multi-target, or wildcard).
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                handlers filterable by from / to / once / if.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute for per-rule inline effects.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+                per-state timers and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                engine-wide watchdog.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                &mdash; rules-inert Tier 1; the locus where this error fires.
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; Tier 2 promotion target; full transition surface.
+            </li>
+            <li>
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>
+                &mdash; element reference. Legal only inside &lt;engine&gt;.
+            </li>
+            <li>
+                <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
+                   class="text-rose-700 hover:text-rose-900 underline">E-MATCH-EFFECT-FORBIDDEN</a>
+                &mdash; companion error for effect= attribute (also engine-only).
+            </li>
+            <li>
+                <a href="/reference/errors/W-MATCH-RULE-INERT"
+                   class="text-amber-700 hover:text-amber-900 underline">W-MATCH-RULE-INERT</a>
+                &mdash; rule= warning (legal but inert; promote to engine to activate).
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §18.0.2</strong> (match attribute legality:
+            rule= inert / effect= forbidden / onTransition forbidden),
+            <strong>§51.0.H</strong> (&lt;onTransition&gt; in engine context),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>
