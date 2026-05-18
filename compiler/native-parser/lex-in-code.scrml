@@ -24,13 +24,18 @@
 //   The IDENTIFIER/KEYWORD DISCRIMINATION is CALCULATION (lookup in
 //   token.scrml's JS_KEYWORDS table; pure fn of input bytes).
 //
-// Status (M1.3): SUBSTANTIVE. Emits all InCode-state tokens for the
+// Status (M1.4): SUBSTANTIVE. Emits all InCode-state tokens for the
 // bench-corpus files (whitespace, identifiers, keywords, numeric
 // literals, punctuation, multi-char operators, string/comment/regex
 // transition triggers). String bodies activated in M1.2; comment
-// bodies activated in M1.3 (this dispatch now delegates `//` and `/*`
-// to dispatchInLineComment / dispatchInBlockComment). Regex body
-// remains STUB pending M1.4 prev-token-aware regex/division split.
+// bodies activated in M1.3; regex body activated in M1.4 (this
+// dispatch now delegates `//` and `/*` to dispatchInLineComment /
+// dispatchInBlockComment, and a regex-permissive `/` to
+// dispatchInRegexBody). The DD §D4 P3 regex-vs-division
+// disambiguation remains in this file (regexAllowedAfter(lastKind)
+// + the `/` branch above) — only the regex body scan moved out to
+// the M1.4 dispatcher. The M1 lexer ladder is COMPLETE: no LexMode
+// state-children have bare bodies.
 //
 // scrml-extensions emitted in M1.1: at-prefix idents -> ScrmlAt token;
 // dot-prefix variants -> BareVariant token; tilde -> Tilde token;
@@ -49,6 +54,7 @@ ${
     import { dispatchInTemplateBody, isTemplateInterpClose, emitTemplateInterpClose } from "./lex-in-template.scrml"
     import { dispatchInLineComment } from "./lex-in-line-comment.scrml"
     import { dispatchInBlockComment } from "./lex-in-block-comment.scrml"
+    import { dispatchInRegexBody } from "./lex-in-regex.scrml"
 
     // ---------------------------------------------------------------------
     // Character-classification predicates (CALCULATION; pure fns).
@@ -302,8 +308,13 @@ ${
     //  single/double-string dispatch pattern.)
 
     // Regex literal — bounded paired-slash scan honoring `[...]` char-class.
-    // Real regex-context detection lives in the caller (regexAllowed flag);
-    // this just scans the body once we know we're in regex context.
+    // RETIRED in M1.4: the proper body dispatcher lives in
+    // lex-in-regex.scrml. The InCode dispatch below delegates regex
+    // scanning to dispatchInRegexBody (transition in + body + transition
+    // out, matching the M1.3 comment-dispatch shape). This function is
+    // retained as an exported helper for M1.x archaeology + parity with
+    // stubScanSingleString / stubScanDoubleString / stubScanTemplate
+    // (also retired at their dispatch sites but kept as helpers).
     export function stubScanRegex(cursor) {
         const start = cursor.pos
         const line = cursor.line
@@ -519,14 +530,18 @@ ${
         }
 
         // -------- Regex literal vs Division (DD §D4 P3) --------
-        // `/` resolves to regex iff previous-token context allows.
+        // The predicate decides whether `/` opens a regex literal or is
+        // a division operator. On regex, set LexMode → .InRegexBody and
+        // call the M1.4 dispatcher inline (matches the M1.3 comment-
+        // dispatch shape: transition in + body scan + transition out
+        // happen synchronously, the dispatcher emits the RegexLit token
+        // and flips LexMode back to .InCode). On division, fall through
+        // to the punctuation block below.
         if (c0 == "/") {
             const lastKind = ctx.tokens.length > 0 ? ctx.tokens[ctx.tokens.length - 1].kind : not
             if (regexAllowedAfter(lastKind)) {
                 setMode(ctx, LexMode.InRegexBody)
-                const { pattern, flags, raw, span } = stubScanRegex(cursor)
-                ctx.tokens.push(makeToken(TokenKind.RegexLit, raw, span, { pattern, flags }))
-                setMode(ctx, LexMode.InCode)
+                dispatchInRegexBody(cursor, ctx)
                 return true
             }
             // Division operator path (handled by punctuation/operator block below)

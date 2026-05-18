@@ -13,6 +13,7 @@ import { dispatchInDoubleString } from "./lex-in-double-string.js";
 import { dispatchInTemplateBody } from "./lex-in-template.js";
 import { dispatchInLineComment } from "./lex-in-line-comment.js";
 import { dispatchInBlockComment } from "./lex-in-block-comment.js";
+import { dispatchInRegexBody } from "./lex-in-regex.js";
 
 export function makeLexContext() {
     return {
@@ -55,10 +56,12 @@ export function lex(source) {
             dispatchInLineComment(cursor, ctx);
         } else if (mode === LexMode.InBlockComment) {
             dispatchInBlockComment(cursor, ctx);
+        } else if (mode === LexMode.InRegexBody) {
+            dispatchInRegexBody(cursor, ctx);
         } else {
-            // M1.4+ modes (InRegexBody) — dispatched inline from
-            // dispatchInCode in M1.3; safety net for unreachable cases.
-            // Transitions back to InCode immediately.
+            // M1 ladder complete — all 7 LexMode state-children have
+            // substantive body dispatchers wired above. This branch is
+            // a defensive safety net for an unreachable future mode.
             setMode(ctx, LexMode.InCode);
         }
 

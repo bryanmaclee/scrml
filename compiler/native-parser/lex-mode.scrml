@@ -17,7 +17,7 @@
 //   Engine is THE correct shape per the §D1 two-table operational test.
 //   `fn`-shape would lose to engine on EVERY axis named in DD §D1.
 //
-// Status (M1.3): canonical <engine> declaration LANDS at top-level (parses +
+// Status (M1.4): canonical <engine> declaration LANDS at top-level (parses +
 // compiles). State-child bodies:
 //   - InCode  — real body in lex-in-code.scrml (M1.1 substantive work).
 //   - InTemplateBody — ACTIVATED M1.2. COMPOSITE STATE-CHILD per §51.0.Q.1
@@ -31,8 +31,13 @@
 //     lex-in-line-comment.scrml).
 //   - InBlockComment — ACTIVATED M1.3 (block-comment body scanner; body
 //     in lex-in-block-comment.scrml).
-//   - InRegexBody — STUB for M1.4 (regex literal scanning; needs
-//     prev-token context per DD §D4 P3).
+//   - InRegexBody — ACTIVATED M1.4 (regex literal body scanner; body in
+//     lex-in-regex.scrml). The DD §D4 P3 regex-vs-division decision
+//     (`regexAllowedAfter(lastKind)`) lives at the InCode transition
+//     site, not in the body — the body just scans `/pattern/flags`.
+//
+// M1 LEXER LADDER COMPLETE: all 7 LexMode state-children now have
+// substantive body dispatchers; no bare bodies remain.
 //
 // In M1.1 the JS-host LIVE SURFACE drives the transition dispatch (see
 // `currentMode` cell + `setMode` calculation below). The <engine> block
@@ -97,6 +102,13 @@ ${
 // M1.3: InLineComment / InBlockComment activate as non-composite bodies —
 // each scans a bounded comment span and transitions back to .InCode. The
 // scan emits no token (comments are non-emitted per the token catalog).
+//
+// M1.4: InRegexBody activates as a non-composite body — scans a bounded
+// `/pattern/flags` span, emits a single RegexLit token, and transitions
+// back to .InCode. The regex-vs-division disambiguation (DD §D4 P3) is
+// the responsibility of the InCode dispatch site (which checks
+// `regexAllowedAfter(lastKind)` before setting LexMode → .InRegexBody);
+// this body assumes the decision has already been made.
 <engine for=LexMode initial=.InCode>
     <InCode rule=(.InTemplateBody | .InSingleString | .InDoubleString | .InLineComment | .InBlockComment | .InRegexBody)></>
     <InTemplateBody rule=.InCode>

@@ -13,9 +13,8 @@
 //   engine-shaped. Per D1 OQ1: "the operational test classifies the
 //   LOCUS, and a calculation may contain state-shape subroutines."
 //
-// Status (M1.3): functional end-to-end for InCode + string + template +
-// comment modes. The loop dispatches by LexMode through dedicated
-// dispatchers:
+// Status (M1.4): functional end-to-end for all 7 LexMode state-children.
+// The loop dispatches by LexMode through dedicated dispatchers:
 //   - .InCode → dispatchInCode (lex-in-code.scrml; M1.1)
 //   - .InSingleString → dispatchInSingleString (lex-in-single-string.scrml; M1.2)
 //   - .InDoubleString → dispatchInDoubleString (lex-in-double-string.scrml; M1.2)
@@ -23,9 +22,10 @@
 //     §51.0.Q.1 nested-engine pattern)
 //   - .InLineComment → dispatchInLineComment (lex-in-line-comment.scrml; M1.3)
 //   - .InBlockComment → dispatchInBlockComment (lex-in-block-comment.scrml; M1.3)
-//   - .InRegexBody — M1.4; still inline-dispatched within dispatchInCode
-//     (transition in + body scan + transition out happen synchronously
-//     inside InCode).
+//   - .InRegexBody → dispatchInRegexBody (lex-in-regex.scrml; M1.4 — the
+//     DD §D4 P3 regex-vs-division decision happens at the InCode
+//     transition site, this body assumes the decision is committed).
+// M1 LEXER LADDER COMPLETE: no bare LexMode bodies remain.
 // Per-call ctx grows a `templateStack` array tracking template-interp
 // frames (see lex-in-template.scrml for the §51.0.Q.1 lifecycle coupling).
 
@@ -41,6 +41,7 @@ ${
     import { dispatchInTemplateBody } from "./lex-in-template.scrml"
     import { dispatchInLineComment } from "./lex-in-line-comment.scrml"
     import { dispatchInBlockComment } from "./lex-in-block-comment.scrml"
+    import { dispatchInRegexBody } from "./lex-in-regex.scrml"
 
     // makeLexContext — STATE constructor: collects all engine state into
     // one ctx object. The CANONICAL form would have each engine as a
@@ -95,10 +96,13 @@ ${
                 dispatchInLineComment(cursor, ctx)
             } else if (mode == LexMode.InBlockComment) {
                 dispatchInBlockComment(cursor, ctx)
+            } else if (mode == LexMode.InRegexBody) {
+                dispatchInRegexBody(cursor, ctx)
             } else {
-                // M1.4+ modes (InRegexBody) — still inline-dispatched
-                // within dispatchInCode for M1.3; this branch is the
-                // safety-net + future-extension point.
+                // M1 ladder complete — all 7 LexMode state-children have
+                // substantive body dispatchers wired above. This branch
+                // is a defensive safety net for an unreachable future
+                // mode.
                 setMode(ctx, LexMode.InCode)
             }
 

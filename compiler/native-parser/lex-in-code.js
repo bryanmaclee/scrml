@@ -13,6 +13,7 @@ import { dispatchInTemplateBody } from "./lex-in-template.js";
 import { isTemplateInterpClose, emitTemplateInterpClose } from "./lex-in-template.js";
 import { dispatchInLineComment } from "./lex-in-line-comment.js";
 import { dispatchInBlockComment } from "./lex-in-block-comment.js";
+import { dispatchInRegexBody } from "./lex-in-regex.js";
 
 // --- Character-classification predicates ---
 export function isWhitespaceCode(c) {
@@ -203,6 +204,8 @@ export function stubScanTemplate(cursor) {
     return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) };
 }
 
+// RETIRED in M1.4 — see lex-in-code.scrml for the rationale. Kept as
+// an exported helper for parity with the other stubScan* fns.
 export function stubScanRegex(cursor) {
     const start = cursor.pos;
     const line = cursor.line;
@@ -389,14 +392,18 @@ export function dispatchInCode(cursor, ctx) {
         return true;
     }
 
-    // Regex vs Division (DD §D4 P3)
+    // Regex vs Division (DD §D4 P3) — the predicate decides whether `/`
+    // opens a regex literal or is a division operator. On regex, set
+    // LexMode.InRegexBody and call the M1.4 dispatcher inline (matches
+    // the M1.3 comment-dispatch shape: transition in + body + transition
+    // out happen synchronously, the dispatcher emits the RegexLit token
+    // and flips LexMode back to InCode). On division, fall through to
+    // the punctuation block below.
     if (c0 === "/") {
         const lastKind = ctx.tokens.length > 0 ? ctx.tokens[ctx.tokens.length - 1].kind : null;
         if (regexAllowedAfter(lastKind)) {
             setMode(ctx, LexMode.InRegexBody);
-            const { pattern, flags, raw, span } = stubScanRegex(cursor);
-            ctx.tokens.push(makeToken(TokenKind.RegexLit, raw, span, { pattern, flags }));
-            setMode(ctx, LexMode.InCode);
+            dispatchInRegexBody(cursor, ctx);
             return true;
         }
     }

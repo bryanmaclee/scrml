@@ -678,6 +678,75 @@ describe("M1.1 lexer conformance — inline micro-corpus", () => {
         ]);
     });
 
+    // -------------------------------------------------------------------
+    // M1.4 — regex-literal cases. These exercise the new InRegexBody body
+    // dispatcher in lex-in-regex.js. The DD §D4 P3 regex-vs-division
+    // disambiguation lives at the InCode transition site
+    // (regexAllowedAfter(lastKind)); the cases below cover both the
+    // regex-permissive and division-context branches.
+    // -------------------------------------------------------------------
+
+    test(`(M1.4-regex) plain regex — /foo/`, () => {
+        const raw = scrmlNativeLex("const g = /foo/");
+        const r = raw.find(t => t.kind === TokenKind.RegexLit);
+        expect(r).toBeDefined();
+        expect(r.text).toBe("/foo/");
+        expect(r.pattern).toBe("foo");
+        expect(r.flags).toBe("");
+    });
+
+    test(`(M1.4-regex) regex with flags — /foo.bar/gi`, () => {
+        const raw = scrmlNativeLex("const g = /foo.bar/gi");
+        const r = raw.find(t => t.kind === TokenKind.RegexLit);
+        expect(r).toBeDefined();
+        expect(r.text).toBe("/foo.bar/gi");
+        expect(r.pattern).toBe("foo.bar");
+        expect(r.flags).toBe("gi");
+    });
+
+    test(`(M1.4-regex) escaped slash — /\\//`, () => {
+        const raw = scrmlNativeLex("const g = /\\//");
+        const r = raw.find(t => t.kind === TokenKind.RegexLit);
+        expect(r).toBeDefined();
+        expect(r.text).toBe("/\\//");
+        expect(r.pattern).toBe("\\/");
+    });
+
+    test(`(M1.4-regex) char-class with literal slash — /[a/b]/`, () => {
+        const raw = scrmlNativeLex("const g = /[a/b]/");
+        const r = raw.find(t => t.kind === TokenKind.RegexLit);
+        expect(r).toBeDefined();
+        expect(r.text).toBe("/[a/b]/");
+        expect(r.pattern).toBe("[a/b]");
+    });
+
+    test(`(M1.4-regex) division after Ident — a / b — NO regex emitted`, () => {
+        const raw = scrmlNativeLex("const x = a / b");
+        const regexes = raw.filter(t => t.kind === TokenKind.RegexLit);
+        const slashes = raw.filter(t => t.kind === TokenKind.Slash);
+        expect(regexes.length).toBe(0);
+        expect(slashes.length).toBe(1);
+    });
+
+    test(`(M1.4-regex) division after RParen — (a) / b — NO regex emitted`, () => {
+        const raw = scrmlNativeLex("const x = (a) / b");
+        const regexes = raw.filter(t => t.kind === TokenKind.RegexLit);
+        const slashes = raw.filter(t => t.kind === TokenKind.Slash);
+        expect(regexes.length).toBe(0);
+        expect(slashes.length).toBe(1);
+    });
+
+    test(`(M1.4-regex) regex after return keyword — return /x/`, () => {
+        // `return` is regex-permissive per DD §D4 P3 (a value follows in
+        // expression-primary position).
+        const raw = scrmlNativeLex("function f() { return /x/g }");
+        const r = raw.find(t => t.kind === TokenKind.RegexLit);
+        expect(r).toBeDefined();
+        expect(r.text).toBe("/x/g");
+        expect(r.pattern).toBe("x");
+        expect(r.flags).toBe("g");
+    });
+
     // Numeric values: ensure the literal-value parse (DD §D1 canonical
     // calculation example) returns correct results.
     test("(calculation) numeric literal values", () => {

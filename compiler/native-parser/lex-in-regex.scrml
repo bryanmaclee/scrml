@@ -1,0 +1,174 @@
+// lex-in-regex.scrml — body of <InRegexBody> state-child (M1.4).
+//
+// PILLAR 5b classification (DD §D1):
+//
+//   The PER-CHARACTER SCAN inside a regex-literal body is CALCULATION:
+//   given a cursor positioned just past the opening `/`, returning the
+//   raw regex pattern + flags is a pure function of the source bytes
+//   between that position and the matching unescaped `/` (followed by
+//   the optional ECMA-262 §12.8.5 flag run `[gimsuy]*`). No ambient
+//   context; no transition contract on the SCAN itself.
+//
+//   The MODE TRANSITION around the scan is STATE: the outer LexMode
+//   engine transitions InCode → InRegexBody on the opening `/` ONLY
+//   when the previous token is regex-permissive per DD §D4 P3 (the
+//   `regexAllowedAfter(lastKind)` predicate lives in lex-in-code.scrml
+//   and gates the InCode-side transition trigger; it is NOT this file's
+//   concern). The inner body runs to completion; LexMode transitions
+//   back to InCode after consuming the closing `/` + flag run. That
+//   transition is governed by the LexMode engine in lex-mode.scrml. The
+//   lex-in-regex body itself is CALCULATION over an already-typed-mode
+//   region.
+//
+//   REGEX-TOKEN EMISSION POLICY: regex literals ARE emitted as tokens
+//   (TokenKind.RegexLit). The token carries `pattern` (the body
+//   between the slashes, exclusive) + `flags` (the trailing flag run)
+//   + `raw` (the full `/.../flags` substring) + `span`. Matches the
+//   token-catalog declaration in token.scrml.
+//
+//   CHARACTER-CLASS HANDLING: inside `[...]` a `/` is literal, NOT the
+//   closing delimiter. ECMA-262 §22.2.1.10 RegularExpressionLiteral
+//   normative: `RegularExpressionClassChar` excludes `]` and `\`; `\`
+//   is the escape and the next char is consumed as part of the class.
+//   The `]` itself closes the class (a `]` inside the class would
+//   have to be `\]`).
+//
+//   ESCAPES: `\` outside a class consumes the next char regardless
+//   (handles `\/`, `\\`, `\n`, etc. uniformly — no per-escape decoding;
+//   the regex engine at runtime does the decoding). Same rule inside
+//   a class (the next char is consumed as a unit).
+//
+//   FLAGS: after the closing `/`, an optional run of ECMA-262 §12.8.5
+//   IdentifierPart-shaped characters is the flag string. We accept
+//   the general IdentifierPart predicate (matches Acorn's surface — it
+//   accepts any IdentifierPart and emits the raw flag string verbatim,
+//   leaving syntactic validation of `[gimsuy]+` to the regex engine).
+//
+//   UNTERMINATED REGEX: when EOF or a LineTerminator is reached before
+//   the closing `/`, the scan returns with what it has consumed (the
+//   M1.1 stub behavior). Error recovery at parse-time is deferred to a
+//   later milestone consistent with the M1.2 string-body + M1.3
+//   block-comment-body precedent.
+//
+// Spec authority:
+//   - JS RegularExpressionLiteral (ECMA-262 §12.8.5 + §22.2.1.10).
+//   - SPEC §51.0.F — rule= contract for InRegexBody → InCode.
+//   - SPEC §51.0.B exhaustiveness — InRegexBody is a canonical
+//     state-child of the LexMode engine.
+//   - DD §D4 P3 — regex-vs-division disambiguation lives at the InCode
+//     transition site (regexAllowedAfter(lastKind)); this body is
+//     invoked AFTER that decision has been made.
+//
+// Status (M1.4): SUBSTANTIVE. Replaces the M1.1 stubScanRegex
+// round-trip pattern in lex-in-code (which inline-flipped mode +
+// scanned + flipped back synchronously). The body now runs from the
+// outer dispatch loop in lex.js, matching the M1.3 comment-body shape
+// and closing the LexMode-engine M1 ladder (all 7 state-children
+// now have substantive body dispatchers).
+
+${
+    import { peekChar, peekCharCode, advance, isEof } from "./cursor.scrml"
+    import { makeToken, TokenKind } from "./token.scrml"
+    import { makeSpan } from "./span.scrml"
+    import { LexMode, setMode } from "./lex-mode.scrml"
+    import { isNewlineCode, isIdentCont } from "./lex-in-code.scrml"
+
+    // ---------------------------------------------------------------------
+    // scanRegexBody — CALCULATION over the source bytes: walks the cursor
+    // forward through a regex literal, returning { pattern, flags, raw,
+    // span }. Cursor is positioned AT the opening `/` on entry; advances
+    // past the closing `/` + flag run on return.
+    //
+    // Mirrors the M1.1 stubScanRegex's logic exactly (paired-slash scan
+    // with `[...]` char-class awareness + escape handling + flag run);
+    // the only structural difference is that this body is invoked by
+    // the outer dispatch loop in lex.scrml rather than inline from
+    // dispatchInCode — see the M1.3 comment-body precedent.
+    // ---------------------------------------------------------------------
+    export function scanRegexBody(cursor) {
+        const start = cursor.pos
+        const line = cursor.line
+        const col = cursor.col
+        advance(cursor, 1) // skip opening /
+        let inClass = false
+        while (!isEof(cursor)) {
+            const c = peekChar(cursor, 0)
+            if (c == "\\") {
+                // Escape — consume the backslash + next char as a unit.
+                // Handles \/, \\, \n, \[, \], etc. uniformly. EOF after
+                // a lone `\` falls through naturally (advance(2) past EOF
+                // is bounded by isEof on the next loop iteration).
+                advance(cursor, 2)
+                continue
+            }
+            if (c == "[") {
+                inClass = true
+                advance(cursor, 1)
+                continue
+            }
+            if (c == "]") {
+                // Inside a class, `]` closes the class. Outside (shouldn't
+                // happen — `]` outside a class would be a literal `]` per
+                // §22.2.1.10, which our scanner treats the same way).
+                inClass = false
+                advance(cursor, 1)
+                continue
+            }
+            if (c == "/" && !inClass) {
+                advance(cursor, 1) // consume closing /
+                break
+            }
+            if (isNewlineCode(peekCharCode(cursor, 0))) {
+                // Unterminated regex — LineTerminator inside a regex body
+                // is a SyntaxError per ECMA-262 §12.8.5. M1.4 follows the
+                // M1.1 stub precedent: stop scanning at the LineTerminator
+                // (which is NOT consumed) and let the caller continue.
+                // The recovered token's `raw` will be missing the closing
+                // `/` + flags; the parse-time diagnostic is a later
+                // milestone.
+                break
+            }
+            advance(cursor, 1)
+        }
+        // Flag run: optional IdentifierPart-shaped tail. Acorn accepts the
+        // general IdentifierPart predicate and leaves [gimsuy] validation
+        // to the regex engine.
+        const flagsStart = cursor.pos
+        while (!isEof(cursor) && isIdentCont(peekCharCode(cursor, 0))) {
+            advance(cursor, 1)
+        }
+        // pattern = body between opening and closing slashes (exclusive).
+        // On unterminated regex (loop broke on newline/EOF before consuming
+        // a closing /), `flagsStart - 1` would point AT the character
+        // before the cursor, which is harmless — the substring covers
+        // everything up to where we stopped.
+        const pattern = cursor.source.substring(start + 1, flagsStart - 1)
+        const flags = cursor.source.substring(flagsStart, cursor.pos)
+        return {
+            pattern,
+            flags,
+            raw: cursor.source.substring(start, cursor.pos),
+            span: makeSpan(start, cursor.pos, line, col),
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // dispatchInRegexBody — STATE-aware wrapper for the InRegexBody
+    // LexMode state-child. Called by the outer lex loop in lex.scrml
+    // when the outer LexMode is .InRegexBody. Responsibilities:
+    //   1. Invoke the body scanner (calculation).
+    //   2. Emit a RegexLit token carrying { pattern, flags, raw, span }.
+    //   3. Transition LexMode: InRegexBody → InCode (state-shape;
+    //      satisfies §51.0.F rule= contract).
+    //
+    // The wrapper is state-aware (mode transition out + token emit);
+    // the body scanner (scanRegexBody) is pure calculation. The
+    // boundary is clean (mirrors the M1.2 string-body shape — string
+    // bodies also emit a single token per dispatch).
+    // ---------------------------------------------------------------------
+    export function dispatchInRegexBody(cursor, ctx) {
+        const { pattern, flags, raw, span } = scanRegexBody(cursor)
+        ctx.tokens.push(makeToken(TokenKind.RegexLit, raw, span, { pattern, flags }))
+        setMode(ctx, LexMode.InCode)
+    }
+}
