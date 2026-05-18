@@ -1,11 +1,12 @@
 # scrml Compiler Pipeline — Stage Contracts
 
-**Version:** 0.7.1
-**Date:** 2026-05-09
+**Version:** 0.7.2
+**Date:** 2026-05-18
 **Owner:** scrml Integration Pipeline Reviewer
 **Status:** Authoritative — no stage integration proceeds without a reviewed contract here.
 
 **Change log:**
+- **0.7.2 (2026-05-18, S101 v0.3.x refresh):** NEW Stage 2 (BS) v0.next addendum documenting SPEC §4.17 raw-content elements `<pre>` and `<code>`. Token suppression inside raw-content body (no `${...}` / `<TagName>` / brace contexts recognized); HTML entity-escape author-responsibility preserved; EOF recovery emits `E-CTX-001` + `closerForm: "inferred"`; locus `compiler/src/block-splitter.js`; conformance at `conf-raw-content-pre-code.test.js`. No contract changes on downstream stages — text-child carries through verbatim. Companion to v0.3.1 release tag (`cbe1b1e`). No other stage contracts changed in this revision.
 - **0.7.1 (2026-05-09, A1c step C23 — prose pass):** PIPELINE.md prose pass per
   IMPLEMENTATION-ROADMAP §8.6 #2. No new normative content; no contract changes.
   Re-flow only — engineering substance is unchanged from 0.7.0.
@@ -385,6 +386,16 @@ evaluation of attribute values or content expressions occurs.
 **Performance budget:** <= 10 ms per file.
 **Parallelism opportunity:** Yes — fully per-file.
 **Dependencies:** Preprocessor (PP) must complete for the file.
+
+### Stage 2 v0.next addendum — raw-content elements (S101, SPEC §4.17)
+
+- **Raw-content element recognition.** The lowercase tag names `pre` and `code` (matched case-insensitively, gated on `!isComp` so uppercase `<Pre>` / `<Code>` component references take the normal markup path) trigger the raw-content body-scan after `scanAttributes` consumes the opener's attribute set. The scan finds the matching close tag (case-insensitive on the element name) and captures the body verbatim as a single `text`-typed child of the markup block.
+- **Token suppression inside raw-content.** During the body scan, no scrml-significant tokens are recognized: `${...}` does NOT open a logic context, `<TagName>` does NOT open a nested markup block, `?{...}` / `#{...}` / `!{...}` / `^{...}` / `_{...}` brace contexts do NOT open, `//` line-comments do NOT suppress recognition, `<!-- -->` markup-comment-skip does NOT engage. The entire body is a single text run.
+- **HTML entity-escaping unchanged.** Authors continue to entity-escape `<` / `>` / `&` for visible display per plain-HTML rules; BS does not auto-encode raw-content bodies. (Browsers do not auto-encode inside `<pre>` either; the rule parallels HTML's own.)
+- **EOF recovery.** Unterminated raw-content opener emits `E-CTX-001` against the opener span and emits the markup block with `closerForm: "inferred"` and the captured raw text spanning from after the opener's `>` through end-of-file.
+- **No new error codes.** Token suppression does not fail; it just doesn't parse. Existing block-grammar diagnostics (`E-CTX-001`, `E-CTX-003`, `E-PARSE-001`) cover EOF / pairing / generic-parse cases.
+- **Locus:** `compiler/src/block-splitter.js` — new `RAW_CONTENT_ELEMENTS` Set declaration; raw-content branch between the void/self-closing emit and the normal `pushTagContext` push in the markup-opener path. Companion conformance test at `compiler/tests/conformance/conf-raw-content-pre-code.test.js` (15 cases).
+- **Composition with downstream stages.** The text-child carries through TAB / NR / TS / CG verbatim; CG emits it as literal HTML in the dist output. No new contract surface on downstream stages.
 
 ---
 
