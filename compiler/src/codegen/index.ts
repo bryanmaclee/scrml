@@ -178,6 +178,29 @@ export interface CgInput {
    * `EmitPerRouteInput.chunkSizeBudgetBytes`.
    */
   chunkSizeBudgetBytes?: number;
+  /**
+   * PGO P1.1 (S102) — opt-in sub-stage instrumentation. When TRUE, each
+   * emit-* call site inside the per-file CG loop is wrapped with a
+   * `performance.now()` timing pair, totals are aggregated per-emit-name
+   * across all files, and a sorted `[CG-EMIT] <name>: <total>ms
+   * (<percent>% of CG)` breakdown is emitted via the `log` channel after
+   * the per-file loop completes.
+   *
+   * Default FALSE. When unset, the instrumentation branch is short-
+   * circuited so the hot per-file loop incurs zero added work beyond
+   * a single boolean check per emit call site.
+   *
+   * Plumbed from `compileScrml({ debugPerf })` in api.js, which is
+   * itself wired to the `--debug-perf` CLI flag (P1.5, commit
+   * 139bbc5).
+   */
+  debugPerf?: boolean;
+  /**
+   * PGO P1.1 (S102) — log channel for `[CG-EMIT]` lines. Defaults to
+   * `console.log`. Threaded from `compileScrml({ log })` in api.js so
+   * test harnesses + the CLI verbose-buffer share a single sink.
+   */
+  log?: (msg: string) => void;
 }
 
 export interface CgFileOutput {
@@ -244,12 +267,42 @@ export function runCG(input: CgInput): CgOutput {
     reachabilityRecord: reachabilityRecordInput = null,
     emitPerRoute = false,
     chunkSizeBudgetBytes,
+    debugPerf = false,
+    log = console.log,
   } = input;
 
   // Resolve encoding configuration (§47)
   const encodingOpts = typeof encodingInput === "object"
     ? encodingInput
     : { enabled: encodingInput ?? false };
+
+  // ---------------------------------------------------------------------------
+  // PGO P1.1 (S102) — sub-stage timing instrumentation.
+  //
+  // `codegenStage(name, fn)` mirrors api.js:559's `stage()` shape but
+  // accumulates per-emit totals into a Map across all files so the
+  // post-loop reporter can rank the hot emit paths. Hard-gated on
+  // `debugPerf` so the flag-off baseline takes the SAME code path as
+  // pre-instrumentation (one boolean check + a direct call). When the
+  // flag is set, each emit call site adds two `performance.now()`
+  // reads + one Map upsert — small constant overhead, identical
+  // structure across all sites.
+  //
+  // Naming convention: short, stable strings (e.g. "emit-html",
+  // "emit-server") so the reporter's left column lines up across runs
+  // and PGO P2.1 can cite the names directly when deep-diving the
+  // top-3 hottest paths.
+  // ---------------------------------------------------------------------------
+  const cgEmitTotals: Map<string, number> = debugPerf ? new Map() : (null as any);
+  function codegenStage<T>(name: string, fn: () => T): T {
+    if (!debugPerf) return fn();
+    const start = performance.now();
+    const result = fn();
+    const elapsed = performance.now() - start;
+    cgEmitTotals.set(name, (cgEmitTotals.get(name) ?? 0) + elapsed);
+    return result;
+  }
+  const cgStart = debugPerf ? performance.now() : 0;
 
   resetVarCounter();
 
@@ -425,7 +478,9 @@ export function runCG(input: CgInput): CgOutput {
     if (workerDefs.size > 0) {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
-        bundles.set(name, generateWorkerJs(name, def.children, def.whenMessage));
+        bundles.set(name, codegenStage("emit-worker", () =>
+          generateWorkerJs(name, def.children, def.whenMessage)
+        ));
       }
       workerBundlesPerFile.set(filePath, bundles);
     }
@@ -530,12 +585,16 @@ export function runCG(input: CgInput): CgOutput {
     // ---------------------------------------------------------------------------
     // Generate server JS — emitted in both browser and library mode.
     // ---------------------------------------------------------------------------
-    let serverJs: string | null = generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors) || null;
+    let serverJs: string | null = codegenStage("emit-server", () =>
+      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors)
+    ) || null;
 
     // ---------------------------------------------------------------------------
     // Generate CSS — emitted in both modes.
     // ---------------------------------------------------------------------------
-    const userCss: string = generateCss(nodes, analysis?.cssBlocks) || "";
+    const userCss: string = codegenStage("emit-css", () =>
+      generateCss(nodes, analysis?.cssBlocks)
+    ) || "";
 
     // ---------------------------------------------------------------------------
     // LIBRARY MODE — emit ES module exports, skip HTML and browser client JS
@@ -561,7 +620,9 @@ export function runCG(input: CgInput): CgOutput {
         analysis: analysis ?? null,
         reachabilityRecord: reachabilityRecordInput,
       };
-      const libraryJs: string | null = generateLibraryJs(libCtx) || null;
+      const libraryJs: string | null = codegenStage("emit-library", () =>
+        generateLibraryJs(libCtx)
+      ) || null;
 
       const css: string | null = userCss || null;
 
@@ -656,7 +717,7 @@ export function runCG(input: CgInput): CgOutput {
       )
     );
     const htmlBody: string | null = hasRenderableContent
-      ? generateHtml(nodes, compileCtx)
+      ? codegenStage("emit-html", () => generateHtml(nodes, compileCtx))
       : null;
 
     // Bug 17 (SPEC §26.1): collect Tailwind utility class names from BOTH the
@@ -667,17 +728,19 @@ export function runCG(input: CgInput): CgOutput {
     // are emitted as `_scrml_lift(() => { el.setAttribute("class", "...") })`
     // factory JS, NOT as static HTML, so a pure HTML scan misses them.
     let tailwindCss = "";
-    const usedClasses = new Set<string>();
-    if (htmlBody) {
-      for (const cls of scanClassesFromHtml(htmlBody)) usedClasses.add(cls);
-    }
-    // Even with no static HTML body, an engine-only file can carry markup
-    // inside arm bodies that emit-engine renders at runtime — walk the AST
-    // unconditionally.
-    for (const cls of collectClassNamesFromAst(nodes)) usedClasses.add(cls);
-    if (usedClasses.size > 0) {
-      tailwindCss = getAllUsedCSS([...usedClasses]);
-    }
+    codegenStage("emit-tailwind", () => {
+      const usedClasses = new Set<string>();
+      if (htmlBody) {
+        for (const cls of scanClassesFromHtml(htmlBody)) usedClasses.add(cls);
+      }
+      // Even with no static HTML body, an engine-only file can carry markup
+      // inside arm bodies that emit-engine renders at runtime — walk the AST
+      // unconditionally.
+      for (const cls of collectClassNamesFromAst(nodes)) usedClasses.add(cls);
+      if (usedClasses.size > 0) {
+        tailwindCss = getAllUsedCSS([...usedClasses]);
+      }
+    });
 
     const cssParts: string[] = [];
     if (userCss) cssParts.push(userCss);
@@ -705,7 +768,9 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
 
-    const clientJsRaw: string | null = generateClientJs(compileCtx) || null;
+    const clientJsRaw: string | null = codegenStage("emit-client", () =>
+      generateClientJs(compileCtx)
+    ) || null;
 
     let clientJs: string | null = clientJsRaw;
     if (clientJsRaw && !embedRuntime) {
@@ -883,7 +948,9 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
     const testJs: string | null = testMode
-      ? generateTestJs(filePath, (analysis as any)?.testGroups ?? [], [], sameFileServerFnNames) ?? null
+      ? codegenStage("emit-test", () =>
+          generateTestJs(filePath, (analysis as any)?.testGroups ?? [], [], sameFileServerFnNames)
+        ) ?? null
       : null;
 
     // §51.13 — auto-generated machine property tests.
@@ -908,7 +975,9 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
       walkForMachineInitials(nodes);
-      machineTestJs = generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants);
+      machineTestJs = codegenStage("emit-machine-tests", () =>
+        generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants)
+      );
     }
 
     const fileWorkerBundles = workerBundlesPerFile.get(filePath);
@@ -935,7 +1004,9 @@ export function runCG(input: CgInput): CgOutput {
     // Scans the just-emitted compiled JS for bare `undefined` JS-keyword usage
     // outside the canonical paired-absence-check idiom. Fires per-line. See
     // lint-undefined-interpolation.ts for the legitimate-idiom exception set.
-    const undefinedLintErrors = lintCompiledForUndefined(filePath, clientJs, serverJs);
+    const undefinedLintErrors = codegenStage("lint-undefined", () =>
+      lintCompiledForUndefined(filePath, clientJs, serverJs)
+    );
     if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
   }
 
@@ -1508,6 +1579,28 @@ export function runCG(input: CgInput): CgOutput {
         // value previously written to `outputs`; reassigning is safe.)
         outputs.set(filePath, { ...output, html: augmented });
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PGO P1.1 (S102) — emit the aggregated `[CG-EMIT]` breakdown.
+  //
+  // Sorted descending by total ms so the hottest emit paths surface
+  // first. Percentage column is computed against the elapsed CG wall
+  // time captured at function entry (`cgStart`); this matches the
+  // outer `[CG] Nms` line emitted by api.js:stage(), so adopters can
+  // cross-reference the breakdown against the existing top-line
+  // pipeline log. Sum of percentages is typically < 100 because
+  // un-instrumented work (analysis pass, route-splitter, post-pass
+  // shell composition, runtime-union assembly) is part of CG wall
+  // time but not part of the per-emit-* surface.
+  // ---------------------------------------------------------------------------
+  if (debugPerf && cgEmitTotals.size > 0) {
+    const cgElapsed = performance.now() - cgStart;
+    const rows = [...cgEmitTotals.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [name, total] of rows) {
+      const pct = cgElapsed > 0 ? (total / cgElapsed) * 100 : 0;
+      log(`  [CG-EMIT] ${name}: ${total.toFixed(1)}ms (${pct.toFixed(1)}% of CG)`);
     }
   }
 

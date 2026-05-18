@@ -1417,6 +1417,12 @@ export function compileScrml(options = {}) {
     // undefined, the route-splitter falls back to its default
     // `CHUNK_LARGE_SOFT_BUDGET_BYTES` (100 000).
     chunkSizeBudgetBytes,
+    // PGO P1.1 (S102) — when `--debug-perf` is set, runCG aggregates
+    // per-emit-* timings and emits a `[CG-EMIT] ...` breakdown via
+    // `log` after the per-file loop. Hard-gated; when unset the
+    // per-emit instrumentation is a single boolean check per site.
+    debugPerf,
+    log,
   }));
   collectErrors("CG", cgResult.errors);
 

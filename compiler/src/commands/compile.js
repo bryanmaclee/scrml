@@ -372,7 +372,12 @@ function runOnce(opts, selfHostModules = null) {
       // Consumers wire in P1.1/P1.2/P1.3; this just threads the flag.
       debugPerf,
       write: true,
-      log: verbose ? (msg) => console.log(c.dim(msg)) : () => {},
+      // PGO P1.1 (S102) — `--debug-perf` is observable on its own. When set
+      // (without `--verbose`), CG's `[CG-EMIT]` breakdown still reaches
+      // stdout; the per-stage `[CG] Nms` line (gated on `verbose` inside
+      // api.js:stage()) stays suppressed so the breakdown is the only
+      // added output for the perf-focused invocation.
+      log: (verbose || debugPerf) ? (msg) => console.log(c.dim(msg)) : () => {},
       selfHostModules,
     });
   } catch (err) {
