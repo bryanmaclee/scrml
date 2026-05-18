@@ -11548,6 +11548,74 @@ function collectForbiddenSwitches(nodes, errors, filePath) {
 }
 
 /**
+ * PGO P3.B follow-up (Option 2, S102) — detect whether the assembled AST
+ * contains at least one `reset-expr` node anywhere in its ExprNode subtrees.
+ * Result is cached on `FileAST.hasResetExpr` and consumed by
+ * `detectRuntimeChunks` in `compiler/src/codegen/emit-client.ts`, which
+ * previously ran a per-node ExprNode probe descent looking for `reset-expr`
+ * presence — the largest residual sub-component of detect-runtime-chunks
+ * cost after P3.B (~123ms on trucking-dispatch).
+ *
+ * **Why TAB:** TAB is the first stage that has the fully-assembled AST. All
+ * downstream stages (NR / MOD / SYM / TS / DG / CG) read the AST; caching
+ * a presence boolean here means every downstream consumer reads it as O(1).
+ * The walk is a single-pass DFS with first-hit short-circuit via a sentinel
+ * exception — the cheapest possible single-shot presence detection.
+ *
+ * **Walk shape:** mirrors `collectForbiddenSwitches.visit` (immediately
+ * above) and `walkValidateResetTargets` (symbol-table.ts L6521). Iterates
+ * every node's enumerable keys (excluding `span` / `id` metadata), descends
+ * into array elements and into nested objects that carry a `kind` string.
+ * The cheap `kind === "reset-expr"` test fires the sentinel on first match.
+ *
+ * **Conservatism:** false-negatives MUST NOT happen — a missed `reset-expr`
+ * would cause `detectRuntimeChunks` to omit the `reset` chunk and break
+ * runtime. False-positives are harmless (just the `reset` chunk landing when
+ * not strictly needed via the ExprNode path; other gates — state-decl
+ * `defaultExpr`, validators — still hit independently). Our walker descends
+ * into every object child including ExprNode fields (initExpr, condExpr,
+ * argsExpr, etc.), so any reset-expr reachable in the AST is detected.
+ *
+ * @param {ASTNode[]} nodes — Top-level AST nodes from buildAST.
+ * @returns {boolean} — true iff any reset-expr exists in the AST tree.
+ */
+const RESET_EXPR_SENTINEL = Symbol("RESET_EXPR_PRESENT");
+function detectResetExprPresence(nodes) {
+  if (!Array.isArray(nodes) || nodes.length === 0) return false;
+  // Throw-sentinel short-circuit: JS engines handle a single thrown
+  // primitive cheaply, and this lets us bail the entire DFS the moment
+  // the first reset-expr is found. The catch outside the loop re-asserts
+  // boolean true. Any non-sentinel error rethrows.
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    if (node.kind === "reset-expr") {
+      throw RESET_EXPR_SENTINEL;
+    }
+    for (const key in node) {
+      // Skip span / id / pure-metadata fields. `kind` is a string and
+      // skipped naturally by the object-check below.
+      if (key === "span" || key === "id" || key === "_scope") continue;
+      const val = node[key];
+      if (Array.isArray(val)) {
+        for (let i = 0; i < val.length; i++) {
+          const item = val[i];
+          if (item && typeof item === "object") visit(item);
+        }
+      } else if (val && typeof val === "object" && typeof val.kind === "string") {
+        visit(val);
+      }
+    }
+  }
+  try {
+    for (const n of nodes) visit(n);
+  } catch (e) {
+    if (e === RESET_EXPR_SENTINEL) return true;
+    throw e;
+  }
+  return false;
+}
+
+/**
  * Walk an ASTNode tree and collect all import-decl, export-decl,
  * type-decl, and component-def nodes that live inside logic blocks.
  * These are hoisted into the FileAST top-level fields.
@@ -12183,6 +12251,14 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     }
   }
 
+  // PGO P3.B follow-up (Option 2, S102) — cache reset-expr presence at TAB
+  // time so emit-client.ts:detectRuntimeChunks can skip its ExprNode probe
+  // descent for reset-expr detection (the largest residual sub-component
+  // of detect-runtime-chunks cost after P3.B fused-probe + structural-skip).
+  // Walk is short-circuiting via sentinel exception — bails the entire DFS
+  // on first reset-expr found.
+  const hasResetExpr = detectResetExprPresence(nodes);
+
   const ast = {
     filePath,
     nodes,
@@ -12194,6 +12270,7 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     channelDecls,
     spans,
     hasProgramRoot,
+    hasResetExpr,
     authConfig,
     middlewareConfig,
   };

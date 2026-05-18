@@ -108,6 +108,46 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     fileAST?.ast ?? fileAST ?? {},
   );
 
+  // PGO P3.B follow-up (Option 2, S102) — O(1) reset-expr chunk gate.
+  //
+  // Pre-fix: the per-node ExprNode probe at line ~365 below scanned every
+  // ExprNode subtree looking for `reset-expr` nodes (alongside `==`/`!=`).
+  // Per the P3.B agent's instrumentation, the reset-side sub-probe was the
+  // largest residual sub-component of detect-runtime-chunks cost — ~123ms
+  // on trucking-dispatch after P3.B's fused-probe + structural-skip work.
+  //
+  // Post-fix: `ast-builder.js → detectResetExprPresence` walks the AST
+  // exactly once at TAB time and caches the boolean on `FileAST.hasResetExpr`.
+  // Reading the flag here is O(1) — no descent, no walk. Once `chunks.has(
+  // "reset")` is true the in-walk probe's `needReset && !chunks.has("reset")`
+  // condition (line ~374) becomes false on every node, so the reset-side
+  // scanning is fully short-circuited inside `probeExprForEqualityAndReset`.
+  //
+  // **Correctness — chunk-set identity:** the `reset` chunk is included iff
+  // the file has at least one `reset-expr` node (or one of the other gates
+  // below: state-decl `defaultExpr`, validators, etc.). The previous walk's
+  // ExprNode-side rule was "fire `chunks.add('reset')` once a reset-expr
+  // is seen". `hasResetExpr` from TAB encodes exactly that predicate, so
+  // chunk-set inclusion is byte-identical to pre-fix. Other gates (kind-
+  // based: state-decl, function-decl, etc.) are unchanged and still fire
+  // independently in the kind-switch below.
+  // Capture the AST-cached flag once. When `hasResetExpr === true`, we pre-
+  // activate the `reset` chunk so the in-walk probe at line ~395 sees
+  // `chunks.has("reset") === true` and short-circuits reset-side scanning
+  // immediately. When `hasResetExpr === false`, the boolean is used directly
+  // to gate `needReset` in the in-walk probe — the AST is guaranteed to
+  // contain no `reset-expr` node, so the probe doesn't need to look.
+  // When the field is missing entirely (legacy callers / synthetic ASTs),
+  // we fall back to the pre-fix behaviour (probe scans both sides).
+  const __hasResetExprFlag = fileAST?.ast?.hasResetExpr ?? fileAST?.hasResetExpr;
+  if (__hasResetExprFlag === true) {
+    chunks.add("reset");
+  }
+  // `false` when the AST builder cached a definitive negative; `undefined`
+  // when the field was not produced (synthetic AST / legacy caller). The
+  // in-walk probe at line ~395 reads this to skip reset-side scanning.
+  const __resetExprDefinitivelyAbsent = __hasResetExprFlag === false;
+
   // A-4.3 + A-4.5 — `prefetch` chunk lights up when the Stage 7.6 RS has
   // produced EITHER:
   //   (i)  at least one non-empty tier-1 ChunkContents (A-4.3 — idle prefetch
@@ -363,7 +403,15 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     // are already activated for this file, skip the entire scan (which
     // before this fix was O(deep-tree-size × ExprNode-fields-per-node)).
     const needEquality = !chunks.has("equality");
-    const needReset = !chunks.has("reset");
+    // PGO P3.B follow-up (Option 2, S102) — gate `needReset` on the AST-cached
+    // `hasResetExpr` flag. When the flag is `false`, we KNOW with certainty
+    // no `reset-expr` node exists anywhere in the AST (the TAB-time walker
+    // already proved it), so the in-walk probe doesn't need to scan reset-
+    // side. When the flag is `true`, `chunks.add("reset")` was called above,
+    // so `chunks.has("reset")` is already true and `needReset` falls naturally
+    // to false. When the flag is `undefined` (synthetic AST / legacy caller),
+    // fall back to the pre-fix behaviour: probe scans both sides.
+    const needReset = !chunks.has("reset") && !__resetExprDefinitivelyAbsent;
     if (needEquality || needReset) {
       for (const key of Object.keys(node)) {
         const v = node[key];
