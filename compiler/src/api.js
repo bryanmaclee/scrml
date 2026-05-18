@@ -560,7 +560,10 @@ export function compileScrml(options = {}) {
     const start = performance.now();
     const result = fn();
     const ms = (performance.now() - start).toFixed(1);
-    if (verbose) log(`  [${name}] ${ms}ms`);
+    // PGO P1.2 — `--debug-perf` also surfaces the per-stage aggregate
+    // (so [CG-EMIT] / [RS-COMPONENT] / [DG-PER-FILE] breakdowns have
+    // their parent-stage [STAGE] comparison line in context).
+    if (verbose || debugPerf) log(`  [${name}] ${ms}ms`);
     return result;
   }
 
@@ -1381,6 +1384,10 @@ export function compileScrml(options = {}) {
     batchPlan: bpResult.batchPlan,
     files: metaFiles,
     authGraph: agResult.graph,
+    // PGO P1.2 — when --debug-perf is set, RS emits per-component
+    // `[RS-COMPONENT N]` + `[RS-OUTER-FIXPOINT]` breakdown via `log`.
+    debugPerf,
+    log,
   }));
   collectErrors("RS", rsResult.errors);
 

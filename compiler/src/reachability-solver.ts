@@ -159,29 +159,43 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
     return { record, errors };
   }
 
+  // PGO P1.2 — per-component timing instrumentation (zero overhead
+  // when `debugPerf` is unset; the `performance.now()` calls are
+  // guarded by the flag so the disabled path issues no host calls).
+  const debugPerf = input.debugPerf === true;
+  const perfLog = input.log ?? ((msg: string) => console.log(msg));
+
   // Component 1 — entry-point enumeration + initially-rendered set.
+  const c1Start = debugPerf ? performance.now() : 0;
   const entryPoints = enumerateEntryPoints(files);
   const env: ConstFoldEnv = { constBindings: new Map() };
   const irc = computeInitiallyRenderedComponents(entryPoints, files, env);
+  const c1Ms = debugPerf ? performance.now() - c1Start : 0;
 
   // Component 2 — reactive-dep closure over the post-A-1 DG. The DG
   // is duck-typed at the boundary; when absent (tests bypassing the
   // full pipeline) Component 2 returns empty closures per entry point.
   const dg = input.depGraph as ReadOnlyDependencyGraph | null | undefined;
+  const c2Start = debugPerf ? performance.now() : 0;
   const reactiveClosures = computeReactiveDepClosure(irc, dg);
+  const c2Ms = debugPerf ? performance.now() - c2Start : 0;
 
   // Component 3 (A-2.4) — `server_fn_reachable_within` at N=0/N=1/N=2.
   // Builds the interaction-graph projection per OQ-A2-H Option α
   // (pure AST projection — no DG extension). Returns cumulative
   // tier-0/tier-1/tier-2 sets per entry point; ChunkPlan construction
   // (below) differences them into per-tier admission per §40.9.7.
+  const c3Start = debugPerf ? performance.now() : 0;
   const serverFnByEntry = computeServerFnReachableWithin(irc, files, dg);
+  const c3Ms = debugPerf ? performance.now() - c3Start : 0;
 
   // Component 5 — §41 vendor units referenced by each entry point's
   // component set. Opacity rule (§40.9.6): the vendor unit's internal
   // module graph is NOT subdivided; Component 5 admits the unit as a
   // whole by VendorUnitId. Per-unit chunking is A-4's concern.
+  const c5Start = debugPerf ? performance.now() : 0;
   const vendorUnits = computeVendorUnitsUsed(irc, files);
+  const c5Ms = debugPerf ? performance.now() - c5Start : 0;
 
   // Component 4 (A-2.5) — auth-gated boundaries visible per role. The
   // AuthGraph is duck-typed at the boundary; when absent (unit tests
@@ -191,8 +205,10 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
   // filtering). The diagnostics stream from C4 — W-AUTH-RUNTIME-FALLBACK
   // info-level lint per OQ-A2-I + E-CLOSURE-002 error per OQ-A2-F — is
   // unioned into the orchestrator's `errors` output verbatim.
+  const c4Start = debugPerf ? performance.now() : 0;
   const c4 = computeAuthGatedBoundariesVisibleTo(input.authGraph, files);
   for (const e of c4.errors) errors.push(e);
+  const c4Ms = debugPerf ? performance.now() - c4Start : 0;
 
   // Materialize per-entry-point per-role ChunkPlans.
   //
@@ -219,6 +235,16 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
   // A-2.7 (outer fixpoint) and A-4 (artifact splitter) will refine.
   // Vendor units are per-file declarations (§40.9.6 opacity rule) and
   // are not filtered per role for the same reason.
+  //
+  // PGO P1.2 — accumulate outer-fixpoint time across every
+  // (entry-point, role) pair PLUS the per-EP loop glue
+  // (`filterComponentsByRole`, `makeChunkPlanFromFixpoint`,
+  // `unionTierIds`). The whole loop is attributed to the
+  // `RS-OUTER-FIXPOINT` bucket — the fixpoint dominates per-EP cost in
+  // practice, and folding the glue here keeps the per-component sum
+  // within ±1ms of the aggregate `[RS]` line.
+  const fpStart = debugPerf ? performance.now() : 0;
+  let fpIterTotal = 0;
   for (const ep of entryPoints) {
     const componentIds: Set<NodeId> = irc.get(ep.id) ?? new Set();
     const reactiveCellIds: Set<NodeId> =
@@ -271,6 +297,7 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
         env,
       });
       for (const e of fp.errors) errors.push(e);
+      if (debugPerf) fpIterTotal += fp.iterations;
 
       const plan = makeChunkPlanFromFixpoint(
         fp.result,
@@ -280,6 +307,20 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
       rps.byRole.set(role, plan);
     }
     record.closures.set(ep.id satisfies EntryPointId, rps);
+  }
+  const fpMs = debugPerf ? performance.now() - fpStart : 0;
+
+  // PGO P1.2 — emit per-component breakdown ONLY when `debugPerf` is
+  // set. The component bucket numbers SHALL sum to within ±1ms of the
+  // existing `[RS] Nms` aggregate (the per-EP fixpoint loop folds its
+  // glue cost into the `RS-OUTER-FIXPOINT` bucket; see comment above).
+  if (debugPerf) {
+    perfLog(`  [RS-COMPONENT 1] initially-rendered: ${c1Ms.toFixed(2)}ms`);
+    perfLog(`  [RS-COMPONENT 2] reactive-dep-closure: ${c2Ms.toFixed(2)}ms`);
+    perfLog(`  [RS-COMPONENT 3] server-fn-reachable-within: ${c3Ms.toFixed(2)}ms`);
+    perfLog(`  [RS-COMPONENT 4] auth-gated-boundaries-visible-to: ${c4Ms.toFixed(2)}ms`);
+    perfLog(`  [RS-COMPONENT 5] vendor-units-used-by: ${c5Ms.toFixed(2)}ms`);
+    perfLog(`  [RS-OUTER-FIXPOINT] ${fpIterTotal} iters, ${fpMs.toFixed(2)}ms`);
   }
 
   return { record, errors };

@@ -291,6 +291,20 @@ export interface RSInput {
   batchPlan?: unknown;
   /** Per-file AST set, used by the A-2.4 interaction-graph projection. */
   files?: unknown[];
+  /**
+   * PGO P1.2 — when `true`, the solver emits per-component timing lines
+   * (`[RS-COMPONENT 1] initially-rendered: Nms` etc.) plus a single
+   * `[RS-OUTER-FIXPOINT] <iters> iters, Nms` line via the `log`
+   * channel. Off by default; zero overhead when unset
+   * (no `performance.now()` calls are issued on the false branch).
+   */
+  debugPerf?: boolean;
+  /**
+   * PGO P1.2 — log sink used when `debugPerf === true`. Matches the
+   * `log` channel plumbed through `compileScrml`. Defaults to
+   * `console.log` when omitted; tests can pass a sink-recording function.
+   */
+  log?: (msg: string) => void;
 }
 
 /**
