@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
+# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
 
 ## TypeScript AST — `compiler/src/types/ast.ts` (~1,858 LOC)
 
@@ -187,7 +187,7 @@ FNV_OFFSET: 2166136261 (const — SPEC §47.1.3 normative)
 FNV_PRIME: 16777619 (const — SPEC §47.1.3 normative)
 fnv1aHash(input: string): string — FNV-1a 32-bit hash, output as 8-char base36, zero-padded
 
-getCompilerIdentity(): string — reads package.json `version`, returns `"scrml-" + V`, cached; fallback `"scrml-unknown"` on read failure (Q-OPEN-4, NEW S92)
+getCompilerIdentity(): string — reads package.json `version`, returns `"scrml-" + V`, cached; fallback `"scrml-unknown"` on read failure (Q-OPEN-4)
 
 ## Wire Format Types — `compiler/src/codegen/wire-format.ts` (228 LOC)
 
@@ -217,12 +217,12 @@ derivedNames: Set<string>, analysis: FileAnalysis | null, usedRuntimeChunks: Set
 exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | null,
 reachabilityRecord?: ReachabilityRecord | null,
 hasPrefetchableLinks: boolean  [A-4.4 — set by emit-html when internal `<a href>` resolves to RouteMap.pages],
-hasInternalLinks: boolean      [Q-OPEN-6 NEW S92 — set by emit-html on any absolute-path string-literal `<a href>`, independent of resolution]
+hasInternalLinks: boolean      [Q-OPEN-6 — set by emit-html on any absolute-path string-literal `<a href>`, independent of resolution]
 
 ### CgInput  [codegen/index.ts:79]
 files, routeMap?, depGraph?, protectAnalysis?, sourceMap?, embedRuntime?, mode?, testMode?,
 emitMachineTests?, encoding?, batchPlan?, batchPlannerErrors?, exportRegistry?,
-reachabilityRecord?, emitPerRoute?: boolean, chunkSizeBudgetBytes?: number  [Q-OPEN-5 NEW S92]
+reachabilityRecord?, emitPerRoute?: boolean, chunkSizeBudgetBytes?: number  [Q-OPEN-5]
 
 ### CgFileOutput  [codegen/index.ts:143]
 sourceFile, serverJs?, clientJs?, libraryJs?, html?, css?, testJs?, machineTestJs?,
@@ -230,7 +230,7 @@ workerBundles?: Map<string, string>, clientJsMap?, serverJsMap?
 
 ### CGError  [errors.ts:11]
 code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning' | 'info'
-(severity now includes 'info' as of S92 — errors.ts line 15 updated)
+(severity includes 'info' since S92 — errors.ts line 15)
 
 ## scrml:host Runtime Types — `compiler/runtime/stdlib/host.js`
 
@@ -239,11 +239,53 @@ Variant constructor: `HostError.Thrown(message, name) → { variant: "Thrown", d
 ### safeCall(thunk) → value | scrml-error-shape
 ### safeCallAsync(thunk) → Promise<value | scrml-error-shape>
 
+## Native Parser Token Types — `compiler/native-parser/token.js` (M1.1-M1.4)
+
+### Token  [token.js:181]
+`{ kind: TokenKind, text: string, span: NativeSpan, ...payload }`
+- RegexLit token also carries: `{ pattern: string, flags: string, raw: string }`
+- TemplateChunk token carries the chunk text (no extra payload)
+- TemplateInterpStart/TemplateInterpEnd are zero-payload boundary tokens
+
+### NativeSpan  [span.js]
+`{ start: number, end: number, line: number, col: number }`
+(distinct from compiler/src/types/ast.ts Span which also carries `file: string`)
+
+### TokenKind values  [token.js:5-123]
+Grouped by category:
+
+| Category | Values |
+|----------|--------|
+| Brackets | LParen, RParen, LBrace, RBrace, LBracket, RBracket |
+| Punctuation | Semicolon, Comma, Dot, Ellipsis, Arrow, Colon, Question |
+| Arithmetic | Plus, Minus, Star, Slash, Percent, StarStar |
+| Assignment | Assign, PlusAssign, MinusAssign, StarAssign, SlashAssign |
+| Comparison | Equal, NotEqual, StrictEqual, StrictNotEqual, LessThan, LessEqual, GreaterThan, GreaterEqual |
+| Logical | LogicalAnd, LogicalOr, NullishCoalesce |
+| Bitwise | BitAnd, BitOr, BitXor, BitNot, BitShiftLeft, BitShiftRight, BitShiftRightUnsigned |
+| Unary | Increment, Decrement, Bang |
+| JS keywords | KwIf, KwElse, KwFor, KwWhile, KwDoWhile, KwReturn, KwBreak, KwContinue, KwFunction, KwLet, KwConst, KwVar, KwClass, KwExtends, KwNew, KwImport, KwExport, KwFrom, KwAs, KwDefault, KwAsync, KwAwait, KwYield, KwTry, KwCatch, KwFinally, KwThrow, KwTrue, KwFalse, KwNull, KwUndefined, KwTypeof, KwInstanceof, KwIn, KwOf, KwVoid, KwDelete, KwThis, KwSuper |
+| scrml extensions | KwIs, KwNot, KwMatch, KwLift, KwFail, KwRender, KwGiven, KwSome |
+| Literals | NumberLit, StringLit, TemplateChunk, RegexLit (M1.4), BoolLit |
+| Template interp | TemplateInterpStart, TemplateInterpEnd (M1.2) |
+| Identifier | Ident |
+| scrml syntax | BareVariant, ScrmlAt, SqlBlock, InputStateRef, Tilde, LogicEscapeOpen, LogicEscapeClose |
+| Whitespace/Meta | Newline, Whitespace, EOF |
+
+### QuoteKind  [token.js:125]
+Single | Double | Backtick
+
+### Functions  [token.js:181-195]
+`makeToken(kind, text, span, payload?)` → Token
+`makeIdentOrKeyword(text, span)` → Token (Ident or matching Kw* variant via JS_KEYWORDS lookup)
+`makeEof(pos, line, col)` → Token
+
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s92 #v0.3.0 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6
+#scrmlts #map #schema #ast #types #codegen #ir #s101 #v0.3.1 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6 #native-parser #token-catalog #m1-4
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
 - [domain.map.md](./domain.map.md)
+- [native-parser.map.md](./native-parser.map.md)

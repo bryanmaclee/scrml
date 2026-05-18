@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
+# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
 
 ## Core Concepts
 
@@ -11,7 +11,8 @@
 | Reactive cell (@var) | Mutable reactive variable declared with `@name = expr`; all subscriptions update on set |
 | Derived cell | Const-derived reactive variable (`const <name> = expr`); recomputed when deps change; shape:"derived" in AST |
 | Engine | State machine over a reactive cell (`<engine>` tag); governs legal transitions via rule= attributes; variant-guarded markup rendering |
-| State child | AST node inside an `<engine>` body representing a named variant; body is walkable AST |
+| State child | AST node inside an `<engine>` body representing a named variant; body is walkable AST; may carry payload binding per §51.0.B.1 (S98) |
+| Payload binding on state-child | §51.0.B.1 (S98 SPEC-only): three forms — bare-attribute, named, parenthesized; positional + named semantics inherit from §18.7; reserved-name precedence rule; unit-variant rejection. Track 2 (compiler wiring) pending. |
 | Match block | Pattern-match expression (`match expr { .A => ..., .B => ... }`); match-as-expression and match-block-form |
 | Logic block (${ }) | Imperative code block; contains let/const/reactive decls, function defs, SQL blocks, control flow |
 | Meta block (^{ }) | Compile-time code execution block; evaluated at CG Stage 8; `meta.emit()` inserts HTML at the block's DOM position |
@@ -36,7 +37,7 @@
 | Per-Route Artifact Splitter | A-4 wave FULLY CLOSED S91. route-splitter.ts orchestrates per-(EP, role, tier) chunk emission from ChunkPlan atoms. Output: per-file `<route>/<Role>.<tier>.<8-char-hash>.js` + `chunks.json` manifest |
 | ChunkKey | (entryPointId, role, tier) tuple uniquely identifying one emitted JS chunk artifact |
 | ChunkOutput | One emitted chunk: payloadJs (atom-composed JS), chunkHash (FNV-1a base36 8-char, SPEC §47.5), filename, byteSize |
-| getCompilerIdentity() | Reads scrmlTS package.json `version` lazily, returns `"scrml-" + V` (e.g. `"scrml-0.3.0"`); cached after first call; fallback `"scrml-unknown"` on read failure. Populates `chunks.json` `compiler` field (Q-OPEN-4, CLOSED S92) |
+| getCompilerIdentity() | Reads scrmlTS package.json `version` lazily, returns `"scrml-" + V` (e.g. `"scrml-0.3.1"`); cached after first call; fallback `"scrml-unknown"` on read failure. Populates `chunks.json` `compiler` field (Q-OPEN-4, CLOSED S92) |
 | FNV-1a hash | Shared 32-bit base36 hash primitive at `codegen/fnv1a-hash.ts` (SPEC §47.1.3 normative). Two call sites: per-binding type-encoding (§47.1.2) and per-chunk content-addressing (§47.5). Pure-PURE; deterministic |
 | Tier-1 idle prefetch | `_scrml_prefetch_tier1(chunkUrl)`: requestIdleCallback browser-side + setTimeout(fn,1) Safari fallback; wired in IIFE tail when (EP,role) admits non-empty tier-1 |
 | Tier-2 hover prefetch | `_scrml_prefetch_tier2(routePath, role)`: mouseenter+focus once-listeners on `[data-scrml-prefetch]` anchors; `<a href="/internal">` wiring injects data-scrml-prefetch for exact RouteMap.pages matches |
@@ -49,46 +50,43 @@
 | Wire Format (§57) | scrml absence (`not`) encodes as `{"__scrml_absent": true}` over the wire for `T | not` return types. Dual-decoder: accepts envelope + raw JSON null. Clean-break at v1.0 |
 | null / undefined eradication | ABSOLUTE. `null` and `undefined` do NOT exist in scrml. `""` / `0` / `false` are DEFINED values. Canonical absence: `not`. SPEC §42 + §42.1.1 normative |
 | Tier system | Tier 1 (basic reactive): if/for/match; Tier 2 (engines): state machines; Tier 3 (positional sugar): compound state shorthand |
-| Self-host | Compiler compiled with itself; dist artifacts gitignored. Self-host is a from-scratch rewrite SHOWCASING scrml advantages — not a mechanical TS port |
+| Self-host | Compiler compiled with itself; dist artifacts gitignored. Self-host is a from-scratch rewrite SHOWCASING scrml advantages — not a mechanical TS port. Post-v1.0 timeline |
 | scrml:host | Stdlib module: `safeCall`, `safeCallAsync`, `HostError`. try/catch lives ONLY in compiler/runtime/stdlib/host.js — never in scrml source |
+| Raw-content elements (§4.17) | `<pre>` and `<code>` — bodies are a single text run. scrml tokens (`${...}`, `<TagName>`, brace sigils) NOT recognized inside. `RAW_CONTENT_ELEMENTS` Set in block-splitter.js. S101 landing, companion §24.3.1 cross-ref |
+| Tailwind typography plugin (§26.6) | `prose` / `prose-{color}` / `prose-{size}` / `not-prose` opt-out. §26.6.1 base prose styling with `:where()`+`:not(:where([class~="not-prose"] *))` selectors. §26.6.2 color variants (slate/gray/zinc/neutral/stone). §26.6.3 size variants (sm/base/lg/xl/2xl). Implemented in tailwind-classes.js +415 LOC (S100) |
+| fn mutual recursion / hoisting (§48.6.4) | `fn` declarations at file scope hoist per §6.9, mirroring `function`; mutual recursion supported without source-order constraints; `pinned fn` opt-out (parser-recognition implementation-pending). S98 SPEC-only landing |
+| Native parser (Mn series) | `compiler/native-parser/` — bottom-up scrml-native lexer replacing Acorn pre-v1.0. M1.1 (S99) + M1.2 strings/templates/§51.0.Q.1 nested-engine (S100) + M1.3 line/block comments (S102) + M1.4 regex (S103). M1 LADDER COMPLETE: all 7 LexMode state-children have substantive body dispatchers. Acorn is the conformance oracle, not the design template. Design authority: scrml-native-parser-design-2026-05-17.md |
+| §51.0.Q.1 nested engine | SPEC-canonical pattern for composite state-children containing an inner `<engine>` over the same type. `var=innerLexMode` is the canonical disambiguation (SPEC §51.0.C + §51.0.Q.1). Exemplified in `lex-mode.scrml` InTemplateBody state-child. |
+| Named timers (§51.0.M.1) | `<onTimeout name=IDENT after=DURATION to=.Variant>` — addressable timer; `cancelTimer("IDENT")` from event-handler inside same state-child body. E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID diagnostics. SHIPPED S79 A5-6 Feature 1 |
+| MPA shell-composition $& fix | S100 `01eeda9` + S101 `d77a60d`: `String.prototype.replace` second argument dollar-sign backreferences (`$&`, `$N`, `$'`, `` $` ``) silently substituted in multipage body replace calls; fixed by converting to function-form replace in codegen/index.ts:1214, component-expander.ts:2169, commands/generate.js:242 |
+| PIPELINE.md | v0.7.2 (S101 2026-05-18) — adds Stage 2 (BS) v0.next addendum for §4.17 raw-content elements. v0.7.1 (S101) was the prose-pass; v0.7.2 is the §4.17 contract addendum. No downstream stage contract changes |
 
-## v0.3.0 Status — STABLE CUT (HEAD 13154ba, 2026-05-14)
+## v0.3.x Status (HEAD dae8ff1, 2026-05-18)
 
-**v0.3.0 STABLE** — all Approach A sub-waves closed. Version tagged.
+**v0.3.1** — v0.3.0 patch tag `cbe1b1e`. v0.3.x patch arc (S93+). All Approach A sub-waves CLOSED (v0.3.0 baseline).
 
-**CLOSED at S88/S89:**
-- LIFT-1..5 (all codegen bug families) — S88 ✓
-- Approach A wave A-1 (A-1.1..A-1.8 inclusive) — S89 ✓
-- §36 input devices chain — S89 ✓
-- §13.2 auto-await chain (Sub-A + Sub-B + Sub-E; STDLIB-EXPORT-SEED pass) — S89 ✓
-- Wave 4 adopter content (T-track 11/11 + D-track 17 articles) — S89 ✓
-- Null/undefined eradication (SPEC §42.1.1, W-ABSENCE rename, corpus + stdlib sweep) — S89 ✓
+**CLOSED at S93-S99 (post-v0.3.0 patch arc):**
+- S93-S99: 6+ substantive compiler bugs closed (scope-walker gaps, parseParamList default-value, export function synth stubs, `is some`/`is not` preprocessor, E-SWITCH-FORBIDDEN); B1 §51.0.B.1 payload-binding compiler-feature wiring Track 2 CLOSED S99
 
-**CLOSED at S90:**
-- M-7C-D-12 runtime sentinel — T1..T5 ✓
-- A-2.3..A-2.6 Components 2–5 ✓
-- A-3.1..A-3.4 ✓
+**CLOSED at S99:**
+- §51.0.B.1 payload-binding compiler wiring (Track 2) ✓
+- Day-30 reference build-out (11 pages shipped) ✓
 
-**CLOSED at S91 — A-2 + A-3 + A-4 FULLY CLOSED:**
-- A-2.7 outer fixed-point + E-CLOSURE-001; A-2.8 canonical JSON ✓
-- A-3.5 AuthGraph wired into api.js Stage 7.55; W-AUTH-LOGIN-MISSING + generate-auth ✓
-- A-4.1..A-4.7 per-route artifact splitter — all sub-phases, chunks ACTIVATE in adopter browsers ✓
+**CLOSED at S100 (v0.3.x):**
+- §26.6 Tailwind typography plugin (tailwind-classes.js +415 LOC) ✓
+- MPA shell-composition `$&` regex-injection bug fix (codegen/index.ts) ✓
+- M1.2 native-parser: strings + template literals + §51.0.Q.1 nested-engine (M1.2 stress test) ✓
 
-**CLOSED at S92 — A-5 wave FULLY CLOSED + v0.3.0 cut:**
-- A-5.1 multipage-multirole cornerstone integration test ✓
-- A-5.2 cross-file MOD+CE+AG+RS+CG end-to-end integration test ✓
-- A-5.3 negative-cascade diagnostic chain integration test ✓
-- A-5.4 W-* lint family end-to-end integration tests ✓
-- A-5.5 cross-wave determinism end-to-end + trucking-dispatch compile-smoke ✓
-- Q-OPEN-4: getCompilerIdentity() sources `compiler` field from package.json (not hard-coded) ✓
-- Q-OPEN-5: `--chunk-size-budget=N` CLI flag + chunkSizeBudgetBytes propagation ✓
-- Q-OPEN-6: W-CG-CHUNK-NO-PREFETCH (Info) vs W-CG-CHUNK-PREFETCH-UNRESOLVED (Warning) split ✓
-- package.json version updated to 0.3.0 ✓
-- v0.3.0-announce published (docs/website/v0.3.0-announce-2026-05-14.md) ✓
+**CLOSED at S101-S103 (v0.3.1 era):**
+- §4.17 raw-content elements (`<pre>` / `<code>`) — BS stage + PIPELINE.md v0.7.2 + SPEC §24.3.1 ✓
+- $& body-replace function-form fix at component-expander.ts + commands/generate.js ✓
+- M1.3 native-parser: line comments + block comments (S102) ✓
+- M1.4 native-parser: regex body dispatcher; M1 LADDER COMPLETE (S103) ✓
 
-**A-5 wave summary (S92):** Six sub-phases covering five integration test families (FX-1 multi-EP/role cornerstone, FX-2 cross-file, FX-3+FX-4 negative cascade, FX-5+FX-7+FX-8a+FX-8b lint family, F-6 trucking-dispatch smoke). Three Q-OPEN items closed. Test count: 12,694 pass / 638 files.
-
-**Pending (post-v0.3.0):**
+**Pending (post-v0.3.1):**
+- M1.5 native-parser: flip `expr-literals.js` to "full" disposition (regex-token normalizer extension)
+- M2: expression parser in scrml; ParseContext engine
+- §51.0.B.1 Track 2 compiler-feature (parser + typer + codegen wiring) — SPEC landed S98; compiler wiring CLOSED S99
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
 
 ## Business Invariants
@@ -110,8 +108,11 @@
 - Chunk hash MUST NOT equal CHUNK_HASH_PLACEHOLDER ("00000000") at chunk surface — regression-guard invariant (A-4.6 assertion)
 - Two builds of the same source MUST produce byte-identical chunk payloads AND byte-identical chunk hashes (§40.9.8 determinism normative)
 - W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive per Q-OPEN-6 (hasInternalLinks discriminator)
+- `<pre>` and `<code>` bodies are NOT parsed for scrml tokens — they are raw-content text runs (§4.17)
+- Engine state-child payload-binding MUST NOT shadow reserved attribute names {rule, effect, history, internal:rule} — E-ENGINE-PAYLOAD-RESERVED-COLLISION (§51.0.B.1)
+- Engine state-child payload binding on a UNIT variant (no payload fields) raises E-ENGINE-PAYLOAD-ON-UNIT-VARIANT (§51.0.B.1)
 
-## Diagnostic First-Fire-Sites (S90 + S91 + S92)
+## Diagnostic First-Fire-Sites (S90 + S91 + S92 — unchanged; new codes at S98)
 
 | Code | Severity | File | Description | Session |
 |------|----------|------|-------------|---------|
@@ -128,6 +129,9 @@
 | W-CG-CHUNK-NO-PREFETCH | info | codegen/route-splitter.ts emitChunkLints() | Multi-route app, no internal links at all — Info (Q-OPEN-6 case 1) | S91/S92 |
 | W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | codegen/route-splitter.ts emitChunkLints() | Internal-shaped links present but unresolved — Warning (Q-OPEN-6 case 2) | S92 |
 | W-CG-CHUNK-MISSING-ROLE | warning | codegen/route-splitter.ts emitChunkLints() | `<auth role=X>` role not in reachability record (A-4.7) | S91 |
+| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Payload binding on a unit-variant state-child | S98 |
+| E-ENGINE-PAYLOAD-ARITY-MISMATCH | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Binding count != variant payload field count | S98 |
+| E-ENGINE-PAYLOAD-RESERVED-COLLISION | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Payload binding name shadows reserved state-child attribute | S98 |
 
 ## Domain Events (Compiler Pipeline)
 
@@ -145,13 +149,14 @@
 | emitPerRouteChunks | Post-emit phase, when emitPerRoute=true | codegen/index.ts → route-splitter.ts |
 | emitChunkLints | Post-per-route-emission, per entry-point | codegen/route-splitter.ts |
 | augmentHtmlForChunks | Post-emit, when emitPerRoute=true + chunks manifest ready | codegen/emit-html.ts |
+| raw-content element passthrough | BS Stage 2: RAW_CONTENT_ELEMENTS.has(lowerTagName) — body becomes text run | block-splitter.js |
 
 ## Aggregates
 
 | Aggregate | File | Owns |
 |-----------|------|------|
 | FileAST | compiler/src/types/ast.ts | All ASTNodes for one .scrml file |
-| CompileContext | compiler/src/codegen/context.ts | BindingRegistry, FileAnalysis, EncodingContext, error list, hasPrefetchableLinks, hasInternalLinks [Q-OPEN-6 S92] |
+| CompileContext | compiler/src/codegen/context.ts | BindingRegistry, FileAnalysis, EncodingContext, error list, hasPrefetchableLinks, hasInternalLinks |
 | BindingRegistry | compiler/src/codegen/binding-registry.ts | EventBinding[], LogicBinding[] |
 | FileAnalysis | compiler/src/codegen/analyze.ts | Pre-computed AST slices |
 | AuthGraph | compiler/src/types/auth-graph.ts | gates Map, roleEnum, gateToEntryPoint, redirectTargets, errors — Stage 7.55 output |
@@ -170,6 +175,13 @@
 | Q-OPEN-5 chunk size budget | CLOSED S92 — --chunk-size-budget=N CLI flag; chunkSizeBudgetBytes through compileScrml/runCG/emitPerRouteChunks |
 | Q-OPEN-6 prefetch split | CLOSED S92 — W-CG-CHUNK-NO-PREFETCH (Info) vs W-CG-CHUNK-PREFETCH-UNRESOLVED (Warning); ctx.hasInternalLinks discriminator |
 | W-AUTH-LOGIN-MISSING resolution path | `scrml generate auth` CLI (commands/generate.js) → writes stdlib/auth/templates/login.scrml to project |
+| §51.0.B.1 payload-binding | SPEC landed S98 (Track 1); compiler wiring (Track 2) CLOSED S99 |
+| §51.0.M.1 named timers + cancelTimer | SHIPPED S79 A5-6 Feature 1 — engine-statechild-parser.ts + emit-variant-guard.ts + binding-registry.ts + runtime-template.js |
+| §26.6 typography plugin | CLOSED S100 — tailwind-classes.js buildProseRule/buildProseColorRule/buildProseSizeRule (SPEC §26.6.1-§26.6.5) |
+| §4.17 raw-content elements | CLOSED S101 — block-splitter.js RAW_CONTENT_ELEMENTS Set + PIPELINE.md v0.7.2 + SPEC §24.3.1 cross-ref |
+| §48.6.4 fn mutual recursion / hoisting | SPEC-only S98 — parser-recognition implementation-pending (normative semantics specified) |
+| MPA shell-composition $& fix | CLOSED S100/S101 — codegen/index.ts:1214 + component-expander.ts:2169 + commands/generate.js:242 |
+| Native parser M1 ladder | CLOSED S103 — compiler/native-parser/ all 7 LexMode state-children active (M1.4). Next: M1.5 regex-token normalizer |
 | stdlib/http async migration | stdlib/http/index.scrml lines 65/264 (W-TRY-CATCH fires) |
 | null/absence migration | docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep |
 | Chunk content-addressing | codegen/fnv1a-hash.ts (FNV-1a primitive) + route-splitter.ts computeChunkHash/finalizeChunkHash |
@@ -178,7 +190,7 @@
 | Canonical JSON reachability | reachability-solver.ts:serializeReachabilityRecord (A-2.8) — stratified comparator + canonical diagnostic order |
 
 ## Tags
-#scrmlts #map #domain #concepts #pipeline #engine #reactive #s92 #v0.3.0 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #input-devices #auto-await #wave4-closed #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6
+#scrmlts #map #domain #concepts #pipeline #engine #reactive #s101 #v0.3.1 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-4 #m1-ladder-complete #raw-content #typography #payload-binding #named-timers #spec-51-0-b-1 #spec-4-17 #spec-26-6 #spec-48-6-4
 
 ## Links
 - [primary.map.md](./primary.map.md)

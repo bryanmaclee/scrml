@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
+# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
 
 ## Error Code System
 
@@ -17,7 +17,7 @@ class CGError {
 }
 ```
 
-Note: CGError.severity is `'error' | 'warning' | 'info'` (updated at S92 — prior note saying info was excluded is now stale). Auth-graph and reachability diagnostics carry the same three-way severity through their own `AuthGraphDiagnostic` and `RSError` types (see schema.map.md).
+Note: CGError.severity is `'error' | 'warning' | 'info'` (updated S92). Auth-graph and reachability diagnostics carry the same three-way severity through their own `AuthGraphDiagnostic` and `RSError` types (see schema.map.md).
 
 ## Runtime Error Classes  [compiler/src/runtime-template.js:1423+]
 
@@ -48,17 +48,20 @@ All extend `_ScrmlError extends Error`.
 | E-CHANNEL-* | 001, 007, 008 | Channel declaration/usage |
 | E-CHANNEL-OUTSIDE-PROGRAM | §38.1 | `<channel>` at file-top in file with `<program>` sibling |
 | E-CHANNEL-INSIDE-PAGE | §38.1 | `<channel>` inside `<page>` |
-| E-CLOSURE-001 | §40.9.1, §40.9.11 | Closure analysis fails to terminate — fixed-point non-termination; fired by outer-fixpoint.ts when iteration cap reached (A-2.7) |
+| E-CLOSURE-001 | §40.9.1, §40.9.11 | Fixed-point non-termination; fired by outer-fixpoint.ts when iteration cap reached (A-2.7) |
 | E-CLOSURE-002 | §40.9.5, §40.9.11 | App uses `<auth role=...>` variant-referencing gates with no app-scope role enum declared; fired by A-2.5 (Component 4) |
 | E-COMPONENT-* | 010–035 | Component expansion/definition |
 | E-CONTRACT-* | 001–004 | Pipeline contract violations |
 | E-CTRL-* | 001–005, 011 | Control flow errors |
-| E-CTX-* | 001–003 | Context violations |
+| E-CTX-* | 001–003 | Context violations; E-CTX-001 also fires on unclosed raw-content element (§4.17) |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | Debounced attr on derived cell |
 | E-DEBOUNCED-WITH-SERVER | §6.13 | Debounced attr on server-context cell |
 | E-DG-* | 001, 002 | Dependency graph (Stage 7) |
 | E-ENGINE-* | 001, 003, 004, 005, 010, 013 | Engine declaration/transition |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F | Direct write violating rule= contract |
+| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 S98 | Payload binding attrs on a unit variant state-child; compiler wiring pending Track 2 |
+| E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 S98 | Binding count != variant payload field count; compiler wiring pending Track 2 |
+| E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 S98 | Payload binding name shadows reserved state-child attribute {rule, effect, history, internal:rule}; compiler wiring pending Track 2 |
 | E-ERROR-* | 008 | Error handling surface |
 | E-IMPORT-* | 005, 006, 007 | Import violations |
 | E-INPUT-* | 001–005 | §36 input device errors |
@@ -86,6 +89,8 @@ All extend `_ScrmlError extends Error`.
 | E-TEST-* | 001–006 | Test block violations (§19.13) |
 | E-TILDE-* | 001, 002 | Tilde-decl must-use violations |
 | E-TIMEOUT-* | 001, 002 | Timeout configuration errors |
+| E-TIMER-NAME-DUPLICATE | §51.0.M.1 | Engine state-child declares two `<onTimeout>` with same `name=` value; fire-site: engine-statechild-parser.ts (A5-6 Feature 1, S79) |
+| E-TIMER-NAME-INVALID | §51.0.M.1 | `<onTimeout name=...>` value is not identifier-shaped; fire-site: engine-statechild-parser.ts (A5-6 Feature 1, S79) |
 | E-TYPE-* | 001, 004, 006, 020–081 | Type system errors (Stage 6 TS) |
 | E-USE-* | 001, 002, 005 | Usage analysis errors |
 | E-VALIDATOR-* | CIRCULAR-DEP, INLINE-DYNAMIC | Validator graph errors |
@@ -114,7 +119,7 @@ Fire-site: `compiler/src/auth-graph.ts` + `compiler/src/reachability/component-4
 | W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks across all roles |
 | W-CG-CHUNK-LARGE | warning | initial chunk payloadJs exceeds soft size budget (default 100,000 bytes; configurable via `--chunk-size-budget=N`) |
 | W-CG-CHUNK-NO-PREFETCH | info | multi-route app AND entry-point has NO internal `<a href>` links at all (Q-OPEN-6 case 1) |
-| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | multi-route app AND internal-shaped `<a href>` links exist but NONE resolved to RouteMap.pages (Q-OPEN-6 case 2) [NEW S92] |
+| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | multi-route app AND internal-shaped `<a href>` links exist but NONE resolved to RouteMap.pages (Q-OPEN-6 case 2) |
 | W-CG-CHUNK-MISSING-ROLE | warning | `<auth role="X">` references a role with no ChunkPlan in reachability record |
 
 W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive per Q-OPEN-6: `hasInternalLinks` (ctx field) discriminates case 1 (info) vs case 2 (warning). All five codes in SPEC §34 + §40.9.11 catalog.
@@ -128,7 +133,7 @@ W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive
 | W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks (A-4.7, route-splitter.ts) |
 | W-CG-CHUNK-LARGE | warning | initial chunk exceeds size budget (A-4.7; Q-OPEN-5 configurable threshold, route-splitter.ts) |
 | W-CG-CHUNK-NO-PREFETCH | info | multi-route app, no internal links at all (Q-OPEN-6 case 1, route-splitter.ts) |
-| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | internal-shaped links exist but none resolve to RouteMap.pages (Q-OPEN-6 case 2, route-splitter.ts) [NEW S92] |
+| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | internal-shaped links exist but none resolve to RouteMap.pages (Q-OPEN-6 case 2, route-splitter.ts) |
 | W-CG-CHUNK-MISSING-ROLE | warning | `<auth role=X>` role not in reachability record (A-4.7, route-splitter.ts) |
 | W-AUTH-LOGIN-MISSING | warning | auth gates present but no login page at loginRedirect path (A-3.5, auth-graph.ts) |
 | W-ENGINE-SELF-WRITE-DETECTED | info | Engine self-write detected; runtime NO-OP (two fire-sites: symbol-table.ts PASS 12.B + PASS 16) |
@@ -175,10 +180,11 @@ W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive
 | compiler/src/auth-graph.ts checkLoginMissing() | W-AUTH-LOGIN-MISSING |
 | compiler/src/reachability/component-4.ts | W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 |
 | compiler/src/reachability/outer-fixpoint.ts | E-CLOSURE-001 |
-| compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family + W-CG-CHUNK-PREFETCH-UNRESOLVED [Q-OPEN-6, NEW S92] |
+| compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family + W-CG-CHUNK-PREFETCH-UNRESOLVED |
+| compiler/src/engine-statechild-parser.ts | E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID (§51.0.M.1) |
 
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s92 #v0.3.0 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s101 #v0.3.1 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6 #payload-binding #named-timers #raw-content
 
 ## Links
 - [primary.map.md](./primary.map.md)
