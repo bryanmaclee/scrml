@@ -502,9 +502,18 @@ describe("§14 Integration — lintDiagnostics in compileScrml() result", () => 
     expect(Array.isArray(result.lintDiagnostics)).toBe(true);
   });
 
-  test("clean scrml produces empty lintDiagnostics", () => {
+  test("clean scrml produces no W-LINT-* ghost-pattern diagnostics", () => {
+    // The original assertion was `lintDiagnostics.toHaveLength(0)`. S108
+    // dogfood Bug 1 added W-TAILWIND-UNRECOGNIZED-CLASS (info lint) which
+    // fires on custom CSS classes like `greeting` (a known false-positive
+    // at the floor-fix level — adopters silence via the compiler-setting
+    // opt-out). The intent of this test is to assert "no GHOST-pattern
+    // lints fire on clean scrml"; we filter to the W-LINT-* prefix to
+    // preserve the original intent without overconstraining the broader
+    // lintDiagnostics surface.
     const result = compileSource('<markup name="hello">\n  <p class="greeting">Hello</p>\n</>');
-    expect(result.lintDiagnostics).toHaveLength(0);
+    const ghostLints = result.lintDiagnostics.filter(d => d.code?.startsWith("W-LINT-"));
+    expect(ghostLints).toHaveLength(0);
   });
 
   test("ghost pattern in source produces lintDiagnostics entry", () => {

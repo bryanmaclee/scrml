@@ -36,7 +36,7 @@ import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
-import { findUnsupportedTailwindShapes } from "./tailwind-classes.js";
+import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
@@ -451,6 +451,19 @@ export function compileScrml(options = {}) {
     debugPerf = false,
     log = console.log,
     selfHostModules = null,
+    /**
+     * S108 dogfood Bug 1 FLOOR fix — compiler-level lint suppression knobs.
+     * Mirrors the spec-only `lint.*` config family declared at SPEC §28.
+     * Recognized keys (values: "warn" / "off" — default per-knob below):
+     *   lintTailwindUnrecognizedClass — W-TAILWIND-UNRECOGNIZED-CLASS
+     *     (default "warn"; set "off" for adopters whose codebase relies on
+     *      custom CSS class names — the lint produces acknowledged
+     *      false positives there per SPEC §34 / §26.5).
+     * Unknown keys are silently ignored. Adopters can pass
+     * `{ compilerSettings: { lintTailwindUnrecognizedClass: "off" } }`
+     * from a project-level config loader.
+     */
+    compilerSettings = {},
   } = options;
 
   let { outputDir } = options;
@@ -608,10 +621,19 @@ export function compileScrml(options = {}) {
   // Non-fatal: diagnostics are returned in lintDiagnostics[], never in errors[].
   // The real compiler always runs regardless of lint findings.
   //
-  // Also runs the W-TAILWIND-001 detector (SPEC §26.3, SPEC-ISSUE-012) which
-  // surfaces class names in source whose shape suggests Tailwind variant or
-  // arbitrary-value syntax but does not match the registered utility set.
+  // Also runs:
+  //   - W-TAILWIND-001 detector (SPEC §26.3, SPEC-ISSUE-012) — class names
+  //     in source whose shape suggests Tailwind variant or arbitrary-value
+  //     syntax but does not match the registered utility set.
+  //   - W-TAILWIND-UNRECOGNIZED-CLASS detector (S108 dogfood Bug 1 FLOOR fix,
+  //     SPEC §26.5 / §34) — any class name in `class="..."` that does not
+  //     resolve via the registered utility set. Covers typos, unsupported
+  //     arbitrary values, and custom CSS classes (acknowledged false
+  //     positives at floor level). Suppressible per-project via
+  //     `compilerSettings.lintTailwindUnrecognizedClass = "off"`.
   // ---------------------------------------------------------------------------
+  const lintTailwindUnrecognizedClass =
+    compilerSettings.lintTailwindUnrecognizedClass ?? "warn";
   const allLintDiagnostics = [];
   for (const inputFile of inputFiles) {
     try {
@@ -626,6 +648,13 @@ export function compileScrml(options = {}) {
       for (const d of tailwindDiags) {
         allLintDiagnostics.push({ ...d, filePath });
         if (verbose) log(`  [LINT] ${filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+      if (lintTailwindUnrecognizedClass !== "off") {
+        const unrecognizedDiags = findUnrecognizedClasses(source);
+        for (const d of unrecognizedDiags) {
+          allLintDiagnostics.push({ ...d, filePath });
+          if (verbose) log(`  [LINT] ${filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+        }
       }
     } catch {
       // Lint errors must not block compilation — silently skip unreadable files here
