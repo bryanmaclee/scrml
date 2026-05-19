@@ -190,7 +190,7 @@
                 <a href="/about" class="hover:text-slate-100">About</a>
                 <a href="https://github.com/bryanmaclee/scrmlTS" class="hover:text-slate-100">GitHub</a>
             </nav>
-            <span class="version-pill">v0.3.0</span>
+            <span class="version-pill">${VERSION}</span>
         </div>
     </header>
 
@@ -234,7 +234,7 @@
             </p>
             <p class="text-xs text-slate-600">
                 MIT licensed &middot;
-                <span class="font-mono">v0.3.0</span>
+                <span class="font-mono">${VERSION}</span>
             </p>
         </div>
     </footer>

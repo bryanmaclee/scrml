@@ -955,6 +955,51 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
         lines.push(`    }`);
         lines.push(`  }`);
+      } else if (binding.kind == null && typeof expr === "string" && expr.trim() !== "") {
+        // Bug 5 Phase 1 (S107, 2026-05-19) — non-reactive non-server-fn
+        // default-kind interpolation gets a one-shot textContent write at
+        // DOMContentLoaded.
+        //
+        // Pre-S107: this branch was missing — `${VERSION}` / `${"literal"}`
+        // all fell through, leaving the placeholder span empty + the
+        // markup-as-value pillar L1 silently misfiring on its simplest shape.
+        //
+        // No `_scrml_effect` subscription (no reactive deps to track).
+        // Server-fn case already handled at the earlier
+        // `if (varRefs.length === 0 && exprUsesServerFn(...))` branch above.
+        //
+        // Kind-guard: this OUTER for-loop iterates ALL logicBindings — not
+        // just default reactive-text. Chain branches (kind: "if-chain-*"),
+        // errors-element, transitions, etc. each have their own dedicated
+        // emission path in this function. They MAY fall through to here when
+        // their own early-continue paths don't fire AND they don't have
+        // @-refs / server-fns. Restricting to `binding.kind == null` keeps
+        // the new wiring scoped to the default reactive-text shape (the only
+        // shape that has the {placeholderId, expr, exprNode, reactiveRefs}
+        // contract emitExprField expects).
+        //
+        // Phase 1 scope-out (deferred to Phase 2): tilde-keyword bodies +
+        // multi-bare-expr placeholder dedup. The `~` rewriter at
+        // emit-reactive-wiring.ts:372 hoists tilde vars to file-scope, but
+        // the binding's stored `expr` is still raw `~`; emitExprField has no
+        // tilde-context here, so emitting `el.textContent = ~;` would produce
+        // invalid JS (bitwise-NOT with no operand). Skip wiring when `~`
+        // appears as a standalone token. Phase 2 will thread tilde context
+        // properly. Multi-bare-expr bodies (e.g. `${ "a"; "b" }`) currently
+        // register multiple bindings for the same placeholderId — also a
+        // pre-existing structural issue inherited from the reactive path;
+        // Phase 2 dedup will close it. Until then, multi-emit-to-same-
+        // placeholder is wasteful but valid JS, so Phase 1 tolerates it.
+        const standaloneTildeRegex = /(^|[\s,(;{=])~(?=\s|$|[,;)}\]])/;
+        if (standaloneTildeRegex.test(expr)) continue;
+
+        const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames });
+        lines.push(`  {`);
+        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+        lines.push(`    if (el) {`);
+        lines.push(`      el.textContent = ${rewrittenExpr};`);
+        lines.push(`    }`);
+        lines.push(`  }`);
       }
     }
   }
