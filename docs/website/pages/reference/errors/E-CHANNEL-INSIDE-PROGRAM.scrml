@@ -1,0 +1,86 @@
+// scrml.dev /reference/errors/E-CHANNEL-INSIDE-PROGRAM — retired (v0.3)
+//
+// Retired 2026-05-12 (v0.3 Wave 1 direction reversal). The current
+// canonical code is E-CHANNEL-OUTSIDE-PROGRAM. This page exists as a
+// pointer for adopters who land here from older docs / search.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-500 font-mono">
+                E-CHANNEL-INSIDE-PROGRAM
+                <span class="text-base text-slate-500 font-sans">&mdash; retired</span>
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Retired in v0.3 Wave 1. The
+                <code class="font-mono text-base">&lt;channel&gt;</code>
+                placement direction was reversed; the canonical
+                error code is now
+                <a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM"
+                   class="font-mono text-rose-700 hover:text-rose-900 underline">
+                    E-CHANNEL-OUTSIDE-PROGRAM
+                </a>.
+            </p>
+        </header>
+
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-5 py-4 text-slate-700 my-6">
+            <p class="font-semibold text-slate-900 mb-2">
+                What changed (2026-05-12, v0.3 Wave 1)
+            </p>
+            <p class="leading-relaxed">
+                Pre-v0.3: channels lived at file top level, sibling
+                of
+                <code class="font-mono text-sm">&lt;program&gt;</code>.
+                A channel nested inside
+                <code class="font-mono text-sm">&lt;program&gt;</code>
+                fired E-CHANNEL-INSIDE-PROGRAM.
+            </p>
+            <p class="leading-relaxed mt-2">
+                v0.3 onward (per S87 Insight 30): channels are
+                application-scoped, so the canonical placement is
+                INSIDE
+                <code class="font-mono text-sm">&lt;program&gt;</code>
+                (sibling of
+                <code class="font-mono text-sm">&lt;page&gt;</code>).
+                A channel at file top level when
+                <code class="font-mono text-sm">&lt;program&gt;</code>
+                is present is the new violation &mdash;
+                E-CHANNEL-OUTSIDE-PROGRAM. Pure channel-only module
+                files (no
+                <code class="font-mono text-sm">&lt;program&gt;</code>)
+                may still declare a
+                <code class="font-mono text-sm">&lt;channel&gt;</code>
+                at file top.
+            </p>
+        </div>
+
+        <p class="text-slate-700 leading-relaxed">
+            If you're hitting this code in a current compiler, you're
+            either on a stale release or your source predates v0.3.
+            Run
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml migrate</code>
+            on the source &mdash; the migration tooling rewrites the
+            placement automatically.
+        </p>
+
+        <p class="mt-10 text-sm">
+            <a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM"
+               class="text-rose-700 hover:text-rose-900 underline">
+                &rarr; Current code: E-CHANNEL-OUTSIDE-PROGRAM
+            </a>
+        </p>
+
+        <p class="mt-2 text-sm">
+            <a href="/reference" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Reference
+            </a>
+        </p>
+
+    </article>
+
+</>

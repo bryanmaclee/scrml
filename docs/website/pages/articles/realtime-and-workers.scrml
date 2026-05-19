@@ -1,0 +1,361 @@
+// scrml.dev /articles/realtime-and-workers
+//
+// Long-form narrative on scrml's <channel> + nested-<program> primitives.
+// Drafted 2026-05-19 in side-session; flagged for the same spec-fidelity
+// audit as the keyword reference pages.
+//
+// SPEC anchors verified before drafting:
+//   §38 — WebSocket Channels (file-level, V5-strict, no @shared modifier
+//         since D3 rewrite — SPEC.md line 16165+).
+//   §43 — Nested <program> as Universal Execution Context Boundary
+//         (4 context types: web worker / foreign sidecar / WASM / server
+//         endpoint; SPEC.md line 19056+).
+//   §46 — Worker Lifecycle: parent-side observation (SPEC.md line 19317+).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Articles &rsaquo; The how-it-works
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Realtime &amp; workers
+            </h1>
+        </header>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            <em>authored by claude, rubber stamped by Bryan MacLee</em>
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            <strong>TL;DR: the realtime/queue/worker plumbing that every mainstream stack treats as a vendor decision (socket.io vs. Pusher vs. Liveblocks; BullMQ vs. Inngest vs. Trigger.dev; web worker boilerplate vs. Comlink) is one language primitive in scrml. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> for shared reactive state. Nested <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> for separate execution contexts (web worker, sidecar process, WASM module, server endpoint). Both compile to plain runtime calls; neither pulls in a library.</strong>
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Pick any production-ready stack and trace the path from "I want multiple users to see the same value update in real time" to "I have a working feature." The shape is consistent: choose a vendor, learn its SDK, wire its client into your reactive system, write the server-side handler in its DSL, decide on the consistency model, learn its reconnection semantics, debug the case where the WebSocket and your local state disagree.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Same shape for workers: choose a worker library or roll Web Worker boilerplate, define the message protocol, serialize/deserialize at the boundary, decide where the worker source lives, set up the build pipeline that bundles the worker code separately, debug the case where the worker crashed and your main thread doesn't know.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The bet underneath scrml's design here is that realtime state and worker execution contexts are <em>not vendor problems</em> &mdash; they are <em>placement problems</em>, and the compiler is already doing placement. Adding two more placement targets (a synced channel; a nested execution context) costs an order of magnitude less complexity than picking the right vendor.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Part 1 — Realtime
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Part 1: realtime state via
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            A
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            block (SPEC §38) declares state that's synchronized in real time across connected clients. It sits at file level &mdash; a sibling of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
+            not a child &mdash; and its body uses the same V5-strict declarations the rest of the language uses.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;channel name="cursors"&gt;
+  &lt;positions&gt; = []      // synced across all connected clients
+&lt;/&gt;
+
+&lt;program&gt;
+
+  function moveCursor(x, y) &#123;
+    @positions = [...@positions.filter(p =&gt; p.uid != @user.id), &#123; uid: @user.id, x, y &#125;]
+  &#125;
+
+  &lt;svg onmousemove=moveCursor(event.clientX, event.clientY)&gt;
+    ${ @positions.forEach(p =&gt; lift &lt;circle cx=${p.x} cy=${p.y} r="5"/&gt;) }
+  &lt;/svg&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Three things to notice. First, there is no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code>
+            modifier on
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@positions</code>
+            &mdash; the cell is synced because it's <em>structurally inside</em> the channel block. Placement IS the contract. The pre-v0.next syntax that required
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code>
+            was retired at the D3 rewrite for exactly this reason: the modifier was redundant signal.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Second, the read site and write site for
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@positions</code>
+            look exactly like the read/write site for any other reactive cell. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ @positions.forEach(&hellip;) }</code>
+            re-renders automatically when the channel pushes an update. There is no subscribe / unsubscribe lifecycle; no callback registry; no manual diff. The reactive system that handles a local
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;count&gt;</code>
+            handles this too &mdash; the only difference is where the change is sourced.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Third, there is no vendor in this picture. The compiler emits the WebSocket server endpoint, the client connection, the message protocol, the reconnection logic. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml dev</code>
+            server hosts it. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml build</code>
+            output deploys it. There is no library to import, no API key to pass, no per-message billing tier. (There are honest trade-offs at scale &mdash; a Bun server isn't a 100k-concurrent-connections vendor service &mdash; but for the "I want users in the same document to see each other's edits" case the primitive is sufficient.)
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            What the compiler tracks
+        </h3>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <strong>Per-channel reactive dep graph.</strong> Same dep-tracking pass as local state &mdash; reads register, writes propagate &mdash; extended over the WebSocket boundary.
+            </li>
+            <li>
+                <strong>Reconnect semantics.</strong> A
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program channel-reconnect=&gt;</code>
+                attribute sets the project-level default (S81 amendment). Per-channel override at the channel block.
+            </li>
+            <li>
+                <strong>Server-authoritative writes.</strong> A channel cell that the server treats as authoritative rejects client-side writes the same way the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">server</code>
+                modifier does on a regular state cell. (See the
+                <a href="/articles/mutability-contracts" class="text-blue-700 hover:text-blue-900 underline">mutability contracts article</a>
+                for the five-layer authority model this fits into.)
+            </li>
+            <li>
+                <strong>Lifecycle handlers.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onserver:&hellip;</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclient:&hellip;</code>
+                hooks for join / disconnect / per-message logic when the default sync doesn't fit.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Part 2 — Workers
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Part 2: workers as nested
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            scrml's worker primitive is structural: <em>a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            nested inside another
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            is an independent execution context.</em> The attribute combination on the nested program decides what kind of execution context (SPEC §43.2):
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+                only &mdash; Web Worker. Compiles to
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">new Worker()</code>
+                with postMessage transport.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+                +
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lang=</code>
+                (non-WASM) &mdash; Foreign Sidecar. Subprocess; HTTP or socket transport.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+                +
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lang=</code>
+                +
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">mode="wasm"</code>
+                &mdash; WASM Module.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">WebAssembly.instantiate()</code>
+                under the hood.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+                +
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">route=</code>
+                &mdash; Server Endpoint.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Bun.serve()</code>
+                route handler.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            One structural primitive; four runtime targets. The developer doesn't choose between four worker libraries; they pick the attribute that matches the placement they want.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;
+
+  &lt;program name="compute"&gt;
+    ${ export function fibonacci(n: number) -&gt; number &#123;
+      if (n &lt; 2) return n
+      return fibonacci(n - 1) + fibonacci(n - 2)
+    &#125; }
+  &lt;/&gt;
+
+  &lt;result&gt; = 0
+
+  function go() &#123;
+    const r = a&#119;ait &lt;#compute&gt;.fibonacci(35)
+    @result = r
+  &#125;
+
+  &lt;button onclick=go()&gt;Compute&lt;/button&gt;
+  &lt;p&gt;${@result}&lt;/p&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;#compute&gt;.fibonacci(35)</code>
+            call site looks like a regular function call. The compiler knows
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compute</code>
+            is a nested program, knows
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fibonacci</code>
+            is exported from it, generates the postMessage marshaling, returns a Promise. The unawaited form is a compile error (E-PROG-004) because losing async results is a known footgun.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Shared-nothing scope isolation
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Nested programs are fully isolated. No bindings, types,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">use</code>,
+            or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">import</code>
+            declarations cross the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            boundary. A reference to a parent-scope name from inside a nested
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            is a compile error (E-PROG-003).
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Types needed in both parent and child are extracted to a shared module and imported independently from each side. The boundary is real, not a convention &mdash; the compiler refuses to elide it.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Supervision is an attribute
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Workers fail. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">restart=</code>
+            attribute on the nested
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            sets the supervision strategy (
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"always"</code>
+            /
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"never"</code>
+            /
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"on-error"</code>).
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max-restarts=N</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">within=S</code>
+            cap restart frequency. Lifecycle events surface in the parent program via the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">when</code>
+            grammar (§46):
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program name="ingest" restart="always" max-restarts="5" within="60"&gt;
+  ${ // long-running ingest loop ... }
+&lt;/&gt;
+
+when message from &lt;#ingest&gt; (data) &#123; @lastBatch = data &#125;
+when error   from &lt;#ingest&gt; (e)    &#123; @status = .Crashed &#125;
+when terminate from &lt;#ingest&gt;       &#123; @status = .Terminated &#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            That's the supervision tree. No library; no separate config file; the supervision strategy lives next to the worker declaration. A reader scanning the parent program can see exactly what happens when the ingest worker crashes.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // What this composes
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Why the two primitives compose
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The reason these live in the same article: many production patterns use both at once. A document-collaboration feature uses
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            to share cursor positions and a nested
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program name="diff"&gt;</code>
+            web worker to compute operational transforms off the main thread. A real-time dashboard uses
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            for live event push and a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program name="aggregate" route=&gt;</code>
+            server endpoint for batched rollups.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Both primitives compile down to plain runtime calls; both stay in the same file (or a small set of files) the developer is already reading; both surface their failure modes as compile errors or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">when error</code>
+            handlers, not as runtime exceptions that surface in vendor dashboards.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // What you give up
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What you give up
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The honest list:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <strong>Massive-scale managed realtime.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+                runs on the Bun server scrml deploys; it isn't a 100k-concurrent-connections vendor service with edge POPs. If you're building Figma-scale collaboration, you're going to want a real CDN-backed realtime tier underneath. The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+                surface gets you to product-market fit; scaling past it is a separate question.
+            </li>
+            <li>
+                <strong>Vendor-specific features.</strong>
+                Pusher-style presence channels, Ably-style message history,
+                Liveblocks-style awareness API &mdash; none of these are
+                built-in. The primitive is "shared reactive state";
+                features above that layer are app code.
+            </li>
+            <li>
+                <strong>Mature worker-pool tooling.</strong>
+                BullMQ has years of operator experience with delayed jobs, retries, priority queues, observability dashboards. Nested
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+                gives you the supervision tree; the rest is application code on top of it.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            All three trade-offs are intentional. The bet is that "most apps don't need vendor-grade realtime / vendor-grade queues" and "the apps that DO grow into them will already have the structural primitive in place to integrate with."
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Closing
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            The shape of the bet, again
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Realtime and workers in mainstream stacks are vendor-shaped because <em>the language doesn't have a concept of placement</em>. The runtime is a single thread, in a single process, on a single side of the network. Anything else is a library that pretends to extend the runtime.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            scrml's compiler is already doing placement for the server/client split &mdash; deciding what runs where based on the call site. Extending that to a synced channel and a nested execution context isn't a different mechanism; it's the same mechanism with two more placement targets. The language primitives are smaller than the vendor surfaces they replace, and they compose with each other and with the rest of the type system. That's the whole bet.
+        </p>
+
+    </article>
+
+</>

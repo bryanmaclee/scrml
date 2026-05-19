@@ -1,0 +1,377 @@
+// scrml.dev /reference/keywords/derived — full reference page
+//
+// derived marks a binding as a pure function of reactive deps.
+// Recomputes on dep change; write-forbidden (fires E-DERIVED-WRITE
+// on reassignment, E-DERIVED-VALUE-MUTATE on in-place mutation);
+// validator-forbidden (fires E-DERIVED-WITH-VALIDATORS).
+// SPEC anchors: §6.6.1 (sole const-form decl), §6.6.3 (static dep
+// extraction + lazy pull), §6.6.8 (E-DERIVED-WRITE), §6.6.17
+// (markup-typed derived), §6.6.18 (derived value-mutate forbidden),
+// §51.0.J (derived engines), §55.14 (req-on-derived).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Keywords
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                derived
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Read-only reactive binding. The RHS is an expression
+                that recomputes whenever any dependency changes; the
+                bound name is never directly written.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§6"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;6.6 (state shapes)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Summary
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            A derived cell is the third state shape (per SPEC &sect;6.6):
+            its value is a pure function of other reactive bindings.
+            The compiler tracks the dependencies automatically; on
+            any dep change, the cell re-evaluates and downstream
+            consumers re-render.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Two non-negotiable rules:
+        </p>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <strong>Derived cells are write-forbidden.</strong>
+                Assigning into a derived cell fires
+                <a href="/reference/errors/E-DERIVED-WRITE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-WRITE
+                </a>
+                (&sect;6.6.8) at compile time. In-place mutation
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@derivedArr.push(x)</code>)
+                fires the sibling error
+                <a href="/reference/errors/E-DERIVED-VALUE-MUTATE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-VALUE-MUTATE
+                </a>
+                (&sect;6.6.18). Mutate the upstream cell instead.
+            </li>
+            <li>
+                <strong>Validators are forbidden on derived cells.</strong>
+                Predicates apply to <em>inputs</em>; derived outputs
+                don't have an independent validity surface. Adding
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                to a derived cell fires
+                <a href="/reference/errors/E-DERIVED-WITH-VALIDATORS"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-WITH-VALIDATORS
+                </a>.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;name&gt; = expr</code>
+            form is the SOLE declaration syntax for derived
+            reactive values (&sect;6.6.1). The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@derived</code>
+            keyword form is explicitly NOT recognised &mdash;
+            attempting it fires
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-REACTIVE-001</code>
+            with a hint suggesting
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;name&gt; = expr</code>.
+            (The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">derived=expr</code>
+            <em>attribute</em> on
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+            is a separate construct &mdash; see the engine form
+            below.)
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>// Numeric derived
+const &lt;doubled&gt; = @count * 2
+
+// Markup-typed derived (§6.6.17)
+const &lt;badge&gt;   = &lt;span class="badge"&gt;${@user.name}&lt;/span&gt;
+
+// String derived
+const &lt;greeting&gt; = "Hello, " + @user.name</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            Derived engines (Tier 2 form):
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase derived=computePhase(@a, @b)&gt;
+  &lt;Idle/&gt;
+  &lt;Loading/&gt;
+  &lt;Ready/&gt;
+&lt;/engine&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Derived engines never carry
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            (fires
+            <a href="/reference/errors/E-DERIVED-ENGINE-NO-INITIAL"
+               class="text-rose-700 hover:text-rose-900 underline">
+                E-DERIVED-ENGINE-NO-INITIAL
+            </a>)
+            and never accept writes &mdash; the variant is the
+            <em>output</em> of the derived expression.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Live search. A search input drives a derived
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@filtered</code>
+            cell; the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${@filtered}</code>
+            list re-renders automatically on every keystroke. No
+            manual subscribe, no useEffect, no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">computed()</code>
+            wrapper.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;contacts&gt; = [
+    &#123; name: "Alice",   email: "alice@example.com"   &#125;,
+    &#123; name: "Bob",     email: "bob@example.com"     &#125;,
+    &#123; name: "Charlie", email: "charlie@example.com" &#125;,
+  ]
+  &lt;query&gt; = ""
+
+  const &lt;filtered&gt; = @contacts.filter(c =&gt; c.name.toLowerCase().includes(@query.toLowerCase()))
+
+  &lt;input bind:value=@query placeholder="Search by name"&gt;
+
+  &lt;ul&gt;
+    ${ @filtered.forEach(c =&gt; lift &lt;li&gt;${c.name} &mdash; ${c.email}&lt;/li&gt;) }
+  &lt;/ul&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Notice: the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@filtered</code>
+            cell never gets a write site. It's computed from
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@contacts</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@query</code>;
+            both are tracked automatically. If you tried
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@filtered = [...]</code>
+            anywhere, the compiler would reject it at compile time
+            (E-DERIVED-WRITE).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Lazy evaluation by default.</strong>
+                The derived expression evaluates on first read. If
+                nothing reads it, it doesn't run.
+            </li>
+            <li>
+                <strong>Dep tracking is static, not runtime.</strong>
+                Every
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x</code>
+                read appearing inside the derived RHS becomes a
+                compile-time dependency &mdash; regardless of conditional
+                reachability. Both branches of an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">if</code>
+                contribute their reads to the dep set. Runtime
+                auto-tracking (SolidJS-style branch-conditional
+                subscription) is explicitly rejected by &sect;6.6.3 for
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;name&gt; = expr</code>
+                cells outside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+                meta blocks.
+            </li>
+            <li>
+                <strong>Result caching.</strong>
+                The computed value is cached. Consumers re-read the
+                cached value without re-running the expression
+                until a dep changes.
+            </li>
+            <li>
+                <strong>Markup-typed derived cells are first-class.</strong>
+                A derived expression whose RHS produces markup
+                (per &sect;6.6.17) is a markup-typed value &mdash;
+                interpolatable, slot-fillable, return-valuable. The
+                same way a string-typed derived cell is a string.
+            </li>
+            <li>
+                <strong>Reactivity attributes are forbidden.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">debounced=</code>
+                /
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">throttled=</code>
+                on a derived cell is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DEBOUNCED-WITH-DERIVED</code>.
+                Wrap the upstream input instead.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Don't mutate the value, even if the type is mutable
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@derivedArr.push(x)</code>
+            on a const-derived array is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-VALUE-MUTATE</code>.
+            Even if the mutation would technically work
+            (JS arrays are mutable), the next dep-fire will
+            recompute the value and clobber the push. Mutate the
+            upstream cell:
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@items = [...@items, x]</code>.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Self-reference is a cycle
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A derived cell that reads itself in its own RHS is a
+            structural cycle. The compiler detects this at the
+            dep-graph pass and rejects.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Don't put side effects in the RHS
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            Derived RHS expressions should be pure functions of
+            their deps. Writing to other cells inside the RHS, doing
+            IO, calling
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetch()</code>
+            &mdash; all of these break the "this value IS this
+            function of these inputs" contract. Side effects belong
+            in event handlers or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            elements, not derived RHS.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/errors/E-DERIVED-WRITE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-WRITE
+                </a>
+                &mdash; fires on direct reassignment of a derived cell
+                (&sect;6.6.8).
+            </li>
+            <li>
+                <a href="/reference/errors/E-DERIVED-VALUE-MUTATE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-VALUE-MUTATE
+                </a>
+                &mdash; fires on in-place mutation
+                (<code class="font-mono text-sm">@derived.push(&hellip;)</code>;
+                &sect;6.6.18).
+            </li>
+            <li>
+                <a href="/reference/errors/E-DERIVED-WITH-VALIDATORS"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-WITH-VALIDATORS
+                </a>
+                &mdash; fires when validator predicates are placed
+                on a derived cell.
+            </li>
+            <li>
+                <a href="/reference/errors/E-DERIVED-ENGINE-NO-INITIAL"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-ENGINE-NO-INITIAL
+                </a>
+                &mdash; derived engines forbid
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>.
+            </li>
+            <li>
+                <a href="/reference/elements/engine"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a>
+                &mdash; derived engines are an engine form.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Spec
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text: <strong>SPEC &sect;6.6</strong>
+            (Shape 3 &mdash; derived) +
+            <strong>&sect;6.6.17</strong>
+            (markup-typed derived) +
+            <strong>&sect;6.6.18</strong>
+            (derived value-mutate forbidden) +
+            <strong>&sect;51</strong>
+            (derived engines). Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

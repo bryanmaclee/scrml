@@ -1,0 +1,351 @@
+// scrml.dev /getting-started — install + first programs walkthrough
+//
+// Day-1 content. Mirrors README's Getting Started section but
+// expanded for the docs-site audience: bigger examples with annotation,
+// next-step pointers per major surface.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; Getting started
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Get started with scrml
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Install the compiler, write your first
+                <code class="font-mono text-base">.scrml</code> file,
+                run the dev server, ship a build.
+            </p>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Prerequisites
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Prerequisites
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml's reference compiler runs on
+            <a href="https://bun.sh" class="text-blue-700 hover:text-blue-900 underline">Bun</a>.
+            Bun is the only required runtime &mdash; no Node, no separate
+            package manager, no bundler.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>curl -fsSL https://bun.sh/install | bash</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Verify the install:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>bun --version</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Install scrml
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Install scrml
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Until the npm package lands, install from source:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>git clone https://github.com/bryanmaclee/scrmlTS
+cd scrmlTS
+bun install</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Link the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml</code>
+            CLI onto your
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">PATH</code>:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>bun link</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Confirm it works:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml --version</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Hello, scrml
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Hello, scrml
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Create a file
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">hello.scrml</code>:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;div class="flex flex-col items-center justify-center min-h-screen gap-4"&gt;
+    &lt;h1 class="text-4xl font-bold"&gt;Hello, scrml&lt;/h1&gt;
+    &lt;p class="text-lg text-gray-600"&gt;No framework. Just output.&lt;/p&gt;
+  &lt;/div&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Compile:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml compile hello.scrml -o dist/</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            That produces
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">dist/hello.html</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">dist/hello.css</code>,
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">dist/hello.client.js</code>.
+            Open the HTML in a browser. There is no framework runtime
+            on the page &mdash; the compiler emits only the JS that
+            your specific program needs.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Reactivity in 30 seconds
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Reactivity in 30 seconds
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Add state and event handlers. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; = init</code>
+            shape declares a reactive cell;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x</code>
+            reads it,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x = expr</code>
+            writes it. Any DOM read of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x</code>
+            re-renders automatically on write.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;count&gt; = 0
+  &lt;step&gt;  = 1
+
+  function increment() &#123; @count = @count + @step &#125;
+  function decrement() &#123; @count = @count - @step &#125;
+  function clearCount() &#123; reset(@count) &#125;
+
+  &lt;div class="flex flex-col items-center gap-6 p-8 min-h-screen"&gt;
+    &lt;h1 class="text-3xl font-bold"&gt;Counter&lt;/h1&gt;
+    &lt;p class="text-6xl font-bold text-blue-600"&gt;${@count}&lt;/p&gt;
+
+    &lt;div class="flex gap-2"&gt;
+      &lt;button class="px-5 py-2 bg-red-500 text-white rounded" onclick=decrement()&gt;&minus;&lt;/button&gt;
+      &lt;button class="px-5 py-2 bg-gray-200 rounded" onclick=clearCount()&gt;Reset&lt;/button&gt;
+      &lt;button class="px-5 py-2 bg-green-500 text-white rounded" onclick=increment()&gt;+&lt;/button&gt;
+    &lt;/div&gt;
+
+    &lt;label class="flex items-center gap-2 text-sm"&gt;
+      Step:
+      &lt;input type="number" class="w-16 p-1 border rounded" bind:value=@step min="1" max="100"&gt;
+    &lt;/label&gt;
+  &lt;/div&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Five things to notice:
+        </p>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <strong>No store wrapper.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;count&gt; = 0</code>
+                is reactive on declaration. No
+                <code class="font-mono text-sm">useState</code>,
+                no
+                <code class="font-mono text-sm">writable()</code>,
+                no
+                <code class="font-mono text-sm">ref()</code>.
+            </li>
+            <li>
+                <strong>No JSX.</strong>
+                The markup IS the language. Curly braces inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+                evaluate; everywhere else they're text.
+            </li>
+            <li>
+                <strong>Standard event names.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=decrement()</code>
+                &mdash; no
+                <code class="font-mono text-sm">@click</code>,
+                <code class="font-mono text-sm">(click)</code>,
+                or
+                <code class="font-mono text-sm">onClick</code>.
+            </li>
+            <li>
+                <strong>Two-way binding without a directive.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value=@step</code>
+                wires the input's value both ways.
+            </li>
+            <li>
+                <strong>Tailwind out of the box.</strong>
+                Utility classes work with no setup &mdash; the
+                compiler scans your markup and emits only the CSS you
+                use.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Dev server
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Dev server with hot reload
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml dev</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Boots a local server on
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">localhost:3000</code>,
+            watches every
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>
+            file in the directory, and triggers a recompile + browser
+            reload on every save. Compile errors print to the terminal
+            with a line/column pointer.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Custom port and output dir:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml dev . --port 3100 -o dist/</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Build for production
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Build for production
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml build</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Produces optimised HTML, CSS, and JavaScript under
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">dist/</code>,
+            content-addressed so cache invalidation is automatic. The
+            v0.3 release ships per-route per-role chunk splitting
+            &mdash; an unauthenticated visitor downloads only the
+            unauthenticated bundle; an
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">admin</code>
+            visitor downloads only the admin bundle.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Where to go next
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Where to go next
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a>
+                &mdash; state machines as a first-class element. The
+                Tier 2 form of "UI as a fully-handled state machine."
+            </li>
+            <li>
+                <a href="/reference/contexts/sql"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    ?&#123; &hellip; &#125;
+                </a>
+                &mdash; SQL as syntax. No ORM. The server boundary
+                disappears.
+            </li>
+            <li>
+                <a href="/reference/elements/errors"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors of=&hellip;/&gt;
+                </a>
+                &mdash; the auto-synthesised validity surface.
+                Validation lives on the type, not on a separate Zod-
+                style schema.
+            </li>
+            <li>
+                <a href="/reference"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Reference
+                </a>
+                &mdash; every element, keyword, context, and error code.
+            </li>
+            <li>
+                <a href="/articles"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Articles
+                </a>
+                &mdash; long-form essays on the design decisions.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Standing notes
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Standing notes
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <strong>No null, no undefined.</strong>
+                scrml has no
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null</code>
+                literal and no
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">undefined</code>
+                concept. Use
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+                to express absence and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+                &middot;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">0</code>
+                &middot;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">[]</code>
+                for empty values.
+            </li>
+            <li>
+                <strong>Cells declare with
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; = init</code>
+                at top level.</strong>
+                Inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+                logic context, the assignment-form
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x = init</code>
+                also declares.
+            </li>
+            <li>
+                <strong>One file format.</strong>
+                Markup, logic, styles, server functions, SQL, all in
+                the same
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>
+                file. The compiler decides what runs where.
+            </li>
+        </ul>
+
+    </article>
+
+</>

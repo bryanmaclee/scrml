@@ -232,7 +232,7 @@
                 (<code class="font-mono text-sm">""</code> fails req).
             </li>
             <li>
-                <a href="/reference/contexts/meta-^{}" class="text-blue-700 hover:text-blue-900 underline">registerMessages</a>
+                <a href="/reference/contexts/meta" class="text-blue-700 hover:text-blue-900 underline">registerMessages</a>
                 via <code class="font-mono text-sm">scrml:data</code> — project-level message catalog
                 for the 4-level resolution chain.
             </li>

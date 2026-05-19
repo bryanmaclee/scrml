@@ -1,0 +1,145 @@
+// scrml.dev /reference/errors/E-DERIVED-ENGINE-NO-INITIAL
+//
+// Drafted 2026-05-19. SPEC anchor verified:
+//   §51.0.J line 22539 — `initial=` on a derived engine REJECTED;
+//                        initial value computed from derived=expr.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-DERIVED-ENGINE-NO-INITIAL
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                A derived engine declares an
+                <code class="font-mono text-base">initial=</code>
+                attribute. Derived engines compute their initial
+                state from the
+                <code class="font-mono text-base">derived=expr</code>
+                source; an explicit initial is redundant and rejected.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;51.0.J
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per &sect;51.0.J, a derived engine
+            (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine for=Type derived=expr&gt;</code>)
+            takes its state from an upstream reactive expression.
+            The initial value is whatever
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">derived=expr</code>
+            evaluates to at engine-init time. Specifying an
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            on top of that is incoherent &mdash; it would imply the
+            engine is BOTH driven by the derived expression AND
+            seeded by an authored initial. The compiler rejects.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Ready &#125;
+
+&lt;ready&gt; = false
+&lt;loading&gt; = false
+
+&lt;engine for=Phase derived=computePhase(@ready, @loading) initial=.Idle&gt;
+//                                                       ^^^^^^^^^^^^
+//                                                       E-DERIVED-ENGINE-NO-INITIAL
+  &lt;Idle/&gt;
+  &lt;Loading/&gt;
+  &lt;Ready/&gt;
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Drop the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>
+            attribute. The derived expression provides the initial
+            value automatically:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase derived=computePhase(@ready, @loading)&gt;
+  &lt;Idle/&gt;
+  &lt;Loading/&gt;
+  &lt;Ready/&gt;
+&lt;/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            If the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">derived=expr</code>
+            evaluates to scrml-absence
+            (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>)
+            when the upstream sources are in their initial state,
+            you'll get
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-ENGINE-INITIAL-ABSENT</code>
+            instead &mdash; that's the signal to fix the upstream
+            expression to always produce a defined variant.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a>
+                &mdash; the engine element reference; derived form is
+                one of two flavours.
+            </li>
+            <li>
+                <a href="/reference/keywords/derived"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    derived
+                </a>
+                &mdash; the wider semantics of derived bindings.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC &sect;51.0.J</strong>
+            (derived engines, the rules table that rejects
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">initial=</code>).
+            Companion errors:
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-ENGINE-NO-RULES</code>
+            (no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            on state-children) and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-ENGINE-NO-WRITE</code>
+            (no direct writes to the engine variable).
+        </p>
+
+    </article>
+
+</>

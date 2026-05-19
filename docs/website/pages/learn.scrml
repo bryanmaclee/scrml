@@ -1,0 +1,70 @@
+// scrml.dev /learn — Day-30 placeholder stub
+//
+// Top-bar nav target. The /learn index will eventually enumerate
+// the tutorial track (5 narrative tutorials per the architecture
+// DD §6 day-30 plan). For now this is a holding page.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; Learn
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Learn
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Narrative tutorials &mdash; long-form, end-to-end, one
+                language concept per tutorial.
+            </p>
+        </header>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-slate-800">
+            <p class="font-semibold text-slate-900 mb-2">
+                Tutorial track queued for the Day-30 build-out.
+            </p>
+            <p class="leading-relaxed">
+                Five narrative tutorials are planned (server-boundary,
+                validators, engines-end-to-end, channels-realtime,
+                schema-and-migrations). Until then the reference and the
+                long-form articles cover the same surface area in shorter
+                form.
+            </p>
+        </div>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Tutorial outlines (drafted, not yet written)
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <a href="/learn/server-boundary"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Server boundary
+                </a>
+                &mdash; how
+                <code class="font-mono text-sm">?&#123; &hellip; &#125;</code>
+                erases the request/response shape from your code.
+            </li>
+            <li>
+                <a href="/learn/validators"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Validators
+                </a>
+                &mdash; the universal-core predicate vocabulary +
+                <code class="font-mono text-sm">&lt;errors of=&hellip;/&gt;</code>
+                surface.
+            </li>
+        </ul>
+
+        <p class="mt-10 text-sm">
+            <a href="/" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Home
+            </a>
+        </p>
+
+    </article>
+
+</>

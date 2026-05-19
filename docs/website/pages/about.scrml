@@ -1,0 +1,68 @@
+// scrml.dev /about — Day-30 placeholder stub
+//
+// Top-bar nav target. The /about index will be the language's
+// public "what is scrml, who built it, why does it exist" page.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; About
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                About scrml
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                What scrml is, what it is not, who is building it, and
+                why the project exists.
+            </p>
+        </header>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-slate-800">
+            <p class="font-semibold text-slate-900 mb-2">
+                Full page queued for the Day-30 build-out.
+            </p>
+            <p class="leading-relaxed">
+                For now: scrml is an in-development full-stack language
+                for the browser. The compiler is implemented in
+                TypeScript today and will be self-hosted in scrml after
+                v1.0. MIT-licensed; source at
+                <a href="https://github.com/bryanmaclee/scrmlTS"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    github.com/bryanmaclee/scrmlTS
+                </a>.
+            </p>
+        </div>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            About-section pages
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <a href="/about/philosophy"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Philosophy
+                </a>
+                &mdash; the design rules the project operates under.
+            </li>
+            <li>
+                <a href="/about/changelog"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Changelog
+                </a>
+                &mdash; what has shipped per session, from v0.1 onward.
+            </li>
+        </ul>
+
+        <p class="mt-10 text-sm">
+            <a href="/" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Home
+            </a>
+        </p>
+
+    </article>
+
+</>

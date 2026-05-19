@@ -1,0 +1,334 @@
+// scrml.dev /learn/server-boundary — tutorial
+//
+// Hands-on walkthrough of scrml's server-boundary disappearance via
+// the ?{} SQL context + auto placement. Builds a tiny full-stack
+// contact-book in 4 steps. Mirrors examples/03-contact-book.scrml.
+//
+// Drafted 2026-05-19. Verified against SPEC:
+//   §39   — <schema> declarations
+//   §39.9 — <schema> + <db> + ?{} interaction
+//   §8    — ?{} SQL context grammar
+//   §12   — route inference (where server functions land)
+//   §44   — multi-database adaptation
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; Learn &rsaquo; Server boundary
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                The server boundary disappears
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Tutorial &mdash; in 4 steps, build a contact book
+                with persistent storage, no HTTP layer to wire, no
+                ORM to configure, no separate schema file to keep in
+                sync.
+            </p>
+        </header>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            What you'll have at the end: a single
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">contacts.scrml</code>
+            file that compiles to a working full-stack app. Server
+            handlers, client handlers, SQL schema, validation, all
+            in one file. The compiler decides what runs where.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Pre-req: you've finished
+            <a href="/getting-started" class="text-blue-700 hover:text-blue-900 underline">Getting started</a>
+            and have
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml dev</code>
+            running.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 1
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 1: declare the schema
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per SPEC &sect;39, the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+            block declares your database structure. It sits next to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            in your file, NOT inside it.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;schema&gt;
+  contacts &#123;
+    id:    integer primary key
+    name:  text n&#111;t null
+    email: text n&#111;t null
+    phone: text
+  &#125;
+&lt;/schema&gt;
+
+&lt;program db="./contacts.db"&gt;
+  &lt;h1&gt;Contact book&lt;/h1&gt;
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Save the file. Run
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml migrate</code>
+            and the compiler diffs your
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+            against the live database at
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">./contacts.db</code>,
+            generates the migration SQL, and applies it. No separate
+            schema-file-and-generator step.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 2
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 2: read from the database
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123; &hellip; &#125;</code>
+            context (SPEC &sect;8) is SQL as syntax. The compiler reads
+            the SQL string against the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>,
+            validates the columns, and emits a parameterised query
+            against the bound database.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program db="./contacts.db"&gt;
+
+  &lt;contacts&gt; = ?&#123;`SELECT id, name, email, phone FROM contacts ORDER BY name`&#125;.all()
+
+  &lt;h1&gt;Contact book&lt;/h1&gt;
+  &lt;ul&gt;
+    ${ @contacts.forEach(c =&gt; lift &lt;li&gt;${c.name} &mdash; ${c.email}&lt;/li&gt;) }
+  &lt;/ul&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Three things to notice:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700">
+            <li>
+                <strong>No
+                    <code class="font-mono text-sm">fetch()</code>.
+                </strong>
+                The query runs server-side. The result lands in
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@contacts</code>
+                as a typed array of rows. The compiler placed the
+                handler on the server, serialised the result for the
+                client, and wired the reactive read. You wrote
+                neither side.
+            </li>
+            <li>
+                <strong>No ORM client.</strong>
+                There's nothing to
+                <code class="font-mono text-sm">prisma generate</code>.
+                The column names came straight from
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>;
+                the row type is inferred at compile time.
+            </li>
+            <li>
+                <strong>SQL stays SQL.</strong>
+                If your query needs a
+                <code class="font-mono text-sm">JOIN</code>,
+                a window function, a CTE &mdash; you write SQL. No
+                DSL-approximation tier.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 3
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 3: write to the database
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Add a form. The submit handler is a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">server function</code>
+            &mdash; the compiler places it on the server (route
+            inference per &sect;12). The client's onsubmit handler calls
+            it like a regular function; the compiler wires the RPC
+            transport.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program db="./contacts.db"&gt;
+
+  &lt;contacts&gt; = ?&#123;`SELECT id, name, email, phone FROM contacts ORDER BY name`&#125;.all()
+  &lt;newName: string req&gt;  = ""
+  &lt;newEmail: string req&gt; = ""
+  &lt;newPhone: string is some&gt; = ""
+
+  $&#123;
+    s&#101;rver function addContact(name, email, phone) &#123;
+      ?&#123;`INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})`&#125;.run()
+    &#125;
+  &#125;
+
+  function submit() &#123;
+    addContact(@newName, @newEmail, @newPhone)
+    reset(@newName)
+    reset(@newEmail)
+    reset(@newPhone)
+  &#125;
+
+  &lt;form onsubmit=submit()&gt;
+    &lt;input bind:value=@newName  placeholder="Name"&gt;
+    &lt;input bind:value=@newEmail placeholder="Email"&gt;
+    &lt;input bind:value=@newPhone placeholder="Phone"&gt;
+    &lt;errors of=@newName/&gt;
+    &lt;errors of=@newEmail/&gt;
+    &lt;button disabled=!@newName.isValid || !@newEmail.isValid&gt;Add&lt;/button&gt;
+  &lt;/form&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${name}</code>
+            inside the SQL template is a bound parameter, never
+            string concatenation &mdash; SQL injection is structurally
+            impossible (per &sect;8). The compiler refuses to emit
+            unbound interpolation. There is no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sql.raw()</code>
+            escape hatch.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 4
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 4: see the reactivity
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            One thing left: after
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">addContact</code>
+            inserts, the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@contacts</code>
+            list should re-fetch. There's a pattern for that &mdash;
+            invalidate the read and the compiler re-runs it:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>function submit() &#123;
+  addContact(@newName, @newEmail, @newPhone)
+  reset(@newName)
+  reset(@newEmail)
+  reset(@newPhone)
+  invalidate(@contacts)    // re-runs the SELECT
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Save, click "Add" in the browser &mdash; the new contact
+            appears in the list without a page reload. The browser
+            never saw the SQL; the server never saw the form HTML.
+            The compiler handled the seam.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // What the compiler did
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What the compiler actually did
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            From one file, three artifacts:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700">
+            <li>
+                <strong>Server bundle.</strong>
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">addContact</code>
+                function, the initial
+                <code class="font-mono text-sm">SELECT</code>, the
+                migration script, and the RPC endpoint for the
+                server-function call. Code that touches
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;&#125;</code>
+                blocks landed here automatically.
+            </li>
+            <li>
+                <strong>Client bundle.</strong>
+                The reactive runtime for
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newName</code>
+                /
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newEmail</code>
+                /
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newPhone</code>,
+                the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors&gt;</code>
+                surface, the form submit handler, and the RPC client
+                stub that calls
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">addContact</code>.
+                No ORM, no fetch wrapper, no framework runtime.
+            </li>
+            <li>
+                <strong>Migration.</strong>
+                The compile-time diff between
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+                and the live DB, as DDL ready to apply.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Next
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Where to go next
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/learn/validators"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Validators tutorial
+                </a>
+                &mdash; deeper coverage of the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                /
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+                surface this tutorial touched on lightly.
+            </li>
+            <li>
+                <a href="/reference/contexts/sql"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    ?&#123; &#125; reference
+                </a>
+                &mdash; the full SQL-context surface: result-mode
+                methods, multi-database adaptation, error handling.
+            </li>
+            <li>
+                <a href="/articles/orm-trap"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    The ORM trap
+                </a>
+                &mdash; the long-form why behind this design.
+            </li>
+        </ul>
+
+        <p class="mt-10 text-sm">
+            <a href="/learn" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Learn
+            </a>
+        </p>
+
+    </article>
+
+</>

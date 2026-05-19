@@ -149,8 +149,8 @@
                 &lt;page&gt;). Pure-channel module files
                 (no &lt;program&gt; in the file) MAY declare channels
                 at file top &mdash; the sharing pattern.
-                <a href="/reference/errors/E-CHANNEL-INSIDE-PROGRAM"
-                   class="font-mono text-xs text-rose-700 underline">E-CHANNEL-INSIDE-PROGRAM</a>
+                <a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM"
+                   class="font-mono text-xs text-rose-700 underline">E-CHANNEL-OUTSIDE-PROGRAM</a>
                 fires on misplaced channels in a file that has
                 &lt;program&gt;. Per Insight 30 (S87).
             </li>
@@ -183,7 +183,7 @@
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
             <li><a href="/reference/errors/W-PROGRAM-TITLE-NESTED" class="text-amber-700 underline">W-PROGRAM-TITLE-NESTED</a></li>
             <li><a href="/reference/errors/W-PROGRAM-001" class="text-amber-700 underline">W-PROGRAM-001</a> &mdash; non-entry-page suppression</li>
-            <li><a href="/reference/errors/E-CHANNEL-INSIDE-PROGRAM" class="text-rose-700 underline">E-CHANNEL-INSIDE-PROGRAM</a></li>
+            <li><a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM" class="text-rose-700 underline">E-CHANNEL-OUTSIDE-PROGRAM</a></li>
             <li><a href="/reference/errors/E-CHANNEL-SHARED-MODIFIER" class="text-rose-700 underline">E-CHANNEL-SHARED-MODIFIER</a></li>
             <li><a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK" class="text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a></li>
             <li><a href="/reference/errors/W-AUTH-LOGIN-MISSING" class="text-amber-700 underline">W-AUTH-LOGIN-MISSING</a></li>
@@ -292,7 +292,7 @@
             <li>
                 <strong>Channels and pages are siblings.</strong>
                 A &lt;channel&gt; declared INSIDE a &lt;page&gt; fires
-                <a href="/reference/errors/E-CHANNEL-INSIDE-PROGRAM"
+                <a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM"
                    class="font-mono text-xs text-rose-700 underline">E-CHANNEL-INSIDE-PAGE</a>
                 (channel scope is program-wide; nesting it in a page
                 breaks the multi-client sync semantic).

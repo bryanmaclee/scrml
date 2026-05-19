@@ -1,0 +1,405 @@
+// scrml.dev /learn/validators — tutorial
+//
+// Hands-on walkthrough of scrml's validity surface. Builds a signup
+// form with progressively richer validation; surfaces the
+// auto-synthesised .isValid + .errors properties; shows the
+// <errors of=...> renderer + the universal-core predicate catalog.
+//
+// Drafted 2026-05-19. SPEC anchors verified:
+//   §55.1   — universal-core predicate catalog (14 predicates)
+//   §55.2   — bare-attribute decl syntax
+//   §55.5   — compound-level .isValid synthesis
+//   §55.6   — per-field validity-surface synthesis
+//   §55.8   — <errors of=expr/> first-class element
+//   §55.9   — ValidationError enum
+//   §55.10  — 4-level error message resolution chain
+//   §55.12  — short-circuit composition (req/is-some skip remaining)
+//   §42.2.5 — req vs is-some distinction
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; Learn &rsaquo; Validators
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Validators &amp; the validity surface
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Tutorial &mdash; build a signup form with rich
+                per-field validation in five steps. By the end you
+                will have used five universal-core predicates and the
+                auto-synthesised
+                <code class="font-mono text-base">.isValid</code>
+                surface.
+            </p>
+        </header>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            What you'll learn:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                The three "absence" predicates &mdash;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+                &mdash; and when each one is the right tool.
+            </li>
+            <li>
+                Predicate composition: stacking multiple validators
+                on one cell.
+            </li>
+            <li>
+                The auto-synthesised
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+                surface &mdash; how to gate a submit button on it.
+            </li>
+            <li>
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors of=&hellip;/&gt;</code>
+                element for rendering failure messages.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 1
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 1: the simplest predicate
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Start with one cell and one predicate. Per SPEC &sect;55.2,
+            a validator attaches to a state declaration as a
+            bare attribute after the type:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;email: string req&gt; = ""
+
+  &lt;input bind:value=@email placeholder="Email"&gt;
+  &lt;errors of=@email/&gt;
+  &lt;button disabled=!@email.isValid&gt;Sign up&lt;/button&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Save and look at the browser:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700">
+            <li>
+                The button is disabled (empty string fails
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                per &sect;42.2.5).
+            </li>
+            <li>
+                As soon as you type one character, the button
+                enables.
+            </li>
+            <li>
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors of=@email/&gt;</code>
+                element is empty when the field is valid; on failure
+                it renders the localised error message (default
+                "This field is required.").
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            That's the validity surface in 6 lines: declaration,
+            predicate, input, error-renderer, submit-gate.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 2
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 2: choose between
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            and
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per &sect;42.2.5, the two are NOT synonyms:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                fails on
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">0</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">false</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">[]</code>,
+                and the absence value
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>.
+                "I need a meaningful value."
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+                fails ONLY on
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>.
+                "I need this to be a defined value, but empty is
+                fine."
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            Apply the right one per field:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;firstName:  string req&gt;     = ""    // must be meaningful
+&lt;middleName: string is some&gt; = ""    // empty is fine
+&lt;lastName:   string req&gt;     = ""    // must be meaningful</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            A user with no middle name leaves that field blank;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@middleName.isValid</code>
+            is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">true</code>;
+            the form submits.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 3
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 3: stack predicates
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            The universal-core vocabulary has fourteen predicates
+            (&sect;55.1). Stack them by writing more than one in the
+            decl:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;username: string req length(&gt;=3 &amp;&amp; &lt;=20) pattern(/^[a-z0-9_]+$/)&gt; = ""
+&lt;age:      number req gte(13) lte(120)&gt;                            = 0</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Per &sect;55.12 short-circuit composition:
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            (or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>)
+            is evaluated first; if it fails, the remaining predicates
+            are skipped and the error is reported as
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Required</code>
+            (or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.NotSome</code>).
+            Otherwise all subsequent predicates run.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The full catalog (&sect;55.1):
+            <code class="font-mono text-sm">req</code>,
+            <code class="font-mono text-sm">is some</code>,
+            <code class="font-mono text-sm">length</code>,
+            <code class="font-mono text-sm">pattern</code>,
+            <code class="font-mono text-sm">min</code>,
+            <code class="font-mono text-sm">max</code>,
+            <code class="font-mono text-sm">gt</code>,
+            <code class="font-mono text-sm">lt</code>,
+            <code class="font-mono text-sm">gte</code>,
+            <code class="font-mono text-sm">lte</code>,
+            <code class="font-mono text-sm">eq</code>,
+            <code class="font-mono text-sm">neq</code>,
+            <code class="font-mono text-sm">oneOf</code>,
+            <code class="font-mono text-sm">notIn</code>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 4
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 4: compound validity composes upward
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Group the signup fields into a compound cell. The
+            compound's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+            is auto-synthesised per &sect;55.5: it is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">false</code>
+            if ANY field's validators fail.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;signup&gt; = &#123;
+  email:    "" : string req
+  password: "" : string req length(&gt;=8)
+  age:      0  : number req gte(13)
+&#125;
+
+&lt;form&gt;
+  &lt;input bind:value=@signup.email    placeholder="Email"&gt;
+  &lt;errors of=@signup.email/&gt;
+
+  &lt;input bind:value=@signup.password type="password"&gt;
+  &lt;errors of=@signup.password/&gt;
+
+  &lt;input bind:value=@signup.age      type="number"&gt;
+  &lt;errors of=@signup.age/&gt;
+
+  &lt;button disabled=!@signup.isValid&gt;Sign up&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Per &sect;55.5/&sect;55.6, the compound carries
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@signup.isValid</code>
+            AND each field carries its own
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@signup.email.isValid</code>
+            /
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.password.isValid</code>
+            /
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.age.isValid</code>.
+            All synthesised at compile time. None of these properties
+            were declared by you.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Step 5
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Step 5: customise the error messages
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per &sect;55.10, error messages resolve through a 4-level
+            chain. The first that matches wins. For per-decl
+            customisation, write the message inline after the
+            predicate:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;email: string req:"Please enter your email."&gt; = ""</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            For project-level messages (shared across many fields),
+            register a catalogue via the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            meta context's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">registerMessages</code>
+            API (&sect;41.12). The compiler resolves per-field at
+            compile time.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Errors are typed values
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Errors are typed values, not strings
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per &sect;55.9, the per-field
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.errors</code>
+            array is typed as
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ValidationError[]</code>
+            &mdash; a tagged enum whose variants name the predicate
+            that failed:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>$&#123;
+  @signup.email.errors.forEach(e =&gt; match e &#123;
+    .Required          =&gt; logEvent("email-blank")
+    .PatternMismatch(p)=&gt; logEvent("email-malformed", p)
+    .LengthFailed(p)   =&gt; logEvent("email-too-short", p)
+  &#125;)
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Consumers pattern-match on the tag; the message string is
+            one rendering. Analytics, custom UIs, and accessibility
+            layers all read from the same typed surface.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Where validators don't apply
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Where validators don't apply
+        </h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700">
+            <li>
+                <strong>Derived cells.</strong> Per &sect;55.14, a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;x&gt; = expr</code>
+                cell carrying validators fires
+                <a href="/reference/errors/E-DERIVED-WITH-VALIDATORS"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-WITH-VALIDATORS
+                </a>.
+                Validators are for inputs, not for outputs derived
+                from inputs.
+            </li>
+            <li>
+                <strong>Single-value top-level cells without validators.</strong>
+                A cell like
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;count&gt; = 0</code>
+                does NOT auto-synthesise an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+                surface (per &sect;55.5 Edge A). Compound cells always
+                synthesise; single-value cells require at least one
+                predicate to opt in.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Next
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Where to go next
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/elements/errors"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors of=&hellip;/&gt;
+                </a>
+                &mdash; full reference for the element you used in
+                every step.
+            </li>
+            <li>
+                <a href="/reference/keywords/req"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    req
+                </a>
+                /
+                <a href="/reference/keywords/is-some"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    is some
+                </a>
+                &mdash; the two predicates this tutorial leans on.
+            </li>
+            <li>
+                <a href="/learn/server-boundary"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Server-boundary tutorial
+                </a>
+                &mdash; the partner walkthrough on the full-stack side.
+            </li>
+        </ul>
+
+        <p class="mt-10 text-sm">
+            <a href="/learn" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Learn
+            </a>
+        </p>
+
+    </article>
+
+</>

@@ -1,0 +1,46 @@
+// scrml.dev /reference/elements/db — Day-30 placeholder stub
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;db&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Database binding element. The compile-time anchor that
+                connects a
+                <a href="/reference/elements/schema"
+                   class="text-blue-700 hover:text-blue-900 underline font-mono">
+                    &lt;schema&gt;
+                </a>
+                to a concrete database under
+                <code class="font-mono text-base">?&#123; &hellip; &#125;</code>.
+            </p>
+        </header>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-slate-800">
+            <p class="font-semibold text-slate-900 mb-2">
+                Reference page queued for the Day-30 build-out.
+            </p>
+            <p class="leading-relaxed">
+                The full 8-section reference (summary, syntax, worked
+                example, semantics, edge cases, related, availability,
+                spec link) is on the immediate roadmap. Until then the
+                authoritative source is SPEC.md.
+            </p>
+        </div>
+
+        <p class="mt-10 text-sm">
+            <a href="/reference" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Reference
+            </a>
+        </p>
+
+    </article>
+
+</>

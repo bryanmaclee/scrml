@@ -5,7 +5,7 @@
 //
 // SPEC anchors: §38 (WebSocket Channels) + §38.1 (file-level
 // placement under Insight 30 S87) + §38.4 (V5-strict reactive sync)
-// + §38.12 (cross-file inline expansion) + §34 E-CHANNEL-INSIDE-PROGRAM
+// + §38.12 (cross-file inline expansion) + §34 E-CHANNEL-OUTSIDE-PROGRAM
 // + E-CHANNEL-SHARED-MODIFIER + W-CHANNEL.
 
 <page>
@@ -171,7 +171,7 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/reference/errors/E-CHANNEL-INSIDE-PROGRAM" class="text-rose-700 underline">E-CHANNEL-INSIDE-PROGRAM</a> &mdash; channel at file top in a file that already has &lt;program&gt;</li>
+            <li><a href="/reference/errors/E-CHANNEL-OUTSIDE-PROGRAM" class="text-rose-700 underline">E-CHANNEL-OUTSIDE-PROGRAM</a> &mdash; channel at file top in a file that already has &lt;program&gt;</li>
             <li><a href="/reference/errors/E-CHANNEL-INSIDE-PAGE" class="text-rose-700 underline">E-CHANNEL-INSIDE-PAGE</a> &mdash; channel nested inside a &lt;page&gt;</li>
             <li><a href="/reference/errors/E-CHANNEL-SHARED-MODIFIER" class="text-rose-700 underline">E-CHANNEL-SHARED-MODIFIER</a> &mdash; legacy &#64;shared modifier (removed v0.next)</li>
             <li><a href="/reference/errors/E-CHANNEL-008" class="text-rose-700 underline">E-CHANNEL-008</a> &mdash; channel name collision</li>

@@ -1,0 +1,332 @@
+// scrml.dev /articles/mutability-contracts
+//
+// Long-form narrative on scrml's approach to write-authority.
+// Drafted 2026-05-19 in side-session; flagged for the same
+// spec-fidelity audit as the keyword reference pages.
+//
+// Voice: matches orm-trap.scrml + server-boundary-disappears.scrml
+// — direct, opinionated, mid-form. Spec citations are intentionally
+// minimal; load-bearing claims point at sections verified via
+// SPEC-INDEX (§6.6 derived shape, §35 lin, §38 channels, §52 state
+// authority).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Articles &rsaquo; The how-it-works
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Mutability contracts
+            </h1>
+        </header>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            <em>authored by claude, rubber stamped by Bryan MacLee</em>
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            <strong>TL;DR: in mainstream stacks, "who can write to this value" is folklore. In scrml it's a compile error. Five different layers of write-authority are tracked statically: derived cells refuse direct writes, server-authority cells reject client writes, schema columns gate on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code>, channel state is auto-shared by structural placement, and one-shot linear values are consumed exactly once. None of this requires a runtime convention.</strong>
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Every codebase I've worked in had the same conversation at least once: someone wrote to a value they shouldn't have written to, the bug surfaced three pull requests later, and the fix was a comment. Sometimes a comment plus a lint rule. Sometimes a comment plus a lint rule plus a runtime assertion. The value itself was still writable. The "you can't write to this" lived in social convention.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The convention works fine if the team is small and the codebase is young. It collapses on cross-team handoff, on agent-assisted refactors, on grep-driven debugging. "Where was this set" stops being a question with a finite answer. The whole codebase is the answer.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            scrml's bet is that <em>write-authority is a type-system question</em>, not a convention question. Five layers; each one a compile-time refusal; none of them opt-in.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Layer 1 — derived cells
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Layer 1: derived cells refuse direct writes
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            A derived cell is a binding whose value is a function of other reactive bindings. The compiler tracks the deps, recomputes on dep change, caches the result.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;count&gt; = 0
+const &lt;doubled&gt; = @count * 2
+
+// later, in a handler:
+@doubled = 42         // compile error: E-DERIVED-WRITE (§6.6.8)</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            That's not a lint. It's not a deprecation warning. It's a compile error. The grammar accepts the write site syntactically; the resolver knows
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">doubled</code>
+            was declared with
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const</code>
+            and is a Shape-3 cell per the state-shape model (SPEC §6.6); the assign-into-derived is rejected before codegen runs.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The follow-on rule is also a compile error: <em>mutating the value through its reference doesn't work either</em>. A derived array isn't a mutable bucket; calling
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.push()</code>
+            on it doesn't compile.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;items&gt; = [1, 2, 3]
+const &lt;doubled&gt; = @items.map(x =&gt; x * 2)
+
+@doubled.push(8)      // also a compile error</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The honest reason for the second rule: even if the JS engine would technically let the push happen, the next dep-fire would recompute
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@doubled</code>
+            from scratch and clobber the pushed value. Catching it at compile time is structural &mdash; you can't silently lose work to a race against a dep recomputation.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Mutate the upstream cell instead. The compiler knows where to look:
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@items = [...@items, 4]</code>
+            in a handler; the derived cell recomputes automatically; the new value propagates to consumers. The write site stays where it belongs &mdash; on the cell that owns the value.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Layer 2 — server-authority cells
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Layer 2: server-authority cells reject client writes
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The state authority model (SPEC §52) gives any cell a write-authority tier. The default is "wherever it's declared," but the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">server</code>
+            modifier promotes a cell to server-only authority. Client code reading it is fine. Client code writing it is a compile error.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;currentUser server&gt; = not        // server holds authority
+
+// in a client handler:
+@currentUser = newUser              // compile error: client cannot
+                                    // write a server-authority cell</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            This is the same idea as the derived rule, applied across the network boundary. The compiler knows which functions land on the server (because it placed them there) and which fragments land in the client bundle (because it placed those too). A write site to a server-authority cell from inside a client-bundle fragment is structurally impossible.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            What's missing from this picture in mainstream stacks: there <em>is</em> no compile-time placement step. The same function runs in either tier (or the developer is responsible for not putting database code in the client bundle by remembering not to). The check that exists is "did the build succeed" not "is this value's authority respected."
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Layer 3 — schema protection
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Layer 3: schema columns gate on
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">protect=</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+            block describes the database. A
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db&gt;</code>
+            block binds a connection. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code>
+            attribute on
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db&gt;</code>
+            takes a column list and restricts those columns to declared write paths.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;schema&gt;
+  users &#123;
+    id:            integer primary key
+    username:      text n&#111;t null
+    passwordHash:  text n&#111;t null
+    isAdmin:       boolean default false
+  &#125;
+&lt;/&gt;
+
+&lt;db src="./app.db" protect="passwordHash, isAdmin"/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            With those columns in
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code>, any
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">UPDATE</code>
+            or
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">INSERT</code>
+            inside a regular
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;&#125;</code>
+            block that touches them is a compile error. To write them you need an explicit channel (the canonical pattern is a server-only handler that's been audited and named).
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Two observations worth naming:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <strong>Column typos surface as diagnostics, not silent ignores.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect="passwrd"</code>
+                (typo) doesn't quietly mean "protect nothing." The compiler reads the schema, knows the column doesn't exist, fires an error with a quick-fix offering
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">passwordHash</code>.
+            </li>
+            <li>
+                <strong>The check runs against the live schema.</strong>
+                Not against a hand-authored schema file that might be out of sync. The compiler pulls column lists from the database the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db&gt;</code>
+                block points at; the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code>
+                block is reconciled against that.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Layer 4 — channels
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Layer 4: channel state is auto-shared by structural placement
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            A
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            block (SPEC §38) declares state that's auto-synchronized across connected clients in real time. There is no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code>
+            modifier &mdash; cells inside the channel body are shared because they're <em>structurally inside the channel</em>. Cells outside aren't.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;channel name="cursors"&gt;
+  &lt;positions&gt; = []         // synced to every connected client
+&lt;/&gt;
+
+&lt;program&gt;
+  &lt;localDraft&gt; = ""        // NOT synced; local to this client
+&lt;/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The placement is the contract. A reader looking at the file knows
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@positions</code>
+            is shared because of where it sits, not because they remembered the team's "always add
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code>
+            on cross-client state" rule. The same write site (
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@positions = [&hellip;]</code>
+            ) does fundamentally different things depending on the enclosing scope; the compiler picks the right code path because it can see the scope.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            A channel cell that someone tries to write from outside the channel's authority surface &mdash; e.g., a server-only mutation from a regular client handler &mdash; is rejected the same way the server-authority case above is rejected. Auto-share is not auto-write-anywhere.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Layer 5 — linear types
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Layer 5: linear types &mdash; one-shot consumption tracked
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lin</code>
+            keyword (SPEC §35) marks a value as linear &mdash; consumed exactly once. The compiler tracks consumption through control flow, function calls, closures, and async boundaries. A linear value used twice is a compile error. A linear value never used is also a compile error.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>lin &lt;token&gt; = mintAccessToken(@user)
+
+useToken(@token)
+useToken(@token)        // compile error: lin value used twice</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            This is the layer most languages don't ship. It's what makes "you opened a file, you have to close it exactly once" a type-system contract rather than a runtime convention. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lin</code>
+            surface in scrml is for the cases where the value is a real one-shot resource &mdash; an upload token, a one-time payment intent, a database transaction handle &mdash; and accidentally double-consuming it is a real-world bug class.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // What this buys
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What five-layer authority buys
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Three concrete payoffs:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <strong>"Where was this set" has a finite answer.</strong>
+                For any cell, the write sites are statically enumerable. A reader (human or LLM) can grep for all the writers without missing one to a closure-captured mutation or a dynamic property assignment.
+            </li>
+            <li>
+                <strong>Refactors are safer.</strong>
+                Moving a value from "client-only" to "server-authority" by adding the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">server</code>
+                modifier &mdash; every write site that's now invalid becomes a compile error. You see the surface area immediately. No "I'll find them as the bugs come in."
+            </li>
+            <li>
+                <strong>LLM-assisted coding stops being a write-amplifier.</strong>
+                A coding agent that "helpfully" mutates a derived cell, a server-only state, or a protected column hits a compile error at PR time. The diagnostic is in front of the human reviewer, not in production logs.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // What this doesn't buy
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it doesn't buy
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The honest version, two points:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>
+                <strong>It doesn't replace runtime authorization.</strong>
+                A
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code>
+                column is structurally write-gated, but the gate is "compile-time refusal of unauthorised writes" &mdash; not "runtime check that the current user is allowed." Authorization is a separate concern, layered on
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth&gt;</code>
+                + per-route role chunking.
+            </li>
+            <li>
+                <strong>Linear types are not a memory model.</strong>
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lin</code>
+                surface is about exactly-once consumption, not about ownership transfer in the Rust sense. JavaScript's garbage collector still handles memory. scrml's
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lin</code>
+                is a smaller, more targeted contract: you said you'd consume this once; the compiler holds you to it.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // Closing
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            The shape of the bet
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            Every one of these layers is a refusal. The grammar accepts a write site that the resolver then rejects. That asymmetry is intentional &mdash; the grammar's job is to express what programmers want to express; the resolver's job is to refuse the things that don't typecheck against the authority model. Both are working together to make "who can write this" a question you can answer with the cursor, not a question you can only answer with the test suite.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            The bet underneath all five layers is the same: <em>most production bugs are mutability bugs.</em> Race conditions, partial updates, write sites in the wrong tier, optimistic concurrency that wasn't actually optimistic, mutations that should have gone through a queue. The mainstream answer is libraries on top of conventions on top of social rules. scrml's answer is the type system, the placement model, and the schema talking to each other. The compiler does the audit, every build.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed my-4">
+            None of these layers are unique to scrml in isolation. Linear types existed in Linear Haskell. Authority modifiers exist in capability languages. Per-column write gating exists in row-level-security policies. Auto-shared state exists in CRDT libraries. What's specific to scrml is that all five compose, all five are compile-time, and all five run on the same AST.
+        </p>
+
+    </article>
+
+</>

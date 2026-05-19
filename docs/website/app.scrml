@@ -4,25 +4,17 @@
 // scrml multi-page app per the Phase 0 architecture deep-dive at
 // scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md
 //
-// Scope:
-//   - <program> root (this file) — top-bar, footer, no DB, public
-//   - pages/ — filesystem-routed pages via <page>
-//   - components/ — Sidebar / Breadcrumbs / FeaturePageHeader / CodeExample
-//
-// Per S86 styling rule: NO file-top #{} placeholder; Tailwind utility
-// classes inline. Per S89: no null / undefined in scrml source — `not`
-// for absence. Per V5-strict: `<x> = value` at top-level, `@x` in
-// expression positions.
+// Dark-theme override block lives at program scope: a real #{} CSS
+// context (the canonical scrml mechanism per the css-without-build-step
+// article). NOT a file-top placeholder — actual program-global styles.
+// Repaints the existing light-theme Tailwind classes via class-level
+// overrides so per-page edits aren't required for the dark flip.
 //
 // Day-1 surface (P1 Deliverable B):
 //   - pages/index.scrml — landing (honest current-state framing)
 //   - pages/reference/elements/engine.scrml — flagship feature page
 //   - pages/reference/elements/errors.scrml — flagship feature page
 //   - pages/reference/contexts/sql.scrml — flagship feature page
-//
-// Day-30 surface (queued): every Tier 1 + Tier 2 element / keyword /
-// context gets its own reference page; 5 narrative tutorials in
-// pages/learn/; 9 ratified articles migrated to pages/articles/.
 
 <program>
 
@@ -30,47 +22,220 @@
     const SITE_TAGLINE = "Official documentation for the scrml language"
     const VERSION = "v0.3.0"
 
-    <header class="border-b border-slate-200 bg-white sticky top-0 z-10">
-        <div class="max-w-6xl mx-auto px-6 py-3 flex items-center gap-8">
-            <a href="/" class="font-mono font-bold text-lg text-slate-900">scrml.dev</a>
-            <nav class="flex items-center gap-6 text-sm text-slate-700">
-                <a href="/getting-started" class="hover:text-slate-900">Get started</a>
-                <a href="/learn" class="hover:text-slate-900">Learn</a>
-                <a href="/reference" class="hover:text-slate-900">Reference</a>
-                <a href="/articles" class="hover:text-slate-900">Articles</a>
-                <a href="/about" class="hover:text-slate-900">About</a>
+    #{
+        /* ─── base canvas ────────────────────────────────────────── */
+        :root {
+            color-scheme: dark;
+        }
+        html, body {
+            background-color: rgb(2 6 23);
+            color: rgb(226 232 240);
+        }
+        body {
+            font-feature-settings: "ss01", "cv11";
+        }
+
+        /* ─── link polish (default + per-page link colors) ──────── */
+        a {
+            text-underline-offset: 3px;
+            transition: color 150ms ease;
+        }
+        a:hover {
+            text-decoration-thickness: 2px;
+        }
+
+        /* ─── class overrides — flip light-theme palette to dark ── */
+        .bg-white            { background-color: rgb(15 23 42) !important; }
+        .bg-slate-50         { background-color: rgb(15 23 42) !important; }
+        .bg-slate-100        { background-color: rgb(30 41 59) !important; }
+        .text-slate-900      { color: rgb(241 245 249) !important; }
+        .text-slate-800      { color: rgb(226 232 240) !important; }
+        .text-slate-700      { color: rgb(203 213 225) !important; }
+        .text-slate-600      { color: rgb(148 163 184) !important; }
+        .text-slate-500      { color: rgb(100 116 139) !important; }
+        .border-slate-200    { border-color: rgb(30 41 59) !important; }
+        .border-slate-300    { border-color: rgb(51 65 85) !important; }
+        .hover\:bg-slate-50:hover    { background-color: rgb(30 41 59) !important; }
+        .hover\:bg-slate-800:hover   { background-color: rgb(51 65 85) !important; }
+        .hover\:text-slate-900:hover { color: rgb(241 245 249) !important; }
+
+        /* link palette */
+        .text-blue-700                { color: rgb(125 211 252) !important; }
+        .hover\:text-blue-900:hover   { color: rgb(186 230 253) !important; }
+        .text-rose-700                { color: rgb(251 113 133) !important; }
+        .hover\:text-rose-900:hover   { color: rgb(254 205 211) !important; }
+
+        /* status banners (queued / since / kind chips) */
+        .bg-amber-50                  { background-color: rgb(120 53 15 / 0.22) !important; }
+        .border-amber-200             { border-color: rgb(180 83 9 / 0.5) !important; }
+        .text-amber-700               { color: rgb(252 211 77) !important; }
+        .bg-rose-50                   { background-color: rgb(159 18 57 / 0.25) !important; }
+        .bg-emerald-50                { background-color: rgb(6 78 59 / 0.28) !important; }
+        .text-emerald-700             { color: rgb(110 231 183) !important; }
+        .bg-blue-50                   { background-color: rgb(30 58 138 / 0.30) !important; }
+
+        /* dark variant for prose without per-page edits */
+        .prose                        { color: rgb(203 213 225); }
+        .prose h1, .prose h2, .prose h3, .prose h4, .prose strong {
+            color: rgb(241 245 249);
+        }
+        .prose a                      { color: rgb(125 211 252); }
+        .prose a:hover                { color: rgb(186 230 253); }
+        .prose code {
+            color: rgb(241 245 249);
+            background-color: rgb(30 41 59);
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+            font-weight: 500;
+        }
+        .prose pre {
+            background-color: rgb(2 6 23);
+            border: 1px solid rgb(30 41 59);
+        }
+        .prose pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .prose blockquote {
+            color: rgb(148 163 184);
+            border-left-color: rgb(51 65 85);
+        }
+
+        /* dark <pre> tweak — slight separation from page bg */
+        pre.bg-slate-900 {
+            border: 1px solid rgb(30 41 59);
+        }
+
+        /* page-body alignment: articles use max-w-3xl with no mx-auto,
+           which leaves them packed at the LEFT of main's wider column.
+           Centre them so the article axis = viewport centre. */
+        article.prose,
+        article.prose.max-w-3xl {
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* utility shims — scrml's Tailwind layer doesn't pick up these
+           classes from source on its own scan, so define them here.
+           Tracked as Bug 1 in handOffs/incoming/2026-05-19-0614-...-dogfood-bug-surface.md */
+        .flex-1 { flex: 1 1 0%; }
+        .justify-center { justify-content: center; }
+        .justify-end    { justify-content: flex-end; }
+
+        /* ─── shell chrome (header / footer) — explicit CSS because
+              scrml's Tailwind layer doesn't emit:
+                - color shades ≥ 950 (`bg-slate-950`)
+                - opacity-suffixed bg classes (`bg-slate-900/60`)
+                - `backdrop-blur` / `backdrop-filter` utilities
+                - `bg-sky-500/10`, `border-sky-500/30`, etc.
+              all logged in the same Bug 1 inbox note. */
+        header.site-chrome {
+            background-color: rgb(2 6 23 / 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgb(30 41 59);
+        }
+        footer.site-chrome {
+            background-color: rgb(15 23 42 / 0.6);
+            border-top: 1px solid rgb(30 41 59);
+        }
+        .version-pill {
+            font-size: 0.7rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            color: rgb(148 163 184);
+            background-color: rgb(30 41 59 / 0.7);
+            padding: 0.15rem 0.55rem;
+            border-radius: 9999px;
+            border: 1px solid rgb(51 65 85);
+        }
+        .built-in-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.85rem;
+            border-radius: 9999px;
+            background-color: rgb(14 165 233 / 0.10);
+            border: 1px solid rgb(14 165 233 / 0.35);
+            color: rgb(125 211 252);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.75rem;
+        }
+        .built-in-pill::before {
+            content: "";
+            width: 0.45rem;
+            height: 0.45rem;
+            border-radius: 9999px;
+            background-color: rgb(56 189 248);
+            box-shadow: 0 0 8px rgb(56 189 248 / 0.6);
+        }
+
+        /* CTA button on landing — promote from black to indigo accent */
+        a.bg-slate-900 {
+            background-color: rgb(56 189 248) !important;
+            color: rgb(2 6 23) !important;
+        }
+        a.bg-slate-900:hover {
+            background-color: rgb(125 211 252) !important;
+        }
+    }
+
+    <header class="site-chrome sticky top-0 z-10">
+        <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between gap-6">
+            <a href="/" class="font-mono font-bold text-lg text-slate-100">scrml.dev</a>
+            <nav class="flex items-center gap-5 text-sm text-slate-400">
+                <a href="/getting-started" class="hover:text-slate-100">Get started</a>
+                <a href="/learn" class="hover:text-slate-100">Learn</a>
+                <a href="/reference" class="hover:text-slate-100">Reference</a>
+                <a href="/articles" class="hover:text-slate-100">Articles</a>
+                <a href="/about" class="hover:text-slate-100">About</a>
+                <a href="https://github.com/bryanmaclee/scrmlTS" class="hover:text-slate-100">GitHub</a>
             </nav>
-            <div class="ml-auto flex items-center gap-4">
-                <span class="text-xs text-slate-500 font-mono">${VERSION}</span>
-                <a href="https://github.com/bryanmaclee/scrmlTS"
-                   class="text-sm text-slate-700 hover:text-slate-900">GitHub</a>
-            </div>
+            <span class="version-pill">v0.3.0</span>
         </div>
     </header>
 
-    <main class="max-w-6xl mx-auto px-6 py-10 min-h-screen">
+    <main class="max-w-5xl mx-auto px-6 py-10 min-h-screen">
         // Page-specific content renders here via filesystem routing —
         // each pages/<route>.scrml file is a `<page>` that lifts into
         // this main slot per SPEC §40 multi-page composition.
     </main>
 
-    <footer class="border-t border-slate-200 bg-slate-50 mt-16">
-        <div class="max-w-6xl mx-auto px-6 py-8 text-sm text-slate-600 flex flex-wrap gap-8">
-            <div>
-                <div class="font-semibold text-slate-900 mb-2">scrml</div>
-                <a href="https://github.com/bryanmaclee/scrmlTS" class="block hover:text-slate-900">GitHub</a>
-                <a href="/about/changelog" class="block hover:text-slate-900">Changelog</a>
-                <a href="/about/philosophy" class="block hover:text-slate-900">Philosophy</a>
+    <footer class="site-chrome mt-16">
+        <div class="max-w-3xl mx-auto px-6 py-10 text-sm text-slate-400 grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="text-center">
+                <div class="font-semibold text-slate-100 mb-2">scrml</div>
+                <a href="https://github.com/bryanmaclee/scrmlTS" class="block hover:text-slate-100">GitHub</a>
+                <a href="/about/changelog" class="block hover:text-slate-100">Changelog</a>
+                <a href="/about/philosophy" class="block hover:text-slate-100">Philosophy</a>
             </div>
-            <div>
-                <div class="font-semibold text-slate-900 mb-2">Docs</div>
-                <a href="/getting-started" class="block hover:text-slate-900">Get started</a>
-                <a href="/reference" class="block hover:text-slate-900">Reference</a>
-                <a href="/learn" class="block hover:text-slate-900">Learn</a>
+            <div class="text-center">
+                <div class="font-semibold text-slate-100 mb-2">Docs</div>
+                <a href="/getting-started" class="block hover:text-slate-100">Get started</a>
+                <a href="/reference" class="block hover:text-slate-100">Reference</a>
+                <a href="/learn" class="block hover:text-slate-100">Learn</a>
             </div>
-            <div class="ml-auto text-xs">
-                MIT licensed. <span class="font-mono">${VERSION}</span> docs generated 2026-05-17.
+            <div class="text-center">
+                <div class="font-semibold text-slate-100 mb-2">Project</div>
+                <a href="/articles/roadmap-2026-05-14" class="block hover:text-slate-100">Roadmap</a>
+                <a href="/articles" class="block hover:text-slate-100">Articles</a>
+                <a href="/about" class="block hover:text-slate-100">About</a>
             </div>
+        </div>
+        <div class="max-w-3xl mx-auto px-6 py-6 border-t border-slate-800 flex flex-col items-center gap-3 text-center">
+            <span class="built-in-pill">built in scrml</span>
+            <p class="text-xs text-slate-500 leading-relaxed max-w-xl">
+                Every page on this site was authored as a
+                <code class="font-mono text-slate-300">&lt;page&gt;</code>
+                and compiled by the same
+                <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/docs/website"
+                   class="text-sky-400 hover:text-sky-300 underline">scrml compiler</a>
+                that ships in
+                <code class="font-mono text-slate-300">bun install scrml</code>.
+            </p>
+            <p class="text-xs text-slate-600">
+                MIT licensed &middot;
+                <span class="font-mono">v0.3.0</span>
+            </p>
         </div>
     </footer>
 

@@ -97,6 +97,29 @@
                     its scoped styles to that, not to a runtime mangler.
                 </span>
             </li>
+            <li>
+                <a href="/articles/mutability-contracts"
+                   class="text-blue-700 hover:text-blue-900 underline font-medium">
+                    Mutability contracts
+                </a>
+                <span class="text-sm text-slate-500 block">
+                    Who can write to this value? In mainstream stacks
+                    it's folklore. In scrml it's a compile error. Five
+                    layers of write-authority, all compile-time.
+                </span>
+            </li>
+            <li>
+                <a href="/articles/realtime-and-workers"
+                   class="text-blue-700 hover:text-blue-900 underline font-medium">
+                    Realtime &amp; workers
+                </a>
+                <span class="text-sm text-slate-500 block">
+                    Socket.io vs. Pusher vs. Liveblocks for realtime;
+                    BullMQ vs. Inngest for queues; Comlink vs. raw
+                    Worker boilerplate. scrml replaces the whole
+                    matrix with two language primitives.
+                </span>
+            </li>
         </ul>
 
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The why-not (existing tools)</h2>

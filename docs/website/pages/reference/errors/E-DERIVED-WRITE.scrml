@@ -1,0 +1,62 @@
+// scrml.dev /reference/errors/E-DERIVED-WRITE — Day-30 placeholder stub
+//
+// Real reference page queued. SPEC anchor: §6.6.8 + §34 catalog.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-DERIVED-WRITE
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Direct reassignment to a derived cell. Derived cells
+                are read-only; mutate the upstream input instead.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§6"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;6.6.8 / &sect;34
+                </a>
+            </div>
+        </header>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-slate-800">
+            <p class="font-semibold text-slate-900 mb-2">
+                Per-code reference page queued for the Day-30 build-out.
+            </p>
+            <p class="leading-relaxed">
+                E-DERIVED-WRITE fires when a const-declared derived
+                cell appears on the LHS of an assignment. The
+                companion error
+                <a href="/reference/errors/E-DERIVED-VALUE-MUTATE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-DERIVED-VALUE-MUTATE
+                </a>
+                fires for in-place mutation through the cell
+                reference. Distinct from
+                <a href="/reference/errors/E-SYNTHESIZED-WRITE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-SYNTHESIZED-WRITE
+                </a>
+                &mdash; that one is writes to auto-synthesised
+                validity-surface properties.
+            </p>
+        </div>
+
+        <p class="mt-10 text-sm">
+            <a href="/reference" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Reference
+            </a>
+        </p>
+
+    </article>
+
+</>

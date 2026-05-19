@@ -1,0 +1,203 @@
+// scrml.dev /reference/errors/E-CHANNEL-OUTSIDE-PROGRAM
+//
+// Drafted 2026-05-19. SPEC anchors verified:
+//   §38.1     — channel placement (canonical inside <program> in v0.3)
+//   §38.12.6  — PURE-CHANNEL-FILE dispensation for module files
+//   §34       — catalog row (line 14842)
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-CHANNEL-OUTSIDE-PROGRAM
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                A
+                <code class="font-mono text-base">&lt;channel&gt;</code>
+                sits at file top level in a file that also declares
+                <code class="font-mono text-base">&lt;program&gt;</code>.
+                Under v0.3, channels live INSIDE
+                <code class="font-mono text-base">&lt;program&gt;</code>
+                (sibling of
+                <code class="font-mono text-base">&lt;page&gt;</code>).
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time
+                </span>
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.3.0 (Wave 1)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§38"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;38.1
+                </a>
+            </div>
+        </header>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per &sect;38.1 (v0.3 Wave 1 / S87 Insight 30), the
+            canonical placement for a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            is INSIDE the entry file's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            (as a sibling of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code>),
+            not at file top level next to it.
+            E-CHANNEL-OUTSIDE-PROGRAM fires when both these conditions
+            hold:
+        </p>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 mt-3">
+            <li>
+                The file declares a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+                element somewhere.
+            </li>
+            <li>
+                A
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+                sits at file top level &mdash; sibling of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
+                not descended from it.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Module-file dispensation
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per &sect;38.12.6 (S87, Insight 30), a file containing NO
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            element MAY declare a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            at file top level &mdash; the "pure channel file" sharing
+            pattern. The error does NOT fire here. This parallels
+            the existing file-top
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>
+            permission in module files.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;channel name="cursors"&gt;   // E-CHANNEL-OUTSIDE-PROGRAM:
+                            // file declares &lt;program&gt; below;
+                            // channel must move inside it.
+  &lt;positions&gt; = []
+&lt;/&gt;
+
+&lt;program&gt;
+  &lt;page&gt;...&lt;/&gt;
+&lt;/&gt;</code></pre>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Move the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
+            inside
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+  &lt;channel name="cursors"&gt;
+    &lt;positions&gt; = []
+  &lt;/&gt;
+  &lt;page&gt;...&lt;/&gt;
+&lt;/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            OR, if the file's purpose is purely to expose a shared
+            channel (and contains no
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>),
+            split the channel into its own file &mdash; the
+            pure-channel-file shape &mdash; and import it where
+            needed.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Direction-reversal history
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Before v0.3 Wave 1 (2026-05-12), the direction was
+            inverted: the pre-v0.3 error
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-CHANNEL-INSIDE-PROGRAM</code>
+            (now retired) fired when a channel was nested inside
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>.
+            The S87 Insight 30 closure (channel-architecture
+            ratification) reversed this: channels are application-
+            scoped shared-state vehicles, and the application is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
+            so the canonical placement is inside it. Adopters
+            migrating from pre-v0.3 source need to move channels INTO
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>.
+        </p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/channel"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;channel&gt;
+                </a>
+                &mdash; element reference.
+            </li>
+            <li>
+                <a href="/reference/errors/E-CHANNEL-INSIDE-PAGE"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-CHANNEL-INSIDE-PAGE
+                </a>
+                &mdash; channels can't nest INSIDE
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code>
+                either; they must sit at
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+                scope.
+            </li>
+            <li>
+                <a href="/reference/errors/E-CHANNEL-SHARED-MODIFIER"
+                   class="text-rose-700 hover:text-rose-900 underline">
+                    E-CHANNEL-SHARED-MODIFIER
+                </a>
+                &mdash; the related migration: drop the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code>
+                modifier.
+            </li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC &sect;38.1</strong>
+            (channel placement rules) +
+            <strong>&sect;38.12.6</strong>
+            (PURE-CHANNEL-FILE dispensation). Catalog row at
+            <strong>&sect;34</strong>.
+        </p>
+
+    </article>
+
+</>

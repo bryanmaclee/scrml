@@ -1,0 +1,404 @@
+// scrml.dev /reference/keywords/req — full reference page
+//
+// req is the meaningful-value predicate from the universal-core
+// vocabulary. Pairs with is some (existence) and not (absence).
+// SPEC anchors: §55.1 (universal-core catalog), §42.2.5 (req vs is
+// some), §55.5 (validity surface synthesis), §55.14 (derived +
+// validators forbidden), §34 (E-DERIVED-WITH-VALIDATORS row).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Keywords
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                req
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Meaningful-value predicate. A
+                <code class="font-mono text-base">req</code>-annotated
+                cell fails validation when its value is
+                "empty-by-type":
+                <code class="font-mono text-base">""</code>,
+                <code class="font-mono text-base">0</code>,
+                <code class="font-mono text-base">false</code>,
+                <code class="font-mono text-base">[]</code>,
+                <code class="font-mono text-base">&#123;&#125;</code>.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§55"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;55 (validators)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Summary
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            is one of the fourteen universal-core predicates
+            (&sect;55.1) &mdash; the validation vocabulary that comes
+            built into every scrml type without import. Where
+            <a href="/reference/keywords/is-some"
+               class="font-mono text-blue-700 hover:text-blue-900 underline">is some</a>
+            checks for <em>existence</em>
+            (an empty string IS some &mdash; it's a defined value),
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            checks for a <em>meaningful</em> value &mdash; an empty
+            string is NOT meaningful.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The two predicates are deliberately distinct. A user's
+            middle name might be the empty string (no middle name &mdash;
+            still a defined answer); a user's first name probably
+            shouldn't be. The first case wants
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>;
+            the second wants
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            On a state cell declaration:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;firstName: string req&gt; = ""
+&lt;quantity: number req&gt; = 0</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            On a function parameter:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>function greet(name: string req) &#123; ... &#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            On a struct field:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type User:struct = &#123;
+  firstName: string req
+  middleName: string is some  // empty middle name is OK
+  lastName: string req
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            On a schema column:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;schema&gt;
+  &lt;users&gt;
+    id:        int req
+    email:     string req
+    bio:       string is some
+  &lt;/users&gt;
+&lt;/schema&gt;</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A signup form. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            on each cell makes the empty-string default fail
+            validation, so the submit button stays disabled until
+            the user fills both fields meaningfully.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;email: string req&gt;    = ""
+  &lt;password: string req&gt; = ""
+
+  &lt;form&gt;
+    &lt;input type="email"    bind:value=@email    placeholder="Email"&gt;
+    &lt;input type="password" bind:value=@password placeholder="Password"&gt;
+
+    &lt;errors of=@email/&gt;
+    &lt;errors of=@password/&gt;
+
+    &lt;button disabled=!@email.isValid || !@password.isValid&gt;Sign up&lt;/button&gt;
+  &lt;/form&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Three things to notice:
+        </p>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <strong>Validation is on the type, not on the input.</strong>
+                The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">string req</code>
+                annotation is the schema. There is no separate Zod /
+                Yup / Joi declaration to keep in sync.
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@email.isValid</code>
+                    is auto-synthesised.
+                </strong>
+                Every cell with a validator surface gets an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+                computed property for free (&sect;55.5).
+            </li>
+            <li>
+                <strong>
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors of=&hellip;/&gt;</code>
+                    renders the active failure messages.
+                </strong>
+                See
+                <a href="/reference/elements/errors"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors&gt;
+                </a>
+                for the full surface.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            evaluates per the value's runtime type:
+        </p>
+
+        <table class="text-sm text-slate-700 mt-2 mb-4">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">Type</th>
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">Fails req when</th>
+                    <th class="text-left py-2 font-semibold text-slate-900">Passes req when</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">string</td>
+                    <td class="py-2 pr-6 font-mono">""</td>
+                    <td class="py-2 font-mono">"anything else"</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">number</td>
+                    <td class="py-2 pr-6 font-mono">0</td>
+                    <td class="py-2 font-mono">any non-zero</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">boolean</td>
+                    <td class="py-2 pr-6 font-mono">false</td>
+                    <td class="py-2 font-mono">true</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-6 font-mono">array</td>
+                    <td class="py-2 pr-6 font-mono">[]</td>
+                    <td class="py-2 font-mono">any non-empty</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            applies to scalar leaf values per the table above. On a
+            <strong>struct field</strong>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            fires on the field's value &mdash; not on the struct as a
+            whole. The compound-cell validity surface (per &sect;55.5)
+            composes upward: a struct cell's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+            is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">false</code>
+            iff ANY field's validators fail.
+        </p>
+        <p class="text-slate-700 leading-relaxed mt-3">
+            For <strong>enum-typed</strong> cells holding a defined
+            variant, the cell carries a tag &mdash; bare-variant
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            on an enum cell is trivially satisfied once a variant is
+            present.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Zero is not absence
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            For a field like
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">temperature: number req</code>,
+            an honest reading of zero
+            (e.g., 0&deg;C in a weather widget) will fail req. If
+            zero is meaningful in your domain, use
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            instead, or constrain with a refinement predicate like
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">number(&gt;=-100 &amp;&amp; &lt;=200)</code>.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            req does not imply existence
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A cell holding scrml's absence value
+            (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>)
+            also fails
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>.
+            Per &sect;55.12 short-circuit semantics, both
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+            produce the same
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Required</code>
+            error tag &mdash; downstream validators are skipped. The
+            sibling
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.NotSome</code>
+            tag is reserved for
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            failures.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            req on derived cells fires E-DERIVED-WITH-VALIDATORS
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            Validators apply to <em>inputs</em>, never to derived
+            outputs. Trying to put
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            on a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">derived</code>
+            cell is a compile error &mdash; see
+            <a href="/reference/errors/E-DERIVED-WITH-VALIDATORS"
+               class="text-rose-700 hover:text-rose-900 underline">
+                E-DERIVED-WITH-VALIDATORS
+            </a>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/keywords/is-some"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    is some
+                </a>
+                &mdash; the existence-only sibling.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+                IS some;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+                fails req.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+                &mdash; absence predicate. Both
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">undefined</code>
+                from other languages collapse onto
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+                in scrml.
+            </li>
+            <li>
+                <a href="/reference/elements/errors"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors of=&hellip;/&gt;
+                </a>
+                &mdash; renders the validity surface req
+                participates in.
+            </li>
+            <li>
+                <a href="/reference/elements/schema"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;schema&gt;
+                </a>
+                &mdash; req on a schema column emits SQL
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">NOT NULL</code>
+                + a CHECK constraint matching the per-type emptiness
+                rule.
+            </li>
+            <li>
+                <a href="/learn/validators"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Learn: Validators
+                </a>
+                &mdash; tutorial on the full validity surface.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Spec
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text: <strong>SPEC &sect;55.1</strong>
+            (universal-core predicate catalog) +
+            <strong>&sect;42.2.5</strong>
+            (req vs is some &mdash; distinct predicates) +
+            <strong>&sect;55.5</strong>
+            (validity-surface synthesis &amp;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>) +
+            <strong>&sect;55.12</strong>
+            (req / is some short-circuit) +
+            <strong>&sect;55.14</strong>
+            (derived + validators forbidden). The req-on-derived
+            error is
+            <strong>&sect;34</strong>
+            row
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-WITH-VALIDATORS</code>.
+            Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

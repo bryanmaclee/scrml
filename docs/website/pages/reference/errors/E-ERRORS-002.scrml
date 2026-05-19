@@ -1,0 +1,53 @@
+// scrml.dev /reference/errors/E-ERRORS-002 — Day-30 placeholder stub
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-ERRORS-002
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                &lt;errors&gt; placement / configuration diagnostic.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§34"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §34 (catalogue)
+                </a>
+            </div>
+        </header>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-slate-800">
+            <p class="font-semibold text-slate-900 mb-2">
+                Per-code reference page queued for the Day-30 build-out.
+            </p>
+            <p class="leading-relaxed">
+                The full template (what it means &middot; minimal reproducer &middot;
+                how to fix &middot; related &middot; specification) is being
+                rolled out across every error code the compiler can emit.
+                Until this page lands, the catalogue row in
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§34"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §34
+                </a>
+                is authoritative.
+            </p>
+        </div>
+
+        <p class="mt-10 text-sm">
+            <a href="/reference" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; Reference
+            </a>
+        </p>
+
+    </article>
+
+</>

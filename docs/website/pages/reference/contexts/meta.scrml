@@ -1,0 +1,369 @@
+// scrml.dev /reference/contexts/meta — full reference page for ^{}
+//
+// Drafted 2026-05-19. SPEC anchors verified:
+//   §22       — Metaprogramming overview (line 12667+)
+//   §22.2     — ^{} sigil + grammar (line 12686+)
+//   §22.3     — context preservation (line 12699+)
+//   §22.4     — compile-time meta classification + emit/emit.raw (line 12725+)
+//   §22.4.1   — emit escape-sequence semantics (line 12742+)
+//   §22.4.2   — reflect() resolution
+//   §22.5     — runtime meta
+//   §22.8     — phase-separation rules
+//   §22.11    — error codes (E-META-* family)
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Contexts
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                ^&#123; &hellip; &#125;
+                <span class="text-slate-500 font-sans text-2xl">&mdash; meta context</span>
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                The universal breakout mechanism. Captures all
+                bindings in scope; classified as either compile-time
+                or runtime by the compiler's dep analysis. Hosts type
+                reflection, code emission, and runtime DOM
+                inspection.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§22"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;22 (Metaprogramming)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per &sect;22.2:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>meta-block ::= '^&#123;' meta-body '&#125;'
+meta-body  ::= (any sequence of scrml statements and expressions)</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            A file MAY contain zero or more top-level
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            blocks (file scope, outside any function, component,
+            markup, or nested block). Each is classified
+            independently as compile-time or runtime.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Two modes, automatically classified
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Two modes, automatically classified
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            The compiler's meta-checker pass classifies each
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            block based on its body. The classification determines
+            which capabilities are available and what code is
+            emitted.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Compile-time meta (&sect;22.4)
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A block is classified compile-time when its body uses one
+            or more of these APIs <em>and</em> references no
+            runtime-only values:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-2">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reflect(TypeName)</code>
+                &mdash; type introspection. Accepts either a
+                compile-time-constant type name or a runtime variable
+                holding one; the compiler picks the right resolution
+                strategy (&sect;22.4.2).
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit(html)</code>
+                &mdash; inject generated markup. Normalises a small
+                set of escape sequences
+                (<code class="font-mono text-sm">\n</code>,
+                <code class="font-mono text-sm">\"</code>,
+                <code class="font-mono text-sm">\t</code>,
+                <code class="font-mono text-sm">\\</code>)
+                before passing the string to the block splitter
+                (&sect;22.4.1).
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit.raw(html)</code>
+                &mdash; same as
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit</code>
+                but verbatim, no escape-sequence normalisation. Use
+                when the source already has the bytes you want
+                emitted.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun.eval(&hellip;)</code>
+                &mdash; compile-time evaluation via Bun. The escape
+                hatch for arbitrary build-time computation.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Top-level compile-time blocks evaluate in source order
+            during compilation. The result is inlined into the output
+            artifact.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Runtime meta (&sect;22.5)
+        </h3>
+
+        <p class="text-slate-700 leading-relaxed">
+            A block that references runtime-only values
+            (reactive cells, runtime DOM handles, runtime
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">meta</code>
+            API surface) is classified as runtime. The compiler emits
+            an
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_meta_effect</code>
+            call that fires on
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">DOMContentLoaded</code>
+            (or immediately, if DOMContentLoaded has already fired).
+            Top-level runtime blocks execute in source order.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Context preservation
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Context preservation
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Per &sect;22.3, a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            block preserves all bindings from its breakout point.
+            What's accessible inside:
+        </p>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                All
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">let</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lin</code>,
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@var</code>
+                bindings lexically in scope at the breakout point.
+            </li>
+            <li>
+                The type registry &mdash; user-declared types AND
+                compiler-synthesised types (e.g. &sect;14.8 generated
+                table types from schema).
+            </li>
+            <li>
+                The encoded variable name registry (per ADR-001).
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The mechanism by which access is provided differs between
+            compile-time and runtime mode, but the access guarantees
+            are identical.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Worked example — type-driven code generation
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example: type-driven code generation
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Compile-time meta with
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reflect</code>
+            +
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit</code>
+            &mdash; iterate over the fields of a struct type and
+            emit a label-and-input pair for each one:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Signup:struct = &#123;
+  email:    string req
+  password: string req
+  name:     string is some
+&#125;
+
+^&#123;
+  for (const field of reflect(Signup).fields) &#123;
+    emit(`
+      &lt;label&gt;
+        $&#123;field.name&#125;
+        &lt;input type="$&#123;field.type === 'string' ? 'text' : field.type&#125;"
+               name="$&#123;field.name&#125;"&gt;
+      &lt;/label&gt;
+    `)
+  &#125;
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            At compile time, the block iterates the struct's three
+            fields and produces three
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;label&gt;</code>
+            elements in the emitted artifact. The output is plain
+            markup &mdash; no runtime cost. For form-shaped types
+            specifically, the dedicated
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">formFor(StructType)</code>
+            primitive (&sect;41.14) is the canonical alternative; the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            surface is for shapes that don't have a dedicated
+            primitive yet.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Phase separation
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Phase-separation rules
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per &sect;22.8, compile-time meta cannot reach forward into
+            the runtime &mdash; a compile-time block evaluating
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x</code>
+            against a runtime cell is a compile error. Similarly,
+            runtime meta cannot reach back into the compile-time
+            stage &mdash; a runtime block calling
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit()</code>
+            against the build artifact is invalid (the artifact has
+            already shipped). The compiler's classifier resolves the
+            phase per block; mis-mixed bodies fire one of the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-META-*</code>
+            errors at &sect;22.11.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — When to reach for ^{ } vs. dedicated primitives
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            When to reach for
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            vs. dedicated primitives
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml's strategy is to add named primitives for common
+            type-driven patterns rather than leaving them in the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            surface. The L22 type-as-argument family (&sect;53.14)
+            currently includes:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-2">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">parseVariant(json, EnumType)</code>
+                (&sect;41.13) &mdash; boundary-parsing for
+                tagged-variant JSON.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">formFor(StructType)</code>
+                (&sect;41.14) &mdash; type-driven form generation.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">schemaFor(StructType)</code>
+                (&sect;41.15) &mdash; type-driven SQL DDL.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Reach for
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+            when a dedicated primitive doesn't exist yet for the
+            shape you need. Reach for a dedicated primitive when one
+            does &mdash; the named primitive has better error
+            messages, better authority semantics, and a tighter
+            surface.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/contexts/logic"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    $&#123; &hellip; &#125;
+                </a>
+                &mdash; the logic context. Reactive computation,
+                control flow, inline writes.
+            </li>
+            <li>
+                <a href="/reference/contexts/sql"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    ?&#123; &hellip; &#125;
+                </a>
+                &mdash; the SQL context.
+            </li>
+            <li>
+                <a href="/reference/elements/errors"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors&gt;
+                </a>
+                &mdash; the
+                <code class="font-mono text-sm">registerMessages</code>
+                call site for project-level error message
+                catalogues is a
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
+                meta block.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text: <strong>SPEC &sect;22</strong> in full
+            (overview &sect;22.1, sigil &sect;22.2, context-preservation
+            &sect;22.3, compile-time meta &sect;22.4, emit
+            normalisation &sect;22.4.1,
+            <code class="font-mono text-sm">reflect</code> resolution
+            &sect;22.4.2, runtime meta &sect;22.5, phase-separation
+            &sect;22.8, error codes &sect;22.11). Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

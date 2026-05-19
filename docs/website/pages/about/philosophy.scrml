@@ -1,0 +1,223 @@
+// scrml.dev /about/philosophy — design rules narrative
+//
+// Public-facing distillation of the operating rules that govern
+// scrml's design process. Adapted from internal PA directives but
+// rewritten for the public audience — these ARE the principles that
+// shape the language, and they're worth naming out loud.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                scrml.dev &rsaquo; About &rsaquo; Philosophy
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900">
+                Design philosophy
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                The five load-bearing rules the project operates under.
+                These are not aspirations &mdash; they are the
+                checkpoints every design call gets evaluated against.
+            </p>
+        </header>
+
+        <p class="text-slate-700 leading-relaxed">
+            Most languages accrete features. scrml is going the other
+            way: every feature has to pay for its existence against a
+            small number of structural axioms, and the bar for
+            keeping something simple is higher than the bar for
+            adding something powerful. The five rules below are how
+            that bar gets enforced session-to-session.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Rule 1
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            1. Scope discipline &mdash; get the language right first, evangelism later
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml does not court adoption while v0.x is still in
+            flight. No conference talks. No "5 reasons to switch"
+            posts. No comparison-grid marketing. The bar for the
+            project is "the compiler working as planned" &mdash;
+            everything else waits.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The pragmatic reason: a language that's selling itself
+            before it's structurally complete is a language that has
+            already started accumulating compromises. The honest
+            reason: scrml has near-zero adoption right now, and
+            that's a known state, not a problem we're papering over
+            (see the
+            <a href="/" class="text-blue-700 hover:text-blue-900 underline">honest landing
+            page</a>
+            for the longer version).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Rule 2
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            2. Built for production, not as a toy
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml is not a teaching language, not a hobby project,
+            and not an experiment in syntax aesthetics. The design
+            bar is the full surface area of a production web app:
+            authentication, real-time channels, server-side
+            persistence, schema migration, role-based access,
+            content-addressed assets, the lot.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            That has practical consequences. We don't drop features
+            from the surface because "the corpus doesn't use it" or
+            "users won't notice." Corpus emptiness is more often the
+            artifact of past parser limits than evidence that a
+            shape doesn't matter. The bar is what the language is
+            <em>structurally correct to express</em>, not what
+            existing artifacts have happened to write.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Rule 3
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            3. Right answer beats easy answer
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            When a small fix and a structural fix diverge, we pick
+            the structural one 99.999% of the time. The small fix is
+            cheaper today and more expensive forever after. The
+            structural fix costs an extra session and removes the
+            class of problem.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Most language regret stories are this rule violated &mdash;
+            "we'll fix it in v2, just ship the easier thing for now."
+            The fixed-in-v2 never lands; the easier thing becomes the
+            permanent shape. scrml's check against that is:
+            <strong>any time the easy answer is on the table,
+            surface it explicitly so it can be rejected.</strong>
+            Default-to-shortcut is the operating failure mode; making
+            shortcuts visible is the structural countermeasure.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Rule 4
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            4. The spec is the source of truth
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml has a single normative document:
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="font-mono text-blue-700 hover:text-blue-900 underline">compiler/SPEC.md</a>.
+            When a design doc, an audit, a planning artifact, or even
+            this docs site disagrees with the spec, the spec wins.
+            The docs get fixed.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            That's not a process detail &mdash; it's a structural
+            assertion. Languages with multiple "authoritative" sources
+            (spec / reference impl / dominant production runtime /
+            adopter folk wisdom) routinely diverge, and the
+            divergence becomes the language's lived semantics. scrml
+            collapses the question: there is the spec, and there is
+            the compiler that implements it. Disagreement is a bug
+            in one or the other &mdash; never an irresolvable axis.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Rule 5
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            5. Communication: direct over polite
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Most of scrml's load-bearing design decisions came out of
+            controversy: hypothetical syntax fights, "this feels
+            wrong" objections that turned out to be load-bearing,
+            corrections to claims that had been operating as
+            background truth for sessions. The project deliberately
+            does not optimise for politeness during those exchanges.
+            Real disagreement, voiced cleanly, is the mechanism by
+            which the language evolves.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            What this looks like in practice:
+            issues get pushed back on with reasoning, not with
+            framing apologies; ambiguous statements get asked about,
+            not papered over with the most flattering interpretation;
+            compiler behaviour that contradicts a stated rule gets
+            classified as a bug, not a "doc gap." If something is
+            unclear, we ask. If a design is wrong, we say so. The
+            language has gotten its sharpest evolutions through that
+            channel, and softening it costs signal.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // Closing
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-12 mb-3">
+            Why these five
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            None of these rules are unique to scrml. Production-
+            language fidelity is the Wirth tradition; spec-as-truth
+            is the C / C++ tradition; right-answer-over-easy is the
+            Rust attitude; scope discipline is what shipping
+            anything serious feels like; direct communication is just
+            how field engineering works.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            What's specific to scrml is that all five are written
+            down, named, and applied at every design decision &mdash;
+            not as aspirations on a values page but as concrete
+            checkpoints. When a design call goes the wrong way (and
+            they sometimes do), the post-mortem is "which of the five
+            did we drift on?" Almost always: Rule 3.
+        </p>
+
+        <div class="mt-12 p-6 border border-slate-200 rounded-lg bg-slate-50">
+            <p class="text-slate-700 leading-relaxed">
+                These rules are the
+                <a href="/about" class="text-blue-700 hover:text-blue-900 underline">about</a>
+                section's load-bearing claim. If the language
+                eventually has wide adoption, the test of these rules
+                will be whether the language has stayed structurally
+                coherent across the growth. If it does, the rules
+                held. If it doesn't, one of them got compromised at a
+                point we can name.
+            </p>
+        </div>
+
+        <p class="mt-10 text-sm">
+            <a href="/about" class="text-blue-700 hover:text-blue-900 underline">
+                &larr; About
+            </a>
+        </p>
+
+    </article>
+
+</>

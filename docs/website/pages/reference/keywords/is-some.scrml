@@ -1,0 +1,327 @@
+// scrml.dev /reference/keywords/is-some — full reference page
+//
+// is some is the existence predicate from the universal-core
+// vocabulary. Pairs with req (meaningful-value) and not (absence).
+// SPEC anchors: §42.2.5 (vs req), §55.1 (universal-core catalog).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Keywords
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                is some
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Existence predicate. A
+                <code class="font-mono text-base">is some</code>-annotated
+                cell passes validation as long as a defined value is
+                present &mdash; empty string IS some, zero IS some,
+                false IS some. Only
+                <code class="font-mono text-base">not</code>
+                fails it.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§42"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;42.2.5
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Summary
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            asserts that a cell holds a defined value &mdash; any
+            defined value. It does not care whether the value is
+            "meaningful" by domain rules. An empty string, zero, an
+            empty array, a struct with no fields populated &mdash; all
+            of these IS some. The only thing that fails
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            is scrml's absence value,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Pairs with
+            <a href="/reference/keywords/req"
+               class="font-mono text-blue-700 hover:text-blue-900 underline">req</a>
+            (meaningful-value).
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+            IS some &mdash; but
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code>
+            fails req. The two are deliberately distinct: existence
+            and meaningfulness are different invariants, and they
+            belong to different application domains.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            On a state cell:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;middleName: string is some&gt; = ""
+&lt;nickname:   string is some&gt; = ""</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            On a struct field:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type User:struct = &#123;
+  firstName:  string req       // must be meaningful
+  middleName: string is some   // empty is fine
+  lastName:   string req       // must be meaningful
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Schema-column SQL lowering for
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            is not currently enumerated in &sect;39.5.8 (only
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            has an explicit
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">NOT NULL</code> +
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CHECK</code>
+            row). Use
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+            on schema columns where you want the per-type empty-check
+            CHECK constraint; leave columns unannotated where empty
+            is fine.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Profile edit form. The bio field is optional &mdash; an
+            empty bio is a valid bio. We still want the field to be
+            "present" (a defined string) for the schema, so we use
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            rather than leaving the column unvalidated.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;displayName: string req&gt;     = "Alice"
+  &lt;bio:         string is some&gt; = ""
+
+  &lt;form&gt;
+    &lt;label&gt;
+      Display name (required)
+      &lt;input bind:value=@displayName&gt;
+      &lt;errors of=@displayName/&gt;
+    &lt;/label&gt;
+
+    &lt;label&gt;
+      Bio (optional)
+      &lt;textarea bind:value=@bio&gt;&lt;/textarea&gt;
+      &lt;errors of=@bio/&gt;       // never fires for empty string
+    &lt;/label&gt;
+
+    &lt;button disabled=!@displayName.isValid&gt;Save&lt;/button&gt;
+  &lt;/form&gt;
+
+&lt;/program&gt;</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            is the inverse of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>:
+        </p>
+
+        <table class="text-sm text-slate-700 mt-2 mb-4">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">Value</th>
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">is some</th>
+                    <th class="text-left py-2 font-semibold text-slate-900">req</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">""</td>
+                    <td class="py-2 pr-6 text-emerald-700">passes</td>
+                    <td class="py-2 text-rose-700">fails</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">"alice"</td>
+                    <td class="py-2 pr-6 text-emerald-700">passes</td>
+                    <td class="py-2 text-emerald-700">passes</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">0</td>
+                    <td class="py-2 pr-6 text-emerald-700">passes</td>
+                    <td class="py-2 text-rose-700">fails</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">false</td>
+                    <td class="py-2 pr-6 text-emerald-700">passes</td>
+                    <td class="py-2 text-rose-700">fails</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6 font-mono">[]</td>
+                    <td class="py-2 pr-6 text-emerald-700">passes</td>
+                    <td class="py-2 text-rose-700">fails</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-6 font-mono">not</td>
+                    <td class="py-2 pr-6 text-rose-700">fails</td>
+                    <td class="py-2 text-rose-700">fails</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="text-slate-700 leading-relaxed">
+            The one value that fails
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            is
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+            &mdash; scrml's single absence value. Languages with null
+            <em>and</em> undefined collapse both onto
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+            here.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — When to choose is some vs req
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            When to choose
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            vs
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Use
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
+                    when</strong>
+                the empty form-of-the-type is not a meaningful value
+                in your domain. A user's first name. A product's
+                price. A task's title. The empty/zero answer is an
+                error, not a choice.
+            </li>
+            <li>
+                <strong>Use
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+                    when</strong>
+                the empty form-of-the-type is a meaningful answer.
+                A user's middle name (some people don't have one).
+                A task's description (optional). A scheduled
+                temperature reading of 0&deg;C (zero is a real
+                temperature).
+            </li>
+            <li>
+                <strong>Use neither when</strong>
+                the field is purely internal and never user-facing.
+                A top-level single-value cell with no validator
+                surface suppresses the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+                synthesis (&sect;55.5 Edge A). Note that compound cells
+                always synthesise an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.isValid</code>
+                surface regardless &mdash; the per-field surface
+                composes upward via &sect;55.5.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/keywords/req"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    req
+                </a>
+                &mdash; the meaningful-value sibling.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not</code>
+                &mdash; scrml's absence value. The only thing
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+                rejects.
+            </li>
+            <li>
+                <a href="/reference/elements/errors"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;errors of=&hellip;/&gt;
+                </a>
+                &mdash; renders the validity surface
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+                participates in.
+            </li>
+            <li>
+                <a href="/learn/validators"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    Learn: Validators
+                </a>
+                &mdash; tutorial.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Spec
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text: <strong>SPEC &sect;42.2.5</strong>
+            (req vs is some, exact predicate-pair semantics) +
+            <strong>&sect;55.1</strong> (universal-core predicate
+            catalog &mdash; 14 predicates including
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>).
+            Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>

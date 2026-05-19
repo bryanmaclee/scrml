@@ -1,0 +1,353 @@
+// scrml.dev /reference/keywords/lift — full reference page
+//
+// lift is the value-emission operator from anonymous logic blocks.
+// Two modes: accumulation (into markup/style/array parent) and
+// value-lift (in if-as-expression arms).
+// SPEC anchors: §10 entire section, §10.1.1 (L1 reframe), §10.2
+// (coercion table), §10.4 (use-site restrictions), §17.6 (if-as-
+// expression value-lift).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Keywords
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                lift
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Emits a value from inside an anonymous logic block to
+                the surrounding context. The scrml-flavored
+                <code class="font-mono text-base">yield</code>
+                &mdash; renamed to avoid collision with JavaScript
+                generators.
+            </p>
+            <div class="flex gap-3 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§10"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC &sect;10
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — Summary
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            emits a value from within a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+            logic context up to the parent context. The lifted value
+            is coerced according to the parent's expected type &mdash;
+            markup, CSS, or a scalar (in value-lift mode). Execution
+            continues after
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>;
+            it is not a return statement.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Two modes per &sect;10.1:
+        </p>
+
+        <ol class="space-y-3 text-slate-700 mt-2">
+            <li>
+                <strong>Accumulation mode.</strong>
+                Inside a bare
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+                whose parent is a markup or style context, each
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                appends one item to the block's accumulator array. On
+                block exit, the array is coerced per the parent (per
+                &sect;10.2 coercion table).
+            </li>
+            <li>
+                <strong>Value-lift mode.</strong>
+                Inside an if-as-expression arm (&sect;17.6), one
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                per arm designates the expression's result. Multiple
+                lifts on a single execution path through one arm
+                fires
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-LIFT-002</code>.
+            </li>
+        </ol>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Statement form:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>lift &lt;li value=name&gt;;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3 mb-3">
+            Chain form (per &sect;10.3) &mdash; equivalent:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>users.select(userName).get().lift(&lt;li value=userName&gt;)</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example — accumulation mode
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example: building markup from an array
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            The classic accumulation case &mdash; one
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            per loop iteration, accumulator coerced to a markup
+            sequence by the parent
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;ul&gt;</code>:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;contacts&gt; = [
+  &#123; name: "Alice",   email: "alice@example.com"   &#125;,
+  &#123; name: "Bob",     email: "bob@example.com"     &#125;,
+&#125;
+
+&lt;ul&gt;
+  ${ @contacts.forEach(c =&gt; lift &lt;li&gt;${c.name} &mdash; ${c.email}&lt;/li&gt;) }
+&lt;/ul&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+            block sits as a child of the markup
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;ul&gt;</code>.
+            Each
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            appends one
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;li&gt;</code>
+            element to the accumulator. On block exit, the array of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;li&gt;</code>
+            elements coerces to a markup sequence &mdash; rendered
+            inside the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;ul&gt;</code>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Worked example — value-lift mode
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example: if-as-expression value-lift
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            An if-as-expression (&sect;17.6) produces a single value
+            per evaluation. Each arm body contains exactly one
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            designating that arm's result:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>const &lt;message&gt; = ${
+  if (@count == 0)        &#123; lift "no items"    &#125;
+  else if (@count == 1)   &#123; lift "one item"    &#125;
+  else                    &#123; lift "${@count} items" &#125;
+}</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Notice: the lifted value is NOT accumulated into an array
+            here. The if-as-expression's surrounding
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+            is a value-lift context (per &sect;10.2 row 4), not an
+            accumulation context. The lifted scalar becomes the
+            const binding's value.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Coercion table (§10.2)
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Coercion by parent context
+        </h2>
+
+        <table class="text-sm text-slate-700 mt-2 mb-4">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">Parent context</th>
+                    <th class="text-left py-2 pr-6 font-semibold text-slate-900">Expected type</th>
+                    <th class="text-left py-2 font-semibold text-slate-900">Coercion</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6">Markup</td>
+                    <td class="py-2 pr-6 font-mono">markup[]</td>
+                    <td class="py-2">Rendered as a markup sequence; non-coercible items are E-TYPE-010.</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6">Style
+                        <code class="font-mono text-xs">#{ }</code></td>
+                    <td class="py-2 pr-6 font-mono">cssClass[]</td>
+                    <td class="py-2">Coerced to CSS class list; non-CSS items are E-TYPE-011.</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-6">Logic</td>
+                    <td class="py-2 pr-6 font-mono">any</td>
+                    <td class="py-2">No coercion; passes through as array.</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-6">If-as-expression arm</td>
+                    <td class="py-2 pr-6 font-mono">scalar</td>
+                    <td class="py-2">Lifted value IS the expression's result; not accumulated.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Valid use sites (§10.4)
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Where
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            is allowed
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            is valid <strong>only</strong> in anonymous
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+            logic contexts &mdash; bare blocks that are NOT the body
+            of a named function. Per &sect;10.4:
+        </p>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">function name() &#123; ... &#125;</code>
+                is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-SYNTAX-002</code>.
+                Named functions return markup as a return value;
+                callers lift the return if needed.
+            </li>
+            <li>
+                Same for the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn name &#123; ... &#125;</code>
+                form.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                outside any
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+                context is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-SYNTAX-001</code>.
+            </li>
+            <li>
+                Multiple lifts on the same execution path through one
+                if-as-expression arm is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-LIFT-002</code>.
+            </li>
+            <li>
+                Heterogeneous lifted values that aren't mutually
+                coercible is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-TYPE-012</code>.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — lift under the markup-as-value pillar
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            under markup-as-value
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Per &sect;10.1.1, scrml's L1 pillar puts markup as a
+            first-class value type &mdash; markup may sit on the RHS
+            of any binding (
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">let</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; =</code>,
+            function returns, function arguments, slot fills).
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+            is <em>one</em> path by which markup becomes a value
+            &mdash; specifically, when the surrounding context is an
+            anonymous accumulating
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>.
+            It is not the only path. Markup-typed derived cells
+            (&sect;6.6.17), markup-typed function returns, and inline
+            markup-as-expression all produce markup values without
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-2 text-slate-700">
+            <li>
+                <a href="/reference/keywords/derived"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    derived
+                </a>
+                &mdash; markup-typed
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const &lt;x&gt; = &lt;markup&gt;</code>
+                is a markup value via reactive binding, no
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                involved.
+            </li>
+            <li>
+                <a href="/reference/elements/program"
+                   class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;program&gt;
+                </a>
+                &mdash; the root container; multi-page composition
+                is via filesystem-routed
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code>,
+                NOT
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §9 — Spec
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text: <strong>SPEC &sect;10</strong> in full
+            (semantics &sect;10.1, L1 reframe &sect;10.1.1, coercion
+            &sect;10.2, syntax &sect;10.3, use-site restrictions
+            &sect;10.4) +
+            <strong>&sect;17.6</strong>
+            (if-as-expression value-lift). Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>
