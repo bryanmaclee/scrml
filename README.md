@@ -133,7 +133,7 @@ the wrapper swap is the commitment moment.
 | Tier  | Form                                       | What you get                                                           |
 |-------|--------------------------------------------|------------------------------------------------------------------------|
 | **0** | `if=` chains / `${ if (...) lift ... }`    | prototype; no exhaustiveness check                                     |
-| **1** | `<match for=Type [on=expr]>`               | structural exhaustiveness check at compile time                        |
+| **1** | `<match for=Type [on=expr]>`               | structural exhaustiveness check at compile time; `rule=` is accepted + compiler-checked but inert at runtime (`W-MATCH-RULE-INERT` lint nudges promotion to Tier 2) |
 | **2** | `<engine for=Type initial=.Variant>`       | full deal — exhaustiveness + active transition rules (`rule=`) + per-state effect handlers (`<onTransition>`, `<onTimeout>`, `<onIdle>`) + composite hierarchy + `history` restore |
 
 Adding a new variant to the discriminating type later forces the compiler to
@@ -153,7 +153,12 @@ app has phases," promote from booleans (Tier 0 — `if=` chains) to a `<match fo
 block (Tier 1 — structural exhaustiveness; the compiler refuses to compile until
 every variant has a UI block), then to `<engine for=Type initial=.Variant>` (Tier 2 —
 exhaustiveness plus active transition rules). `<match>` is the rest-state for UI
-that doesn't yet need transition guarantees; `<engine>` adds the rules. The engine
+that doesn't yet need transition guarantees; `<engine>` adds the rules. `rule=`
+annotations on `<match>` arms are **accepted and compiler-checked** so you can
+forward-stage transition contracts during Tier 1 prototyping, but **they do not
+enforce at runtime** — promoting to `<engine>` is the wrapper swap that activates
+them. `W-MATCH-RULE-INERT` fires on any `rule=` you write at Tier 1 to keep the
+intent visible. The engine
 declares legal transitions per state via `rule=`, runs effect handlers via
 `<onTransition>`, schedules timeouts via `<onTimeout>` (with `cancelTimer("X")`
 builtin), watches for engine-wide idle via `<onIdle>`, nests via composite
