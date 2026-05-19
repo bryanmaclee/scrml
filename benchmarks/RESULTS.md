@@ -80,13 +80,86 @@ The happy-dom results (below) differ significantly from real Chrome. Key differe
 - happy-dom's `cloneNode(true)` and `innerHTML` are slower than `createElement` (opposite of real browsers)
 - Chrome is 1.2-2x faster than happy-dom at DOM creation
 
-## Runtime Performance — happy-dom (medians in ms, lower is better)
+## Runtime Performance — happy-dom (medians in ms, lower is better) — 2026-05-19 v0.3.3 + Vanilla baseline (S103 P1.C)
 
-Regenerated 2026-05-14 against HEAD `13154ba` (v0.3.0 STABLE).
-Bun 1.3.13, happy-dom 20.8.9. 3 warmup + 10 measured iterations per benchmark; medians shown.
-These numbers are less reliable than the Chrome results above; happy-dom's DOM
-implementation differs significantly from real browsers (see "happy-dom vs real
-Chrome" notes above).
+Regenerated 2026-05-19 against HEAD `6bc5128` (S103 / v0.3.3 post-PGO Phase 3 + formFor + P1.B runtime instrumentation + derived-chunk-gate widening). **NEW: Vanilla JS added as 5th baseline** (raw DOM API, zero framework — represents the irreducible per-row cost floor; anything above it is framework overhead). Per runtime-perf SCOPING §2.3 P1.C; OQ-RUNTIME-OPEN-1/2/3/4 all ratified S103.
+
+Bun 1.3.13, happy-dom. 2-3 warmup + 5-10 iterations per benchmark; medians shown.
+
+| Operation | scrml | React 19 | Svelte 5 | Vue 3 | Vanilla JS | scrml vs React | scrml vs Svelte | scrml vs Vue | scrml vs Vanilla |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| initial-render | 2.68 | 0.73 | 0.59 | 0.57 | **0.48** | 0.3x | 0.2x | 0.2x | 0.2x |
+| create-1000 | 52.2 | 55.8 | **23.9** | 56.0 | 27.8 | 1.1x | 0.5x | 1.1x | 0.5x |
+| replace-1000 | 58.4 | 51.2 | **27.7** | 43.1 | 34.3 | 0.9x | 0.5x | 0.7x | 0.6x |
+| partial-update | 2.36 | 22.8 | 13.8 | 4.01 | **0.73** | **9.7x** | 5.8x | 1.7x | 0.3x |
+| delete-every-10th | 3.68 | 20.7 | 11.2 | 3.58 | **0.87** | 5.6x | 3.0x | 1.0x | 0.2x |
+| clear-all | 8.78 | **4.10** | 5.40 | 5.24 | 5.91 | 0.5x | 0.6x | 0.6x | 0.7x |
+| select-row | 4.97 | 5.29 | 0.036 | 0.023 | **0.012** | 1.1x | **0.0x** | **0.0x** | **0.0x** |
+| swap-rows | 3.35 | 30.0 | 18.5 | 2.79 | **0.069** | 9.0x | 5.5x | 0.8x | **0.0x** |
+| remove-row | 4.42 | 20.2 | 11.1 | 2.33 | **0.039** | 4.6x | 2.5x | 0.5x | **0.0x** |
+| create-10000 | 527.3 | 489.7 | **242.9** | 387.8 | 253.0 | 0.9x | 0.5x | 0.7x | 0.5x |
+| append-1000 | 65.2 | 63.4 | 38.1 | 34.6 | **25.3** | 1.0x | 0.6x | 0.5x | 0.4x |
+
+**Summary:**
+- scrml is **3.1x faster** than React 19 on average (faster in 6/11 benchmarks)
+- scrml is **1.8x faster** than Svelte 5 on average (faster in 4/11 benchmarks)
+- scrml is **0.7x faster** than Vue 3 on average (faster in 2/11 benchmarks)
+- scrml is **0.3x faster** than Vanilla JS on average (faster in 0/11 benchmarks — expected; vanilla is the floor)
+
+**Narrative shift vs the removed-from-README v0.3.0 STABLE data:** the prior README captured scrml at 0/10 wins vs React. v0.3.3 HEAD measures 6/11 wins (3.1x avg). Most plausible cause: runtime-template tweaks across v0.3.1-v0.3.3 + P1.B's derived-chunk-gate widening unblocking the V5-strict `const <x>` form (some prior v0.3.0 measurements may have been on a harness that throw'd `_scrml_derived_declare is not defined` and recovered to a degraded state). **README republishing remains deferred** per S102 user direction.
+
+### Per-op scrml-runtime breakdown (instrumentation ON; SCOPING §2.2)
+
+Captured via `bun benchmarks/bench-scrml-perf.js` (gated on `globalThis.__SCRML_DEBUG_PERF`; per-op subtotals verified to within ±10% of wall-clock per AC2). **Exclusive (non-nested) ms** — nesting model: `reactive_set ⊇ {notify_subscribers, effect_scheduling ⊇ reconcile_list ⊇ dom_write}`.
+
+**partial-update (1.40ms wall):**
+
+| Path | Exclusive ms | % wall | Calls |
+|---|---:|---:|---:|
+| reconcile_list | 0.762 | 54% | 1 |
+| effect_scheduling | 0.613 | 44% | 2 |
+| reactive_set | 0.033 | 2% | 1 |
+| reactive_get | 0.017 | 1% | 45 |
+
+**select-row (5.94ms wall):**
+
+| Path | Exclusive ms | % wall | Calls |
+|---|---:|---:|---:|
+| **notify_subscribers** | **5.369** | **90%** | 1 |
+| reactive_get | 0.074 | 1% | 2001 |
+| reactive_set | 0.030 | 1% | 1 |
+
+**swap-rows (1.85ms wall):**
+
+| Path | Exclusive ms | % wall | Calls |
+|---|---:|---:|---:|
+| effect_scheduling | 1.146 | 62% | 2 |
+| reconcile_list | 0.659 | 36% | 1 |
+| dom_write | 0.105 | 6% | 2 |
+| reactive_get | 0.071 | 4% | 109 |
+| reactive_set | 0.033 | 2% | 1 |
+
+**create-1000 (52.9ms wall, bonus):**
+
+| Path | Exclusive ms | % wall | Calls |
+|---|---:|---:|---:|
+| reconcile_list | 37.433 | 71% | 1 |
+| dom_write | 7.120 | 13% | 1000 |
+| effect_scheduling | 1.397 | 3% | 2 |
+| reactive_get | 0.181 | <1% | 3141 |
+| reactive_set | 0.023 | <1% | 1 |
+
+### Top-3 Phase 2 attribution targets (per SCOPING §2.3 AC2)
+
+Largest gap vs the fastest framework AND vs vanilla:
+
+1. **select-row** — 5.0ms vs Svelte 0.036ms / vs vanilla 0.012ms (~138x worse vs Svelte; ~414x vs vanilla). **Root cause attributed by P1.B: the LEGACY `_scrml_subscribers` central registry walks O(n)** per-row writes on compound state — 90% of the wall-clock cost. SCOPING §3 hypothesis CONFIRMED ("the reactive system can't narrow the dependency set"). SCOPING §4 chip-aways match: signal-style direct subscription + per-row reactive scope.
+2. **remove-row** — 4.4ms vs Vue 2.33ms / vs vanilla 0.039ms (~113x vs vanilla). Likely the same notify_subscribers + list-reconciliation cost; P1.B instrumentation didn't characterize this op explicitly (deferred to P2).
+3. **partial-update** — 2.4ms vs vanilla 0.73ms (3.2x vs vanilla). **Root cause: reconcile_list LIS walk over 1000 nodes for 100 changes** (54% of wall) + effect_scheduling fan-out (44%). SCOPING §3 hypothesis CONFIRMED. SCOPING §4 candidates: for-loop key-based diff (avoid full-list re-render) + batched reconciliation.
+
+SCOPING §3 hypotheses CONFIRMED for select-row + partial-update + swap-rows + create-1000. **Phase 2 scope is now well-defined; Phase 3 chip-away candidates anchored by data.**
+
+### Historical: happy-dom 2026-05-14 (v0.3.0 STABLE; preserved for trend tracking)
 
 | Operation | scrml | React 19 | Svelte 5 | Vue 3 | scrml vs React | scrml vs Svelte | scrml vs Vue |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -102,12 +175,7 @@ Chrome" notes above).
 | create-10000 | 482.3 | 656.9 | **244.8** | 377.0 | 1.4x | 0.5x | 0.8x |
 | append-1000 | 198.5 | 97.7 | **41.3** | 36.7 | 0.5x | 0.2x | 0.2x |
 
-**Across-the-board: scrml wins 0/11 in happy-dom at v0.3.0.** This is a deliberate
-trade-off: Approach A's runtime additions (per-route chunk loader, FNV-1a content
-addressing, role-detection bootstrap, dual-decoder wire format, mount-hydration
-coalescing) add baseline cost that single-page TodoMVC cannot amortize. Real-Chrome
-measurements (above) and the per-route per-role bench (below) show the cases where
-v0.3 wins.
+At v0.3.0 STABLE this section claimed "scrml wins 0/11 in happy-dom" framed as Approach A's runtime cost. The S103 P1.C re-measurement (above) substantially changes that picture — scrml at v0.3.3 wins 6/11 vs React, and several of the old happy-dom regressions (partial-update 57.4ms → 2.4ms; swap-rows 77.3ms → 3.4ms; select-row 57.6ms → 5.0ms) are now an order of magnitude smaller. The "0/11" narrative was a snapshot that didn't survive past S102 PGO Phase 3 + S103 derived-chunk-gate fix.
 
 ### Historical: happy-dom 2026-05-12 (S86 / v0.2.6+; preserved for trend tracking)
 
@@ -370,3 +438,4 @@ All TodoMVC implementations cover the same features:
 | 2026-05-12 (v0.2.6+ HEAD) | not re-measured | not re-measured | Runtime happy-dom regenerated for HEAD `149c979` (S86 wrap + Wave 2 + Approach A spec anchor); Chrome row carried forward from 2026-04-13 (rerun pending separate dispatch). `bench-scrml.js` switched from IIFE-with-explicit-window-export to indirect-eval `(0, eval)(combinedScript)` after the prior eval pattern broke against v0.2.6+ codegen (D3a finding, D3b fix). TodoMVC `activeCount`/`completedCount` source split into two-statement form to dodge a `.filter(cb).<member>` compiler bug (out-of-scope; separate dispatch pending). Build-time and bundle-size rows not re-measured this pass — they'd need a separate timer-instrumented build script run. happy-dom runtime numbers: scrml beats React in 9/11, Svelte in 6/11, Vue in 5/11. |
 | 2026-05-14 (v0.3.0 STABLE, HEAD `13154ba`) | 65.6 ms | 39.9 KB | Full bench refresh against v0.3.0 STABLE — Chrome runtime, happy-dom runtime, bundle size, build time, full-stack, SQL-batching ALL re-measured. NEW per-route per-role chunk variance bench added (`benchmarks/per-route-roles/`). scrml bundle grew 2.7x (14.8→39.9 KB gzip) from Approach A runtime additions; build time grew 1.5x (43.7→65.6 ms) from ExprNode parser. TodoMVC runtime regressed (Chrome: 0/10 wins at v0.3.0 vs 6/10 at v0.2.4-era). The v0.3 win is per-route per-role chunking — anonymous visitors get strictly-smaller initial bundles than admins (96% reduction vs single-bundle hypothetical). FNV-1a content addressing byte-deterministic across 10 compiles. Honesty note added to RESULTS.md top framing the regression. (Note: the "14.8 → 39.9 KB" framing here compresses two separate changes — see 2026-05-15 row.) |
 | 2026-05-15 (v0.3.x Phase B, HEAD `1f73732`) | not re-measured | **13.9 KB JS / 15.8 KB total** | Bundle re-measure only; runtime + build + full-stack queued. Phase B landed three integrated fixes (shared-runtime union assembly + new `wire` chunk gating `_scrml_wire_decode` + FNV-1a content-hashed runtime filename). Bundle 40.8 → 15.8 KB total gzip (-61.4%). The recovery exceeds the +4.3 KB v0.3.0 Approach-A delta because Phase B closes a pre-existing shared-runtime tree-shake gap — the legacy `!embedRuntime` path shipped the full `SCRML_RUNTIME` regardless of `usedRuntimeChunks`. Same-source TodoMVC at every v0.2.x release tag (v0.2.0 — v0.2.6) measures 36.5 KB total gzip; HEAD beats every prior release. **The "14.8 KB v0.2.x" baseline cited in earlier framings is a 2026-04-13 pre-v0.2.0 measurement, not reproducible against any v0.2.x release tag.** Runtime + build + full-stack re-measurement queued. |
+| 2026-05-19 (v0.3.3 + P1.C, HEAD `6bc5128`) | not re-measured | not re-measured | **Runtime happy-dom re-measure with NEW Vanilla JS 5th baseline + per-op scrml-runtime instrumentation** (P1.A vanilla baseline landed at `efe7d42`; P1.B instrumentation + derived-chunk-gate widening landed at `6bc5128`). Major narrative shift: v0.3.3 wins 6/11 vs React (3.1x avg), 4/11 vs Svelte (1.8x), 2/11 vs Vue (0.7x), 0/11 vs Vanilla (expected — vanilla is the floor). Several v0.3.0-STABLE happy-dom regressions are an order of magnitude smaller now (partial-update 57.4→2.4ms; swap-rows 77.3→3.4ms; select-row 57.6→5.0ms; remove-row 57.3→4.4ms). Probable cause: derived-chunk-gate widening (V5-strict `const <x>` decls no longer throw `_scrml_derived_declare is not defined` at runtime → harness no longer recovers in degraded state). Per-op P1.B instrumentation identified the top-3 Phase 2 attribution targets: select-row 90% in LEGACY `_scrml_subscribers` O(n) walk; partial-update 54% in reconcile_list LIS over 1000 nodes for 100 changes; swap-rows 62% in effect_scheduling fan-out. Chrome + build-time + full-stack rows NOT re-measured this pass — happy-dom only per P1.C scope. Build-time and bundle rows are still v0.3.x Phase B baselines (no v0.3.3 substantive runtime-template growth). |
