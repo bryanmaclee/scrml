@@ -16,6 +16,18 @@
  *                                                 like Tailwind variant or
  *                                                 arbitrary-value syntax but
  *                                                 fail registry lookup
+ *   findUnrecognizedClasses(source)             — W-TAILWIND-UNRECOGNIZED-CLASS
+ *                                                 FLOOR-fix lint (dogfood Bug
+ *                                                 1, S108) for any class name
+ *                                                 in `class="..."` that does
+ *                                                 NOT resolve via
+ *                                                 `getTailwindCSS()`. Covers
+ *                                                 typos, unsupported arbitrary
+ *                                                 values, and custom CSS
+ *                                                 classes (acknowledged
+ *                                                 false-positive at floor
+ *                                                 level — adopters can suppress
+ *                                                 via `compilerSettings`).
  *
  * Variant prefixes supported (per §26.3): responsive (`sm:`–`2xl:`), state
  * pseudo-classes (`hover:`, `focus:`, `active:`, `disabled:`, `first:`,
@@ -1908,6 +1920,133 @@ export function findUnsupportedTailwindShapes(source) {
   }
 
   // Sort by line, then column for deterministic output (mirrors lintGhostPatterns).
+  diagnostics.sort((a, b) => a.line !== b.line ? a.line - b.line : a.column - b.column);
+  return diagnostics;
+}
+
+// ---------------------------------------------------------------------------
+// W-TAILWIND-UNRECOGNIZED-CLASS — FLOOR-fix lint for the broader silent-no-op
+// surface (dogfood Bug 1, S108).
+//
+// `findUnsupportedTailwindShapes` (above) fires only when a class string is
+// shaped like Tailwind variant/arbitrary syntax (contains `:` or `[`) but
+// fails registry lookup. That misses the dogfood-Bug-1 friction class: a
+// non-shaped class name (e.g. a typo `flexx` instead of `flex`, or an
+// unsupported arbitrary-value class whose engine returns null like
+// `grid-cols-[auto_1fr_auto]`) emits no CSS rule AND no diagnostic — layout
+// breaks silently and the adopter has nothing to chase.
+//
+// This pre-pass widens the surface: every class-name token inside a
+// `class="..."` attribute that fails `getTailwindCSS()` resolution gets a
+// `W-TAILWIND-UNRECOGNIZED-CLASS` info-level lint. The message points
+// adopters at three legitimate causes (typo / unsupported arbitrary / user
+// CSS class) so they can self-triage.
+//
+// FLOOR fix scope (vs full fix):
+//   - Floor (this code): lint-only. Acknowledged false-positives on custom
+//     user-defined CSS classes. Adopters using only Tailwind get clean
+//     diagnostics; mixed adopters can suppress via the
+//     `compilerSettings.lintTailwindUnrecognizedClass = "off"` knob.
+//   - Full (deferred): actually emit CSS for the unrecognized arbitrary-value
+//     classes (`grid-cols-[auto_1fr_auto]` -> `grid-template-columns:
+//     auto 1fr auto`) + a safelist/@apply mechanism to distinguish custom
+//     classes from misspellings.
+//
+// Severity: `info` (not `warning`) to keep it lower-noise than
+// W-TAILWIND-001. Both lints together cover the silent-no-op surface.
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {{
+ *   line: number,
+ *   column: number,
+ *   className: string,
+ *   message: string,
+ *   severity: 'info',
+ *   code: 'W-TAILWIND-UNRECOGNIZED-CLASS',
+ * }} TailwindUnrecognizedDiagnostic
+ */
+
+/**
+ * Scan a source string for class names inside `class="..."` attributes that
+ * do NOT resolve via `getTailwindCSS()`. Returns one diagnostic per offending
+ * `(offset, class)` pair. Within a single `class="..."` value duplicate
+ * offenders are reported once; across multiple `class=` attributes each
+ * occurrence is reported.
+ *
+ * `${...}` interpolation regions inside the attribute value are masked
+ * before scanning so dynamic-class expressions like
+ * `class="${cond ? 'a' : 'b'}"` do not produce spurious diagnostics on the
+ * interpolation contents.
+ *
+ * This function is intentionally permissive about what is a "class" — every
+ * whitespace-separated non-empty token in the attribute value is checked.
+ * Custom user-defined CSS classes (e.g. `counter-app`, `my-card`) will
+ * trigger the lint as false positives; adopters wanting them silenced
+ * should suppress via the compiler-settings opt-out (see api.js).
+ *
+ * Sibling `findUnsupportedTailwindShapes` (W-TAILWIND-001) keeps firing on
+ * Tailwind-shaped-but-unsupported classes (`group-hover:p-4`,
+ * `weird:p-4`, arbitrary-values the engine doesn't resolve). The two lints
+ * MAY both fire on the same class (e.g. `grid-cols-[auto_1fr_auto]`);
+ * adopters get more information about the failure mode, not less.
+ *
+ * @param {string} source
+ * @returns {TailwindUnrecognizedDiagnostic[]}
+ */
+export function findUnrecognizedClasses(source) {
+  if (!source || typeof source !== "string") return [];
+
+  const diagnostics = [];
+  const attrRe = /\bclass="([^"]*)"/g;
+  let attrMatch;
+
+  while ((attrMatch = attrRe.exec(source)) !== null) {
+    const attrValue = attrMatch[1];
+    const attrValueStart = attrMatch.index + attrMatch[0].indexOf('"') + 1;
+
+    // Mask out ${...} interpolation regions inside the attribute value so the
+    // JS expression contents (which may themselves contain class-name-shaped
+    // string literals or arbitrary tokens) do not generate diagnostics. The
+    // mask preserves length so source offsets stay accurate.
+    const masked = maskInterpolations(attrValue);
+
+    const classRe = /\S+/g;
+    let classMatch;
+    const seenInThisAttr = new Set();
+    while ((classMatch = classRe.exec(masked)) !== null) {
+      const cls = classMatch[0];
+      if (seenInThisAttr.has(cls)) continue;
+      seenInThisAttr.add(cls);
+
+      // Engine recognized the class -> no diagnostic. This covers base
+      // utilities (`flex`, `p-4`), supported variants (`md:p-4`,
+      // `hover:bg-blue-500`), and supported arbitrary values
+      // (`w-[420px]`, `p-[1.5rem]`).
+      if (getTailwindCSS(cls) !== null) continue;
+
+      // Unresolved -> emit the lint. The message names the three legitimate
+      // causes so adopters can self-triage without consulting docs.
+      const offset = attrValueStart + classMatch.index;
+      const { line, column } = offsetToLineCol(source, offset);
+      diagnostics.push({
+        line,
+        column,
+        className: cls,
+        message:
+          `W-TAILWIND-UNRECOGNIZED-CLASS: Class name '${cls}' is not a ` +
+          `recognized Tailwind utility. Either the class is misspelled, ` +
+          `is a Tailwind arbitrary-value class (e.g., ` +
+          `'grid-cols-[auto_1fr_auto]') which scrml's built-in Tailwind ` +
+          `engine does not yet support, or is a custom class defined ` +
+          `elsewhere. Workaround for arbitrary-value classes: drop a #{} ` +
+          `CSS shim block with the rules written by hand.`,
+        severity: "info",
+        code: "W-TAILWIND-UNRECOGNIZED-CLASS",
+      });
+    }
+  }
+
   diagnostics.sort((a, b) => a.line !== b.line ? a.line - b.line : a.column - b.column);
   return diagnostics;
 }
