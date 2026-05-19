@@ -98,15 +98,53 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
 function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   const chunks = ctx.usedRuntimeChunks;
   const allNodes: any[] = fileAST?.ast?.nodes ?? fileAST?.nodes ?? [];
+
+  // PGO Phase 3 follow-up C2 (S108) — fused TAB-time presence flags for the
+  // markup-tag + for-stmt chunk-gate surfaces. The walker
+  // `detectMarkupForStmtChunkPresence` (ast-builder.js) runs once at TAB time
+  // and caches { hasChunkedMarkupTag, hasForStmt } on the FileAST. Reading the
+  // flags here is O(1) — no descent, no walk. Sibling Option-2 pattern to
+  // hasResetExpr (S102) + hasEqualityExpr (S106).
+  //
+  // **hasForStmt gate (`buildFunctionBodyRegistry` skip):** the function-body
+  // registry exists ONLY to support the for-stmt iter-reactivity transitive
+  // probe (`iterableHasReactiveRefs` at the `case "for-stmt"` site below).
+  // When the file has NO for-stmt nodes, the registry is never consulted, so
+  // building it is pure waste. The S96 Issue C precedent (function-call
+  // transitive reactive deps) still applies for files that DO have for-stmts —
+  // we build the registry conditionally instead of unconditionally.
+  //
+  // **hasChunkedMarkupTag gate (in-walk markup tag-test skip):** when the
+  // file has NO markup tag in {timer/poll/timeout/keyboard/mouse/gamepad},
+  // the in-walk `case "markup"` tag-test block can be elided. The recursion
+  // into markup children still fires (other kinds may live inside markup).
+  //
+  // When either flag is `undefined` (synthetic AST / legacy caller / older
+  // FileAST shape), the in-walk probe and registry build both fall back to
+  // pre-fix behaviour (full work). This preserves correctness for any caller
+  // that doesn't go through the canonical `buildAST` path.
+  const __hasChunkedMarkupTagFlag = fileAST?.ast?.hasChunkedMarkupTag ?? fileAST?.hasChunkedMarkupTag;
+  const __hasForStmtFlag = fileAST?.ast?.hasForStmt ?? fileAST?.hasForStmt;
+  const __chunkedMarkupTagDefinitivelyAbsent = __hasChunkedMarkupTagFlag === false;
+  const __forStmtDefinitivelyAbsent = __hasForStmtFlag === false;
+
   // S96 Issue C — build the function-body registry once so the for-stmt
   // chunk-gate (case "for-stmt" below) can detect transitive reactive
   // dependencies through function-call iterables (`fn()` where fn body
   // reads `@state`). Without this, the gate misses Cases 3 + transitive
   // from the Option A table — see iterableHasReactiveRefs docstring.
   // Mirror of the registry build at emit-reactive-wiring.ts:286.
-  const fnRegistry = buildFunctionBodyRegistry(
-    fileAST?.ast ?? fileAST ?? {},
-  );
+  //
+  // PGO P3 follow-up C2 (S108) — skip the registry build when the TAB-time
+  // walker proved no for-stmt exists in the file. The registry is consumed
+  // only by `iterableHasReactiveRefs` at the `case "for-stmt"` site below,
+  // which never fires if no for-stmt exists. Skipping avoids a full AST
+  // collectFunctions walk for pure-logic / no-loop files.
+  const fnRegistry = __forStmtDefinitivelyAbsent
+    ? null
+    : buildFunctionBodyRegistry(
+        fileAST?.ast ?? fileAST ?? {},
+      );
 
   // PGO P3.B follow-up (Option 2, S102) — O(1) reset-expr chunk gate.
   //
@@ -589,17 +627,28 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
 
       // timers — <timer> and <poll> markup elements
       case "markup": {
-        const tag: string = node.tag ?? "";
-        if (tag === "timer" || tag === "poll" || tag === "timeout") {
-          chunks.add("timers");
-          chunks.add("deep_reactive"); // emitLifecycleNode uses _scrml_effect for running=@var
-        }
-        if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
-          chunks.add("input");
-        }
-        if (tag === "channel") {
-          // <channel> generates inline WebSocket code (no runtime chunk needed)
-          // but uses _scrml_register_cleanup — already in 'scope' (always included)
+        // PGO P3 follow-up C2 (S108) — gate the tag-test block on the AST-
+        // cached `hasChunkedMarkupTag` flag. When `false`, the TAB-time walker
+        // proved no markup tag in {timer/poll/timeout/keyboard/mouse/gamepad}
+        // exists anywhere in the AST, so the in-walk tag-test can be elided.
+        // The recursion into markup children below still fires (other kinds
+        // may live inside markup). When the flag is `undefined` (synthetic
+        // AST / legacy caller), fall back to pre-fix behaviour: run the tag-
+        // test. Channel tag is unconditional (no-op — kept for documentary
+        // value; structural-AST-kind detection already happens elsewhere).
+        if (!__chunkedMarkupTagDefinitivelyAbsent) {
+          const tag: string = node.tag ?? "";
+          if (tag === "timer" || tag === "poll" || tag === "timeout") {
+            chunks.add("timers");
+            chunks.add("deep_reactive"); // emitLifecycleNode uses _scrml_effect for running=@var
+          }
+          if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
+            chunks.add("input");
+          }
+          if (tag === "channel") {
+            // <channel> generates inline WebSocket code (no runtime chunk needed)
+            // but uses _scrml_register_cleanup — already in 'scope' (always included)
+          }
         }
         // Check for reactive for-loop (iterable is @varName) — within children
         if (Array.isArray(node.children)) {
@@ -618,6 +667,16 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         // are LOCAL (per §6.1.3 + E-NAME-COLLIDES-STATE), so "no @-ref" is
         // unambiguously snapshot semantics. See iterableHasReactiveRefs
         // in reactive-deps.ts for the helper.
+        //
+        // PGO P3 follow-up C2 (S108) — when `fnRegistry` is null (the TAB-time
+        // walker proved no for-stmt exists, so we skipped building the registry),
+        // this case can't fire. Defensively guard against an inconsistent state
+        // (case fires despite no registry) by falling back to the non-registry
+        // form of `iterableHasReactiveRefs`, which still checks direct @-refs
+        // and just misses the transitive fn-body case. Soundness > completeness:
+        // a missed transitive case here would only happen if the TAB-time walker
+        // returned `hasForStmt: false` when it should have been `true`, which
+        // would be a TAB-time bug. The fallback is purely defensive.
         const iterIsReactive = iterableHasReactiveRefs(node, fnRegistry);
         if (iterIsReactive) {
           chunks.add("reconciliation");
