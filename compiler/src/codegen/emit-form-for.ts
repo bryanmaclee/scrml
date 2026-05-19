@@ -423,6 +423,52 @@ function textNode(value: string, span: unknown): unknown {
 }
 
 /**
+ * Build a synthesized `${expr}` logic-interpolation node.
+ *
+ * S108 — formFor B5 L2 label-store consultation per SPEC §41.14.7. The
+ * expander needs to emit a per-label runtime lookup so `registerLabels()`
+ * actually shapes the rendered label, not just seeds a dead map.
+ *
+ * Shape produced (mirrors what `${expr}` in markup body produces during
+ * regular parse via ast-builder.js' implicit-logic-wrap path):
+ *
+ *   { kind: "logic", body: [{ kind: "bare-expr", expr, exprNode, span }], span }
+ *
+ * generateHtml's `node.kind === "logic"` case routes through:
+ *   - constant-fold (Bug 5 P3 §7.4.2) — `_scrml_label_for(...)` is a CallExpr,
+ *     not foldable → falls through
+ *   - placeholder + binding registry — `${_scrml_label_for("T", "f")}` has
+ *     NO reactive deps (no `@`-prefix) → routes through Bug 5 P1's
+ *     non-reactive `el.textContent = expr` one-shot binding at
+ *     DOMContentLoaded. This is exactly the right shape: registerLabels()
+ *     fires at module init (before DOMContentLoaded fires the formFor
+ *     bindings), the lookup walks Level 2 → Level 4, label is set once.
+ *     No subscription needed (the registry is set-once-at-boot, not
+ *     reactive).
+ */
+function logicInterpolationNode(exprRaw: string, span: unknown): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseExprToNode } = require("../expression-parser.ts") as {
+    parseExprToNode: (raw: string, filePath: string, offset: number) => unknown;
+  };
+  const filePath = (span as { file?: string } | undefined)?.file ?? "<formFor-synth>";
+  const offset = (span as { start?: number } | undefined)?.start ?? 0;
+  const exprNode = parseExprToNode(exprRaw, filePath, offset);
+  return {
+    id: nextSynthId(),
+    kind: "logic",
+    body: [{
+      kind: "bare-expr",
+      expr: exprRaw,
+      exprNode,
+      span,
+    }],
+    span,
+    _formForSynth: true,
+  };
+}
+
+/**
  * Build a Shape 2 state-decl (decl-with-render-spec). Per ast-builder.js
  * lines 3958-3993 — `renderSpec` wraps the markup, `validators` carries the
  * validator clauses, `shape: "decl-with-spec"`, `structuralForm: true`.
@@ -514,6 +560,7 @@ function buildCompoundStateDecl(
  */
 function buildFieldGroup(
   cellName: string,
+  structName: string,
   field: FieldInfo,
   slotOverride: unknown[] | undefined,
   errorStrategy: "per-field" | "summary" | "both",
@@ -521,11 +568,47 @@ function buildFieldGroup(
 ): unknown {
   const children: unknown[] = [];
 
-  // <label>Display Label</label>
+  // <label>${(typeof _scrml_label_for === "function" ? _scrml_label_for("StructName", "fieldName") : "Mechanical Default")}</label>
+  //
+  // S108 B5 — Level-2 label-store consultation. Per SPEC §41.14.7 the
+  // resolution chain walks Level 2 (registerLabels) → Level 4 (mechanical
+  // default). Pre-B5, the expander baked the Level-4 mechanical default
+  // (`field.label`) directly into the static HTML as a text node — adopters
+  // who called `data.registerLabels({...})` saw no effect because the
+  // expander never consulted the runtime store. B5 closes that gap by
+  // emitting a `${_scrml_label_for(...)}` interpolation that resolves at
+  // render time (DOMContentLoaded one-shot binding per Bug 5 P1 β-path).
+  //
+  // Defensive typeof-guard rationale: `_scrml_label_for` lives in the
+  // `messages` runtime chunk (co-located with `_scrml_messages_register` /
+  // `_scrml_message_for` per runtime-template.js:2922-2945). The chunk is
+  // only auto-activated at emit-client.ts:563 when a Level-1 inline-override
+  // validator is present. formFor without inline overrides may compile to a
+  // bundle that doesn't include the messages chunk; the typeof-guard makes
+  // the lookup safe in that case (fall back to the compile-time mechanical
+  // default literal embedded in the JS). Mirrors the existing pattern in
+  // emit-event-wiring.ts:667 for `_scrml_message_for` consumption in
+  // errors-element wiring.
+  //
+  // The interpolation flows through generateHtml's logic-node case:
+  //   - constant-fold (Bug 5 P3) tries the conditional expression → CallExpr
+  //     inside → RUNTIME → no fold
+  //   - placeholder + binding registered; no reactive refs → one-shot
+  //     textContent write at DOMContentLoaded
+  //
+  // The runtime helper falls through Level 2 → Level 4 internally so the
+  // adopter's unregistered fields still render their mechanical label, and
+  // registered fields render the custom label. registerLabels() seeds the
+  // map at module init (before DOMContentLoaded) so the lookup hits Level 2
+  // when registered.
+  const labelExpr =
+    `(typeof _scrml_label_for === "function" ` +
+    `? _scrml_label_for(${JSON.stringify(structName)}, ${JSON.stringify(field.name)}) ` +
+    `: ${JSON.stringify(field.label)})`;
   const labelNode = markupNode(
     "label",
     [],
-    [textNode(field.label, span)],
+    [logicInterpolationNode(labelExpr, span)],
     span,
     false,
   );
@@ -741,6 +824,7 @@ export function expandFormFor(exp: FormForExpansion): [unknown, unknown] {
     const slotOverride = exp.slotOverrides.get(field.name);
     fieldGroups.push(buildFieldGroup(
       exp.cellName,
+      exp.structName,
       field,
       slotOverride,
       exp.errorStrategy,

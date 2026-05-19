@@ -106,10 +106,15 @@ describe("§41.14 canonical example — flagship demo conformance", () => {
     expect(html).toContain(`data-scrml-formfor-field="agree"`);
   });
 
-  test("mechanical labels (title-cased field names) emitted", () => {
-    expect(html).toContain(`<label>Name</label>`);
-    expect(html).toContain(`<label>Email</label>`);
-    expect(html).toContain(`<label>Agree</label>`);
+  test("label placeholders emitted; runtime resolves via _scrml_label_for (S108 B5)", () => {
+    // S108 B5 — labels emit a `${_scrml_label_for("Signup", "field")}` interpolation
+    // placeholder per SPEC §41.14.7. The runtime helper walks Level 2 (registerLabels)
+    // → Level 4 (mechanical title-case) at DOMContentLoaded. Pre-B5 emitted the
+    // mechanical default as a static text node; B5 routes it through the runtime
+    // chain so `data.registerLabels({Signup: {name: "Full Name"}})` actually shapes
+    // the rendered label.
+    const labelMatches = html.match(/<label><span data-scrml-logic="_scrml_logic_\d+"><\/span><\/label>/g) ?? [];
+    expect(labelMatches.length).toBe(3); // one per field (name + email + agree)
   });
 
   test("string fields emit <input type='text'> with bind:value wiring", () => {

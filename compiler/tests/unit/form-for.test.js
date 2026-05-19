@@ -136,9 +136,21 @@ describe("§1 formFor happy path", () => {
     expect(html).toContain(`<button type="submit"`);
     // Per-field <errors> placeholder (default per-field strategy).
     expect(html).toContain(`data-scrml-errors-anchor`);
-    // <label> elements with mechanical-default labels.
-    expect(html).toContain(`<label>Name</label>`);
-    expect(html).toContain(`<label>Email</label>`);
+    // <label> elements emit a `${_scrml_label_for(...)}` interpolation
+    // placeholder (S108 B5 — Level-2 label-store consultation per SPEC
+    // §41.14.7). The static HTML carries the placeholder; one-shot
+    // textContent write at DOMContentLoaded resolves Level 2 (registerLabels)
+    // → Level 4 (mechanical title-case) via the typeof-guarded runtime call.
+    expect(html).toMatch(/<label><span data-scrml-logic="_scrml_logic_\d+"><\/span><\/label>/);
+    const clientJs = getClientJs(result, fx("happy/signup-html.scrml", ""));
+    // Wiring contains the _scrml_label_for call for the name + email fields
+    expect(clientJs).toContain(`_scrml_label_for`);
+    expect(clientJs).toContain(`"Signup"`);
+    expect(clientJs).toContain(`"name"`);
+    expect(clientJs).toContain(`"email"`);
+    // Mechanical default literals embedded as typeof-guard fallback
+    expect(clientJs).toContain(`"Name"`);
+    expect(clientJs).toContain(`"Email"`);
   });
 
   test("emitted clientJs subscribes to signup.<field>.errors", () => {

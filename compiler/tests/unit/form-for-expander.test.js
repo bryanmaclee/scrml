@@ -231,7 +231,21 @@ describe("expandFormFor — synthesized AST shape", () => {
 
     // Children: label, compound-wrap, errors.
     expect(firstFieldDiv.children[0].tag).toBe("label");
-    expect(firstFieldDiv.children[0].children[0].value).toBe("Name");
+    // S108 B5 — Label child is now a synthesized `logic` node carrying a
+    // `${_scrml_label_for("Signup", "name")}` interpolation (typeof-guarded
+    // for `messages` chunk tree-shake — falls back to "Name" mechanical
+    // default literal). Pre-B5 was a plain text node with the title-case
+    // value baked at compile time. Bug 5 P1 β-path one-shot binding at
+    // DOMContentLoaded wires `registerLabels` consultation per
+    // SPEC §41.14.7 Level 2 → Level 4 chain.
+    const labelChild = firstFieldDiv.children[0].children[0];
+    expect(labelChild.kind).toBe("logic");
+    expect(labelChild.body[0].kind).toBe("bare-expr");
+    expect(labelChild.body[0].expr).toContain("_scrml_label_for");
+    expect(labelChild.body[0].expr).toContain('"Signup"');
+    expect(labelChild.body[0].expr).toContain('"name"');
+    // Mechanical default literal is the typeof-guard fallback
+    expect(labelChild.body[0].expr).toContain('"Name"');
     expect(firstFieldDiv.children[2].tag).toBe("errors");
     const errorsOfAttr = firstFieldDiv.children[2].attrs.find(a => a.name === "of");
     expect(errorsOfAttr.value.kind).toBe("variable-ref");
