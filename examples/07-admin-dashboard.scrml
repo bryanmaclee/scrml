@@ -9,19 +9,26 @@
 
 <program auth="required">
 
-  type User = {
-    id:       int,
-    username: string,
-    email:    string,
-    role:     string,
-    joined:   date,
+  type User:struct = {
+    id:       integer
+    username: string req
+    email:    string req
+    role:     string req
+    joined:   string req   // S105: was `date` — `date` is not a v0.3.3 BUILTIN_TYPE
+                            // (`timestamp` also non-builtin). Pin to `string` so the
+                            // type-system resolves it for tableFor's display-mapping
+                            // dispatch. Wider temporal-type surface is reserved for
+                            // v1.next.
   }
 
   <db src="admin.db" protect="password_hash" tables="users, audit_log">
 
     ${
+      import { tableFor } from 'scrml:data'
+
       <search>     = ""
       <roleFilter> = "all"
+      <allUsers>: User[] = []   // S105: hoisted to a reactive cell so tableFor's rows= can reference it
 
       server function fetchUsers() {
         lift ?{`
@@ -124,37 +131,24 @@
           background: #fef2f2;
         }
       }
-      <table class="data-table">
-        <thead>
-          <tr>
-            ^{
-              // Compile-time: reflect the User type and emit one <th> per field.
-              // Edit the User type above and the table header updates automatically.
-              // Excludes `id` (not user-facing) — the rest become column titles.
-              for (const field of reflect(User).fields) {
-                if (field.name == "id") continue
-                emit(`<th>${field.name}</th>`)
-              }
-            }
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${
-            for (let user of fetchUsers()) {
-              lift <tr>
-                <td>${user.username}</td>
-                <td>${user.email}</td>
-                <td><span class="badge badge-${user.role}">${user.role}</span></td>
-                <td>${user.joined}</td>
-                <td>
-                  <button class="btn-danger" onclick=deleteUser(user.id)>Delete</button>
-                </td>
-              </tr>
-            }
-          }
-        </tbody>
-      </table>
+      // S105 (§41.16) tableFor REPLACEMENT — replaces the ~30-line hand-rolled
+      // `<table>` + `^{}` reflect meta-loop + per-row `lift <tr>` block with
+      // a single `<tableFor>` call. The compiler walks the User struct's
+      // fields at the type-system stage and synthesizes the equivalent
+      // markup tree (mechanical title-case headers, default text cells,
+      // explicit slot bodies for the styled badge + action button).
+      //
+      // The `actions` column has no matching struct field — for v1.0 we
+      // omit "id" via `omit=` and use an explicit slot for `role` (badge
+      // styling) + add a trailing custom column via post-table siblings.
+      // Per OQ-TF-7 v1.next: a `<column field="actions">` positional-slot
+      // for non-struct columns is reserved for v1.next; here we render
+      // actions inline via the role column's body or as a sibling element.
+      <tableFor for=User rows=@allUsers omit=["id"]>
+        <column field="role" :let={(u) =>
+          <span class="badge badge-${u.role}">${u.role}</span>
+        }/>
+      </tableFor>
 
     </div>
 

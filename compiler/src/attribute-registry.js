@@ -316,6 +316,53 @@ ELEMENT_ATTR_REGISTRY.set("formfor", {
 });
 
 // ---------------------------------------------------------------------------
+// <tableFor> — type-driven `<table>` rendering (SPEC §41.16, S105).
+//
+// Markup-element form `<tableFor for=StructType rows=@cell [pick=[...]]
+// [omit=[...]] [selectable=@cell] [selectedBy="field"]>`. Per §41.16 attribute
+// grammar mirrors formFor's compile-time structural-element shape where the
+// type identifier + cell-reference are consumed verbatim at the type-system
+// stage.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("tablefor", {
+  allowedAttrs: new Map([
+    ["for",         attrSpec({ supportsInterpolation: false })],
+    ["rows",        attrSpec({ supportsInterpolation: false })],
+    ["pick",        attrSpec({ supportsInterpolation: false })],
+    ["omit",        attrSpec({ supportsInterpolation: false })],
+    ["selectable",  attrSpec({ supportsInterpolation: false })],
+    ["selectedBy",  attrSpec({ supportsInterpolation: false })],
+  ]),
+});
+
+// ---------------------------------------------------------------------------
+// <column> — per-column slot inside tableFor (SPEC §41.16.3, S105).
+// Slot grammar — `field=` is required; rest are optional per-column overrides.
+// `:let=` is a parametric snippet binding parameter (§16.6).
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("column", {
+  allowedAttrs: new Map([
+    ["field",     attrSpec({ supportsInterpolation: false })],
+    ["header",    attrSpec({ supportsInterpolation: false })],
+    ["sortable",  attrSpec({ supportsInterpolation: false })],
+    ["align",     attrSpec({ supportsInterpolation: false })],
+    ["class",     attrSpec({ supportsInterpolation: false })],
+    [":let",      attrSpec({ supportsInterpolation: false })],
+  ]),
+});
+
+// ---------------------------------------------------------------------------
+// <empty> — empty-state slot inside tableFor (SPEC §41.16.9, S105).
+// No attributes — body content is the entire payload.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("empty", {
+  allowedAttrs: new Map([]),
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

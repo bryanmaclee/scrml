@@ -1917,7 +1917,12 @@ describe("§35 State Type Registry", () => {
       // S90 A-3.1: <auth> role-gate is structural (SPEC §40.9.9) — non-DOM-rendering.
       // S102 §41.14: <formFor for=Type/> is type-driven form-gen — non-DOM (codegen
       //   replaces it with the equivalent Shape 2 + <form> + <errors> markup tree).
-      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor"]);
+      // S105 §41.16: <tableFor for=Type rows=@cell/> is type-driven table-gen —
+      //   non-DOM (codegen replaces it with the equivalent <table>+<thead>+<tbody>
+      //   markup tree). <column> and <empty> are tableFor child slots — also
+      //   non-DOM (consumed by the type-system pass; expanded into <th>/<td>
+      //   markup at expansion time).
+      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty"]);
       for (const [name, st] of reg) {
         if (nonDomElements.has(name)) {
           expect(st.isHtml).toBe(false);

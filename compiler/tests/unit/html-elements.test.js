@@ -101,7 +101,7 @@ describe("void elements", () => {
 
 describe("rendersToDom", () => {
   it("is true for all HTML elements", () => {
-    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor"]);
+    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty"]);
     for (const tag of getAllElementNames()) {
       if (nonDomElements.has(tag)) continue; // scrml structural elements
       expect(getElementShape(tag).rendersToDom).toBe(true);

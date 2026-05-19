@@ -669,6 +669,95 @@ REGISTRY.set("formfor", {
 });
 
 // ---------------------------------------------------------------------------
+// <tableFor> — type-driven `<table>` rendering (SPEC §41.16, S105).
+//
+// Fourth general-position member of the §53.14 type-as-argument family
+// (after parseVariant §41.13 + formFor §41.14 + schemaFor §41.15).
+// Compile-time recognized at the type-system stage (cross-ref §53.14.5) —
+// the parser produces a regular markup node; the TS pass validates the
+// `for=` + `rows=` attributes against the file's struct typeRegistry and
+// rewrites the node into a `<table>` + `<thead>` + `<tbody>` markup tree
+// (per §41.16.11 Pillar 5 invariant).
+//
+// Attributes (per SPEC §41.16):
+//   for=         — required struct-type identifier (E-TABLEFOR-TYPE-NOT-STRUCT)
+//   rows=        — required @cell or expression yielding T[] (E-TABLEFOR-ROWS-MISSING)
+//   pick=        — optional array of field names to include
+//   omit=        — optional array of field names to exclude
+//   selectable=  — optional @cell for selection surface (E-TABLEFOR-NO-PRIMARY-KEY)
+//   selectedBy=  — optional PK field-name override (default "id")
+//
+// Children (per §41.16.3 + §41.16.9):
+//   <column field="X" [header=...] [sortable] [align=...] [class=...]>
+//   <empty>...fallback markup...</empty>
+//
+// rendersToDom: false — codegen replaces this node with the synthesized
+// markup tree; nothing renders FROM the tableFor tag itself.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("tablefor", {
+  tag: "tableFor",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["for",         attr("string", true)],   // required — struct type identifier
+    ["rows",        attr("string", true)],   // required — @cellOrExpr yielding T[]
+    ["pick",        attr("string")],         // optional — array literal of field names
+    ["omit",        attr("string")],         // optional — array literal of field names
+    ["selectable",  attr("string")],         // optional — @cell for selection
+    ["selectedBy",  attr("string")],         // optional — PK field-name override
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
+// <column> — per-column slot for tableFor (SPEC §41.16.3, S105).
+//
+// Recognized only inside `<tableFor>` elements; the type-system stage walks
+// `<column>` children to capture per-column overrides. Outside `<tableFor>`,
+// `<column>` is treated as a generic element (HTML doesn't define `<column>`;
+// the spec-name allows it as a generic markup tag without special semantics).
+//
+// Attributes (per SPEC §41.16.3):
+//   field=    — required struct-field name (E-TABLEFOR-COLUMN-FIELD-UNKNOWN)
+//   header=   — optional header text override (mechanical default per §41.16.4)
+//   sortable  — optional flag; opts column into sort surface
+//   align=    — optional "left" | "right" | "center"
+//   class=    — optional CSS class applied to both <th> and <td>
+//   :let=     — optional parametric snippet `{(row) => ...}` for row-binding name
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("column", {
+  tag: "column",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["field",     attr("string", true)],   // required
+    ["header",    attr("string")],         // optional
+    ["sortable",  attr("boolean")],        // optional flag
+    ["align",     attr("string")],         // optional "left"|"right"|"center"
+    [":let",      attr("string")],         // optional row-binding lambda
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
+// <empty> — empty-state slot for tableFor (SPEC §41.16.9, S105).
+//
+// Recognized inside `<tableFor>` elements; provides fallback content rendered
+// inside an auto-wrapped `<tr><td colspan=N>...</td></tr>` when rows.length == 0.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("empty", {
+  tag: "empty",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

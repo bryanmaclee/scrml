@@ -1,0 +1,148 @@
+// Example 27: Type-derived table — `<tableFor for=T rows=@cell>` (§41.16).
+//
+// Demonstrates v0.4 L22-family type-as-argument primitive #4 (after
+// parseVariant + formFor + schemaFor). The admin-UI-lift display sibling
+// of formFor (§41.14):
+//
+//   - formFor   (§41.14) — struct → <form> + validators + submit
+//   - tableFor  (§41.16) — struct + rows → <table> + headers + cells
+//
+// What `formFor` does for INPUT, `tableFor` does for OUTPUT. Both ride
+// the markup-element form per OQ-FF-1 (formFor) + OQ-TF-1 (tableFor, 53/60
+// vs function-call 34/60 vs block-attribute 29/60).
+//
+// What the compiler does at S105:
+//   1. Recognizes `<tableFor for=User rows=@users/>` at type-system stage
+//      (§41.16.11 + §53.14.5).
+//   2. Resolves the `for=` attribute to the User struct definition.
+//   3. Walks each struct field; classifies the display kind (§41.16.6):
+//      - string         → bare ${row.field}
+//      - integer/number → bare ${row.field}
+//      - boolean        → "true"/"false" via bare ${row.field}
+//      - bare-variant enum → variant name via bare ${row.field}
+//   4. Emits the equivalent canonical scrml markup tree (Pillar 5):
+//        <table data-scrml-tablefor="User">
+//          <thead>
+//            <tr>
+//              <th>Id</th>
+//              <th>Email</th>
+//              ...
+//            </tr>
+//          </thead>
+//          <tbody>
+//            ${for (row of @users) {
+//              lift <tr>
+//                <td>${row.id}</td>
+//                <td>${row.email}</td>
+//                ...
+//              </tr>;
+//            } else {
+//              lift <tr><td colspan=5>No rows to display</td></tr>;
+//            }}
+//          </tbody>
+//        </table>
+//   5. Splices the synthesized AST in place of the original `<tableFor>`
+//      node. The downstream pipeline (DG / VSS / CG) processes the result
+//      identically to a hand-authored `<table>` + iteration block.
+//
+// Per-column slot overrides (§41.16.3):
+//   <column field="X" header="Custom Header" sortable align="right" class="...">
+//     adopter-authored markup using row.X
+//   </column>
+//
+// Sort surface (§41.16.7) — when ANY `<column sortable>`:
+//   - Click handler bound on the corresponding <th>
+//   - Toggles `@<varName>.sortedBy = {field, direction}` per click
+//   - Adopter consumes `@<varName>.sortedBy` to wire a comparator on rows
+//
+// Selection surface (§41.16.8) — when `selectable=@cell` is set:
+//   - Leading checkbox column auto-prepended
+//   - Master checkbox in <thead> toggles all-on/all-off
+//   - Per-row checkbox toggles row's PK in @cell
+//   - PK field defaults to "id"; override via `selectedBy="field"`
+//
+// Empty state (§41.16.9) — when rows source is empty:
+//   - Default text "No rows to display" in a wrapped <tr><td colspan>
+//   - <empty>...</empty> slot overrides the default text
+//
+// Cross-references:
+//   SPEC §41.16      — tableFor (the whole feature)
+//   SPEC §41.16.4    — mechanical title-case header default
+//   SPEC §41.16.6    — per-cell display-mapping (the dispatch table)
+//   SPEC §41.16.7    — sort surface
+//   SPEC §41.16.8    — selection surface
+//   SPEC §41.16.9    — empty-state with <empty> slot
+//   SPEC §41.16.11   — Pillar 5 invariant (emitted output IS canonical scrml)
+//   SPEC §53.14.3    — type-as-argument family roster (L22 member #4)
+//   examples/26-type-derived-schema.scrml — symmetric SQL DDL surface (schemaFor)
+
+${
+    import { tableFor } from 'scrml:data'
+
+    type UserRole:enum = { Admin, Editor, Viewer }
+
+    type User:struct = {
+        id:    integer
+        email: string req
+        name:  string req
+        role:  string req
+    }
+}
+
+<program>
+    <users> = [
+        { id: 1, email: "alice@example.com",  name: "Alice Anderson", role: "Admin"  },
+        { id: 2, email: "bob@example.com",    name: "Bob Brown",      role: "Editor" },
+        { id: 3, email: "carol@example.com",  name: "Carol Chen",     role: "Viewer" },
+        { id: 4, email: "dave@example.com",   name: "Dave Davis",     role: "Editor" }
+    ]
+    <selectedIds>: integer[] = []
+
+    function editUser(id) {
+        // adopter-authored handler — would navigate to /users/edit/${id}
+    }
+
+    function deleteUser(id) {
+        // adopter-authored handler — would delete the user
+    }
+
+    <h1>Users</h1>
+
+    <p>Selected: ${@selectedIds.length} of ${@users.length}</p>
+
+    // CANONICAL FORM — default rendering, all fields, mechanical title-case headers.
+    //
+    // Compiler-emitted equivalent (post-expansion):
+    //   <table data-scrml-tablefor="User">
+    //     <thead>
+    //       <tr>
+    //         <th class="tableFor-select"> <input type="checkbox" .../> </th>
+    //         <th>Id</th>
+    //         <th data-scrml-tablefor-sortable="email" onclick=...>Email</th>
+    //         <th data-scrml-tablefor-sortable="name"  onclick=...>Name</th>
+    //         <th>Role</th>
+    //       </tr>
+    //     </thead>
+    //     <tbody>
+    //       ${ for (user of @users) {
+    //         lift <tr>
+    //           <td class="tableFor-select"> <input type="checkbox" ... bind:checked=...>/</td>
+    //           <td>${user.id}</td>
+    //           <td>${user.email}</td>
+    //           <td>${user.name}</td>
+    //           <td><span class="badge badge-${user.role}">${user.role}</span></td>
+    //         </tr>;
+    //       } }
+    //     </tbody>
+    //   </table>
+    <tableFor for=User rows=@users selectable=@selectedIds>
+        <column field="email" sortable/>
+        <column field="name"  sortable/>
+        <column field="role" :let={(user) =>
+            <span class="badge badge-${user.role}">${user.role}</span>
+        }/>
+        <empty>
+            <p>No users yet. <a href="/users/new">Invite the first one</a>.</p>
+        </empty>
+    </tableFor>
+</program>

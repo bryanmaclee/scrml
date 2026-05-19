@@ -1,0 +1,145 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:data/table-for — type-driven `<table>` rendering (L22 family member #4)
+    //
+    // tableFor — the type-driven `<table>` generator. Canonical usage is the
+    //   MARKUP ELEMENT FORM:
+    //
+    //       import { tableFor } from 'scrml:data'
+    //
+    //       type User:struct = {
+    //           id:        integer
+    //           email:     string req
+    //           name:      string req
+    //           role:      UserRole req
+    //           createdAt: timestamp
+    //       }
+    //
+    //       type UserRole:enum = { Admin, Editor, Viewer }
+    //
+    //       <users> = []
+    //       <selectedIds>: integer[] = []
+    //
+    //       <tableFor for=User rows=@users selectable=@selectedIds>
+    //           <column field="email"/>
+    //           <column field="name"/>
+    //           <column field="role" sortable>
+    //               <span class="badge badge-${row.role}">${row.role}</span>
+    //           </column>
+    //           <column field="createdAt" header="Joined" sortable/>
+    //           <column field="actions" :let={(user) =>
+    //               <button onclick=editUser(user.id)>Edit</button>
+    //           }/>
+    //           <empty>
+    //               <p>No users yet. <a href="/users/new">Invite the first one</a>.</p>
+    //           </empty>
+    //       </tableFor>
+    //
+    //   That call expands at compile time into a `<table>` with `<thead>`
+    //   (one `<th>` per included struct field) + `<tbody>` (one `<tr>` per
+    //   row in `@users`, with one `<td>` per included field per row, default-
+    //   rendered from the struct's field type or overridden via the matching
+    //   `<column>` slot body). Opt-in `sortable` columns synthesize a sort-
+    //   state reactive cell + click handlers on the relevant `<th>`s. Opt-in
+    //   `selectable=@cell` wires a leading checkbox column to the adopter-
+    //   declared `T[]` cell. The `<empty>` slot overrides the default empty-
+    //   state markup.
+    //
+    // The flagship value-add (vs hand-rolled `<table>` + per-row `lift <tr>`):
+    //   - Mechanical title-case headers (`createdAt` → "Created At") with
+    //     `header="..."` override per column.
+    //   - Type-driven per-cell default rendering (string, integer, boolean,
+    //     timestamp, bare-variant enum) per §41.16.6.
+    //   - Auto-synth sort cell + click-handlers (`sortable` attr per column).
+    //   - Selection surface with master + per-row checkboxes (`selectable=`).
+    //   - For/else empty-state with `<empty>` slot override.
+    //   - Pick/omit field-set transforms per §41.16.5.
+    //
+    // TableSort:struct — the v1.0 sort-state shape used by the auto-synthesized
+    //   sort cell. Adopters consume it via `@<varName>SortedBy.field` /
+    //   `@<varName>SortedBy.direction` reads when wiring a comparator on the
+    //   rows source. The shape is normative; v1.0 commits to (field, direction).
+    //   Field is the struct's bare field-name string; direction is either
+    //   "asc" or "desc". Initial value (no sort applied) is `not`.
+    //
+    // 13 normative error codes per SPEC §41.16.1-§41.16.9 (also catalogued at
+    //   SPEC §34):
+    //
+    //   E-TABLEFOR-TYPE-NOT-STRUCT             — `for=` is not a `:struct` type
+    //   E-TABLEFOR-ROWS-WRONG-TYPE             — `rows=` does not evaluate to T[]
+    //   E-TABLEFOR-ROWS-MISSING                — `rows=` attribute absent
+    //   E-TABLEFOR-COLUMN-FIELD-UNKNOWN        — <column field="X"> names non-field
+    //   E-TABLEFOR-PICK-INVALID-FIELD          — pick names a non-field
+    //   E-TABLEFOR-OMIT-INVALID-FIELD          — omit names a non-field
+    //   E-TABLEFOR-PICK-OMIT-CONFLICT          — both pick + omit given
+    //   E-TABLEFOR-NESTED-STRUCT-NO-SLOT       — struct-typed field; explicit slot required
+    //   E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1     — payload-bearing enum; v1.next
+    //   E-TABLEFOR-NO-DISPLAY-MAPPING          — field type has no v1.0 display mapping
+    //   E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS — sortable column + non-cell rows= source
+    //   E-TABLEFOR-NO-PRIMARY-KEY              — selectable= but no id field + no selectedBy=
+    //   E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE  — selectable=@cell type != PK-field[]
+    //
+    // Cross-references:
+    //   - SPEC §41.16    — tableFor (canonical surface + 13 normative error codes)
+    //   - SPEC §41.16.4  — mechanical title-case header default
+    //   - SPEC §41.16.6  — per-cell default rendering (display-mapping)
+    //   - SPEC §41.16.7  — sort surface (auto-synth sort cell)
+    //   - SPEC §41.16.8  — selection surface (selectable= + PK derivation)
+    //   - SPEC §41.16.9  — empty-state (<empty> slot)
+    //   - SPEC §53.14.3  — type-as-argument family roster (L22 member #4)
+    //   - SPEC §41.13    — parseVariant (family member #1)
+    //   - SPEC §41.14    — formFor (family member #2; markup-element form precedent)
+    //   - SPEC §41.15    — schemaFor (family member #3)
+    //   - compiler/src/codegen/emit-table-for.ts — source-level AST expander
+    // ---------------------------------------------------------------------------
+
+    /**
+     * TableSort — the v1.0 sort-state shape used by auto-synthesized sort cells.
+     *
+     * When ANY `<column sortable>` is present on a `<tableFor>` call, the
+     * compiler synthesizes a sibling state cell `<<varName>SortedBy>` of type
+     * `TableSort | not`. Adopters read `@<varName>SortedBy.field` and
+     * `@<varName>SortedBy.direction` to wire a comparator on the rows source.
+     *
+     * Initial value (no sort applied at module init): `not`.
+     *
+     * Per SPEC §41.16.7:
+     *   - Clicking an unsorted column sets {field: "X", direction: "asc"}.
+     *   - Re-clicking the same column toggles direction asc↔desc.
+     *   - Clicking a different sortable column switches to that column at asc.
+     */
+    type TableSort:struct = {
+        field:     string req
+        direction: string req
+    }
+
+    /**
+     * tableFor(StructType, ...) — MOD-stage resolution stub.
+     *
+     * The canonical usage is the markup element form. The function body in
+     * this module is a defensive fallback only — the compiler's type-system
+     * stage recognizes `<tableFor for=StructType rows=...>` directly and
+     * rewrites the node to a canonical `<table>` + `<thead>` + `<tbody>`
+     * markup tree (Pillar 5 invariant per §41.16.11).
+     *
+     * Calls to `tableFor(...)` as a function (rather than markup-element form)
+     * are NOT supported in v1.0 — the markup-element form is canonical per
+     * OQ-TF-1 verdict (53/60 vs 34/60 function-call form vs 29/60 block-attribute).
+     *
+     * This export exists so `import { tableFor } from 'scrml:data'` resolves
+     * at MOD stage.
+     *
+     * @param StructType - The `:struct` type identifier (recognized at compile
+     *                     time via the typeRegistry).
+     * @param options    - Optional row/sort/selection metadata. See SPEC §41.16
+     *                     for the full attribute grammar on the markup form.
+     */
+    export function tableFor(StructType, options) {
+        // Unreachable under a correct compiler — every `<tableFor>` element is
+        // rewritten by the type-system stage before any code-emission stage
+        // could see it. This body exists only so `import { tableFor }`
+        // resolves at MOD stage.
+    }
+}
+</program>

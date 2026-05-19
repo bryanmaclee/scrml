@@ -4137,6 +4137,69 @@ function annotateNodes(
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // §41.16 / §53.14 — tableFor markup-element recognition + AST rewrite pass.
+  //
+  // tableFor is the FOURTH general-position member of the §53.14 type-as-
+  // argument family (after parseVariant §41.13 + formFor §41.14 + schemaFor
+  // §41.15). The TS pass:
+  //
+  //   1. Collect local names that bind to `tableFor` from imports of
+  //      `'scrml:data'`.
+  //   2. Walk every `<tableFor>` markup node in the file's AST.
+  //   3. Validate per §41.16.1-§41.16.9 (the 13 normative error codes).
+  //   4. Build a TableForExpansion plan + invoke the emit-table-for expander
+  //      to synthesize the equivalent `<table>` + `<thead>` + `<tbody>` tree
+  //      plus an optional `<<varName>SortedBy>` state-decl (when sortable=).
+  //   5. Splice the synthesized nodes in place of the original `<tableFor>`
+  //      node in the parent's children array.
+  //
+  // The rewrite makes the downstream stages (DG / VSS / CG) see a tree that
+  // is identical in shape to hand-authored `<table>` + `${ for ... lift <tr>
+  // ... }` markup. Per §41.16.11 the emitted output is standard scrml —
+  // Pillar 5 invariant.
+  // ---------------------------------------------------------------------------
+  const tableForLocals = new Set<string>();
+  function collectTableForImports(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "import-decl" && (n as ASTNodeLike).source === "scrml:data") {
+        const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
+        if (Array.isArray(specifiers)) {
+          for (const spec of specifiers) {
+            if (spec && spec.imported === "tableFor" && typeof spec.local === "string") {
+              tableForLocals.add(spec.local);
+            }
+          }
+        } else if (Array.isArray(n.names)) {
+          for (const name of n.names as unknown[]) {
+            if (typeof name === "string" && name === "tableFor") {
+              tableForLocals.add("tableFor");
+            }
+          }
+        }
+      }
+      const body = n.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectTableForImports(body);
+      const children = n.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectTableForImports(children);
+    }
+  }
+  collectTableForImports(_allTopNodes);
+
+  if (tableForLocals.size > 0) {
+    const _tfDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    walkAndExpandTableForNodes(
+      _allTopNodes,
+      tableForLocals,
+      typeRegistry,
+      _structFieldRawClauses,
+      errors,
+      filePath,
+      _tfDefaultSpan,
+    );
+  }
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown();
 
@@ -10985,6 +11048,529 @@ function walkAndExpandSchemaForCalls(
 
   walkPassA(nodes);
   walkPassB(nodes);
+}
+
+// ---------------------------------------------------------------------------
+// §41.16 — tableFor validation + AST rewrite helpers.
+//
+// Recognition + validation runs at the type-system stage per §53.14.5.
+// The expander synthesizes a `<table>` + `<thead>` + `<tbody>` markup tree
+// (cross-ref compiler/src/codegen/emit-table-for.ts) plus an optional sort-
+// state cell when ANY `<column sortable>` is present.
+//
+// Architectural decisions:
+//   - Markup-element form `<tableFor for=StructType rows=@cell ...>` (Form A
+//     per OQ-TF-1 53/60 verdict; mirrors formFor §41.14 shape).
+//   - Single-pass walker: tableFor elements are top-level markup; no schemaFor-
+//     style two-pass context discrimination needed.
+//   - <column>/<empty> are tableFor-local children (NOT §16 component slots) —
+//     parsed via the walker's direct child inspection.
+//   - 13 normative error codes per §41.16.1-§41.16.9.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the bare cell-variable name from a rows= expression.
+ *
+ *   "@users"                  → "users"
+ *   "@items.filter(p)"        → "items"
+ *   "@all.slice(0,10)"        → "all"
+ *   "@records.map(f).sort(g)" → "records"
+ *   "users"                   → null   (not an @-rooted cell-ref)
+ *   "[]"                      → null   (literal array)
+ *
+ * Returns the bare cell-var name on success; null when the expression has no
+ * `@<ident>` root form. Used to derive the sort-state synth-cell name.
+ */
+function _tfExtractRowsCellName(rowsExpr: string): string | null {
+  if (!rowsExpr) return null;
+  const trimmed = rowsExpr.trim();
+  if (!trimmed.startsWith("@")) return null;
+  // Match `@<ident>` (ident may continue but we want the bare root before any .).
+  const m = trimmed.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)/);
+  if (!m) return null;
+  return m[1];
+}
+
+/**
+ * Process a single `<tableFor>` AST node — validate per §41.16.1-§41.16.9
+ * and build the TableForExpansion plan. Returns the synthesized AST replacements
+ * on success, null on validation failure (errors already pushed).
+ *
+ * Implementation note: this function is invoked by the walker for each
+ * `<tableFor>` element; the walker handles the AST splice once a valid
+ * expansion is produced.
+ */
+function _processTableForNode(
+  node: ASTNodeLike,
+  typeRegistry: Map<string, ResolvedType>,
+  structFieldRawClauses: Map<string, Map<string, string>>,
+  errors: TSError[],
+  defaultSpan: Span,
+): { sortStateDecl: unknown | null; tableElement: unknown } | null {
+  // Late-load the expander module to avoid a static cycle.
+  const codegen = require("./codegen/emit-table-for.ts") as typeof import("./codegen/emit-table-for.ts");
+  const span = ((node.span as Span | undefined) ?? defaultSpan);
+  const attrs = (node.attrs as ASTNodeLike[] | undefined) ?? (node.attributes as ASTNodeLike[] | undefined);
+
+  // §41.16.1 — Validate `for=` attribute.
+  const forAttr = _ffGetAttrRawValue(attrs, "for");
+  if (!forAttr || !forAttr.rawValue) {
+    errors.push(new TSError(
+      "E-TABLEFOR-TYPE-NOT-STRUCT",
+      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=...>\` is missing the required \`for=\` attribute. ` +
+      `The \`for=\` attribute SHALL be a bare scrml-native \`:struct\` type identifier — e.g. \`<tableFor for=User rows=@users/>\`. ` +
+      `See SPEC §41.16.1.`,
+      forAttr?.span ?? span,
+    ));
+    return null;
+  }
+  if (forAttr.valueKind === "string-literal") {
+    errors.push(new TSError(
+      "E-TABLEFOR-TYPE-NOT-STRUCT",
+      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=...>\` was given a quoted string value '"${forAttr.rawValue}"'. ` +
+      `The \`for=\` attribute SHALL be a bare scrml-native \`:struct\` type identifier — not a string literal. ` +
+      `Example: \`<tableFor for=User rows=@users/>\` (NOT \`<tableFor for="User"/>\`). See SPEC §41.16.1.`,
+      forAttr.span ?? span,
+    ));
+    return null;
+  }
+  const structTypeName = forAttr.rawValue;
+  const resolved = typeRegistry.get(structTypeName);
+  if (!resolved) {
+    errors.push(new TSError(
+      "E-TABLEFOR-TYPE-NOT-STRUCT",
+      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=${structTypeName}>\` references unknown type '${structTypeName}'. ` +
+      `The \`for=\` attribute must name a scrml-native \`:struct\` type declared in this file ` +
+      `(or imported via \`\${ import { ${structTypeName} } from './path.scrml' }\`). See SPEC §41.16.1.`,
+      forAttr.span ?? span,
+    ));
+    return null;
+  }
+  if (resolved.kind !== "struct") {
+    errors.push(new TSError(
+      "E-TABLEFOR-TYPE-NOT-STRUCT",
+      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${resolved.kind}, not a struct. ` +
+      `\`tableFor\` only accepts scrml-native \`:struct\` types — the field set is what drives the auto-generated columns. ` +
+      `For enum-shape boundary parsing, use \`parseVariant\` (§41.13); for form generation, use \`formFor\` (§41.14); for SQL DDL generation, use \`schemaFor\` (§41.15). See SPEC §41.16.1.`,
+      forAttr.span ?? span,
+    ));
+    return null;
+  }
+  const structType = resolved as StructType;
+
+  // §41.16.2 — Validate `rows=` attribute.
+  const rowsAttr = _ffGetAttrRawValue(attrs, "rows");
+  if (!rowsAttr || !rowsAttr.rawValue) {
+    errors.push(new TSError(
+      "E-TABLEFOR-ROWS-MISSING",
+      `E-TABLEFOR-ROWS-MISSING: \`<tableFor for=${structTypeName}/>\` omits the required \`rows=\` attribute. ` +
+      `Add \`rows=@cellOrExpr\` where the expression resolves to '${structTypeName}[]'. ` +
+      `See SPEC §41.16.2.`,
+      rowsAttr?.span ?? span,
+    ));
+    return null;
+  }
+  // The rows expression is consumed verbatim into the synth for-loop. For v1.0
+  // the type-check of `rows=` against `StructType[]` is delegated to the regular
+  // type-system pass once the synth for-loop sees the iterable in expression
+  // position — string-literal misuse is rejected here as a structural shape.
+  if (rowsAttr.valueKind === "string-literal") {
+    errors.push(new TSError(
+      "E-TABLEFOR-ROWS-WRONG-TYPE",
+      `E-TABLEFOR-ROWS-WRONG-TYPE: \`<tableFor rows=...>\` was given a quoted string value '"${rowsAttr.rawValue}"'. ` +
+      `The \`rows=\` attribute SHALL evaluate to an array of '${structTypeName}' values — e.g. \`rows=@users\` or \`rows=@items.filter(p)\`. ` +
+      `See SPEC §41.16.2.`,
+      rowsAttr.span ?? span,
+    ));
+    return null;
+  }
+  const rowsExpr = rowsAttr.rawValue;
+  const rowsCellVarName = _tfExtractRowsCellName(rowsExpr);
+
+  // §41.16.5 — Validate pick=/omit=.
+  const pickAttr = _ffGetAttrRawValue(attrs, "pick");
+  const omitAttr = _ffGetAttrRawValue(attrs, "omit");
+  if (pickAttr && omitAttr) {
+    errors.push(new TSError(
+      "E-TABLEFOR-PICK-OMIT-CONFLICT",
+      `E-TABLEFOR-PICK-OMIT-CONFLICT: \`<tableFor>\` was given BOTH \`pick=\` AND \`omit=\` attributes. ` +
+      `The two are mutually exclusive — \`pick=\` names the only fields to render; \`omit=\` names fields to exclude. ` +
+      `Resolution: choose one. See SPEC §41.16.5.`,
+      span,
+    ));
+    return null;
+  }
+  let pickList: string[] | null = null;
+  if (pickAttr && pickAttr.rawValue) {
+    pickList = _ffParseStringArray(pickAttr.rawValue);
+    if (!pickList) {
+      errors.push(new TSError(
+        "E-TABLEFOR-PICK-INVALID-FIELD",
+        `E-TABLEFOR-PICK-INVALID-FIELD: \`<tableFor pick=...>\` value '${pickAttr.rawValue}' is not a recognized array-of-strings literal. ` +
+        `Use the form \`pick=["fieldA", "fieldB"]\` with bare field-name strings. See SPEC §41.16.5.`,
+        pickAttr.span ?? span,
+      ));
+      return null;
+    }
+    for (const fieldName of pickList) {
+      if (!structType.fields.has(fieldName)) {
+        errors.push(new TSError(
+          "E-TABLEFOR-PICK-INVALID-FIELD",
+          `E-TABLEFOR-PICK-INVALID-FIELD: \`<tableFor for=${structTypeName} pick=[...]>\` references field '${fieldName}' which is not present on struct '${structTypeName}'. ` +
+          `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.16.5.`,
+          pickAttr.span ?? span,
+        ));
+        return null;
+      }
+    }
+  }
+  let omitList: string[] | null = null;
+  if (omitAttr && omitAttr.rawValue) {
+    omitList = _ffParseStringArray(omitAttr.rawValue);
+    if (!omitList) {
+      errors.push(new TSError(
+        "E-TABLEFOR-OMIT-INVALID-FIELD",
+        `E-TABLEFOR-OMIT-INVALID-FIELD: \`<tableFor omit=...>\` value '${omitAttr.rawValue}' is not a recognized array-of-strings literal. ` +
+        `Use the form \`omit=["fieldA", "fieldB"]\` with bare field-name strings. See SPEC §41.16.5.`,
+        omitAttr.span ?? span,
+      ));
+      return null;
+    }
+    for (const fieldName of omitList) {
+      if (!structType.fields.has(fieldName)) {
+        errors.push(new TSError(
+          "E-TABLEFOR-OMIT-INVALID-FIELD",
+          `E-TABLEFOR-OMIT-INVALID-FIELD: \`<tableFor for=${structTypeName} omit=[...]>\` references field '${fieldName}' which is not present on struct '${structTypeName}'. ` +
+          `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.16.5.`,
+          omitAttr.span ?? span,
+        ));
+        return null;
+      }
+    }
+  }
+
+  // §41.16.8 — Validate selectable= + selectedBy=.
+  const selectableAttr = _ffGetAttrRawValue(attrs, "selectable");
+  const selectedByAttr = _ffGetAttrRawValue(attrs, "selectedBy");
+  let selection: import("./codegen/emit-table-for.ts").TableForSelectionInfo | null = null;
+  if (selectableAttr && selectableAttr.rawValue) {
+    const selectableRef = selectableAttr.rawValue.startsWith("@")
+      ? selectableAttr.rawValue.slice(1)
+      : selectableAttr.rawValue;
+    // PK field — default "id"; overridden via selectedBy=.
+    let pkFieldName = "id";
+    if (selectedByAttr && selectedByAttr.rawValue) {
+      pkFieldName = selectedByAttr.rawValue;
+    }
+    // Validate PK field exists.
+    if (!structType.fields.has(pkFieldName)) {
+      // Special case the default "id" → fire E-TABLEFOR-NO-PRIMARY-KEY with the canonical message.
+      if (pkFieldName === "id") {
+        errors.push(new TSError(
+          "E-TABLEFOR-NO-PRIMARY-KEY",
+          `E-TABLEFOR-NO-PRIMARY-KEY: \`<tableFor for=${structTypeName} selectable=@${selectableRef}/>\` has no \`id\` field on struct '${structTypeName}' AND no \`selectedBy=\` override was provided. ` +
+          `The selection surface needs a primary-key field to track which rows are selected. ` +
+          `Resolution: add an \`id\` field to the struct, OR add \`selectedBy="<some-other-field>"\` to the \`<tableFor>\` naming the PK field explicitly. ` +
+          `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.16.8.`,
+          selectableAttr.span ?? span,
+        ));
+      } else {
+        errors.push(new TSError(
+          "E-TABLEFOR-NO-PRIMARY-KEY",
+          `E-TABLEFOR-NO-PRIMARY-KEY: \`<tableFor for=${structTypeName} selectedBy="${pkFieldName}"/>\` names PK field '${pkFieldName}' which is not present on struct '${structTypeName}'. ` +
+          `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.16.8.`,
+          selectedByAttr?.span ?? span,
+        ));
+      }
+      return null;
+    }
+    // E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE — we'd need to resolve the cell's
+    // declared type via the file's stateTypeRegistry to compare against
+    // <pkFieldType>[]. The stateTypeRegistry is not threaded into this helper
+    // for v1.0 — the regular type-system pass downstream will catch type
+    // mismatches via the synthesized `${@cell.includes(row.id)}` expressions
+    // (the array's element type vs the row PK's type). This is a known
+    // FOLLOWUP (§41.16.8 P2 — strict pre-emit type-check) but doesn't block
+    // the surface. We emit the diagnostic gate only when we have the data;
+    // here we accept the cell and trust the downstream type-checker.
+    selection = { cellName: selectableRef, pkFieldName };
+  }
+
+  // Walk children: collect <column> + <empty> slots.
+  const childNodes = (node.children as ASTNodeLike[] | undefined) ?? [];
+  const columnNodes: ASTNodeLike[] = [];
+  let emptySlot: unknown[] | null = null;
+  let emptySlotCount = 0;
+  for (const child of childNodes) {
+    if (!child || typeof child !== "object") continue;
+    if (child.kind !== "markup") continue;
+    const tag = (child.tag as string | undefined) ?? ((child as ASTNodeLike).tagName as string | undefined);
+    if (tag === "column") {
+      columnNodes.push(child);
+    } else if (tag === "empty") {
+      emptySlotCount++;
+      emptySlot = (child.children as unknown[] | undefined) ?? [];
+    }
+  }
+  // Multiple <empty> slots — invalid (§41.16.9).
+  if (emptySlotCount > 1) {
+    errors.push(new TSError(
+      "E-TABLEFOR-COLUMN-FIELD-UNKNOWN",  // closest applicable; the SPEC §41.16.9 cites "parser error per §16"
+      `Multiple \`<empty>\` slots on \`<tableFor for=${structTypeName}>\` — the empty-slot is unique per §41.16.9. ` +
+      `Resolution: remove the duplicate \`<empty>\` block(s).`,
+      span,
+    ));
+    return null;
+  }
+
+  // §41.16.3 — Build per-column overrides.
+  const columnOverrides = new Map<string, {
+    headerText: string | null;
+    slotBody: unknown[];
+    rowBindingName: string;
+    sortable: boolean;
+    align: "left" | "right" | "center" | null;
+    cssClass: string | null;
+  }>();
+  for (const colNode of columnNodes) {
+    const colAttrs = (colNode.attrs as ASTNodeLike[] | undefined) ?? (colNode.attributes as ASTNodeLike[] | undefined);
+    const fieldAttr = _ffGetAttrRawValue(colAttrs, "field");
+    if (!fieldAttr || !fieldAttr.rawValue) {
+      // <column> without field= — surface as invalid-field with hint.
+      errors.push(new TSError(
+        "E-TABLEFOR-COLUMN-FIELD-UNKNOWN",
+        `E-TABLEFOR-COLUMN-FIELD-UNKNOWN: A \`<column>\` slot inside \`<tableFor for=${structTypeName}>\` is missing the required \`field="<fieldName>"\` attribute. ` +
+        `Each \`<column>\` must name a struct field. Positional + computed-column slots are RESERVED for v1.next. ` +
+        `See SPEC §41.16.3.`,
+        (colNode.span as Span | undefined) ?? span,
+      ));
+      return null;
+    }
+    const fieldName = fieldAttr.rawValue;
+    if (!structType.fields.has(fieldName)) {
+      errors.push(new TSError(
+        "E-TABLEFOR-COLUMN-FIELD-UNKNOWN",
+        `E-TABLEFOR-COLUMN-FIELD-UNKNOWN: \`<tableFor for=${structTypeName}>\` contains a \`<column field="${fieldName}">\` slot referencing field '${fieldName}' which is not present on struct '${structTypeName}'. ` +
+        `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.16.3.`,
+        (colNode.span as Span | undefined) ?? span,
+      ));
+      return null;
+    }
+    const headerAttr = _ffGetAttrRawValue(colAttrs, "header");
+    const sortableAttr = _ffGetAttrRawValue(colAttrs, "sortable");
+    const alignAttr = _ffGetAttrRawValue(colAttrs, "align");
+    const classAttr = _ffGetAttrRawValue(colAttrs, "class");
+    const letAttr = _ffGetAttrRawValue(colAttrs, ":let");
+
+    // :let="(row) => ..." — extract binding name from the lambda head. v1.0
+    // syntax accepted: `(name) => ...` OR bare `name` (no parens). We pull the
+    // first ident from the value.
+    let rowBindingName = "row";
+    if (letAttr && letAttr.rawValue) {
+      // Strip leading "(" if present; pull first ident.
+      let s = letAttr.rawValue.trim();
+      if (s.startsWith("(")) s = s.slice(1).trim();
+      const m = s.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+      if (m) rowBindingName = m[1];
+    }
+    // Sortable is a boolean-flag attribute — present means true.
+    const sortable = !!(sortableAttr && (
+      sortableAttr.valueKind === "boolean-flag"
+      || sortableAttr.rawValue === "true"
+      || sortableAttr.rawValue === ""   // bare flag form
+      || sortableAttr.valueKind === "absent"
+    ));
+    const align = (alignAttr?.rawValue === "left" || alignAttr?.rawValue === "right" || alignAttr?.rawValue === "center")
+      ? alignAttr.rawValue as "left" | "right" | "center"
+      : null;
+    const cssClass = classAttr?.rawValue || null;
+
+    columnOverrides.set(fieldName, {
+      headerText: headerAttr?.rawValue || null,
+      slotBody: (colNode.children as unknown[] | undefined) ?? [],
+      rowBindingName,
+      sortable,
+      align,
+      cssClass,
+    });
+  }
+
+  // §41.16.5 — Compute the included field set.
+  const allFieldNames = [...structType.fields.keys()];
+  let includedFieldNames: string[];
+  if (pickList) {
+    includedFieldNames = pickList;
+  } else if (omitList) {
+    const omitSet = new Set(omitList);
+    includedFieldNames = allFieldNames.filter(f => !omitSet.has(f));
+  } else {
+    includedFieldNames = allFieldNames;
+  }
+
+  // §41.16.6 — Build TableForColumnInfo per included field; validate display-mapping.
+  // Per formFor + schemaFor precedent: the struct-body parser drops trailing
+  // validator predicates and lowers `email: string req length(<=120)` to `asIs`.
+  // We recover the actual base-type by re-parsing the leading token of the raw
+  // clause text and re-resolving through typeRegistry. Mirrors
+  // _processSchemaForCallInSchemaContext (lines 10718-10741).
+  const rawClauses = structFieldRawClauses.get(structTypeName) ?? new Map<string, string>();
+  const columns: import("./codegen/emit-table-for.ts").TableForColumnInfo[] = [];
+  let hasSortable = false;
+  for (const fieldName of includedFieldNames) {
+    let fieldType = structType.fields.get(fieldName) as unknown;
+    if (!fieldType) continue;
+    const ftKind = (fieldType && typeof fieldType === "object")
+      ? ((fieldType as { kind?: string }).kind ?? "unknown")
+      : "unknown";
+    if (ftKind === "asIs" || ftKind === "unknown") {
+      const clauseRaw = rawClauses.get(fieldName) ?? "";
+      const m = clauseRaw.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+      if (m) {
+        const tokenName = m[1];
+        const r = typeRegistry.get(tokenName);
+        if (r) fieldType = r;
+      }
+    }
+    const override = columnOverrides.get(fieldName);
+    const hasExplicitSlot = !!(override && override.slotBody && (override.slotBody as unknown[]).length > 0);
+    const displayKind = codegen.classifyFieldForCell(fieldType);
+
+    // Errors are suppressed when an explicit slot body is provided (the adopter
+    // is telling us how to render the otherwise-unmappable type).
+    if (!hasExplicitSlot) {
+      if (displayKind.kind === "nested-struct") {
+        errors.push(new TSError(
+          "E-TABLEFOR-NESTED-STRUCT-NO-SLOT",
+          `E-TABLEFOR-NESTED-STRUCT-NO-SLOT: \`<tableFor for=${structTypeName}>\` has a struct-typed field '${fieldName}' (type '${displayKind.structName}') AND no explicit \`<column field="${fieldName}">\` slot override was provided. ` +
+          `Auto-recurse into nested struct fields is out-of-scope for v1.0 (mirror formFor §41.14.8 OQ-FF-11 v1.0 disposition). ` +
+          `Resolution: provide a \`<column field="${fieldName}">\` slot body that renders the nested struct (e.g., \`\${row.${fieldName}.street}, \${row.${fieldName}.city}\`), OR exclude the field via \`omit=["${fieldName}"]\`. ` +
+          `See SPEC §41.16.6.`,
+          span,
+        ));
+        return null;
+      }
+      if (displayKind.kind === "payload-enum") {
+        errors.push(new TSError(
+          "E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1",
+          `E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1: \`<tableFor for=${structTypeName}>\` has field '${fieldName}' typed as a payload-bearing enum '${displayKind.enumName}' (one or more variants carry payload data). ` +
+          `v1.0 has no default rendering for payload variants. ` +
+          `Resolution: provide an explicit \`<column field="${fieldName}">\` slot body with adopter-authored payload rendering, OR refactor to a bare-variant enum if the payload is not load-bearing, OR exclude via \`omit=["${fieldName}"]\`. ` +
+          `See SPEC §41.16.6.`,
+          span,
+        ));
+        return null;
+      }
+      if (displayKind.kind === "unmappable") {
+        errors.push(new TSError(
+          "E-TABLEFOR-NO-DISPLAY-MAPPING",
+          `E-TABLEFOR-NO-DISPLAY-MAPPING: \`<tableFor for=${structTypeName}>\` has field '${fieldName}' whose declared type (${displayKind.typeKind}) has no v1.0 display mapping. ` +
+          `Unmappable shapes include function types, snippet types, Promise types, foreign-code types, deep-reactive proxy types, arrays, and arbitrary opaque types. ` +
+          `Resolution: exclude the field via \`omit=["${fieldName}"]\`, OR provide an explicit \`<column field="${fieldName}">\` slot body with adopter-authored rendering, OR refactor the struct to use a renderable type. ` +
+          `See SPEC §41.16.6.`,
+          span,
+        ));
+        return null;
+      }
+    }
+
+    // Build the column descriptor.
+    const headerText = override?.headerText ?? codegen.tableHeaderTitleCase(fieldName);
+    const sortable = !!override?.sortable;
+    if (sortable) hasSortable = true;
+    columns.push({
+      fieldName,
+      headerText,
+      displayKind,
+      slotBody: hasExplicitSlot ? (override!.slotBody as unknown[]) : null,
+      rowBindingName: override?.rowBindingName ?? "row",
+      sortable,
+      align: override?.align ?? null,
+      cssClass: override?.cssClass ?? null,
+    });
+  }
+
+  // §41.16.7 — Sort surface requires rows= to be a cell reference.
+  if (hasSortable && !rowsCellVarName) {
+    errors.push(new TSError(
+      "E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS",
+      `E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS: \`<tableFor for=${structTypeName} rows=${rowsExpr}>\` has at least one \`<column sortable>\` but the \`rows=\` expression is not a cell reference (no \`@\`-root). ` +
+      `The sort surface synthesizes a state cell named after the rows source, which requires \`rows=@<varName>\` (with optional \`.method()\` chains). ` +
+      `Resolution: hoist the rows expression into a reactive cell (\`<rows> = ...\` then \`rows=@rows\`), OR remove the \`sortable\` attribute from \`<column>\` slots if external sort is not needed. ` +
+      `See SPEC §41.16.7.`,
+      span,
+    ));
+    return null;
+  }
+
+  // Build the expansion plan + invoke the expander.
+  const expansion: import("./codegen/emit-table-for.ts").TableForExpansion = {
+    structName: structTypeName,
+    rowsExpr,
+    rowsCellVarName,
+    columns,
+    hasSortable,
+    selection,
+    emptySlot,
+    span,
+  };
+  const { sortStateDecl, tableElement } = codegen.expandTableForElement(expansion);
+  return { sortStateDecl, tableElement };
+}
+
+/**
+ * Walk the file's AST and find every `<tableFor>` markup-element node;
+ * validate per §41.16.1-§41.16.9; on success, rewrite the parent's children
+ * array to splice in the synthesized sort-state-decl (if any) + <table>
+ * markup tree.
+ *
+ * Parent threading: we cannot rely on parent backrefs (AST construction
+ * doesn't populate them). Instead, the walker iterates over each parent's
+ * `children`/`body` array and detects tableFor children itself, splicing in
+ * the synthesized nodes when a match is found.
+ */
+function walkAndExpandTableForNodes(
+  nodes: ASTNodeLike[],
+  tableForLocals: Set<string>,
+  typeRegistry: Map<string, ResolvedType>,
+  structFieldRawClauses: Map<string, Map<string, string>>,
+  errors: TSError[],
+  _filePath: string,
+  defaultSpan: Span,
+): void {
+  void _filePath;
+  void tableForLocals;  // not needed during walking — the markup tag is the gate
+
+  function walkAndSplice(arr: ASTNodeLike[] | undefined): void {
+    if (!Array.isArray(arr)) return;
+    // Walk in reverse so splice insertions don't disturb forward indices for
+    // siblings we haven't visited. Each tableFor child expands to 1-2 nodes.
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const child = arr[i];
+      if (!child || typeof child !== "object") continue;
+      if (child.kind === "markup") {
+        const tag = (child.tag as string | undefined)
+          ?? ((child as ASTNodeLike).tagName as string | undefined);
+        if (tag === "tableFor" || tag === "tablefor") {
+          const synth = _processTableForNode(child, typeRegistry, structFieldRawClauses, errors, defaultSpan);
+          if (synth) {
+            // Splice: sortStateDecl (if any) + tableElement in place of the original node.
+            const replacements: ASTNodeLike[] = [];
+            if (synth.sortStateDecl) replacements.push(synth.sortStateDecl as ASTNodeLike);
+            replacements.push(synth.tableElement as ASTNodeLike);
+            arr.splice(i, 1, ...replacements);
+          }
+          continue;  // do not recurse into the tableFor's children (they're consumed)
+        }
+      }
+      // Recurse into children + body of non-tableFor nodes.
+      const cChildren = (child as ASTNodeLike).children as ASTNodeLike[] | undefined;
+      if (Array.isArray(cChildren)) walkAndSplice(cChildren);
+      const cBody = (child as ASTNodeLike).body as ASTNodeLike[] | undefined;
+      if (Array.isArray(cBody)) walkAndSplice(cBody);
+    }
+  }
+
+  walkAndSplice(nodes);
 }
 
 // ---------------------------------------------------------------------------
