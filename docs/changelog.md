@@ -2,9 +2,9 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-18 **S104** — schemaFor impl SHIPPED): pre-commit subset **~12,870 pass / 0 fail** (baseline 12,807 + 62 new schemaFor tests + 1 sample fixture). **THE FLAGSHIP closing announcement:** OQ-SCH-12 enum lowering — `schemaFor(StructType)` automatically lowers bare-variant enum-typed struct fields to `text req oneOf([variant-names...])`, which §39.5.8 then expands to `CHECK (col IN ('Pending','Active',...))`. This closes the enum-knowledge-loss-at-DB-boundary gap that hand-authored `<schema>` blocks routinely leak: 23-trucking-dispatch currently has 7 enum columns stored as bare `text not null` — `INSERT INTO loads VALUES (..., 'BogusStatus')` slips through unstoppable. schemaFor mechanically encodes the constraint, making the variant set a load-bearing DB invariant rather than a developer-recall-checklist. Two-line authoring (`type Status:enum = { Pending, ... }` + `status: Status req` in struct) replaces three-step manual SQL CHECK authoring + remembering to update it on every variant addition. schemaFor is the THIRD active L22 type-as-argument family member (after parseVariant S65 + formFor S102-S103), closing the §39+L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") waiting since L4 landed S58.
+Current baseline (2026-05-19 **S104 CLOSE** — schemaFor impl SHIPPED + Phase 3.B SCOPING + 5 non-compliance derefs + agent-crash partial-recovery WIN): pre-commit subset **12,872 pass / 88 skip / 1 todo / 0 fail / 670 files / 43,337 expect**; full `bun run test` (pre-push gate) **15,709 pass / 169 skip / 0 fail** + TodoMVC gauntlet quick check PASS. Delta vs S103 close (12,807): **+65 pass / +2 files / +118 expect / 0 fail / 0 regressions**. Two commits pushed to origin: scrmlTS `8a6cd85` (23-file S104 bundle) + scrml-support `4a1d1c1` (4 archive landings). **THE FLAGSHIP closing announcement:** OQ-SCH-12 enum lowering — `schemaFor(StructType)` automatically lowers bare-variant enum-typed struct fields to `text req oneOf([variant-names...])`, which §39.5.8 then expands to `CHECK (col IN ('Pending','Active',...))`. This closes the enum-knowledge-loss-at-DB-boundary gap that hand-authored `<schema>` blocks routinely leak: 23-trucking-dispatch currently has 7 enum columns stored as bare `text not null` — `INSERT INTO loads VALUES (..., 'BogusStatus')` slips through unstoppable. schemaFor mechanically encodes the constraint, making the variant set a load-bearing DB invariant rather than a developer-recall-checklist. Two-line authoring (`type Status:enum = { Pending, ... }` + `status: Status req` in struct) replaces three-step manual SQL CHECK authoring + remembering to update it on every variant addition. schemaFor is the THIRD active L22 type-as-argument family member (after parseVariant S65 + formFor S102-S103), closing the §39+L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") waiting since L4 landed S58.
 
-### 2026-05-18 (S104 — schemaFor impl SHIPPED — closing the enum-knowledge-loss-at-DB-boundary gap; L22 family member #3)
+### 2026-05-19 (S104 CLOSE — schemaFor impl SHIPPED — L22 family member #3 + Phase 3.B SCOPING + agent-crash partial-recovery WIN + 5 non-compliance derefs)
 
 **Session-defining outcome — OQ-SCH-12 enum-lowering: the FLAGSHIP value-add.**
 
@@ -42,6 +42,80 @@ Enum-typed struct fields automatically lower to `text req oneOf([variant-names..
 | `variantNames(EnumType)` / reflective metadata | planned |
 
 3 active members shipped + 1 STASHED + 2 planned. The §53.14.4 discipline gate is empirically working (3 rejected at debate-05 + 1 STASHED vs 4 advanced).
+
+**Agent dispatch — partial-recovery WIN.** schemaFor dispatched via `scrml-js-codegen-engineer` agent, `isolation: "worktree"`, opus, run in background. Agent ran 5h 40m / 218 tool uses; API stream-idle-timeout interrupted the FINAL REPORT MESSAGE only. All 8 work units (survey + stdlib + codegen + type-system + unit tests + integration tests + sample/example + close commit) had committed to the agent branch BEFORE the timeout, per S83 commit-discipline two-sided rule. PA crash-recovery audit confirmed: zero path-discipline leak into main (S99 hardening held); worktree status clean; agent branch tip `02fd3bb` had complete deliverables. File-delta land per S67 protocol — 13 files, +2618 LOC, single PA-authored bundle commit `8a6cd85`. Validated pre-commit subset 12,872 pass / 0 fail / +65 vs S103 close; pre-push gate full `bun run test` 15,709 pass / 0 fail + TodoMVC quick check PASS. **Crash at report-time, not work-time — recovery cost was the file-delta operation only (~5min PA-time).**
+
+**PA-direct work parallel to schemaFor dispatch** — Phase 2.2 runtime-perf attribution per Q-RT2-OPEN-3 ratified fold. Walked partial-update + swap-rows hotspots end-to-end against `runtime-template.js:1237-1376` reconcile_list + `:2382-2403` _scrml_trigger. Produced `docs/changes/runtime-perf-phase-3-partial-update-and-swap/SCOPING.md` (Phase 3.B SCOPING). 4 candidates ranked: B2 same-keys-in-same-order fast-path (HIGH; ~30-50% partial-update savings), B4 count-derived dep precision (MED-HIGH; ~30-50% partial + ~20-40% swap), B3 batched microtask reconcile (gated on B2+B4 measured residual; behavior change), B1 array-reorder fast-path (DEFER — pathway walk showed already fast-bailing). 5 OQs surfaced for ratification. **Counter-intuitive finding:** scrml partial-update already wins Chrome (1.00ms vs Vanilla 2.60ms, React 4.65ms, Svelte 4.10ms); Phase 3.B candidates target happy-dom + swap-rows where Chrome gap remains (scrml 2.20ms vs Vanilla 1.00ms = 2.2× floor).
+
+**Stragglers — 5 non-compliance derefs (S104 hand-off carry-forward batch).** Per scope principle (scrmlTS holds current-truth only): `docs/articles/llm-kickstarter-v0-2026-04-25.md` deleted (archive copy at `scrml-support/archive/articles-skipped/` from S79 sweep); `undefined-eradication-self-host/SUPERSEDED-CLOSURE.md` + `wave-4-adopter-content/SCOPING.md` + `promotion-ergonomics/TIER-C-SCOPE.md` + `v0.3-approach-a-impl/SCOPING.md` derefed to `scrml-support/archive/changes/` via companion commit `4a1d1c1`. 4 archive landings + 5 scrmlTS deletions; both repos pushed.
+
+**S104 commit ledger:** scrmlTS `8a6cd85` (S104 bundle: schemaFor + bookkeeping + 5 derefs) + scrml-support `4a1d1c1` (4 archive landings) + scrmlTS `<wrap-sha>` (this wrap commit). Per pa.md bump-on-tag convention: NO release tag this session (schemaFor is feature work, not a release cut; v0.4 cut shape pending tableFor + L22 family completion).
+
+**Final state at S104 CLOSE:**
+
+| Item | Status |
+|---|---|
+| Tests pre-commit subset | 12,872 / 88 / 1 / 0 fail / 670 files / 43,337 expect |
+| Tests full (pre-push gate) | 15,709 / 169 skip / 0 fail + TodoMVC quick PASS |
+| Origin sync scrmlTS | 0/0 post-wrap-push |
+| Origin sync scrml-support | 0/0 |
+| Worktree list | main only (agent worktree removed at landing) |
+| Inbox `handOffs/incoming/` | empty |
+| Maps watermark | `84c736e` (S103 open) — **deferred to S105 session-start refresh** (24+ commits behind incl. S104 schemaFor; refresh value is for next-session dispatches) |
+| Self-host bootstrap | unchanged from S103 (partial dist state; gitignored; pre-commit subset doesn't touch self-host parity) |
+| L22 family | 3 SHIPPED (parseVariant + formFor + schemaFor) + 1 STASHED (serialize) + 2 planned (tableFor + variantNames) |
+| Discipline-health datum | 3 debate-05 rejections + 1 STASH vs 4 advancements — §53.14.4 filter empirically working |
+
+**S104 carry-forwards for S105:**
+
+*High (substantive compiler work):*
+- **L22 next member dispatch** — tableFor (heavier; ~15-25h; markup synthesis + sort/select state surface) OR variantNames (smaller primitive; ~4-8h)
+- **Phase 3.B chip-aways** — pending 5-OQ ratification in SCOPING; B2 surgical (~2-3h PA-direct), B4 invasive (~3-5h agent dispatch); B3 conditional + B1 deferred
+- Native parser M2 expression parser (~2-4 sessions; M1.2 in flight per master-list)
+- Native parser §48.6.4 `pinned fn` parser-recognition (SPEC landed S98)
+- Self-host bootstrap broken-import-path (S102 carry; not addressed S103/S104)
+
+*Medium (closes pre-existing gaps; ratified-stragglers queued behind schemaFor — now unblocked):*
+- formFor `disabled=!@cell` reactive-attr wiring fix (~2-4h)
+- formFor v1.next: per-type renderer registry / `@label` annotation / auto-recurse nested struct (~3-8h each)
+- formFor L2 label-store consultation IN expander (~3-5h)
+- PGO Phase 3 follow-ons: `hasEqualityExpr` flag + Markup/for-stmt double-walk fold (~3-5h combined)
+- Pre-existing equality runtime-chunk detector bug (~2-3h)
+
+*Light (cleanup):*
+- **Maps incremental refresh** (PA-direct OR project-mapper invocation; first task of S105 if dispatching scrml-source work)
+- 4 NEW stale-header non-compliance items (pgo × 3 + formFor-scoping) — flip-in-place to CLOSED vs deref pending ratification
+- Puppeteer dep cleanup after 1-2 release cycles of clean Playwright runs (Q-PW-PORT-OPEN-1 ratified DEFER)
+- LEGACY `_scrml_subscribers` retirement (v0.4+ proposal; Q-RT3-SR-OPEN-3 ratified DEFER)
+
+*Marketing-shaped (pa.md Rule 1 — DEFER unless user raises):*
+- formFor + schemaFor sample app + scrml.dev refresh
+- v0.3.3 / v0.4 announce content
+- 561× select-row + L22 family completion narrative
+
+**Things S105 PA MUST NOT screw up:**
+
+- **Maps refresh BEFORE any dev-agent dispatch.** 24+ commits behind watermark including major schemaFor surface in type-system.ts + emit-schema-for.ts. Stale-map dispatches risk wrong-shape advice.
+- **L22 family discipline empirically working** — next candidate (tableFor or variantNames) GETS THE SAME 4-gate honest walk + may surface a STASH verdict (parallel to serialize precedent). Don't shortcut.
+- **Phase 3.B candidate ranking is open** — 5 OQs need user ratification BEFORE dispatching B2 or B4. Don't proceed under PA-lean without explicit ratification per S103 Q-SCH-OPEN-3 user-direction precedent.
+- **schemaFor architectural shape is now load-bearing precedent for tableFor + variantNames** — agent's two-pass walker (Pass A inside-`<schema>` validates+rewrites; Pass B everywhere-else fires E-SCHEMAFOR-INVALID-CALL-CONTEXT) is the template. tableFor will need analogous markup-context detection (its surface is markup-element `<tableFor for=T rows=@items/>` per family precedent + output-kind-match rule); variantNames will be CallExpression-form like parseVariant + schemaFor.
+- **Single-machine workflow unchanged** (S100 directive); cross-machine sync hygiene dormant.
+
+**S105 session-start checklist (per pa.md session-start protocol):**
+
+1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL
+2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies)
+3. Read `compiler/SPEC-INDEX.md` IN FULL — note S103 §41.15 schemaFor entries (no SPEC additions this session beyond agent's SPEC-INDEX +3L Quick Lookup)
+4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — **note S104 CLOSE addendum + §53.14.3 schemaFor SHIPPED flip**
+5. Read this `hand-off.md` (S104 CLOSE) — will be rotated to `handOffs/hand-off-107.md` at S105 open
+6. Read last ~10 contentful user-voice entries from `../scrml-support/user-voice-scrmlTS.md` (no new entries this session — no durable directives surfaced)
+7. Session-start sync hygiene: `git fetch origin && git rev-list --left-right --count origin/main...HEAD` should be 0/0
+8. Inbox check — `handOffs/incoming/*.md` empty
+9. Verify worktrees: `git worktree list` shows main only
+10. Verify path-discipline hook + pre-push hook installed
+11. Self-host bootstrap state check — `ls -la compiler/dist/self-host/`
+12. **Maps currency check + REFRESH** — `head -3 .claude/maps/primary.map.md` will show `84c736e` watermark; HEAD is now `<post-wrap-sha>` (25+ commits ahead). Refresh before any scrml-source-shape dispatch.
+13. Report: caught up + next priority
 
 ---
 
