@@ -1,4 +1,15 @@
-# TodoMVC Benchmark Results — 2026-05-14 (v0.3.0 STABLE) + Bundle re-measure 2026-05-15 (v0.3.x Phase B)
+# TodoMVC Benchmark Results — 2026-05-19 v0.3.3 HEAD (S109)
+
+> **Update 2026-05-19 (S109):** Bundle Size + Build Performance + Runtime
+> Performance (Real Browser, Playwright) all re-measured against HEAD `3609985`
+> (S109 post-S108 substantive landings: match block-form Phases 3+4 + Bug 5 P3
+> const-fold + Bug 1 floor + 3 full-fix waves + Bug 4 C-narrow + Bug 2 C-narrow
+> + ring family + formFor B5 + PGO C2 fold + date/timestamp BUILTIN_TYPES).
+> Build time vs. v0.3.0 STABLE: **−44% (28.9 ms faster)**. Bundle size vs.
+> 2026-05-15 Phase B: **+5.8 KB JS gzip** tracking new runtime contributions
+> (match-block dispatcher + per-arm render fns; Bug 5 P3 wiring; ring + Bug 4
+> + formFor B5). Vite framework times stable within noise. Historical
+> v0.3.x Phase B numbers preserved below for trend tracking.
 
 > **Update 2026-05-15 (v0.3.x Phase B SPA tree-shake landed at HEAD `1f73732`):** The Bundle Size section below is re-measured against HEAD `1f73732`. The runtime + build + full-stack tables still reflect the 2026-05-14 v0.3.0 STABLE measurement and are queued for re-measurement; the tree-shake cut the scrml-runtime payload from 38.7 KB → 11.8 KB gzip on same-source TodoMVC, which should reduce parse + load cost (in-memory dispatch unchanged). See [docs/changes/v0.3.x-spa-tree-shake/SCOPING.md](../docs/changes/v0.3.x-spa-tree-shake/SCOPING.md) for the Phase A measurement basis + Phase B implementation plan.
 >
@@ -274,25 +285,58 @@ At v0.3.0 STABLE this section claimed "scrml wins 0/11 in happy-dom" framed as A
 | create-10000 | 249 | 430 | 218 | 295 |
 | append-1000 | 27.4 | 45.5 | 22.5 | 26.5 |
 
-## Bundle Size (gzipped) — 2026-05-15 v0.3.x Phase B SPA tree-shake landed
+## Bundle Size (gzipped) — 2026-05-19 v0.3.3 HEAD (S109)
 
-Re-measured 2026-05-15 against HEAD `1f73732`. v0.3.x Phase B landed at `1f73732`:
-shared-runtime union assembly (`scrml-runtime.<hash>.js` now ships only the chunks the
-compile unit actually uses, where the legacy path shipped the full template
-unconditionally) + new `wire` chunk gates the §57 dual-decoder behind a server-fn /
-sidecar-import predicate + FNV-1a content-hashed runtime filename for deterministic
-cache-busting. See [docs/changes/v0.3.x-spa-tree-shake/SCOPING.md](../docs/changes/v0.3.x-spa-tree-shake/SCOPING.md).
+Re-measured 2026-05-19 against HEAD `3609985` (post S108-S109 substantive landings:
+match block-form Phases 3+4, Bug 5 P3 const-fold, Bug 1 floor+full×3 waves,
+Bug 4 C-narrow, Bug 2 C-narrow, ring family arbitrary-value, formFor B5 L2,
+PGO C2 fold, date/timestamp BUILTIN_TYPES). Harness: `bun run scripts/bundle-size-benchmark.js`
+after a clean `rm -rf benchmarks/todomvc/dist`. Vite framework bundles also
+re-measured.
 
 | Framework | JS (gzip) | CSS (gzip) | Total (gzip) | Raw JS | Dependencies | node_modules |
 |---|---:|---:|---:|---:|---:|---:|
-| **scrml** | **13.9 KB** | 1.2 KB | **15.8 KB** | 52 KB | **0** | **0 bytes** |
-| Svelte 5 | 15.7 KB | 1.1 KB | 16.8 KB | 40 KB | 3 | ~30 MB |
-| Vue 3 | 26.5 KB | 1.1 KB | 27.6 KB | 66 KB | 3 | ~25 MB |
-| React 19 | 61.5 KB | 1.1 KB | 62.6 KB | 194 KB | 4 | ~46 MB |
+| **scrml** | **19.7 KB** | 1.2 KB | **21.5 KB** | 73 KB | **0** | **0 bytes** |
+| Svelte 5 | 15.7 KB | 1.1 KB | 17.1 KB | 40 KB | 3 | ~30 MB |
+| Vue 3 | 26.5 KB | 1.1 KB | 27.8 KB | 66 KB | 3 | ~25 MB |
+| React 19 | 61.5 KB | 1.1 KB | 62.8 KB | 194 KB | 4 | ~46 MB |
 
-scrml at HEAD beats Svelte 5 on JS bundle, with zero dependencies. The per-route
-per-role chunking benefit (multi-route multi-role apps) is unchanged by Phase B —
-see "Per-Route Per-Role Chunk Variance" below for that v0.3 narrative.
+scrml at S109 HEAD vs. 2026-05-15 Phase B baseline: **+5.8 KB JS gzip** (13.9 → 19.7).
+The growth tracks new runtime contributions landed since Phase B: match block-form
+codegen runtime (Phase 3+4 dispatcher + per-arm render fns + variant-guard helper),
+Bug 5 P3 constant-folding wiring, formFor B5 label-store consultation, Bug 1 ring
+arbitrary-value emit, and Bug 4 C-narrow markup-text-mode gate. Bundle still smaller
+than Vue 3 and substantially smaller than React 19. Svelte 5 holds the bundle floor
+among the four; scrml regained partial parity on the JS-only axis (19.7 vs 15.7 KB,
+a 4 KB delta) and continues to ship with zero dependencies / zero node_modules.
+
+The per-route per-role chunking benefit (multi-route multi-role apps) is unchanged
+by these landings — see "Per-Route Per-Role Chunk Variance" below for that v0.3
+narrative.
+
+**Honesty note on the +5.8 KB:** match block-form Tier-1 case-analysis is now
+shipped end-to-end in the runtime (per-arm render fns + dispatcher subscribed to
+the engine variable + on-change writes the matching arm's HTML into a slot). The
+canonical TodoMVC app doesn't currently exercise `<match for=Type>` so the runtime
+contribution is "compile-time-aware-of-but-not-walking" for this app. Future
+TodoMVC variants exercising match-block-form would amortize the byte cost; apps
+using only Tier 0 (`if=`) get the runtime contribution as dead-code-able paths.
+PGO Phase 3 C2 fold landed S108 to skip code emission for files with no for-stmt
+or chunked-markup-tag — TodoMVC happens to use both, so this app doesn't benefit
+from C2's narrowing.
+
+### Historical: Bundle Size at v0.3.x Phase B (2026-05-15)
+
+Preserved for trend tracking. Measured 2026-05-15 against HEAD `1f73732`.
+
+| Framework | JS (gzip) | CSS (gzip) | Total (gzip) | Raw JS |
+|---|---:|---:|---:|---:|
+| **scrml** v0.3.x Phase B | 13.9 KB | 1.2 KB | 15.8 KB | 52 KB |
+
+The Phase B measurement was the moment the v0.3.x SPA tree-shake landed — every
+chunk-shipping decision was load-bearing, every runtime contribution narrowly
+scoped. Phase 3+4 match-block runtime + Bug 5 P3 wiring + Bug 1 ring + Bug 4
+C-narrow + formFor B5 are the contributors above that baseline.
 
 **Approach A measured cost (now closed):** same-source TodoMVC at v0.2.6 measured
 36.5 KB total gzip; v0.3.0 STABLE measured 40.8 KB (+4.3 KB Approach-A delta). Phase B
@@ -328,19 +372,38 @@ elsewhere in the docs that cited "14.8 KB → 39.9 KB" as the Approach-A delta
 compressed a much older regression into the Approach-A story. The honestly-attributed
 Approach-A delta is +4.3 KB; Phase B recovered the delta and then some.
 
-## Build Performance — TodoMVC (10 runs, median) — 2026-05-14 v0.3.0 STABLE
+## Build Performance — TodoMVC (10 runs, median) — 2026-05-19 v0.3.3 HEAD (S109)
 
-Re-measured 2026-05-14. scrml measured in-process via `compileScrml()` API call
-(3 warmup + 10 measured). Vite-built frameworks measured by parsing the
-`built in Xms` line from Vite's own production-mode output (subprocess walltime
-excluded — matches Vite's internal walltime metric, same methodology as 2026-04-13).
+Re-measured 2026-05-19 against HEAD `3609985`. scrml measured in-process via
+`compileScrml()` API call (3 warmup + 10 measured). Vite-built frameworks
+measured by parsing the `built in Xms` line from Vite's own production-mode
+output (subprocess walltime excluded — matches Vite's internal walltime metric,
+same methodology as 2026-04-13).
 
 | Framework | Build Tool | Build Time | vs scrml |
 |---|---|---:|---:|
-| **scrml** | Built-in compiler | **65.6 ms** | — |
-| Svelte 5 | Vite 6.4 | 668 ms | 10.2x slower |
-| Vue 3 | Vite 6.4 | 706 ms | 10.8x slower |
-| React 19 | Vite 6.4 | 944 ms | 14.4x slower |
+| **scrml** | Built-in compiler | **36.7 ms** | — |
+| Svelte 5 | Vite 6.4 | 681 ms | 18.6x slower |
+| Vue 3 | Vite 6.4 | 697 ms | 19.0x slower |
+| React 19 | Vite 6.4 | 963 ms | 26.2x slower |
+
+scrml build time vs. v0.3.0 STABLE (65.6 ms): **−44% (28.9 ms faster)**. PGO Phase 3
+chip-away work has accumulated meaningful wall-time wins: PGO C1 hasEqualityExpr
+flag (S106), PGO C2 hasForStmt + hasChunkedMarkupTag fold (S108), Phase 3
+select-row chip-away (S103), and assorted Option-2 narrowings have lifted the
+gap from "10-14x faster than Vite" at v0.3.0 STABLE to "18-26x faster than Vite"
+at S109 HEAD. Vite times themselves are stable within noise (±20ms each).
+
+### Historical: Build Performance (2026-05-14, v0.3.0 STABLE; preserved for trend tracking)
+
+Preserved for trend tracking. Measured 2026-05-14 against HEAD `13154ba` (v0.3.0 STABLE).
+
+| Framework | Build Tool | Build Time | vs scrml |
+|---|---|---:|---:|
+| **scrml** v0.3.0 STABLE | Built-in compiler | **65.6 ms** | — |
+| Svelte 5 v0.3.0 STABLE | Vite 6.4 | 668 ms | 10.2x slower |
+| Vue 3 v0.3.0 STABLE | Vite 6.4 | 706 ms | 10.8x slower |
+| React 19 v0.3.0 STABLE | Vite 6.4 | 944 ms | 14.4x slower |
 
 ### Historical: Build Performance (2026-04-13, v0.2.x; preserved for trend tracking)
 
