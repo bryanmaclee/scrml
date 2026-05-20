@@ -1,14 +1,23 @@
-# scrmlTS
+# scrml
 
 */ˈskrɪmɛl/*
 
-The working compiler for **scrml** — a single-file, full-stack reactive web language.
-This is the TypeScript/JavaScript implementation that compiles `.scrml` source into
-HTML, CSS, client JS, and server route handlers in a single pass.
+**An app should be an exhaustive state machine.**
 
-scrml lets you write a complete app in one file: markup, reactive state, scoped CSS,
-SQL, server functions, and inline tests — no build config, no separate server file,
-no state management library.
+scrml is a compiled language built around one organizing principle: the structural
+shape of a shipped UI is the structural shape of its state. Every reachable state
+has UI. Every transition is intentional. Every effect runs at the right moment.
+**Provability falls out of the language's natural shape — not from separate proof
+ceremony.**
+
+The compiler does the wiring: server/client splitting, reactivity, routing,
+async scheduling, SQL batching, channel sync, validity-surface synthesis. You
+declare the shape; the compiler emits plain HTML, CSS, and JavaScript. No virtual
+DOM, no JSX, no `node_modules`.
+
+```bash
+scrml compile hello.scrml -o dist/
+```
 
 ## A note from the developer
 
@@ -27,95 +36,6 @@ After my first couple of experiments with claude I realized, I might actually be
 AI code is still what it is. 100% mid. But its still all human mid that it is regurget-asemble-ing, If the ideas on top of the impl are good, or at least novel. it doesn't matter if the impl is mid. The ideas still get across. that's all that really matters to me here.
 
 are the ideas any good?
-
-> ## scrml — current state: v0.3.x
->
-> The compiler ships v0.3.x codegen + runtime semantics: **V5-strict**
-> declaration (`<x> = init` decl form + `@x` expression access), the
-> **Tier 0/1/2 ladder** for case analysis (booleans → `<match>` → `<engine>`),
-> auto-synthesized validity surface for forms, file-level `<channel>` blocks
-> for realtime, schema shared-core vocabulary, refinement-type predicates,
-> hierarchical engines with `history` + `<onTimeout>` + `<onIdle>` +
-> `internal:rule=`, whole-stack closure analysis with per-route per-role
-> content-addressed chunk splitting and tiered prefetch, the
-> **`{"__scrml_absent": true}`** wire envelope for `T | not` server returns
-> (SPEC §57), and 22 architectural locks (L1–L22). v0.4 is the next minor
-> horizon.
->
-> Live phase status: [`master-list.md` §0](./master-list.md) (the
-> load-bearing dashboard); recent landings:
-> [`docs/changelog.md`](./docs/changelog.md); session hand-offs:
-> [`hand-off.md`](./hand-off.md) (current) + [`handOffs/`](./handOffs/)
-> (rotated).
->
-> **Known gaps (spec-vs-impl drift).** The compiler does not yet implement
-> every feature the spec describes. The largest open gap: **`<match>`
-> block-form** (Tier 1 of the case-analysis ladder; SPEC §18.0.1) —
-> structural validation + 5 safety diagnostics ship; codegen render dispatch
-> is in active impl. Workaround: use `<engine>` (Tier 2, fully implemented).
-> Other open gaps: Tailwind arbitrary-value classes silently no-op; one
-> cascading-parse-error edge on multi-line `<a>` openers with
-> entity-encoded element-name bodies; bare context-opener tokens (`?{` /
-> `/`) in markup-text body have no docs-mode escape. Full list with per-gap
-> workarounds, reproducers, SCOPING links, and target releases:
-> **[`docs/known-gaps.md`](./docs/known-gaps.md)**.
-
-## Quick start
-
-```bash
-# Install (Bun required)
-bun install
-
-# Link the scrml binary onto your PATH (one-time, from the repo root)
-bun link
-
-# Scaffold a new project, then run it
-scrml init my-app
-cd my-app
-scrml dev src/app.scrml   # watch + serve
-
-# Or use the CLI directly on any .scrml file or directory
-scrml compile <file|dir>
-scrml dev <file|dir>      # watch + serve
-scrml build <dir>         # production build
-
-# Run the test suite
-bun test compiler/tests/
-```
-
-## What's in here
-
-- `compiler/` — compiler source, the authoritative `SPEC.md` (~27,144 lines / §57 + appendices) / `SPEC-INDEX.md` / `PIPELINE.md`, **12,300+ tests**, and reference self-host modules
-- `examples/` — **23 runnable single-file scrml apps + the trucking-dispatch multi-page app**
-- `samples/compilation-tests/` — **289 compilation tests** covering every accepted construct
-- `stdlib/` — **16 user-facing stdlib modules** (`auth`, `crypto`, `data`, `format`, `fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`, `cron`, `regex`, `oauth`)
-- `benchmarks/` — runtime, build, and full-stack benchmarks vs React / Svelte / Vue
-- `editors/vscode/`, `editors/neovim/` — editor integrations
-- `lsp/server.js` — language server
-- `dist/scrml-runtime.js` — shared reactive runtime
-
-For recent fixes and work currently in flight, see [`docs/changelog.md`](./docs/changelog.md).
-
-
-
-# scrml
-
-**An app should be an exhaustive state machine.**
-
-scrml is a compiled language built around one organizing principle: the structural
-shape of a shipped UI is the structural shape of its state. Every reachable state
-has UI. Every transition is intentional. Every effect runs at the right moment.
-**Provability falls out of the language's natural shape — not from separate proof
-ceremony.**
-
-The compiler does the wiring: server/client splitting, reactivity, routing,
-async scheduling, SQL batching, channel sync, validity-surface synthesis. You
-declare the shape; the compiler emits plain HTML, CSS, and JavaScript. No virtual
-DOM, no JSX, no `node_modules`.
-
-```bash
-scrml compile hello.scrml -o dist/
-```
 
 ## The Tier 0 / 1 / 2 ladder
 
@@ -613,40 +533,6 @@ These features are fully designed in the [language spec](compiler/SPEC.md) but n
 | **Sidecar process declarations** | S23.4 | `use foreign:name { fn }` for declaring server-side sidecar processes (HTTP/socket services) that scrml routes to automatically. |
 | **`RemoteData` enum** | S13.5 | Built-in `Loading / Loaded(T) / Failed(Error)` enum for modeling async fetch state. Pattern-matchable with exhaustive checking. |
 
-## Getting Started
-
-### Prerequisites
-
-Install [Bun](https://bun.sh):
-
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
-
-### Compile a file
-
-```bash
-scrml compile hello.scrml -o dist/
-```
-
-This produces `dist/hello.html`, `dist/hello.client.js`, and `dist/hello.css`. Open the HTML file in a browser.
-
-### Development with hot reload
-
-```bash
-scrml dev
-```
-
-`dev` starts a dev server with hot reload. Write `.scrml` files and see results immediately.
-
-### Build for production
-
-```bash
-scrml build
-```
-
-The compiler produces optimized HTML, CSS, and JavaScript. No runtime framework ships to the browser.
-
 ## Examples
 
 The [`examples/`](examples/) directory contains curated examples that show what scrml can do:
@@ -693,6 +579,59 @@ The [`examples/`](examples/) directory contains curated examples that show what 
 > Snippets here marked with a leading `// gate: skip` comment are
 > intentionally illustrative fragments (e.g., they show a state-decl
 > shape without a full `<program>` wrapper).
+
+## scrmlTS
+
+The working compiler for **scrml** — a single-file, full-stack reactive web language.
+This is the TypeScript/JavaScript implementation that compiles `.scrml` source into
+HTML, CSS, client JS, and server route handlers in a single pass.
+
+scrml lets you write a complete app in one file: markup, reactive state, scoped CSS,
+SQL, server functions, and inline tests — no build config, no separate server file,
+no state management library.
+
+**Current state — v0.3.x.** Live phase status: [`master-list.md` §0](./master-list.md) · recent landings: [`docs/changelog.md`](./docs/changelog.md) · known spec-vs-impl gaps + per-gap workarounds: [`docs/known-gaps.md`](./docs/known-gaps.md).
+
+### What's in here
+
+- `compiler/` — compiler source, the authoritative `SPEC.md` (~27,144 lines / §57 + appendices) / `SPEC-INDEX.md` / `PIPELINE.md`, **12,300+ tests**, and reference self-host modules
+- `examples/` — **23 runnable single-file scrml apps + the trucking-dispatch multi-page app**
+- `samples/compilation-tests/` — **289 compilation tests** covering every accepted construct
+- `stdlib/` — **16 user-facing stdlib modules** (`auth`, `crypto`, `data`, `format`, `fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`, `cron`, `regex`, `oauth`)
+- `benchmarks/` — runtime, build, and full-stack benchmarks vs React / Svelte / Vue
+- `editors/vscode/`, `editors/neovim/` — editor integrations
+- `lsp/server.js` — language server
+- `dist/scrml-runtime.js` — shared reactive runtime
+
+For recent fixes and work currently in flight, see [`docs/changelog.md`](./docs/changelog.md).
+
+
+
+## Quick start
+
+```bash
+# Install Bun if you don't have it — https://bun.sh
+curl -fsSL https://bun.sh/install | bash
+
+# Install scrmlTS dependencies
+bun install
+
+# Link the scrml binary onto your PATH (one-time, from the repo root)
+bun link
+
+# Scaffold a new project, then run it
+scrml init my-app
+cd my-app
+scrml dev src/app.scrml   # watch + serve
+
+# Or use the CLI directly on any .scrml file or directory
+scrml compile <file|dir>
+scrml dev <file|dir>      # watch + serve
+scrml build <dir>         # production build
+
+# Run the test suite
+bun test compiler/tests/
+```
 
 ## License
 
