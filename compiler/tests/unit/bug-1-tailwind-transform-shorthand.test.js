@@ -189,8 +189,13 @@ describe("§8: lint regression — v3 families no longer fire W-TAILWIND-UNRECOG
 // ---------------------------------------------------------------------------
 
 describe("§9: still-deferred families STILL fire W-TAILWIND-UNRECOGNIZED-CLASS", () => {
-  test("ring-[2px] STILL fires the lint (Tailwind box-shadow compound)", () => {
-    const src = `<div class="ring-[2px]">x</div>`;
+  // S109 update: ring-[length] / ring-[color] / ring-[var()] / ring-[keyword]
+  // now ship via ARBITRARY_DECL_TRANSFORM single-property emit (box-shadow
+  // single-decl, ring-offset still deferred). See
+  // `compiler/tests/unit/bug-1-tailwind-ring-family.test.js` for the
+  // shipped surface. ring-offset-* remains deferred (needs preflight CSS).
+  test("ring-offset-[2px] STILL fires the lint (Tailwind needs preflight `*, ::before, ::after` machinery)", () => {
+    const src = `<div class="ring-offset-[2px]">x</div>`;
     const lints = findUnrecognizedClasses(src);
     expect(lints.length).toBeGreaterThan(0);
     expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");

@@ -170,14 +170,18 @@ describe("§2 Arbitrary-value class engine doesn't handle — warning fires", ()
     expect(firedOn(diags, "skew-[10deg]")).toBe(true);
   });
 
-  test("`ring-[2px]` fires (still-unsupported family)", () => {
-    const diags = scan('<div class="ring-[2px]"></div>');
-    expect(firedOn(diags, "ring-[2px]")).toBe(true);
+  // S109 update: `ring-[length]` / `ring-[color]` / `ring-[var()]` /
+  // `ring-[keyword]` are now SHIPPED via ARBITRARY_DECL_TRANSFORM. See
+  // `bug-1-tailwind-ring-family.test.js`. `ring-offset-*` remains deferred
+  // (needs preflight `*, ::before, ::after` custom-property machinery).
+  test("`ring-offset-[2px]` fires (still-unsupported — needs preflight)", () => {
+    const diags = scan('<div class="ring-offset-[2px]"></div>');
+    expect(firedOn(diags, "ring-offset-[2px]")).toBe(true);
   });
 
-  test("`ring-[2px]` fires (still-unsupported family)", () => {
-    const diags = scan('<div class="ring-[2px]"></div>');
-    expect(firedOn(diags, "ring-[2px]")).toBe(true);
+  test("`bg-gradient-to-r` fires (still-unsupported — needs preflight + multi-utility)", () => {
+    const diags = scan('<div class="bg-gradient-to-r"></div>');
+    expect(firedOn(diags, "bg-gradient-to-r")).toBe(true);
   });
 });
 

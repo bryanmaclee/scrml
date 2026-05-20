@@ -1209,6 +1209,48 @@ const ARBITRARY_DECL_TRANSFORM = {
   "rotate-z": (v) => `transform: rotateZ(${v.css})`,
   "skew-x":   (v) => `transform: skewX(${v.css})`,
   "skew-y":   (v) => `transform: skewY(${v.css})`,
+  // Ring — single-property emit, kind-dispatched (S109 Bug 1 partial closure).
+  //
+  //   `ring-[3px]`         -> `box-shadow: 0 0 0 3px currentColor`     (length)
+  //   `ring-[2.5rem]`      -> `box-shadow: 0 0 0 2.5rem currentColor`  (length)
+  //   `ring-[#ff0000]`     -> `box-shadow: 0 0 0 3px #ff0000`          (color → default 3px width)
+  //   `ring-[red]`         -> `box-shadow: 0 0 0 3px red`              (color keyword)
+  //   `ring-[var(--c)]`    -> `box-shadow: 0 0 0 3px var(--c)`         (var defaults to color)
+  //   `ring-[currentColor]`-> `box-shadow: 0 0 0 3px currentColor`     (keyword)
+  //
+  // Length values set the ring width with color = currentColor. Color/var/
+  // color-keyword values use a 3px default width (matches Tailwind's named
+  // `ring` utility = `ring-3`).
+  //
+  // KNOWN LIMITATIONS (deferred per S109 Bug 1 partial closure — `docs/known-gaps.md`):
+  //   - `ring-offset-[N]` is NOT supported. Tailwind's offset machinery requires
+  //     the `--tw-ring-offset-shadow` + `--tw-ring-shadow` custom-property layer
+  //     emitted as preflight on `*, ::before, ::after`. scrml has no preflight
+  //     emission infrastructure yet (filed as deferred follow-on).
+  //   - `ring-inset` is NOT supported (Tailwind v3 named utility; not arbitrary-value).
+  //   - composing `ring-[N]` with `shadow-[...]` overwrites — last `box-shadow:`
+  //     declaration wins per CSS class order. Tailwind's `*, ::before, ::after`
+  //     preflight is the layer that lets `box-shadow: var(--tw-ring-offset-shadow),
+  //     var(--tw-ring-shadow), var(--tw-shadow)` compose at runtime; without
+  //     that preflight, scrml emits single-property `box-shadow` and last-write-wins.
+  //
+  // The companion `bg-gradient-*` / `from-*` / `to-*` / `via-*` family is NOT
+  // implemented for the same reason (multi-utility coordination via custom
+  // properties on `*, ::before, ::after`). Documented in `docs/known-gaps.md`.
+  "ring": (v) => {
+    if (v.kind === "length" || v.kind === "number") {
+      return `box-shadow: 0 0 0 ${v.css} currentColor`;
+    }
+    if (v.kind === "color" || v.kind === "var" || v.kind === "keyword") {
+      return `box-shadow: 0 0 0 3px ${v.css}`;
+    }
+    // list / ratio / url / unknown — emit something sensible (length-shape
+    // fallback). Lists like `ring-[3px_red]` would arrive as kind "list" and
+    // composing the full multi-value box-shadow at this layer isn't supported
+    // yet — caller's validation will already have rejected list-shape via the
+    // single-token requirement in tryArbitraryValuePrefix below.
+    return `box-shadow: 0 0 0 ${v.css} currentColor`;
+  },
 };
 
 // Overloaded prefixes — property depends on value shape.

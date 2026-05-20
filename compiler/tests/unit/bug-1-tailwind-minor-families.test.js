@@ -228,8 +228,11 @@ describe("§9: lint regression — minor families now recognized (do NOT fire li
 // ---------------------------------------------------------------------------
 
 describe("§10: still-deferred families STILL fire W-TAILWIND-UNRECOGNIZED-CLASS", () => {
-  test("ring-[2px] STILL fires the lint (deferred — Tailwind compound utility)", () => {
-    const src = `<div class="ring-[2px]">x</div>`;
+  // S109 update: ring-[length|color|var|keyword] now ships single-property
+  // emit (see bug-1-tailwind-ring-family.test.js). ring-offset-* remains
+  // deferred (needs preflight `*, ::before, ::after` custom-property layer).
+  test("ring-offset-[2px] STILL fires the lint (deferred — needs preflight machinery)", () => {
+    const src = `<div class="ring-offset-[2px]">x</div>`;
     const lints = findUnrecognizedClasses(src);
     expect(lints.length).toBeGreaterThan(0);
     expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");

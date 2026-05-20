@@ -392,12 +392,15 @@ describe("§12 W-TAILWIND-UNRECOGNIZED-CLASS lint sync — engine + lint single 
     expect(diags).toHaveLength(0);
   });
 
-  test("still-unsupported family (`ring-[2px]`) DOES trigger", () => {
+  test("still-unsupported family (`ring-offset-[2px]`) DOES trigger", () => {
     // Sanity check — the lint still works for families NOT shipped in this dispatch.
     // S108 v2 (Bug 1 minor families) added transition/duration/delay/ease + rotate/
-    // scale/translate + outline + outline-offset. `ring-` is still deferred
-    // (Tailwind compound utility — box-shadow stack).
-    const diags = findUnrecognizedClasses('<div class="ring-[2px]"></div>');
+    // scale/translate + outline + outline-offset. S109 (Bug 1 partial closure)
+    // added `ring-[length|color|var|keyword]` via single-property box-shadow
+    // emit. `ring-offset-*` and `bg-gradient-*` / `from-*` / `to-*` / `via-*`
+    // remain deferred — they need preflight `*, ::before, ::after`
+    // custom-property machinery scrml hasn't yet wired up.
+    const diags = findUnrecognizedClasses('<div class="ring-offset-[2px]"></div>');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
   });
