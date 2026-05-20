@@ -225,6 +225,7 @@ within one quarter.
 | Milestone / sub-step | Status | Dispatch | Landed | Notes |
 |---|---|---|---|---|
 | M1 (lexer) | ✅ COMPLETE | — | S99-S103 | M1.1-M1.4; 7 LexMode state-children substantive |
+| M1.5 — expr-literals.js conformance flip | ⬜ pending | — | — | regex-token normalizer (native `RegexLit` vs Acorn's regex-token surface); minor polish, non-blocking M2 |
 | **M2.1** substrate + ParseMode + primary | ⏳ DISPATCHED S112 | — | — | parallel w/ MK1.1 |
 | M2.2 operators | ⬜ pending | — | — | depends M2.1 |
 | M2.3 call/member/arrow-heads | ⬜ pending | — | — | depends M2.2 |

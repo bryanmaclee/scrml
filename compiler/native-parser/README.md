@@ -1,10 +1,13 @@
 # compiler/native-parser/
 
-Bottom-up scrml-native JS lexer (and eventually parser); replaces Acorn pre-v1.0; lives in the scrmlTS compiler pipeline.
+The scrml-native compiler **front-end** — a composed-engines parser that, per **charter B** (ratified S111), replaces the WHOLE front-end: the heuristic block-splitter, the Acorn JS layer, BPP, and the statechild re-tokenizers. M1 (composed-engines lexer) is complete; the parser ships behind `--parser=scrml-native` at M5. Lives in the scrmlTS compiler pipeline.
 
-NOT a port. NOT self-host. NOT a Mn-replacement of `compiler/src/`. Acorn is the conformance ORACLE — never the design template.
+NOT a port. NOT the v1.0 self-host (the from-scratch hand-built compiler is a separate, post-v1.0 effort). Acorn is the conformance ORACLE — never the design template. Under charter B, M6 deletes the `compiler/src/` front-end stages (`block-splitter.js`, the Acorn integration, `body-pre-parser.ts`) — replaced by this parser behind a soak-gated flag flip.
 
-Design authority: [`scrml-support/docs/deep-dives/scrml-native-parser-design-2026-05-17.md`](../../../scrml-support/docs/deep-dives/scrml-native-parser-design-2026-05-17.md) (D1 charter, D2 composed-engines architecture, D3 type catalog, D4 missing-primitive inventory, D5 JS subset bound, D6 conformance-test plan, D7 milestones).
+Design authority:
+- S98 foundation DD — [`scrml-native-parser-design-2026-05-17.md`](../../../scrml-support/docs/deep-dives/scrml-native-parser-design-2026-05-17.md) (D1 charter, D2 composed-engines architecture, D3 type catalog, D4 missing-primitive inventory, D5 JS subset bound, D6 conformance-test plan, D7 milestones).
+- Charter-B expansion DD — [`scrml-native-parser-front-end-charter-2026-05-20.md`](../../../scrml-support/docs/deep-dives/scrml-native-parser-front-end-charter-2026-05-20.md) (the whole-front-end plan: the markup-layer engine graph, the heuristic-elimination proof, the expanded M-ladder, the joint retirement).
+- Implementation roadmap — [`IMPLEMENTATION-ROADMAP.md`](../../docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md) (the trackable per-sub-step decomposition + the live status tracker).
 
 ## Pillar 5b conformance note
 
@@ -55,16 +58,26 @@ A reader who points to any state-shape construct must be able to find its `<engi
 | `lex.scrml` / `.js` | Top-level `lex(source: string): Token[]`; loop dispatches by LexMode via 7 active dispatchers (InCode / InSingleString / InDoubleString / InTemplateBody / InLineComment / InBlockComment / InRegexBody); safety bound + cursor-progress sentinel |
 | `README.md` | this file |
 
-## Swap-in roadmap
+## M-ladder — charter B (the whole front-end)
 
-| Mn | What changes | Status |
-|---|---|---|
-| M1.2 | Activates `<InTemplateBody>` (incl. `${...}` nested-engine per §51.0.Q.1) + `<InSingleString>` + `<InDoubleString>` state-child bodies; replaces M1.1 stub scanners | ✅ landed at S100 |
-| M1.3 | Activates `<InLineComment>` + `<InBlockComment>` state-child bodies (line/block comment scanners + dispatcher wiring); retires M1.1 stubScanLineComment / stubScanBlockComment; closes the prior-smoke bench-corpus skips via a normalizer extension covering Acorn's binary `+/-` label, 4-form `==/!=/===/!==` label, and `let/async/await/of` contextual-keyword `name` surface | ✅ landed at S102 |
-| M1.4 | Activates `<InRegexBody>` state-child body — proper body dispatcher (`lex-in-regex.scrml` / `.js`) mirroring the M1.3 comment-body shape; outer LexMode dispatch loop now drives the body scan (M1 ladder complete); DD §D4 P3 `regexAllowedAfter(lastKind)` heuristic unchanged (the M1.1 prev-token-aware split was already in place — M1.4 is a structural extraction, not a heuristic change); adds direct M1.4 regex-dispatcher assertions to the conformance test (the bench-corpus `expr-literals.js` `"full"` flip is deferred to M1.5 pending a regex-token normalizer extension) | ✅ landed at S103 |
-| M1.5 | Flip `expr-literals.js` to `"full"` disposition (regex-token normalizer extension — Acorn's regex-token surface vs native `RegexLit` shape); close the residual regex byte-identical gap | pending |
-| M2 | Expression parser implemented in scrml; ParseContext engine; replaces `scrmlNativeParserStub.parse` body in `compiler/tests/parser-conformance/parsers.js` | pending |
-| M3-M6 | Per DD §D7 milestones — full statement parser, full bounded subset, scrmlTS pipeline swap-in, Acorn removal | pending |
+Charter B (S111) expands the project from "replace Acorn" to "replace the whole compiler
+front-end." Per-sub-step decomposition + the live status tracker live in
+[`IMPLEMENTATION-ROADMAP.md`](../../docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md);
+M1.x sub-step landing detail is in the "M1.4 status" table above.
+
+| Mn | Layer | Scope | Status |
+|---|---|---|---|
+| M1 | JS | Composed-engines lexer | ✅ COMPLETE — M1.1-M1.4, S99-S103 |
+| M1.5 | JS | `expr-literals.js` conformance flip (regex-token normalizer) | pending — minor polish, non-blocking M2 |
+| M2 | JS | Expression parser; `ParseMode` engine; `Expr` AST | in flight — M2.1 dispatched S112 |
+| M3 | JS | Statement parser; in-line function bodies (subsumes BPP) | pending |
+| M4 | JS | Full bounded JS subset (all D5 MUST PARSE + MUST ADD) | pending |
+| MK1 | Markup | `BlockContext` engine + context-grid boundaries | in flight — MK1.1 dispatched S112 |
+| MK2 | Markup | `TagFrame` engine — tag tree, 3 closer forms, `TagKind` | pending |
+| MK3 | Markup | `BodyMode` + `DisplayTextLiteral` — §4.18 native quoted-text | pending |
+| MK4 | Markup | Markup↔JS seam; re-tokenizer scaffolding deletion | pending |
+| M5 | Both | Pipeline swap behind `--parser=scrml-native` + canary | pending |
+| M6 | Both | Joint retirement — BS + Acorn + BPP deleted; flag retired | pending |
 
 ## Anomalies surfaced during M1.1 + M1.2
 
