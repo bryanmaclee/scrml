@@ -273,6 +273,8 @@ The V5-strict access model (§1.6) applies differently in each context locus. Th
 | Engine state-child tag | `<Variant ...>...</>` — declares/renders the engine state body for that variant | The engine variable is read by the compiler to select the active variant; writes via `.advance()` or direct assignment to the engine variable | Match-by-name to enum variants |
 | Compound state body | `<field> = init` — declares a field within the compound cell | `@parent.field` — reads the field; `@parent.field = val` — writes | Within the compound block, field declarations use structural form; access from outside uses canonical dot-path |
 
+**S111 amendment (2026-05-20) — code-default body loci (quoted-text model, scope b).** Engine state-child bodies, match block-form arm bodies, and `:`-shorthand bodies are **code-default-body loci**: in those bodies a bare run is code and display text is an explicit `"..."` display-text literal. This is a body-mode property distinct from the per-context access-form table above (the V5-strict `@`-sigil rule is unchanged in those bodies). The canonical definition of the code-default body mode and the display-text literal is §4.18; this note records the locus list for navigation. Plain-markup bodies (`<p>`, `<h1>`, HTML/component elements, `<program>` / `<page>`) stay free-text — unchanged.
+
 **Cross-references:**
 - §1.6 — The V5-strict access principle (foundational statement)
 - §6.1 — Full V5-strict treatment: both forms, invariants, E-NAME-COLLIDES-STATE
@@ -280,6 +282,7 @@ The V5-strict access model (§1.6) applies differently in each context locus. Th
 - §6.3 — Compound state (Variant C): compound body declarations
 - §6.4 — Render-by-tag semantics: when `<varname/>` in markup is valid vs. E-CELL-NO-RENDER-SPEC
 - §1.4 — Markup-as-first-class-value: the pillar underlying Shape 2 and markup-typed derived cells
+- §4.18 — Code-default body mode and the display-text literal (S111 — quoted-text model)
 
 ---
 
@@ -944,6 +947,8 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 **Added:** 2026-05-04 — formalised at the block-grammar layer for v0.next; full behavioural rules live at §51.0.I (engine state-children) and §18.0.1 (match block-form arms). This subsection registers the form in the universal block grammar so the block splitter and tokenizer can recognise it uniformly across every locus where it is legal.
 
+**S111 amendment (2026-05-20) — code-default body mode (quoted-text model, scope b).** A `:`-shorthand body is a **code-default body** (§4.18) — the single expression follows code-default grammar (a bare run is code), and display text in a `:`-shorthand slot is an explicit `"..."` display-text literal (§4.18.3). The `:`-shorthand body grammar is stated explicitly in the normative statements below per the Wave-0 spike's request: the `:`-shorthand body is a **within-body construct**, not a delimited block, and introduces **no new structural delimiter**.
+
 **Three legitimate body forms.** Every tag opener (HTML element, state-type, scrml-defined structural element — see §4.15) admits exactly three closer + body shapes:
 
 | Form | Shape | Body |
@@ -961,6 +966,13 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 - Mandatory whitespace separates the last attribute (or the tag name) from the `:`. `<Tag:expr>` (no whitespace) is `E-PARSE-001` — the tokenizer treats no-space colon as part of an identifier or as a `bind:` / `class:` / `on:` namespace separator.
 - The `:`-shorthand's `>` terminator is the standard tag-closer `>`. The `angleDepth` rule (§4.13) applies inside the expression — embedded markup is handled by tracking angle depth.
 
+**The `:`-shorthand body grammar — explicit statement (S111).** A `:`-shorthand body is a **single code-default expression**, lexically bounded on the left by the `:` token and on the right by the `>` that terminates the opener. The following are normative for the block splitter:
+
+- The `:`-shorthand body is a **within-body construct**: it is the body content of one opener, recognized while scanning that opener's enclosing body. It is NOT a delimited block — it has no opener delimiter of its own and no closer (`</>` / `/` / `/>`); the closer-presence override above forbids any closer.
+- The `:`-shorthand body introduces **no new structural delimiter**. The `:` token is a within-opener body-introducer; the `>` is the standard tag-closer. The block splitter recognizes a `:`-shorthand body by the post-attribute `:` token inside an opener — a within-opener scan concern. No new block-grammar delimiter, and no new structural block kind, is introduced for `:`-shorthand bodies.
+- A `:`-shorthand body is a **code-default body** (§4.18.1) — its single expression is parsed in code-default mode. Because the `:`-shorthand body is bounded by the enclosing opener and is not a delimited block, code-default recognition of a `:`-shorthand body is a **sub-mode of the enclosing body's scan** (the enclosing engine / match body, itself code-default per §51.0 / §18.0.1) — it requires no separate structural block-grammar machinery. The Wave-0 spike (`docs/changes/quoted-text-model/SPIKE-bs-mode-flag.md` §4.7) confirms this: the `:`-shorthand body is a within-body sub-mode, not a stack frame.
+- Display text as a `:`-shorthand body SHALL be written as a `"..."` display-text literal (§4.18.3) — the display-text literal is the canonical literal form for a display-text `:`-shorthand slot. `<Idle : "Waiting…">` is the canonical form; a bare `<Idle : Waiting…>` (prose, not a valid expression) is `E-UNQUOTED-DISPLAY-TEXT` (§34 / §4.18.7).
+
 **Loci where `:`-shorthand is legal in v0.next:**
 
 - Engine state-children (§51.0.I): `<Idle : startGame()>` — single-expression body for a state-child arm.
@@ -977,6 +989,20 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 </>
 ```
 
+In this example each `:`-shorthand body is valid code: `startGame()` is a call; `<p>Loading...</>` and `<p>Got it: ${count}</>` are nested markup elements (markup-as-value, §1.4) — and the `<p>` bodies (`Loading...`, `Got it: ${count}`) are plain-markup free-text, unchanged by the quoted-text model.
+
+**Worked example — `:`-shorthand body that IS display text (S111, quoted-text model).** When the `:`-shorthand body is display text directly (not wrapped in a plain-markup element), it is a `"..."` display-text literal:
+
+```scrml
+<engine for=Phase initial=.Idle>
+    <Idle    : "Waiting to start.">
+    <Loading : "Loading… ${@progressPct}%">
+    <Done    : "Finished.">
+</>
+```
+
+Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… ${@progressPct}%"` carries one interpolation inside the literal (§4.18.4). A bare `<Idle : Waiting to start.>` (prose, not a valid expression) would be `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
+
 **What is NOT legal under `:`-shorthand:**
 
 - Multi-statement: `<Idle : startGame(); track()>` — `E-MULTI-STATEMENT-HANDLER` (cross-ref §5.2.2). Use bare-body.
@@ -985,15 +1011,15 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 ### 4.15 Scrml-defined structural elements (registered at the block-grammar layer)
 
-**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40).
+**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40). Updated 2026-05-20 (S111 — quoted-text model) — `<engine>` / `<match>` body-form notes mark their state-child / arm bodies as code-default bodies (§4.18).
 
 **The registered structural elements:**
 
 | Element | Owning section | Attribute slots (parse-time) | Body form |
 |---|---|---|---|
-| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr` | bare-body (state-children) |
-| `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms) |
-| `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) |
+| `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr` | bare-body (state-children); each state-child body is a **code-default body** (§4.18 — S111) |
+| `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms); each arm body is a **code-default body** (§4.18 — S111) |
+| `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) — free-text body (plain markup, NOT code-default) |
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
 | `<onTimeout>` (S67; `name=` S79) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required), `name=IDENT` (optional, S79 — addressable for `cancelTimer`) | self-closing only |
 | `<onIdle>` (S77) | §51.0.R | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
@@ -1003,6 +1029,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 - The block splitter SHALL classify openers `<engine`, `<match>`, `<errors`, `<onTransition`, `<onTimeout`, `<onIdle`, and `<page` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
 - These element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
+- (S111 — quoted-text model.) The state-child bodies of `<engine>` and the arm bodies of `<match>` are **code-default bodies** (§4.18.1) — a bare run in those bodies is code; display text is a `"..."` display-text literal (§4.18.3). The `<errors>` override-template body, the `<page>` default-logic body, and any plain-markup element body remain free-text bodies. The body-mode of a structural element's body is fixed by the element kind per §4.18.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
 - Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `errors`, `onTransition`, `onTimeout`, `onIdle`, or `page` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
 - These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children); `<page>` is grammatical only as a child of `<program>` in multi-page apps. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R).
@@ -1074,6 +1101,167 @@ Counter is now ${@count}:
 
 **S108 sibling — markup-text-mode SQL gate (Bug 4 C-narrow).** This section's raw-content rule for `<pre>` / `<code>` is one side of a broader locus-gating principle: a sigil-prefix opener is recognized only inside its normatively-permitted parent context. The companion rule, ratified S108 via deep-dive `scrml-support/docs/deep-dives/bug-4-docs-mode-escape-2026-05-19.md`, gates the `?{` SQL opener on Logic-parent context per §3.1 + §8.1 — bare `?{` in markup-text body is text (the `?` accumulates literally; the `{` is tracked as an orphan-brace and pairs with a matching `}` if present). Together the two rules collapse into the invariant: **`?{` is a SQL opener only where SPEC §3.1 normatively places SQL — inside Logic.** This eliminates the pre-S108 dogfood-bug surface where bare `?{` in adopter prose ("`<p>The ?{ syntax opens SQL</p>`") catastrophically consumed the rest of the file as SQL, producing an EOF-cascade. Adopters no longer need entity-escapes for `?{` in prose. (Q-BUG4-OPEN-1 surfaced the question of extending the same gate to `!{` / `^{` / `_{`; deferred pending friction signal — the dogfood report named only `?{` + `/`.)
 
+> **Orthogonality note (S111 — quoted-text model).** Raw-content status (this section) and the **code-default body mode** (§4.18) are orthogonal mechanisms. `<pre>` / `<code>` remain raw-content elements with plain free-text-mode bodies; the quoted-text model's scope (b) does NOT change their treatment. A `<pre>` / `<code>` opened inside a code-default body (e.g. as a plain-markup child of an engine state-child body) follows the §4.18 rule for plain-markup elements: it opens a free-text body, and within that body raw-content scanning applies as specified here.
+
+### 4.18 Code-default body mode and the display-text literal (S111 — quoted-text model, scope b)
+
+**Status:** S111 amendment (2026-05-20). Quoted-text model, scope (b) — code-bearing-only. Investigation closed GO at S111; design locked. Authority: deep-dives `scrml-support/docs/deep-dives/quoted-text-model-design-space-2026-05-20.md` (DD-2 — design space), `quoted-text-model-depth-of-fix-2026-05-20.md` (DD-3 — depth-of-fix / per-section rewrite map), `quoted-text-model-friction-and-prior-art-2026-05-20.md` (DD-1 — friction + prior art); roadmap `docs/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`; Wave-0 spike `docs/changes/quoted-text-model/SPIKE-bs-mode-flag.md`.
+
+This subsection is the **single canonical definition** of the code-default body mode and the display-text literal. §3.4, §4.14, §4.15, §18.0.1, and §51.0 cross-reference this subsection; they do NOT re-define the literal grammar.
+
+#### 4.18.1 The two body modes
+
+A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is scanned by the block splitter in one of two **body modes**:
+
+| Body mode | Bodies that have it | What a bare (unquoted) run means |
+|---|---|---|
+| **free-text mode** | Plain-markup elements: HTML elements (`<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component-element bodies, the `<program>` / `<page>` body, the `<errors>` override-template body. | A bare run is **display text** — free text, recognized as today (heuristic text/code boundary; `${...}` is the delimited code exception). UNCHANGED by this amendment. |
+| **code-default mode** | The three **code-bearing loci**: engine state-child bodies (§51.0), match block-form arm bodies (§18.0.1), and `:`-shorthand bodies (§4.14). | A bare run is **code** — an identifier, a keyword, a call, member access, a nested `<tag>` (markup-as-value, §1.4), or a `${...}` interpolation. Display text in a code-default body MUST be written as a **display-text literal** (`"..."`, §4.18.3). |
+
+**Normative statements:**
+
+- The block splitter SHALL assign a body mode to every markup/state body at the point the body's opener is recognized. The default body mode is **free-text mode**. A body is in **code-default mode** if and only if it is one of the three code-bearing loci enumerated above.
+- The body mode SHALL be determined by the **enclosing element kind**, not by the lexical content of the body. An engine state-child body is code-default because it is an engine state-child body — independent of what it contains.
+- Body modes nest. A plain-markup element opened *inside* a code-default body (e.g. a `<button>` inside an engine state-child body) opens a **free-text-mode** body — the inner element's body mode is its own, not inherited from the enclosing code-default body. Conversely, an engine / match opened inside a free-text body opens code-default bodies for its state-children / arms. Each body carries its own mode; the mode in effect at any cursor position is the mode of the innermost enclosing body.
+- This amendment is **scope (b)**: it changes the body mode of the three code-bearing loci only. Every other body — all plain markup — stays in free-text mode and is **unchanged**. There is no syntactic position outside the three code-bearing loci where this amendment alters how a body is scanned.
+
+#### 4.18.2 What a bare run means in code-default mode
+
+In a code-default-mode body, the block splitter and tokenizer do NOT apply the free-text heuristics. A bare (unquoted) run of source characters is parsed as **code**, following the universal scrml expression grammar (§7 logic-context grammar):
+
+- A bare identifier resolves as an expression — a local identifier, or a keyword. (Reactive state access still requires the `@` sigil per §1.6 / §6.1 — the code-default body mode does not change the V5-strict access rule.)
+- A call (`fn(...)`), member access (`a.b.c`), and a literal (number, boolean, `not`) are code.
+- A nested `<tag>` is markup-as-value (§1.4).
+- A `${...}` interpolation opens a logic context per §3.1.
+- A run of source characters that is **prose intended for display** — a sequence that is not a valid scrml expression — is NOT free text in a code-default body. It MUST be written as a display-text literal (§4.18.3). A bare prose run in a code-default body that is not valid code is a compile error — `E-UNQUOTED-DISPLAY-TEXT` (§34; fire condition in §4.18.7).
+
+This is the **explicit text/code boundary** the model establishes: in a code-default body the default is code, and display text is the marked exception (`"..."`). It is the V5-strict access principle (§1.6) applied to the text/code boundary — a mandatory visible marker replaces a heuristic, the same move `@` made for reactive state access. The marker lands on display text only in the loci where display text is the minority content (code-bearing bodies); plain-markup prose, where display text is the majority content, keeps free text (§4.18.1).
+
+#### 4.18.3 The display-text literal
+
+A **display-text literal** is the vehicle for plain display text inside a code-default body.
+
+**Formal rule:**
+
+```
+display-text-literal ::= '"' ( literal-segment | interpolation )* '"'
+literal-segment      ::= (any character except '"', '\', or the '${' sequence)+
+interpolation        ::= '${' expression '}'
+```
+
+**Normative statements:**
+
+- A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
+- The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
+- A literal double-quote `"` inside a display-text literal SHALL be written as the escape sequence `\"`. The backslash escape sequence `\\` produces a literal backslash. These are the only two escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter.)
+- A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
+
+**Worked example — display-text literals in code-default bodies:**
+
+```scrml
+<engine for=FetchPhase initial=.Idle>
+    <Idle>"Ready to fetch."</>
+    <Loading>"Loading…"</>
+    <Error>"Don't panic — it's recoverable."</>
+</>
+```
+
+Each `"..."` is one display-text literal. The `'` characters in `Don't` and `it's` are interior characters — no escaping. A bare `Ready to fetch.` in the `<Idle>` body (no quotes) would be `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
+
+#### 4.18.4 Interpolation inside the literal
+
+A display-text literal is a **sequence of literal-text segments and `${expr}` interpolations** — the syntax-quote / unquote shape, equivalent to a JS/TS template-string. The `${...}` interpolation lives **inside** the `"..."` literal; it is NOT a separate sibling value beside the literal.
+
+**Normative statements:**
+
+- `${expr}` inside a display-text literal opens a logic context per §3.1, exactly as `${...}` does elsewhere. The `expr` follows logic-context grammar; `@`-sigil reactive access applies normally.
+- A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
+- The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
+- A literal `${` sequence intended as display text (not an interpolation) SHALL be escaped — `\${` produces the literal two-character sequence `${`. (Rare; the `${` sequence is the interpolation opener inside the literal.)
+
+**Worked example — interpolation inside the literal:**
+
+```scrml
+<engine for=FetchPhase initial=.Idle>
+    <Success>"Loaded ${@result.count} rows"</>
+    <Error>"Failed: ${@result.message}"</>
+</>
+```
+
+`"Loaded ${@result.count} rows"` is **one** display-text literal — literal segment `Loaded `, interpolation `${@result.count}`, literal segment ` rows`. The whitespace around the interpolation is inside the quotes and is therefore content (§4.18.5).
+
+#### 4.18.5 Whitespace inside the literal
+
+Whitespace inside a display-text literal is **verbatim** — preserved exactly as written, byte for byte. A run of spaces is that run of spaces; a newline inside a multi-line display-text literal is a newline in the rendered output. The literal *is* the whitespace declaration; there is no collapse and no leading/trailing strip inside a display-text literal.
+
+**Normative statements:**
+
+- Inside a display-text literal, every whitespace character (space, tab, newline) between the opening `"` and the closing `"` SHALL be preserved verbatim in the rendered display text. `"two  spaces"` renders two spaces.
+- Whitespace **outside** a display-text literal but inside a code-default body — whitespace between a literal and a sibling value, between two nested tags, between a value and a closer — is **source formatting** and is NOT content. It is ignored, exactly as whitespace between function arguments is ignored.
+- Plain-markup free-text-mode bodies (§4.18.1) are **unchanged**: they retain HTML-style whitespace handling — runs of whitespace collapse, leading/trailing whitespace strips. This amendment does NOT alter free-text-body whitespace. The verbatim-whitespace guarantee is a property of the display-text literal, not of free-text bodies.
+
+This is the resolved-by-coupling consequence of scope (b): the display-text literal gets the verbatim-whitespace guarantee where it is wanted (the code-bearing loci); plain-markup `<p>` / `<h1>` prose keeps HTML-collapse. Two whitespace regimes, split by body mode — the same split as the body-mode split itself (§4.18.1).
+
+#### 4.18.6 Auto-HTML-escaping of literal text content
+
+The codegen **auto-HTML-escapes** the literal-text-segment content of a display-text literal on emit. The author writes plain text; the compiler escapes for HTML.
+
+**Normative statements:**
+
+- For each literal-text segment of a display-text literal, the codegen SHALL HTML-escape the characters `<` → `&lt;`, `>` → `&gt;`, and `&` → `&amp;` when emitting the segment into the output HTML. The author writes the literal characters; the dist HTML carries the entity forms; the browser decodes them at render time.
+- The value produced by an `${expr}` interpolation inside a display-text literal SHALL be escaped per the existing interpolation escaping rules (the same rules that apply to `${...}` interpolation in any body or attribute position) — NOT by this segment-escaping rule. The two escape paths are distinct: literal segments escape by this rule; interpolated values escape by the existing interpolation rule.
+- Auto-escaping applies to display-text literals in code-default bodies. It does NOT change free-text-mode body emission, and it does NOT change `<pre>` / `<code>` raw-content emission (§4.17 — HTML entity-escaping there remains author responsibility).
+
+**Worked example — auto-escape:**
+
+```scrml
+<engine for=Mode initial=.ShowTag>
+    <ShowTag>"a literal <tag> and an & ampersand"</>
+</>
+```
+
+The author writes the literal `<`, `>`, `&` characters. The emitted HTML carries `a literal &lt;tag&gt; and an &amp; ampersand`. The author does not hand-escape; the compiler does.
+
+#### 4.18.7 `E-UNQUOTED-DISPLAY-TEXT` — bare display text in a code-default body
+
+A run of bare (unquoted) source characters in a code-default body (engine state-child body, match block-form arm body, `:`-shorthand body) that is **not a valid scrml expression** and **not whitespace** is a compile error — `E-UNQUOTED-DISPLAY-TEXT` (§34).
+
+**Fire condition:**
+
+- The error fires when, scanning a **code-default-mode** body (§4.18.1), the block splitter / tokenizer encounters a run of non-whitespace source characters that is neither (a) a valid scrml expression per §4.18.2 (identifier, keyword, call, member access, literal, nested `<tag>`, `${...}`), nor (b) a display-text literal (`"..."`, §4.18.3).
+- The diagnostic SHALL identify the offending run and SHALL suggest wrapping the run in a display-text literal — e.g. *"Display text in an engine state-child body must be a quoted display-text literal. Did you mean `\"<the run>\"`?"*.
+- The error does NOT fire in free-text-mode bodies — a bare run of prose in a `<p>` body is display text, unchanged. `E-UNQUOTED-DISPLAY-TEXT` is a code-default-body diagnostic only.
+
+**Recovery (unterminated literal).** A display-text literal opened with `"` that reaches the body closer or end-of-file before its closing `"` fires `E-CTX-001` against the opening `"`. The block splitter recovers by treating the captured text from the opening `"` through the body closer (or EOF) as the literal's content and continuing.
+
+**Worked example — `E-UNQUOTED-DISPLAY-TEXT`:**
+
+```scrml
+<engine for=FetchPhase initial=.Idle>
+    <Idle>Ready to fetch.</>
+</>
+```
+
+`Ready to fetch.` is a bare run in a code-default body (an engine state-child body). It is not a valid expression. This fires `E-UNQUOTED-DISPLAY-TEXT`; the diagnostic suggests `<Idle>"Ready to fetch."</>`.
+
+#### 4.18.8 The `text` block / AST kind survives
+
+The `text` block kind (at the block-splitter layer) and the corresponding `TextNode` AST kind (§14 / the AST node-kind union) **survive** this amendment. They remain the kind for **plain-markup free text** — the content of free-text-mode bodies (§4.18.1).
+
+**Normative statement:** This amendment (scope b) does NOT delete the `text` block kind or the `TextNode` AST kind. Free-text-mode bodies continue to produce `text` blocks / `TextNode`s for their free-text runs, exactly as before. The code-default body mode produces display-text-literal nodes (and the other expression-node kinds) for its bodies — but free text, and the `text` / `TextNode` kind that carries it, persist for every plain-markup body. (The deletion of `TextNode` was scope (a) — all-bodies — which was costed and NOT chosen for v0.4; see DD-3.)
+
+#### 4.18.9 Cross-references
+
+- §3.4 — V5-strict access form per context; the engine-state-child / match-arm / `:`-shorthand loci are code-default-body loci.
+- §4.14 — the `:`-shorthand body form; a `:`-shorthand body is a single code-default expression.
+- §4.15 — the structural-elements registry; `<engine>` / `<match>` body-form notes.
+- §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above).
+- §5 / §5.1 — attribute quoting; the `"`-only attribute-string convention, the precedent this subsection's `"`-only display-text literal matches.
+- §18.0.1 — match block-form arms (a code-default-body locus).
+- §51.0 / §51.0.B / §51.0.I — engine state-children (code-default-body loci).
+- §1.6 / §6.1 — the V5-strict access principle, the precedent for the explicit-marker move.
+- §34 — `E-UNQUOTED-DISPLAY-TEXT`.
+
 ---
 
 ## 5. Attribute Quoting Semantics
@@ -1087,6 +1275,8 @@ scrml attributes follow a three-way distinction based on quoting:
 | Quoted string | `attr="value"` | Static string literal. Value is fixed at compile time. |
 | Unquoted identifier | `attr=name` | Variable or scope reference. Value is resolved at runtime from the current scope. |
 | Unquoted call | `attr=fn()` | Logic invocation. Wired as an event listener or called at the expression site. |
+
+> **Cross-reference (S111 — quoted-text model).** The attribute quoted-string form is `"`-only (double-quote; single-quote is not an attribute-string delimiter). §4.18.3's display-text literal — the body-position display-text vehicle in code-default bodies — uses the same `"`-only convention; §4.18 cites this section as its precedent. scrml uses one string delimiter, `"`, language-wide.
 
 ### 5.2 Normative Rules
 
@@ -9600,6 +9790,12 @@ for markup, JS-style for value-return), §18.0.1 (block-form `<match for=Type [o
 forbidden), §18.0.3 (bare-variant inference). These are Tier 1 of the case-analysis
 ladder (§17.0 / §1.5).
 
+**S111 amendment (2026-05-20) — quoted-text model, scope b.** Match block-form arm
+bodies (§18.0.1) are **code-default bodies** (§4.18): a bare run in a `<match>` arm body
+is code; display text in an arm body is an explicit `"..."` display-text literal
+(§4.18.3). The canonical definition of the code-default body mode and the display-text
+literal is §4.18; §18.0.1 below cross-references it and does not re-define it.
+
 ---
 
 ### 18.0 Two match shapes — block-form for markup, JS-style for value-return
@@ -9643,6 +9839,28 @@ of an enum-typed reactive cell. It is the Tier 1 wrapper of the §17.0 case-anal
 </>
 ```
 
+Each arm body above is a **code-default body** (§4.18 — S111). The `:`-shorthand bodies
+here hold markup-as-value (`<p>...</p>`, `<ul>...</ul>`) — nested markup is valid code in
+a code-default body. The `<p>` / `<li>` element bodies (`Press to load.`, `Loading…`,
+`${r.name}`) are plain-markup free-text bodies — unchanged by the quoted-text model.
+
+**Worked example — arm body that IS display text (S111, quoted-text model).** When an
+arm body is display text directly — not wrapped in a plain-markup element — it is a
+`"..."` display-text literal (§4.18.3):
+
+```scrml
+<match for=MarioState on=@marioState>
+  <Small> : "Small Mario"
+  <Big>   : "Big Mario"
+  <Fire>  : "Fire Mario — ${@powerCount} power-ups"
+  <Cape>  : "Caped Mario"
+</>
+```
+
+`"Fire Mario — ${@powerCount} power-ups"` is one display-text literal carrying one
+interpolation inside it (§4.18.4). A bare `<Small> : Small Mario` (prose, not a valid
+expression) is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
+
 - **`for=Type`** — REQUIRED. The enum type the match is over.
 - **`on=expr`** — REQUIRED when the matched-on value is not auto-implied. Auto-implied
   ONLY when an `<engine for=Type>` for the same `Type` is in scope (most-local-semantics-friendly
@@ -9655,10 +9873,15 @@ of an enum-typed reactive cell. It is the Tier 1 wrapper of the §17.0 case-anal
   authorizes a bare-attribute form (`<Ready rows>`) and a named form (`<Ready rows=r>`)
   on engine state-children; these forms are normatively §51-locus only and do NOT appear
   on `<match>` state-children, where the parenthesized form is canonical.
-- **Bodies** use the three legitimate body forms (cross-ref §4 / §51):
+- **Bodies** use the three legitimate body forms (cross-ref §4 / §51). Each arm body is a
+  **code-default body** (§4.18 — S111): a bare run is code, and display text in an arm
+  body is a `"..."` display-text literal (§4.18.3):
   - Self-closing `<Variant/>` — no body, renders nothing for that variant
-  - Bare body `<Variant>...</>` — markup body with text, `${}` interpolation, nested tags
-  - Single-expression body `<Variant> : expr` — `:`-shorthand
+  - Bare body `<Variant>...</>` — code-default body: nested tags (markup-as-value),
+    `${}` interpolation, and `"..."` display-text literals. A bare prose run that is not
+    a valid expression is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
+  - Single-expression body `<Variant> : expr` — `:`-shorthand (also code-default, §4.14);
+    a display-text `:`-shorthand body is a `"..."` display-text literal.
 - **Exhaustiveness** — the compiler verifies every variant of `Type` has a matching
   state-child OR a wildcard `<_>` catch-all is present. Otherwise: `E-MATCH-NOT-EXHAUSTIVE`.
 
@@ -14652,7 +14875,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |
 | E-CTX-002 | §3.2, §4.4 | `</>` or `</tagname>` closer used inside a `${ }` logic context | Error |
-| E-CTX-003 | §3.2 | Unclosed context at end of file or before outer closer | Error |
+| E-CTX-003 | §3.2 | Unclosed context at end of file or before outer closer. **Scoping note (S111 — quoted-text model):** `:`-shorthand-vs-full-body shape confusion in a code-default body (engine state-child / match arm) surfaces as this code — a `:`-shorthand body wrongly scanned as a full body hunts a non-existent closer and reaches EOF / an outer closer. Under §4.18 / §4.14 the `:`-shorthand body is a within-body construct bounded by `:` and the opener's `>` (no closer); correct `:`-shorthand recognition prevents this misfire. The code's fire condition is otherwise unchanged. | Error |
 | E-TYPE-001 | §14.3, §18.4 | Type mismatch (lifecycle field, match arm type conflict) | Error |
 | E-TYPE-006 | §18.8.2 | Non-exhaustive match over union type | Error |
 | E-TYPE-010 | §3.3, §10.2 | `${ }` result not coercible to markup in markup parent | Error |
@@ -14944,7 +15167,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-CTRL-011 | §17.4 | `for (... in ...)` is not a valid scrml loop form. scrml iterates values via `of`: `for (item of @items)`. The `in` keyword iterates object keys in JavaScript and does not appear in scrml's vocabulary. (Catalog addition S64 audit; emitted at `compiler/src/ast-builder.js:4087-4093, 6517-6519`) | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts:447`) | Error |
 | E-META-EVAL-002 | §22.4 | Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts:375, 385`) | Error |
-| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js:1276`) | Error |
+| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js:1276`) | Error |
+| E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), or a `:`-shorthand body (§4.14) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (Spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires the compiler-side fire. Authority: `docs/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | E-PARSEVARIANT-TYPE-NOT-ENUM | §41.13, §53.14 | Second argument to `parseVariant` is not a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, string literals, and arbitrary expressions are rejected. Resolution: pass an enum type as the second argument; for struct-shape boundary parsing, use a server-function normalization step or §53.4 SPARK boundary refinement on assignment. (Stage TS — type-system pass; catalog addition S65 — parseVariant Path-A architectural commit) | Error |
 | E-PARSEVARIANT-DISCRIMINATOR-MISSING | §41.13 | Runtime: a `parseVariant` call's input has no `tag` field at parse time, or the value is `null`/non-object/non-string. Surfaced via `::ParseError::MissingDiscriminator`. Resolution: ensure the wire format includes the enum-variant-name discriminator; non-conforming wire shapes require server-fn normalization before `parseVariant`. (Runtime; catalog addition S65) | Error |
 | E-PARSEVARIANT-UNKNOWN-VARIANT | §41.13 | Runtime: a `parseVariant` call's input has a `tag` field whose value does not match any variant name in the second-argument enum. Surfaced via `::ParseError::UnknownVariant(tag)`. Resolution: add the variant to the enum, OR normalize the wire format in a server function before `parseVariant`. (Runtime; catalog addition S65) | Error |
@@ -22156,6 +22380,16 @@ transition effects, and (optionally) the markup that renders for each variant.
    multi-instance presentation factories. They do not collapse into one another. A
    component body that instantiates an engine is forbidden — `E-COMPONENT-ENGINE-SCOPE`.
 
+**S111 amendment (2026-05-20) — quoted-text model, scope b.** Engine state-child bodies
+are **code-default bodies** (§4.18): inside a state-child body a bare run is code, and
+display text is an explicit `"..."` display-text literal (§4.18.3). This applies to every
+state-child body form — the bare body (`<Variant>...</>`) and the `:`-shorthand body
+(`<Variant> : expr` — §51.0.I). The canonical definition of the code-default body mode
+and the display-text literal is §4.18; §51.0 cross-references it and does not re-define
+it. Plain-markup elements opened inside a state-child body (e.g. a `<button>` or `<p>`)
+open their own free-text bodies per §4.18.1 — the code-default mode is the state-child
+body's own, not inherited by nested plain markup.
+
 #### 51.0.B Engine declaration syntax
 
 ```scrml
@@ -22181,7 +22415,11 @@ state-child may carry:
 - `rule=Variant` or `rule=(VariantA \| VariantB \| ...)` — outgoing transitions (§51.0.F)
 - `effect=${ ... }` — single-target transition effect (§51.0.H)
 - `<onTransition>` element child — multi-target / attribute-bearing transition handler (§51.0.H)
-- a body — markup rendered when the engine is in this variant (§51.0.C, §51.0.I)
+- a body — rendered when the engine is in this variant (§51.0.C, §51.0.I). The
+  state-child body is a **code-default body** (§4.18 — S111): a bare run is code, nested
+  `<tag>` is markup-as-value (§1.4), and display text is a `"..."` display-text literal
+  (§4.18.3). A bare prose run in a state-child body that is not a valid expression is
+  `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
 
 **Worked example — the canonical Mario engine:**
 
@@ -22250,9 +22488,9 @@ bound local identifiers as in §18.7).
 
    <engine for=LoadPhase initial=.Idle>
      <Idle rule=.Loading>: <button onclick=load()>Load</button>
-     <Loading rule=(.Done | .Error)>: Loading...
-     <Done rows rule=.Idle>: ${rows} rows
-     <Error msg rule=.Idle>: ${msg}
+     <Loading rule=(.Done | .Error)>: "Loading…"
+     <Done rows rule=.Idle>: "${rows} rows"
+     <Error msg rule=.Idle>: "${msg}"
    </>
    ```
 
@@ -22260,13 +22498,18 @@ bound local identifiers as in §18.7).
    attribute names** (`rule`, `effect`, `history`, `internal:rule`). The bareword
    attributes that remain are interpreted as positional payload bindings.
 
+   The state-child bodies above are **code-default bodies** (§4.18 — S111): `<Idle>`'s
+   `:`-shorthand body holds a `<button>` markup-as-value; `<Loading>`'s, `<Done>`'s, and
+   `<Error>`'s `:`-shorthand bodies are `"..."` display-text literals (`"${rows} rows"`
+   carries the payload-bound `rows` interpolation inside the literal per §4.18.4).
+
 2. **Named form** — each binding appears as a `field=local` attribute, where `field` is
    the declared payload field name and `local` is the binding identifier introduced
    into scope. This form mirrors §18.7's named match-arm payload destructuring.
 
    ```scrml
-   <Done rows=r rule=.Idle>: ${r} rows
-   <Error msg=m rule=.Idle>: ${m}
+   <Done rows=r rule=.Idle>: "${r} rows"
+   <Error msg=m rule=.Idle>: "${m}"
    ```
 
    The named form binds by field name (NOT by source order); the RHS identifier is the
@@ -22280,7 +22523,7 @@ bound local identifiers as in §18.7).
    amendment authorizes it on engine state-children with identical semantics.
 
    ```scrml
-   <Done(rows) rule=.Idle>: ${rows} rows
+   <Done(rows) rule=.Idle>: "${rows} rows"
    <OpenAt(depth, opener, span) rule=(.Balanced | .OpenAt)>
      // body references `depth`, `opener`, `span` as in-scope locals
    </>
@@ -22354,7 +22597,7 @@ type BracketStack:enum = {
     //     ^^^^^^^^^^^^^^^^^^ ← three positional payload bindings
     // body references `depth`, `opener`, `span` as in-scope locals; types
     // inherit from the variant's payload field declarations (int, BracketKind, Span).
-    Depth: ${depth} (opener at ${span.line}:${span.col})
+    "Depth: ${depth} (opener at ${span.line}:${span.col})"
   </>
 </>
 ```
@@ -22363,7 +22606,7 @@ The parenthesized form is also accepted and semantically identical:
 
 ```scrml
 <OpenAt(depth, opener, span) rule=(.Balanced | .OpenAt)>
-  Depth: ${depth} (opener at ${span.line}:${span.col})
+  "Depth: ${depth} (opener at ${span.line}:${span.col})"
 </>
 ```
 
@@ -22778,18 +23021,27 @@ blocks (Tier 1 is read-only). They are engine-only.
 #### 51.0.I `:`-shorthand for single-expression body (Move 15)
 
 A state-child with NO `</>` closer MAY use `<tag attrs> : expr` shorthand where `expr`
-becomes the rendered body. Cross-ref §4 (block grammar) for the underlying form.
+becomes the rendered body. Cross-ref §4.14 (block grammar — the universal `:`-shorthand
+form, including the explicit `:`-shorthand body grammar) and §4.18 (code-default body
+mode) for the underlying form.
 
 **Three legitimate body forms (mutually exclusive by syntactic shape):**
 
 | Form | Job |
 |---|---|
 | `<Variant/>` | Self-closing. No body. State-child declares transitions only. |
-| `<Variant>...</>` | Bare body. Markup body — text, `${}` interpolation, nested tags, child elements. |
-| `<Variant> : expr` | Single-expression body shorthand. `expr` becomes the body. |
+| `<Variant>...</>` | Bare body — a **code-default body** (§4.18). Code, nested tags (markup-as-value), `${}` interpolation, and `"..."` display-text literals for display text. |
+| `<Variant> : expr` | Single-expression body shorthand — a **code-default** single expression (§4.14, §4.18). A display-text `:`-shorthand body is a `"..."` display-text literal. |
 
 The `:`-shorthand is the high-density default; it composes elegantly with bare-variant
 arms in match blocks (§18.0.3) and with the kickstarter recipe shape (`docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.1).
+
+**Code-default body (S111 — quoted-text model).** A state-child body — bare-body or
+`:`-shorthand — is a code-default body (§4.18.1): a bare run is code; display text is an
+explicit `"..."` display-text literal (§4.18.3). `<Idle : "Waiting…">` is the canonical
+form for a display-text `:`-shorthand body; a bare `<Idle : Waiting…>` (prose, not a
+valid expression) is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7). See §4.18 for the full
+definition.
 
 **Mixed engines (some bodied, some self-closing) are legal and useful.** Self-closing
 state-children declare transition rules without contributing to render. Bodied
@@ -22954,12 +23206,12 @@ function load() {
 
   <Loading rule=(.Done | .TimedOut | .Error)>
     <onTimeout after=30s to=.TimedOut/>
-    Loading...
+    "Loading…"
   </>
 
-  <Done rows rule=.Idle>: ${rows} rows
-  <TimedOut rule=.Idle>: Timed out
-  <Error msg rule=.Idle>: ${msg}
+  <Done rows rule=.Idle>: "${rows} rows"
+  <TimedOut rule=.Idle>: "Timed out"
+  <Error msg rule=.Idle>: "${msg}"
 </>
 ```
 
@@ -23160,7 +23412,7 @@ exit, and restores from that cell on outer re-entry.
 ```scrml
 <engine for=AppMode initial=.Title>
   <Title rule=.Playing>
-    Welcome — press start.
+    "Welcome — press start."
   </>
 
   <Playing history rule=(.Title | .Paused)>
@@ -23171,7 +23423,7 @@ exit, and restores from that cell on outer re-entry.
   </>
 
   <Paused rule=.Playing.history>
-    Game paused. <button onclick=${ @appMode = .Playing.history }>Resume</button>
+    "Game paused. " <button onclick=${ @appMode = .Playing.history }>Resume</button>
   </>
 </>
 ```
@@ -23338,7 +23590,7 @@ type PlayMode:enum = { Exploring, Battle, Inventory }
 
 <engine for=AppMode initial=.Title>
   <Title rule=.Playing>
-    Welcome.
+    "Welcome."
   </>
 
   <Playing rule=(.Title | .Paused)>
@@ -23354,7 +23606,7 @@ type PlayMode:enum = { Exploring, Battle, Inventory }
   </>
 
   <Paused rule=.Playing>
-    Paused.
+    "Paused."
   </>
 </>
 ```
