@@ -1,127 +1,93 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
+# updated: 2026-05-20T13:42:44-06:00  commit: 78faa65
 
-## Development Commands (root package.json > scripts)
+Build tool: Bun (no transpile step — `.ts` runs directly).
+No Dockerfile, no docker-compose, no CI workflow files (.github/, .gitlab-ci, Jenkinsfile).
+The only CI-equivalent automation is git hooks under scripts/git-hooks/.
 
-| Command | What it does |
-|---------|--------------|
-| `bun run compile` | Compile a .scrml file or directory using CLI |
-| `bun run watch` | Compile + watch mode via `--watch` flag |
-| `bun run test` | Run full test suite; pretest runs scripts/compile-test-samples.sh first |
-| `bun run test:coverage` | Test suite with coverage reporting |
-| `bun run pretest` | (auto) Compile all samples/compilation-tests/ fixtures to dist/ before tests |
-| `bun run bench` | Compile samples/compilation-tests/ with --timing flag for performance measurement |
-| `bun run security` | Compile test samples, then run `node --check` on all client JS output |
-| `bun run lsp` | Start the LSP server |
-| `bun run docs:build` | Build the documentation site |
-| `bun run e2e` | Run Playwright e2e suite (3-browser: Chromium/Firefox/WebKit) |
-| `bun run e2e:ui` | Run Playwright e2e suite with UI mode |
-| `bun run e2e:install` | Install Playwright browsers (chromium, firefox, webkit) |
+## npm Scripts (package.json)
+compile        — `bun run compiler/src/cli.js compile` — compile a .scrml file/dir
+pretest        — `bash scripts/compile-test-samples.sh` — runs automatically before `test`
+test           — `bun test compiler/tests/` — full test suite (728 files)
+test:coverage  — `bun test compiler/tests/ --coverage`
+watch          — `bun --watch compiler/src/cli.js compile` — recompile on change
+bench          — `bun run compiler/src/cli.js compile samples/compilation-tests/ --timing`
+security       — compile compilation-tests then `node --check` every emitted client.js
+lsp            — `bun run lsp/server.js --stdio` — start the language server
+docs:build     — `bun run docs/build.ts` — build the docs site (articles → HTML)
+e2e            — `playwright test --config=e2e/playwright.config.ts`
+e2e:ui         — Playwright in UI mode
+e2e:docs       — `playwright test --config=e2e/playwright.docs.config.ts`
+e2e:install    — `playwright install chromium firefox webkit`
+
+## CLI Subcommands (compiler/src/cli.js — the `scrml` binary)
+scrml init [dir]                         — scaffold a new scrml project
+scrml compile <file|dir> [opts]          — compile scrml source
+scrml dev <file|dir> [opts]              — compile + watch + serve
+scrml build <dir> [opts]                 — build a production server
+scrml serve [opts]                       — start a persistent compiler server
+scrml generate <type> [opts]             — scaffold adopter-owned source (e.g. `generate auth`)
+scrml migrate <file|dir> [opts]          — apply automated rewrites for deprecated patterns
+scrml promote --match|--engine <file|dir> — tier-1→<match> / <match>→<engine> (CLI locked; rewrite impl pending)
+A bare `.scrml` file or directory as the first arg falls through to `compile`.
+
+### Compile / Dev options
+--output-dir, -o <dir>   output directory (default: dist/ next to input)
+--verbose, -v            per-stage timing and counts
+--convert-legacy-css     convert <style> blocks to #{...}
+--embed-runtime          inline the runtime instead of a separate file
+--emit-batch-plan        print the Stage 7.5 BatchPlan as JSON
+--emit-reachability      emit <base>.reachability.json (Stage 7.6 / SPEC §40.9)
+--chunk-size-budget=N    soft size budget for W-CG-CHUNK-LARGE (default 100000)
+--emit-machine-tests     emit <base>.machine.test.js per source (§51.13)
+--debug-perf             sub-stage CG/RS/DG timing (PGO instrumentation)
+--watch, -w              watch + recompile (compile command only)
+
+### build / serve / migrate / promote options
+build:   --output <dir>, --embed-runtime, --minify (accepted, no-op in v1)
+serve:   --port <n> (default 3100 or SCRML_PORT), --verbose
+migrate: --dry-run, --check (CI exit-code), --include=<glob>, --exclude=<glob>, --no-default-excludes
+promote: --match, --engine, --dry-run, --check
 
 ## Build & Release
+There is no release pipeline in-repo. Release cut points are git release tags
+(`refs/tags/v*`); the pre-push hook runs the README accuracy gate only on tag pushes.
 
-| Command | What it does |
-|---------|--------------|
-| `bun run compiler/src/cli.js build <dir>` | Build production server bundle |
-| `bun run scripts/rebuild-tab-dist.ts` | Regenerate all TAB dist artifacts |
-| `bun run scripts/rebuild-self-host-dist.ts` | Regenerate all self-host dist files (STRICT GATE — exits 1 on host-compiler errors) |
-| `bun run scripts/rebuild-bs-dist.ts` | Regenerate block-splitter dist artifacts |
-| `scripts/assemble-spec.sh` | Assemble SPEC.md from section files |
-| `bun run scripts/regen-spec-index.ts` | Regenerate SPEC-INDEX.md line ranges + sizes in-place (idempotent) |
-| `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
-| `bun run scripts/measure-markup-read-edges.ts` | Measure markup-read node ceiling (A-1.7 tool) |
-| `bun run scripts/benchmark-perf-baseline.ts` | Capture per-stage perf baseline → benchmarks/perf-baseline.json (PGO P1.4; S102) |
-| `bun run scripts/perf-regression-check.ts` | Diff current perf vs baseline; exit 1 on regression >TOLERANCE% (default 10%; S102) |
-| `node scripts/extract-readme-scrml.js` | Compile-gate for `scrml` fenced blocks in README.md (S102; called by pre-push hook on release-tag push) |
+## CI/CD Pipeline
+None. No .github/workflows, .gitlab-ci.yml, or Jenkinsfile.
+Quality gating is local-only via versioned git hooks (install: `bash scripts/git-hooks/install.sh`):
 
-## CLI Subcommands
+git pre-commit hook  [scripts/git-hooks/pre-commit]
+  - warns if committing directly to `main` (only the PA should)
+  - runs `bun test compiler/tests/{unit,integration,conformance} --bail`
+    (skips browser subdir for flakiness); fails the commit on any test failure
+  Triggers: every commit
 
-| Subcommand | What it does |
-|------------|--------------|
-| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON; `--emit-per-route` emits per-(EP, role, tier) JS chunks + chunks.json (default-on at v0.3.0); `--chunk-size-budget=N` sets soft byte threshold for W-CG-CHUNK-LARGE lint [NEW S92 Q-OPEN-5] |
-| `scrml dev <file\|dir>` | Dev server with hot-reload |
-| `scrml build <dir>` | Production build |
-| `scrml serve <dir>` | Serve compiled output |
-| `scrml migrate <file\|dir>` | Migrate pre-v0.3 .scrml structure; `--program-shape` flag for v0.3 container migration |
-| `scrml promote <file\|dir>` | Promote patterns (e.g. `i-match` → `match`); `--match` flag |
-| `scrml init` | Scaffold a new scrml project |
-| `scrml generate auth` | Scaffold adopter-owned login page (writes stdlib/auth/templates/login.scrml to project) |
-| `scrml lsp --stdio` | Start LSP server |
-
-## `--chunk-size-budget` Flag  [compiler/src/commands/compile.js]
-
-Q-OPEN-5. Both forms accepted:
-- `--chunk-size-budget=150000` (equals form)
-- `--chunk-size-budget 150000` (space form)
-
-Rejects non-positive / non-numeric values with non-zero exit. Default when absent: `CHUNK_LARGE_SOFT_BUDGET_BYTES` = 100,000 bytes. Propagates through `compileScrml({ chunkSizeBudgetBytes })` → `runCG` → `emitPerRouteChunks`.
-
-## Pre-commit Hook (scripts/git-hooks/pre-commit)
-
-Activated per-machine via: `git config core.hooksPath scripts/git-hooks`
-
-Steps:
-1. Warn if committing directly to `main` branch
-2. Run: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`
-3. Exit 1 on test failure
-
-## Pre-push Hook (scripts/git-hooks/pre-push — NEW S102)
-
-Source-controlled baseline. Install via `bash scripts/git-hooks/install.sh`.
-
-Steps:
-1. Parse push payload (one line per ref: `<local-ref> <local-sha> <remote-ref> <remote-sha>`)
-2. Detect any release-tag push (`refs/tags/v*`) in the payload
-3. On release-tag push: run `node scripts/extract-readme-scrml.js` — compile-gate for all ` ```scrml ` fenced blocks in README.md
-4. Regular (non-release-tag) pushes: skip README gate
-
-README gate behavior: default-gated (opt-OUT via `// gate: skip` marker in first non-blank line of block). Compile + lint-clean check; ghost-pattern lint W-LINT-* failures fail the gate.
-
-## Bun Test Config (bunfig.toml)
-
-```toml
-[test]
-root = "compiler/tests/"
-timeout = 10000
-```
-
-Run subsets:
-- `bun test compiler/tests/unit`           — unit tests only
-- `bun test compiler/tests/integration`    — integration tests only
-- `bun test compiler/tests/conformance`    — conformance tests only
-- `bun test compiler/tests/unit/<name>.test.js`  — single test file
-
-## No CI/CD Pipeline
-
-No `.github/workflows/`, `.gitlab-ci.yml`, or `Jenkinsfile` detected. CI is via local pre-commit and pre-push hooks.
+git pre-push hook  [scripts/git-hooks/pre-push]
+  - full test suite + gauntlet quick check
+  - README accuracy gate (`scripts/extract-readme-scrml.js`) — ONLY when the
+    push payload contains a release-tag ref (`refs/tags/v*`)
+  Triggers: every push
 
 ## Docker
+None.
 
-No Dockerfile or docker-compose.yml detected. The dev server (`scrml dev`) runs via Bun directly.
-
-## Self-Host Dist Artifacts
-
-Gitignored; must be built locally on each machine:
-- `compiler/dist/self-host/*.js`
-- `compiler/self-host/dist/tab.js`
-
-Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
-
-## PGO Performance Tooling (S102)
-
-| File | Purpose |
-|------|---------|
-| scripts/benchmark-perf-baseline.ts | Capture per-stage baseline (trucking-dispatch + contact-book + todomvc corpora). Output: benchmarks/perf-baseline.json |
-| scripts/perf-regression-check.ts | Re-run harness, diff vs baseline per stage, flag >TOLERANCE% slower (exit 1) |
-| benchmarks/perf-baseline.json | Versioned baseline JSON. Reference: docs/changes/perf-characterization/CLOSURE-ANALYSIS-COST.md (S94) |
+## Notable build scripts (scripts/)
+compile-test-samples.sh  — `pretest` hook; compiles test sample sources
+assemble-spec.sh / regen-spec-index.ts / update-spec-index.sh — SPEC.md + SPEC-INDEX.md maintenance
+generate-api-reference.js — generates API reference from stdlib
+rebuild-self-host-dist.ts / rebuild-bs-dist.ts / rebuild-tab-dist.ts — rebuild self-host `.js` dist from `.scrml`
+extract-readme-scrml.js  — README scrml-snippet accuracy gate (pre-push, tag pushes)
+perf-regression-check.ts / benchmark-perf-baseline.ts / bundle-size-benchmark.js — performance gates
+verify-js.js — `node --check` over emitted JS
 
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #pre-push #self-host #playwright #e2e #s103 #v0.3.3 #generate-auth #emit-per-route #chunk-size-budget #q-open-5 #pgo-tooling #perf-baseline #readme-gate
+#scrmlts #map #build #cli #bun #git-hooks
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
-- [config.map.md](./config.map.md)
+- [structure.map.md](./structure.map.md)
 - [test.map.md](./test.map.md)

@@ -1,6 +1,25 @@
 # Quoted-Text Model — Implementation Roadmap (scope b, v0.4)
 
-**Status:** ACTIVE — implementation track. Go/no-go CLOSED **GO** at S111 (2026-05-20).
+> ## ⚠️ STATUS SUPERSEDED — S111 charter-B pivot
+>
+> **Waves 2-7 below are PAUSED.** S111 ratified native-parser **charter B**: the
+> scrml-native parser expands to replace the WHOLE compiler front-end (block-splitter
+> + Acorn). The block-splitter is slated for **deletion** — so the BS-retrofit Waves
+> 2-7 retrofit a doomed layer and are throwaway work.
+>
+> **Wave 1 (SPEC §4.18) LANDED S111 and STANDS** — it defines the quoted-text
+> *language*. The native parser implements §4.18 **natively, once, cleanly** as
+> first-class design. Quoted-text now ships **with the native parser**, not as a
+> standalone v0.4 BS-retrofit.
+>
+> The wave decomposition below is **retained as input** to the native-parser charter
+> deep-dive (`scrml-support/docs/deep-dives/scrml-native-parser-front-end-charter-2026-05-20.md`)
+> — it is the per-compiler-layer analysis of what implementing §4.18 entails. It is no
+> longer a live dispatch plan. A *minimal* interim BS fix (Wave 2 only) is an open
+> question the charter dive prices.
+
+**Status:** SUPERSEDED at S111 (charter-B pivot — see banner). Wave 1 LANDED + stands;
+Waves 2-7 PAUSED. Go/no-go was CLOSED **GO** at S111 (2026-05-20).
 **Investigation:** see `INVESTIGATION-PLAN.md` (sibling) — Phases 1-5 complete.
 **Cost basis:** DD-3 — `scrml-support/docs/deep-dives/quoted-text-model-depth-of-fix-2026-05-20.md`.
 **Target:** v0.4. DD-3 midpoint estimate ~120h (range ~79-167h).
