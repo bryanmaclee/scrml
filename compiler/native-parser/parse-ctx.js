@@ -21,27 +21,38 @@ export function makeParseContext() {
     const lexCtx = makeLexContext();
     return {
         // --- inherited from M1's makeLexContext (the JS-layer state) ---
-        tokens:          lexCtx.tokens,
-        currentMode:     lexCtx.currentMode,
-        brackets:        lexCtx.brackets,
-        recovery:        lexCtx.recovery,
-        templateStack:   lexCtx.templateStack,
+        tokens:            lexCtx.tokens,
+        currentMode:       lexCtx.currentMode,
+        brackets:          lexCtx.brackets,
+        recovery:          lexCtx.recovery,
+        templateStack:     lexCtx.templateStack,
 
         // --- NEW at MK1.1 ---
         // The shared AST-node sink. Whichever layer is active appends
         // produced nodes here; the host layer's open node adopts them.
-        nodes:           [],
+        nodes:             [],
         // The seam's instance stack — the §51.0.Q.1 inner-instance
         // hierarchy materialized; generalizes M1's templateStack. MK4
         // pushes/pops these for the real markup<->JS delegation.
-        delegationStack: [],
+        delegationStack:   [],
 
         // --- markup-layer engine state (MK1.1) ---
         // The current BlockContext variant the markup trampoline
         // dispatches on. Live-surface mirror of the engine's
         // auto-declared @blockContext cell (cf. ctx.currentMode for
         // @lexMode in M1).
-        blockContext:    initialBlockContext(),
+        blockContext:      initialBlockContext(),
+
+        // --- markup-layer context stack (MK1.2) ---
+        // The stack of SUSPENDED outer BlockContext frames — the
+        // BlockContext-engine analogue of M1's templateStack. When a
+        // nested context opens (the charter Q1.C rule= contract permits
+        // it), the outer frame is pushed here so the matching close
+        // knows which context to return @blockContext to.
+        // block-context.js's ensureBlockContextStack also lazy-inits
+        // this so the helpers stay total against an MK1.1-vintage ctx;
+        // seeding it here is the canonical form.
+        blockContextStack: [],
     };
 }
 

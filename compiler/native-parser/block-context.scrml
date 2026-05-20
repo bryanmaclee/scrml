@@ -46,24 +46,32 @@
 //   Engine is THE correct shape — the same verdict M1's LexMode carries.
 //   BlockContext is to the markup layer what LexMode is to the JS layer.
 //
-// MK1.1 SCOPE (this dispatch):
+// MK1.2 SCOPE (this dispatch):
 //   - The <engine for=BlockContext> DECLARATION is COMPLETE: all 9
-//     variants, the full rule= contract per charter Q1.C.
-//   - The .TopLevel state-child is a SUBSTANTIVE dispatcher at a
-//     RECOGNITION level — it recognizes a context-entry sigil and names
-//     the BlockContext variant the cursor wants to enter. The DEEP work
-//     (consuming the sigil, brace-depth tracking, the actual transition)
-//     is MK1.2.
-//   - The other 8 state-child bodies are SKELETAL — deep boundary
-//     recognition + brace-depth closing is MK1.2.
-//   - .InLogicEscape is shaped as a §51.0.Q.1 COMPOSITE state-child
-//     (punch-list P3) — its body carries the JS-layer engine graph
-//     (the markup→JS delegation point). At MK1.1 the inner delegation
-//     is a stub frame; the actual JS-parse delegation lands at MK4.
+//     variants, the full rule= contract per charter Q1.C (unchanged
+//     from MK1.1).
+//   - MK1.1 made the .TopLevel state-child substantive at a RECOGNITION
+//     level. MK1.2 deepens that to actual CONSUMPTION + TRANSITION: the
+//     seven block-opener sigils are CONSUMED and @blockContext (the live
+//     ctx.blockContext slot) TRANSITIONS to the matching variant; a
+//     brace-depth marker is recorded so the matching closing brace at
+//     depth-0 closes the context back to the prior one.
+//   - The `<ident` markup-tag-context boundary is recognized + entered
+//     (.InMarkupTag). MK1.2 transitions on the BOUNDARY only — the <tag>
+//     TREE (opener/closer pairing, TagFrame) is MK2.
+//   - .InLogicEscape (a §51.0.Q.1 COMPOSITE state-child, punch-list P3)
+//     — entering it pushes a DelegationFrame of kind .LogicEscape onto
+//     ctx.delegationStack; the matching close pops it. The JS-layer
+//     parse-delegation is NOT wired until MK4 — at MK1.2 the delegated
+//     body is captured as a span and the DelegationFrame is the
+//     substrate MK4 widens.
+//   - .InForeignCode is the §23 opaque passthrough — no inner
+//     recognition; the body is verbatim.
 //
-// MK1.2 lands: the 7 block-opener sigils + brace-depth closing; the
-//   `<ident` markup-tag-context boundary; .InLogicEscape realized as a
-//   DelegationFrame push; the foreign-code opaque passthrough (§23).
+// MK1.2 lands (THIS dispatch): the 7 block-opener sigils + brace-depth
+//   closing; the `<ident` markup-tag-context boundary; .InLogicEscape
+//   realized as a DelegationFrame push/pop; the foreign-code opaque
+//   passthrough (§23).
 // MK1.3 lands: line comments + HTML comments recognized structurally;
 //   the .InCss / .InSql / .InErrorEffect / .InMeta / .InTest sub-context
 //   stubs at sketch depth; conformance vs the current BS block tree.
@@ -79,6 +87,21 @@
 
 ${
     import { LexMode } from "./lex-mode.scrml"
+    import { peekChar, peekStr, advance } from "./cursor.scrml"
+    import { makeSpan } from "./span.scrml"
+    import {
+        push as pushBracket,
+        pop as popBracket,
+        depth as bracketDepth,
+        BracketKind,
+    } from "./bracket-stack.scrml"
+    import {
+        delegationKinds,
+        closeOnBraceDepth,
+        makeDelegationFrame,
+        pushDelegationFrame,
+        popDelegationFrame,
+    } from "./parse-ctx.scrml"
 
     type BlockContext:enum = {
         TopLevel,
@@ -301,5 +324,253 @@ ${
         const isUpper = c >= 65 && c <= 90
         const isLower = c >= 97 && c <= 122
         return isUpper || isLower
+    }
+
+    // =====================================================================
+    // MK1.2 — CONTEXT CONSUMPTION + TRANSITION.
+    //
+    // MK1.1 stopped at recognition (contextForSigil / isMarkupTagOpener
+    // answer "what would the cursor enter here?"). MK1.2 CONSUMES the
+    // boundary and performs the @blockContext transition, recording the
+    // datum that lets the matching close return to the prior context.
+    //
+    // PILLAR 5b: enterBlockContext / closeBlockContext / enterMarkupTag-
+    // Context are STATE TRANSITIONS — in the canonical engine form each is
+    // a write to @blockContext that the engine's rule= contract validates.
+    // The recognition that PRECEDES the write (which variant, at what
+    // brace depth) is calculation around the write. isBlockContextClose
+    // and blockContextDepth are calculations (predicate / read).
+    // =====================================================================
+
+    // --- The BlockContext stack ------------------------------------------
+    //
+    // The charter Q1.C rule= contract permits NESTED contexts (e.g.
+    // <InLogicEscape rule=(.TopLevel | .InMarkupTag | .InSql)> — a
+    // logic-escape body may itself enter a markup tag or a SQL block).
+    // MK1.2 therefore models the open-context chain as a STACK, exactly
+    // as M1 models nested template interpolations with ctx.templateStack.
+    // The live ctx.blockContext slot is the CURRENT variant (the engine's
+    // @blockContext cell); ctx.blockContextStack holds the suspended
+    // outer frames so a close knows which context to return to.
+    //
+    // Each frame records:
+    //   context      — the BlockContext variant this frame opened
+    //   priorContext — the variant the engine was in BEFORE this frame
+    //                   opened (the variant a matching close returns to)
+    //   depthAtOpen  — the ctx.brackets depth BEFORE the sigil's brace was
+    //                  pushed. The matching close is the brace where depth
+    //                  returns to depthAtOpen + 1. This is the
+    //                  CloseCondition.BraceDepth datum (R1 spike §3.2).
+    //   openSpan     — the sigil's span (blame locus for an unterminated
+    //                  body).
+
+    // ensureBlockContextStack — lazy init the per-ctx BlockContext stack.
+    // Mirrors lex-in-template.scrml's ensureTemplateStack.
+    export function ensureBlockContextStack(ctx) {
+        if (ctx.blockContextStack is not) {
+            ctx.blockContextStack = []
+        }
+    }
+
+    // pushBlockContextFrame — STATE write: a context opens.
+    export function pushBlockContextFrame(ctx, frame) {
+        ensureBlockContextStack(ctx)
+        ctx.blockContextStack.push(frame)
+    }
+
+    // popBlockContextFrame — STATE write: a context closes. Returns the
+    // popped frame, or `not` if the stack was empty (an unbalanced close
+    // — the caller dispatches ErrorRecovery).
+    export function popBlockContextFrame(ctx) {
+        ensureBlockContextStack(ctx)
+        if (ctx.blockContextStack.length == 0) return not
+        return ctx.blockContextStack.pop()
+    }
+
+    // topBlockContextFrame — CALCULATION (peek). The frame whose close
+    // the cursor is currently watching for.
+    export function topBlockContextFrame(ctx) {
+        ensureBlockContextStack(ctx)
+        if (ctx.blockContextStack.length == 0) return not
+        return ctx.blockContextStack[ctx.blockContextStack.length - 1]
+    }
+
+    // blockContextDepth — CALCULATION (read). How many block contexts
+    // are open.
+    export function blockContextDepth(ctx) {
+        ensureBlockContextStack(ctx)
+        return ctx.blockContextStack.length
+    }
+
+    // --- Sigil consumption + transition ----------------------------------
+
+    // enterBlockContext — STATE transition. Consumes a recognized
+    // two-character block-opener sigil at the cursor and transitions
+    // @blockContext into the matching variant.
+    //
+    // The brace-depth datum is recorded BEFORE the sigil's brace is
+    // pushed, mirroring lex-in-template.scrml's isTemplateInterpClose
+    // depth bookkeeping. For .InLogicEscape (punch-list P3) a
+    // DelegationFrame of kind .LogicEscape, closeOn .BraceDepth(...) is
+    // pushed — the markup→JS delegation point; the JS-layer parse-
+    // delegation lands at MK4.
+    export function enterBlockContext(ctx, cursor, context, sigil) {
+        const openSpan = makeSpan(
+            cursor.pos,
+            cursor.pos + sigil.length,
+            cursor.line,
+            cursor.col,
+        )
+
+        const depthAtOpen = bracketDepth(ctx.brackets)
+
+        // Consume the two sigil characters.
+        advance(cursor, sigil.length)
+
+        // Push a Brace frame for the sigil's brace — inner braces nest
+        // against this same stack so the matching close is a pure depth
+        // calculation.
+        pushBracket(
+            ctx.brackets,
+            BracketKind.Brace,
+            makeSpan(openSpan.start + 1, openSpan.start + 2, openSpan.line, openSpan.col),
+        )
+
+        const priorContext = getBlockContext(ctx)
+        const frame = {
+            context,
+            priorContext,
+            depthAtOpen,
+            openSpan,
+        }
+        pushBlockContextFrame(ctx, frame)
+
+        // Punch-list P3 — entering .InLogicEscape pushes a DelegationFrame.
+        if (context == BlockContext.InLogicEscape) {
+            const kinds = delegationKinds()
+            // bodyMode is MK3's BodyMode type — carried as `not` here
+            // until MK3 threads the §4.18 mode (the field is part of the
+            // DelegationFrame struct per R1 spike §3.2).
+            const frameDelegation = makeDelegationFrame(
+                kinds.LogicEscape,
+                closeOnBraceDepth(depthAtOpen),
+                openSpan,
+                not,
+            )
+            pushDelegationFrame(ctx, frameDelegation)
+        }
+
+        setBlockContext(ctx, context)
+        return frame
+    }
+
+    // enterMarkupTagContext — STATE transition. The `<ident` markup-tag-
+    // context boundary. MK1.2 recognizes + transitions on the BOUNDARY
+    // only; the actual <tag> TREE (opener/closer pairing, TagFrame) is
+    // MK2.
+    //
+    // A markup tag is NOT brace-delimited — the tag context closes on a
+    // TagFrame-balanced condition (MK2's datum), not a brace-depth-0
+    // close. MK1.2 consumes ONLY the `<` (the boundary marker) and pushes
+    // a frame with a sentinel depthAtOpen of -1 ("not brace-delimited").
+    export function enterMarkupTagContext(ctx, cursor) {
+        const openSpan = makeSpan(cursor.pos, cursor.pos + 1, cursor.line, cursor.col)
+
+        // Consume the `<` boundary marker only — the tag name + closer
+        // are MK2.
+        advance(cursor, 1)
+
+        const priorContext = getBlockContext(ctx)
+        const frame = {
+            context:      BlockContext.InMarkupTag,
+            priorContext,
+            // -1 = not brace-delimited. A markup tag closes on a TagFrame
+            // balance (MK2), not a brace-depth-0 close.
+            depthAtOpen:  -1,
+            openSpan,
+        }
+        pushBlockContextFrame(ctx, frame)
+
+        setBlockContext(ctx, BlockContext.InMarkupTag)
+        return frame
+    }
+
+    // --- Context closing -------------------------------------------------
+
+    // isBlockContextClose — CALCULATION (predicate). Is the cursor at the
+    // closing brace of the CURRENT brace-delimited block context?
+    //
+    // True when a brace-delimited context is open, the character at the
+    // cursor is a closing brace, and the ctx.brackets depth is exactly
+    // depthAtOpen + 1 (only this frame's own sigil brace still open).
+    // Mirrors lex-in-template.scrml's isTemplateInterpClose depth check.
+    // A markup-tag frame's -1 depthAtOpen never matches here.
+    export function isBlockContextClose(ctx, cursor) {
+        const frame = topBlockContextFrame(ctx)
+        if (frame is not) return false
+        if (frame.depthAtOpen < 0) return false
+        if (peekChar(cursor, 0) != closingBrace()) return false
+        return bracketDepth(ctx.brackets) == frame.depthAtOpen + 1
+    }
+
+    // closingBrace — CALCULATION (pure fn). The one-character closing
+    // brace string, assembled via character code per the README
+    // ANOMALY-1 string-literal workaround (a literal closing brace in a
+    // string inside a logic-escape block trips the BS-layer bracket
+    // matcher — same class as the SIGIL_TO_CONTEXT table's concat form).
+    export function closingBrace() {
+        return String.fromCharCode(125)
+    }
+
+    // closeBlockContext — STATE transition. Consumes the matching
+    // closing brace of the current brace-delimited block context and
+    // transitions @blockContext back to the prior context.
+    //
+    // Pops the BlockContext frame, consumes the close, pops the sigil
+    // brace off ctx.brackets, pops the DelegationFrame for .InLogicEscape
+    // (P3), and writes @blockContext back to frame.priorContext. Returns
+    // the popped frame, or `not` if no context was open.
+    export function closeBlockContext(ctx, cursor) {
+        const frame = popBlockContextFrame(ctx)
+        if (frame is not) return not
+
+        // Consume the closing brace.
+        advance(cursor, 1)
+
+        // Pop the sigil brace's frame — ctx.brackets depth returns to
+        // frame.depthAtOpen.
+        popBracket(ctx.brackets)
+
+        // Punch-list P3 — closing .InLogicEscape pops the DelegationFrame.
+        if (frame.context == BlockContext.InLogicEscape) {
+            popDelegationFrame(ctx)
+        }
+
+        setBlockContext(ctx, frame.priorContext)
+        return frame
+    }
+
+    // --- Inner-brace bookkeeping -----------------------------------------
+    //
+    // While the cursor is INSIDE a brace-delimited block context,
+    // ordinary (non-sigil, non-closing) braces in the body must push/pop
+    // against ctx.brackets so isBlockContextClose's depth calculation
+    // stays accurate.
+
+    // noteBraceOpen — STATE write. Push a Brace frame for an ordinary
+    // open brace in a block-context body.
+    export function noteBraceOpen(ctx, cursor) {
+        pushBracket(
+            ctx.brackets,
+            BracketKind.Brace,
+            makeSpan(cursor.pos, cursor.pos + 1, cursor.line, cursor.col),
+        )
+    }
+
+    // noteBraceClose — STATE write. Pop a Brace frame for an ordinary
+    // close brace in a block-context body (a close brace that is NOT the
+    // context's matching close — isBlockContextClose returned false).
+    export function noteBraceClose(ctx) {
+        popBracket(ctx.brackets)
     }
 }

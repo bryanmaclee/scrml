@@ -144,22 +144,22 @@ ${
         const lexCtx = makeLexContext()
         return {
             // --- inherited from M1's makeLexContext (the JS-layer state) ---
-            tokens:          lexCtx.tokens,
-            currentMode:     lexCtx.currentMode,
-            brackets:        lexCtx.brackets,
-            recovery:        lexCtx.recovery,
-            templateStack:   lexCtx.templateStack,
+            tokens:            lexCtx.tokens,
+            currentMode:       lexCtx.currentMode,
+            brackets:          lexCtx.brackets,
+            recovery:          lexCtx.recovery,
+            templateStack:     lexCtx.templateStack,
 
             // --- NEW at MK1.1 (R1 spike §3.1) ---
             // The shared AST-node sink. Whichever layer is active appends
             // produced nodes here; the host layer's open node adopts them.
-            nodes:           [],
+            nodes:             [],
             // The seam's instance stack — the §51.0.Q.1 inner-instance
             // hierarchy materialized. Tagged frames: a markup→JS frame or
             // a JS→markup frame. Generalizes M1's templateStack: an M1
             // template-interp frame becomes one DelegationFrame of
             // kind .Interpolation. MK4 pushes/pops these for real.
-            delegationStack: [],
+            delegationStack:   [],
 
             // --- markup-layer engine state (MK1.1) ---
             // The current BlockContext variant the markup trampoline
@@ -167,7 +167,21 @@ ${
             // auto-declared @blockContext cell; the LIVE SURFACE mirrors
             // it as a ctx slot, exactly as M1 mirrors @lexMode as
             // ctx.currentMode.
-            blockContext:    initialBlockContext(),
+            blockContext:      initialBlockContext(),
+
+            // --- markup-layer context stack (MK1.2) ---
+            // The stack of SUSPENDED outer BlockContext frames. The
+            // charter Q1.C rule= contract permits nested contexts (a
+            // logic-escape body may itself enter a markup tag or a SQL
+            // block); when a nested context opens, the outer frame is
+            // pushed here so the matching close knows which context to
+            // return @blockContext to. This is the BlockContext-engine
+            // analogue of M1's templateStack — the §51.0.Q.1 instance
+            // hierarchy for the markup-layer context-grid engine.
+            // block-context.scrml's ensureBlockContextStack also lazy-
+            // inits this so the helpers stay total against an
+            // MK1.1-vintage ctx; seeding it here is the canonical form.
+            blockContextStack: [],
         }
     }
 
