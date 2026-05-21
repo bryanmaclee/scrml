@@ -71,7 +71,12 @@ ${
     import { makeToken, TokenKind } from "./token.scrml"
     import { makeSpan } from "./span.scrml"
     import { LexMode, setMode } from "./lex-mode.scrml"
-    import { isNewlineCode, isIdentCont } from "./lex-in-code.scrml"
+    // K2 cleanup (M1.x): isNewlineCode + isIdentCont now come from the leaf
+    // module char-classify.scrml, NOT from lex-in-code.scrml. lex-in-code
+    // imports dispatchInRegexBody from this file, so importing the char
+    // predicates back from lex-in-code formed a `lex-in-code <-> lex-in-regex`
+    // cycle (E-IMPORT-002). char-classify is a leaf both files import.
+    import { isNewlineCode, isIdentCont } from "./char-classify.scrml"
 
     // ---------------------------------------------------------------------
     // scanRegexBody — CALCULATION over the source bytes: walks the cursor

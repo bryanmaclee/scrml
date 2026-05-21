@@ -6,7 +6,11 @@ import { peekChar, peekCharCode, advance, isEof } from "./cursor.js";
 import { makeToken, TokenKind } from "./token.js";
 import { makeSpan } from "./span.js";
 import { LexMode, setMode } from "./lex-mode.js";
-import { isNewlineCode, isIdentCont } from "./lex-in-code.js";
+// K2 cleanup (M1.x): isNewlineCode + isIdentCont now come from the leaf
+// module char-classify.js, NOT from lex-in-code.js — importing them back
+// from lex-in-code (which imports dispatchInRegexBody from this file)
+// formed a circular import. char-classify is a leaf both files import.
+import { isNewlineCode, isIdentCont } from "./char-classify.js";
 
 // --- scanRegexBody — consume `/pattern/flags` from the opening `/`.
 // Cursor lands one past the trailing flag run (or at EOF / newline on

@@ -1,4 +1,4 @@
-// parser-conformance-lexer.test.js — lexer conformance suite (M1.1-M1.4).
+// parser-conformance-lexer.test.js — lexer conformance suite (M1.1-M1.5).
 //
 // Per scrml-native-parser-design-2026-05-17.md §D7 M1 gating criterion (a):
 //   "Lexer-output Token[] for every file in the conformance corpus is
@@ -7,13 +7,16 @@
 //
 // Scope: this test runs the bench corpus through both Acorn's tokenizer
 // and the new compiler/native-parser/lex.js, normalizes outputs to a
-// comparable shape, and asserts kind+text+span match per token. Bench
-// files whose Acorn-vs-native diff requires future normalizer work
-// (notably the regex-token shape difference between Acorn's single
-// regex-token + native's `RegexLit { pattern, flags }` payload) record
-// a SKIP with a milestone-named reason; activation lands at that
-// milestone (M1.5 for regex-token normalizer + `expr-literals.js`
-// full-disposition flip).
+// comparable shape, and asserts kind+text+span match per token.
+//
+// The M1 lexer ladder is COMPLETE. M1.5 (commit bcb48c9f) closed the final
+// bench-file disposition gap — `expr-literals.js` flipped to the "full"
+// byte-identical disposition. The regex-token shape (native's
+// `RegexLit { pattern, flags }` payload vs Acorn's single `regexp` token)
+// is normalized via the `ACORN_LABEL_TO_KIND` map (`"regexp" -> RegexLit`)
+// — the M1.5 work itself turned out to be template-mode normalization (the
+// regex + BigInt token kinds were already normalized correctly). No bench
+// file currently records a regex-pending SKIP.
 
 import { describe, test, expect } from "bun:test";
 import { readFileSync, readdirSync } from "fs";

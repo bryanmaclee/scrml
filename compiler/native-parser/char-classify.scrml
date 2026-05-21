@@ -1,0 +1,65 @@
+// char-classify.scrml — character-classification predicates (DD §D1).
+//
+// PILLAR 5b classification (DD §D1):
+//   Every predicate here is PURE CALCULATION — a total function over a
+//   single Unicode code point returning a boolean. No state, no
+//   transitions, no lifecycle, no "what condition is this in right now?"
+//   semantics. Engine-shape does NOT apply. The spec's existing `fn`
+//   primitive is sufficient; no missing primitive surfaced.
+//
+// Why this file exists (K2 — M1 circular-import break):
+//   These predicates were originally exported from lex-in-code.scrml.
+//   lex-in-regex.scrml needs isNewlineCode + isIdentCont, and
+//   lex-in-code.scrml needs dispatchInRegexBody from lex-in-regex.scrml —
+//   a `lex-in-code.scrml -> lex-in-regex.scrml -> lex-in-code.scrml`
+//   import cycle (E-IMPORT-002). The predicates are the shared SURFACE,
+//   so per the E-IMPORT-002 remedy ("extract shared code into a third
+//   file that both can import") they move here, into a LEAF module with
+//   zero native-parser imports. Both lex-in-code.scrml and
+//   lex-in-regex.scrml now import from this leaf; the cycle is broken.
+//
+// Status (M1.x cleanup): COMPILABLE skeleton. JS-escape block carries the
+// live surface today; the `${...}` SPA-block `export function` bodies are
+// the canonical scrml-source shape for the M4+ swap-in (see span.js header
+// for the .scrml<->.js duplication rationale).
+
+${
+    // ---------------------------------------------------------------------
+    // Character-classification predicates (CALCULATION; pure fns over a
+    // single Unicode code point).
+    // ---------------------------------------------------------------------
+
+    // isWhitespaceCode — space, tab, vertical tab, form feed, NBSP.
+    export function isWhitespaceCode(c) {
+        return c == 32 || c == 9 || c == 11 || c == 12 || c == 160
+    }
+
+    // isNewlineCode — LF, CR, LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR
+    // (U+2029) — the ECMA-262 LineTerminator set.
+    export function isNewlineCode(c) {
+        return c == 10 || c == 13 || c == 0x2028 || c == 0x2029
+    }
+
+    // isDigit — ASCII decimal digit 0-9.
+    export function isDigit(c) {
+        return c >= 48 && c <= 57
+    }
+
+    // isHexDigit — ASCII hex digit (0-9, A-F, a-f).
+    export function isHexDigit(c) {
+        return (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)
+    }
+
+    // isIdentStart — a character that may begin an identifier (A-Z, a-z,
+    // `_`, `$`). ASCII-only — the M1 lexer subset does not yet recognize
+    // the full ECMA-262 IdentifierStart Unicode range.
+    export function isIdentStart(c) {
+        return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 36
+    }
+
+    // isIdentCont — a character that may continue an identifier
+    // (isIdentStart + a decimal digit).
+    export function isIdentCont(c) {
+        return isIdentStart(c) || isDigit(c)
+    }
+}

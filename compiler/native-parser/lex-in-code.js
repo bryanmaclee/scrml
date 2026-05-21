@@ -6,7 +6,8 @@ import { peekChar, peekCharCode, peekStr, advance, isEof } from "./cursor.js";
 import { makeToken, makeIdentOrKeyword, makeEof, TokenKind, QuoteKind } from "./token.js";
 import { makeSpan } from "./span.js";
 import { LexMode, setMode } from "./lex-mode.js";
-import { push as pushBracket, pop as popBracket, BracketKind } from "./bracket-stack.js";
+import { push, pop, BracketKind } from "./bracket-stack.js";
+import { isWhitespaceCode, isNewlineCode, isDigit, isHexDigit, isIdentStart, isIdentCont } from "./char-classify.js";
 import { dispatchInSingleString } from "./lex-in-single-string.js";
 import { dispatchInDoubleString } from "./lex-in-double-string.js";
 import { dispatchInTemplateBody } from "./lex-in-template.js";
@@ -16,29 +17,14 @@ import { dispatchInBlockComment } from "./lex-in-block-comment.js";
 import { dispatchInRegexBody } from "./lex-in-regex.js";
 
 // --- Character-classification predicates ---
-export function isWhitespaceCode(c) {
-    return c === 32 || c === 9 || c === 11 || c === 12 || c === 160;
-}
-
-export function isNewlineCode(c) {
-    return c === 10 || c === 13 || c === 0x2028 || c === 0x2029;
-}
-
-export function isDigit(c) {
-    return c >= 48 && c <= 57;
-}
-
-export function isHexDigit(c) {
-    return (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102);
-}
-
-export function isIdentStart(c) {
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36;
-}
-
-export function isIdentCont(c) {
-    return isIdentStart(c) || isDigit(c);
-}
+// K2 cleanup (M1.x): the six predicates isWhitespaceCode / isNewlineCode /
+// isDigit / isHexDigit / isIdentStart / isIdentCont moved to the leaf
+// module char-classify.js — they are the shared surface lex-in-regex.js
+// needs, so extracting them into a leaf both files import breaks the
+// lex-in-code <-> lex-in-regex import cycle. Imported above; used unchanged
+// below. The bracket-stack import above also drops its `as pushBracket` /
+// `as popBracket` aliases (K2 — the canonical .scrml form imports `push` /
+// `pop` plain; the v0.3 compiler does not bind an unquoted aliased import).
 
 // --- parseNumericLiteralValue — DD §D1 canonical calculation example ---
 export function parseNumericLiteralValue(raw) {
@@ -667,37 +653,37 @@ export function dispatchInCode(cursor, ctx) {
 
     // Brackets
     if (c0 === "(") {
-        pushBracket(ctx.brackets, BracketKind.Paren, makeSpan(startPos, startPos + 1, startLine, startCol));
+        push(ctx.brackets, BracketKind.Paren, makeSpan(startPos, startPos + 1, startLine, startCol));
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LParen, "(", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === ")") {
-        popBracket(ctx.brackets);
+        pop(ctx.brackets);
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RParen, ")", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "{") {
-        pushBracket(ctx.brackets, BracketKind.Brace, makeSpan(startPos, startPos + 1, startLine, startCol));
+        push(ctx.brackets, BracketKind.Brace, makeSpan(startPos, startPos + 1, startLine, startCol));
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LBrace, "{", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "}") {
-        popBracket(ctx.brackets);
+        pop(ctx.brackets);
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RBrace, "}", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "[") {
-        pushBracket(ctx.brackets, BracketKind.Bracket, makeSpan(startPos, startPos + 1, startLine, startCol));
+        push(ctx.brackets, BracketKind.Bracket, makeSpan(startPos, startPos + 1, startLine, startCol));
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LBracket, "[", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "]") {
-        popBracket(ctx.brackets);
+        pop(ctx.brackets);
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RBracket, "]", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
