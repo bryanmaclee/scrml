@@ -364,6 +364,32 @@ export interface MetaNode extends BaseNode {
   parentContext: string;
 }
 
+// -- F8 / v0.6 — native-parser kind-naming dual-mode predicates ----------
+//
+// The live (block-splitter + ast-builder) pipeline tags a meta block
+// `kind: "meta"` and an error-effect block `kind: "error-effect"`. The
+// scrml-native parser's block-stream catalog is uniformly PascalCase — it
+// tags the same two constructs `kind: "Meta"` and `kind: "ErrorEffect"`.
+// Aligning the native emitter to lowercase would break the native
+// catalog's internal consistency (Markup / LogicEscape / Sql / Css / Test
+// are all PascalCase); the F2-precedent reconciliation is therefore a
+// downstream dual-mode kind-test. These predicates centralize the
+// dual-mode check so the ~17 downstream meta walk-sites and the
+// error-effect switch arms accept BOTH spellings — the live pipeline and
+// the M5-swap native pipeline both work. Until the M5 swap activates the
+// native parser the PascalCase branch is never exercised; it is
+// forward-prep, harmless to the live pipeline.
+
+/** True for a meta block node from EITHER pipeline (`"meta"` / `"Meta"`). */
+export function isMetaKind(kind: unknown): boolean {
+  return kind === "meta" || kind === "Meta";
+}
+
+/** True for an error-effect block from EITHER pipeline (`"error-effect"` / `"ErrorEffect"`). */
+export function isErrorEffectKind(kind: unknown): boolean {
+  return kind === "error-effect" || kind === "ErrorEffect";
+}
+
 // -- Destructuring Patterns (A5 2026-05-17) --
 //
 // Structured AST representation of array/object destructuring patterns. The

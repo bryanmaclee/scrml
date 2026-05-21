@@ -46,6 +46,8 @@ import type {
   LogicNode,
   ExprNode,
 } from "./types/ast.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 import { forEachIdentInValidators } from "./validator-arg-parser.ts";
 
@@ -734,7 +736,7 @@ function collectAllMetaBlocks(fileAST: FileAST): MetaNode[] {
 
   function visit(list: ASTNode[]): void {
     for (const node of list) {
-      if (node.kind === "meta") result.push(node);
+      if (isMetaKind(node.kind)) result.push(node);
       if ("children" in node && Array.isArray((node as MarkupNode).children)) {
         visit((node as MarkupNode).children as ASTNode[]);
       }
@@ -2665,7 +2667,7 @@ export function runDG(input: DGInput): DGOutput {
       }
       // Explicitly walk meta block bodies — ^{} blocks can contain @var reads
       // in their logic statements. Meta nodes have no children/consequent/alternate.
-      if (node.kind === "meta") {
+      if (isMetaKind(node.kind)) {
         const metaBody = (node as Record<string, unknown>).body;
         if (Array.isArray(metaBody)) {
           for (const child of metaBody as ASTNode[]) {

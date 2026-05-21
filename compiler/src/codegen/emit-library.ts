@@ -1,5 +1,7 @@
 import { CGError } from "./errors.ts";
 import { getNodes } from "./collect.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "../types/ast.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { isServerOnlyNode } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
@@ -207,7 +209,7 @@ export function generateLibraryJs(
 
 
         // Meta blocks: extract `await import()` calls and emit as ES imports
-        if (stmt.kind === "meta") {
+        if (isMetaKind(stmt.kind)) {
           if (sourceText && stmt.span) {
             const span = stmt.span as Span;
             const metaText = sourceText.slice(span.start, span.end);
@@ -314,7 +316,7 @@ export function generateLibraryJs(
             // Check for content before the first emittable node
             // by looking at earlier body nodes' spans, but skip past any
             // skipped nodes (type-decl, component-def, meta)
-            const firstMeta = body.find(s => s?.kind === "meta" && s.span);
+            const firstMeta = body.find(s => s && isMetaKind(s.kind) && s.span);
             let gapStart = -1;
             if (firstMeta?.span) {
               const fmSpan = firstMeta.span as Span;
@@ -389,7 +391,7 @@ export function generateLibraryJs(
     const body = (logic.body ?? []) as ASTNode[];
     for (const stmt of body) {
       if (!stmt) continue;
-      if (stmt.kind === "meta") continue;
+      if (isMetaKind(stmt.kind)) continue;
 
       if (isServerOnlyNode(stmt)) {
         errors.push(new CGError(

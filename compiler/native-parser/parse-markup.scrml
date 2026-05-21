@@ -220,6 +220,16 @@ ${
     import { shapeStateBlock } from "./parse-state-body.scrml"
     import { shapeSqlBlock } from "./parse-sql-body.scrml"
     import { shapeCssBlock } from "./parse-css-body.scrml"
+    // F8 (v0.6) — the error-effect arm shaper. shapeErrorEffectBlock parses
+    // a `!{...}` ErrorEffect block's captured body text into the live
+    // ErrorEffectNode `arms[]` payload.
+    import { shapeErrorEffectBlock } from "./parse-error-body.scrml"
+    // F8 (v0.6) — the native M3 statement parser. A `^{...}` Meta block's
+    // body is scrml-native statements (Approach C, S114); parseProgram
+    // parses the body's token stream into a native Stmt[] — the SAME
+    // catalog the .InLogicEscape branch produces — matching the live
+    // MetaNode `body` shape.
+    import { parseProgram } from "./parse-stmt.scrml"
 
     // -------------------------------------------------------------------
     // blockKindForContext — CALCULATION (pure fn). Maps a BlockContext
@@ -456,6 +466,44 @@ ${
             if (cursor is some && typeof shaped.chainEnd == "number" && shaped.chainEnd > cursor.pos) {
                 advance(cursor, shaped.chainEnd - cursor.pos)
             }
+        }
+
+        // F8 — a `^{...}` Meta block. Approach C (S114): a meta block's
+        // body is scrml-native statements — the SAME catalog the
+        // .InLogicEscape branch produces. Capture the body slice + route
+        // it through the native M3 statement parser (lex + parseProgram)
+        // so `block.body` is a native Stmt[] matching the live
+        // MetaNode.body shape. `parentContext` is "markup" — a top-level
+        // `^{}` block (the markup layer does not yet thread an enclosing
+        // context kind; the live builder's mapParentContext default is
+        // likewise "markup").
+        if (frame.context == BlockContext.InMeta) {
+            const bodyStart = frame.openSpan.end
+            const bodyEnd = endPos > bodyStart ? endPos - 1 : bodyStart
+            if (typeof ctx.source == "string" && bodyEnd >= bodyStart) {
+                block.bodyText = ctx.source.substring(bodyStart, bodyEnd)
+                const metaTokens = lex(block.bodyText)
+                const metaResult = parseProgram(metaTokens)
+                block.body = metaResult.body is some ? metaResult.body : []
+            } else {
+                block.bodyText = ""
+                block.body = []
+            }
+            block.parentContext = "markup"
+        }
+
+        // F8 — a `!{...}` ErrorEffect block. Capture the body slice +
+        // shape it into `block.arms` — the live ErrorEffectNode.arms
+        // payload (an ErrorArm[]).
+        if (frame.context == BlockContext.InErrorEffect) {
+            const bodyStart = frame.openSpan.end
+            const bodyEnd = endPos > bodyStart ? endPos - 1 : bodyStart
+            if (typeof ctx.source == "string" && bodyEnd >= bodyStart) {
+                block.bodyText = ctx.source.substring(bodyStart, bodyEnd)
+            } else {
+                block.bodyText = ""
+            }
+            shapeErrorEffectBlock(block)
         }
 
         appendBlock(ctx, block)

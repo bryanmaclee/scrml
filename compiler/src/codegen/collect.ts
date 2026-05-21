@@ -1,4 +1,6 @@
 import { emitStringFromTree } from "../expression-parser.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
 // Local AST type — loosely typed to match the plain-object AST produced by
@@ -204,7 +206,7 @@ export function collectTopLevelLogicStatements(fileAST: FileAST): Node[] {
 
       // Top-level `^{}` meta block — yield the whole meta node so emitLogicNode
       // can emit it as an IIFE (case "meta": handler in emit-logic.js).
-      if (node.kind === "meta") {
+      if (isMetaKind(node.kind)) {
         result.push(node);
         continue;
       }
@@ -418,7 +420,7 @@ export function isServerOnlyNode(node: unknown): boolean {
   if (n.kind === "sql") return true;
   if (n.kind === "transaction-block") return true;
 
-  if (n.kind === "meta") {
+  if (isMetaKind(n.kind)) {
     const body = n.body;
     if (!Array.isArray(body) || body.length === 0) return false;
     const exprs = collectMetaExprStrings(body);

@@ -1,5 +1,8 @@
 import { extractIdentifiersFromAST, forEachIdentInExprNode, exprNodeContainsCall, exprNodeContainsMemberAccess, emitStringFromTree } from "./expression-parser.ts";
 import type { Span, FileAST, ASTNode, ExprNode, CallExpr, IdentExpr } from "./types/ast.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (accepts the live `"meta"`
+// and the scrml-native `"Meta"` spelling — the M5-swap reconciliation).
+import { isMetaKind } from "./types/ast.ts";
 
 /**
  * Meta Checker — Phase separation and reflect() API for ^{} meta contexts.
@@ -447,7 +450,7 @@ export function bodyContainsNestedMeta(body: LogicNode[]): boolean {
   function walk(nodes: LogicNode[]): boolean {
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
-      if (node.kind === "meta") return true;
+      if (isMetaKind(node.kind)) return true;
       if (node.kind === "html-fragment") {
         const content = (node as { content?: unknown }).content;
         if (typeof content === "string" && /\^\s*\{/.test(content)) return true;
@@ -637,7 +640,7 @@ function collectReflectArgIdents(body: LogicNode[]): Set<string> {
     if (!Array.isArray(nodes)) return;
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
-      if (node.kind === "meta") continue;
+      if (isMetaKind(node.kind)) continue;
 
       const exprs: string[] = [];
       if (node.kind === "bare-expr") {
@@ -702,7 +705,7 @@ export function bodyMixesPhases(
     if (!Array.isArray(nodes)) return false;
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
-      if (node.kind === "meta") continue;
+      if (isMetaKind(node.kind)) continue;
 
       // S23 bug 2b: state-decl nodes inside a meta body represent `@var =
       // value` runtime writes (see BUG-META-6 comment in dependency-graph.ts).
@@ -1090,7 +1093,7 @@ export function checkMetaBlock(
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
 
-      if (node.kind === "meta") {
+      if (isMetaKind(node.kind)) {
         checkNestedMetaBlock(node, metaLocals, scopeChain, typeRegistry, filePath, errors);
         continue;
       }
@@ -1137,7 +1140,7 @@ function checkNestedMetaBlock(
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
 
-      if (node.kind === "meta") {
+      if (isMetaKind(node.kind)) {
         checkNestedMetaBlock(node, combinedLocals, scopeChain, typeRegistry, filePath, errors);
         continue;
       }
@@ -1423,7 +1426,7 @@ function findMetaBlocks(nodes: LogicNode[], visitor: (node: LogicNode) => void):
   for (const node of nodes) {
     if (!node || typeof node !== "object") continue;
 
-    if (node.kind === "meta") {
+    if (isMetaKind(node.kind)) {
       visitor(node);
     }
 
@@ -1475,7 +1478,7 @@ export function checkReflectCalls(
       if (initStr) checkExprForReflect(initStr, typeRegistry, node.span || metaSpan, filePath, errors, locals);
     }
 
-    if (node.kind === "meta") {
+    if (isMetaKind(node.kind)) {
       // Nested ^{} — new scope, do not pass outer locals.
       checkReflectCalls(node.body || [], typeRegistry, filePath, node.span || metaSpan, errors);
     }
@@ -1719,7 +1722,7 @@ function checkReflectOutsideMeta(
     if (!node || typeof node !== "object") continue;
 
     // Skip meta blocks — reflect inside ^{} is valid
-    if (node.kind === "meta") continue;
+    if (isMetaKind(node.kind)) continue;
 
     // Skip function declarations — defining a function named "reflect" is fine
     if (node.kind === "function-decl") {
@@ -1936,7 +1939,7 @@ export function collectRuntimeVars(fileAST: MetaFileAST): Map<string, "reactive"
     for (const node of nodeList) {
       if (!node || typeof node !== "object") continue;
 
-      if (node.kind === "meta") continue;
+      if (isMetaKind(node.kind)) continue;
 
       if (!inMeta) {
         if (node.kind === "let-decl") {

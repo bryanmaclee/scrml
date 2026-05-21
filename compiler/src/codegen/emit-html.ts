@@ -1,5 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-parser.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry } from "./reactive-deps.ts";
 import { hasTemplateInterpolation, rewriteBunEval } from "./rewrite.js";
@@ -1804,7 +1806,7 @@ export function generateHtml(
       return;
     }
 
-    if (node.kind === "meta") {
+    if (isMetaKind(node.kind)) {
       if (node.id != null) {
         const metaScopeId = `_scrml_meta_${node.id}`;
         parts.push(`<span data-scrml-meta="${metaScopeId}"></span>`);

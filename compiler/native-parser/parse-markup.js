@@ -123,6 +123,10 @@ import { shapeSqlBlock } from "./parse-sql-body.js";
 // body is CSS; shapeCssBlock parses it into the live `CSSInlineNode`
 // `rules[]` payload (property rules / selector rules / at-rules).
 import { shapeCssBlock } from "./parse-css-body.js";
+// F8 (v0.6) — the error-effect arm shaper. A `!{...}` ErrorEffect block's
+// body is `| ::Type binding -> handler` arms; shapeErrorEffectBlock parses
+// it into the live `ErrorEffectNode` `arms[]` payload.
+import { shapeErrorEffectBlock } from "./parse-error-body.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
 // BlockKind a closed context of that variant emits. The seven
@@ -361,6 +365,45 @@ export function emitContextBlock(ctx, frame, endPos, cursor) {
             && typeof shaped.chainEnd === "number" && shaped.chainEnd > cursor.pos) {
             advance(cursor, shaped.chainEnd - cursor.pos);
         }
+    }
+
+    // F8 (v0.6) — a `^{...}` Meta block. Approach C (S114): a meta block's
+    // body is scrml-native statements — the SAME catalog the .InLogicEscape
+    // branch produces. Capture the verbatim body slice + route it through
+    // the existing native M3 statement parser (parseLogicBodyBestEffort) so
+    // `block.body` is a native Stmt[] matching the live `MetaNode.body`
+    // shape. `parentContext` is "markup" — a top-level `^{}` block; a meta
+    // block nested in another context inherits that context at the M5 swap
+    // (the markup layer does not yet thread the enclosing-context kind, the
+    // same posture the live builder's `mapParentContext` default takes).
+    if (frame.context === BlockContext.InMeta) {
+        const bodyStart = frame.openSpan.end;
+        const bodyEnd = (endPos > bodyStart) ? (endPos - 1) : bodyStart;
+        const sourceSlice = cursorSourceFromCtx(ctx);
+        if (sourceSlice !== null && bodyEnd >= bodyStart) {
+            block.bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+            block.body = parseLogicBodyBestEffort(
+                block.bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
+        } else {
+            block.bodyText = "";
+            block.body = [];
+        }
+        block.parentContext = "markup";
+    }
+
+    // F8 (v0.6) — a `!{...}` ErrorEffect block. Capture the verbatim body
+    // slice + shape it into `block.arms` — the live `ErrorEffectNode.arms`
+    // payload (an ErrorArm[]).
+    if (frame.context === BlockContext.InErrorEffect) {
+        const bodyStart = frame.openSpan.end;
+        const bodyEnd = (endPos > bodyStart) ? (endPos - 1) : bodyStart;
+        const sourceSlice = cursorSourceFromCtx(ctx);
+        if (sourceSlice !== null && bodyEnd >= bodyStart) {
+            block.bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+        } else {
+            block.bodyText = "";
+        }
+        shapeErrorEffectBlock(block);
     }
 
     appendBlock(ctx, block);

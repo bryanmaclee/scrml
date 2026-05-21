@@ -108,6 +108,8 @@ import type {
   LiftExprNode,
   TextNode,
 } from "./types/ast.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -1597,7 +1599,7 @@ function substituteProps(
   }
 
   // F-COMPONENT-004: Meta blocks share the LogicStatement[] body shape.
-  if (cloned.kind === "meta" && propExprMap && Array.isArray(cloned.body)) {
+  if (isMetaKind(cloned.kind) && propExprMap && Array.isArray(cloned.body)) {
     cloned.body = substitutePropsInLogicStmts(
       cloned.body as LogicStatement[],
       propExprMap,

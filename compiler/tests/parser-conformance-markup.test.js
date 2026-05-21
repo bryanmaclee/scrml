@@ -196,6 +196,14 @@ import {
     parseCssRules,
     scanReactiveRefs,
 } from "../native-parser/parse-css-body.js";
+// F8 (v0.6) — the error-effect arm shaper (the BRIDGE-LIGHT native payload
+// the M5 swap activates). Meta block bodies route through the existing M3
+// statement parser (parseMarkup wires it in emitContextBlock — no separate
+// shaper module).
+import {
+    shapeErrorEffectBlock,
+    parseErrorArms,
+} from "../native-parser/parse-error-body.js";
 
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
@@ -5227,6 +5235,192 @@ describe("F7.c — CSS declaration / rule structure (shapeCssBlock)", () => {
             const live = liveCss[0];
 
             expect(native.rules.map(stripSpans)).toEqual(live.rules.map(stripSpans));
+        });
+    }
+});
+
+// #############################################################################
+// F8 (v0.6) — the meta + error-effect native payloads. The BRIDGE-LIGHT
+// payload-shaping additions: a `^{...}` Meta block gets the live
+// `MetaNode` payload (`body` — a native Stmt[] — + `parentContext`); a
+// `!{...}` ErrorEffect block gets the live `ErrorEffectNode` `arms[]`
+// payload. Each section asserts the native payload AND parity vs the live
+// `buildAST` FileAST `meta` / `error-effect` node for the same source.
+//
+// NOTE on meta-body parity: the native Meta `body` is a native `Stmt[]`
+// (the M3 statement catalog — `VarDecl` / `ExprStmt` / ...); the live
+// `meta` `body` is a `LogicStatement[]` (the live catalog — `let-decl` /
+// `const-decl` / ...). The two catalogs are NOT 1:1 — the M5 swap's
+// downstream bridge maps native Stmt -> live LogicStatement. F8 therefore
+// asserts meta-body parity at the STATEMENT-COUNT granularity (both
+// pipelines recognize the same number of body statements) + asserts the
+// native block carries the right structural surface; deep kind-by-kind
+// parity is M5-swap scope.
+// #############################################################################
+
+describe("F8 — Meta block bodies (^{...} — Approach C native Stmt[])", () => {
+    test("a `^{...}` block gets kind Meta + a parsed body + parentContext", () => {
+        const blocks = parseMarkup("^{ const x = 1 }");
+        const meta = blocks.find(b => b.kind === "Meta");
+        expect(meta).toBeDefined();
+        expect(meta.parentContext).toBe("markup");
+        expect(meta.bodyText).toBe(" const x = 1 ");
+        expect(Array.isArray(meta.body)).toBe(true);
+        expect(meta.body).toHaveLength(1);
+        // The body routes through the native M3 statement parser — a
+        // `const` decl parses to the native `VarDecl` Stmt kind.
+        expect(meta.body[0].kind).toBe("VarDecl");
+    });
+
+    test("an empty meta body parses to an empty body[]", () => {
+        const blocks = parseMarkup("^{}");
+        const meta = blocks.find(b => b.kind === "Meta");
+        expect(meta).toBeDefined();
+        expect(meta.body).toEqual([]);
+    });
+
+    test("a multi-statement meta body parses every statement", () => {
+        const blocks = parseMarkup("^{ const a = 1\n const b = 2\n emit(a) }");
+        const meta = blocks.find(b => b.kind === "Meta");
+        expect(meta.body).toHaveLength(3);
+    });
+
+    test("an unterminated meta block emits no block (sibling-context parity)", () => {
+        // An unterminated brace context emits NO block — the EOF flush
+        // path does not close an open context. This matches the
+        // .InLogicEscape / .InSql / .InCss sibling contexts (a `${`/`?{`/
+        // `#{` with no matching `}` likewise emits no block).
+        const blocks = parseMarkup("^{ const x = 1");
+        expect(blocks.find(b => b.kind === "Meta")).toBeUndefined();
+    });
+
+    // PARITY — the native Meta body's statement count + parentContext match
+    // the live FileAST `meta` node for the same source. Deep statement-kind
+    // parity is M5-swap scope (the catalogs differ — see the section note).
+    const META_PARITY_CASES = [
+        "^{ const x = 1 }",
+        "^{ const a = 1\n const b = 2 }",
+        "^{ emit(reflect(Foo)) }",
+    ];
+    for (const src of META_PARITY_CASES) {
+        test(`meta payload parity vs live buildAST — ${JSON.stringify(src)}`, () => {
+            const blocks = parseMarkup(src);
+            const native = blocks.find(b => b.kind === "Meta");
+            expect(native).toBeDefined();
+
+            // The meta block is exercised at MARKUP top level — the same
+            // position parseMarkup sees it — so the live `parentContext`
+            // is "markup" (a `${ }` wrap would make it "logic").
+            const liveMeta = liveNodesOfKind(src, "meta");
+            expect(liveMeta.length).toBeGreaterThan(0);
+            const live = liveMeta[0];
+
+            // Same statement count.
+            const liveBody = Array.isArray(live.body) ? live.body : [];
+            expect(native.body.length).toBe(liveBody.length);
+            // Same parent context.
+            expect(native.parentContext).toBe(live.parentContext);
+        });
+    }
+});
+
+describe("F8 — Error-effect arms (!{...} — shapeErrorEffectBlock)", () => {
+    test("a `!{...}` block gets kind ErrorEffect + parsed arms", () => {
+        const blocks = parseMarkup("!{ ::NotFound e -> fallback() }");
+        const err = blocks.find(b => b.kind === "ErrorEffect");
+        expect(err).toBeDefined();
+        expect(err.arms).toHaveLength(1);
+        expect(err.arms[0]).toMatchObject({
+            pattern: "::NotFound", binding: "e", handler: "fallback()",
+        });
+    });
+
+    test("multiple pipe-separated arms each parse", () => {
+        const blocks = parseMarkup("!{ ::NotFound e -> a() | ::Timeout -> b() }");
+        const err = blocks.find(b => b.kind === "ErrorEffect");
+        expect(err.arms).toHaveLength(2);
+        expect(err.arms[0].pattern).toBe("::NotFound");
+        expect(err.arms[1].pattern).toBe("::Timeout");
+        expect(err.arms[1].binding).toBe("");
+    });
+
+    test("a `(ident)` tuple-form binding is peeled", () => {
+        const blocks = parseMarkup("!{ ::QueryFailed (err) -> log(err) }");
+        const err = blocks.find(b => b.kind === "ErrorEffect");
+        expect(err.arms[0].binding).toBe("err");
+    });
+
+    test("a `.Variant` bare-dot pattern is recognized", () => {
+        const blocks = parseMarkup("!{ .ConnectionLost -> reconnect() }");
+        const err = blocks.find(b => b.kind === "ErrorEffect");
+        expect(err.arms[0].pattern).toBe(".ConnectionLost");
+    });
+
+    test("a `_` wildcard arm is recognized", () => {
+        const blocks = parseMarkup("!{ _ -> defaultHandler() }");
+        const err = blocks.find(b => b.kind === "ErrorEffect");
+        expect(err.arms[0].pattern).toBe("_");
+    });
+
+    test("a `||` inside a handler does NOT split the arm", () => {
+        const arms = parseErrorArms("::E e -> a() || b()");
+        expect(arms).toHaveLength(1);
+        expect(arms[0].handler).toBe("a() || b()");
+    });
+
+    test("a leading `|` before the first arm is tolerated", () => {
+        const arms = parseErrorArms("| ::E e -> handle()");
+        expect(arms).toHaveLength(1);
+        expect(arms[0].pattern).toBe("::E");
+    });
+
+    test("an `=>` arrow is tolerated as well as `->`", () => {
+        const arms = parseErrorArms("::E e => handle()");
+        expect(arms).toHaveLength(1);
+        expect(arms[0].handler).toBe("handle()");
+    });
+
+    test("shapeErrorEffectBlock leaves a non-ErrorEffect block untouched", () => {
+        const block = { kind: "Css", bodyText: "x" };
+        expect(shapeErrorEffectBlock(block)).toBe(block);
+        expect(block.arms).toBeUndefined();
+    });
+
+    // PARITY — the native arms[] match the live FileAST `error-effect` node
+    // for the same source. `pattern` + `binding` match exactly; `handler`
+    // matches after whitespace-normalization (the live builder rejoins
+    // tokens with spaces — `fallback ( )` — where the native shaper keeps
+    // the verbatim source slice — `fallback()`).
+    // The wildcard case uses the PIPED form `| _ -> ...`: the live
+    // `parseErrorTokens` recognizes a no-pipe `::Type` arm but NOT a
+    // no-pipe bare `_` arm (a live-parser limitation — the wildcard token
+    // is only reached inside the leading-`|` branch). The native shaper is
+    // more permissive (it recognizes a no-pipe `_` — see the unit test
+    // above); the piped form is what both pipelines agree on for parity.
+    const ERR_PARITY_CASES = [
+        "!{ ::NotFound e -> fallback() }",
+        "!{ ::NotFound e -> a() | ::Timeout -> b() }",
+        "!{ ::QueryFailed (err) -> log(err) }",
+        "!{ ::A a -> x() | _ -> defaultHandler() }",
+    ];
+    const normWs = (s) => (typeof s === "string" ? s.replace(/\s+/g, "") : s);
+    for (const src of ERR_PARITY_CASES) {
+        test(`error-effect payload parity vs live buildAST — ${JSON.stringify(src)}`, () => {
+            const blocks = parseMarkup(src);
+            const native = blocks.find(b => b.kind === "ErrorEffect");
+            expect(native).toBeDefined();
+
+            const liveErr = liveNodesOfKind("${ " + src + " }", "error-effect");
+            expect(liveErr.length).toBeGreaterThan(0);
+            const live = liveErr[0];
+
+            const liveArms = Array.isArray(live.arms) ? live.arms : [];
+            expect(native.arms.length).toBe(liveArms.length);
+            for (let i = 0; i < liveArms.length; i++) {
+                expect(native.arms[i].pattern).toBe(liveArms[i].pattern);
+                expect(native.arms[i].binding).toBe(liveArms[i].binding);
+                expect(normWs(native.arms[i].handler)).toBe(normWs(liveArms[i].handler));
+            }
         });
     }
 });

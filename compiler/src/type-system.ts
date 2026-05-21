@@ -5611,7 +5611,11 @@ function annotateNodes(
 
       // ------------------------------------------------------------------
       // Error-effect block.
+      // F8 / v0.6 — `"ErrorEffect"` is the scrml-native parser's PascalCase
+      // spelling of the same block; the dual-mode `case` accepts both so
+      // the M5-swap native pipeline reaches this arm too.
       // ------------------------------------------------------------------
+      case "ErrorEffect":
       case "error-effect": {
         resolvedType = tAsIs();
         break;

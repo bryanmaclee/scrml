@@ -1,5 +1,7 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { exprNodeContainsCall } from "../expression-parser.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER } from "./runtime-chunks.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
@@ -47,7 +49,7 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
   function visit(nodeList: any[]): boolean {
     for (const node of nodeList) {
       if (!node) continue;
-      if (node.kind === "meta" && node.capturedScope) return true;
+      if (isMetaKind(node.kind) && node.capturedScope) return true;
       if (node.kind === "logic" && Array.isArray(node.body)) {
         if (visit(node.body)) return true;
       }

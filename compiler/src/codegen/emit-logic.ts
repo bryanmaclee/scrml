@@ -2321,6 +2321,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return lines.join("\n");
     }
 
+    // F8 / v0.6 — `"ErrorEffect"` is the scrml-native parser's PascalCase
+    // spelling of the same block; the dual-mode `case` accepts both so the
+    // M5-swap native pipeline reaches this arm too.
+    case "ErrorEffect":
     case "error-effect": {
       // Standalone `!{ tryBody } catch Type [as binding] { handler }` form
       const arms: LogicArm[] = node.arms ?? [];

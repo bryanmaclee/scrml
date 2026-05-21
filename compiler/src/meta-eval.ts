@@ -31,6 +31,8 @@ import { bodyUsesCompileTimeApis, bodyContainsNestedMeta, createReflect, buildFi
 import { rewriteBunEval } from "./codegen/rewrite.ts";
 import { exprNodeContainsReactiveRef, emitStringFromTree } from "./expression-parser.ts";
 import type { Span, FileAST, ASTNode, ExprNode, MetaNode, LogicStatement } from "./types/ast.ts";
+// F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
+import { isMetaKind } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -528,7 +530,7 @@ function processNodeList(
       }
     }
 
-    if (node.kind === "meta") {
+    if (isMetaKind(node.kind)) {
       const body = (node as MetaNode).body;
 
       // Check compile-time eligibility:
