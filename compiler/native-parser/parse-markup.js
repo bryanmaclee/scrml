@@ -6,26 +6,32 @@
 // lex.js: a loop dispatching by the BlockContext engine, with a safety
 // bound and a cursor-progress sentinel.
 //
-// MK1.3 SCOPE: the trampoline now PRODUCES A BLOCK-STREAM. MK1.2
-// recognized / consumed / transitioned through context boundaries but
-// emitted no nodes; MK1.3 emits a typed block per construct — a Text
-// block for a plain-text run, a Comment block for a `//` or `<!-- -->`
-// comment, a context block (LogicEscape / Sql / Css / ErrorEffect / Meta
-// / Test / ForeignCode) for each brace-delimited context, and a Markup
-// block at each `<ident` boundary. Comments are recognized STRUCTURALLY
-// (block-context.js's recognizeCommentForm / commentExtent — the
-// elimination of BS heuristics #6 / #7). The five sub-context stubs gain
-// SKETCH-DEPTH per-context dispatchers (dispatchInCss / dispatchInSql /
-// dispatchInErrorEffect / dispatchInMeta / dispatchInTest) — extent +
-// close recognition; the deep per-context grammars are later milestones.
+// MK1.3 SCOPE: the trampoline PRODUCES A BLOCK-STREAM — a typed block
+// per construct: a Text block for a plain-text run, a Comment block for
+// a `//` or `<!-- -->` comment, a context block (LogicEscape / Sql /
+// Css / ErrorEffect / Meta / Test / ForeignCode) for each brace-delimited
+// context, and a Markup block per markup tag. Comments are recognized
+// STRUCTURALLY (block-context.js's recognizeCommentForm / commentExtent
+// — the elimination of BS heuristics #6 / #7). The five sub-context
+// stubs have SKETCH-DEPTH per-context dispatchers (dispatchInCss /
+// dispatchInSql / dispatchInErrorEffect / dispatchInMeta /
+// dispatchInTest) — extent + close recognition.
+//
+// MK2.1 SCOPE: dispatchInMarkupTag is substantive — recognizeOpener
+// (tag-frame.js) tokenizes the opener BODY (name + attributes + `>`) in
+// one pass, computes its TagKind, and pushes a TagFrame. The `Markup`
+// block now spans the full opener (D-4 below). enterMarkupTagContext
+// keeps its MK1.2 contract (consume the `<`, push the .InMarkupTag
+// frame); the opener tokenizer reads the frame's openSpan as the
+// opener-span anchor. The closer forms + opener/closer PAIRING are MK2.2.
 //
 // KNOWN + DOCUMENTED DIVERGENCES from the BS block tree (see the .scrml
 // header D-1..D-4): no inner `text` body-captures (the inner grammar is
 // later milestones / the compound-match raw-capture is the charter's
 // named improvement); SQL permitted from top level (charter Q1.C vs the
 // BS's §3.1 SQL-inside-Logic placement); `_{}` foreign-code recognized
-// (the BS has no `_{` opener); the `Markup` block at boundary
-// granularity (the full element span is MK2).
+// (the BS has no `_{` opener); the `Markup` block spans the full OPENER
+// (MK2.1) — the whole-element span (children + closer) is MK2.2.
 
 import { makeCursor, isEof, peekChar, peekStr, advance } from "./cursor.js";
 import { makeSpan } from "./span.js";
@@ -46,6 +52,10 @@ import {
     recognizeCommentForm,
     commentExtent,
 } from "./block-context.js";
+// MK2.1 — the TagFrame <tag>-tree engine. The .InMarkupTag dispatcher
+// calls recognizeOpener to tokenize a `<ident ...>` opener in one pass,
+// compute its TagKind, and push a TagFrame.
+import { recognizeOpener } from "./tag-frame.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
 // BlockKind a closed context of that variant emits. The seven
@@ -188,6 +198,10 @@ export function dispatchTopLevel(run, cursor, ctx) {
 
     if (recognized.kind === "markupTag") {
         flushTextRun(run, cursor, ctx);
+        // enterMarkupTagContext consumes the `<` + transitions
+        // @blockContext to .InMarkupTag; the NEXT trampoline iteration
+        // dispatches .InMarkupTag (dispatchInMarkupTag) to tokenize the
+        // opener body. The `<` consumption is the iteration's progress.
         enterMarkupTagContext(ctx, cursor);
         return;
     }
@@ -239,6 +253,9 @@ export function dispatchInLogicEscape(run, cursor, ctx) {
         return;
     }
     if (recognized.kind === "markupTag") {
+        // enterMarkupTagContext consumes the `<` + transitions
+        // @blockContext; the next iteration dispatches .InMarkupTag (see
+        // dispatchTopLevel's markupTag branch).
         enterMarkupTagContext(ctx, cursor);
         return;
     }
@@ -364,48 +381,55 @@ export function dispatchInTest(run, cursor, ctx) {
     scanBraceDelimitedSketch(cursor, ctx);
 }
 
-// dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK1.3 —
-// boundary-only + Markup block emit).
+// dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK2.1 —
+// opener recognition + TagFrame push + Markup block emit).
 //
-// MK1.3 recognizes + transitions on the markup-tag BOUNDARY; the actual
-// `<tag>` TREE (opener/closer pairing, attributes, TagFrame, the three closer
-// forms) is MK2. At MK1.3 the dispatch consumes the rest of the tag-name run,
-// emits a Markup block at the BOUNDARY granularity (the `<ident` opener run —
-// divergence D-4 from the BS, which spans the whole element), and returns to
-// the prior context.
+// MK1.3's placeholder consumed the tag-name run char-by-char and emitted a
+// Markup block at BOUNDARY granularity (the `<ident` run). MK2.1 makes the
+// dispatch substantive: enterMarkupTagContext has consumed the `<` and
+// pushed the .InMarkupTag BlockContext frame (whose openSpan is the `<`'s
+// span). The cursor is now at the byte AFTER the `<`. The dispatch:
+//   1. Pops the .InMarkupTag BlockContext frame — frame.openSpan is the
+//      `<`'s span, the opener-span anchor.
+//   2. Calls recognizeOpener (tag-frame.js) — tokenizes the opener BODY
+//      (name + attributes + `>`) from the cursor, anchored at the `<`,
+//      in one pass; computes the opener's TagKind; pushes a TagFrame.
+//   3. Emits a Markup block spanning the FULL opener (`<ident ...>`) —
+//      a real improvement over MK1.3's boundary granularity (see the
+//      .scrml header's updated D-4 note). The whole-ELEMENT span (opener
+//      + children + closer) is MK2.2.
+//   4. Restores @blockContext to the prior context.
+//
+// The TagFrame the opener pushed STAYS on ctx.tagFrameStack — that is the
+// open-tag stack MK2.2's closer-form recognizers pop against.
 export function dispatchInMarkupTag(run, cursor, ctx) {
-    // Consume the tag-name run (the boundary's identifier).
-    const here = peekChar(cursor, 0);
-    if (isTagNameChar(here)) {
-        advance(cursor, 1);
+    // 1. Pop the .InMarkupTag BlockContext frame — its openSpan is the
+    //    `<`'s span (the opener-span anchor). enterMarkupTagContext
+    //    always pushes this frame, but stay defensive.
+    const frame = popBlockContextFrame(ctx);
+    if (frame === null) {
+        setBlockContext(ctx, BlockContext.TopLevel);
         return;
     }
 
-    // The tag-name run has ended — the boundary is fully recognized. Pop the
-    // .InMarkupTag frame, emit a Markup block spanning the `<ident` opener
-    // run, and restore the prior context.
-    const frame = popBlockContextFrame(ctx);
-    if (frame !== null) {
-        emitContextBlock(ctx, frame, cursor.pos);
-        setBlockContext(ctx, frame.priorContext);
-    } else {
-        setBlockContext(ctx, BlockContext.TopLevel);
-    }
+    // 2. recognizeOpener tokenizes the opener BODY (name + attributes +
+    //    `>`) from the cursor (positioned after the `<`), anchored at the
+    //    `<`'s span; it computes TagKind and pushes a TagFrame.
+    const tagFrame = recognizeOpener(ctx, cursor, frame.openSpan);
+
+    // 3 + 4. Emit a Markup block spanning the FULL opener
+    //    (frame.openSpan.start is the `<`; tagFrame.opener.span.end is one
+    //    past the opener's `>`); restore the prior context.
+    emitContextBlock(ctx, frame, tagFrame.opener.span.end);
+    setBlockContext(ctx, frame.priorContext);
 }
 
 // isTagNameChar — calculation (predicate). A character that may continue a
-// markup-tag name run: ASCII letter, ASCII digit, or `-`. (MK2 owns the full
-// tag-name grammar; MK1.3 needs only enough to consume the boundary
-// identifier so the trampoline progresses past it.)
-export function isTagNameChar(ch) {
-    if (ch === "") return false;
-    if (ch === "-") return true;
-    const c = ch.charCodeAt(0);
-    if (c >= 48 && c <= 57) return true;   // 0-9
-    if (c >= 65 && c <= 90) return true;   // A-Z
-    if (c >= 97 && c <= 122) return true;  // a-z
-    return false;
-}
+// markup-tag name run: ASCII letter, ASCII digit, or `-`. MK2.1 made
+// tag-frame.js the canonical home of the tag-name grammar; this is a
+// re-export so existing importers of parse-markup.js's isTagNameChar (the
+// MK1.2 conformance suite) keep a single source of truth.
+export { isTagNameChar } from "./tag-frame.js";
 
 // openBrace / closeBraceChar — calculation. The one-character open / close
 // brace strings. Mirror the .scrml's String.fromCharCode form 1:1 — the

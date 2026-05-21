@@ -51,8 +51,32 @@ import {
     isTagNameChar,
 } from "../native-parser/parse-markup.js";
 import { makeParseContext, delegationDepth } from "../native-parser/parse-ctx.js";
-import { makeCursor, isEof } from "../native-parser/cursor.js";
+import { makeCursor, isEof, advance } from "../native-parser/cursor.js";
 import { depth as bracketDepth } from "../native-parser/bracket-stack.js";
+// MK2.1 — the TagFrame <tag>-tree engine + the TagKind calculation.
+import {
+    TagKind,
+    TagFrameKind,
+    initialTagFrame,
+    STRUCTURAL_ELEMENTS,
+    isStructuralElementName,
+    firstCharIsUpper,
+    tagKindFor,
+    isTagNameStart,
+    isTagNameChar as tagFrameIsTagNameChar,
+    isOpenerWhitespace,
+    scanTagName,
+    skipOpenerWhitespace,
+    tokenizeOpener,
+    recognizeOpener,
+    tagFrameDepth,
+    currentTagFrame,
+    topTagFrame,
+    pushTagFrame,
+    popTagFrame,
+    makeOpenExpectingChildrenFrame,
+    makeOpenSelfClosedFrame,
+} from "../native-parser/tag-frame.js";
 
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
@@ -786,11 +810,15 @@ describe("MK1.3 block-stream — typed blocks emitted by the trampoline", () => 
         expect(s).toEqual([]);
     });
 
-    test("a Markup block is emitted at the `<ident` boundary granularity (divergence D-4)", () => {
-        // `<div> x` — the native Markup block spans the `<div` opener run
-        // only (D-4 — the full element span + the tag tree are MK2).
+    test("a Markup block spans the FULL opener (MK2.1 — divergence D-4 narrowed)", () => {
+        // `<div> x` — MK2.1's dispatchInMarkupTag tokenizes the FULL
+        // opener `<div>` via recognizeOpener; the Markup block spans
+        // [0,5] (the whole `<div>`), not just the `<div` boundary run
+        // [0,4] that MK1.3's placeholder emitted. The whole-ELEMENT span
+        // (opener + children + closer) is MK2.2 — D-4 is narrowed, not
+        // yet closed.
         const s = blockStream("<div> x");
-        expect(s[0]).toEqual({ kind: NativeBlockKind.Markup, start: 0, end: 4 });
+        expect(s[0]).toEqual({ kind: NativeBlockKind.Markup, start: 0, end: 5 });
     });
 });
 
@@ -1030,4 +1058,539 @@ describe("MK1.3 conformance — inline micro-corpus (block-stream === BS)", () =
             expect(native).toEqual(bs.blocks);
         });
     }
+});
+
+// #############################################################################
+// MK2.1 — TagFrame engine skeleton + opener recognition + TagKind calc.
+//
+// Per IMPLEMENTATION-ROADMAP §3.1 (the MK2.1 row) + charter dive Q1.F: the
+// TagFrame <tag>-tree engine (compiler/native-parser/tag-frame.js) — its
+// 3 payload-bearing state-children, the TagKind pure-fn calculation, the
+// SPEC §4.15/§24.4 structural-element registry, the one-pass opener
+// tokenizer (charter Q2.A #4's `skipOpener` primitive), and recognizeOpener
+// (the opener-side entry point — computes TagKind + pushes a TagFrame).
+//
+// Scope (MK2.1 — the first sub-step of MK2): the engine SKELETON + opener
+// recognition + the TagKind calc. The 3 closer forms + opener/closer
+// PAIRING + mismatch recovery are MK2.2; the TagKind-driven decl-vs-markup
+// classification + punch-list P4/P5 are MK2.3; BodyMode (§4.18) is MK3.
+//
+// The engine declaration (tag-frame.scrml's <engine for=TagFrame>) is the
+// canonical Pillar-5b SHAPE; the .js shadow is what runs + what this suite
+// imports (README ANOMALY-2 shadow discipline).
+// #############################################################################
+
+// tokenizeOpenerFromLt — drive tokenizeOpener the way the trampoline does:
+// the `<` is consumed by enterMarkupTagContext (its MK1.2 contract), so the
+// cursor passed to tokenizeOpener is positioned at the byte AFTER the `<`
+// and the `<`'s span is the `ltAnchor`. This helper takes a full
+// `<ident...>` source, advances the cursor over the `<` (mirroring
+// enterMarkupTagContext), and calls tokenizeOpener with the `<`'s span.
+function tokenizeOpenerFromLt(source) {
+    const cursor = makeCursor(source);
+    // The `<`'s span — { start, line, col }. enterMarkupTagContext builds
+    // exactly this as the .InMarkupTag frame's openSpan.
+    const ltAnchor = { start: cursor.pos, line: cursor.line, col: cursor.col };
+    advance(cursor, 1); // consume the `<` (mirror enterMarkupTagContext)
+    return tokenizeOpener(cursor, ltAnchor);
+}
+
+// recognizeOpenerFromLt — the recognizeOpener analogue of the helper above.
+// Returns { ctx, cursor, frame }.
+function recognizeOpenerFromLt(source) {
+    const ctx = makeParseContext();
+    const cursor = makeCursor(source);
+    const ltAnchor = { start: cursor.pos, line: cursor.line, col: cursor.col };
+    advance(cursor, 1);
+    const frame = recognizeOpener(ctx, cursor, ltAnchor);
+    return { ctx, cursor, frame };
+}
+
+// =============================================================================
+// MK2.1 §16 — the TagKind calculation (charter Q1.F; a pure fn — D1 OQ1).
+// =============================================================================
+describe("MK2.1 tagKindFor — the four-way opener classification", () => {
+    test("a lowercase non-structural name is Html", () => {
+        expect(tagKindFor("div", false)).toBe(TagKind.Html);
+        expect(tagKindFor("p", false)).toBe(TagKind.Html);
+        expect(tagKindFor("section", false)).toBe(TagKind.Html);
+        expect(tagKindFor("my-widget", false)).toBe(TagKind.Html);  // kebab — still Html
+    });
+
+    test("a PascalCase (uppercase-first) name is Component", () => {
+        expect(tagKindFor("Button", false)).toBe(TagKind.Component);
+        expect(tagKindFor("Counter", false)).toBe(TagKind.Component);
+        expect(tagKindFor("X", false)).toBe(TagKind.Component);
+    });
+
+    test("a structural-element name is ScrmlStructural (registry membership)", () => {
+        // All 7 SPEC §4.15/§24.4 structural elements.
+        expect(tagKindFor("engine", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("match", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("errors", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("onTransition", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("onTimeout", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("onIdle", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("page", false)).toBe(TagKind.ScrmlStructural);
+    });
+
+    test("the registry test precedes the case test — structural names are lowercase", () => {
+        // `engine` is lowercase, so without the registry-first ordering it
+        // would fall through to Html. The priority order (registry before
+        // first-char-case) is what makes it ScrmlStructural.
+        expect(firstCharIsUpper("engine")).toBe(false);
+        expect(tagKindFor("engine", false)).toBe(TagKind.ScrmlStructural);
+        expect(tagKindFor("engine", false)).not.toBe(TagKind.Html);
+    });
+
+    test("a `< ident`-with-space opener is StateOpener (the §4.3 advisory shape)", () => {
+        // §4.3 — the whitespace-after-`<` discriminator is informational
+        // only (advisory). hadSpaceAfterLt=true => StateOpener, regardless
+        // of the name's case or registry membership.
+        expect(tagKindFor("Counter", true)).toBe(TagKind.StateOpener);
+        expect(tagKindFor("db", true)).toBe(TagKind.StateOpener);
+        expect(tagKindFor("engine", true)).toBe(TagKind.StateOpener);  // space wins over registry
+    });
+
+    test("firstCharIsUpper — the PascalCase signal", () => {
+        expect(firstCharIsUpper("Button")).toBe(true);
+        expect(firstCharIsUpper("button")).toBe(false);
+        expect(firstCharIsUpper("")).toBe(false);
+        expect(firstCharIsUpper("7up")).toBe(false);  // digit, not A-Z
+    });
+});
+
+// =============================================================================
+// MK2.1 §17 — the structural-element registry (SPEC §4.15 / §24.4).
+// =============================================================================
+describe("MK2.1 structural-element registry — the SPEC §4.15/§24.4 set", () => {
+    test("the registry contains exactly the 7 SPEC-normative structural elements", () => {
+        // SPEC §4.15 + §24.4 register exactly these 7. (`channel` / `auth`
+        // are NOT in those normative registry tables — see the
+        // tag-frame.js STRUCTURAL-ELEMENT REGISTRY note.)
+        expect(Object.keys(STRUCTURAL_ELEMENTS).sort()).toEqual([
+            "engine", "errors", "match", "onIdle", "onTimeout",
+            "onTransition", "page",
+        ]);
+    });
+
+    test("isStructuralElementName recognizes each registered element", () => {
+        for (const name of ["engine", "match", "errors", "onTransition",
+                             "onTimeout", "onIdle", "page"]) {
+            expect(isStructuralElementName(name)).toBe(true);
+        }
+    });
+
+    test("isStructuralElementName rejects non-registered names", () => {
+        expect(isStructuralElementName("div")).toBe(false);
+        expect(isStructuralElementName("Button")).toBe(false);
+        expect(isStructuralElementName("Engine")).toBe(false);  // case-sensitive
+        expect(isStructuralElementName("")).toBe(false);
+        // `channel` / `auth` are NOT in the SPEC §4.15/§24.4 registry.
+        expect(isStructuralElementName("channel")).toBe(false);
+        expect(isStructuralElementName("auth")).toBe(false);
+    });
+});
+
+// =============================================================================
+// MK2.1 §18 — the opener tokenizer (the one-pass `skipOpener` primitive).
+// =============================================================================
+describe("MK2.1 tokenizeOpener — one-pass opener-body recognition", () => {
+    test("a bare opener `<div>` — name + span + not self-closing", () => {
+        const o = tokenizeOpenerFromLt("<div>");
+        expect(o.name).toBe("div");
+        expect(o.selfClosing).toBe(false);
+        expect(o.ok).toBe(true);
+        expect(o.malformed).toBe(false);
+        // The span covers the FULL opener — anchored at the `<` (0), one
+        // past the `>` (5).
+        expect(o.span.start).toBe(0);
+        expect(o.span.end).toBe(5);
+    });
+
+    test("an opener with attributes — the attribute region is opaque bytes", () => {
+        // `<input type="text" disabled>` — MK2.1 does not parse attributes;
+        // it recognizes the opener STRUCTURE. The name is `input`; the span
+        // covers the whole opener.
+        const src = "<input type=\"text\" disabled>";
+        const o = tokenizeOpenerFromLt(src);
+        expect(o.name).toBe("input");
+        expect(o.selfClosing).toBe(false);
+        expect(o.span.end).toBe(src.length);
+    });
+
+    test("a self-closing opener `<br/>` — selfClosing true", () => {
+        const o = tokenizeOpenerFromLt("<br/>");
+        expect(o.name).toBe("br");
+        expect(o.selfClosing).toBe(true);
+        expect(o.span.end).toBe(5);
+    });
+
+    test("a self-closing opener with a space before `/>` — `<br />`", () => {
+        const o = tokenizeOpenerFromLt("<br />");
+        expect(o.name).toBe("br");
+        expect(o.selfClosing).toBe(true);
+    });
+
+    test("a self-closing opener with attributes — `<img src=\"a.png\"/>`", () => {
+        const o = tokenizeOpenerFromLt("<img src=\"a.png\"/>");
+        expect(o.name).toBe("img");
+        expect(o.selfClosing).toBe(true);
+    });
+
+    test("a `>` INSIDE an attribute-value string is not the terminator", () => {
+        // `<a title="x>y">` — the `>` at index 9 is inside the "..." string;
+        // the real terminator is the `>` at index 14. The string-aware scan
+        // recognizes this — the span ends at 15, not 10.
+        const o = tokenizeOpenerFromLt("<a title=\"x>y\">");
+        expect(o.name).toBe("a");
+        expect(o.span.end).toBe(15);
+        expect(o.selfClosing).toBe(false);
+    });
+
+    test("a `/` INSIDE an attribute-value string is not the self-closing marker", () => {
+        // `<a href="/path">` — the `/` is inside the string; the opener is
+        // NOT self-closing (no trailing `/` before the real `>`).
+        const o = tokenizeOpenerFromLt("<a href=\"/path\">");
+        expect(o.name).toBe("a");
+        expect(o.selfClosing).toBe(false);
+    });
+
+    test("single-quoted attribute strings are recognized too", () => {
+        const o = tokenizeOpenerFromLt("<a title='x>y'>");
+        expect(o.name).toBe("a");
+        expect(o.span.end).toBe(15);
+    });
+
+    test("a whitespace-after-`<` opener — `< Counter>` — records hadSpaceAfterLt", () => {
+        // The §4.3 advisory state-type-instantiation shape.
+        const o = tokenizeOpenerFromLt("< Counter>");
+        expect(o.name).toBe("Counter");
+        expect(o.hadSpaceAfterLt).toBe(true);
+    });
+
+    test("a no-space opener records hadSpaceAfterLt false", () => {
+        const o = tokenizeOpenerFromLt("<div>");
+        expect(o.hadSpaceAfterLt).toBe(false);
+    });
+
+    test("an unterminated opener (EOF before `>`) is malformed", () => {
+        const o = tokenizeOpenerFromLt("<div");
+        expect(o.name).toBe("div");
+        expect(o.malformed).toBe(true);
+        expect(o.ok).toBe(false);
+    });
+
+    test("an opener with no name start after the `<` is malformed", () => {
+        // `< >` — whitespace then `>`, no tag-name identifier.
+        const o = tokenizeOpenerFromLt("< >");
+        expect(o.name).toBe("");
+        expect(o.malformed).toBe(true);
+        expect(o.ok).toBe(false);
+    });
+
+    test("a hyphenated / digit-bearing tag name is scanned whole", () => {
+        // The tag-name grammar admits ASCII letters, digits, and `-`.
+        const o = tokenizeOpenerFromLt("<my-widget-2>");
+        expect(o.name).toBe("my-widget-2");
+    });
+
+    test("the opener span anchors at the `<` even with an offset cursor", () => {
+        // Drive tokenizeOpener directly with a cursor mid-source — the span
+        // anchors at ltAnchor (the one-cursor invariant: no offset math).
+        const cursor = makeCursor("xx<p>yy");
+        cursor.pos = 2; cursor.col = 3;          // on the `<`
+        const ltAnchor = { start: 2, line: 1, col: 3 };
+        cursor.pos = 3; cursor.col = 4;          // step past the `<`
+        const o = tokenizeOpener(cursor, ltAnchor);
+        expect(o.name).toBe("p");
+        expect(o.span.start).toBe(2);            // the `<`
+        expect(o.span.end).toBe(5);              // one past the `>`
+    });
+});
+
+// =============================================================================
+// MK2.1 §19 — the opener-tokenizer scan helpers (pure calculations).
+// =============================================================================
+describe("MK2.1 opener-tokenizer scan helpers", () => {
+    test("isTagNameStart — an ASCII letter starts a tag name", () => {
+        expect(isTagNameStart("d")).toBe(true);
+        expect(isTagNameStart("D")).toBe(true);
+        expect(isTagNameStart("1")).toBe(false);  // digit cannot START
+        expect(isTagNameStart("-")).toBe(false);
+        expect(isTagNameStart("")).toBe(false);
+    });
+
+    test("isTagNameChar (tag-frame's canonical) — letters / digits / hyphen", () => {
+        expect(tagFrameIsTagNameChar("a")).toBe(true);
+        expect(tagFrameIsTagNameChar("Z")).toBe(true);
+        expect(tagFrameIsTagNameChar("5")).toBe(true);
+        expect(tagFrameIsTagNameChar("-")).toBe(true);
+        expect(tagFrameIsTagNameChar(" ")).toBe(false);
+        expect(tagFrameIsTagNameChar("")).toBe(false);
+    });
+
+    test("parse-markup's isTagNameChar re-export is the same fn (single source)", () => {
+        // parse-markup.js re-exports isTagNameChar from tag-frame.js — MK2.1
+        // made tag-frame the canonical home of the tag-name grammar.
+        expect(isTagNameChar).toBe(tagFrameIsTagNameChar);
+    });
+
+    test("isOpenerWhitespace — space / tab / CR / LF", () => {
+        expect(isOpenerWhitespace(" ")).toBe(true);
+        expect(isOpenerWhitespace("\t")).toBe(true);
+        expect(isOpenerWhitespace("\n")).toBe(true);
+        expect(isOpenerWhitespace("\r")).toBe(true);
+        expect(isOpenerWhitespace("x")).toBe(false);
+    });
+
+    test("scanTagName returns the end offset of a maximal tag-name run", () => {
+        // `div class` — the name run is `div` [0,3]; the space ends it.
+        expect(scanTagName("div class", 0)).toBe(3);
+        expect(scanTagName("my-widget>", 0)).toBe(9);
+        expect(scanTagName("abc", 0)).toBe(3);  // runs to EOF
+    });
+
+    test("skipOpenerWhitespace returns the end offset of a maximal ws run", () => {
+        expect(skipOpenerWhitespace("   x", 0)).toBe(3);
+        expect(skipOpenerWhitespace("x", 0)).toBe(0);  // no ws
+        expect(skipOpenerWhitespace("  ", 0)).toBe(2);  // runs to EOF
+    });
+});
+
+// =============================================================================
+// MK2.1 §20 — the TagFrame engine + the open-tag stack.
+// =============================================================================
+describe("MK2.1 TagFrame engine — the open-tag stack", () => {
+    test("initialTagFrame is .Closed (matches `initial=.Closed`)", () => {
+        expect(initialTagFrame()).toBe(TagFrameKind.Closed);
+    });
+
+    test("a fresh ctx has tag-tree depth 0 and currentTagFrame .Closed", () => {
+        const ctx = makeParseContext();
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect(currentTagFrame(ctx)).toBe(TagFrameKind.Closed);
+        expect(topTagFrame(ctx)).toBe(null);
+    });
+
+    test("pushTagFrame pushes an open-tag frame; depth + currentTagFrame track it", () => {
+        const ctx = makeParseContext();
+        const frame = makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+            { start: 0, end: 5, line: 1, col: 1 });
+        pushTagFrame(ctx, frame);
+        expect(tagFrameDepth(ctx)).toBe(1);
+        expect(currentTagFrame(ctx)).toBe(TagFrameKind.OpenExpectingChildren);
+        expect(topTagFrame(ctx)).toBe(frame);
+    });
+
+    test("nested pushes — the stack IS the tag-tree depth", () => {
+        const ctx = makeParseContext();
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+            { start: 0, end: 5, line: 1, col: 1 }));
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("span", TagKind.Html, 1,
+            { start: 5, end: 11, line: 1, col: 6 }));
+        expect(tagFrameDepth(ctx)).toBe(2);
+        expect(topTagFrame(ctx).name).toBe("span");
+    });
+
+    test("popTagFrame pops the top open-tag frame (the MK2.2 closer substrate)", () => {
+        const ctx = makeParseContext();
+        const outer = makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+            { start: 0, end: 5, line: 1, col: 1 });
+        const inner = makeOpenExpectingChildrenFrame("span", TagKind.Html, 1,
+            { start: 5, end: 11, line: 1, col: 6 });
+        pushTagFrame(ctx, outer);
+        pushTagFrame(ctx, inner);
+        expect(popTagFrame(ctx)).toBe(inner);
+        expect(tagFrameDepth(ctx)).toBe(1);
+        expect(popTagFrame(ctx)).toBe(outer);
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect(currentTagFrame(ctx)).toBe(TagFrameKind.Closed);
+    });
+
+    test("popTagFrame on an empty stack returns null (the unbalanced-closer case)", () => {
+        const ctx = makeParseContext();
+        expect(popTagFrame(ctx)).toBe(null);
+    });
+
+    test("makeOpenExpectingChildrenFrame carries name / kind / depth / span + bodyMode tag", () => {
+        const span = { start: 0, end: 5, line: 1, col: 1 };
+        const f = makeOpenExpectingChildrenFrame("div", TagKind.Html, 2, span);
+        expect(f.kind).toBe(TagFrameKind.OpenExpectingChildren);
+        expect(f.name).toBe("div");
+        expect(f.tagKind).toBe(TagKind.Html);
+        expect(f.depth).toBe(2);
+        expect(f.span).toBe(span);
+        // bodyMode is MK3's BodyMode — carried as a tag (null) at MK2.1.
+        expect(f.bodyMode).toBe(null);
+    });
+
+    test("makeOpenSelfClosedFrame carries name / kind / span (no depth — no subtree)", () => {
+        const span = { start: 0, end: 6, line: 1, col: 1 };
+        const f = makeOpenSelfClosedFrame("br", TagKind.Html, span);
+        expect(f.kind).toBe(TagFrameKind.OpenSelfClosed);
+        expect(f.name).toBe("br");
+        expect(f.tagKind).toBe(TagKind.Html);
+        expect(f.span).toBe(span);
+        expect(f.depth).toBe(undefined);
+    });
+});
+
+// =============================================================================
+// MK2.1 §21 — recognizeOpener (the opener-side entry point).
+// =============================================================================
+describe("MK2.1 recognizeOpener — tokenize + TagKind + push the TagFrame", () => {
+    test("a non-self-closing opener pushes an .OpenExpectingChildren frame", () => {
+        const { ctx, frame } = recognizeOpenerFromLt("<div>");
+        expect(frame.kind).toBe(TagFrameKind.OpenExpectingChildren);
+        expect(frame.name).toBe("div");
+        expect(frame.tagKind).toBe(TagKind.Html);
+        expect(frame.depth).toBe(0);  // a top-level tag opens at depth 0
+        expect(tagFrameDepth(ctx)).toBe(1);
+    });
+
+    test("a self-closing opener pushes an .OpenSelfClosed frame", () => {
+        const { ctx, frame } = recognizeOpenerFromLt("<br/>");
+        expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+        expect(frame.name).toBe("br");
+        // A self-closed tag also pushes onto the stack at MK2.1 — MK2.2's
+        // closer-pairing handles the .OpenSelfClosed -> .Closed transition.
+        expect(tagFrameDepth(ctx)).toBe(1);
+    });
+
+    test("recognizeOpener computes the TagKind from the opener bytes", () => {
+        expect(recognizeOpenerFromLt("<Counter>").frame.tagKind).toBe(TagKind.Component);
+        expect(recognizeOpenerFromLt("<engine>").frame.tagKind).toBe(TagKind.ScrmlStructural);
+        expect(recognizeOpenerFromLt("< widget>").frame.tagKind).toBe(TagKind.StateOpener);
+        expect(recognizeOpenerFromLt("<div>").frame.tagKind).toBe(TagKind.Html);
+    });
+
+    test("the pushed frame carries the tokenizer descriptor as `.opener`", () => {
+        const { frame } = recognizeOpenerFromLt("<section class=\"x\">");
+        expect(frame.opener).toBeDefined();
+        expect(frame.opener.name).toBe("section");
+        expect(frame.opener.span.start).toBe(0);
+        expect(frame.opener.span.end).toBe(19);
+    });
+
+    test("nested recognizeOpener calls — depth increments per opener", () => {
+        const ctx = makeParseContext();
+        const cursor = makeCursor("<div><span>");
+        // First opener `<div>` — cursor on the `<` at 0.
+        let ltAnchor = { start: 0, line: 1, col: 1 };
+        advance(cursor, 1);
+        const f1 = recognizeOpener(ctx, cursor, ltAnchor);
+        expect(f1.depth).toBe(0);
+        // Second opener `<span>` — cursor now on the `<` at 5.
+        ltAnchor = { start: cursor.pos, line: cursor.line, col: cursor.col };
+        advance(cursor, 1);
+        const f2 = recognizeOpener(ctx, cursor, ltAnchor);
+        expect(f2.depth).toBe(1);  // nested — opens at depth 1
+        expect(tagFrameDepth(ctx)).toBe(2);
+    });
+});
+
+// =============================================================================
+// MK2.1 §22 — end-to-end: the trampoline produces TagFrame-driven Markup
+// blocks; the open-tag stack reflects the opener stream.
+// =============================================================================
+describe("MK2.1 trampoline — TagFrame-driven .InMarkupTag dispatch", () => {
+    test("a `<div>` opener emits a Markup block spanning the FULL opener", () => {
+        const s = blockStream("<div>");
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 5 }]);
+    });
+
+    test("a self-closing `<br/>` emits a Markup block spanning the opener", () => {
+        const s = blockStream("<br/>");
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 5 }]);
+    });
+
+    test("an opener with attributes — the Markup block covers the whole opener", () => {
+        // `<p class="lead">` — the Markup block spans [0,16].
+        const s = blockStream("<p class=\"lead\">");
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 16 }]);
+    });
+
+    test("text on either side of an opener splits into Text blocks", () => {
+        // `a <span> b` — Text[0,2], Markup[2,8], Text[8,10].
+        const s = blockStream("a <span> b");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Text,   start: 0,  end: 2 },
+            { kind: NativeBlockKind.Markup, start: 2,  end: 8 },
+            { kind: NativeBlockKind.Text,   start: 8,  end: 10 },
+        ]);
+    });
+
+    test("two openers — one Markup block each (the tag tree is MK2.2)", () => {
+        // `<div><span>` — MK2.1 emits a Markup block per opener; the
+        // children + closer pairing (the tree) is MK2.2.
+        const s = blockStream("<div><span>");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Markup, start: 0,  end: 5 },
+            { kind: NativeBlockKind.Markup, start: 5,  end: 11 },
+        ]);
+    });
+
+    test("a closer `</div>` is text to MK2.1 (closer recognition is MK2.2)", () => {
+        // `<div></div>` — MK2.1 recognizes the OPENER; the `</div>` closer
+        // is NOT yet recognized (MK2.2) — it accumulates as a Text block.
+        const s = blockStream("<div></div>");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Markup, start: 0,  end: 5 },
+            { kind: NativeBlockKind.Text,   start: 5,  end: 11 },
+        ]);
+    });
+
+    test("the final tag-frame stack reflects the opener stream", () => {
+        // Every opener pushes a frame; closers (MK2.2) would pop. At MK2.1
+        // the stack after `<div><span><br/>` has all three frames.
+        const { ctx } = parseMarkupTrace("<div><span><br/>");
+        expect(tagFrameDepth(ctx)).toBe(3);
+        expect(ctx.tagFrameStack.map((f) => f.name)).toEqual(["div", "span", "br"]);
+        expect(ctx.tagFrameStack.map((f) => f.kind)).toEqual([
+            TagFrameKind.OpenExpectingChildren,
+            TagFrameKind.OpenExpectingChildren,
+            TagFrameKind.OpenSelfClosed,
+        ]);
+    });
+
+    test("a nested tag inside a logic escape is recognized — `${ <div> }`", () => {
+        // The charter Q1.C contract permits a markup tag inside a logic
+        // body. The `<div>` opener inside `${ ... }` is recognized; its
+        // Markup block is emitted, then the LogicEscape block.
+        const s = blockStream("$" + "{" + " <div> }");
+        const kinds = s.map((b) => b.kind);
+        expect(kinds).toContain(NativeBlockKind.Markup);
+        expect(kinds).toContain(NativeBlockKind.LogicEscape);
+    });
+
+    test("an opener with a structural element — `<engine for=Phase>`", () => {
+        // The opener tokenizer + TagKind handle a structural-element opener;
+        // the Markup block spans the whole opener. (decl-vs-structural
+        // classification completion is MK2.3.)
+        const src = "<engine for=Phase>";
+        const s = blockStream(src);
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: src.length }]);
+        const { ctx } = parseMarkupTrace(src);
+        expect(ctx.tagFrameStack[0].tagKind).toBe(TagKind.ScrmlStructural);
+    });
+
+    test("the trampoline halts on every opener shape (the termination guarantee)", () => {
+        // Each of these must produce a finite block-stream array.
+        for (const src of ["<div>", "<br/>", "<p ", "<", "< >", "<a x=\"y>z\">",
+                            "<div><span><section>"]) {
+            const s = blockStream(src);
+            expect(Array.isArray(s)).toBe(true);
+        }
+    });
+
+    test("a malformed opener still halts + emits a (boundary-ish) Markup block", () => {
+        // `<p` — unterminated. recognizeOpener marks it malformed but the
+        // trampoline still progresses (the cursor advances to EOF) and a
+        // Markup block is emitted for the recognized extent.
+        const s = blockStream("<p");
+        expect(Array.isArray(s)).toBe(true);
+        expect(s.length).toBe(1);
+        expect(s[0].kind).toBe(NativeBlockKind.Markup);
+    });
 });

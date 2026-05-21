@@ -17,6 +17,15 @@
 // COMMENT RECOGNITION section at the bottom of this file; the
 // recognizers are pure calculations (recognizeCommentForm /
 // lineCommentExtent / htmlCommentExtent) — the trampoline consumes.
+//
+// MK2.1 amendment: the TagFrame <tag>-tree engine lands in tag-frame.js
+// (a SIBLING engine of BlockContext — it tracks the open-tag stack
+// ACROSS .InMarkupTag entries; charter Q1.G). BlockContext itself is
+// UNCHANGED at MK2.1 — enterMarkupTagContext keeps its MK1.2 contract
+// (consume the `<`, push the .InMarkupTag frame). MK2.1's opener
+// tokenizer (tag-frame.js's tokenizeOpener) tokenizes the opener BODY
+// from the byte AFTER the `<`, reading the .InMarkupTag frame's openSpan
+// as the opener-span anchor.
 
 import { peekChar, peekStr, advance } from "./cursor.js";
 import { makeSpan } from "./span.js";
@@ -276,21 +285,27 @@ export function enterBlockContext(ctx, cursor, context, sigil) {
 }
 
 // enterMarkupTagContext — STATE transition. The `<ident` markup-tag-context
-// boundary. MK1.2 recognizes + transitions on the BOUNDARY only; the actual
-// `<tag>` TREE (opener/closer pairing, TagFrame) is MK2.
+// boundary. Recognizes + transitions on the BOUNDARY; the actual `<tag>`
+// TREE (opener/closer pairing, TagFrame) is MK2.
 //
 // Unlike a block-opener sigil, a markup tag is NOT brace-delimited — the tag
 // context closes on a TagFrame-balanced condition (MK2's datum), not a
-// brace-depth-0 `}`. MK1.2 therefore consumes ONLY the `<` (the boundary
-// marker) and transitions @blockContext; it pushes a BlockContext frame with
-// a sentinel depthAtOpen of -1 ("not brace-delimited — closes via MK2's
-// TagFrame, not a `}`"). The tag NAME and the `>` are MK2's to consume.
+// brace-depth-0 `}`. The pushed frame carries a sentinel depthAtOpen of -1
+// ("not brace-delimited — closes via MK2's TagFrame, not a `}`").
+//
+// Consumes ONLY the `<` (the boundary marker). The frame's openSpan spans the
+// `<` (one char) — MK2.1's opener tokenizer reads it as the opener-span
+// anchor (tokenizeOpener tokenizes the opener BODY — name + attributes + `>`
+// — from the byte AFTER the `<`; the openSpan anchor lets the opener's span
+// still cover the `<`). The openSpan is also the unterminated-tag blame locus.
 //
 // Returns the pushed BlockContext frame.
 export function enterMarkupTagContext(ctx, cursor) {
     const openSpan = makeSpan(cursor.pos, cursor.pos + 1, cursor.line, cursor.col);
 
-    // Consume the `<` boundary marker only — the tag name + `>` are MK2.
+    // Consume the `<` boundary marker only — the tag name + the attributes +
+    // the `>` are MK2's (tokenizeOpener, run from parse-markup's .InMarkupTag
+    // dispatcher).
     advance(cursor, 1);
 
     const priorContext = getBlockContext(ctx);
