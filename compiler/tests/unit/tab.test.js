@@ -724,17 +724,6 @@ describe("FileAST structure", () => {
     expect(Array.isArray(ast.typeDecls)).toBe(true);
   });
 
-  test("FileAST has spans object (node id → span)", () => {
-    const ast = parseAST("<p>hi</>");
-    expect(typeof ast.spans).toBe("object");
-  });
-
-  test("spans table is non-empty for a non-trivial program", () => {
-    const ast = parseAST('<div class="x">text</>');
-    const spanCount = Object.keys(ast.spans).length;
-    expect(spanCount).toBeGreaterThan(0);
-  });
-
   test("runTAB is an alias for buildAST with same output shape", () => {
     const bsOut = splitBlocks("test.scrml", "<p>hi</>");
     const r1 = buildAST(bsOut);

@@ -14,7 +14,6 @@
  *   exports:    ExportDecl[],
  *   components: ComponentDef[],
  *   typeDecls:  TypeDecl[],
- *   spans:      SpanTable,       // nodeId → Span
  * }
  *
  * ASTNode discriminated by `.kind`:
@@ -11965,37 +11964,6 @@ function collectHoisted(nodes) {
 }
 
 // ---------------------------------------------------------------------------
-// Span table builder
-// ---------------------------------------------------------------------------
-
-/**
- * Walk the AST and populate a span table: Map<nodeId, Span>.
- * Node IDs are assigned during construction (stored as `id` on each node);
- * this pass only reads them — it does not mutate any node.
- *
- * @param {ASTNode[]} nodes
- * @returns {Map<number, Span>}
- */
-function buildSpanTable(nodes) {
-  const table = new Map();
-
-  function assign(node) {
-    if (!node || typeof node !== "object") return;
-    if (node.id !== undefined && node.span) table.set(node.id, node.span);
-
-    for (const key of Object.keys(node)) {
-      if (key === "span" || key === "id") continue;
-      const val = node[key];
-      if (Array.isArray(val)) val.forEach(assign);
-      else if (val && typeof val === "object" && val.kind) assign(val);
-    }
-  }
-
-  nodes.forEach(assign);
-  return table;
-}
-
-// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -12054,15 +12022,6 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
   const { imports, exports, typeDecls, components, machineDecls, channelDecls } = collectHoisted(nodes);
-
-  // Build span table
-  const spanTable = buildSpanTable(nodes);
-
-  // Convert span table Map to plain object for serialisability
-  const spans = {};
-  for (const [id, span] of spanTable) {
-    spans[id] = span;
-  }
 
   // W-PROGRAM-001: Check for <program> root element
   const hasProgramRoot = nodes.some(
@@ -12455,7 +12414,6 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     typeDecls,
     machineDecls,
     channelDecls,
-    spans,
     hasProgramRoot,
   };
 

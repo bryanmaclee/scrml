@@ -427,7 +427,6 @@ evaluation of attribute values or content expressions occurs.
     exports: ExportDecl[],
     components: ComponentDef[], // const Name = <element props> definitions
     typeDecls: TypeDecl[],
-    spans: SpanTable,           // node id -> Span (never dropped)
   }
 
   ASTNode =

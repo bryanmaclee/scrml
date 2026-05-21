@@ -73,9 +73,4 @@ describe("CONF-TAB-002: every AST node carries a valid span — spans are never 
     const node = ast.nodes[0];
     expect(node.span.file).toBe("my-file.scrml");
   });
-
-  test("span table (FileAST.spans) is populated and non-empty for a non-empty file", () => {
-    const { ast } = run("<div>hello</>");
-    expect(Object.keys(ast.spans).length).toBeGreaterThan(0);
-  });
 });

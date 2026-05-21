@@ -8,7 +8,7 @@
 //  unclassified raw attribute strings remain in the AST."
 //
 // This test covers the FileAST structure invariants: filePath, nodes, imports,
-// exports, components, typeDecls, spans — all required fields must be present.
+// exports, components, typeDecls — all required fields must be present.
 
 import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../../src/block-splitter.js";
@@ -35,8 +35,6 @@ describe("CONF-TAB-023: FileAST output shape satisfies all Stage 3 output contra
     expect(Array.isArray(ast.exports)).toBe(true);
     expect(Array.isArray(ast.components)).toBe(true);
     expect(Array.isArray(ast.typeDecls)).toBe(true);
-    expect(ast.spans).toBeDefined();
-    expect(typeof ast.spans).toBe("object");
   });
 
   test("filePath in FileAST matches the filePath passed to BS", () => {
@@ -62,10 +60,5 @@ describe("CONF-TAB-023: FileAST output shape satisfies all Stage 3 output contra
         attr.value.kind
       );
     }
-  });
-
-  test("FileAST.spans is a non-circular plain object (JSON.stringify succeeds)", () => {
-    const { ast } = run("<div>hello</>");
-    expect(() => JSON.stringify(ast.spans)).not.toThrow();
   });
 });

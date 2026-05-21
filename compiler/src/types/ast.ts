@@ -1502,8 +1502,6 @@ export interface FileAST {
    *  exported (top-level `export <channel>`) decls. Used by CHX to look up
    *  cross-file channel exports during inline-expansion. */
   channelDecls?: ChannelDeclNode[];
-  /** Span table: maps node ID to its source span. */
-  spans: Record<number, Span>;
   /** True if the file has a `<program>` root element. */
   hasProgramRoot: boolean;
   /** Auth configuration from `<program>` attributes, or null. */
