@@ -1,0 +1,121 @@
+// translate-expr.scrml — M5-swap Unit A2 — the EXPRESSION-CATALOG BRIDGE: the
+// native-parser analogue that translates the native PascalCase `Expr` catalog
+// into the live lowercase `ExprNode` union the downstream codegen walks.
+//
+// PILLAR 5b classification (DD §D1):
+//   translateExpr is CALCULATION (pure). It is a recursive tree-walk over the
+//   native parser's `Expr` — read-only, no cursor, no engine, no lifecycle, no
+//   threaded state. Unlike the statement bridge it takes NO id-allocator: the
+//   live `ExprNode` union carries NO numeric `id` (the `id` field is the
+//   `BaseNode` contract for STATEMENT / MARKUP nodes, not for expression
+//   nodes). So the calculation is a pure shape map. The spec's `fn` + struct
+//   primitives are sufficient; no missing primitive surfaced.
+//
+// PURPOSE — the expression-catalog bridge:
+//   The native parser's `parse-expr.js` emits a PascalCase ESTree-shaped
+//   `Expr` — the `ast-expr.js` `ExprKind` catalog (40 closed entries: Ident /
+//   NumberLit / Binary / Conditional / IsCheck / Call / ...). The live
+//   `FileAST` codegen layer dispatches a scrml-specific LOWERCASE `ExprNode`
+//   union — ident / lit / binary / ternary / member / call / ... (ast.ts:1939,
+//   20 kinds). The codegen emitter `emit-expr.ts` walks the lowercase union;
+//   `ast-expr.js` produces the PascalCase catalog. The two catalogs DIVERGE
+//   structurally — kind-rename, fan-out, fan-in. This module is the
+//   reconciliation. It is the direct sibling of R1's `translate-stmt` (the
+//   statement-catalog bridge); R1 rode expression children through VERBATIM
+//   and explicitly deferred this unit. A2 closes that deferral.
+//
+// TRANSLATION LOCUS (A2 design decision — mirrors R1): a native-parser
+//   EXIT-SHAPING module, sibling of `collect-hoisted` / `translate-stmt` —
+//   NOT a mutation of `parse-expr`. `parseExpression` stays pure (still emits
+//   the native `Expr`); this module is an OPTIONAL exit shaper the FileAST
+//   assembler (Unit C1) invokes — and that the statement bridge calls into for
+//   every expression CHILD it currently rides through verbatim.
+//
+// THE NATIVE -> LIVE EXPRESSION-KIND MAP:
+//   KIND-RENAME:
+//     native Ident         -> live ident
+//     native AtCell        -> live ident   (the `@` rides in `name`)
+//     native BareVariant   -> live ident   (the `.` rides in `name`)
+//     native Tilde         -> live ident   (`name` is the literal "~")
+//     native Array         -> live array
+//     native Object        -> live object
+//     native Unary         -> live unary
+//     native Binary        -> live binary
+//     native Assignment    -> live assign
+//     native Conditional   -> live ternary
+//     native Call          -> live call
+//     native New           -> live new
+//     native Sql           -> live sql-ref          (nodeId -1; C1 re-stamps)
+//     native InputStateRef -> live input-state-ref
+//     native Match         -> live match-expr
+//   FAN-IN:
+//     native NumberLit / StringLit / BoolLit / RegexLit / TemplateLit
+//                          -> live lit  (litType discriminates)
+//     native NotValue      -> live lit { litType: "not" }   (§42 absence)
+//     native Logical       -> live binary  (JS `&&`/`||`/`??` are BinaryExpr
+//                             `op` values — no separate `logical` kind)
+//     native Update        -> live unary   (`++`/`--` are UnaryExpr `op`
+//                             values; the `prefix` flag carries pre/post)
+//     native Arrow / Function -> live lambda  (`fnStyle` discriminates)
+//   FAN-OUT:
+//     native IsCheck -> live binary, `op` selected by the IsCheckOp:
+//       Not -> "is-not" · Some/Given -> "is-some" · NotNot -> "is-not-not" ·
+//       Variant -> "is" (the `x is .V` variant form; `right` is the variant)
+//     native Member -> live member (computed:false) / live index (computed:true)
+//   PASSTHROUGH-UNWRAP:
+//     native Paren -> the inner expression (no live `paren` kind — parentheses
+//       are a parse-grouping artifact; codegen re-parenthesizes by precedence)
+//   ESCAPE-HATCH (no clean live target — SURFACED to PA as gaps, not papered
+//   over): This / Super / TaggedTemplate / Sequence / Yield / Render /
+//     MarkupValue (and Lift / Fail at a genuine expression-child position —
+//     the common statement-position case is intercepted by translate-stmt).
+//     These route to live `escape-hatch` with `nativeKind` set (the S115 /
+//     DD #27 `estreeType`->`nativeKind` rename — a sub-kind decoration, not a
+//     translation surface). emit-expr.ts:emitEscapeHatch's dual-mode path
+//     already recognizes native kind strings, so the escape-hatch keeps
+//     codegen crash-free + the output correct via the string-rewrite fallback.
+//
+// SCOPE BOUNDARY (A2, IMPORTANT): A2 translates ONLY what the native parser
+//   already PRODUCES. It is INDEPENDENT of the Tier-B parser-feature-gap units
+//   (`?` propagate, `!{}` guarded-expr, `~`-decl, `lin`, `fn`/`server`/`pure`
+//   modifiers, `type`) — those are v0.7 work and the native parser has no
+//   production for them yet. A2 adds NO parser productions and invents NO
+//   downstream `ExprNode` kinds.
+//
+// Status (A2 / v0.6): COMPILABLE skeleton. The `${...}` JS-escape block carries
+//   the live surface; the .js shadow (translate-expr.js) runs (README
+//   ANOMALY-2 — the shadow discipline every native-parser file follows). No
+//   live-pipeline wiring at A2 — exercised by the per-kind translation unit
+//   tests. Unit C1 wires it into the `nativeParseFile` FileAST assembler.
+
+${
+    // -----------------------------------------------------------------
+    // translateExpr — CALCULATION (pure). The module entry point.
+    // Translate ONE native `Expr` node into ONE live `ExprNode`.
+    //
+    //   nativeExpr — a native `Expr` (the `ast-expr.js` catalog).
+    //
+    // Returns ONE live `ExprNode`. Expressions are FLATTER than statements:
+    // a native `Expr` always maps to exactly one live `ExprNode` — the
+    // "fan-out" in this bridge is kind-SELECTION (`IsCheck` -> one of four
+    // binary ops), not node-count expansion. A missing / non-object input
+    // folds to a zero-span `escape-hatch` so a caller never receives an
+    // absence where an `ExprNode` is expected.
+    //
+    // (live surface in translate-expr.js — the .scrml shape carries the
+    // canonical Pillar 5b SHAPE; the .js shadow runs.)
+    // -----------------------------------------------------------------
+    export fn translateExpr(nativeExpr) {
+        // see translate-expr.js for the running shadow
+    }
+
+    // -----------------------------------------------------------------
+    // translateExprList — CALCULATION (pure). Translate an array of native
+    // `Expr` nodes into a live `ExprNode[]`. A missing / non-array input
+    // folds to an empty array. Convenience for callers (C1) holding an
+    // expression array.
+    // -----------------------------------------------------------------
+    export fn translateExprList(nativeExprs) {
+        // see translate-expr.js for the running shadow
+    }
+}
