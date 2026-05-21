@@ -148,6 +148,16 @@ export class CPSSplit {
   returnVarName: string | null;
 
   /**
+   * Ext 1 M1.5: the full statement schedule (every body index, server +
+   * client) in the topological order the multi-batch planner (M1.3) chose.
+   * Empty until M1.3's planner has run. Codegen's client-wrapper emit
+   * (emit-functions.ts) sequences client statements between batch awaits
+   * using this order — for a single-batch split it equals source order, so
+   * the back-compat single-batch emit path stays observationally identical.
+   */
+  topoOrder: number[];
+
+  /**
    * Function-level static monotonicity verdict (SPEC §19.9.6, A9 Ext 5).
    * Populated by Stage 5.5 (monotonicity-analyzer.ts) AFTER RI has built the
    * cpsSplit. Undefined when Stage 5.5 has not run, OR when the function is a
@@ -181,6 +191,10 @@ export class CPSSplit {
     this.serverBatches = serverBatches;
     this.clientStmtIndices = clientStmtIndices;
     this.returnVarName = returnVarName;
+    // M1.5: default to empty; M1.3's planner overwrites with the real
+    // schedule when it runs. A single-batch split with an empty `topoOrder`
+    // falls back to source order at the emit site — no behavior change.
+    this.topoOrder = [];
   }
 
   /**
@@ -2839,6 +2853,10 @@ export function runRI(input: RIInput): RIOutput {
               // Install the planned batches. A single-batch plan is identical
               // to the M1.1 baseline; a multi-batch plan is the Ext 1 shape.
               cpsSplit.serverBatches = _plan.batches;
+              // M1.5: store the planner's topological schedule so codegen's
+              // client-wrapper emit can sequence client statements between
+              // the per-batch awaits.
+              cpsSplit.topoOrder = _plan.topoOrder;
             }
           } else {
             // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped

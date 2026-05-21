@@ -79,6 +79,7 @@ interface CpsBatch {
 interface CpsSplit {
   serverStmtIndices: number[];
   returnVarName?: string;
+  clientStmtIndices?: number[];
   /**
    * Function-level monotonicity verdict — the back-compat aggregate
    * (Ext 1 M1.4 conservative max). Retained for consumers that want one
@@ -87,6 +88,14 @@ interface CpsSplit {
   monotonicity?: "monotone" | "non-monotone" | "machine-intrinsic";
   /** Server batches in source order (Ext 1). Each carries its own verdict. */
   serverBatches?: CpsBatch[];
+  /**
+   * Ext 1 M1.5: the full statement schedule (server + client body indices) in
+   * the topological order the multi-batch planner (M1.3) chose. Used by the
+   * multi-batch client wrapper to sequence client statements between the
+   * per-batch awaits. Empty / absent for a single-batch split — the wrapper
+   * falls back to source order.
+   */
+  topoOrder?: number[];
 }
 
 /** A param node (either a string or a structured param). */
@@ -112,6 +121,244 @@ function cpsNeedsIdempotencyKey(cpsSplit: CpsSplit | undefined): boolean {
     if (batches.every((b) => b.monotonicity !== undefined)) return false;
   }
   return cpsSplit.monotonicity === "non-monotone";
+}
+
+/** A per-batch fetch-emission plan entry (Ext 1 M1.5 — client side). */
+interface ClientBatch {
+  /** 0-based batch ordinal; -1 for the single-handler (non-multi-batch) case. */
+  batchIndex: number;
+  /** Server-statement body indices THIS batch runs (sorted ascending). */
+  indices: number[];
+  /** Per-batch monotonicity verdict (M1.4); drives the Idempotency-Key gate. */
+  monotonicity: string | undefined;
+  /** The scrml cell name this batch produces (the value it forwards), or null. */
+  returnCell: string | null;
+  /** Prior-batch return cell names forwarded into this batch's fetch body. */
+  fwdResultNames: string[];
+}
+
+/**
+ * Ext 1 M1.5 — build the per-batch client fetch plan for a CPS route.
+ *
+ * For a single-batch CPS route this returns one `ClientBatch` whose `indices`
+ * is the flat `serverStmtIndices` and `batchIndex` is -1 (the single-handler
+ * back-compat shape). For a multi-batch route it returns one entry per batch,
+ * each carrying its own monotonicity verdict, the cross-batch param-forwarding
+ * set, and the cell it produces.
+ *
+ * The return-cell of each batch is the scrml `state-decl` name of its LAST
+ * server statement — the last batch produces the function's final
+ * `returnVarName`; earlier batches produce their own last `state-decl`.
+ */
+function buildClientBatchPlan(
+  cpsSplit: CpsSplit,
+  body: ASTNode[],
+): ClientBatch[] {
+  const batches = cpsSplit.serverBatches;
+  if (!batches || batches.length <= 1) {
+    return [{
+      batchIndex: -1,
+      indices: cpsSplit.serverStmtIndices,
+      monotonicity: (batches && batches.length === 1 ? batches[0].monotonicity : undefined)
+        ?? cpsSplit.monotonicity,
+      returnCell: cpsSplit.returnVarName ?? null,
+      fwdResultNames: [],
+    }];
+  }
+  const plan: ClientBatch[] = [];
+  const fwdSoFar: string[] = [];
+  for (let bi = 0; bi < batches.length; bi++) {
+    const b = batches[bi];
+    const indices = Array.isArray(b.indices)
+      ? [...b.indices].sort((a, c) => a - c)
+      : [];
+    const isLast = bi === batches.length - 1;
+    let returnCell: string | null = null;
+    if (isLast) {
+      returnCell = cpsSplit.returnVarName ?? null;
+    } else if (indices.length > 0) {
+      const last = body[indices[indices.length - 1]] as ASTNode | undefined;
+      if (last && last.kind === "state-decl" && typeof last.name === "string") {
+        returnCell = last.name;
+      }
+    }
+    plan.push({
+      batchIndex: bi,
+      indices,
+      monotonicity: b.monotonicity,
+      returnCell,
+      fwdResultNames: [...fwdSoFar],
+    });
+    if (returnCell && !fwdSoFar.includes(returnCell)) fwdSoFar.push(returnCell);
+  }
+  return plan;
+}
+
+/**
+ * Ext 1 M1.5 — emit the body of a multi-batch CPS client wrapper.
+ *
+ * Walks the planner's topological schedule (M1.3 `topoOrder`; source order is
+ * the fallback when the schedule is absent). For each statement:
+ *   - the FIRST server statement of a batch triggers that batch's `await`
+ *     block — an own-scope try/catch issuing the fetch stub, checking the
+ *     server-serialized `__scrml_error` envelope, and on a thrown failure
+ *     returning a tagged `__scrml_error` envelope that names the batch index;
+ *   - subsequent server statements of an already-issued batch are skipped
+ *     (folded into that batch's single request);
+ *   - client statements are emitted directly, interleaved between the awaits.
+ *
+ * Each batch's result is bound to `_scrml_batch_<i>_result`; if the batch
+ * produces a scrml `state-decl` cell that cell is `_scrml_reactive_set` and
+ * also bound as a `const` so later batches / client statements (and the
+ * cross-batch parameter forwarding) can reference it by name.
+ *
+ * Per-batch atomicity (S1) and independent failure handling (S4) hold: each
+ * `await` is one HTTP request → one §8.9 transactional envelope; an earlier
+ * batch's commit stands when a later batch's try/catch fires (§19.6.7).
+ */
+function emitMultiBatchWrapper(opts: {
+  lines: string[];
+  name: string;
+  body: ASTNode[];
+  cpsSplit: CpsSplit;
+  batchPlan: ClientBatch[];
+  batchStubs: string[];
+  fnParamNames: string[];
+  cpsOptsBase: Record<string, unknown>;
+  errors: CGError[];
+  filePath: string;
+}): void {
+  const { lines, name, body, cpsSplit, batchPlan, batchStubs, fnParamNames, cpsOptsBase, errors, filePath } = opts;
+
+  // The traversal order: the planner's topological schedule when present,
+  // else source order. A single-batch split's schedule equals source order,
+  // so this fallback is observationally safe.
+  const schedule: number[] = (Array.isArray(cpsSplit.topoOrder) && cpsSplit.topoOrder.length > 0)
+    ? cpsSplit.topoOrder
+    : body.map((_, i) => i);
+
+  // Map each server-statement index → its batch ordinal, and identify each
+  // batch's FIRST server index (the index whose visit triggers the await).
+  const batchOfIndex = new Map<number, number>();
+  const firstIndexOfBatch = new Map<number, number>();
+  batchPlan.forEach((b) => {
+    if (b.indices.length > 0) firstIndexOfBatch.set(b.batchIndex, b.indices[0]);
+    for (const idx of b.indices) batchOfIndex.set(idx, b.batchIndex);
+  });
+
+  const emittedBatch = new Set<number>();
+  // Cell names already bound as a `const`/`let` in the wrapper scope — guards
+  // against a JS redeclaration when two batches produce the same cell.
+  const boundCells = new Set<string>();
+
+  // A9-Ext-4 D1: an outer try/catch wraps the whole wrapper body so an
+  // interleaved CLIENT statement that throws still surfaces as a tagged
+  // `__scrml_error` envelope — failure-mode preservation (S4) parity with the
+  // single-batch wrapper. The per-batch try/catch blocks below `return` early
+  // with a batch-indexed envelope; this outer catch is the catch-all for
+  // everything between the awaits.
+  lines.push(`  try {`);
+
+  for (const stmtIndex of schedule) {
+    const stmt = body[stmtIndex];
+    if (!stmt) continue;
+
+    const owningBatch = batchOfIndex.get(stmtIndex);
+    if (owningBatch !== undefined) {
+      // A server statement. Only the batch's FIRST server index emits the
+      // await block; the rest are folded into that one request.
+      if (firstIndexOfBatch.get(owningBatch) !== stmtIndex) continue;
+      if (emittedBatch.has(owningBatch)) continue;
+      emittedBatch.add(owningBatch);
+
+      const plan = batchPlan[owningBatch];
+      const stub = batchStubs[owningBatch];
+      const resultVar = `_scrml_batch_${owningBatch}_result`;
+      // Call args: original fn params, then each prior batch's return cell
+      // (cross-batch parameter forwarding — M1.3). The prior cells are bound
+      // as `const`s after their batch's await, below.
+      const callArgs = [...fnParamNames, ...plan.fwdResultNames].join(", ");
+
+      lines.push(`    // Ext 1 M1.5: CPS batch ${owningBatch}`);
+      lines.push(`    let ${resultVar};`);
+      lines.push(`    try {`);
+      lines.push(`      ${resultVar} = await ${stub}(${callArgs});`);
+      // A9-Ext-4 D1: a server-serialized error envelope propagates as-is so
+      // the caller's `?` / `!{}` / `<errorBoundary>` observes one shape.
+      lines.push(`      if (${resultVar} && typeof ${resultVar} === 'object' && ${resultVar}.__scrml_error) {`);
+      lines.push(`        return ${resultVar};`);
+      lines.push(`      }`);
+      lines.push(`    } catch (_scrml_cps_err) {`);
+      lines.push(`      if (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error) {`);
+      lines.push(`        return _scrml_cps_err;`);
+      lines.push(`      }`);
+      lines.push(`      return {`);
+      lines.push(`        __scrml_error: true,`);
+      lines.push(`        type: "CpsError",`);
+      lines.push(`        variant: "NetworkError",`);
+      lines.push(`        data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)}, batch: ${owningBatch} },`);
+      lines.push(`      };`);
+      lines.push(`    }`);
+      // If the batch produces a scrml cell, publish it reactively and bind it
+      // by name so later batches / client statements can read it. The local
+      // binding uses `let` and is DECLARED once per cell name; a later batch
+      // writing the same cell reassigns the existing binding (the planner
+      // proved the cross-batch write admissible — M1.3 param-forwarding).
+      if (plan.returnCell) {
+        lines.push(`    _scrml_reactive_set(${JSON.stringify(plan.returnCell)}, ${resultVar});`);
+        if (!boundCells.has(plan.returnCell)) {
+          lines.push(`    let ${plan.returnCell} = ${resultVar};`);
+          boundCells.add(plan.returnCell);
+        } else {
+          lines.push(`    ${plan.returnCell} = ${resultVar};`);
+        }
+      }
+      continue;
+    }
+
+    // A client statement — emit it directly, interleaved between the awaits.
+    // Security guard: server-only nodes must not appear in a client wrapper.
+    if (isServerOnlyNode(stmt)) {
+      errors.push(new CGError(
+        "E-CG-006",
+        `E-CG-006: ${stmt.kind} node found in CPS client wrapper for \`${name}\`. ` +
+        `This code uses server-only features (${stmt.kind}) but is marked to run in the browser. ` +
+        `Move it to a server function or remove the client boundary.`,
+        (stmt.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2],
+      ));
+      continue;
+    }
+    // The reactive assignment that receives a batch result is already emitted
+    // as part of that batch's await block (the `returnCell` publish above) —
+    // skip a duplicate emission here.
+    if (
+      stmt.kind === "state-decl" &&
+      typeof stmt.name === "string" &&
+      batchPlan.some((b) => b.returnCell === stmt.name)
+    ) {
+      continue;
+    }
+    const code = emitLogicNode(stmt, cpsOptsBase);
+    if (code) {
+      for (const line of code.split("\n")) lines.push(`    ${line}`);
+    }
+  }
+
+  // A9-Ext-4 D1: outer catch — an interleaved client statement that throws
+  // surfaces as a tagged scrml-error envelope (NetworkError variant), matching
+  // the single-batch wrapper's failure-mode shape. A `__scrml_error`-shaped
+  // throw passes through unchanged to preserve the original variant identity.
+  lines.push(`  } catch (_scrml_cps_err) {`);
+  lines.push(`    if (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error) {`);
+  lines.push(`      return _scrml_cps_err;`);
+  lines.push(`    }`);
+  lines.push(`    return {`);
+  lines.push(`      __scrml_error: true,`);
+  lines.push(`      type: "CpsError",`);
+  lines.push(`      variant: "NetworkError",`);
+  lines.push(`      data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
+  lines.push(`    };`);
+  lines.push(`  }`);
 }
 
 /**
@@ -177,6 +424,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // Map from original function name → generated fetch stub var name.
   // Used by CPS wrapper generation.
   const serverFnStubs = new Map<string, string>();
+  // Ext 1 M1.5: function name → per-batch fetch-stub names, in batch order.
+  // A non-CPS / single-batch route maps to a one-element array; a multi-batch
+  // route maps to N stub names. Step 2's CPS wrapper consumes this to issue
+  // one `await` per batch in topological order.
+  const serverFnBatchStubs = new Map<string, string[]>();
 
   // -------------------------------------------------------------------------
   // Step 1: Generate fetch/EventSource stubs for server-boundary functions
@@ -229,14 +481,45 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // A5-FUP: paramName() resolves DestructurePattern names to _scrml_arg_N
     // placeholders so the fetch stub forwards positional args correctly even
     // when the original source used destructured params.
-    const paramNames = params.map((p: Param, i: number) => paramName(p, i));
+    const fnParamNames = params.map((p: Param, i: number) => paramName(p, i));
 
-    const stubName = genVar(`fetch_${name}`);
-    serverFnStubs.set(name, stubName);
-    // Map original name → fetch stub as the default rewrite target.
-    // If this function also has a CPS split, Step 2 will override this
-    // with the CPS wrapper name (which is the correct call target).
-    fnNameMap.set(name, stubName);
+    // ----------------------------------------------------------------------
+    // Ext 1 M1.5 — multi-stub emit (client fetch side).
+    //
+    // A non-CPS route, and a single-batch CPS route, emit exactly ONE fetch
+    // stub — the pre-Ext-1 shape. A multi-batch CPS route emits N fetch stubs,
+    // one per batch, each targeting `<path>__batch_<i>`:
+    //   - the idempotency key is gated on THIS batch's own monotonicity
+    //     verdict (M1.4) — only non-monotone batches' stubs carry the key,
+    //   - batch i's stub body forwards the original function params PLUS each
+    //     prior batch's return cell (cross-batch parameter forwarding, M1.3).
+    const _cps: CpsSplit | undefined = route.cpsSplit;
+    const _fnBody = (fnNode.body as ASTNode[]) ?? [];
+    const _stubBatches: ClientBatch[] = _cps
+      ? buildClientBatchPlan(_cps, _fnBody)
+      : [{ batchIndex: -1, indices: [], monotonicity: undefined, returnCell: null, fwdResultNames: [] }];
+    const _isMultiStub = _stubBatches.length > 1;
+    // Per-batch stub names — Step 2's wrapper calls these in topological order.
+    const _batchStubNames: string[] = [];
+
+    for (const _sb of _stubBatches) {
+    // Batch-i's param list: original fn params, then prior batch return cells.
+    const paramNames = [...fnParamNames, ..._sb.fwdResultNames];
+    // The route path this stub fetches. Single-stub → the route's own path;
+    // multi-batch → the per-batch path emitted by emit-server.ts.
+    const batchPath = _isMultiStub ? `${path}__batch_${_sb.batchIndex}` : path;
+
+    const stubName = _isMultiStub
+      ? genVar(`fetch_${name}_batch_${_sb.batchIndex}`)
+      : genVar(`fetch_${name}`);
+    _batchStubNames.push(stubName);
+    if (!_isMultiStub) {
+      serverFnStubs.set(name, stubName);
+      // Map original name → fetch stub as the default rewrite target.
+      // If this function also has a CPS split, Step 2 will override this
+      // with the CPS wrapper name (which is the correct call target).
+      fnNameMap.set(name, stubName);
+    }
 
     lines.push(`async function ${stubName}(${paramNames.join(", ")}) {`);
     const usesCsrfRetry = csrfEnabled && httpMethod !== "GET" && httpMethod !== "HEAD";
@@ -247,15 +530,14 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // result on key-hit. Monotone / machine-intrinsic batches and non-CPS
     // server functions skip key emission.
     //
-    // Ext 1 M1.4: gated per-batch. The monotonicity classifier writes an
-    // independent verdict onto each `CPSBatch.monotonicity`. While the client
-    // wrapper still issues ONE fetch (M1.5 splits it into N fetches, one per
-    // batch), that single fetch carries every batch's work — so it needs the
-    // key iff ANY batch is non-monotone. This is identical to the prior
-    // function-level gate for single-batch functions (the conservative-max
-    // aggregate equals `some()` over batches), but makes the per-batch verdict
-    // the load-bearing surface so M1.5 can gate each fetch on its own batch.
-    const emitIdempotencyKey = cpsNeedsIdempotencyKey(route.cpsSplit);
+    // Ext 1 M1.5: gated on THIS batch's own monotonicity verdict. In a
+    // multi-batch route only non-monotone batches' stubs carry the key; for
+    // the single-stub case `_sb.monotonicity` is the M1.4 conservative-max
+    // aggregate, identical to the prior function-level gate
+    // (`cpsNeedsIdempotencyKey`).
+    const emitIdempotencyKey = _isMultiStub
+      ? _sb.monotonicity === "non-monotone"
+      : cpsNeedsIdempotencyKey(route.cpsSplit);
     if (emitIdempotencyKey) {
       lines.push(`  // A9 Ext 5: idempotency key (non-monotone CPS batch)`);
       lines.push(`  const _scrml_idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + '-' + Date.now();`);
@@ -277,7 +559,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // !usesCsrfRetry branch with manual CSRF retry semantics.
         lines.push(`  // A9 Ext 5: bypass _scrml_fetch_with_csrf_retry to add Idempotency-Key header`);
         lines.push(`  const _scrml_csrf_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
-        lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(path)}, {`);
+        lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`    method: ${JSON.stringify(httpMethod)},`);
         lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key },`);
         lines.push(`    body: _scrml_body,`);
@@ -286,7 +568,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`  if (_scrml_resp_initial.status === 403) {`);
         lines.push(`    // CSRF token may have been minted on the 403; retry with the freshly-planted token.`);
         lines.push(`    const _scrml_csrf_retry_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
-        lines.push(`    _scrml_resp = await fetch(${JSON.stringify(path)}, {`);
+        lines.push(`    _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`      method: ${JSON.stringify(httpMethod)},`);
         lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key },`);
         lines.push(`      body: _scrml_body,`);
@@ -295,10 +577,10 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`    _scrml_resp = _scrml_resp_initial;`);
         lines.push(`  }`);
       } else {
-        lines.push(`  const _scrml_resp = await _scrml_fetch_with_csrf_retry(${JSON.stringify(path)}, ${JSON.stringify(httpMethod)}, _scrml_body);`);
+        lines.push(`  const _scrml_resp = await _scrml_fetch_with_csrf_retry(${JSON.stringify(batchPath)}, ${JSON.stringify(httpMethod)}, _scrml_body);`);
       }
     } else {
-      lines.push(`  const _scrml_resp = await fetch(${JSON.stringify(path)}, {`);
+      lines.push(`  const _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
       lines.push(`    method: ${JSON.stringify(httpMethod)},`);
       if (emitIdempotencyKey) {
         lines.push(`    headers: { "Content-Type": "application/json", "Idempotency-Key": _scrml_idempotency_key },`);
@@ -327,13 +609,23 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // `compiler/src/runtime-template.js` — always present in compiled client
     // output, no per-file injection needed.
     const _retAnnot = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
-    if (returnTypeAllowsAbsence(_retAnnot)) {
+    // M1.5: the `T | not` wire-decode wrap applies to the FUNCTION'S return
+    // type — only the LAST batch's stub produces that value. Intermediate
+    // batch stubs return their own cell value (a forwarded intermediate),
+    // which is not the declared return type — they take the raw `.json()`.
+    const _isLastStub = !_isMultiStub || _sb.batchIndex === _stubBatches.length - 1;
+    if (_isLastStub && returnTypeAllowsAbsence(_retAnnot)) {
       lines.push(`  return _scrml_wire_decode(await _scrml_resp.json());`);
     } else {
       lines.push(`  return _scrml_resp.json();`);
     }
     lines.push(`}`);
     lines.push("");
+    } // end per-batch fetch-stub loop (Ext 1 M1.5)
+
+    // M1.5: register the per-batch stub names so Step 2's CPS wrapper can call
+    // them in topological order. For the single-stub case this holds one name.
+    serverFnBatchStubs.set(name, _batchStubNames);
   }
 
   // -------------------------------------------------------------------------
@@ -359,6 +651,47 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // rewrite bare call sites (e.g. onclick=login() → _scrml_cps_login_X()).
     fnNameMap.set(name, wrapperName);
     lines.push(`async function ${wrapperName}(${paramNames.join(", ")}) {`);
+
+    // ----------------------------------------------------------------------
+    // Ext 1 M1.5 — multi-batch client wrapper.
+    //
+    // A single-batch CPS route keeps the pre-Ext-1 wrapper shape verbatim
+    // (one outer try/catch, one `await`). A multi-batch route emits N awaits
+    // — one per batch — in the planner's topological order (M1.3), with the
+    // client statements interleaved between them. Each await sits inside its
+    // OWN try/catch producing a tagged `__scrml_error` envelope that names the
+    // failing batch index; an earlier batch's commit stands even if a later
+    // batch fails (predecessor Q3 / §19.6.7).
+    const _wrapBatchPlan = buildClientBatchPlan(cpsSplit, body);
+    const _batchStubs = serverFnBatchStubs.get(name) ?? (stubName ? [stubName] : []);
+    if (_wrapBatchPlan.length > 1 && _batchStubs.length === _wrapBatchPlan.length) {
+      emitMultiBatchWrapper({
+        lines,
+        name,
+        body,
+        cpsSplit,
+        batchPlan: _wrapBatchPlan,
+        batchStubs: _batchStubs,
+        fnParamNames: paramNames,
+        cpsOptsBase: {
+          declaredNames: new Set<string>(),
+          insideFunctionBody: true,
+          ...(machineBindings ? { machineBindings } : {}),
+          ...(engineBindings ? { engineBindings } : {}),
+          ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+          ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
+          ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
+          ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}),
+          ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}),
+          ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}),
+        },
+        errors,
+        filePath,
+      });
+      lines.push(`}`);
+      lines.push("");
+      continue; // multi-batch wrapper fully emitted — skip the single-batch path
+    }
 
     // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS stubs.
     // Wrap the entire CPS body in try/catch so failures route through scrml's

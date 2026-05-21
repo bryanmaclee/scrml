@@ -126,6 +126,41 @@ function cpsNeedsIdempotencyDedup(
 }
 
 /**
+ * Ext 1 M1.5 — per-batch monotonicity verdict lookup.
+ *
+ * Returns the monotonicity verdict of batch `batchIndex` (M1.4 — the verdict
+ * the classifier wrote onto `CPSBatch.monotonicity`). Used by the multi-stub
+ * emit to gate EACH batch's Ext 5 idempotency-key dedup middleware on its OWN
+ * verdict: in a function with one monotone + one non-monotone batch, only the
+ * non-monotone stub pays the dedup tax.
+ *
+ * Falls back to the function-level verdict when the indexed batch carries no
+ * per-batch verdict (Stage 5.5 not run) — defensive; in the normal pipeline
+ * analyzeMonotonicity always populates `batch.monotonicity`.
+ */
+function cpsBatchMonotonicity(
+  cpsSplit: { monotonicity?: string; serverBatches?: Array<{ monotonicity?: string }> } | null | undefined,
+  batchIndex: number,
+): string | undefined {
+  if (!cpsSplit) return undefined;
+  const batches = cpsSplit.serverBatches;
+  if (Array.isArray(batches) && batchIndex >= 0 && batchIndex < batches.length) {
+    const v = batches[batchIndex].monotonicity;
+    if (v !== undefined) return v;
+  }
+  return cpsSplit.monotonicity;
+}
+
+/**
+ * Ext 1 M1.5 — does THIS batch's stub need the Ext 5 idempotency-key dedup
+ * middleware? True iff the batch's own monotonicity verdict is "non-monotone".
+ * Monotone / machine-intrinsic batches skip the dedup layer entirely.
+ */
+function batchNeedsIdempotencyDedup(monotonicity: string | undefined): boolean {
+  return monotonicity === "non-monotone";
+}
+
+/**
  * Bug 3a (S87 follow-on, 2026-05-12) — DB scope collector for `_scrml_sql`
  * declaration emission.
  *
@@ -700,7 +735,7 @@ export function generateServerJs(
     const path: string = route.explicitRoute ? route.explicitRoute : routePath(routeName);
     const params: any[] = fnNode.params ?? [];
     // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario")
-    const paramNames: string[] = params.map((p: any, i: number) =>
+    const fnParamNames: string[] = params.map((p: any, i: number) =>
       typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
     );
 
@@ -786,6 +821,143 @@ export function generateServerJs(
     const isStateMutating: boolean = httpMethod !== "GET" && httpMethod !== "HEAD";
     const useBaselineCsrf: boolean = !authMiddlewareEntry && isStateMutating;
 
+    // ----------------------------------------------------------------------
+    // Ext 1 M1.5 — multi-stub emit.
+    //
+    // A non-CPS route, and a CPS route whose body forms a single server
+    // batch, both emit exactly ONE handler + ONE route export — identical to
+    // the pre-Ext-1 (A9 min-viable) shape.
+    //
+    // A CPS route whose multi-batch planner (M1.3) produced N>1 batches emits
+    // N handlers — `<routeName>__batch_<i>` — and N route exports. Each batch
+    // handler:
+    //   - runs ONLY that batch's server statements (`batch.indices`),
+    //   - gets its own Ext 4 `!`-wrap (every CPS stub is failable),
+    //   - gets its own Ext 5 idempotency-key dedup middleware iff THIS batch's
+    //     monotonicity verdict (M1.4) is "non-monotone" — monotone batches in
+    //     a mixed function skip the dedup layer,
+    //   - receives the original function params PLUS every prior batch's
+    //     returned value (admissible cross-batch parameter forwarding, M1.3).
+    //
+    // `_emitBatches` is the per-route emission plan. For the single-handler
+    // case it holds one entry whose `serverIndices` is the flat
+    // `serverStmtIndices` (or `null` for a non-CPS route — meaning "emit the
+    // whole body").
+    const _cpsSplit: any = route.cpsSplit;
+    const _serverBatches: any[] = (_cpsSplit && Array.isArray(_cpsSplit.serverBatches))
+      ? _cpsSplit.serverBatches
+      : [];
+    const _isMultiBatch: boolean = !!_cpsSplit && _serverBatches.length > 1;
+    type EmitBatch = {
+      // Server-statement body indices for THIS batch. `null` = non-CPS route
+      // (emit the entire body). Empty array = CPS route with no server work.
+      serverIndices: number[] | null;
+      // Per-batch monotonicity verdict (M1.4); drives the Ext 5 dedup gate.
+      monotonicity: string | undefined;
+      // 0-based batch ordinal; -1 for the single-handler (non-multi-batch) case.
+      batchIndex: number;
+      // The route name + path this batch's handler is exported under.
+      batchRouteName: string;
+      batchPath: string;
+      // Names of the prior-batch result values forwarded into this batch's
+      // handler as additional `_scrml_body` fields (cross-batch param
+      // forwarding, M1.3). Each entry is the scrml cell name a prior batch
+      // produced — the handler destructures it from `_scrml_body` and the
+      // batch's server statements reference it directly. Empty for batch 0
+      // and for the single-handler case.
+      fwdResultNames: string[];
+    };
+    // Compute each batch's return cell — the scrml `state-decl` name of its
+    // LAST server statement (the value the batch sends back, and forwards to
+    // later batches). The function's final `returnVarName` is the last batch's
+    // return; earlier batches return their own last `state-decl` name.
+    function batchReturnCell(serverIndices: number[], isLast: boolean): string | null {
+      if (isLast) return _cpsSplit?.returnVarName ?? null;
+      if (serverIndices.length === 0) return null;
+      const _bodyForRet: any[] = fnNode.body ?? [];
+      const _last = _bodyForRet[serverIndices[serverIndices.length - 1]];
+      return (_last && _last.kind === "state-decl" && typeof _last.name === "string")
+        ? _last.name
+        : null;
+    }
+    const _emitBatches: EmitBatch[] = [];
+    if (_isMultiBatch) {
+      // Multi-batch CPS route — one handler per batch. A batch is forwarded
+      // every prior batch's return cell (admissible cross-batch parameter
+      // forwarding, M1.3 — the value rides as a request-body field).
+      const _fwdSoFar: string[] = [];
+      for (let _bi = 0; _bi < _serverBatches.length; _bi++) {
+        const _b = _serverBatches[_bi];
+        const _bIndices: number[] = Array.isArray(_b.indices)
+          ? [..._b.indices].sort((a: number, c: number) => a - c)
+          : [];
+        _emitBatches.push({
+          serverIndices: _bIndices,
+          monotonicity: _b.monotonicity,
+          batchIndex: _bi,
+          batchRouteName: `${routeName}__batch_${_bi}`,
+          batchPath: `${path}__batch_${_bi}`,
+          fwdResultNames: [..._fwdSoFar],
+        });
+        // Forward this batch's return cell (if any) to every later batch.
+        const _ret = batchReturnCell(_bIndices, _bi === _serverBatches.length - 1);
+        if (_ret && !_fwdSoFar.includes(_ret)) _fwdSoFar.push(_ret);
+      }
+    } else {
+      // Single handler — non-CPS route, or a single-batch CPS route.
+      _emitBatches.push({
+        serverIndices: _cpsSplit ? _cpsSplit.serverStmtIndices : null,
+        monotonicity: _cpsSplit ? cpsBatchMonotonicity(_cpsSplit, 0) : undefined,
+        batchIndex: -1,
+        batchRouteName: routeName,
+        batchPath: path,
+        fwdResultNames: [],
+      });
+    }
+
+    for (const _batch of _emitBatches) {
+      const _curRouteName: string = _batch.batchRouteName;
+      const _curPath: string = _batch.batchPath;
+      // Per-batch param list: the original function params, then each prior
+      // batch's forwarded result. The handler destructures all of them from
+      // `_scrml_body` identically — the wrapper (emit-functions.ts) places the
+      // forwarded results into the request body.
+      const paramNames: string[] = [...fnParamNames, ..._batch.fwdResultNames];
+
+      // The CPS-split view this batch's handler runs over. For the single-
+      // handler case it is the route's own cpsSplit (or `null` for a non-CPS
+      // route — handler emits the whole body). For a multi-batch route it is
+      // a synthetic per-batch view: `serverStmtIndices` is THIS batch's index
+      // set, and `returnVarName` is the cell this batch produces. The last
+      // batch produces the function's final `returnVarName`; an earlier batch
+      // produces whatever its last server statement is a `state-decl` for.
+      const _batchBody: any[] = fnNode.body ?? [];
+      let _batchReturnVar: string | null = null;
+      if (_cpsSplit) {
+        if (!_isMultiBatch) {
+          _batchReturnVar = _cpsSplit.returnVarName ?? null;
+        } else {
+          const _bIdx = _batch.serverIndices ?? [];
+          const _isLastBatch = _batch.batchIndex === _serverBatches.length - 1;
+          if (_isLastBatch) {
+            _batchReturnVar = _cpsSplit.returnVarName ?? null;
+          } else if (_bIdx.length > 0) {
+            const _lastStmt = _batchBody[_bIdx[_bIdx.length - 1]];
+            if (_lastStmt && _lastStmt.kind === "state-decl" && typeof _lastStmt.name === "string") {
+              _batchReturnVar = _lastStmt.name;
+            }
+          }
+        }
+      }
+      // The CPS view the existing handler-body emission consults. For the
+      // single-handler case this IS `route.cpsSplit`; for a multi-batch route
+      // it is the synthetic per-batch view described above.
+      const cpsSplit: any = !_cpsSplit
+        ? null
+        : (_isMultiBatch
+            ? { serverStmtIndices: _batch.serverIndices ?? [], returnVarName: _batchReturnVar }
+            : _cpsSplit);
+
     const handlerName = genVar(`handler_${name}`);
     lines.push(`async function ${handlerName}(_scrml_req) {`);
 
@@ -846,9 +1018,11 @@ export function generateServerJs(
       // the stored response without re-executing the body. On key-miss:
       // execute the body, store key+result, return. Monotone /
       // machine-intrinsic batches and non-CPS functions skip this layer.
-      // Ext 1 M1.4: gated per-batch — the single stub needs dedup iff ANY
-      // batch is non-monotone (`cpsNeedsIdempotencyDedup`).
-      const _ext5Dedup = cpsNeedsIdempotencyDedup(route.cpsSplit);
+      // Ext 1 M1.5: gated on THIS batch's own monotonicity verdict. In a
+      // multi-batch route, only non-monotone batches' stubs pay the dedup tax;
+      // for the single-handler case `_batch.monotonicity` is the M1.4
+      // conservative-max aggregate (identical to the prior function-level gate).
+      const _ext5Dedup = batchNeedsIdempotencyDedup(_batch.monotonicity);
       if (_ext5Dedup) {
         lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
         lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
@@ -910,7 +1084,9 @@ export function generateServerJs(
       const _channelOwnedCells = _ownerChannel ? channelCellMap.get(_ownerChannel) ?? null : null;
 
       const body: any[] = fnNode.body ?? [];
-      const cpsSplit = route.cpsSplit;
+      // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
+      // loop — for a multi-batch route it carries THIS batch's index set; for
+      // the single-handler case it is `route.cpsSplit` verbatim.
 
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
@@ -1060,17 +1236,18 @@ export function generateServerJs(
       const _channelOwnedCellsNonCsrf = _ownerChannelNonCsrf ? channelCellMap.get(_ownerChannelNonCsrf) ?? null : null;
 
       const body: any[] = fnNode.body ?? [];
-      const cpsSplit = route.cpsSplit;
+      // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
+      // loop (mirror of the CSRF path above).
 
       // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS server endpoints (non-CSRF path).
       // Mirror of the useBaselineCsrf=true site above. For CPS-split functions,
       // wrap the body in an outer try/catch that returns a tagged scrml-error
       // shape on any throw (network/SQL/validation/etc).
-      const _ext4WrapNonCsrf = !!cpsSplit;
+      const _ext4WrapNonCsrf = !!route.cpsSplit;
       // A9 Ext 5 (§19.9.6): non-monotone CPS batches read the Idempotency-Key
       // header and consult the configured storage backend (mirror of CSRF
-      // path above). Ext 1 M1.4: gated per-batch (`cpsNeedsIdempotencyDedup`).
-      const _ext5DedupNonCsrf = cpsNeedsIdempotencyDedup(cpsSplit);
+      // path above). Ext 1 M1.5: gated on THIS batch's own monotonicity verdict.
+      const _ext5DedupNonCsrf = batchNeedsIdempotencyDedup(_batch.monotonicity);
       if (_ext5DedupNonCsrf) {
         lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
         lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
@@ -1195,12 +1372,17 @@ export function generateServerJs(
     lines.push(`}`);
     lines.push("");
 
-    lines.push(`export const ${routeName} = {`);
-    lines.push(`  path: ${JSON.stringify(path)},`);
+    // Ext 1 M1.5: route export uses the per-batch name + path. For the
+    // single-handler case `_curRouteName`/`_curPath` are the route's own name
+    // + path; for a multi-batch route each batch exports under
+    // `<routeName>__batch_<i>` at `<path>__batch_<i>`.
+    lines.push(`export const ${_curRouteName} = {`);
+    lines.push(`  path: ${JSON.stringify(_curPath)},`);
     lines.push(`  method: ${JSON.stringify(httpMethod)},`);
     lines.push(`  handler: ${(_scrml_hasMW || _scrml_handleNode != null) ? `_scrml_mw_wrap(${handlerName})` : handlerName},`);
     lines.push(`};`);
     lines.push("");
+    } // end per-batch emit loop (Ext 1 M1.5)
   }
 
   // §8.11 Mount-Hydration Coalescing — synthetic __mountHydrate route.
