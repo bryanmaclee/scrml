@@ -1,6 +1,15 @@
 # M5-swap residual-work decomposition
 
-status: Phase-0-STOP-GATE escalation artifact
+> **⚠ SUPERSEDED S117 (2026-05-21).** This Phase-0 decomposition's R1-R5 / 46-78h
+> estimate was itself under-counted — R1 + R2 surfaced that DD #27's F2-RETIRE
+> (expression catalog) and F3 (hoist) were both incomplete, and the native-parser
+> Tier-B feature gaps were never scoped. The honest re-decomposition is
+> `scrml-support/docs/deep-dives/m5-swap-redecomposition-2026-05-21.md` (corrected
+> total 96-160h; swap deferred to v0.7). Use that document, not this one.
+
+status: superseded
+superseded-by: scrml-support/docs/deep-dives/m5-swap-redecomposition-2026-05-21.md
+last-reviewed: 2026-05-21
 date: 2026-05-21 (S117)
 authority: BRIEF-M5-SWAP.md Phase 0 STOP GATE · DD #27
 companion: M5-divergence-ledger.md (the refreshed per-feature ledger)

@@ -1,73 +1,98 @@
-# scrmlTS — Session 117 (OPEN)
+# scrmlTS — Session 117 (CLOSE)
 
 **Date:** 2026-05-21
-**Previous:** `handOffs/hand-off-119.md` (S116 CARRYOVER — rotated at S117 OPEN)
+**Previous:** `handOffs/hand-off-119.md` (S116 carryover — rotated at S117 OPEN)
 **Machine:** single-machine (S100 directive holds)
-**HEAD at S117 OPEN:** `67a17dc5` (S116 carryover commit)
+**HEAD at S117 OPEN:** `67a17dc5` · **HEAD at S117 CLOSE:** this wrap commit
+**Wrap:** full 8-step "wrap and push" (user-authorized).
 
 ---
 
-## S117 session-start state
+## S117 net outcome
 
-Session-start checklist run: pa.md + PRIMER + SPEC-INDEX + master-list §0 + S116 hand-off + user-voice S114/S115 (S116 produced no user-voice append) all read. Sync hygiene: both repos checked.
+A long, branchy, productive session. The build-story design thread closed (Approach B ratified + per-`<program>` build-id deep-dived); the M5-swap got an honest re-decomposition after DD #27's compression failed verification; two M5 units landed; the README went live on GitHub.
 
-**Sync state at S117 OPEN:**
-- **scrmlTS:** 1 commit ahead of origin (`67a17dc5` — the S116 carryover commit). UNPUSHED. Single-machine so non-blocking — surfaced for push authorization.
-- **scrml-support:** 2 commits ahead of origin (`3a4889a` deep-dives + `3282c9c` debate record — S116 landings). UNPUSHED.
-- Working trees clean both repos.
-- Hook config: B (pre-commit + post-commit + pre-push installed at `.git/hooks/`).
-- Inbox `handOffs/incoming/`: empty.
+- **scrmlTS:** 9 commits + this wrap commit. **scrml-support:** 4 commits + this wrap commit.
+- **Tests:** 18,102 → **18,173 pass / 0 fail / 169 skip / 1 todo / 739 files / 55,582 expect** (+71, R1's statement-bridge tests; zero regressions).
+- **No release tag.** v0.4.0 stands (S114).
 
 ---
 
-## Carry-forwards from S116 (open at S117 OPEN)
+## What landed S117
 
-1. **M5-swap brief — user review pending.** `docs/changes/m5-v0.5-compressed-ladder/BRIEF-M5-SWAP.md` drafted S116, NOT dispatched. The v0.6 milestone (re-entered M5 = the `--parser=scrml-native` pipeline swap). 4 phases, agent `scrml-js-codegen-engineer`, worktree. Open item: Phase-1-split question (§34 reconciliation could be a parallel `general-purpose` SPEC-text dispatch). Maps refresh required before dispatch (watermark `092fa90a`, HEAD ~21 commits ahead). Brief has `<PA-FILLS-SHA>`/`<PA-FILLS-DATE>`/`<PA-FILLS-ABSOLUTE-WORKTREE-PATH>` placeholders.
+1. **Build-story artifact → Approach B ratified.** The S116 debate left A-vs-B open; S117 PA/user ratification → **B (content-addressed Merkle closure)**. Conditions: mandatory `build-story.lock` sidecar; normatively-specified canonical encoding. Recorded: `~/.claude/design-insights.md` (build-story entry), `scrml-support/docs/debates/debate-build-story-artifact-2026-05-21.md` (§"Open decision — RESOLVED"), `compiler-story-living-compiler-2026-05-21.md` (Q1).
 
-2. **Build-story artifact A-vs-B — RATIFIED S117 → Approach B** (content-addressed Merkle closure). PA recommended B, user ratified via AskUserQuestion. Recorded: `~/.claude/design-insights.md` build-story entry (PA/user-ratification block); `debate-build-story-artifact-2026-05-21.md` §"Open decision — RESOLVED"; `compiler-story-living-compiler-2026-05-21.md` Q1 + headline-shape. **Two conditions ride with B:** the expanded `build-story.lock` sidecar is mandatory (S43 anti-image guard); the closure encoding must be normatively specified canonical/bit-stable (new `§N Build Story` SPEC section = DD Q2). **Live follow-ons now:** DD Q2 (normative closure-encoding section) + Q5 (concrete file format) — both unscheduled. The README build-story synthesis paragraph (carry-forward #4) is now landable post-ratification.
+2. **Per-`<program>` build identifier — deep-dived.** `scrml-support/docs/deep-dives/per-program-build-identifier-2026-05-21.md`. Verdict: idea holds + strengthened; nested `<program>` (§43) is a sound separate-compilation-unit boundary (normative SHALL); declaration shape = a *reference* into `scrml.toml` (deep-dive recommends `build-story=` as the attribute name, NOT `compiler=`); resolves compiler-story DD Q6; **no debate fork — routes to SPEC authoring.**
 
-3. **§29 debate panel — undefined.** Vanilla-interop retire-vs-implement. Needs who-argues-what decision before it can run.
+3. **M5-swap re-decomposed.** Phase-0 STOP gate caught DD #27's "swap = 6-12h" → re-survey found 46-78h → R1/R2 verification falsified three DD #27 compression claims (F2-RETIRE expression catalog, F3 hoist, the unpriced statement catalog) + surfaced the native parser has NO production for core scrml (`?`/`!{}`/`~`/`lin`/`fn`/`server`/`type`). Honest re-decomposition: `scrml-support/docs/deep-dives/m5-swap-redecomposition-2026-05-21.md` — **corrected total 96-160h; the pipeline swap deferred to v0.7**; v0.6 ships the non-routing units. DD #27 → `partially-superseded`; `compiler/native-parser/M5-SWAP-residual-decomposition.md` → `superseded`.
 
-4. **README synthesis paragraphs HELD till post-debate.** Build-story + code-import one-paragraph syntheses live in the 2 DDs, NOT the README. Build-story debate now run — its paragraph closer to landable once A-vs-B ratified. Apply S115 nominal/asterisk convention on landing.
+4. **M5 unit R1 — statement-catalog bridge LANDED** (`ab1afe3c`). `compiler/native-parser/translate-stmt.{js,scrml}` — `translateStmtList` exit-shaping module; 20/20 native `Stmt` kinds → live lowercase `LogicStatement` union; 71 tests.
 
-5. **`.scrml`-correctness gate is an M6 precondition.** F1/F7/F8 each shipped a malformed `.scrml` predicate (`is not not` is not scrml — presence is `is some`). Native-parser `.scrml` tier not test-run. Memory `feedback_native_parser_scrml_predicate_drift.md`.
+5. **M5 unit R4 — SPEC §34.1 LANDED** (`01fc0c7d`). New "Native-Parser Parse Diagnostics" sub-section: 66 codes (30 `E-EXPR-*` + 35 `E-STMT-*` + 1 `E-MARKUP-VALUE-UNCLOSED`) in 3 grouped sub-tables; zero renames.
 
-6. **Living Compiler retraction** — draft committed (`docs/articles/living-compiler-retraction-devto-2026-05-21.md`); pending Bryan's stamp + publish (user action).
+6. **README — `### The Build Story` + layered-imports.** New Features subsection (Merkle-closure model + per-`<program>` `compiler=` line + Nominal banner); "no npm" Tooling bullet rewritten as "One source file type, layered imports" with the no-npm-≠-no-user-code note. **Pushed — live at github.com/bryanmaclee/scrmlTS.**
 
-7. **scrml.dev article canonicalization** — port surviving dev.to articles to canonical `.scrml` pages. Not started.
+7. **`.claude/maps/` refreshed** — full cold-start, watermark `092fa90a` → `67a17dc5`.
 
-8. **ADR + gauntlet-report follow-on sweep** — S115 currency sweep flagged same write-once risk; not audited.
+8. **Telemetry idea raised + rejected** — a "serialize every build for telemetry" proposal; PA pushed back (re-introduces the retracted compiler-observes-usage mechanism; breaks determinism); user accepted. Durable boundary recorded in user-voice S117.
 
-9. **Ext 3 + Ext 2 briefs** — rest of the full-body-split family; not authored. (Ext 1 COMPLETE end-to-end S115.)
+---
+
+## Open threads / carry-forwards — surface at S118 OPEN
+
+1. **Build-story SPEC authoring** — the `§N Build Story` section (defines the Merkle-closure artifact, Approach B) + `<program build-story=>` attribute (§4.12.2) + `[build-story]` manifest table (§22.13) + §47.5 amendment + the ABI-invariance rule. ONE coordinated SPEC amendment (the attribute references the artifact; §N must exist first). The user said "straight to spec auth." Deep-dive's 5 OQs (OQ-3 inheritance, OQ-4 top-level legality, etc.) are drafting decisions for the spec author. Attribute name: deep-dive recommends `build-story=` over the README's `compiler=` — settle at authoring. **Serializes on SPEC.md** with any other SPEC dispatch.
+
+2. **M5 v0.6 units — dispatch off the re-decomposition DAG.** v0.6 = the non-routing units: the **expression-catalog bridge** (the F2-RETIRE miss — a `translate-expr` sibling to R1's `translate-stmt`) + the **hoist fix** (R2's declaration-shape synthesis). R4 §34 already landed. The 13-unit DAG + per-unit estimates + the `token.js` file-contention hazard for the B-units are in `m5-swap-redecomposition-2026-05-21.md`. The native-parser Tier-B feature gaps + the swap itself are **v0.7**.
+
+3. **dev.to online article updates.** S115 fixed the article *content in the repo* (`docs/articles/*-devto-*.md`, 11 of 12); the *published dev.to posts are unchanged*. PA offered to dispatch an agent to assemble a paste-ready update package (per-article corrected text + the retraction); the user did not answer (pulled into M5). Platform posting is the user's action. Carry forward.
+
+4. **Living Compiler retraction** — draft at `docs/articles/living-compiler-retraction-devto-2026-05-21.md`; pending Bryan's stamp + publish (user action).
+
+5. **"Second note from the developer"** — the user floated a designer's note unifying no-npm-≠-no-user-code with the per-`<program>` build-id idea. PA supplied a scaffold (NOT ghostwritten — it's the user's voice); the user has not yet written it.
+
+6. **scrml.dev article canonicalization** — port surviving dev.to articles to canonical `.scrml` pages. Not started.
+
+7. **SPEC-INDEX Quick-Lookup mini-index stale** — R4 surfaced: the `~lines 182-201` Quick-Lookup block has hardcoded section ranges grossly stale (§34 cited ~1,200 lines off). `regen-spec-index.ts` deliberately doesn't touch it. A separate Quick-Lookup-block refresh is warranted.
+
+8. **X1 — `class`/`try`/`throw` admission** — the native parser parses these as ESTree statements with no parse-layer "not in scrml" rejection (unlike `async`/`await`). Whether they earn a hard `E-*-NOT-IN-SCRML` is native-parser-completion scope (Tier B / v0.7); additive to §34, does not retro-invalidate R4's rows.
+
+9. **§29 vanilla-interop** — debate panel still undefined (pre-S117 carry-forward); spec↔impl divergence open.
 
 10. **Pre-existing (S114):** generator (`yield`/`function*`) policy; tableFor v1.next impl; PRIMER match-block section; MK4 lazy-require ESM cycle.
 
-11. **Vendoring debate** — experts (`nix-expert`/`roc-expert`/`go-module-vendoring-expert`) staged S116 into `~/.claude/agents/`; load this session. Panel per code-import DD: `security-expert` + `nix-expert` + `go-module-vendoring-expert` vs `roc-expert` synthesis. `/registry update` if the index matters.
+## Push state — PUSHED (wrap step 7, user-authorized)
 
-12. **claude.md restructure** — S116 PA recommended against (CLAUDE.md injected per-turn, not read-once). Logged in case user revisits.
+- **scrmlTS** + **scrml-support** both pushed to origin at S117 close. Verify `git rev-list --left-right --count origin/main...HEAD` = `0 0` on both at S118 open.
 
-## Push state — PENDING (surface at S117 OPEN)
-
-- scrmlTS: `67a17dc5` unpushed. scrml-support: 2 commits unpushed.
-- Single-machine — non-blocking; awaiting user push authorization.
-
-## State-as-of-open
+## State-as-of-close
 
 | Item | Status |
 |---|---|
-| HEAD | `67a17dc5` (S116 carryover) |
-| Tests | 18,102 pass / 0 fail / 169 skip / 1 todo / 738 files (S115 CLOSE — not re-run S116; no compiler source touched) |
-| Worktrees | main only |
-| scrmlTS origin sync | 1 commit ahead — unpushed |
-| scrml-support origin sync | 2 commits ahead — unpushed |
-| Inbox | empty |
-| Hook gate | Configuration B |
+| HEAD | this S117 wrap commit |
+| Tests | 18,173 pass / 0 fail / 169 skip / 1 todo / 739 files / 55,582 expect |
+| Worktrees | main only (5 agent worktrees cleaned at wrap §6b) |
+| scrmlTS origin sync | pushed — should be `0 0` |
+| scrml-support origin sync | pushed — should be `0 0` |
+| Inbox `handOffs/incoming/` | empty |
+| Hook gate | Configuration B (pre-commit + post-commit + pre-push) |
 | pkg.json version | 0.4.0 (v0.4.0 tag stands — S114) |
-| `.claude/maps/` | watermark `092fa90a`; ~21 commits behind — refresh before any dev dispatch |
+| `.claude/maps/` | watermark `67a17dc5` (refreshed S117) — HEAD will be ahead by the S117 commits; refresh before any S118 dev dispatch if those commits touched relevant files |
 | Background agents | none |
+
+## Session-start checklist for S118 PA
+
+1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL.
+2. Read `docs/PA-SCRML-PRIMER.md` IN FULL.
+3. Read `compiler/SPEC-INDEX.md` IN FULL.
+4. Read `master-list.md` §0 IN FULL (the S117 §0.6 entry is the live delta).
+5. Read this `hand-off.md` (S117 CLOSE) — rotate to `handOffs/hand-off-120.md` at S118 OPEN.
+6. Read recent contentful user-voice — the S117 entry has 4 durable subsections (build-story B; per-`<program>` build-id; telemetry rejection; no-npm-≠-no-user-code).
+7. Sync hygiene: `git fetch` scrmlTS + scrml-support — both should be `0 0` (pushed S117).
+8. Maps refresh if S118 dispatches touch files changed since `67a17dc5`.
+9. Report: caught up + next priority (= build-story SPEC authoring + the M5 v0.6 units off the re-decomposition DAG).
 
 ---
 
 ## Tags
-#session-117 #OPEN #m5-swap-brief-review-pending #build-story-A-vs-B-open
-#push-pending #vendoring-experts-loaded
+#session-117 #CLOSE #build-story-B-ratified #per-program-build-id-deepdived
+#m5-swap-redecomposed #swap-deferred-v0.7 #R1-R4-landed #readme-live #pushed

@@ -2,7 +2,19 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-21 **S115 CLOSE**). Full `bun test` **18,102 pass / 169 skip / 1 todo / 0 fail / 738 files / ~55,351 expect**. v0.4.0 stands (S114). M5/M6 compressed-MD-ladder in flight — v0.5 cut + v0.6 bridge units landed; M5-swap is the next milestone.
+Current baseline (2026-05-21 **S117 CLOSE**). Full `bun test` **18,173 pass / 169 skip / 1 todo / 0 fail / 739 files / 55,582 expect**. v0.4.0 stands (S114). M5-swap honestly re-decomposed — corrected total 96-160h; the pipeline swap is deferred to v0.7, v0.6 ships the non-routing units.
+
+### 2026-05-21 (S117 — build-story ratified, M5-swap re-decomposed, README live)
+
+S117 ratified the build-story artifact shape, re-decomposed the M5-swap honestly after DD #27's compression failed verification, landed two M5 units, and put the updated README live on GitHub. 9 commits on scrmlTS + 4 on scrml-support; tests 18,102 → 18,173 (+71, zero regressions).
+
+- **Build-story artifact → Approach B (content-addressed Merkle closure), ratified.** The S116 debate left A-vs-B open; S117 PA/user ratification picked B — it extends scrml's §47 content-addressing; the coherence guarantee is structural and auditable; a "secure flat-A" collapses into B anyway. Two ride-along conditions: mandatory inspectable `build-story.lock` sidecar; normatively-specified canonical encoding. Recorded in `design-insights.md` + the debate record + the compiler-story DD (Q1 resolved).
+- **Per-`<program>` build identifier — deep-dived.** A build story can be pinned per `<program>`; nested `<program>` (§43) is a sound separate-compilation-unit boundary (normative SHALL). Verdict holds + strengthened; resolves compiler-story DD Q6; declaration shape = a reference into `scrml.toml`. No debate fork — routes to SPEC authoring (`per-program-build-identifier-2026-05-21.md`).
+- **M5-swap re-decomposed.** The Phase-0 STOP gate caught DD #27's "swap = 6-12h" premise: the re-survey found 46-78h, then R1/R2 verification falsified three DD #27 compression claims (F2-RETIRE expression catalog, F3 hoist, the unpriced statement catalog) and surfaced that the native parser has no production for core scrml (`?`, `!{}`, `~`, `lin`, `fn`/`server`, `type`). Honest corrected total: **96-160h; the pipeline swap deferred to v0.7** (`m5-swap-redecomposition-2026-05-21.md`). DD #27 + the residual-decomposition doc marked superseded.
+- **M5 unit R1 — statement-catalog bridge LANDED.** `compiler/native-parser/translate-stmt.{js,scrml}` — `translateStmtList` exit-shaping module; 20/20 native `Stmt` kinds → the live lowercase `LogicStatement` union; 71 tests.
+- **M5 unit R4 — SPEC §34.1 LANDED.** New "Native-Parser Parse Diagnostics" sub-section: 66 native-parser codes (30 `E-EXPR-*` + 35 `E-STMT-*` + 1 `E-MARKUP-VALUE-UNCLOSED`) in three grouped sub-tables; zero renames.
+- **README — The Build Story + layered-imports.** New `### The Build Story` Features subsection (Merkle-closure model, per-`<program>` `compiler=` line, Nominal banner); the "no npm" Tooling bullet rewritten as "One source file type, layered imports" with the explicit no-npm-≠-no-user-code note. Pushed — live at github.com/bryanmaclee/scrmlTS.
+- **`.claude/maps/` refreshed** — full cold-start, watermark `092fa90a` → `67a17dc5`.
 
 ### 2026-05-21 (S115 — M5/M6 compressed-ladder opened, Ext 1 complete, corpus audits)
 
