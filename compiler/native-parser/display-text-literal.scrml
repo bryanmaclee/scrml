@@ -11,22 +11,33 @@
 // analogue of the attribute-value string ... equivalent to a JS/TS
 // template-string."
 //
-// MK3 is the §4.18 quoted-text milestone. MK3.1 — THIS dispatch — lands
-// the DisplayTextLiteral engine SKELETON only: the `type
-// DisplayTextLiteral:enum` declaration + the `<engine>` declaration with
-// its rule= contract. The SUBSTANTIVE logic lands in later sub-steps:
-//   - MK3.2 — the `"..."` literal-scanning logic: `.Outside` /
-//     `.InLiteralText` behavior — `"` opens / closes, `\"` / `\\` / `\${`
-//     escapes consumed within `.InLiteralText`, whitespace accumulated
-//     VERBATIM (§4.18.5); emit the DisplayTextLiteral AST node.
+// MK3 is the §4.18 quoted-text milestone. MK3.1 landed the
+// DisplayTextLiteral engine SKELETON — the `type DisplayTextLiteral:enum`
+// declaration + the `<engine>` declaration with its rule= contract. MK3.2
+// — THIS dispatch — fills in the substantive `.Outside` / `.InLiteralText`
+// literal-scanning logic:
+//   - `"` opens the literal (`.Outside → .InLiteralText`) and closes it
+//     (`.InLiteralText → .Outside`);
+//   - `\"` / `\\` / `\${` escapes consumed within `.InLiteralText`
+//     (§4.18.3 — `\"` / `\\`; §4.18.4 — `\${`); a backslash before any
+//     other character is a malformed escape — E-PARSE-001 (§4.18.3);
+//   - whitespace inside the literal accumulated VERBATIM into the text
+//     segment (§4.18.5 — no collapse, no strip);
+//   - `'` and a backtick are ORDINARY interior characters — no transition
+//     (§4.18.3);
+//   - emit the DisplayTextLiteral AST node carrying its text segment(s);
+//   - an unterminated literal — EOF (or the body closer) before the
+//     closing `"` — fires E-CTX-001 against the OPENING `"` and recovers
+//     (§4.18.3 / §4.18.7).
+// The remaining sub-step:
 //   - MK3.3 — the `${...}` interpolation: `.InInterpolation` (a composite
 //     state-child) delegates to the M2 JS expression parser; a literal
 //     with interpolations produces ONE node (§4.18.4); E-UNQUOTED-
 //     DISPLAY-TEXT (§4.18.7).
 //
-// This is the SAME skeleton-first pattern as MK2.1's TagFrame engine
-// skeleton — declare the engine SHAPE so MK3.2 / MK3.3 EXTEND rather than
-// restructure.
+// This is the SAME skeleton-then-fill pattern as MK2.1's TagFrame engine
+// (skeleton at MK2.1, recognizers at MK2.2/MK2.3) — MK3.1 declared the
+// engine SHAPE so MK3.2 / MK3.3 EXTEND rather than restructure.
 //
 // NOTE on the file-top header style — per M1's ANOMALY-1 disposition
 // (README ANOMALY-1; block-context.scrml / tag-frame.scrml / body-mode
@@ -60,23 +71,33 @@
 //   literal engine shape: a literal carrying `${...}` is one body child
 //   whose interpolations delegate to the JS-layer expression parser.
 //
-// MK3.1 SCOPE (this dispatch — the SKELETON):
-//   - `type DisplayTextLiteral:enum = { Outside, InLiteralText,
-//     InInterpolation }` — the three §4.18.3/.4 named conditions.
-//   - The `<engine for=DisplayTextLiteral initial=.Outside>` declaration
-//     + the rule= contract (lifted from charter Q1.E). `.InInterpolation`
-//     is a COMPOSITE state-child per §51.0.Q.1 — at MK3.3 it carries the
-//     JS-layer engine graph for the `${expr}` body; MK3.1 declares the
-//     composite SHAPE with the inner engine graph stubbed (the same
-//     forward-shape lex-mode.scrml uses for `.InTemplateBody`).
+// THE ESCAPE SET IS DELIBERATELY MINIMAL. SPEC §4.18.3 recognizes exactly
+// `\"` and `\\` inside a display-text literal; §4.18.4 adds `\${`. The
+// literal does NOT recognize the full JS string-escape table (`\n` /
+// `\xHH` / `\uHHHH` / line-continuation / …). MK3.2 therefore does NOT
+// reuse lex-in-single-string.scrml's `scanStringEscape` (which decodes
+// that whole table); the literal-text escape scanner here is §4.18-
+// specific. A backslash before any other character is a malformed escape
+// — E-PARSE-001 (§4.18.3) — recovered by treating the `\` as a literal
+// backslash and continuing the scan.
 //
-// MK3.1 does NOT (forward-refs — stubbed + documented):
-//   - The `.Outside` / `.InLiteralText` literal-scanning logic (the `"`
-//     open/close transitions, the escape recognition, the verbatim-
-//     whitespace segment accumulation, the DisplayTextLiteral AST-node
-//     emit) → MK3.2.
+// MK3.2 SCOPE (this dispatch — the `.Outside` / `.InLiteralText` scan):
+//   - the `"` open transition (`.Outside → .InLiteralText`) + the `"`
+//     close transition (`.InLiteralText → .Outside`);
+//   - the `\"` / `\\` / `\${` escape recognition consumed within
+//     `.InLiteralText`; the malformed-escape E-PARSE-001 path;
+//   - verbatim whitespace accumulation into the literal-text segment
+//     (§4.18.5);
+//   - `'` and a backtick treated as ordinary interior characters;
+//   - the DisplayTextLiteral AST node — `{ kind, segments, exprs, span,
+//     terminated }` (the §4.18.4 / D3 Template-node shape; `exprs` is
+//     empty at MK3.2 — non-interpolation);
+//   - the unterminated-literal E-CTX-001 recovery (§4.18.3 / §4.18.7).
+//
+// MK3.1 + MK3.2 do NOT (the MK3.3 forward-ref — stubbed + documented):
 //   - The `.InInterpolation` `${...}` delegation to the M2 JS expression
-//     parser + the one-node-per-literal `{segments, exprs}` shape +
+//     parser + the one-node-per-literal `{segments, exprs}` shape (MK3.2's
+//     scanner STOPS at an un-escaped `${` and returns a resume flag) +
 //     E-UNQUOTED-DISPLAY-TEXT → MK3.3.
 //
 // Spec / design authority:
@@ -154,12 +175,37 @@ ${
 //     interpolation produces a fresh inner instance; nested interpolations
 //     stack.
 //
-// MK3.1 declares the SHAPE + the rule= contract; the substantive scanning
-// is MK3.2 (.Outside / .InLiteralText) + MK3.3 (.InInterpolation).
+// MK3.1 declared the SHAPE + the rule= contract; MK3.2 fills the
+// `.Outside` / `.InLiteralText` scanning bodies; MK3.3 fills
+// `.InInterpolation`.
 <engine for=DisplayTextLiteral initial=.Outside>
 
+    // .Outside — the cursor is NOT inside a display-text literal. In a
+    // code-default body this is the code-grammar regime. The ONLY trigger
+    // out of `.Outside` is a `"` — the literal opener (§4.18.3). On a `"`
+    // the engine consumes it and transitions `.Outside → .InLiteralText`,
+    // anchoring the whole-literal span at the `"`. Any other character is
+    // not this engine's concern in `.Outside` — the enclosing code-default
+    // body grammar handles it (MK3.3's body-mode-aware dispatch).
     <Outside rule=.InLiteralText></>
 
+    // .InLiteralText — the cursor is inside the `"..."` literal,
+    // accumulating a literal-text segment. Per character (§4.18.3 /
+    // §4.18.5):
+    //   - `\` introduces an escape — `\"` → `"`, `\\` → `\` (§4.18.3),
+    //     `\${` → `${` (§4.18.4); a `\` before any other character is a
+    //     malformed escape (E-PARSE-001), recovered as a literal backslash;
+    //   - whitespace (space / tab / newline) is accumulated VERBATIM into
+    //     the segment — no collapse, no leading/trailing strip (§4.18.5);
+    //   - `'` and a backtick are ORDINARY interior characters — no
+    //     delimiter role, no escape, no transition (§4.18.3);
+    //   - a `${` is the interpolation opener — `.InLiteralText →
+    //     .InInterpolation` (§4.18.4; the delegation is MK3.3);
+    //   - a `"` is the literal closer — `.InLiteralText → .Outside`
+    //     (§4.18.3); the segment is complete.
+    //   EOF before the closing `"` is an unterminated literal — E-CTX-001
+    //   against the OPENING `"`, recovered per §4.18.7 (the captured text
+    //   is the literal's content).
     <InLiteralText rule=(.Outside | .InInterpolation)></>
 
     // Composite state-child per §51.0.Q.1 — the `${expr}` interpolation
@@ -183,20 +229,23 @@ ${
 
 ${
     import { LexMode } from "./lex-mode.scrml"
+    import { peekChar, peekStr, advance, isEof } from "./cursor.scrml"
+    import { makeSpan } from "./span.scrml"
 
     // ---------------------------------------------------------------------
-    // LIVE MK3.1 SURFACE — JS-host mirror of the engine above.
+    // LIVE MK3.2 SURFACE — JS-host mirror of the engine above.
     //
     // The canonical engine's variable would be @displayTextLiteral
-    // (auto-declared per §51.0.C). MK3.1's skeleton mirrors this with the
-    // variant tags + the initial-state calculation only — the live
-    // literal-scanning surface (the transition dispatch, the segment
-    // accumulator) lands at MK3.2 / MK3.3. This is the same skeleton-first
-    // shape MK2.1's TagFrame surface used: the tags + initialTagFrame
-    // landed at MK2.1; the substantive recognizers followed.
+    // (auto-declared per §51.0.C). MK3.1's skeleton mirrored it with the
+    // variant tags + the initial-state calculation; MK3.2 adds the live
+    // literal-scanning surface — the escape scanner, the AST-node builder,
+    // the diagnostic sink, and `scanDisplayTextLiteral` (the `.Outside →
+    // .InLiteralText → .Outside` traversal). This is the same skeleton-
+    // then-fill shape MK2.1's TagFrame surface used: tags + initialTagFrame
+    // at MK2.1; the substantive recognizers at MK2.2 / MK2.3.
     //
     // Pillar 5b note: when the M4+ swap-in lights up the engine above,
-    // every transition the MK3.2 / MK3.3 scanner performs becomes a write
+    // every transition `scanDisplayTextLiteral` performs becomes a write
     // to @displayTextLiteral and the runtime engine's rule= enforces.
     // ---------------------------------------------------------------------
 
@@ -219,54 +268,246 @@ ${
     // the display-text-literal delimiter (SPEC §4.18.3 — `"`-only). The
     // `"` is not itself brace-bearing, but a uniform character-code
     // assembly form keeps this file consistent with the markup-layer
-    // files' ANOMALY-1 string-literal workaround discipline. MK3.2's
-    // literal scanner reads this for the open/close transition.
+    // files' ANOMALY-1 string-literal workaround discipline.
     export function doubleQuote() {
         return String.fromCharCode(34)
+    }
+
+    // backslash — CALCULATION (pure fn). The one-character `\` escape-
+    // introducer (SPEC §4.18.3 — `\` introduces `\"` / `\\` / `\${`).
+    // Assembled via char-code per the markup-layer ANOMALY-1 discipline
+    // (a literal backslash in scrml source needs escaping).
+    export function backslash() {
+        return String.fromCharCode(92)
+    }
+
+    // interpolationOpen — CALCULATION (pure fn). The two-character `${`
+    // interpolation opener (SPEC §4.18.4). Assembled via char-code per the
+    // markup-layer ANOMALY-1 discipline (a brace-bearing literal opens a
+    // spurious context). MK3.2's scanner recognizes this sequence as a
+    // segment boundary; MK3.3 wires the JS-expression-parser delegation.
+    export function interpolationOpen() {
+        return String.fromCharCode(36) + String.fromCharCode(123)
     }
 
     // LEGAL_FROM_IN_LITERAL_TEXT — the rule= matrix on the
     // <InLiteralText> state-child, as a JS-host lookup table. From
     // .InLiteralText the engine may transition to .Outside (the closing
-    // `"`) or to .InInterpolation (a `${` opener). MK3.2 / MK3.3 validate
-    // their transitions against this matrix — the same live-surface
+    // `"`) or to .InInterpolation (a `${` opener) — the same live-surface
     // rule= mirror lex-mode.scrml's LEGAL_FROM_IN_CODE provides.
     export const LEGAL_FROM_IN_LITERAL_TEXT = Object.freeze({
         Outside:         true,
         InInterpolation: true,
     })
 
+    // ===================================================================
+    // MK3.2 — THE LITERAL-TEXT ESCAPE SCANNER (SPEC §4.18.3 + §4.18.4).
+    //
+    // Exactly THREE escape sequences are recognized inside a display-text
+    // literal: `\"` → `"`, `\\` → `\` (§4.18.3), `\${` → `${` (§4.18.4).
+    // Any other character after a `\` is a malformed escape — §4.18.3
+    // (E-PARSE-001). Recovery: the `\` is treated as a literal backslash,
+    // the scan continues from the offending character.
+    // ===================================================================
+
+    // classifyEscape — CALCULATION (pure predicate). Given the character
+    // after a `\` (+ the one after that, for the `${` case), which escape
+    // — if any — does the `\` introduce? One of "quote" / "backslash" /
+    // "dollarBrace" / "malformed". A `\` at EOF (no following char) is
+    // "malformed".
+    export function classifyEscape(afterBackslash, afterAfter) {
+        if (afterBackslash === doubleQuote()) { return "quote" }
+        if (afterBackslash === backslash())   { return "backslash" }
+        if (afterBackslash === String.fromCharCode(36) &&
+            afterAfter === String.fromCharCode(123)) {
+            return "dollarBrace"
+        }
+        return "malformed"
+    }
+
+    // scanLiteralEscape — STATE write (cursor advance) + CALCULATION (the
+    // cooked text). The cursor is AT the introducing `\`. Consume the full
+    // escape and return { cooked, malformed }. A malformed escape consumes
+    // only the `\` (1 char) and leaves the offending character for the
+    // caller's next scan iteration.
+    export function scanLiteralEscape(cursor) {
+        advance(cursor, 1)
+        if (isEof(cursor)) {
+            return { cooked: backslash(), malformed: true }
+        }
+        const after = peekChar(cursor, 0)
+        const afterAfter = peekChar(cursor, 1)
+        const kind = classifyEscape(after, afterAfter)
+        if (kind === "quote") {
+            advance(cursor, 1)
+            return { cooked: doubleQuote(), malformed: false }
+        }
+        if (kind === "backslash") {
+            advance(cursor, 1)
+            return { cooked: backslash(), malformed: false }
+        }
+        if (kind === "dollarBrace") {
+            advance(cursor, 2)
+            return { cooked: interpolationOpen(), malformed: false }
+        }
+        return { cooked: backslash(), malformed: true }
+    }
+
+    // ===================================================================
+    // MK3.2 — THE DisplayTextLiteral AST NODE (SPEC §4.18.8 — distinct
+    // kind). A node carries `{ kind, segments, exprs, span, terminated }`
+    // — the §4.18.4 / D3 Template-node shape. `segments` is the literal-
+    // text-segment array (each `{ raw, cooked }` — `raw` is the verbatim
+    // source per §4.18.5, `cooked` has escapes resolved); `exprs` is the
+    // interpolation-expression array (empty at MK3.2 — non-interpolation);
+    // `terminated` records whether a closing `"` was found.
+    // ===================================================================
+
+    // makeLiteralSegment — CALCULATION (pure data builder). One literal-
+    // text segment: { raw, cooked }.
+    export function makeLiteralSegment(raw, cooked) {
+        return { raw, cooked }
+    }
+
+    // makeDisplayTextLiteralNode — CALCULATION (pure data builder). The
+    // DisplayTextLiteral AST node.
+    export function makeDisplayTextLiteralNode(segments, exprs, span, terminated) {
+        return { kind: "DisplayTextLiteral", segments, exprs, span, terminated }
+    }
+
+    // ===================================================================
+    // THE DIAGNOSTIC SINK — shared with the markup layer (tag-frame.scrml).
+    // The sink is `ctx.diagnostics` — the SAME array tag-frame.scrml's
+    // pushDiagnostic appends to (MK2.2). The { code, message, span } shape
+    // is identical so the conformance harness reads one uniform stream.
+    // Re-declared here (not imported) so this module does not depend on
+    // the whole TagFrame engine for one array push.
+    // ===================================================================
+
+    // ensureDiagnostics — STATE write (lazy init). A parse context built
+    // before MK2.2 has no `diagnostics` slot; this keeps the helper total.
+    export function ensureDiagnostics(ctx) {
+        if (ctx.diagnostics === undefined || ctx.diagnostics === null) {
+            ctx.diagnostics = []
+        }
+    }
+
+    // makeDiagnostic — CALCULATION (pure data builder). One structured
+    // diagnostic: { code, message, span }.
+    export function makeDiagnostic(code, message, span) {
+        return { code, message, span }
+    }
+
+    // pushDiagnostic — STATE write: append a diagnostic to ctx.diagnostics.
+    export function pushDiagnostic(ctx, diagnostic) {
+        ensureDiagnostics(ctx)
+        ctx.diagnostics.push(diagnostic)
+    }
+
+    // ===================================================================
+    // MK3.2 — scanDisplayTextLiteral: THE `.Outside → .InLiteralText →
+    // .Outside` LITERAL SCAN (SPEC §4.18.3 / §4.18.5).
+    //
+    // The live-surface realization of the engine's `.Outside` /
+    // `.InLiteralText` state-child bodies. The cursor MUST be AT the
+    // opening `"`. Consume the literal; accumulate the verbatim segment;
+    // recognize `\"` / `\\` / `\${` escapes; STOP at an un-escaped `${`
+    // (the MK3.3 interpolation resume point); close on `"`. An unterminated
+    // literal fires E-CTX-001 against the OPENING `"` (§4.18.7 recovery).
+    //
+    // Returns { node, stoppedAtInterp } — `node` is the DisplayTextLiteral
+    // node (one segment at MK3.2); `stoppedAtInterp` is true iff the scan
+    // stopped at an un-escaped `${` (MK3.3's resume point).
+    // ===================================================================
+    export function scanDisplayTextLiteral(cursor, ctx) {
+        const openPos = cursor.pos
+        const openLine = cursor.line
+        const openCol = cursor.col
+        if (peekChar(cursor, 0) !== doubleQuote()) {
+            const span = makeSpan(openPos, openPos, openLine, openCol)
+            return {
+                node: makeDisplayTextLiteralNode(
+                    [makeLiteralSegment("", "")], [], span, false),
+                stoppedAtInterp: false,
+            }
+        }
+
+        advance(cursor, 1)
+        const segmentStart = cursor.pos
+
+        let cooked = ""
+        let terminated = false
+        let stoppedAtInterp = false
+
+        while (!isEof(cursor)) {
+            const c = peekChar(cursor, 0)
+
+            if (c === backslash()) {
+                const escapePos = cursor.pos
+                const escapeLine = cursor.line
+                const escapeCol = cursor.col
+                const esc = scanLiteralEscape(cursor)
+                cooked = cooked + esc.cooked
+                if (esc.malformed) {
+                    pushDiagnostic(ctx, makeDiagnostic(
+                        "E-PARSE-001",
+                        "Malformed escape in display-text literal — a backslash may only introduce escaped-quote , escaped-backslash , or escaped-dollar-brace .",
+                        makeSpan(escapePos, cursor.pos, escapeLine, escapeCol),
+                    ))
+                }
+                continue
+            }
+
+            if (c === doubleQuote()) {
+                terminated = true
+                break
+            }
+
+            if (peekStr(cursor, 2) === interpolationOpen()) {
+                stoppedAtInterp = true
+                break
+            }
+
+            cooked = cooked + c
+            advance(cursor, 1)
+        }
+
+        const raw = cursor.source.substring(segmentStart, cursor.pos)
+
+        if (terminated) {
+            advance(cursor, 1)
+        }
+
+        const span = makeSpan(openPos, cursor.pos, openLine, openCol)
+
+        if (!terminated && !stoppedAtInterp) {
+            pushDiagnostic(ctx, makeDiagnostic(
+                "E-CTX-001",
+                "Unterminated display-text literal — no closing quote before end of input.",
+                makeSpan(openPos, openPos, openLine, openCol),
+            ))
+        }
+
+        const node = makeDisplayTextLiteralNode(
+            [makeLiteralSegment(raw, cooked)], [], span, terminated)
+        return { node, stoppedAtInterp }
+    }
+
     // -------------------------------------------------------------------
-    // FORWARD SEAM — MK3.2 + MK3.3 (documented, not implemented here).
-    //
-    // MK3.1 is the engine SKELETON. The substantive literal scanner
-    // lands in two later sub-steps; the seam is recorded here so the
-    // next dispatch extends a known surface:
-    //
-    //   MK3.2 — `.Outside` / `.InLiteralText` scanning:
-    //     - the `"` open transition (.Outside → .InLiteralText) and the
-    //       `"` close transition (.InLiteralText → .Outside);
-    //     - the `\"` / `\\` / `\${` escape recognition consumed within
-    //       `.InLiteralText` (SPEC §4.18.3 — the two escape sequences
-    //       `\"` / `\\`; §4.18.4 — the `\${` escape for a literal `${`);
-    //     - whitespace accumulated VERBATIM into the literal-text segment
-    //       (SPEC §4.18.5 — no collapse, no strip);
-    //     - `'` and a backtick are ORDINARY interior characters — no
-    //       transition (SPEC §4.18.3);
-    //     - emit the DisplayTextLiteral AST node (parse-ctx's
-    //       DisplayTextLiteral block kind — MK3.1 adds the kind) carrying
-    //       the literal's text segment(s);
-    //     - an unterminated literal → E-CTX-001 against the opening `"`
-    //       (SPEC §4.18.3 / §4.18.7 recovery).
+    // FORWARD SEAM — MK3.3 (documented, not implemented here).
     //
     //   MK3.3 — `.InInterpolation` `${...}` interpolation:
-    //     - `${` opens an interpolation (.InLiteralText → .InInterpolation)
-    //       — a composite state-child delegating to the M2 JS expression
-    //       parser via the established delegation pattern (a DelegationFrame
-    //       of kind .Interpolation — parse-ctx's delegationKinds);
-    //     - the matching `}` returns to `.InLiteralText`;
-    //     - a literal with interpolations produces ONE AST node — the
-    //       §4.18.4 / D3 `Template`-node shape `{ segments, exprs }`;
+    //     - scanDisplayTextLiteral returns `stoppedAtInterp: true` at an
+    //       un-escaped `${`. MK3.3 resumes there: open the .InInterpolation
+    //       composite state-child, push a DelegationFrame of kind
+    //       .Interpolation (parse-ctx's delegationKinds), delegate the
+    //       `${expr}` body to the M2 JS expression parser (reuse the M1
+    //       template-literal engine shape — punch-list P6), and on the
+    //       matching `}` return to .InLiteralText;
+    //     - a literal with interpolations produces ONE node — `segments`
+    //       carries each literal-text run, `exprs` carries each
+    //       interpolation expression (the §4.18.4 / D3 `{ segments, exprs }`
+    //       shape; MK3.2 already builds the node with an empty `exprs`);
     //     - E-UNQUOTED-DISPLAY-TEXT (SPEC §4.18.7) — fires as a parse
     //       OUTCOME in a code-default body when a bare run is neither
     //       valid code nor a `"..."` literal.

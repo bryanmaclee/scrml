@@ -134,11 +134,19 @@ import {
     isDefaultLogic,
 } from "../native-parser/body-mode.js";
 // MK3.1 — the §4.18.3/.4 DisplayTextLiteral engine SKELETON.
+// MK3.2 — the §4.18.3/.4 `.Outside` / `.InLiteralText` literal-scanning
+// surface: the escape scanner, the AST-node builders, the diagnostic
+// sink, and scanDisplayTextLiteral itself.
 import {
     DisplayTextLiteral,
     initialDisplayTextLiteral,
     doubleQuote,
     LEGAL_FROM_IN_LITERAL_TEXT,
+    classifyEscape,
+    scanLiteralEscape,
+    makeLiteralSegment,
+    makeDisplayTextLiteralNode,
+    scanDisplayTextLiteral,
 } from "../native-parser/display-text-literal.js";
 // MK3.1 — the parse-ctx block-kind catalog (the DisplayTextLiteral kind).
 import { blockKinds } from "../native-parser/parse-ctx.js";
@@ -3201,5 +3209,522 @@ describe("MK3.1 K1 — the block-context.scrml BodyMode forward-ref is resolved"
         // state-child's body-mode dispatch; body-mode establishment
         // (bodyModeForChildOf) is the live calculation that feeds it.
         expect(typeof bodyModeForChildOf).toBe("function");
+    });
+});
+
+// #############################################################################
+// #############################################################################
+// ##                                                                         ##
+// ##  MK3.2 — DisplayTextLiteral literal scanning (non-interpolation).        ##
+// ##                                                                         ##
+// ##  Per IMPLEMENTATION-ROADMAP §3.3 (the MK3.2 row) + charter dive Q1.E     ##
+// ##  (the DisplayTextLiteral engine sketch) + Q3.A/Q3.B (the §4.18 mapping   ##
+// ##  + worked-example trace) + SPEC §4.18.3 / §4.18.4 / §4.18.5 / §4.18.7.   ##
+// ##                                                                         ##
+// ##  MK3.1 landed the DisplayTextLiteral engine SKELETON; MK3.2 fills the    ##
+// ##  `.Outside` / `.InLiteralText` literal-scanning logic — the `"` open/    ##
+// ##  close transitions, the `\"` / `\\` / `\${` escapes, the verbatim-       ##
+// ##  whitespace segment accumulation, the DisplayTextLiteral AST-node emit,  ##
+// ##  and the unterminated-literal E-CTX-001 recovery. The `${...}`           ##
+// ##  interpolation + E-UNQUOTED-DISPLAY-TEXT are MK3.3. These sections are   ##
+// ##  therefore a UNIT suite over the MK3.2 scanning surface.                 ##
+// ##                                                                         ##
+// #############################################################################
+// #############################################################################
+
+// MK3.2 char-code constants — the test file is plain JS, but the literal
+// scanner's delimiters are assembled via char-code to keep the source
+// unambiguous (a literal `${` in a JS template-literal would interpolate;
+// a literal `\` would need its own escape). DQ / BS / DOLLAR+LBRACE here
+// build the §4.18 sigil sequences for the inline-corpus sources below.
+const DQ = String.fromCharCode(34);      // "
+const BS = String.fromCharCode(92);      // \
+const DOLLAR = String.fromCharCode(36);  // $
+const LBRACE = String.fromCharCode(123); // {
+const INTERP = DOLLAR + LBRACE;          // ${
+
+// scanLiteral — drive scanDisplayTextLiteral over a source string. The
+// cursor is positioned at offset 0 (the source begins with the opening
+// `"`). Returns { node, stoppedAtInterp, endPos, diagnostics } — the full
+// MK3.2 observation surface for a single literal.
+function scanLiteral(source) {
+    const cursor = makeCursor(source);
+    const ctx = makeParseContext();
+    const { node, stoppedAtInterp } = scanDisplayTextLiteral(cursor, ctx);
+    return {
+        node,
+        stoppedAtInterp,
+        endPos: cursor.pos,
+        diagnostics: ctx.diagnostics ?? [],
+    };
+}
+
+// =============================================================================
+// MK3.2 §44 — classifyEscape: the §4.18.3/.4 escape-recognition predicate.
+// =============================================================================
+describe("MK3.2 classifyEscape — the §4.18.3/.4 escape predicate", () => {
+    test("a `\"` after `\\` is the escaped-quote escape (SPEC §4.18.3)", () => {
+        expect(classifyEscape(DQ, "")).toBe("quote");
+    });
+
+    test("a `\\` after `\\` is the escaped-backslash escape (SPEC §4.18.3)", () => {
+        expect(classifyEscape(BS, "")).toBe("backslash");
+    });
+
+    test("a `${` after `\\` is the escaped-dollar-brace escape (SPEC §4.18.4)", () => {
+        // §4.18.4 — `\${` escapes a literal `${` (the interpolation
+        // opener). The predicate needs BOTH following chars — `$` then `{`.
+        expect(classifyEscape(DOLLAR, LBRACE)).toBe("dollarBrace");
+    });
+
+    test("a `$` after `\\` NOT followed by `{` is malformed — not escaped-dollar-brace", () => {
+        // `\$x` — the `$` is not followed by `{`, so this is not the
+        // `\${` escape; it is a malformed escape (SPEC §4.18.3).
+        expect(classifyEscape(DOLLAR, "x")).toBe("malformed");
+    });
+
+    test("any other character after `\\` is a malformed escape (SPEC §4.18.3)", () => {
+        // §4.18.3 — the display-text-literal escape set is exactly
+        // `\"` / `\\` / `\${`. `\n` / `\t` / `\a` etc. are MALFORMED —
+        // a display-text literal does NOT recognize the JS escape table.
+        expect(classifyEscape("n", "")).toBe("malformed");
+        expect(classifyEscape("t", "")).toBe("malformed");
+        expect(classifyEscape("a", "")).toBe("malformed");
+        expect(classifyEscape("0", "")).toBe("malformed");
+    });
+
+    test("a `\\` at end-of-input (no following char) is malformed", () => {
+        // peekChar past EOF returns "" — classifyEscape("", "") is the
+        // `\`-at-EOF case. Nothing to escape — malformed.
+        expect(classifyEscape("", "")).toBe("malformed");
+    });
+});
+
+// =============================================================================
+// MK3.2 §45 — scanLiteralEscape: consuming one escape sequence.
+// =============================================================================
+describe("MK3.2 scanLiteralEscape — consume one §4.18.3/.4 escape", () => {
+    // escapeAt — run scanLiteralEscape over a source whose offset 0 is the
+    // introducing `\`. Returns { cooked, malformed, consumed }.
+    function escapeAt(source) {
+        const cursor = makeCursor(source);
+        const r = scanLiteralEscape(cursor);
+        return { cooked: r.cooked, malformed: r.malformed, consumed: cursor.pos };
+    }
+
+    test("`\\\"` cooks to `\"` and consumes two characters (SPEC §4.18.3)", () => {
+        const r = escapeAt(BS + DQ);
+        expect(r.cooked).toBe(DQ);
+        expect(r.malformed).toBe(false);
+        expect(r.consumed).toBe(2);
+    });
+
+    test("`\\\\` cooks to `\\` and consumes two characters (SPEC §4.18.3)", () => {
+        const r = escapeAt(BS + BS);
+        expect(r.cooked).toBe(BS);
+        expect(r.malformed).toBe(false);
+        expect(r.consumed).toBe(2);
+    });
+
+    test("`\\${` cooks to `${` and consumes three characters (SPEC §4.18.4)", () => {
+        const r = escapeAt(BS + INTERP);
+        expect(r.cooked).toBe(INTERP);
+        expect(r.malformed).toBe(false);
+        expect(r.consumed).toBe(3);
+    });
+
+    test("a malformed escape cooks to a bare `\\`, marks malformed, consumes ONLY the `\\`", () => {
+        // SPEC §4.18.3 recovery — a `\` before a non-escape char is a
+        // literal backslash; the offending char is LEFT for the caller's
+        // next scan iteration (consumed === 1 — only the `\`).
+        const r = escapeAt(BS + "n");
+        expect(r.cooked).toBe(BS);
+        expect(r.malformed).toBe(true);
+        expect(r.consumed).toBe(1);
+    });
+
+    test("a `\\` at end-of-input is malformed — cooks to a bare `\\`", () => {
+        const r = escapeAt(BS);
+        expect(r.cooked).toBe(BS);
+        expect(r.malformed).toBe(true);
+    });
+});
+
+// =============================================================================
+// MK3.2 §46 — scanDisplayTextLiteral: the basic `"..."` literal scan.
+// =============================================================================
+describe("MK3.2 scanDisplayTextLiteral — the basic `\"...\"` literal (SPEC §4.18.3)", () => {
+    test("a plain literal — one segment, terminated, no diagnostics", () => {
+        // SPEC §4.18.3 worked example — `"Ready to fetch."`.
+        const r = scanLiteral(DQ + "Ready to fetch." + DQ);
+        expect(r.node.kind).toBe("DisplayTextLiteral");
+        expect(r.node.segments.length).toBe(1);
+        expect(r.node.segments[0].cooked).toBe("Ready to fetch.");
+        expect(r.node.segments[0].raw).toBe("Ready to fetch.");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("the closing `\"` is consumed — the cursor lands one past it", () => {
+        // `"hi"` is 4 chars; the scan consumes the open `"`, `hi`, the
+        // close `"` — the cursor lands at offset 4.
+        const r = scanLiteral(DQ + "hi" + DQ);
+        expect(r.endPos).toBe(4);
+    });
+
+    test("the whole-literal span runs the opening `\"` through the closing `\"`", () => {
+        const r = scanLiteral(DQ + "abc" + DQ);
+        expect(r.node.span.start).toBe(0);
+        expect(r.node.span.end).toBe(5);
+        expect(r.node.span.line).toBe(1);
+        expect(r.node.span.col).toBe(1);
+    });
+
+    test("an empty literal `\"\"` — one empty segment, terminated", () => {
+        const r = scanLiteral(DQ + DQ);
+        expect(r.node.segments.length).toBe(1);
+        expect(r.node.segments[0].cooked).toBe("");
+        expect(r.node.segments[0].raw).toBe("");
+        expect(r.node.terminated).toBe(true);
+        expect(r.endPos).toBe(2);
+    });
+
+    test("a non-interpolation literal has an EMPTY `exprs` array (MK3.2 — interpolation is MK3.3)", () => {
+        // SPEC §4.18.4 / D3 — the node is `{ segments, exprs }`. A
+        // non-interpolation literal carries one segment and zero exprs.
+        const r = scanLiteral(DQ + "no interpolation here" + DQ);
+        expect(Array.isArray(r.node.exprs)).toBe(true);
+        expect(r.node.exprs.length).toBe(0);
+    });
+
+    test("scanDisplayTextLiteral never stops at an interpolation for a plain literal", () => {
+        const r = scanLiteral(DQ + "plain" + DQ);
+        expect(r.stoppedAtInterp).toBe(false);
+    });
+});
+
+// =============================================================================
+// MK3.2 §47 — `'` and a backtick are ordinary interior characters (§4.18.3).
+// =============================================================================
+describe("MK3.2 ordinary interior chars — `'` and backtick (SPEC §4.18.3)", () => {
+    test("an apostrophe `'` is an ordinary interior char — no escape, no transition", () => {
+        // SPEC §4.18.3 — `"Don't worry — it's fine"` is a SINGLE
+        // well-formed literal; the `'` carries no delimiter role.
+        const r = scanLiteral(DQ + "Don't worry — it's fine" + DQ);
+        expect(r.node.segments.length).toBe(1);
+        expect(r.node.segments[0].cooked).toBe("Don't worry — it's fine");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("a backtick is an ordinary interior char — NOT a display-text delimiter", () => {
+        // SPEC §4.18.3 — "the backtick is likewise an ordinary interior
+        // character and is NOT a display-text delimiter".
+        const tick = String.fromCharCode(96);
+        const r = scanLiteral(DQ + "a " + tick + "code" + tick + " span" + DQ);
+        expect(r.node.segments.length).toBe(1);
+        expect(r.node.segments[0].cooked).toBe("a " + tick + "code" + tick + " span");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("a literal that is only apostrophes — every `'` is interior content", () => {
+        const r = scanLiteral(DQ + "'''" + DQ);
+        expect(r.node.segments[0].cooked).toBe("'''");
+        expect(r.node.terminated).toBe(true);
+    });
+});
+
+// =============================================================================
+// MK3.2 §48 — escapes inside the literal (SPEC §4.18.3 + §4.18.4).
+// =============================================================================
+describe("MK3.2 escapes inside the literal — `\\\"` / `\\\\` / `\\${`", () => {
+    test("`\\\"` produces a literal `\"` in the cooked text (SPEC §4.18.3)", () => {
+        // `"say \"hi\""` — the inner `\"` pair is escaped quotes; the
+        // literal is terminated by the FINAL un-escaped `"`.
+        const r = scanLiteral(DQ + "say " + BS + DQ + "hi" + BS + DQ + DQ);
+        expect(r.node.segments[0].cooked).toBe("say " + DQ + "hi" + DQ);
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("the `raw` of an escaped-quote literal keeps the backslashes UNRESOLVED", () => {
+        // `raw` is the verbatim source between the quotes — escapes NOT
+        // applied (SPEC §4.18.5 — `raw` is byte-for-byte). `cooked`
+        // resolves them.
+        const r = scanLiteral(DQ + "x" + BS + DQ + "y" + DQ);
+        expect(r.node.segments[0].raw).toBe("x" + BS + DQ + "y");
+        expect(r.node.segments[0].cooked).toBe("x" + DQ + "y");
+    });
+
+    test("`\\\\` produces a literal backslash in the cooked text (SPEC §4.18.3)", () => {
+        const r = scanLiteral(DQ + "a" + BS + BS + "b" + DQ);
+        expect(r.node.segments[0].cooked).toBe("a" + BS + "b");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("`\\${` produces a literal `${` and does NOT open an interpolation (SPEC §4.18.4)", () => {
+        // SPEC §4.18.4 — `\${` escapes the interpolation opener; the
+        // literal text is `${x}` and the scan does NOT stop at it.
+        const r = scanLiteral(DQ + "literal " + BS + INTERP + "x}" + DQ);
+        expect(r.node.segments[0].cooked).toBe("literal " + INTERP + "x}");
+        expect(r.node.terminated).toBe(true);
+        expect(r.stoppedAtInterp).toBe(false);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("a literal escaped `\\${` immediately before the closing `\"`", () => {
+        const r = scanLiteral(DQ + BS + INTERP + DQ);
+        expect(r.node.segments[0].cooked).toBe(INTERP);
+        expect(r.node.terminated).toBe(true);
+    });
+});
+
+// =============================================================================
+// MK3.2 §49 — verbatim whitespace inside the literal (SPEC §4.18.5).
+// =============================================================================
+describe("MK3.2 verbatim whitespace — SPEC §4.18.5 (no collapse, no strip)", () => {
+    test("a run of spaces is preserved exactly — `\"two  spaces\"` keeps two", () => {
+        // SPEC §4.18.5 — "`\"two  spaces\"` renders two spaces". No
+        // HTML-style collapse inside a display-text literal.
+        const r = scanLiteral(DQ + "two  spaces" + DQ);
+        expect(r.node.segments[0].cooked).toBe("two  spaces");
+    });
+
+    test("leading and trailing whitespace is NOT stripped (SPEC §4.18.5)", () => {
+        // A free-text body would strip leading/trailing whitespace; a
+        // display-text literal keeps it — the literal IS the whitespace
+        // declaration.
+        const r = scanLiteral(DQ + "  padded  " + DQ);
+        expect(r.node.segments[0].cooked).toBe("  padded  ");
+    });
+
+    test("a newline inside a multi-line literal is preserved verbatim (SPEC §4.18.5)", () => {
+        const r = scanLiteral(DQ + "line one" + "\n" + "line two" + DQ);
+        expect(r.node.segments[0].cooked).toBe("line one\nline two");
+        expect(r.node.terminated).toBe(true);
+    });
+
+    test("a tab inside the literal is preserved verbatim (SPEC §4.18.5)", () => {
+        const r = scanLiteral(DQ + "col1" + "\t" + "col2" + DQ);
+        expect(r.node.segments[0].cooked).toBe("col1\tcol2");
+    });
+
+    test("`raw` and `cooked` agree for a whitespace-only escape-free literal", () => {
+        // No escapes — raw and cooked are identical (SPEC §4.18.5 verbatim).
+        const r = scanLiteral(DQ + "  \t \n  " + DQ);
+        expect(r.node.segments[0].raw).toBe("  \t \n  ");
+        expect(r.node.segments[0].cooked).toBe("  \t \n  ");
+    });
+});
+
+// =============================================================================
+// MK3.2 §50 — the unterminated-literal E-CTX-001 recovery (SPEC §4.18.7).
+// =============================================================================
+describe("MK3.2 unterminated literal — E-CTX-001 recovery (SPEC §4.18.3 / §4.18.7)", () => {
+    test("EOF before the closing `\"` fires E-CTX-001", () => {
+        // SPEC §4.18.3 — "a display-text literal that reaches end-of-file
+        // ... before its closing `\"` is an unterminated literal —
+        // E-CTX-001".
+        const r = scanLiteral(DQ + "never closes");
+        expect(r.diagnostics.length).toBe(1);
+        expect(r.diagnostics[0].code).toBe("E-CTX-001");
+    });
+
+    test("E-CTX-001 is blamed at the OPENING `\"` (SPEC §4.18.7)", () => {
+        // SPEC §4.18.7 recovery — the diagnostic is "E-CTX-001 against
+        // the opening `\"`". The blame span is the single opening quote.
+        const r = scanLiteral(DQ + "unterminated");
+        expect(r.diagnostics[0].span.start).toBe(0);
+        expect(r.diagnostics[0].span.end).toBe(0);
+    });
+
+    test("an unterminated literal node carries `terminated: false`", () => {
+        const r = scanLiteral(DQ + "open forever");
+        expect(r.node.terminated).toBe(false);
+    });
+
+    test("the captured text IS the unterminated literal's content (SPEC §4.18.7 recovery)", () => {
+        // SPEC §4.18.7 — "the block splitter recovers by treating the
+        // captured text from the opening `\"` ... as the literal's
+        // content and continuing". The segment carries everything after
+        // the opening `"`.
+        const r = scanLiteral(DQ + "all of this is content");
+        expect(r.node.segments[0].cooked).toBe("all of this is content");
+    });
+
+    test("an unterminated EMPTY literal — `\"` alone at EOF — still fires E-CTX-001", () => {
+        const r = scanLiteral(DQ);
+        expect(r.diagnostics.length).toBe(1);
+        expect(r.diagnostics[0].code).toBe("E-CTX-001");
+        expect(r.node.terminated).toBe(false);
+        expect(r.node.segments[0].cooked).toBe("");
+    });
+});
+
+// =============================================================================
+// MK3.2 §51 — the malformed-escape E-PARSE-001 path (SPEC §4.18.3).
+// =============================================================================
+describe("MK3.2 malformed escape — E-PARSE-001 (SPEC §4.18.3)", () => {
+    test("a `\\n` inside the literal is a malformed escape — E-PARSE-001", () => {
+        // SPEC §4.18.3 — the escape set is `\"` / `\\` / `\${` only. `\n`
+        // is NOT a display-text escape; it is a malformed escape.
+        const r = scanLiteral(DQ + "bad " + BS + "n escape" + DQ);
+        const malformed = r.diagnostics.filter((d) => d.code === "E-PARSE-001");
+        expect(malformed.length).toBe(1);
+    });
+
+    test("a malformed escape is RECOVERED — the `\\` becomes a literal backslash", () => {
+        // SPEC §4.18.3 recovery — the `\` is a literal backslash; the
+        // offending char (`n`) is then ordinary content. The literal
+        // still terminates cleanly.
+        const r = scanLiteral(DQ + "x" + BS + "n y" + DQ);
+        expect(r.node.segments[0].cooked).toBe("x" + BS + "n y");
+        expect(r.node.terminated).toBe(true);
+    });
+
+    test("E-PARSE-001 is blamed at the `\\` (not the literal's opening `\"`)", () => {
+        // The malformed-escape blame span is the `\` itself — distinct
+        // from E-CTX-001, which blames the opening `"`.
+        const r = scanLiteral(DQ + "ab" + BS + "n" + DQ);
+        const malformed = r.diagnostics.find((d) => d.code === "E-PARSE-001");
+        // The `\` is at offset 3 — `"`(0) `a`(1) `b`(2) `\`(3).
+        expect(malformed.span.start).toBe(3);
+    });
+
+    test("a `\\` before EOF inside an unterminated literal — E-PARSE-001 AND E-CTX-001", () => {
+        // A trailing `\` with no following char is a malformed escape;
+        // the literal also never closes — BOTH diagnostics fire.
+        const r = scanLiteral(DQ + "trail" + BS);
+        const codes = r.diagnostics.map((d) => d.code).sort();
+        expect(codes).toEqual(["E-CTX-001", "E-PARSE-001"]);
+        expect(r.node.terminated).toBe(false);
+    });
+
+    test("a clean literal fires NO E-PARSE-001 (the recognized escapes are not malformed)", () => {
+        const r = scanLiteral(DQ + "ok " + BS + DQ + " " + BS + BS + " " + BS + INTERP + "x}" + DQ);
+        const malformed = r.diagnostics.filter((d) => d.code === "E-PARSE-001");
+        expect(malformed.length).toBe(0);
+        expect(r.node.terminated).toBe(true);
+    });
+});
+
+// =============================================================================
+// MK3.2 §52 — the `${` interpolation-stop seam (MK3.3 forward-ref).
+// =============================================================================
+describe("MK3.2 interpolation-stop — the un-escaped `${` MK3.3 resume seam", () => {
+    test("an un-escaped `${` STOPS the scan — `stoppedAtInterp` is true", () => {
+        // MK3.2's scanner recognizes `${` as the .InInterpolation
+        // transition (SPEC §4.18.4) and STOPS — the interpolation
+        // delegation itself is MK3.3.
+        const r = scanLiteral(DQ + "hi " + INTERP + "x} bye" + DQ);
+        expect(r.stoppedAtInterp).toBe(true);
+    });
+
+    test("the segment before the `${` is the literal text up to the opener", () => {
+        // The scan accumulates `hi ` then stops AT the `${` — the first
+        // segment is `hi `.
+        const r = scanLiteral(DQ + "hi " + INTERP + "x}" + DQ);
+        expect(r.node.segments[0].cooked).toBe("hi ");
+    });
+
+    test("the `${` is NOT consumed — the cursor lands AT the `$` (MK3.3 reads it)", () => {
+        // `"hi ${...` — `"`(0) `h`(1) `i`(2) ` `(3) `$`(4). The scan stops
+        // with the cursor at offset 4 so MK3.3's resume reads the `${`.
+        const r = scanLiteral(DQ + "hi " + INTERP + "x}" + DQ);
+        expect(r.endPos).toBe(4);
+    });
+
+    test("a scan stopped at `${` is NOT terminated and fires NO E-CTX-001", () => {
+        // Stopping at an interpolation is a clean MK3.3 hand-off — it is
+        // neither a terminated literal nor an unterminated-literal error.
+        const r = scanLiteral(DQ + "before " + INTERP + "expr}");
+        expect(r.node.terminated).toBe(false);
+        expect(r.diagnostics.filter((d) => d.code === "E-CTX-001").length).toBe(0);
+    });
+
+    test("a literal that is ONLY an interpolation — segment empty, stopped at `${`", () => {
+        const r = scanLiteral(DQ + INTERP + "x}" + DQ);
+        expect(r.node.segments[0].cooked).toBe("");
+        expect(r.stoppedAtInterp).toBe(true);
+        expect(r.endPos).toBe(1);
+    });
+});
+
+// =============================================================================
+// MK3.2 §53 — the DisplayTextLiteral AST node + segment builders.
+// =============================================================================
+describe("MK3.2 the DisplayTextLiteral AST node — `{ kind, segments, exprs, span, terminated }`", () => {
+    test("makeLiteralSegment builds a `{ raw, cooked }` segment", () => {
+        const seg = makeLiteralSegment("ra\\w", "cooked");
+        expect(seg.raw).toBe("ra\\w");
+        expect(seg.cooked).toBe("cooked");
+    });
+
+    test("makeDisplayTextLiteralNode builds the §4.18.4 / D3 node shape", () => {
+        // SPEC §4.18.4 / D3 — the node is a Template-shaped
+        // `{ segments, exprs }` carrier, distinct from a TextNode
+        // (SPEC §4.18.8). MK3.2's builder also carries span + terminated.
+        const span = { start: 0, end: 5, line: 1, col: 1 };
+        const node = makeDisplayTextLiteralNode(
+            [makeLiteralSegment("hi", "hi")], [], span, true);
+        expect(node.kind).toBe("DisplayTextLiteral");
+        expect(node.segments.length).toBe(1);
+        expect(node.exprs).toEqual([]);
+        expect(node.span).toBe(span);
+        expect(node.terminated).toBe(true);
+    });
+
+    test("the node kind matches the parse-ctx DisplayTextLiteral block kind (SPEC §4.18.8)", () => {
+        // The scanner's node `kind` field reads `"DisplayTextLiteral"` —
+        // the SAME string blockKinds() carries (MK3.1 added the block
+        // kind). The code-default-body literal node is a distinct kind
+        // from the free-text-body Text block.
+        const r = scanLiteral(DQ + "x" + DQ);
+        expect(r.node.kind).toBe(blockKinds().DisplayTextLiteral);
+        expect(r.node.kind).not.toBe(blockKinds().Text);
+    });
+});
+
+// =============================================================================
+// MK3.2 §54 — SPEC §4.18.3/.4 worked examples parse correctly.
+// =============================================================================
+describe("MK3.2 SPEC §4.18 worked examples — display-text literals scan correctly", () => {
+    test("§4.18.3 example — `\"Ready to fetch.\"` (the `<Idle>` body)", () => {
+        const r = scanLiteral(DQ + "Ready to fetch." + DQ);
+        expect(r.node.segments[0].cooked).toBe("Ready to fetch.");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("§4.18.3 example — `\"Loading…\"` (the `<Loading>` body)", () => {
+        const r = scanLiteral(DQ + "Loading…" + DQ);
+        expect(r.node.segments[0].cooked).toBe("Loading…");
+        expect(r.node.terminated).toBe(true);
+    });
+
+    test("§4.18.3 example — `\"Don't panic — it's recoverable.\"` (the `<Error>` body)", () => {
+        // The §4.18.3 worked example for `'` as an ordinary interior char
+        // — two apostrophes, no escaping, one clean literal.
+        const r = scanLiteral(DQ + "Don't panic — it's recoverable." + DQ);
+        expect(r.node.segments[0].cooked).toBe("Don't panic — it's recoverable.");
+        expect(r.node.terminated).toBe(true);
+        expect(r.diagnostics.length).toBe(0);
+    });
+
+    test("§4.18.6 example — `\"a literal <tag> and an & ampersand\"` scans verbatim", () => {
+        // SPEC §4.18.6 — the `<`/`>`/`&` HTML-escaping is a CODEGEN
+        // concern; the PARSER captures the literal characters verbatim.
+        // MK3.2's scanner produces the raw `<tag>` + `&` text; codegen
+        // (a later stage) applies the entity escaping.
+        const r = scanLiteral(DQ + "a literal <tag> and an & ampersand" + DQ);
+        expect(r.node.segments[0].cooked).toBe("a literal <tag> and an & ampersand");
+        expect(r.node.terminated).toBe(true);
+    });
+
+    test("§4.18.5 example — `\"two  spaces\"` keeps both spaces", () => {
+        const r = scanLiteral(DQ + "two  spaces" + DQ);
+        expect(r.node.segments[0].cooked).toBe("two  spaces");
     });
 });

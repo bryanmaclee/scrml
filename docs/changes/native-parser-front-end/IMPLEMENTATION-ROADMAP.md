@@ -361,7 +361,7 @@ within one quarter.
 | **M3.3** functions/classes + in-line bodies (subsumes BPP) + import/export + try/throw | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | FunctionDecl/ClassDecl/Import/Export/Try/Throw constructors + parsers; function bodies parsed IN-LINE (BPP subsumable — `body-pre-parser.ts` deletes by construction at M6); async/yield at statement position; +185 tests; full suite 17,556/0. Fixed K7 (M1 lexer prototype-pollution) in flight. |
 | M3.4 error-recovery integration + conformance | ⬜ pending | — | — | §3.2 — depends M3.2+M3.3 |
 | **MK3.1** BodyMode + DisplayTextLiteral skeleton + body-mode establishment + P7 | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | body-mode + display-text-literal (skeleton) engine files; body-mode establishment (per §4.18.1's 3 code-bearing loci) + tag-frame `bodyMode` payload + P7 DelegationFrame threading + `DisplayTextLiteral` block kind; **K1 RESOLVED**; +36 tests; full suite 17,371/0. |
-| MK3.2 DisplayTextLiteral literal scanning (non-interpolation) | ⬜ pending | — | — | §3.3 — depends MK3.1 |
+| **MK3.2** DisplayTextLiteral literal scanning (non-interpolation) | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | `scanDisplayTextLiteral` — `"..."` open/close, `\"`/`\\`/`\${` escapes, verbatim whitespace, the `{segments, exprs}` AST node, unterminated → E-CTX-001; +53 tests; full suite 17,609/0. (Surfaced a SPEC §4.18.3/§4.18.4 escape-count inconsistency — implemented the 3-escape union; see hand-off.) |
 | MK3.3 ${...} interpolation + E-UNQUOTED-DISPLAY-TEXT + §4.18 conformance | ⬜ pending | — | — | §3.3 — depends MK3.2 |
 | M4 / MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
 
