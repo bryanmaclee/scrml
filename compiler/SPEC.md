@@ -1155,7 +1155,7 @@ interpolation        ::= '${' expression '}'
 
 - A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
 - The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
-- A literal double-quote `"` inside a display-text literal SHALL be written as the escape sequence `\"`. The backslash escape sequence `\\` produces a literal backslash. These are the only two escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter.)
+- A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
 
 **Worked example — display-text literals in code-default bodies:**
@@ -1179,7 +1179,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 - `${expr}` inside a display-text literal opens a logic context per §3.1, exactly as `${...}` does elsewhere. The `expr` follows logic-context grammar; `@`-sigil reactive access applies normally.
 - A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
 - The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
-- A literal `${` sequence intended as display text (not an interpolation) SHALL be escaped — `\${` produces the literal two-character sequence `${`. (Rare; the `${` sequence is the interpolation opener inside the literal.)
+- A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).
 
 **Worked example — interpolation inside the literal:**
 
