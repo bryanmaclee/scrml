@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 This is a compiler. There is no database schema or external API schema.
 The "schemas" below are the compiler's internal data structures: the AST node
@@ -15,7 +15,7 @@ compiler emits, not a schema of this codebase.
 
 Discriminated union; every node has `kind` (string literal), `id`, `span`.
 `ASTNode` (line 1381) is the top-level union; `LogicStatement` (1332) the
-statement sub-union. UNCHANGED since commit 78faa65; verified at e613621.
+statement sub-union. UNCHANGED since commit 78faa65; verified at 092fa90a.
 
 ### Source Location
 Span [ast.ts:21] — file, start, end (byte offsets), line, col
@@ -68,7 +68,7 @@ ErrorArm [165] · SQLChainedCall [182] · LiftTarget [195]
 The expression-AST catalog the scrml-native parser produces. SEPARATE from the
 live ast.ts union above — consumed only by native-parser tests, not the pipeline.
 
-### ExprKind  [ast-expr.js:5 — Object.freeze enum, 37 variants at HEAD]
+### ExprKind  [ast-expr.js:5 — Object.freeze enum, 39 variants at HEAD]
 Primary literals:   Ident · NumberLit · StringLit · BoolLit · RegexLit · TemplateLit
 scrml extensions (M1): AtCell · BareVariant
 Keyword atoms (M2.3): This · Super
@@ -81,6 +81,8 @@ scrml-extension exprs (M2.4 — D5 MUST ADD, 9 forms):
                     Render · Lift · Fail
 Async / generator (M4.1 — D5 MUST PARSE; promoted from M3.3 statement-position-only):
                     Await · Yield
+Markup-as-value (MK4 — S114 NEW): MarkupValue (markup expression in JS context;
+                    `const card = <div/>`, `renders <p>...</p>`, `lift <wrapper>...</wrapper>`)
 
 ### Sub-kind enums
 ArrayElementKind   [ast-expr.js:70] = Item · Spread · Hole
@@ -98,7 +100,7 @@ makeAssignment · makeConditional · makeSequence · makeCall · makeNew · make
 makeArrow · makeFunction · makeTaggedTemplate · makeRestElement ·
 makeAssignmentPattern · makeBlockStub · (M2.4) makeNotValue · makeTilde · makeSql ·
 makeInputStateRef · makeIsCheck · makeMatch · makeMatchArm · makeRender · makeLift ·
-makeFail · (M4.1) makeAwait · makeYield · isExpr (predicate)
+makeFail · (M4.1) makeAwait · makeYield · (MK4) makeMarkupValue · isExpr (predicate)
 
 ## Native-Parser Stmt AST  [compiler/native-parser/ast-stmt.{scrml,js}]
 
@@ -117,7 +119,8 @@ ClassMemberKind     [60]   = Method · Property (ESTree MethodDefinition / Prope
 MethodKind          [67]   = Constructor · Method · Get · Set
 ImportSpecifierKind [79]   = Named · Default · Namespace
 BindingKind         [94]   = Ident · ObjectPat · ArrayPat   (M3.1 real binding patterns;
-                            M2.3 `parseParamTarget` literal stand-ins are K6, M4.2 unifies)
+                            M4.2 = K6 unified: parseParamTarget now builds REAL
+                            ObjectPattern/ArrayPattern; the M3.1 literal stand-ins retired)
 BindingPropertyKind [104]  — object-destructuring property discriminator
 BindingElementKind  [114]  — array-destructuring element discriminator
 
@@ -136,7 +139,12 @@ makeAssignmentPattern
 TokenKind     [token.js:5]   — Object.freeze enum, nested-by-category; all JS-subset
                                token kinds (keywords, idents, numerics, punctuation,
                                operators) + scrml extensions + (M1.2) TemplateInterpStart
-                               / TemplateInterpEnd + RegexLit token
+                               / TemplateInterpEnd + RegexLit token.
+                               S114 (K3/K4/K5): +11 compound-assign TokenKinds (PercentAssign /
+                               StarStarAssign / BitShiftLeftAssign / BitShiftRightAssign /
+                               BitShiftRightUnsignedAssign / BitAndAssign / BitOrAssign /
+                               BitXorAssign / LogicalAndAssign / LogicalOrAssign /
+                               NullishCoalesceAssign) + OptionalChain + Hash + DoubleColon.
 QuoteKind     [token.js:125] — Single · Double · Backtick
 JS_KEYWORDS   [token.js:131] — keyword-string → TokenKind lookup table
 Constructors: makeToken · makeIdentOrKeyword (own-property guard per K7 fix) · makeEof
@@ -163,8 +171,8 @@ BlockContext [block-context.scrml:155] — MARKUP-LAYER context-grid engine; ini
   `.TopLevel`; 10 state-children: TopLevel · InMarkupTag · InLogicEscape · InCss ·
   InSql · InErrorEffect · InMeta · InTest · InForeignCode · plus InProgramBody (§40.8
   `default-logic` body — distinct third mode). `.InMarkupTag` nests a BodyMode engine
-  (K1 forward-ref RESOLVED at MK3.1); `.InLogicEscape` nests the LexMode engine graph
-  (markup→JS seam, MK4-pending).
+  (K1 forward-ref RESOLVED at MK3.1). K9 RESOLVED S114 — circular import with
+  parse-ctx broken via delegation-frame.scrml leaf extraction.
 TagFrame     [tag-frame.scrml]      — markup `<tag>` tree engine; 3 state-children:
   `.Closed` · `.OpenExpectingChildren(name, kind, depth, span, bodyMode)` ·
   `.OpenSelfClosed(name, kind, span)`. Payload-bearing per the `bracket-stack`
@@ -179,6 +187,21 @@ DisplayTextLiteral [display-text-literal.scrml] — display-text literal scanner
   Literal escape set: `\"` / `\\` / `\${` (NOTE: §4.18.3 says "only two" but §4.18.4
   adds the third — see non-compliance.report.md; native parser implements the correct
   3-escape union).
+
+## Native-Parser Seam layer  [MK4 — NEW S114]
+
+parse-seam.{scrml,js} — DelegationFrame stack surface:
+  DelegationFrameKind = MarkupToJS · JSToMarkup
+  makeDelegationFrame(kind, openSpan, closeCondition) → DelegationFrame
+  pushDelegationFrame / popDelegationFrame — ctx.delegationStack mutation
+  topDelegationFrame / delegationDepth / inDelegation — read helpers
+  Cross-seam error attribution: `diag.delegationFrame = { kind, openSpan, via }`
+    on every diagnostic forwarded across the seam boundary.
+
+delegation-frame.{scrml,js} — leaf module (K9 RESOLVED S114); zero native-parser
+  imports. Exports: delegationKinds / closeConditionKinds + makers
+  (closeOnBraceDepth / closeOnTagFrameBalanced / closeOnAttrTerminator /
+  closeOnShorthandEol) + push / pop / top / depth / inDelegationFrame.
 
 ## Native-Parser parse-context object  [compiler/native-parser/parse-ctx.{scrml,js}]
 
@@ -241,7 +264,7 @@ RoleClassificationEntry [244]
 RSInput [271] · RSOutput [323] · RSError [343]
 
 ## Tags
-#scrmlts #map #schema #ast #ir #compiler #types #native-parser #expr-ast #stmt-ast #tag-frame #body-mode
+#scrmlts #map #schema #ast #ir #compiler #types #native-parser #expr-ast #stmt-ast #tag-frame #body-mode #mk4 #seam
 
 ## Links
 - [primary.map.md](./primary.map.md)

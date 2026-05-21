@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 ## Test Framework
 Runner: `bun test` (Bun built-in test runner)
@@ -14,7 +14,7 @@ Run a subtree: `bun test compiler/tests/conformance`
 Run e2e: `bun run e2e`  (or `playwright test --config=e2e/playwright.config.ts`)
 Pre-test hook: `bash scripts/compile-test-samples.sh` runs automatically before `test`.
 
-## Test Categories  [compiler/tests/ — 731 total .test.js/.test.ts files]
+## Test Categories  [compiler/tests/ — 732 total .test.js/.test.ts files]
 unit         — compiler/tests/unit/**            — ~514 files — per-pass / per-construct unit tests (largest bucket)
 integration  — compiler/tests/integration/**     —  ~75 files — multi-stage pipeline + canonical-corpus smoke tests
 conformance  — compiler/tests/conformance/**     — ~105 files — one test per SPEC §34 error code + block-grammar subdir
@@ -22,40 +22,42 @@ browser      — compiler/tests/browser/**         —  ~12 files — runtime be
 lsp          — compiler/tests/lsp/**             —  ~10 files — language-server feature tests
 commands     — compiler/tests/commands/**        —   ~6 files — CLI subcommand tests (init/migrate/promote/...)
 self-host    — compiler/tests/self-host/**       —   ~4 files — self-hosting compiler-module tests
-parser-conformance — compiler/tests/parser-conformance-*.test.js — 4 root files (see below; +1 since prior map)
+parser-conformance — compiler/tests/parser-conformance-*.test.js — 6 root files (see below)
 e2e          — e2e/tests/**.spec.ts              —   6 files — Playwright (02-counter, 03-contact-book,
                                                    05-multi-step-form, 14-mario, todomvc, docs-website)
 
-Full-suite pass count grew 16,840 → 17,812 over the S113 native-parser arc
-(+972 tests across the 13 dispatched milestone landings).
+Full-suite pass counts:
+  S113 close: 17,812 / 0 fail / 169 skip / 1 todo
+  S114 close: 17,842 / 0 fail / 173 skip / 1 todo  (net +30 pass / +4 skip; 0 regressions)
 
 ## Native-Parser Conformance Suite
-Four root test files drive the scrml-native parser (compiler/native-parser/)
+Six root test files drive the scrml-native parser (compiler/native-parser/)
 against an Acorn-style oracle + inline micro-corpora. They are the single source
 of truth for current native-parser pass/skip/fail status.
 
 parser-conformance-lexer.test.js  — M1.1-M1.5 lexer; runs bench corpus + inline
   micro-corpus through both Acorn's tokenizer and native-parser/lex.js; asserts
   kind+text+span per token. `expr-literals.js` flipped to `full` byte-identical
-  disposition at S102 (`bcb48c9f`); M1.5 verified at S113.
-parser-conformance-expr.test.js   — M2 (M2.1 primary, M2.2 operators, M2.3
-  call/member/arrow heads, M2.4 scrml-extension forms) + M4.1 (await/yield as
-  expression operators); exercises native-parser/parse-expr.js + ast-expr.js;
-  conformance Tier 1 (node-kind sequence) + Tier 2 (ident/literal values).
-parser-conformance-stmt.test.js   — NEW S113. M3 (M3.1 substrate, M3.2 control-
-  flow, M3.3 functions/classes/import/export/try-throw, M3.4 error-recovery +
-  full statement conformance); exercises native-parser/parse-stmt.js +
-  ast-stmt.js. Tier 1+2 vs Acorn-oracle. 171 test sites at HEAD.
-parser-conformance-markup.test.js — MK1 (BlockContext context-boundary
-  recognition) + MK2 (TagFrame engine + closer-form pairing + TagKind/TagClass
-  classification — 5 BS classifier heuristics demonstrably gone) + MK3 (BodyMode
-  + DisplayTextLiteral §4.18 native quoted-text + E-UNQUOTED-DISPLAY-TEXT).
+  disposition at S102 (`bcb48c9f`); M1.5 verified S113.
+parser-conformance-expr.test.js   — M2 (M2.1-M2.4) + M4 (async/yield ops, K3/K4/K5
+  token closures, MarkupValue ExprKind); exercises native-parser/parse-expr.js +
+  ast-expr.js; conformance Tier 1 (node-kind sequence) + Tier 2 (ident/literal values).
+  +21 tests landing with MK4 (markup-as-value corpus).
+parser-conformance-stmt.test.js   — M3 (M3.1-M3.4: substrate, control-flow,
+  functions/classes/import/export/try-throw, error-recovery + full statement
+  conformance); exercises native-parser/parse-stmt.js + ast-stmt.js.
+  Tier 1+2 vs Acorn-oracle.
+parser-conformance-markup.test.js — MK1 (BlockContext) + MK2 (TagFrame engine +
+  closer-form pairing) + MK3 (BodyMode + DisplayTextLiteral §4.18 native quoted-text)
+  + MK4 (markup↔JS seam — deep-nesting smoke; cross-seam error attribution; peak
+  delegation depth; §65/§66 canonical worked-example). +13 tests at MK4 close.
   Exercises native-parser/parse-markup.js + parse-ctx.js + tag-frame.js +
-  body-mode.js + display-text-literal.js. Tested vs the BS oracle on the
-  markup-bench fixtures.
-
+  body-mode.js + display-text-literal.js + parse-seam.js + delegation-frame.js.
+parser-conformance-corpus.test.js — MK4 §65-§66 corpus smoke (Tier 1+2 strict diff
+  vs live pipeline). Histogram: clean-3 → 535 of 1000 .scrml corpus files after
+  MK4 C3+C4; explicit Tier 1+2 promotion to M5+ scope (requires downstream routing).
 parser-conformance.test.js  — older parser-conformance harness driver (predates
-  the four native-parser suites; uses the same harness modules).
+  the five native-parser suites; uses the same harness modules).
 
 ### Harness  [compiler/tests/parser-conformance/]
 corpus-enumerator.js — enumerates corpus files
@@ -96,7 +98,7 @@ conformance suites instead diff native-parser output against an Acorn oracle
 parity; new tests land alongside their owning M-/MK-sub-step.
 
 ## Tags
-#scrmlts #map #test #bun-test #playwright #conformance #native-parser
+#scrmlts #map #test #bun-test #playwright #conformance #native-parser #mk4
 
 ## Links
 - [primary.map.md](./primary.map.md)

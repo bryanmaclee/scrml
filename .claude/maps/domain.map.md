@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 The domain of this repo is *compiling the scrml language*. scrml is a
 single-file, full-stack reactive web language: one `.scrml` source compiles to
@@ -15,7 +15,8 @@ next. Stages 1–CE are per-file parallel (one Bun worker each); MOD and the
 cross-file stages are project-wide synchronization points.
 Hard target: a 4000-line project compiles from scratch in under 1 second.
 The live pipeline (compiler/src/) is UNCHANGED since commit 78faa65 — verified at
-`e613621` (the entire S113 13-dispatch native-parser arc edited zero compiler/src/ files).
+`092fa90a` (the S114 native-parser arc edited only cli.js / commands/compile.js /
+api.js for the M5-LIGHT observability flag; all 18 pipeline stages are unmodified).
 
 | # | Stage | Abbrev | Source file(s) |
 |---|---|---|---|
@@ -51,9 +52,14 @@ body-pre-parser, and the statechild re-tokenizers).
 Status (parallel track — see structure.map.md):
 - NOT wired into the api.js pipeline. compiler/src/ does not import it.
   Consumed only by `compiler/tests/parser-conformance*` test files.
-- Swaps in behind `--parser=scrml-native` at milestone M5; M6 deletes the live
+- Accessible as an OBSERVABILITY SHADOW via `--parser=scrml-native` (M5-LIGHT,
+  S114): the live pipeline still runs; the flag emits `I-PARSER-NATIVE-SHADOW`
+  into result.warnings confirming end-to-end flag wiring. Downstream routing is
+  M5-FULL scope (compiler/native-parser/M5-ast-bridge-scoping.md).
+- Swaps in behind `--parser=scrml-native` at milestone M5-FULL; M6 deletes the live
   front-end stages (BS + Acorn + BPP) and retires the flag.
 - Each module is a `.scrml` CANONICAL source + `.js` EXECUTABLE shadow.
+- FEATURE-COMPLETE at S114 (JS chain M1-M4 + markup chain MK1-MK4 + K-ledger 12/12 RESOLVED).
 
 ### Composed-engines architecture (DD §D2)
 The front-end is a stack of trampoline loops, each dispatching by an `<engine>`:
@@ -73,11 +79,12 @@ JS layer:
   (M3.1-M3.4, S113). M3 extends ParseMode with `.InBlock`. Error recovery
   wired into M1's ErrorRecovery engine (panic-mode resync on `;` /
   statement-start keywords / `}`).
-- M4 — full bounded JS subset (residual D5 MUST-PARSE/ADD coverage + the
-  full-corpus conformance close). M4.1 (`await`/`yield` operators + `function*`
-  full wiring; `inAsync`/`inGenerator` ctx slots) ✅ COMPLETE (S113). M4.2
-  (K6 destructuring unification + `noIn` flag) + M4.3 (Tier 1+2 full corpus)
-  pending.
+- M4 — full bounded JS subset (D5 MUST-PARSE/ADD + full-corpus conformance).
+  M4.1 (await/yield as operators; function* wiring; inAsync/inGenerator ctx) ✅ S113.
+  M4.2 (K6 destructuring unification; noIn flag) ✅ S114.
+  M4.3 (full-corpus conformance close; async/await RETRACTED — parallel-by-default,
+    no colored functions; canonical async surface is the compiler body-split) ✅ S114.
+  ✅ M4 COMPLETE S114.
 
 Markup layer:
 - MK1 — CONTEXT GRID. `parse-markup` is a trampoline dispatching by the
@@ -96,8 +103,15 @@ Markup layer:
   literal with `\"`/`\\`/`\${` escape set; `${...}` interpolation delegates to
   M2's expression parser; `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7) fires as a parse
   outcome in code-default bodies.
-- MK4 — markup↔JS seam; re-tokenizer-scaffolding deletion. Pending (gated on
-  M4).
+- MK4 — markup↔JS seam; re-tokenizer-scaffolding deletion. ✅ COMPLETE (S114).
+  `parse-seam.scrml/.js` — DelegationFrame stack; MarkupToJS / JSToMarkup frame
+  variants; cross-seam error attribution. `delegation-frame.scrml/.js` — leaf module
+  (K9 circular-import fix). `ast-expr` extended with `MarkupValue` ExprKind
+  (markup-as-value: `const card = <div/>`, `renders <p>...</p>`). `parse-expr`
+  extended with `parseMarkupValue` (JS→markup delegate-up). `parse-markup`
+  extended with `emitContextBlock` (markup→JS LogicEscape body parsing).
+  `parseInterpolationBody` in display-text-literal.js threads source for
+  cross-seam diagnostics.
 
 JS-host third body-mode (§40.8 `default-logic` — NOT MK3's scope): `<program>`
 / `<page>` body parses in `default-logic` mode, a distinct third mode that
@@ -117,20 +131,34 @@ DisplayTextLiteral — display-text-literal scanner (Outside / InLiteralText /
                      InInterpolation, §4.18.3-§4.18.4).
 (Engine state-child catalog: see schema.map.md.)
 
+### M-ladder status at HEAD `092fa90a` (S114 CLOSE)
+JS chain:    M1 ✅ M2 ✅ M3 ✅ M4 ✅ — COMPLETE
+Markup chain: MK1 ✅ MK2 ✅ MK3 ✅ MK4 ✅ — COMPLETE
+K-ledger: 12/12 RESOLVED (K1-K7 in S113; K8-K12 in S114)
+NATIVE-PARSER FRONT-END FEATURE-COMPLETE.
+Next: M5-FULL (downstream-bridge pipeline swap; scoping doc:
+  compiler/native-parser/M5-ast-bridge-scoping.md + M5-divergence-ledger.md;
+  estimated 98-180h per MD-ladder scope-revision DD outcome).
+
+### New native-parser files added S114 (2 new paired modules)
+`parse-seam.scrml/.js` — markup↔JS seam contract (DelegationFrame, MK4)
+`delegation-frame.scrml/.js` — leaf module; delegation surface extracted from parse-ctx (K9)
+
 ### Authority
 Native-parser design lives in scrml-support (deep-dives), NOT this repo:
 `scrml-native-parser-design-2026-05-17.md` (S98 DD) and
 `scrml-native-parser-front-end-charter-2026-05-20.md` (charter B).
-In-repo working artifact: `docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md`.
-Per-sub-step progress notes: `docs/changes/native-parser-front-end/progress-*.md` (one
-per dispatched M-/MK-/K-step — 13 at HEAD).
+In-repo working artifacts: `docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md`
+(authoritative M-ladder + K-ledger tracker; §5 progress table is the single source of truth)
++ `compiler/native-parser/M5-ast-bridge-scoping.md` (M5-FULL downstream-bridge scoping doc)
++ `compiler/native-parser/M5-divergence-ledger.md` (surface gap inventory for M5-FULL).
 
 ## Core Language Concepts (what the compiler processes)
 V5-strict access model — two declaration forms; `<x> = init` declares, `@x` reads/writes a reactive cell (SPEC §6, §1.6).
 Reactive cell — `@`-sigil state; three RHS shapes: plain, decl-coupled-with-render-spec, derived (`const <name> = expr`).
 Compound state — `@compound.field` access; Variant C (SPEC §6.3).
 Markup-as-value — markup is a first-class value usable in logic-context expressions (SPEC §1.4, the L1 pillar).
-Context model — logic `{}`, SQL `?{}`, CSS `#{}`, meta `^{}`, foreign `_{}`; stack rules + coercion (SPEC §3, §7-§9, §22-§23).
+Context model — logic `{}`, SQL `?{}`, CSS `#{}`, meta `^{}`, foreign `_{}`; stack rules + coercion (SPEC §3, §7-§9, §22-§23). Approach C for `^{}`: Approach C primitives + import:host suffix-form α ratified S114 (SPEC §21.3.1 + §22.5.1 + §22.12 + §22.13).
 Tier ladder — control-flow promotion: Tier 0 `if=`, Tier 1 `<match>`, Tier 2 `<engine>` (SPEC §17.0, §51.0).
 `<engine>` / `<machine>` — state machine governing an enum or struct; rule= transitions, effect=, <onTransition> (SPEC §51).
 `<channel>` — file-level WebSocket sync; V5-strict body auto-syncs (SPEC §38).
@@ -140,11 +168,12 @@ Route inference — server/client split + HTTP route inferred from file structur
 `lin` — linear types: exactly-once consumption (SPEC §35).
 `~` keyword — pipeline accumulator / lin-variable / context boundary (SPEC §32).
 `fn` vs `function` — `fn` is a constrained pure function ≡ `pure function`; `function` is unconstrained (SPEC §33, §48).
+No async/await in scrml — SPEC §19.9.8 encodes the language-wide rule: parallel-by-default, no colored functions; canonical async surface is the compiler body-split (ratified S114 — M4.3 retraction; +3 §34 codes).
 Validators + auto-synthesized validity surface — 14 universal-core predicates (`req`/`length`/`pattern`/`min`/`max`/...); per-compound `isValid`/`errors`/`touched`/`submitted` (SPEC §55).
 Inline type predicates — refinement types `number(>0 && <10000)`, `string(email)`; SPARK zones (SPEC §53).
 Type-as-argument family (L22) — `parseVariant` / `formFor` / `schemaFor` / `tableFor` — types passed as values (SPEC §41.13-§41.15, §53.14).
 `<schema>` + migrations — SQL DDL, column types, migration diff (SPEC §39).
-§4.18 quoted-text model — native display-text literal; MK3 implements natively at the native-parser; the older quoted-text-model BS-retrofit (Waves 2-7) is SUPERSEDED by charter B.
+§4.18 quoted-text model — native display-text literal; MK3 implements natively at the native-parser; the older quoted-text-model BS-retrofit (Waves 2-7) was SUPERSEDED by charter B and DEREF'd to scrml-support/archive/ at S114.
 Output name encoding — emitted JS var names use kind prefixes + a hash scheme (SPEC §47).
 
 ## Compiler Analysis Concepts (passes that classify, not transform)
@@ -176,7 +205,7 @@ SPEC-INDEX.md — section navigation map.
 PIPELINE.md (compiler/PIPELINE.md) — normative stage contracts + lock map (L1-L22) + failure-mode catalog.
 
 ## Tags
-#scrmlts #map #domain #compiler #pipeline #scrml-language #native-parser #composed-engines #charter-b
+#scrmlts #map #domain #compiler #pipeline #scrml-language #native-parser #composed-engines #charter-b #mk4 #m5-light
 
 ## Links
 - [primary.map.md](./primary.map.md)

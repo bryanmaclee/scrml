@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 The repo is a Bun workspace: root `scrmlts` + `compiler` workspace member.
 External-dependency surface is intentionally tiny — scrml's "no-build" pitch.
@@ -54,9 +54,9 @@ gate-classifier, outer-fixpoint}.
 SEPARATE track. NOT reachable from api.js or any compiler/src/ module
 (grep-confirmed: no compiler/src/ file imports native-parser). Each module is a
 `.scrml` canonical + `.js` shadow; the graph below is the `.js` import structure
-at HEAD `e613621` (27 paired modules; 2 added since the prior map — see below).
+at HEAD `092fa90a` (29 paired modules; +2 added S114 vs prior map's 27).
 
-JS layer (M1 lexer + M2 expr + M3 stmt + M4.1 async/gen):
+JS layer (M1 lexer + M2 expr + M3 stmt + M4 full subset):
   lex.js → cursor, span, token, lex-mode, bracket-stack, error-recovery,
            lex-in-{code, single-string, double-string, template,
                    line-comment, block-comment, regex}
@@ -64,54 +64,73 @@ JS layer (M1 lexer + M2 expr + M3 stmt + M4.1 async/gen):
                    + delegates to the per-mode lex-in-* dispatchers
   lex-in-regex.js → char-classify (K2 leaf — added S113)  // cycle to lex-in-code broken
   lex-in-{double-string,template}.js → reuse `scanStringEscape` from lex-in-single-string
-  char-classify.js — NEW S113 (K2 fix). Leaf module: 6 char-classification
+  char-classify.js — S113 (K2 fix). Leaf module: 6 char-classification
                      predicates (isWhitespaceCode / isNewlineCode / isDigit /
                      isHexDigit / isIdentStart / isIdentCont). Zero internal
                      native-parser imports. Breaks the lex-in-code ↔ lex-in-regex cycle.
-  parse-expr.js → token-cursor, ast-expr, parse-mode, span, token + M2.4 +
-                  M4.1 Await/Yield surface
-  token-cursor.js → token  (walks lex()'s Token[])
-  ast-expr.js → span  (Expr-node constructors; 37 ExprKind variants at HEAD)
+  parse-expr.js → token-cursor, ast-expr, parse-mode, span, token.
+                  M4 surface: K3/K4/K5 token closures (compound-assign maximal-munch,
+                  OptionalChain, Hash/#id, DoubleColon); MK4 surface: parseMarkupValue
+                  (JS→markup delegate-up; isMarkupValueAhead discriminator).
+  token-cursor.js → token  (walks lex()'s Token[]; extended MK4: optional source threading)
+  ast-expr.js → span  (Expr-node constructors; 39 ExprKind variants at HEAD;
+                  MK4 NEW: MarkupValue + makeMarkupValue)
   parse-mode.js → engine declaration (ParseMode; extended at M3.1 with `.InBlock`)
-  parse-stmt.js — NEW S113 (M3). → ast-stmt, parse-expr, parse-mode, token, span
-                  + error-recovery (M3.4 panic-mode resync)
-  ast-stmt.js   — NEW S113 (M3). → span (Stmt-node constructors + binding-pattern
-                  enums BindingKind/BindingPropertyKind/BindingElementKind)
+  parse-stmt.js — S113 (M3). → ast-stmt, parse-expr, parse-mode, token, span
+                  + error-recovery (M3.4 panic-mode resync).
+                  MK4: makeParseStmtContext(tokens, source) optional source threading.
+  ast-stmt.js   — S113 (M3). → span (Stmt-node constructors + binding-pattern
+                  enums; M4.2/K6: REAL ObjectPattern/ArrayPattern binding nodes)
 
-Markup layer (MK1 BlockContext + MK2 TagFrame + MK3 BodyMode/DisplayTextLiteral):
+Markup layer (MK1 BlockContext + MK2 TagFrame + MK3 BodyMode/DisplayTextLiteral
+             + MK4 markup↔JS seam — COMPLETE S114):
   parse-markup.js → block-context, parse-ctx, token, span, tag-frame (MK2),
-                    body-mode (MK3), display-text-literal (MK3)
-  parse-ctx.js → extends M1's makeLexContext; adds node-sink + delegation-stack
+                    body-mode (MK3), display-text-literal (MK3), parse-seam (MK4).
+                    MK4: emitContextBlock attaches parsed JS body[] to LogicEscape blocks;
+                    diagnostics forwarded with DelegationFrame attribution.
+  parse-ctx.js → extends M1's makeLexContext; adds node-sink + delegation-stack.
+                 K9 RESOLVED S114: delegation-stack helpers moved to parse-ctx from
+                 block-context (delegation-frame leaf provides the surface now).
   block-context.js → engine declaration (BlockContext); `.InMarkupTag` nests
-                     BodyMode (K1 forward-ref RESOLVED at MK3.1); `.InLogicEscape`
-                     nests LexMode (markup→JS seam — MK4 pending)
-  tag-frame.js — NEW S113 (MK2). → token, span, parse-ctx, error-recovery.
+                     BodyMode (K1 fwd-ref RESOLVED at MK3.1). K9 RESOLVED S114:
+                     delegationDepth/topDelegationFrame imported from delegation-frame leaf
+                     instead of parse-ctx (circular import broken).
+  tag-frame.js — S113 (MK2). → token, span, parse-ctx, error-recovery.
                   Exports TagFrame engine + TagKind / TagClass calcs +
                   STRUCTURAL_ELEMENTS registry + tokenizeOpener / recognizeOpener /
                   classifyTag + closer-form pairing (`</>`, `</name>`, `/>`) +
                   mismatch-recovery (E-MARKUP-002) + EOF-recovery (E-CTX-001) +
-                  stray-closer (E-CTX-003).
-  body-mode.js — NEW S113 (MK3). → minimal deps; declares BodyMode engine
+                  stray-closer (E-CTX-003). K9 RESOLVED S114: isTagNameChar de-aliased.
+  body-mode.js — S113 (MK3). → minimal deps; declares BodyMode engine
                   (`.FreeText` / `.CodeDefault`) + ProgramBodyMode enum
                   (§40.8 third mode) + bodyModeForChildOf / isCodeBearingParentName.
-  display-text-literal.js — NEW S113 (MK3). → span, body-mode, parse-expr
-                  (interpolation delegates to M2). Exports scanDisplayTextLiteral
-                  + `{segments, exprs}` ONE-node AST shape + E-UNQUOTED-DISPLAY-TEXT
-                  detection. Escape set: `\"` / `\\` / `\${` (3-escape union
-                  reconciling SPEC §4.18.3 + §4.18.4; see non-compliance report).
+  display-text-literal.js — S113 (MK3). → span, body-mode, parse-expr.
+                  MK4: parseInterpolationBody threads source for cross-seam diagnostics.
+                  Exports scanDisplayTextLiteral + E-UNQUOTED-DISPLAY-TEXT detection.
+                  Escape set: `\"` / `\\` / `\${` (3-escape union).
+  parse-seam.js — NEW S114 (MK4). Zero native-parser imports from other submodules
+                  in this direction (seam-contract leaf). Exports: DelegationFrameKind +
+                  makeDelegationFrame + cross-seam error attribution helpers.
+  delegation-frame.js — NEW S114 (K9 fix). Leaf module: zero native-parser imports.
+                  Exports: delegationKinds / closeConditionKinds /
+                  closeOn{BraceDepth,TagFrameBalanced,AttrTerminator,ShorthandEol} /
+                  makeDelegationFrame / push / pop / top / depth / inDelegationFrame.
+                  Breaks the block-context ↔ parse-ctx circular import.
 
 Consumers (tests only):
   compiler/tests/parser-conformance-lexer.test.js  → lex.js (vs Acorn oracle)
   compiler/tests/parser-conformance-expr.test.js   → parse-expr.js + ast-expr.js
-  compiler/tests/parser-conformance-stmt.test.js   → parse-stmt.js + ast-stmt.js  (NEW S113)
+  compiler/tests/parser-conformance-stmt.test.js   → parse-stmt.js + ast-stmt.js  (S113)
   compiler/tests/parser-conformance-markup.test.js → parse-markup.js + parse-ctx.js +
                                                       tag-frame.js + body-mode.js +
-                                                      display-text-literal.js
+                                                      display-text-literal.js +
+                                                      delegation-frame.js (MK4 — S114)
+  compiler/tests/parser-conformance-corpus.test.js → parse-markup.js + parse-expr.js (S114)
   compiler/tests/parser-conformance/parsers.js     → harness adapter
   compiler/tests/integration/anomaly-2-export-fn-body-stripping.test.js → reproduces ANOMALY-2
 
 ## Tags
-#scrmlts #map #dependencies #compiler #bun #native-parser
+#scrmlts #map #dependencies #compiler #bun #native-parser #mk4
 
 ## Links
 - [primary.map.md](./primary.map.md)

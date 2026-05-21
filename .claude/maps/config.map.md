@@ -1,18 +1,18 @@
 # config.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 No `.env`, `.env.example`, or `.env.template` file exists in the repo
 (`.gitignore` lists `.env` / `.env.local` defensively, but no such file is present).
 No `scrml.config.*` / `.scrmlrc` project config file exists.
 There is no runtime application here — this is a compiler invoked by CLI flags.
-UNCHANGED since 87453fb (S113 native-parser arc added no env vars or config files).
+UNCHANGED since 87453fb (S113-S114 native-parser arc added no env vars or config files).
 
 ## Environment Variables
 
 Only two environment variables are read anywhere in the codebase, both for
 dev/serve-port selection in the generated/served output. (The native-parser
-modules read no environment variables — grep-confirmed at e613621.)
+modules read no environment variables — grep-confirmed at 092fa90a.)
 
 SCRML_PORT — optional — dev server / compiler-server listen port.
   Read in compiler/src/serve-client.js:57 (falls back to a DEFAULT_PORT) and
@@ -28,11 +28,12 @@ No runtime feature-flag system. Compiler behavior is selected via CLI flags
 (see build.map.md "Compile / Dev options" for the full flag list:
 --verbose, --convert-legacy-css, --embed-runtime, --emit-batch-plan,
 --emit-reachability, --chunk-size-budget=N, --emit-machine-tests,
---debug-perf, --watch).
+--debug-perf, --parser=scrml-native, --watch).
 
-Forthcoming flag (NOT yet wired): `--parser=scrml-native` — per the native-parser
-README M-ladder, the milestone-M5 flag that selects the scrml-native front-end
-over the live block-splitter/Acorn front-end. Not present in cli.js at this commit.
+`--parser=scrml-native` — M5-LIGHT observability flag (S114, M5.1). Accepted by
+`scrml compile` / `scrml dev`. Emits `I-PARSER-NATIVE-SHADOW` info diagnostic into
+`result.warnings` per compile; the live BS+TAB+BPP pipeline still runs. Only
+`scrml-native` is a valid value; other values error at argument-parse time.
 
 ## Config Files
 
@@ -52,7 +53,7 @@ SPEC §28 defines `html-content-model` and four lint-suppression settings
 they are not configuration of the scrmlts repo.
 
 ## Tags
-#scrmlts #map #config #env
+#scrmlts #map #config #env #m5-light
 
 ## Links
 - [primary.map.md](./primary.map.md)

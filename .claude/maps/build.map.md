@@ -1,16 +1,16 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 Build tool: Bun (no transpile step — `.ts` runs directly).
 No Dockerfile, no docker-compose, no CI workflow files (.github/, .gitlab-ci, Jenkinsfile).
 The only CI-equivalent automation is git hooks under scripts/git-hooks/.
-UNCHANGED since 87453fb (S113 native-parser arc added no build scripts / CLI flags / hooks).
+S114 change: `--parser=scrml-native` CLI flag added to `compile` subcommand (M5-LIGHT).
 
 ## npm Scripts (package.json)
 compile        — `bun run compiler/src/cli.js compile` — compile a .scrml file/dir
 pretest        — `bash scripts/compile-test-samples.sh` — runs automatically before `test`
-test           — `bun test compiler/tests/` — full test suite (731 files)
+test           — `bun test compiler/tests/` — full test suite (732 files)
 test:coverage  — `bun test compiler/tests/ --coverage`
 watch          — `bun --watch compiler/src/cli.js compile` — recompile on change
 bench          — `bun run compiler/src/cli.js compile samples/compilation-tests/ --timing`
@@ -43,10 +43,13 @@ A bare `.scrml` file or directory as the first arg falls through to `compile`.
 --chunk-size-budget=N    soft size budget for W-CG-CHUNK-LARGE (default 100000)
 --emit-machine-tests     emit <base>.machine.test.js per source (§51.13)
 --debug-perf             sub-stage CG/RS/DG timing (PGO instrumentation)
+--parser=scrml-native    M5-LIGHT observability shadow (S114) — emits I-PARSER-NATIVE-SHADOW
+                         info diagnostic per compile; the live BS+TAB+BPP pipeline still
+                         runs canonically (no native-parser routing at this milestone).
+                         Only accepts `scrml-native` as value; other values error.
+                         See compiler/native-parser/M5-ast-bridge-scoping.md for the
+                         deferred M5-FULL downstream-bridge rationale.
 --watch, -w              watch + recompile (compile command only)
-
-(Not yet wired: `--parser=scrml-native` — milestone-M5 flag for the native-parser
-front-end; see native-parser/README.md. Absent from cli.js at this commit.)
 
 ### build / serve / migrate / promote options
 build:   --output <dir>, --embed-runtime, --minify (accepted, no-op in v1)
@@ -57,6 +60,7 @@ promote: --match, --engine, --dry-run, --check
 ## Build & Release
 There is no release pipeline in-repo. Release cut points are git release tags
 (`refs/tags/v*`); the pre-push hook runs the README accuracy gate only on tag pushes.
+v0.4.0 was cut at S114 (pkg.json bump at `11e2ddf`, tag at `092fa90a`).
 
 ## CI/CD Pipeline
 None. No .github/workflows, .gitlab-ci.yml, or Jenkinsfile.
@@ -95,7 +99,7 @@ checked-in script (no rebuild-native-parser-dist analog exists); they are
 hand-maintained 1:1 per the README ANOMALY-2 swap-in concession.
 
 ## Tags
-#scrmlts #map #build #cli #bun #git-hooks
+#scrmlts #map #build #cli #bun #git-hooks #native-parser
 
 ## Links
 - [primary.map.md](./primary.map.md)

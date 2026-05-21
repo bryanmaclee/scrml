@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-21T04:30:00-06:00  commit: e613621
+# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
 
 This compiler does not `throw` to signal user-facing errors. Each pipeline
 stage collects structured *diagnostic* objects (code + message + span +
@@ -12,7 +12,8 @@ source, not this map.
 ## Per-Stage Diagnostic Classes (one per pipeline stage)
 All have the same shape: `{ code, message, span, severity }` where
 severity ∈ "error" | "warning" | "info". UNCHANGED since commit 78faa65;
-re-verified at e613621 (the S113 native-parser arc edited zero compiler/src/ files).
+re-verified at 092fa90a (the S114 native-parser arc edited zero compiler/src/
+diagnostic classes).
 
 TABError  — compiler/src/ast-builder.js:1232 — Stage 3 (Tokenizer + AST Builder). Extends `Error` (the one diagnostic class that is a real throwable; also used as a collected diagnostic).
 PAError   — compiler/src/protect-analyzer.ts:126 — Stage 4 (protect= Analyzer)
@@ -29,6 +30,16 @@ Every stage result carries `.errors[]` (and sometimes `.diagnostics[]`).
 `api.js` funnels them all through `collectErrors(stageLabel, errors, file)`
 at ~20 call sites (one per stage: BS, TAB, MOD, NR, SYM, CE, VP-1/2/3, PA,
 RI, TS, MC, ME, DG, BP, AG, RS, CG). The aggregate is then partitioned.
+
+## M5-LIGHT Info Diagnostic  [api.js — S114, M5.1]
+`I-PARSER-NATIVE-SHADOW` — emitted into `result.warnings` when
+`compileScrml({ parser: "scrml-native" })` is called (or `--parser=scrml-native`
+from the CLI). Observability-only at this milestone: the live BS+TAB+BPP pipeline
+still produces the FileAST; the native parser is NOT routed downstream. The
+diagnostic's presence confirms the flag is wired end-to-end. Severity: "info"
+→ always non-fatal; lands in `result.warnings` per the stream-partition rule.
+stage: "PARSER-FLAG". Future M5-FULL dispatch swaps the diagnostic emission for
+real native-parser routing behind the same flag value.
 
 ## Diagnostic-Stream Partition  [api.js:1779-1804 — S93 fix]
 CRITICAL contract — a single `isNonFatal(e)` predicate splits the stream:
@@ -72,13 +83,22 @@ private codes). Verified at HEAD:
                 native-parser implements the 3-escape union; see non-compliance
                 report on the §4.18.3 vs §4.18.4 editorial inconsistency)
 
-K7 (M1 lexer prototype-pollution — `JS_KEYWORDS[text]` resolving inherited
-Object.prototype names) was FIXED S113 (M3.3) via an own-property guard
-(`Object.prototype.hasOwnProperty.call(...)`) in `token.scrml`/.js.
+Native-parser-local `E-STMT-*` / `E-EXPR-*` codes (32 distinct codes, e.g.
+`E-STMT-MISSING-SEMICOLON`, `E-EXPR-UNCLOSED-PAREN`) are NOT yet in SPEC §34
+(intentional pre-M5 gap; see non-compliance report item 2). These are only
+consumed by `parser-conformance-*.test.js`; not user-visible until M5. At M5
+the §34 catalog must be reconciled (add surviving codes; merge any that overlap
+existing codes).
 
-Pre-M3 string / comment / regex scanners TOLERATE EOF / unterminated input and
-defer the diagnostic to a later milestone rather than failing — see
-native-parser/README.md "M1.4 status". These remain unchanged.
+K-ledger at HEAD `092fa90a` — ALL 12 K-issues RESOLVED (K1-K7 in S113;
+K8-K12 in S114). The native-parser `.scrml` files compile cleanly (K9
+`delegation-frame.scrml` leaf extraction broke the markup-layer circular
+import; K10-K12 were one-line scrml-source fixes).
+
+Cross-seam error attribution is live at MK4: `diag.delegationFrame` markers
+identify whether an error originated in markup→JS (LogicEscape body) or JS→markup
+(MarkupValue expression). `parse-seam.js` is the seam contract surface
+(DelegationFrame stack + MarkupToJS / JSToMarkup frame variants).
 
 ## Dedicated Lint Passes (emit W-*/I-* diagnostics)
 compiler/src/lint-ghost-patterns.js — W-LINT-001..015 ghost-pattern detection
@@ -100,7 +120,7 @@ These surface as raw stack traces if an invariant is violated — that is the
 intended "compiler bug" signal, distinct from user-facing diagnostics.
 
 ## Tags
-#scrmlts #map #error #diagnostics #compiler #lint #native-parser
+#scrmlts #map #error #diagnostics #compiler #lint #native-parser #m5-light
 
 ## Links
 - [primary.map.md](./primary.map.md)
