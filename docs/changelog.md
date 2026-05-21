@@ -2,7 +2,80 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-21 **S113 CLOSE** — the charter-B native-parser implementation arc run hard: 13 dispatches landed across one session — M2.4 (M2 ladder complete) + the MK2 ladder (MK2.1-MK2.3) + the M3 ladder (M3.1-M3.4) + the MK3 ladder (MK3.1-MK3.3) + the M1.x cleanup cluster (K2 resolved) + M4.1 — all in `compiler/native-parser/`, alongside the live pipeline; no `compiler/src/` changed. **Four milestones completed: M2, M3, MK2, MK3.**) Full `bun test` **17,812 pass / 169 skip / 1 todo / 0 fail / 731 files / 52,503 expect**; pre-commit subset **13,362 pass / 88 skip / 1 todo / 0 fail**. Delta vs S112 close (16,840 / 730 / 49,417): **+972 pass / +1 file / +3,086 expect / 0 fail / 0 regressions** — all native-parser conformance tests.
+Current baseline (2026-05-21 **S114 CLOSE — v0.4.0 release-cut**). Full `bun test` **17,842 pass / 173 skip / 1 todo / 0 fail / 732 files / ~52,800 expect**; pre-commit subset **13,358 pass / 92 skip / 1 todo / 0 fail / 694 files**. Native-parser front-end COMPLETE (JS chain M1-M4 + markup chain MK1-MK4); K-ledger 12-of-12 resolved (S113 + S114). v0.4.0 tag forthcoming.
+
+## v0.4.0 — 2026-05-21 (the post-v0.3.0 rollup)
+
+The v0.4 release-cut consolidates everything adopter-facing accumulated since v0.3.0 (S92, 2026-05-14): the L22 type-as-argument family flagships, the Tailwind §26 expansion, the bug-fix sweep, the quoted-text language ratification (SPEC §4.18), and the no-async/await language-wide formalization.
+
+**The native-parser front-end is feature-complete but NOT YET ADOPTER-VISIBLE — the live pipeline still runs BS+Acorn+BPP through v0.4.** The native parser ships in v0.5 (M5 — pipeline swap behind `--parser=scrml-native`) and becomes default at v0.6 (M6 — joint retirement of the old paths).
+
+### Adopter-facing additions in v0.4
+
+**L22 type-as-argument family — two flagship members landed:**
+- **`formFor(StructType)`** (S102-S103) — type-driven form generation. Markup-element form `<formFor for=Signup onsubmit=fn pick=[...]/>` with named slots for per-field customization, progressive-enhancement `<form action=>` structural default for server-fn handlers, auto-synthesized state cell + Shape 2 + auto-synth validity surface + `<errors of=>` + submit button. 8 error codes in §34; v1.0-scope rigorously bounded. Full deep-dive (10 OQs + 2 debates) feeding the SPEC §41.14 + 11 normative subsections.
+- **`schemaFor(StructType)`** (S104) — type-driven SQL DDL generation. Function-call form `${ schemaFor(Users) }` inside `<schema>` blocks per OQ-SCH-1 debate verdict (Form B 50/60 vs A 39/60 vs C 37/60 — output-kind match). Enum-typed struct fields lower to `text req oneOf([variant-names...])` automatically (the load-bearing v1.0 value-add — closes the enum-knowledge-loss-at-DB-boundary gap). 8 `E-SCHEMAFOR-*` codes; shared-core emit vocabulary per §39.5.7.
+- **`tableFor(StructType)` deep-dive landed (S105)** — admin-UI lift; impl pending v0.4.x patch.
+
+**Tailwind §26 expansion (S100 / S108-S109):**
+- Arbitrary-value support in `class=` attribute (`px-[7px]`, `bg-[#f00]`, etc.).
+- Typography utilities — full Tailwind typography plugin surface.
+- Lint additions for unrecognized utility classes.
+
+**Bug-fix sweep (S107-S110):**
+- **Bug 1 ring-offset** — bind:value compound-state ring-offset on Shape 2 cells with cross-field deps.
+- **Bug 2** — block-splitter text/code misclassification at `:`-shorthand body boundaries.
+- **Bug 4** — block-splitter `?{` C-narrow context recognition.
+- **Match block-form Phase 5** — exhaustiveness across nested variant patterns.
+
+**SPEC §4.18 — quoted-text model, scope (b), Wave 1 (S111):**
+- NEW §4.18 — code-default body mode + display-text literal. In a code-default body (engine state-child / match block-form arm / `:`-shorthand), a bare run is code; display text is an explicit `"..."` display-text literal.
+- §4.18.3 escape catalog amendment (S114) — `\"`, `\\`, `\${` (the three escapes; the prior "only two" wording was editorial drift; §4.18.4's `\${` lifted into §4.18.3 directly).
+- §4.18.4 `${...}` interpolation inside the literal (syntax-quote / unquote shape).
+- §4.18.5 verbatim whitespace inside the literal.
+- §4.18.6 codegen auto-HTML-escapes literal text.
+- §4.18.7 `E-UNQUOTED-DISPLAY-TEXT` — bare prose in a code-default body fires this error.
+- Plain-markup bodies (`<p>`, `<h1>`, etc.) UNCHANGED — they remain free-text.
+- **Enforcement landing:** the SPEC defines the language at v0.4. The native parser (MK3) implements §4.18 natively. Full enforcement reaches adopters at M5 (v0.5).
+
+**No `async` / `await` — language-wide standing rule formalized (S114):**
+- NEW SPEC §19.9.8 — formalises the rule that the §48.3.5 (`fn`-scope E-FN-005) was the partial expression of. scrml has no `async` keyword and no `await` keyword. Parallel-shape rule to §42.1 (no null/undefined) + PRIMER §6 (no try/catch) + Pillar 4 (one file type) + Pillar 5 (one grammar).
+- NEW PRIMER §6.1 — encodes the rule + the body-split / `!` / `!{}` naming-discipline decomposition.
+- §34 +3 error codes — `E-ASYNC-NOT-IN-SCRML`, `E-AWAIT-NOT-IN-SCRML`, `E-FOR-AWAIT-NOT-IN-SCRML`.
+- §48.3.5 amendment — E-FN-005 now subordinate to §19.9.8; error message updated.
+- **The canonical async surface is the body-split / CPS mechanism** (§19.9.3, §19.9.5 — A9 / Insight 26 / S72 ratified). Compiler-managed, uncolored at source. The `!`-typing + `!{}` call-site error handler is the error model, distinct from the body-split — they compose but are distinct.
+
+**Other adopter-facing surface:**
+- `<onTimeout>` element + `<onIdle>` element (S77-S78 — temporal handlers).
+- `<page>` element + §40 v0.3 program-shape (S91-S92).
+- `<auth role="X">` first-class element + auth graph + per-route artifact splitting (Approach A — S91-S92).
+- `package.json` `version` field now content-addressed into `chunks.json` `compiler` field (S92 Q-OPEN-4 + S94 bump-on-tag rule).
+
+### Internal — NOT adopter-facing yet (lands at M5 / M6)
+
+**Native-parser front-end COMPLETE** (S98-S114):
+- **JS chain:** M1 (composed-engines lexer; S99-S103) + M2 (expression parser; S112-S113) + M3 (statement parser; S113) + M4 (full bounded JS subset; S113-S114 — with the S114 retraction of source-level `async`/`await` per §19.9.8).
+- **Markup chain:** MK1 (BlockContext engine; S112) + MK2 (TagFrame engine; S113) + MK3 (BodyMode + DisplayTextLiteral; S113) + MK4 (markup↔JS seam; S114).
+- Ships at `compiler/native-parser/` alongside the live BS+Acorn+BPP path. The seam contract per the R1 spike (S111) lands at MK4.
+- M5 = pipeline swap behind `--parser=scrml-native` (v0.5).
+- M6 = joint retirement of BS + Acorn + BPP + the JS-parser-in-`^{}`-body path (v0.6, per the S114 ^{} expressiveness DD + Approach C ratification).
+
+**K-ledger 12-of-12 resolved (S113 + S114):** K1 (forward-ref) / K2 (lex circular import) / K3-K4-K5 (M1 lexer maximal-munch) / K6 (destructuring unification) / K7 (lexer prototype-pollution) / K8 (function→fn refactor across 27 .scrml / 478 decls) / K9 (markup-layer circular import) / K10 (`isExpr` presence-check — `!= not` → `is some`) / K11-K12 (parse-markup null/undefined → not/is-not).
+
+**Quoted-text-model dereffed to scrml-support archive** (S114). The 4 files (882 lines) moved from `scrmlTS/docs/changes/quoted-text-model/` → `scrml-support/archive/changes/quoted-text-model/` after MK3 landed (the native parser implements §4.18 natively; the BS-retrofit waves are unnecessary).
+
+**`^{}` expressiveness deep-dive + Approach C ratification (S114):** scrml-native fully describes runtime semantics today (8 `meta.*` members + 4 timer adds). Compile-time `^{}` general-developer surface closes to scrml-native + `emit` / `emit.raw` / `reflect`. Self-host bootstrap retains a bounded `import:host` declaration form (file-top, manifest-gated to `scrml/stdlib/compiler/**`). M6 retires the JS-parser-in-`^{}`-body path entirely. Dive at `scrml-support/docs/deep-dives/meta-block-runtime-semantics-expressiveness-2026-05-21.md`.
+
+**Ext 1+3+2 full body-split scope-dive (S114):** 16 sub-steps decomposed (Ext 1 substrate + Ext 3 conditional-tier + Ext 2 loop-aware); 88-112h estimate; S4-predicate amendment for Ext 2 M2.3 ratified S114; implementation briefs queued. Dive at `scrml-support/docs/deep-dives/ext-1-3-2-full-body-split-scoping-2026-05-21.md`.
+
+### Forward cadence
+
+- **v0.4.x patches** = Ext 1+3+2 implementation landings, tableFor impl, doc polish, minor bug fixes.
+- **v0.5** = M5 — pipeline swap behind `--parser=scrml-native` flag; native parser available as opt-in default.
+- **v0.6** = M6 — joint retirement; BS + Acorn + BPP + JS-parser-in-`^{}`-body path deleted; native parser default; `import:host` declaration form lands.
+- **v0.6+** = future enrichments to the L22 family (variantNames + reflective metadata), §29 vanilla-interop disposition, generator policy resolution.
+
+### 2026-05-21 (S113 CLOSE — native-parser arc run hard: M2/M3/MK2/MK3 complete, M4.1 + K2; 13 dispatches)
 
 ### 2026-05-21 (S113 CLOSE — native-parser arc run hard: M2/M3/MK2/MK3 complete, M4.1 + K2; 13 dispatches)
 
