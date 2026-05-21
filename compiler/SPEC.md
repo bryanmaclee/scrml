@@ -28821,7 +28821,7 @@ This forward-compatibility guarantee is intentional and is part of why OQ-2 (b) 
 
 **Added:** S118, 2026-05-21. **Source:** deep-dives `compiler-story-living-compiler-2026-05-21.md` (the build-story artifact + four-component composite) and `per-program-build-identifier-2026-05-21.md` (the per-`<program>` tier); debate `debate-build-story-artifact-2026-05-21.md` (Approach A vs B); `~/.claude/design-insights.md` build-story entry. **Authority:** Approach B (content-addressed Merkle closure) ratified by PA/user decision S117 (2026-05-21).
 
-> **Nominal section.** This section describes scrml's build-story model **as designed**. It is **spec-ahead-of-implementation** — Wave 1 of the build-story arc. No build-story implementation exists in the compiler as of S118; this section is the normative target a later implementation wave wires. Clauses marked `*` describe a guarantee that is **specified but not yet proven for the scrml toolchain** — §58.12 enumerates each `*` gap factually. The concrete byte-level file format of the build story and its `build-story.lock` sidecar is a deliberate follow-on, NOT this section (§58.5 specifies the sidecar's role and required properties; not its serialization).
+> **Nominal section.** This section describes scrml's build-story model **as designed**. It is **spec-ahead-of-implementation** — Wave 1 of the build-story arc. No build-story implementation exists in the compiler as of S118; this section is the normative target a later implementation wave wires. Clauses marked `*` describe a guarantee that is **specified but not yet proven for the scrml toolchain** — §58.12 enumerates each `*` gap factually. The build-story closure model, its canonical encoding, and the `build-story.lock` serialization format are normatively specified here in §58.5.1–§58.5.4; what remains spec-ahead is the compiler *implementation* of build-story resolution, generation, and verification.
 
 ### 58.1 Overview — compilation as a pure function
 
@@ -28901,7 +28901,76 @@ A Merkle root alone is opaque. To prevent the build story from becoming an un-au
 - A `build-story.lock` sidecar SHALL be generated for, and committed alongside, every build story a project pins. The sidecar is **mandatory**, not optional.
 - The sidecar SHALL be the human-readable expansion of the closure: every node listed by content hash, kind, and dependency edges, with the name→hash pointer map.
 - The sidecar SHALL be a *generated, verifiable* artifact — it SHALL be re-derivable from the build-story root and the content-addressed store, and a sidecar that does not re-derive to its stated root SHALL be rejected.
-- The sidecar's concrete serialization format is a follow-on specification (see the §58 Nominal banner). This section fixes only its **role** (human inspection + verifiability) and its **mandatory existence**.
+- The sidecar's role is fixed here (human inspection + verifiability + mandatory existence); its **concrete closure model, canonical encoding, and serialization format** are normatively specified in §58.5.1–§58.5.4.
+
+#### 58.5.1 The closure node model
+
+A build-story closure is a directed acyclic graph of **nodes**. Every node has exactly these members:
+
+- **`kind`** — one of the enumerated values `build-story-root`, `compiler-source`, `tool`, `stdlib`, `vendor`. Exactly one node in a closure SHALL have kind `build-story-root`; it is the root.
+- **`payload-hash`** — the content hash of the component's own bytes (the actual source/files of that component), in the `"sha256:"` form of §58.6. For the `build-story-root` node, `payload-hash` SHALL be the literal string `"sha256:" + 64×"0"` (the root node has no payload of its own — it exists only to bind the four components).
+- **`deps`** — the set of **node-hashes** (§58.5.2) of this node's direct dependency nodes. The `build-story-root` node's `deps` SHALL be exactly the four component nodes. A `tool` node's `deps` SHALL include the `compiler-source` node it was built against. A `vendor` node's `deps` SHALL be its own transitive vendored inputs (possibly empty).
+- **`name`** — an OPTIONAL human-facing metadata pointer (a label such as `tool:lsp` or `vendor:cm6-bridge`). The `name` is NOT an input to any hash (§58.3 — names are metadata, never identity).
+
+**Normative statements:**
+
+- A build-story closure SHALL be acyclic. A closure whose `deps` edges form a cycle SHALL be rejected.
+- A build-story closure SHALL contain exactly one `build-story-root` node.
+- A node's `kind` SHALL be one of the five enumerated values; an unrecognized kind SHALL cause the closure to be rejected.
+
+#### 58.5.2 Canonical node encoding and the build-story root
+
+Each node has a **canonical encoding** — the exact byte sequence over which its node-hash is computed. The canonical encoding of a node N is the concatenation, in this exact order, of:
+
+1. the ASCII bytes of `N.kind`;
+2. one LF byte (`0x0A`);
+3. the ASCII bytes of `N.payload-hash`;
+4. one LF byte;
+5. for each dep-hash in `N.deps` **sorted ascending by byte value as ASCII strings**: the dep-hash ASCII bytes followed by one LF byte.
+
+The `name` member is deliberately absent from the canonical encoding. Every encoded field (`kind` from the fixed enum; `payload-hash` and dep-hashes in `"sha256:"`-hex form) is LF-free by construction, so LF is an unambiguous delimiter.
+
+**Normative statements:**
+
+- The **node-hash** of N SHALL be `"sha256:" + lower-hex(SHA-256(canonical-encoding(N)))` — 64 lowercase hex digits, computed per §58.6.
+- Node-hashes SHALL be computed bottom-up: a node's `deps` node-hashes SHALL be known before the node's own canonical encoding is formed. The closure's acyclicity (§58.5.1) guarantees a valid topological order exists.
+- The **build-story root** SHALL be the node-hash of the `build-story-root` node. This is the single hash carried in the `[story]` manifest table (§58.4).
+- The encoding is fully canonical: `kind` is from a fixed enum, `payload-hash` is content-determined, and `deps` are sorted — so one closure produces exactly one build-story root on every conforming implementation. This is the normatively-specified canonical encoding §58.6 requires.
+
+#### 58.5.3 The `build-story.lock` serialization format
+
+The `build-story.lock` sidecar is a UTF-8 text file with LF (`0x0A`) line endings. It is the human-inspectable, canonically-ordered serialization of the closure:
+
+```
+scrml-build-story-lock 1
+root sha256:c0ffee42deadbeef0011223344556677889900aabbccddeeff00112233445566
+sha256:1a2b…  vendor          sha256:9f8e…  vendor:cm6-bridge
+sha256:3c4d…  stdlib          sha256:7a6b…  stdlib
+sha256:5e6f…  tool            sha256:2d3c…  tool:lsp           sha256:8b9a…
+sha256:8b9a…  compiler-source sha256:4f5e…  compiler-source    sha256:1a2b… sha256:3c4d…
+sha256:c0ff…  build-story-root sha256:0000…  -                 sha256:5e6f… sha256:8b9a… sha256:3c4d… sha256:1a2b…
+```
+
+**Normative statements:**
+
+- **Line 1** SHALL be the literal header `scrml-build-story-lock 1` — the format name and a format-version integer.
+- **Line 2** SHALL be `root <build-story-root>` — the build-story root per §58.5.2.
+- **Each subsequent line** SHALL describe one closure node, with these fields in order, separated by one or more spaces: `<node-hash> <kind> <payload-hash> <name> <dep-hash>*`. The `<name>` field SHALL be the node's metadata pointer, or a single `-` if the node has no name. Zero or more `<dep-hash>` fields follow, in the sorted order of §58.5.2.
+- Node lines SHALL appear **sorted ascending by `<node-hash>`**. The header and root lines are fixed in position; the node lines' sort makes the whole file byte-deterministic for a given closure — `build-story.lock` is therefore diff-stable across regenerations.
+- The `build-story.lock` file SHALL be committed to version control alongside `scrml.toml` (§58.5 — mandatory).
+
+#### 58.5.4 Verification
+
+A `build-story.lock` is a *verifiable* artifact, not a trusted one. Given a sidecar and the build-story root it claims (from the `root` line, cross-checked against `[story]` in `scrml.toml`):
+
+**Normative statements — a conforming tool verifying a build story SHALL:**
+
+1. Parse every node line; reject the sidecar if any line is malformed, if `kind` is not one of the five enumerated values, or if the `deps` edges form a cycle (§58.5.1).
+2. For each node, recompute its node-hash from the canonical encoding of `(kind, payload-hash, sorted deps)` per §58.5.2, and reject the sidecar if the recomputed value does not equal the node-hash printed on that line.
+3. Confirm exactly one node has kind `build-story-root` and that its node-hash equals the `root` line — reject otherwise.
+4. When a content-addressed store is available, confirm each node's `payload-hash` against the actual component bytes in the store — reject on mismatch.
+
+A `build-story.lock` that fails any check SHALL be rejected; a build proceeding under a rejected build story SHALL fail closed (§58.4 — a build story is opt-in, but a *malformed* one is never silently ignored). Verification reads only the sidecar and the store; it requires no network access and no trusted third party — this is the structural DDC / Trusting-Trust defense §58 exists to provide.
 
 ### 58.6 Closure encoding — canonical, bit-stable, collision-resistant
 
@@ -28909,7 +28978,7 @@ The build-story root is a trust artifact: it is the verification-layer answer to
 
 **Normative statements:**
 
-- The build-story closure SHALL have a **normatively-specified canonical encoding** — node ordering, edge ordering, field ordering, and byte representation SHALL be fully determined by the closure's content, so that one closure produces exactly one root on every conforming implementation.
+- The build-story closure's **canonical encoding is normatively specified in §58.5.2** — node-hash construction, edge ordering, field ordering, and byte representation are fully determined by the closure's content, so one closure produces exactly one root on every conforming implementation.
 - The build-story root SHALL be computed with a **cryptographic-strength content hash**. v1 specifies **SHA-256**; the root is written `"sha256:" + <64 lowercase hex digits>`. The algorithm tag (`sha256:`) is part of the canonical encoding, so a future revision MAY introduce an additional algorithm without ambiguity.
 - The build-story hash is **deliberately NOT the §47 FNV-1a 32-bit scheme.** §47 hashes output-name payloads, where 32 bits plus the `E-CG-010` collision-halt is adequate *because a collision is a local, detectable, build-halting defect*. The build story is a **supply-chain trust artifact** where an undetected collision is an attack primitive (a malicious closure forged to a benign root); cryptographic collision resistance is load-bearing. The two hash schemes serve different purposes and are intentionally distinct.
 - The whole-compiler determinism this encoding's reproducibility claim rests on is **not yet proven for the scrml toolchain** — see §58.12.\*
