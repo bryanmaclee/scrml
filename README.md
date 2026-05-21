@@ -590,7 +590,7 @@ scrml lets you write a complete app in one file: markup, reactive state, scoped 
 SQL, server functions, and inline tests — no build config, no separate server file,
 no state management library.
 
-**Current state — v0.3.x.** Live phase status: [`master-list.md` §0](./master-list.md) · recent landings: [`docs/changelog.md`](./docs/changelog.md) · known spec-vs-impl gaps + per-gap workarounds: [`docs/known-gaps.md`](./docs/known-gaps.md).
+**Current state — v0.4.** Live phase status: [`master-list.md` §0](./master-list.md) · recent landings: [`docs/changelog.md`](./docs/changelog.md) · known spec-vs-impl gaps + per-gap workarounds: [`docs/known-gaps.md`](./docs/known-gaps.md).
 
 ### What's in here
 
@@ -644,6 +644,6 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Status
 
-scrml is open source under the [MIT License](./LICENSE). The language is still pre-1.0 — the spec evolves as we find friction and the compiler catches up. See [`docs/changelog.md`](./docs/changelog.md) for what just landed and what's in flight.
+scrml is open source under the [MIT License](./LICENSE) and shipping today — `bun link` and the compile is real. The spec evolves as we find friction; the compiler catches up. See [`docs/changelog.md`](./docs/changelog.md) for what just landed and what's in flight.
 
 The compiler runs on [Bun](https://bun.sh). Compiled output is plain JavaScript that runs in any browser or JavaScript runtime.
