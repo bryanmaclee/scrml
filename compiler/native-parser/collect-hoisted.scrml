@@ -1,0 +1,94 @@
+// collect-hoisted.scrml — F3 / Cluster B — the native-parser analogue of the
+// live pipeline's `collectHoisted` (ast-builder.js ~L12132 + the
+// `hasProgramRoot` computation ~L12296).
+//
+// PILLAR 5b classification (DD §D1):
+//   collectHoisted is CALCULATION (pure). It is a fold over the native
+//   parser's block-stream — read-only, no cursor, no engine. It does NOT
+//   carry state: it has no transitions, no lifecycle. The recursion over
+//   `Markup.children` + `LogicEscape.body` is a tree-walk, the same calc
+//   shape as buildSpanTable in the live pipeline. The spec's `fn` + struct
+//   primitives are sufficient; no missing primitive surfaced.
+//
+// PURPOSE — the file-level surface bridge:
+//   The downstream compiler stages (name-resolver, symbol-table,
+//   component-expander, route-inference, dependency-graph, auth-graph,
+//   codegen) consume six hoisted top-level collections + a `hasProgramRoot`
+//   boolean off the FileAST. The live pipeline derives them in
+//   `ast-builder.js:collectHoisted`. When the M5 swap activates the native
+//   parser (v0.6) the same surface must be derivable from the native
+//   parser's block-stream. This module is that derivation.
+//
+// THE LIVE CONTRACT (transplant source — behavioral spec):
+//   collectHoisted(nodes) returns { imports, exports, typeDecls, components,
+//   machineDecls, channelDecls }; the caller folds in `hasProgramRoot`
+//   (true iff any top-level markup node has tag "program"). The live walk:
+//     - `logic` node     -> carries pre-filtered imports/exports/typeDecls/
+//                           components arrays (spread them in);
+//     - `engine-decl`    -> push to machineDecls; recurse `bodyChildren`
+//                           for NESTED engines;
+//     - `markup`/`state` -> recurse `children`;
+//     - `markup` tag "channel"  -> push to channelDecls;
+//     - `markup` tag "program" (top level only) -> hasProgramRoot;
+//     - `meta` node      -> walk `body` for import/export/type/component-def.
+//
+// THE NATIVE NODE-CATALOG ADAPTATION (Phase 0 — DD §M5-divergence-ledger):
+//   The native parser's block-stream is a flat `Block[]` per file
+//   (parse-markup.js `parseMarkup`). Block-kind map (live -> native):
+//     live `markup`        -> native Block.kind "Markup"   (tag = Block.name)
+//     live `logic`         -> native Block.kind "LogicEscape"
+//                             (body = parsed Stmt[], NOT pre-filtered)
+//     live `meta`          -> native Block.kind "Meta"
+//     live `import-decl`   -> native Stmt.kind "Import"
+//     live `export-decl`   -> native Stmt.kind "Export"
+//     live `engine-decl`   -> NO native kind yet (markup-layer engine
+//                             declarations are not modelled — v0.6 F7)
+//     live `type-decl`     -> NO native kind yet (v0.6 F7)
+//     live `component-def` -> NO native kind yet (v0.6 F7)
+//     live `state`         -> NO native kind yet (v0.6 F7)
+//
+//   v0.5 collects the kinds the native parser produces TODAY:
+//     - imports / exports — scanned out of every LogicEscape block's parsed
+//       Stmt[] body (the live `logic` node hands these pre-filtered; the
+//       native LogicEscape body is the raw Stmt[], so the walker filters);
+//     - channelDecls — Markup blocks with name "channel" (recurse children);
+//     - hasProgramRoot — a top-level Markup block with name "program".
+//   typeDecls / components / machineDecls resolve EMPTY at v0.5 — their
+//   native kinds land at v0.6 F7. The recursion + the collection slots are
+//   present so v0.6 lights them up WITHOUT a structural rewrite (Cluster B
+//   one-walk-all-outputs intent).
+//
+// Status (F3 / v0.5): COMPILABLE skeleton. The `${...}` JS-escape block
+// carries the live surface; the .js shadow runs (README ANOMALY-2 — the
+// shadow discipline every native-parser file follows at v0.3). No
+// live-pipeline wiring at v0.5 — exercised only by the native-parser
+// conformance harness. The M5 swap-in (v0.6) activates it.
+
+${
+    // -----------------------------------------------------------------
+    // collectHoisted — CALCULATION (pure). Fold the native parser's
+    // block-stream into the six hoisted top-level collections + the
+    // `hasProgramRoot` boolean (Cluster B — one walk, all outputs).
+    //
+    //   blocks — the `Block[]` from parse-markup.js's `parseMarkup`.
+    //
+    // Returns { imports, exports, typeDecls, components, machineDecls,
+    //           channelDecls, hasProgramRoot }.
+    //
+    // (live surface in collect-hoisted.js — the .scrml shape carries the
+    // canonical Pillar 5b SHAPE; the .js shadow runs.)
+    // -----------------------------------------------------------------
+    export fn collectHoisted(blocks) {
+        // see collect-hoisted.js for the running shadow
+    }
+
+    // -----------------------------------------------------------------
+    // hasProgramRoot — CALCULATION (pure predicate). True iff any
+    // TOP-LEVEL block is a Markup block named "program". Folded into
+    // collectHoisted per Cluster B, but exported standalone too for the
+    // W-PROGRAM-001 check the live pipeline runs (ast-builder.js L12296).
+    // -----------------------------------------------------------------
+    export fn hasProgramRoot(blocks) {
+        // see collect-hoisted.js for the running shadow
+    }
+}
