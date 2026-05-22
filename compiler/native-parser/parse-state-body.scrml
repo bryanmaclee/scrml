@@ -137,6 +137,16 @@ ${
     // stream for ATTR_TYPED_DECL tokens and produce the TypedAttrDecl[]
     // the live `parseTypedAttributes` produces. Each ATTR_TYPED_DECL
     // token's `.text` is JSON `{ name, typeExpr }`.
+    //
+    // EMPTY-PAREN DISCRIMINATION (M5 P5-8 — r10-bun-admin T-state).
+    //   A `name(type)` typed-attr declaration ALWAYS carries a non-empty
+    //   type expression. An empty-paren `name()` is a CALL expression, not
+    //   a typed-attr decl. The F1 tokenizer emits ATTR_TYPED_DECL for any
+    //   `name(...)` shape inside a state opener — including empty-paren
+    //   calls. When the markup layer over-scans an opener's attribute
+    //   region, stray `name()` call tokens would flip a plain `state` to a
+    //   phantom `state-constructor-def`. An empty-typeExpr decl is dropped
+    //   here so `stateNodeKind` discrimination stays correct.
     // -----------------------------------------------------------------
     export fn parseTypedAttrTokens(tokens) {
         const typedAttrs = []
@@ -151,7 +161,12 @@ ${
                 const name = typeof parsed.name == "string" ? parsed.name : "?"
                 const rawTypeExpr = typeof parsed.typeExpr == "string" ? parsed.typeExpr : ""
                 const span = tok.span is some ? tok.span : not
-                typedAttrs.push(splitTypedAttr(name, rawTypeExpr, span))
+                const decl = splitTypedAttr(name, rawTypeExpr, span)
+                // An empty-paren `name()` is a call expression, not a
+                // `name(type)` typed-attr decl — skip it so it cannot
+                // flip `stateNodeKind`.
+                if (decl.typeExpr == "" and decl.defaultValue is not) continue
+                typedAttrs.push(decl)
             }
         }
         return typedAttrs

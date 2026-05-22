@@ -157,6 +157,23 @@ export function isStateBlock(block) {
 // A TypedAttrDecl: { name, typeExpr, optional, defaultValue, span }.
 //   - defaultValue — the text after `=` in the typeExpr, or null.
 //   - optional     — true if the typeExpr ends with `?` OR a default is set.
+//
+// EMPTY-PAREN DISCRIMINATION (M5 P5-8 — `gauntlet-r10-bun-admin` T-state).
+//   A `name(type)` typed-attr declaration ALWAYS carries a non-empty type
+//   expression — the `type` between the parens is the whole point of the
+//   typed-decl form. An empty-paren `name()` is unambiguously a CALL
+//   expression, NOT a typed-attr decl. The native F1 tokenizer
+//   (`tag-frame.js` `tokenizeAttributeRegion`) emits an `ATTR_TYPED_DECL`
+//   for ANY `name(...)` shape inside a state opener — including the
+//   empty-paren `name()` call form. When the markup layer over-scans an
+//   opener's attribute region (a `< p.foo).length` mis-segmentation grabbing
+//   a `${}` body full of `.run()` / `.all()` / `.get()` calls), those stray
+//   `name()` call tokens would otherwise flip a plain `state` instantiation
+//   to a phantom `state-constructor-def`. A typed decl with an empty type
+//   expression is not a typed decl — it is dropped here so `stateNodeKind`
+//   discrimination (`shapeStateBlock`) stays correct under attr over-scan.
+//   This matches the live FileAST: an over-scanned state opener stays a
+//   plain `state` node (live `typedAttrs` undefined / empty).
 // =============================================================================
 export function parseTypedAttrTokens(tokens) {
     const typedAttrs = [];
@@ -177,6 +194,9 @@ export function parseTypedAttrTokens(tokens) {
         const rawTypeExpr = typeof parsed.typeExpr === "string" ? parsed.typeExpr : "";
 
         const decl = splitTypedAttr(name, rawTypeExpr, tok.span ?? null);
+        // An empty-paren `name()` is a call expression, not a `name(type)`
+        // typed-attr declaration — skip it so it cannot flip `stateNodeKind`.
+        if (decl.typeExpr === "" && decl.defaultValue === null) continue;
         typedAttrs.push(decl);
     }
     return typedAttrs;
