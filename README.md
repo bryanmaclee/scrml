@@ -57,70 +57,50 @@ evolves; the compiler enforces.
 ## Why scrml
 
 **State is the declaration primitive.** `<count> = 0` declares a reactive cell;
-`@count` reads or writes it. Compound state, derived (`const <total> = expr`),
-server-pinned (`<users server>`), linear (exact-once) values, refinement-typed
-cells — all sit on the same primitive with different attributes. The compiler
-tracks the dependency graph and re-renders on change.
+`@count` reads or writes it. Compound, derived (`const <total> = expr`),
+server-pinned (`<users server>`), linear, refinement-typed cells are all the
+same primitive with different attributes. The compiler tracks the dependency
+graph and re-renders on change.
 
 **Engines are the centerpiece.** When state goes from "a few booleans" to "this
-app has phases," promote from booleans (Tier 0 — `if=` chains) to a `<match for=Type>`
-block (Tier 1 — structural exhaustiveness; the compiler refuses to compile until
-every variant has a UI block), then to `<engine for=Type initial=.Variant>` (Tier 2 —
-exhaustiveness plus active transition rules). `<match>` is the rest-state for UI
-that doesn't yet need transition guarantees; `<engine>` adds the rules. `rule=`
-annotations on `<match>` arms are **accepted and compiler-checked** so you can
-forward-stage transition contracts during Tier 1 prototyping, but **they do not
-enforce at runtime** — promoting to `<engine>` is the wrapper swap that activates
-them. `W-MATCH-RULE-INERT` fires on any `rule=` you write at Tier 1 to keep the
-intent visible. The engine
-declares legal transitions per state via `rule=`, runs effect handlers via
-`<onTransition>`, schedules timeouts via `<onTimeout>` (with `cancelTimer("X")`
-builtin), watches for engine-wide idle via `<onIdle>`, nests via composite
-state-children for sub-machines, and restores prior inner state on re-entry via
-the `history` attribute. Five behaviorally-distinct UI states authored once,
-exhaustively, with cross-state effects intentional and co-located.
+app has phases," you promote up the Tier ladder (above) without rewriting the
+markup tree — `if=` chains, then `<match for=Type>`, then `<engine for=Type>`.
+The engine declares legal transitions, runs cross-state effects, and enforces
+that every variant has a UI block. The Engine Example below is the full shape.
 
 **Full-stack in one file.** Markup, logic, styles, SQL, server functions, error
-handling, channels for realtime, inline tests — everything lives in `.scrml`.
-The compiler analyzes your code and splits it across server and client
-automatically. No API layer to maintain, no route files to keep in sync, no
-API/UI drift.
+handling, realtime channels, inline tests — all in `.scrml`. The compiler
+analyzes the code and splits server from client automatically. No API layer, no
+route files, no API/UI drift.
 
 **Errors are states, not booleans.** `try`/`catch` is not in scrml's vocabulary.
-Failable functions surface errors as enum variants (`fn fetchItems()! -> LoadError`);
-the `!{}` handler at the call site routes each variant into the right Phase
-state. Missing-handler is a compile-time error; the failure modes live in the
-type, not in `<isError>` + `<errorMsg>` boolean rubble.
+Failable functions surface errors as enum variants (`fn fetchItems()! ->
+LoadError`); the `!{}` handler routes each variant into the right state. A
+missing handler arm is a compile-time error — the failure modes live in the
+type, not in `<isError>` boolean rubble.
 
-**Validators auto-synthesize a validity surface.** Compound state with `req`
-or `length` or other predicates produces `@form.isValid`, `@form.errors`,
-`@form.touched`, `@form.submitted` rollups AND per-field `@form.name.isValid`,
-`@form.name.errors` cells — all reactive, read-only. `<errors of=@form/>`
-renders the active errors at the right time. Same word fires three places:
-state validator (reactive), refinement type (compile-time + boundary), schema
-column (DB-enforced). No bilingual schema; no Zod; no separate validation
-library.
+**Validators auto-synthesize a validity surface.** Compound state with `req` /
+`length` / other predicates produces reactive read-only `@form.isValid` /
+`.errors` / `.touched` rollups plus per-field cells; `<errors of=@form/>`
+renders them at the right time. The same predicate fires three places — state
+validator, refinement type, schema column. No bilingual schema, no Zod.
 
-**The compiler eliminates N+1 automatically.** Because scrml owns both the
-query context and the loop context, a `for (let x of xs) { ?{...where id =
-${x.id}}.get() }` pattern is rewritten to one pre-loop `WHERE id IN (...)`
-fetch plus a keyed `Map` lookup — no DataLoader, no manual batching.
-Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT`
-envelope for snapshot consistency. [Measured Tier 2 wins](benchmarks/sql-batching/RESULTS.md):
-~1.7× at N=10, ~2.3× at N=100, ~3.3× at N=1000 on on-disk WAL `bun:sqlite` (v0.3.0 refresh).
+**Automatic N+1 elimination.** A `for` loop whose body does `?{...where id =
+${x.id}}.get()` is rewritten to one `WHERE id IN (...)` fetch plus a keyed
+lookup — no DataLoader, no manual batching. Independent reads in a `!` handler
+share one transaction envelope. (Opt-out, diagnostics, and measured wins:
+Features → Server/Client and the benchmarks.)
 
-**Realtime and workers as language primitives.** A `<channel>` block declares
-a WebSocket endpoint — the compiler emits the upgrade route, client connection
-manager, auto-reconnect, and pub/sub topic routing. State declared inside the
-channel auto-syncs across every connected client. A nested `<program>` is a
-Web Worker (or WASM module, or sidecar process) with typed RPC and supervised
-restarts. No `new WebSocket()`, no `postMessage` plumbing, no worker-loader
-config.
+**Realtime and workers as language primitives.** A `<channel>` block declares a
+WebSocket endpoint — the compiler emits the upgrade route, reconnect, and
+pub/sub routing; state declared inside auto-syncs across every connected client.
+A nested `<program>` is a Web Worker (or WASM module, or sidecar) with typed RPC
+and supervised restarts. No `new WebSocket()`, no `postMessage` plumbing.
 
-**No npm.** scrml ships its own stdlib: `auth`, `crypto`, `data`, `format`,
-`fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`,
-`cron`, `regex`, `oauth`. Sixteen modules cover the surface a typical app
-reaches for. No package manager, no dependency trees, no `node_modules`.
+**No npm.** scrml ships its own stdlib — sixteen modules (`auth`, `crypto`,
+`data`, `http`, `router`, `store`, `time`, and more) covering the surface a
+typical app reaches for. No package manager, no dependency trees, no
+`node_modules`.
 
 ## Quick Example — a Counter (Tier 0)
 
@@ -510,13 +490,13 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
 ### The Build Story
 
-> *Nominal — scrml's compiler model as designed. The build-story artifact and the per-`<program>` `compiler=` attribute are ratified design directions, not yet specified or implemented. `*` marks a claim not yet actual.*
+> *Nominal — scrml's compiler model as designed. Specified in [SPEC §58](compiler/SPEC.md); compiler implementation pending. `*` marks a claim not yet actual.*
 
 scrml's compiler has a build story. Compilation is a pure function of two inputs — your source and an explicit, committed **build story** that pins what "the compiler" is: a content-addressed Merkle closure over the compiler-proper's four components — compiler source, language tools, the standard library, and any vendored edge code — one root hash with the dependency edges between them *inside* the hash, plus a human-inspectable `build-story.lock` sidecar. Because every part — the compiler included — is identified by the hash of its content, customizing the compiler to your project and reproducing any build bit-for-bit\* stop being in tension: a tuned compiler is just a different pinned build story, and "pinned" is what makes it portable.
 
-A build story can be pinned per `<program>` — `<program compiler="…">`\* — and because nested `<program>` contexts are already isolated, shared-nothing compilation units, different parts of one application can be built by different compilers, each independently reproducible. This is deliberately not a live or hot-swappable compiler: every build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
+A build story can be pinned per `<program>` — `<program story="…">`\* — and because nested `<program>` contexts are already isolated, shared-nothing compilation units, different parts of one application can be built by different compilers, each independently reproducible. This is deliberately not a live or hot-swappable compiler: every build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
 
-<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit not yet done. The build-story artifact and the `<program compiler=>` attribute are design directions under active deep-dive — the exact surface may change.</sub>
+<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit not yet done. The build-story artifact and the `<program story=>` attribute are specified in SPEC §58 but not yet implemented in the compiler.</sub>
 
 ## Language Contexts
 
