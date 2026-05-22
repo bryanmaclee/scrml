@@ -27,6 +27,17 @@ S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 b
 - **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
 - **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
 
+## v0.5.0 — 2026-05-21 (native-parser M5 — retire-class + downstream extraction + bridge-lights)
+
+v0.5.0 cuts the first wave of the M5 native-parser arc — the retire-class simplifications, the downstream-pass extractions, and the catalog bridge-lights (landed S115). The live pipeline still runs BS+Acorn+BPP; the native parser remains non-adopter-visible (the `--parser=scrml-native` flag is observability-only through v0.6). Cut retroactively at S118 — the v0.5 work landed continuously across S115; per the S94 no-retroactive-renumber rule, the `package.json`-was-`0.4.0` drift across the S115-S117 commit window is accepted-as-known.
+
+- **F2** — `estreeType` retired, renamed `nativeKind`; dual-mode codegen kind-tests.
+- **F3** — native-parser `collectHoisted` analogue.
+- **F5 + F6** — PGO `has*` flags + `authConfig`/`middlewareConfig` extraction relocated out of `ast-builder.js` into a downstream PRECG stage.
+- **F1** — markup attribute tokenizer (`attrs[]` + `tokenizedAttrs`).
+- **F7** — state / SQL / CSS native sub-parsers.
+- **F8** — `^{}` meta + `!{}` error-effect payloads (downstream dual-mode dispatch).
+
 ## v0.4.0 — 2026-05-21 (the post-v0.3.0 rollup)
 
 The v0.4 release-cut consolidates everything adopter-facing accumulated since v0.3.0 (S92, 2026-05-14): the L22 type-as-argument family flagships, the Tailwind §26 expansion, the bug-fix sweep, the quoted-text language ratification (SPEC §4.18), and the no-async/await language-wide formalization.
