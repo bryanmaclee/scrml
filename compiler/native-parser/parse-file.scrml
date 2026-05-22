@@ -63,6 +63,17 @@
 //   SHALLOW synth: transition-decl collapse (§54.3) + substate metadata
 //   (§54.2) are a tracked deep-fidelity follow-up, not done here.
 //
+// THE ENGINE DISCRIMINATION (M5 gap-ledger DIFF-engine-in-nodes):
+//   An `<engine ...>` / `<machine ...>` element is likewise NOT a plain
+//   `markup` ASTNode. The LIVE pipeline emits an `engine-decl` ASTNode in
+//   `FileAST.nodes` (ast-builder.js `buildBlock`) AND ALSO into `machineDecls`.
+//   `isEngineBlock` (collect-hoisted) is the read-side discriminator: a
+//   `Markup` block named "engine" / "machine" routes to A3's `synthEngineDecl`
+//   (the 14-field EngineDeclNode derivation — reused, not re-implemented), so
+//   `FileAST.nodes` carries an `engine-decl` matching live. A3's `collectHoisted`
+//   independently folds the same engine into `machineDecls` — both pipelines
+//   carry the engine in `machineDecls` exactly once, so no double-count.
+//
 // THE BRIDGE SEAM:
 //   - A1 `translateStmtList` (translate-stmt.scrml) — a LogicEscape / Meta
 //     block's native `Stmt[]` body -> the live `LogicStatement[]`. A1 calls the

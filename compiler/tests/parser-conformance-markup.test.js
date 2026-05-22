@@ -1739,17 +1739,22 @@ describe("MK2.1 trampoline — TagFrame-driven .InMarkupTag dispatch", () => {
         expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 24 }]);
     });
 
-    test("a nested tag inside a logic escape is recognized — `${ <div> }`", () => {
-        // The charter Q1.C contract permits a markup tag inside a logic
-        // body. The `<div>` opener inside `${ ... }` is recognized; it is
-        // unterminated within the logic body, so MK2.2 recovers it at the
-        // context close (recoverTagsInClosedContext) — a Markup block AND
-        // the LogicEscape block are both emitted, the LogicEscape block
-        // intact (not corrupted by the recovery splice).
+    test("a `<` inside a logic escape is body content — `${ <div> }` emits only LogicEscape", () => {
+        // M5 gap-ledger 2a. Per §4.6 a `<` inside a `${...}` body is body
+        // content the JS layer owns — NOT a markup-tag context boundary.
+        // The live BS matches this exactly: a `<ident` in a brace context
+        // is consumed as raw text and NEVER becomes a block
+        // (block-splitter.js L1381). The markup trampoline must not enter
+        // .InMarkupTag here — doing so emitted a SPURIOUS top-level Markup
+        // sibling of the `logic` node (the 2a defect). `${ <div> }`
+        // therefore emits ONE LogicEscape block, no Markup block. A
+        // markup-AS-VALUE `${ x = <div/> }` is still recognized — by the
+        // JS-layer expression parser over the body-text slice, not the
+        // trampoline (see the MK4 §64 delegate-up tests).
         const s = blockStream("$" + "{" + " <div> }");
         const kinds = s.map((b) => b.kind);
-        expect(kinds).toContain(NativeBlockKind.Markup);
         expect(kinds).toContain(NativeBlockKind.LogicEscape);
+        expect(kinds).not.toContain(NativeBlockKind.Markup);
     });
 
     test("an opener with a structural element — `<engine for=Phase>...</>`", () => {
@@ -2086,14 +2091,18 @@ describe("MK2.2 trampoline — the <tag> tree (opener/closer pairing end-to-end)
         expect(markupTree("<a><b></></>")).toBe("a[0,12]{b[3,9]{}}");
     });
 
-    test("a markup tag inside a logic escape is paired within the body", () => {
-        // `${ <div></div> }` — the `<div>` opens + pairs INSIDE the logic
-        // body; the LogicEscape block follows.
+    test("a markup tag inside a logic escape is body content, not a paired Markup block", () => {
+        // M5 gap-ledger 2a. `${ <div></div> }` — the `<div></div>` is body
+        // content inside the logic body (§4.6 `<` suppression). The markup
+        // trampoline does NOT enter .InMarkupTag inside a logic body, so no
+        // Markup block is emitted; the source produces ONE LogicEscape
+        // block. The tag-frame stack stays empty — no TagFrame was ever
+        // pushed for the body `<div>` (the live BS posture: a `<ident` in a
+        // brace context is raw text).
         const s = parseMarkup("$" + "{" + " <div></div> }");
         const kinds = s.map((b) => b.kind);
-        expect(kinds).toContain(NativeBlockKind.Markup);
         expect(kinds).toContain(NativeBlockKind.LogicEscape);
-        // The <div> is fully paired — the tag-frame stack is empty.
+        expect(kinds).not.toContain(NativeBlockKind.Markup);
         const { ctx } = parseMarkupTrace("$" + "{" + " <div></div> }");
         expect(tagFrameDepth(ctx)).toBe(0);
     });
@@ -4397,14 +4406,20 @@ describe("MK4 §63 — markup -> JS delegate-down: LogicEscape block carries bod
         expect(stmt.span.end).toBeLessThanOrEqual(src.length - 1);
     });
 
-    test("nested ${} still produces stacked LogicEscape blocks", () => {
-        // The outer + inner each emit a LogicEscape block (the markup
-        // trampoline's nested-context machinery is unchanged at MK4 — the
-        // body delegation is ADDITIVE).
+    test("nested ${} folds into the outer LogicEscape — one top-level block", () => {
+        // M5 gap-ledger 2b. A nested `${...}` inside an outer `${...}` is
+        // NOT a top-level block: the live BS folds the inner brace context
+        // into the ENCLOSING context's body (popBraceContext pushes a
+        // nested brace block into the PARENT frame's children, never
+        // rootBlocks). The native parser has a flat top-level block-stream,
+        // so the faithful analogue suppresses the inner block's emission —
+        // its bytes are inside the outer LogicEscape's `bodyText`. The
+        // nested-context trampoline machinery (frame push/pop, delegation
+        // depth) is unchanged — only the top-level emission is suppressed.
         const src = "$" + brace + " a $" + brace + " b } c }";
         const blocks = parseMarkup(src);
         const les = blocks.filter(b => b.kind === "LogicEscape");
-        expect(les.length).toBe(2);
+        expect(les.length).toBe(1);
     });
 
     test("an unterminated body emits no LogicEscape block (per BS oracle)", () => {

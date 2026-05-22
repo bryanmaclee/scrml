@@ -73,7 +73,7 @@
 // in their headers).
 
 import { parseMarkupTrace } from "./parse-markup.js";
-import { collectHoisted } from "./collect-hoisted.js";
+import { collectHoisted, isEngineBlock, synthEngineDecl } from "./collect-hoisted.js";
 import { translateStmtList } from "./translate-stmt.js";
 import { isStateBlock } from "./parse-state-body.js";
 
@@ -192,6 +192,20 @@ function mapOneBlock(block, idGen, source, errors) {
         // `typedAttrs`) onto the block at parse time; route it to the live
         // `state` / `state-constructor-def` ASTNode rather than `markup`.
         return synthStateNode(block, idGen, source, errors);
+    }
+    if (kind === "Markup" && isEngineBlock(block)) {
+        // M5 gap-ledger DIFF-engine-in-nodes. The native parser models an
+        // `<engine ...>` / `<machine ...>` element as a plain `Markup`
+        // block. The LIVE pipeline emits an `engine-decl` ASTNode in
+        // `FileAST.nodes` (ast-builder.js `buildBlock` L11099) AND ALSO
+        // pushes it into `machineDecls` (ast-builder.js L11930). A3's
+        // `collectHoisted` already mirrors the `machineDecls` side; this
+        // branch mirrors the `nodes` side — route an engine block to a
+        // live-parity `engine-decl` ASTNode rather than `markup`. (The
+        // `machineDecls` count stays equal: both pipelines carry the
+        // engine in `machineDecls` exactly once — A3 there, the live
+        // file-level pass here. No double-count.)
+        return synthEngineNode(block, idGen, source);
     }
     if (kind === "Markup") {
         return synthMarkupNode(block, idGen, source, errors);
@@ -341,6 +355,32 @@ function synthStateNode(block, idGen, source, errors) {
         node.typedAttrs = Array.isArray(block.typedAttrs) ? block.typedAttrs : [];
     }
     return node;
+}
+
+// synthEngineNode — SYNTHESIZE a live `EngineDeclNode` (ast.ts:878) from a
+// native `Markup` block named "engine" / "machine", for placement in
+// `FileAST.nodes`. M5 gap-ledger DIFF-engine-in-nodes.
+//
+// The 14-field `EngineDeclNode` derivation (governedType / varName /
+// rulesRaw / ...) is A3's — `synthEngineDecl` in collect-hoisted.js. This
+// is a thin wrapper that REUSES it (not a re-implementation): A3 already
+// owns the attribute-read field derivation and the §51.0.C varName-
+// resolution rule. The wrapper adapts the id allocator — `synthEngineDecl`
+// takes a zero-arg `stamp()`, `parse-file.js`'s allocator is
+// `stampId(idGen)` — and threads `source` so the engine's `rulesRaw` body
+// slice is recoverable.
+//
+// The same engine block is ALSO walked by A3's `collectHoisted` into
+// `machineDecls` (an independent `synthEngineDecl` call). Two synthesized
+// nodes for one engine is intentional and matches the live pipeline: the
+// live `buildBlock` emits the `engine-decl` into `nodes`, and the live
+// file-level pass (ast-builder.js L11930) ALSO pushes that node into
+// `machineDecls`. The ids differ between the `nodes` copy and the
+// `machineDecls` copy here (two `stampId` draws) — the canary counts
+// nodes, never compares ids, so this is faithful for the ledger flip. A
+// deep follow-up could share ONE node instance across both collections.
+function synthEngineNode(block, idGen, source) {
+    return synthEngineDecl(block, () => stampId(idGen), source);
 }
 
 // synthTextNode — SYNTHESIZE a live `TextNode` (ast.ts:249) from a native

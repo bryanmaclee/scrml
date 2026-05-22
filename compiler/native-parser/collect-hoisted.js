@@ -300,7 +300,21 @@ export function collectHoisted(blocks, idGen, source) {
 // by the bare variant attr). A native attr-tokenizer fix for unquoted dotted
 // values is the proper close — surfaced as a deferred item.
 // =============================================================================
-function synthEngineDecl(block, stamp, source) {
+// isEngineBlock — calculation (predicate). True iff `block` is a native
+// `Markup` block the native parser models an engine declaration as: a
+// `<engine ...>` element (or the legacy `<machine ...>` keyword). This is
+// the read-side discriminator A3's `collectHoisted` keys the
+// engine-vs-markup routing off — exported so `parse-file.js`'s
+// `mapOneBlock` can route an engine block to `synthEngineDecl` (and emit a
+// live-parity `engine-decl` ASTNode into `FileAST.nodes`) instead of a
+// plain `markup` node, the same way `isStateBlock` routes a state block.
+export function isEngineBlock(block) {
+    if (block === undefined || block === null) return false;
+    if (block.kind !== "Markup") return false;
+    return block.name === "engine" || block.name === "machine";
+}
+
+export function synthEngineDecl(block, stamp, source) {
     const attrs = Array.isArray(block.attrs) ? block.attrs : [];
 
     const governedType = readAttrName(attrs, "for");

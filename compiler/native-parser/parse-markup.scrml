@@ -253,6 +253,25 @@ ${
     }
 
     // -------------------------------------------------------------------
+    // isTopLevelEmittingContext — CALCULATION (predicate). M5 gap-ledger
+    // 2b. A just-closed brace context emits a TOP-LEVEL block ONLY when
+    // its `priorContext` is `.TopLevel` (a file-level `${...}` / ...) or
+    // `.InMarkupTag` (a context inside a markup element body — the closer
+    // path's closeMarkupElement splices it under the element on close).
+    //
+    // A context whose `priorContext` is ITSELF a brace-delimited context
+    // is NESTED inside another body — `${ a ${ b } c }` — and does NOT
+    // emit a top-level block: the live BS folds the inner block into the
+    // ENCLOSING context's verbatim body. The native parser has a flat
+    // top-level block-stream, so the faithful analogue suppresses the
+    // inner block's emission (its bytes are inside the outer `bodyText`).
+    // -------------------------------------------------------------------
+    export fn isTopLevelEmittingContext(priorContext) {
+        return priorContext == BlockContext.TopLevel
+            || priorContext == BlockContext.InMarkupTag
+    }
+
+    // -------------------------------------------------------------------
     // recognizeContextEntryAt — CALCULATION (pure fn over the cursor's
     // current position). Answers the `.TopLevel` question: "does a
     // context-entry boundary begin at the cursor right now, and if so,
@@ -506,7 +525,15 @@ ${
             shapeErrorEffectBlock(block)
         }
 
-        appendBlock(ctx, block)
+        // M5 gap-ledger 2b — emit the context block to the top-level
+        // stream ONLY when this context sits at top level (or directly
+        // inside a markup body). A context nested inside another brace
+        // context is folded into the enclosing context's `bodyText`; the
+        // body-slice + F7.b chain-advance side-effects above still run
+        // (the suppression is ONLY the top-level append).
+        if (isTopLevelEmittingContext(frame.priorContext)) {
+            appendBlock(ctx, block)
+        }
     }
 
     // -------------------------------------------------------------------
@@ -883,13 +910,18 @@ ${
             stampTagDepthAtOpen(ctx, nested)
             return
         }
-        if (recognized.kind == "markupTag") {
-            // enterMarkupTagContext consumes the `<` + transitions
-            // @blockContext; the next iteration dispatches .InMarkupTag
-            // (see dispatchTopLevel's markupTag branch).
-            enterMarkupTagContext(ctx, cursor)
-            return
-        }
+        // M5 gap-ledger 2a — a `<ident>` / `< Ident>` opener inside a
+        // logic-escape body is NOT a markup-tag context boundary. Per
+        // §4.6 the `<` inside a `${...}` body is body content the JS
+        // layer owns: a markup-AS-VALUE `${ <div/> }` is recognized by
+        // the JS-layer expression parser (parse-expr's parsePrimary
+        // LessThan branch) over the body-text slice — NOT by the markup
+        // trampoline. The live BS matches this exactly (a `<ident` in a
+        // brace context is raw text, never a block). Entering
+        // .InMarkupTag here would emit a SPURIOUS top-level Markup
+        // sibling of the `logic` node — the 2a defect. So a `markupTag`
+        // recognition is ignored: the `<` falls through to the
+        // ordinary-body-character path below as body content.
 
         // Ordinary body character — track inner braces so the matching-
         // close depth calculation stays accurate, then advance.
