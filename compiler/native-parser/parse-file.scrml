@@ -124,10 +124,17 @@ ${
     //   filePath — the absolute source path (onto the FileAST verbatim).
     //   source   — the scrml source text.
     //
-    // Steps: (1) parse via parseMarkupTrace + collect ctx.diagnostics;
-    // (2) map each native block to its live ASTNode (A1 bridge on logic /
-    // meta bodies); (3) fold the hoisted collections via A3 collectHoisted;
-    // (4) produce the FileAST with authConfig / middlewareConfig null.
+    // Steps: (1) parse via parseMarkupTrace; (1b) P4-2 — lift bare
+    // declaration Text blocks via `liftBareBlocks` (a bare `type` /
+    // `export` / `import` / `fn` / `~`-decl directly inside a `<program>`
+    // / `<page>` / `<channel>` body, swallowed into a Text block by the
+    // markup trampoline, is converted to a synthetic LogicEscape block —
+    // mirroring the live `liftBareDeclarations` post-pass); (1a) collect
+    // ctx.diagnostics (AFTER the lift, so a lifted-body diagnostic is not
+    // missed); (2) map each native block to its live ASTNode (A1 bridge
+    // on logic / meta bodies); (3) fold the hoisted collections via A3
+    // collectHoisted; (4) produce the FileAST with authConfig /
+    // middlewareConfig null.
     //
     // (live surface in parse-file.js — the .scrml shape carries the
     // canonical Pillar 5b SHAPE; the .js shadow runs.)

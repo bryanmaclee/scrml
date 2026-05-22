@@ -462,7 +462,7 @@ function cursorSourceFromCtx(ctx) {
 // surface JS-layer diagnostics for the `<...>` shape until parse-expr's
 // LessThan discriminator (C3) is wired; that is the seam contract working,
 // not a regression.
-function parseLogicBodyBestEffort(bodyText, ctx, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
+export function parseLogicBodyBestEffort(bodyText, ctx, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
     if (bodyText === undefined || bodyText === null) return [];
     if (bodyText.length === 0) return [];
     const tokens = lex(bodyText);
@@ -1252,6 +1252,206 @@ export function openBrace() {
 }
 export function closeBraceChar() {
     return String.fromCharCode(125);
+}
+
+// --- P4-2 — the BARE-MARKUP-STATEMENT lift pass -----------------------------
+//
+// The native markup trampoline accumulates a bare statement-shaped line
+// sitting directly inside a markup element body — `type ...`, `export ...`,
+// `import ...`, `fn ...` / `server fn ...`, a `~`-pipeline decl — into a plain
+// `Text` block. The LIVE pipeline does not: `liftBareDeclarations`
+// (ast-builder.js L740) is a post-pass over the BS block tree that converts a
+// `text` block whose trimmed content STARTS with a bare declaration keyword
+// into a synthetic `logic` block (it wraps the raw text with `${`/`}` so
+// `buildBlock case "logic"` parses it). The hoisted `typeDecls` / `exports` /
+// `imports` / `components` then see the decls inside that synthetic logic.
+//
+// `liftBareBlocks` is the native analogue — a post-pass over the native
+// `Block[]`, mirroring `liftBareDeclarations` 1:1:
+//   - it runs ONLY at file top-level OR inside a `<program>` / `<page>` /
+//     `<channel>` direct-child body (`liftBareDeclarations`'s `parentType`
+//     propagation: those three markup roots set `childContext = "state"`, a
+//     declaration site; any OTHER markup element sets `childContext =
+//     "markup"`, prose context, lift SUPPRESSED). A `state` block's children
+//     are a declaration site too.
+//   - it converts a `Text` block whose raw matches a bare-declaration regex
+//     (`BARE_DECL_RE` — the canonical decl-keyword set; `TILDE_TOKEN_RE` — a
+//     bare `~` pipeline token at a `state`-context child) into a synthetic
+//     `LogicEscape` block carrying a parsed native `Stmt[]` body, so the
+//     downstream `collectHoisted` + `synthLogicNode` see a `logic` node and
+//     the hoisted decls, exactly as the live pipeline does.
+//
+// SCOPE — this mirrors the THREE single-Text-block lift triggers
+// (`BARE_DECL_RE`, `TOPLEVEL_STATE_DECL_RE`, `TILDE_TOKEN_RE`). The two
+// component-def PAIRING forms (`BARE_EXPORT_AT_END_RE` /
+// `BARE_DECL_NAME_EQ_AT_END_RE` — a `text` block paired with a FOLLOWING
+// markup block) are NOT done here: in the native parser a `const Name =
+// <markup>` decl is mis-segmented BEFORE this pass (a `<` opener is consumed
+// by the markup trampoline, never reaching a `Text` block), so the pairing
+// has no native `Text`-then-`Markup` shape to match. `TOPLEVEL_STATE_DECL_RE`
+// likewise rarely has a native `Text` block to match — a bare `<x> = 0` is
+// recognized as a `Markup` element opener by the trampoline; the state-decl
+// mis-segmentation is the P4-1 unit's concern. `TOPLEVEL_STATE_DECL_RE` is
+// still applied here for the case where a merged text run genuinely opens
+// with a `<x> =` shape.
+
+// BARE_DECL_RE — the canonical bare-declaration keyword set. A VERBATIM copy
+// of ast-builder.js's `BARE_DECL_RE` (L335) — the live oracle's recognition
+// set. If the live regex changes, this copy must change in lockstep.
+const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn\s+\w|function\s+\w|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
+
+// TOPLEVEL_STATE_DECL_RE — VERBATIM copy of ast-builder.js L369. A text run
+// opening with a `<Ident ...>` then `=` / `:` / a nested `<Ident` (a Variant C
+// compound state-decl).
+const TOPLEVEL_STATE_DECL_RE =
+    /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*(?:[=:]|<[A-Za-z_])/;
+
+// TILDE_TOKEN_RE — VERBATIM copy of ast-builder.js L385. A bare `~` token
+// (not adjacent to an identifier char) — the unambiguous logic-mode signal
+// (SPEC §32). Lifted ONLY at a `state`-context child (the live oracle gates
+// `TILDE_TOKEN_RE` on `parentType === "state"`).
+const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
+
+// isProgramFamilyRoot — predicate. The three markup roots whose direct-child
+// body is a declaration site (the live `liftBareDeclarations` `childContext`
+// = "state" set): `<program>` (SPEC §40.8 default-logic mode), `<channel>`
+// (§38.4 channel body), `<page>` (§4.15 / §40.8 per-route container).
+function isProgramFamilyRoot(name) {
+    return name === "program" || name === "channel" || name === "page";
+}
+
+// sliceBlockRaw — calculation. The verbatim source text a Text block spans.
+// Native Text blocks carry only a span; the raw text is recovered from source.
+function sliceBlockRaw(source, span) {
+    if (typeof source !== "string") return "";
+    if (span === undefined || span === null) return "";
+    const start = span.start;
+    const end = span.end;
+    if (typeof start !== "number" || typeof end !== "number") return "";
+    if (start < 0 || end > source.length || start > end) return "";
+    return source.slice(start, end);
+}
+
+// synthLiftedLogicBlock — calculation. Build a synthetic `LogicEscape` block
+// from a bare-declaration `Text` block. The native analogue of the live
+// `liftBareDeclarations` synthetic `logic` block: the Text run's raw IS the
+// logic-escape body text; `parseLogicBodyBestEffort` parses it into a native
+// `Stmt[]` so `collectHoisted` (`walkStmts(block.body)`) finds the decls and
+// `synthLogicNode` (`translateStmtList(block.body)`) emits a live `logic`
+// node. `bodyText` is carried so `collectHoisted`'s `rulesRaw`-style slicing
+// is consistent with a real `${...}` LogicEscape block.
+//
+// The block REUSES the Text block's span (the live synthetic logic block
+// reuses the text block's span verbatim — ast-builder.js L1151). `_synthetic`
+// marks the disposition for downstream observability.
+function synthLiftedLogicBlock(textBlock, source, ctx) {
+    const k = blockKinds();
+    const span = textBlock.span;
+    const bodyText = sliceBlockRaw(source, span);
+    const block = makeBlockNode(k.LogicEscape, span, null);
+    block.bodyText = bodyText;
+    // Parse the body. `ctx` is the live parse-context — `parseLogicBody
+    // BestEffort` forwards a lifted body's diagnostics into `ctx.diagnostics`
+    // (the same stream `nativeParseFile` collects), the live oracle's
+    // behaviour. The body text is plain scrml statements (the same parser
+    // path a `${...}` LogicEscape body takes). The body's host-absolute
+    // anchor is the text run's span start.
+    const anchorLine = (span !== undefined && span !== null && typeof span.line === "number")
+        ? span.line : 1;
+    const anchorCol = (span !== undefined && span !== null && typeof span.col === "number")
+        ? span.col : 1;
+    const anchorStart = (span !== undefined && span !== null && typeof span.start === "number")
+        ? span.start : 0;
+    block.body = parseLogicBodyBestEffort(bodyText, ctx, anchorStart, anchorLine, anchorCol);
+    block._synthetic = true;
+    return block;
+}
+
+// liftBareBlocks — calculation (pure; returns a new array, no mutation). The
+// P4-2 post-pass. Walk a native `Block[]` and convert bare-declaration `Text`
+// blocks into synthetic `LogicEscape` blocks, mirroring the live
+// `liftBareDeclarations` (ast-builder.js L740).
+//
+//   blocks      — the native Block[] (a markup element's `children`, or the
+//                 file-level top stream).
+//   source      — the source string (Text blocks carry spans, not raw text).
+//   parentType  — null at file top level; "state" inside a `<program>` /
+//                 `<page>` / `<channel>` body or a `state` block (a
+//                 declaration site); "markup" inside any other markup
+//                 element (prose context — lift suppressed).
+//   ctx         — the live parse-context; a lifted logic body's diagnostics
+//                 are forwarded into `ctx.diagnostics` (the live oracle's
+//                 behaviour). May be null — `parseLogicBodyBestEffort`
+//                 tolerates a null ctx for the delegation-frame note, but
+//                 `pushDiagnostic` needs a real ctx, so callers that want
+//                 lifted-body diagnostics MUST pass one.
+//
+// The lift fires for a `Text` block ONLY when `parentType !== "markup"`. A
+// `Markup` / `state` block recurses its `children` with the propagated
+// `parentType`. Every other block kind passes through unchanged.
+export function liftBareBlocks(blocks, source, parentType, ctx) {
+    const result = [];
+    if (Array.isArray(blocks) === false) return result;
+    for (const block of blocks) {
+        if (block === undefined || block === null) {
+            result.push(block);
+            continue;
+        }
+
+        // A state block's children are a declaration site — recurse with
+        // parentType "state" (the live oracle: `block.type === "state"` ->
+        // `liftBareDeclarations(children, ..., "state")`).
+        if (block.kind === "Markup" && isStateBlock(block)) {
+            const lifted = liftBareBlocks(block.children, source, "state", ctx);
+            result.push({ ...block, children: lifted });
+            continue;
+        }
+
+        // A markup element. `<program>` / `<page>` / `<channel>` direct
+        // children are a declaration site (childContext "state"); any other
+        // markup element is prose context (childContext "markup"). The
+        // program-family check only applies at a non-prose parent — a
+        // `<program>` nested inside another markup element is itself prose
+        // (the live oracle gates `isProgramRoot` on `parentType !== "markup"`).
+        if (block.kind === "Markup") {
+            const name = typeof block.name === "string" ? block.name : "";
+            const isDeclSite = parentType !== "markup" && isProgramFamilyRoot(name);
+            const childContext = isDeclSite ? "state" : "markup";
+            const lifted = liftBareBlocks(block.children, source, childContext, ctx);
+            result.push({ ...block, children: lifted });
+            continue;
+        }
+
+        // A Text block at a declaration site — the bare-statement lift. The
+        // run's raw is tested against the canonical decl-keyword regexes; a
+        // match converts it to a synthetic LogicEscape block.
+        if (block.kind === "Text" && parentType !== "markup") {
+            const raw = sliceBlockRaw(source, block.span);
+            // BARE_DECL_RE — `type` / `export` / `import` / `fn` /
+            // `server fn` / `let` / `const` decl keywords. Fires at any
+            // declaration-site parent.
+            if (BARE_DECL_RE.test(raw)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx));
+                continue;
+            }
+            // TOPLEVEL_STATE_DECL_RE — a `<Ident ...>` opener then `=`/`:`.
+            if (TOPLEVEL_STATE_DECL_RE.test(raw)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx));
+                continue;
+            }
+            // TILDE_TOKEN_RE — a bare `~` pipeline token. The live oracle
+            // gates this on `parentType === "state"` (a `<program>` /
+            // `<page>` / `<channel>` direct-child body) — NOT plain file
+            // top-level — to avoid lifting prose markup that contains `~`.
+            if (parentType === "state" && TILDE_TOKEN_RE.test(raw)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx));
+                continue;
+            }
+        }
+
+        result.push(block);
+    }
+    return result;
 }
 
 // parseMarkup — entry point. Pure fn over the source string; the loop is a

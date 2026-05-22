@@ -72,7 +72,7 @@
 // one id space (the discipline collect-hoisted.js + translate-stmt.js document
 // in their headers).
 
-import { parseMarkupTrace } from "./parse-markup.js";
+import { parseMarkupTrace, liftBareBlocks } from "./parse-markup.js";
 import { collectHoisted, isEngineBlock, synthEngineDecl } from "./collect-hoisted.js";
 import { translateStmtList } from "./translate-stmt.js";
 import { isStateBlock } from "./parse-state-body.js";
@@ -111,9 +111,27 @@ export function nativeParseFile(filePath, source) {
     //    call would discard it.
     const run = parseMarkupTrace(safeSource);
     const ctx = (run !== undefined && run !== null) ? run.ctx : null;
-    const blocks = (ctx !== undefined && ctx !== null && Array.isArray(ctx.nodes))
+    const rawBlocks = (ctx !== undefined && ctx !== null && Array.isArray(ctx.nodes))
         ? ctx.nodes
         : [];
+
+    // 1b. LIFT bare-declaration Text blocks (P4-2 — the bare-markup-statement
+    //     segmentation fix). The native markup trampoline accumulates a bare
+    //     `type` / `export` / `import` / `fn` / `~`-decl line sitting directly
+    //     inside a `<program>` / `<page>` / `<channel>` body (or at file top
+    //     level) into a plain `Text` block; the LIVE pipeline's
+    //     `liftBareDeclarations` post-pass converts such a text block into a
+    //     synthetic `logic` block so the hoisted `typeDecls` / `exports` /
+    //     `imports` see the decls. `liftBareBlocks` is the native analogue —
+    //     it runs over the block stream BEFORE both `mapBlocksToNodes` (so the
+    //     lifted block maps to a `logic` ASTNode) AND `collectHoisted` (so its
+    //     parsed body is walked for hoistable decls). `parentType` is `null`
+    //     at file top level (a declaration site); the recursion propagates
+    //     "state" / "markup" exactly as the live oracle does. `ctx` is
+    //     threaded so a lifted logic body's diagnostics route into
+    //     `ctx.diagnostics` — collected by step 1a below (the lift runs
+    //     BEFORE the collection so a lifted-body diagnostic is not missed).
+    const blocks = liftBareBlocks(rawBlocks, safeSource, null, ctx);
 
     // 1a. Collect the native parser's diagnostics. `ctx.diagnostics` is
     //     lazily-created (tag-frame.js `ensureDiagnostics`) — it is `undefined`

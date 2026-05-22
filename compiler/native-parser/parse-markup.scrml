@@ -1301,6 +1301,45 @@ ${
     }
 
     // -------------------------------------------------------------------
+    // P4-2 — the BARE-MARKUP-STATEMENT lift pass.
+    //
+    // The native markup trampoline accumulates a bare statement-shaped
+    // line sitting directly inside a markup element body — `type ...`,
+    // `export ...`, `import ...`, `fn ...` / `server fn ...`, a
+    // `~`-pipeline decl — into a plain `Text` block. The LIVE pipeline
+    // does not: `liftBareDeclarations` (ast-builder.js) is a post-pass
+    // over the BS block tree that converts such a `text` block into a
+    // synthetic `logic` block, so the hoisted `typeDecls` / `exports` /
+    // `imports` see the decls.
+    //
+    // `liftBareBlocks` is the native analogue — a post-pass over the
+    // native Block[] that mirrors `liftBareDeclarations` 1:1:
+    //   - it runs ONLY at file top-level OR inside a `<program>` /
+    //     `<page>` / `<channel>` direct-child body (a declaration site;
+    //     any OTHER markup element is prose context — lift suppressed).
+    //   - it converts a `Text` block whose raw matches a bare-declaration
+    //     regex (the canonical `type` / `export` / `import` / `fn` /
+    //     `server fn` / `let` / `const` keyword set; a bare `~` pipeline
+    //     token at a `state`-context child) into a synthetic `LogicEscape`
+    //     block carrying a parsed native Stmt[] body — so the downstream
+    //     `collectHoisted` + the live `logic` ASTNode see the decls.
+    //
+    // SCOPE — this mirrors the three single-Text-block lift triggers
+    // (`BARE_DECL_RE` / `TOPLEVEL_STATE_DECL_RE` / `TILDE_TOKEN_RE`). The
+    // two component-def PAIRING forms are out of P4-2 scope (a native
+    // `const Name = <markup>` decl is mis-segmented BEFORE this pass).
+    //
+    // (live surface in parse-markup.js — the .scrml shape carries the
+    // canonical Pillar 5b SHAPE; the .js shadow runs. The body-parse seam
+    // — `parseLogicBodyBestEffort` — is the same milestone-deferred
+    // markup<->JS seam the `emitContextBlock` `.InLogicEscape` branch
+    // rides; both run in the .js shadow only.)
+    // -------------------------------------------------------------------
+    export fn liftBareBlocks(blocks, source, parentType, ctx) {
+        // see parse-markup.js for the running shadow
+    }
+
+    // -------------------------------------------------------------------
     // parseMarkup — entry point. Pure fn over the source string
     // (calculation at the outermost layer; engine-shaped internals
     // dispatch per BlockContext). Returns the typed block-stream

@@ -225,6 +225,12 @@ import { tokenizeAttributes as liveTokenizeAttributes } from "../src/tokenizer.t
 // `css-inline` nodes for the same source.
 import { buildAST as liveBuildAST } from "../src/ast-builder.js";
 
+// P4-2 (v0.7 M5-gap) — the native FileAST assembler, imported as the SUBJECT
+// of the bare-markup-statement segmentation suite: a bare `type` / `export` /
+// `import` / `fn` / `~`-decl directly inside a `<program>` body must produce
+// a `logic` node + the hoisted decls, matching the live `buildAST`.
+import { nativeParseFile } from "../native-parser/parse-file.js";
+
 // peakDelegationDepth — drive the trampoline dispatch by dispatch (the
 // dispatch fns are exported) and record the HIGH-WATER delegationStack
 // depth. parseMarkupTrace only exposes the FINAL ctx; for a nesting
@@ -5767,4 +5773,138 @@ describe("F8 — Error-effect arms (!{...} — shapeErrorEffectBlock)", () => {
             }
         });
     }
+});
+
+// ===========================================================================
+// P4-2 (v0.7 M5-gap) — BARE-MARKUP-STATEMENT SEGMENTATION.
+//
+// The native markup trampoline accumulates a bare statement-shaped line
+// sitting directly inside a `<program>` / `<page>` / `<channel>` body —
+// `type ...`, `export ...`, `import ...`, `fn ...`, a `~`-pipeline decl —
+// into a plain `Text` block. The LIVE pipeline's `liftBareDeclarations`
+// post-pass converts such a text block into a synthetic `logic` block, so the
+// hoisted `typeDecls` / `exports` / `imports` see the decls. `liftBareBlocks`
+// (parse-markup.js) is the native analogue, run inside `nativeParseFile`.
+//
+// The live `buildAST` is the ORACLE: for each case the native FileAST's
+// program-body child-kind sequence + the hoisted-collection counts must match
+// the live FileAST exactly. Two anti-over-fire cases confirm the lift does
+// NOT promote legitimate prose: a prose run directly inside `<program>` stays
+// `text`, and a bare-decl-shaped run inside a NON-program markup element
+// (prose context) also stays `text`.
+// ===========================================================================
+describe("P4-2 — bare-markup-statement segmentation (native vs live buildAST)", () => {
+    // The live oracle's FileAST for a source string.
+    function liveFileAST(source) {
+        return liveBuildAST(splitBlocks("p42.scrml", source)).ast;
+    }
+    // The native FileAST for a source string.
+    function nativeFileAST(source) {
+        return nativeParseFile("p42.scrml", source).ast;
+    }
+    // The kind-sequence of a FileAST's `<program>` markup node children.
+    function programChildKinds(ast) {
+        const prog = ast.nodes.find((n) => n.kind === "markup" && n.tag === "program");
+        return prog ? prog.children.map((c) => c.kind) : null;
+    }
+
+    // Each bare-statement form, directly inside a `<program>` body, must be
+    // recognized as a `logic` node (the live oracle's shape) — not `text`.
+    const LIFT_CASES = [
+        {
+            label: "bare `type` decl",
+            src: "<program>\ntype User:struct = { name: string }\n${ a() }\n</program>",
+        },
+        {
+            label: "two bare `type` decls",
+            src: "<program>\ntype A:struct = { x: number }\ntype B:struct = { y: number }\n${ a() }\n</program>",
+        },
+        {
+            label: "bare `import` decl",
+            src: "<program>\nimport { foo } from \"./mod\"\n${ a() }\n</program>",
+        },
+        {
+            label: "bare `export fn` decl",
+            src: "<program>\nexport fn greet(name) { return name }\n${ a() }\n</program>",
+        },
+        {
+            label: "bare `fn` decl",
+            src: "<program>\nfn helper(x) { return x }\n${ a() }\n</program>",
+        },
+        {
+            label: "bare `server fn` decl",
+            src: "<program>\nserver fn load() { return 1 }\n${ a() }\n</program>",
+        },
+    ];
+
+    for (const { label, src } of LIFT_CASES) {
+        test(`${label} inside <program> lifts to a logic node (matches live)`, () => {
+            const liveKinds = programChildKinds(liveFileAST(src));
+            const nativeKinds = programChildKinds(nativeFileAST(src));
+            expect(nativeKinds).not.toBeNull();
+            // The native program-body child sequence matches the live oracle.
+            expect(nativeKinds).toEqual(liveKinds);
+            // And the first child is a `logic` node — the lifted decl.
+            expect(nativeKinds[0]).toBe("logic");
+        });
+    }
+
+    // The co-occurring hoist counts — the H2 sub-bucket symptom. A bare
+    // `type` decl that the native parser previously swallowed into `text`
+    // never reached `collectHoisted`; after the lift the `typeDecls` /
+    // `exports` / `imports` counts must match the live oracle.
+    test("co-occurring `typeDecls` count matches live (two bare type decls)", () => {
+        const src = "<program>\ntype A:struct = { x: number }\ntype B:struct = { y: number }\n${ a() }\n</program>";
+        const live = liveFileAST(src);
+        const native = nativeFileAST(src);
+        expect(live.typeDecls.length).toBe(2);
+        expect(native.typeDecls.length).toBe(live.typeDecls.length);
+        expect(native.typeDecls.map((t) => t.name).sort())
+            .toEqual(live.typeDecls.map((t) => t.name).sort());
+    });
+
+    test("co-occurring `imports` count matches live (bare import decl)", () => {
+        const src = "<program>\nimport { foo } from \"./mod\"\n${ a() }\n</program>";
+        const live = liveFileAST(src);
+        const native = nativeFileAST(src);
+        expect(native.imports.length).toBe(live.imports.length);
+    });
+
+    test("co-occurring `exports` count matches live (bare export fn decl)", () => {
+        const src = "<program>\nexport fn greet(name) { return name }\n${ a() }\n</program>";
+        const live = liveFileAST(src);
+        const native = nativeFileAST(src);
+        expect(native.exports.length).toBe(live.exports.length);
+    });
+
+    // ANTI-OVER-FIRE #1 — a legitimate prose run directly inside `<program>`
+    // is NOT a declaration; it must stay a `text` node, never lift. The lift
+    // gates on the canonical decl-keyword regexes — prose like "Welcome to
+    // the app." does not match.
+    test("prose text directly inside <program> stays `text` (no over-fire)", () => {
+        const src = "<program>\nWelcome to the app.\n${ a() }\n</program>";
+        const liveKinds = programChildKinds(liveFileAST(src));
+        const nativeKinds = programChildKinds(nativeFileAST(src));
+        // The native program-body child sequence matches the live oracle —
+        // the prose run is `text`, the explicit `${ a() }` is `logic`. The
+        // FIRST child (the prose run) must NOT have been lifted to `logic`.
+        expect(nativeKinds).toEqual(liveKinds);
+        expect(nativeKinds[0]).toBe("text");
+    });
+
+    // ANTI-OVER-FIRE #2 — a bare-decl-keyword-shaped run inside a NON-program
+    // markup element (a `<p>` — prose context) must NOT lift: the live oracle
+    // suppresses the lift for `parentType === "markup"`. `<p>type things
+    // here</p>` is prose, not a `type` declaration.
+    test("decl-keyword-shaped prose inside a non-program element stays `text`", () => {
+        const src = "<program>\n<p>function adds two numbers.</p>\n${ a() }\n</program>";
+        const live = liveFileAST(src);
+        const native = nativeFileAST(src);
+        // The live oracle does not lift inside a `<p>` — no spurious logic.
+        const liveKinds = programChildKinds(live);
+        const nativeKinds = programChildKinds(native);
+        expect(nativeKinds).toEqual(liveKinds);
+        // No type decl was hoisted from the prose.
+        expect(native.typeDecls.length).toBe(live.typeDecls.length);
+    });
 });
