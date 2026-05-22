@@ -138,6 +138,53 @@ export function isStructuralElementName(name) {
 }
 
 // ===========================================================================
+// HTML VOID-ELEMENT REGISTRY.
+//
+// HTML void elements — `<input>`, `<br>`, `<img>`, ... — have NO closer
+// and carry no `/>` in normal HTML authoring (`<input type="text">` is a
+// complete element). The TagFrame engine must treat a void-element opener
+// as a LEAF frame (no children, no closer expected) exactly as a
+// `/>`-self-closing opener — otherwise it pushes a frame that never
+// closes and the next `</...>` mismatches against the dangling void
+// frame (E-MARKUP-002 cascade).
+//
+// This MIRRORS the live block-splitter's `VOID_ELEMENTS` set
+// (block-splitter.js L72) + its self-closing rule (block-splitter.js
+// L1747 — `selfClosing || VOID_ELEMENTS.has(lowerTagName)`). The
+// block-splitter is the oracle; the membership set is copied 1:1. HTML
+// void-element names are case-INSENSITIVE — the lookup lowercases the
+// tag name first, matching the live BS's `lowerTagName` lookup.
+// ===========================================================================
+
+// VOID_ELEMENTS — the closed HTML void-element name set. A frozen
+// membership map: lowercased-name -> true. Copied 1:1 from
+// block-splitter.js L72.
+export const VOID_ELEMENTS = Object.freeze({
+    area:   true,
+    base:   true,
+    br:     true,
+    col:    true,
+    embed:  true,
+    hr:     true,
+    img:    true,
+    input:  true,
+    link:   true,
+    meta:   true,
+    source: true,
+    track:  true,
+    wbr:    true,
+});
+
+// isVoidElementName — calculation (predicate). Is `name` an HTML void
+// element? Case-insensitive — the name is lowercased before the lookup
+// (HTML void-element names are case-insensitive; `<INPUT>` == `<input>`),
+// matching the live block-splitter's `VOID_ELEMENTS.has(lowerTagName)`.
+export function isVoidElementName(name) {
+    if (typeof name !== "string" || name === "") return false;
+    return VOID_ELEMENTS[name.toLowerCase()] === true;
+}
+
+// ===========================================================================
 // THE TagKind CALCULATION (charter Q1.F).
 //
 // A pure fn of the opener's bytes — per D1 OQ1 (a pure function of input
@@ -304,7 +351,8 @@ export function slash() {
 //      marks the opener self-closing.
 //   5. Advance the cursor past the `>`.
 //
-// Returns { ok, name, hadSpaceAfterLt, selfClosing, span, malformed }.
+// Returns { ok, name, hadSpaceAfterLt, selfClosing, voidElement, span,
+// malformed }.
 export function tokenizeOpener(cursor, ltAnchor) {
     const source = cursor.source;
     const len = source.length;
@@ -432,11 +480,21 @@ export function tokenizeOpener(cursor, ltAnchor) {
         ltAnchor.line, ltAnchor.col, hadSpaceAfterLt,
     );
 
+    // An HTML void element written WITHOUT a literal `/>` (`<input>`,
+    // `<br>`, ...) closes as a LEAF — it opens no body and expects no
+    // closer, exactly as a `/>`-self-closing opener does. `voidElement`
+    // is the tokenizer FACT (the name is an HTML void element);
+    // `selfClosing` stays the literal-`/>` fact. recognizeOpener treats
+    // `selfClosing || voidElement` as the leaf-frame condition — mirrors
+    // block-splitter.js L1747 `selfClosing || VOID_ELEMENTS.has(...)`.
+    const voidElement = isVoidElementName(name);
+
     return {
         ok: !malformed,
         name,
         hadSpaceAfterLt,
         selfClosing,
+        voidElement,
         span,
         malformed,
         // F1 — the attribute payload. `attrs` is the AttrNode[] AST (the
@@ -1327,11 +1385,18 @@ export function recognizeOpener(ctx, cursor, ltAnchor) {
     const tagKind = tagKindFor(opener.name, opener.hadSpaceAfterLt);
 
     // 3 + 4. Build + push the open-tag frame.
+    //
+    // The LEAF condition — a `/>`-self-closing opener OR an HTML void
+    // element (`<input>`, `<br>`, ...) written without a `/>`. Both open
+    // NO body and expect NO closer; both push an .OpenSelfClosed (leaf)
+    // frame. Mirrors block-splitter.js L1747's
+    // `selfClosing || VOID_ELEMENTS.has(lowerTagName)`.
+    const leafFrame = opener.selfClosing || opener.voidElement;
     let frame = null;
-    if (opener.selfClosing) {
-        // A self-closing `<ident ... />` opens no body (SPEC §4.18.1 —
-        // a body is the content between an opener's `>` and its closer);
-        // it carries no `bodyMode` payload.
+    if (leafFrame) {
+        // A self-closing `<ident ... />` — or an HTML void element —
+        // opens no body (SPEC §4.18.1 — a body is the content between an
+        // opener's `>` and its closer); it carries no `bodyMode` payload.
         frame = makeOpenSelfClosedFrame(opener.name, tagKind, opener.span);
     } else {
         // The tag-tree depth at which this frame opens — the stack
@@ -1588,8 +1653,13 @@ export function firstChildElementClass(children) {
 // stamps the result on the Markup block — the typed payload NR (Stage
 // 3.05) consumes downstream.
 export function classifyTagFrame(frame, children) {
+    // A `/>`-self-closing opener OR an HTML void element (`<input>`,
+    // `<br>`, ...) — both are §4.14 leaf elements: no body, no closer.
+    // classifyTag's `selfClosing` argument is the "leaf element" datum
+    // (the SelfClose TagClass), so a bare void element classifies
+    // identically to a `/>` opener.
     const selfClosing = frame.opener !== null && frame.opener !== undefined &&
-        frame.opener.selfClosing;
+        (frame.opener.selfClosing || frame.opener.voidElement);
     const firstChildClass = firstChildElementClass(children);
     return classifyTag(frame.tagKind, selfClosing, frame.afterOpener, firstChildClass);
 }

@@ -85,6 +85,8 @@ import {
     initialTagFrame,
     STRUCTURAL_ELEMENTS,
     isStructuralElementName,
+    VOID_ELEMENTS,
+    isVoidElementName,
     firstCharIsUpper,
     tagKindFor,
     isTagNameStart,
@@ -1668,6 +1670,110 @@ describe("MK2.1 recognizeOpener — tokenize + TagKind + push the TagFrame", () 
 });
 
 // =============================================================================
+// MK2.1 §21b — HTML void elements (M5 gap-ledger void-element unit).
+//
+// A void element (`<input>`, `<br>`, ...) written WITHOUT a literal `/>`
+// closes as a LEAF frame (.OpenSelfClosed) — it opens no body and expects
+// no closer, exactly as a `/>`-self-closing opener. Mirrors the live
+// block-splitter's `VOID_ELEMENTS` set (block-splitter.js L72) + its
+// `selfClosing || VOID_ELEMENTS.has(lowerTagName)` rule (L1747). Before
+// this fix a bare `<input>` pushed an unclosed .OpenExpectingChildren
+// frame, so the next `</...>` mismatched against the dangling void frame
+// (E-MARKUP-002 cascade absorbing trailing content).
+// =============================================================================
+describe("MK2.1 isVoidElementName — the HTML void-element registry", () => {
+    test("VOID_ELEMENTS holds exactly the 13 HTML void elements", () => {
+        // The membership set copied 1:1 from block-splitter.js L72.
+        expect(Object.keys(VOID_ELEMENTS).sort()).toEqual([
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "source", "track", "wbr",
+        ]);
+    });
+
+    test("each void element is recognized by isVoidElementName", () => {
+        for (const name of Object.keys(VOID_ELEMENTS)) {
+            expect(isVoidElementName(name)).toBe(true);
+        }
+    });
+
+    test("a non-void HTML element is not a void element", () => {
+        expect(isVoidElementName("div")).toBe(false);
+        expect(isVoidElementName("span")).toBe(false);
+        expect(isVoidElementName("p")).toBe(false);
+        expect(isVoidElementName("inputs")).toBe(false);  // not a prefix match
+    });
+
+    test("void-element recognition is case-insensitive (HTML §)", () => {
+        // HTML void-element names are case-insensitive; the lookup
+        // lowercases first (live BS parity — VOID_ELEMENTS.has(lowerTagName)).
+        expect(isVoidElementName("INPUT")).toBe(true);
+        expect(isVoidElementName("Br")).toBe(true);
+        expect(isVoidElementName("IMG")).toBe(true);
+    });
+
+    test("the empty string and a missing name are not void elements", () => {
+        expect(isVoidElementName("")).toBe(false);
+        expect(isVoidElementName(undefined)).toBe(false);
+        expect(isVoidElementName(null)).toBe(false);
+    });
+});
+
+describe("MK2.1 recognizeOpener — void elements close as leaf frames", () => {
+    test("a bare `<input>` (no `/>`) pushes an .OpenSelfClosed leaf frame", () => {
+        // The bug: before the fix `<input>` pushed an unclosed
+        // .OpenExpectingChildren frame. It is a void element — it must
+        // push an .OpenSelfClosed leaf frame, exactly as `<input/>` does.
+        const { ctx, frame } = recognizeOpenerFromLt("<input>");
+        expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+        expect(frame.name).toBe("input");
+        expect(tagFrameDepth(ctx)).toBe(1);
+    });
+
+    test("every void element written bare closes as a leaf frame", () => {
+        for (const name of Object.keys(VOID_ELEMENTS)) {
+            const { frame } = recognizeOpenerFromLt("<" + name + ">");
+            expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+            expect(frame.name).toBe(name);
+        }
+    });
+
+    test("a void element with attributes still closes as a leaf frame", () => {
+        const { frame } = recognizeOpenerFromLt("<input type=\"text\" disabled>");
+        expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+        expect(frame.name).toBe("input");
+    });
+
+    test("an uppercase `<INPUT>` is recognized as void (case-insensitive)", () => {
+        const { frame } = recognizeOpenerFromLt("<INPUT>");
+        expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+    });
+
+    test("a void element WITH an explicit `/>` still closes as a leaf frame", () => {
+        // `<br/>` was already a leaf frame via the literal-`/>` path; the
+        // void check does not double-handle it.
+        const { frame } = recognizeOpenerFromLt("<br/>");
+        expect(frame.kind).toBe(TagFrameKind.OpenSelfClosed);
+        expect(frame.opener.selfClosing).toBe(true);
+        expect(frame.opener.voidElement).toBe(true);
+    });
+
+    test("the voidElement descriptor fact is set for a bare void opener", () => {
+        const { frame } = recognizeOpenerFromLt("<hr>");
+        expect(frame.opener.voidElement).toBe(true);
+        // `selfClosing` stays the literal-`/>` fact — false for a bare `<hr>`.
+        expect(frame.opener.selfClosing).toBe(false);
+    });
+
+    test("a non-void unclosed tag still pushes .OpenExpectingChildren", () => {
+        // The fix is void-specific — a bare `<div>` is NOT a void element
+        // and still pushes an .OpenExpectingChildren frame expecting a closer.
+        const { frame } = recognizeOpenerFromLt("<div>");
+        expect(frame.kind).toBe(TagFrameKind.OpenExpectingChildren);
+        expect(frame.opener.voidElement).toBe(false);
+    });
+});
+
+// =============================================================================
 // MK2.1 §22 — end-to-end: the trampoline produces TagFrame-driven Markup
 // blocks; the open-tag stack reflects the opener stream.
 // =============================================================================
@@ -2111,6 +2217,68 @@ describe("MK2.2 trampoline — the <tag> tree (opener/closer pairing end-to-end)
         const { ctx } = parseMarkupTrace("<div><p>a</p><p>b</p></div>");
         expect(tagFrameDepth(ctx)).toBe(0);
         expect((ctx.diagnostics ?? []).length).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK2.2 §26b — void-element pairing end-to-end (M5 gap-ledger void unit).
+//
+// A void element is a complete element at its opener; the trampoline must
+// pair the surrounding closers against the NON-void tags. Before the fix
+// a bare `<input>` left a dangling .OpenExpectingChildren frame, so a
+// following `</div>` mismatched against it (E-MARKUP-002 cascade).
+// =============================================================================
+describe("MK2.2 trampoline — void elements pair as leaf elements", () => {
+    test("a bare `<input>` is a complete element at its opener", () => {
+        expect(markupTree("<input>")).toBe("input[0,7]{}");
+    });
+
+    test("`<div><input></div>` — the `</div>` matches the `<div>`, not `<input>`", () => {
+        // The void-element bug: before the fix the bare `<input>` pushed
+        // an unclosed frame, so `</div>` mismatched against `<input>`.
+        // `<input>` is a void leaf [5,12]; the `</div>` [12,18] closes the
+        // `<div>` — the whole element is [0,18].
+        expect(markupTree("<div><input></div>"))
+            .toBe("div[0,18]{input[5,12]{}}");
+    });
+
+    test("a void element leaves its following siblings as siblings", () => {
+        // `<div><br><span>x</span></div>` — `<br>` is a void leaf; the
+        // `<span>` is its SIBLING, not its child (the pre-fix bug would
+        // have absorbed `<span>` as a child of the unclosed `<br>` frame).
+        expect(markupTree("<div><br><span>x</span></div>"))
+            .toBe("div[0,29]{br[5,9]{},span[9,23]{Text[15,16]}}");
+    });
+
+    test("consecutive void elements are consecutive leaf siblings", () => {
+        expect(markupTree("<div><br><br><hr></div>"))
+            .toBe("div[0,23]{br[5,9]{},br[9,13]{},hr[13,17]{}}");
+    });
+
+    test("a void element with attributes pairs cleanly inside a parent", () => {
+        // `<form><input type="text"></form>` — `<input ...>` is a void
+        // leaf [6,25]; `</form>` [25,32] closes `<form>`.
+        expect(markupTree("<form><input type=\"text\"></form>"))
+            .toBe("form[0,32]{input[6,25]{}}");
+    });
+
+    test("a void-element-bearing tree drains the tag-frame stack to empty", () => {
+        const { ctx } = parseMarkupTrace("<div><input><br></div>");
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect((ctx.diagnostics ?? []).length).toBe(0);
+    });
+
+    test("a bare `<input>` produces NO diagnostic (no unterminated-tag cascade)", () => {
+        // Pre-fix: a bare `<input>` was an unterminated tag at EOF —
+        // E-CTX-001. It is a void element — it is complete, no diagnostic.
+        expect(runDiagnostics("<input>")).toEqual([]);
+    });
+
+    test("a non-void unclosed tag STILL cascades — the fix is void-specific", () => {
+        // `<custom>` is not a void element — an unterminated `<custom>` at
+        // EOF is still E-CTX-001 (the void fix did not weaken non-void
+        // unterminated-tag recovery).
+        expect(runDiagnostics("<section>")).toEqual(["E-CTX-001@[0,9]"]);
     });
 });
 
