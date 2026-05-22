@@ -1199,6 +1199,23 @@ ${
             tagFloor = ctxFrame.tagDepthAtOpen
         }
 
+        // P5-13 — brace-in-string skip (BS-narrow 3-char pattern). A `{` /
+        // `}` of the form `"{"` / `"}"` / `'{'` / `'}'` is string-literal
+        // content, not a structural brace. Suppress the structural actions
+        // (matching-close test, noteBraceOpen, noteBraceClose) on it so the
+        // body-extent brace-depth calculation balances — without this,
+        // `${ const c = "{" }` never finds its matching `}`, depth runs to
+        // EOF, and the whole block degrades to a Text node. Mirrors the
+        // live BS at block-splitter.js L1163-1185 ("Bug 2 C-narrow S109").
+        // Placed BEFORE isBlockContextClose so a string `}` at depth-0
+        // cannot prematurely close the context.
+        const hereForStrSkip = peekChar(cursor, 0)
+        if ((hereForStrSkip == openBrace() || hereForStrSkip == closeBraceChar())
+            && braceIsInStringLiteral(cursor)) {
+            advance(cursor, 1)
+            return
+        }
+
         // Matching close of this logic-escape context?
         if (isBlockContextClose(ctx, cursor)) {
             const frame = closeBlockContext(ctx, cursor)
@@ -1332,6 +1349,22 @@ ${
     // inner braces against ctx.brackets; on the matching brace-depth-0
     // close, close the context + emit its block.
     export fn scanBraceDelimitedSketch(cursor, ctx) {
+        // P5-13 — brace-in-string skip (BS-narrow 3-char pattern). Same
+        // rationale as dispatchInLogicEscape: a `{` / `}` of the form
+        // `"{"` / `"}"` / `'{'` / `'}'` is string-literal content, not a
+        // structural brace. Suppress the matching-close test plus
+        // noteBraceOpen / noteBraceClose so the body-extent brace-depth
+        // calculation balances on the SAME inputs the live BS balances on
+        // (block-splitter.js L1163-1185). The five sketch-depth sub-
+        // dispatchers (InCss / InSql / InErrorEffect / InMeta / InTest)
+        // all share this scan, so the fix lands once here for all five.
+        const here = peekChar(cursor, 0)
+        if ((here == openBrace() || here == closeBraceChar())
+            && braceIsInStringLiteral(cursor)) {
+            advance(cursor, 1)
+            return
+        }
+
         if (isBlockContextClose(ctx, cursor)) {
             const frame = closeBlockContext(ctx, cursor)
             // F7.b — pass the cursor so an .InSql block's emitContextBlock
@@ -1340,7 +1373,6 @@ ${
             return
         }
 
-        const here = peekChar(cursor, 0)
         if (here == openBrace()) {
             noteBraceOpen(ctx, cursor)
             advance(cursor, 1)
@@ -1628,6 +1660,31 @@ ${
     }
     export fn closeBraceChar() {
         return String.fromCharCode(125)
+    }
+
+    // braceIsInStringLiteral — CALCULATION (pure fn). A `{` / `}` at the
+    // cursor is brace-in-string content, NOT a structural brace, when it
+    // is the exact 3-character pattern `"{"` / `"}"` / `'{'` / `'}'` — a
+    // brace immediately surrounded by matching quotes. Mirrors the live
+    // block-splitter's narrow detection (block-splitter.js L1163-1185,
+    // "Bug 2 C-narrow S109"). Full string-state tracking is impractical
+    // because a quote char is ambiguous (regex, template interpolation,
+    // apostrophe-in-comment), so the BS detects only the exact quote-
+    // brace-quote shape. The native parser MIRRORS that narrow detection
+    // so the body-extent brace-depth count balances on the SAME inputs
+    // the live BS balances on. Without this skip a `{` inside a string
+    // literal (`const c = "{"`) is counted as a real brace, depth never
+    // balances, the `${...}` opener's matching `}` is never found, and
+    // the whole block degrades to a `Text` node — every declaration
+    // inside it is lost. P5-13.
+    export fn braceIsInStringLiteral(cursor) {
+        let prev1 = peekChar(cursor, -1)
+        let next1 = peekChar(cursor, 1)
+        let doubleQuote = String.fromCharCode(34)
+        let singleQuote = String.fromCharCode(39)
+        if (prev1 == doubleQuote && next1 == doubleQuote) return true
+        if (prev1 == singleQuote && next1 == singleQuote) return true
+        return false
     }
 
     // -------------------------------------------------------------------

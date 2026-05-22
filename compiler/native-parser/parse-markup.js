@@ -1184,6 +1184,27 @@ export function dispatchInLogicEscape(run, cursor, ctx) {
         ? ctxFrame.tagDepthAtOpen
         : 0;
 
+    // P5-13 — brace-in-string skip (BS-narrow 3-char pattern). A `{` / `}` of
+    // the form `"{"` / `"}"` / `'{'` / `'}'` is string-literal content, not a
+    // structural brace. Suppress the structural actions (matching-close test,
+    // noteBraceOpen, noteBraceClose) on it so the body-extent brace-depth
+    // calculation balances — without this, `${ const c = "{" }` never finds
+    // its matching `}`, depth runs to EOF, and the whole block degrades to a
+    // Text node, dropping every declaration inside. Mirrors the live BS at
+    // block-splitter.js L1163-1185 ("Bug 2 C-narrow S109"). Placed BEFORE
+    // isBlockContextClose so a string `}` at depth-0 cannot close the
+    // context. (Two parallel concerns NOT handled here, matching the oracle:
+    // full string-state tracking — strings longer than the 3-char pattern
+    // need the `String.fromCharCode(123/125)` workaround; and a `${` / `?{`
+    // / ... sigil INSIDE a string literal — the oracle and the native parser
+    // both treat that as a nested context-open, an SPEC §4.6 edge case.)
+    const hereForStrSkip = peekChar(cursor, 0);
+    if ((hereForStrSkip === openBrace() || hereForStrSkip === closeBraceChar())
+        && braceIsInStringLiteral(cursor)) {
+        advance(cursor, 1);
+        return;
+    }
+
     // Matching close `}` of this logic-escape context?
     if (isBlockContextClose(ctx, cursor)) {
         const frame = closeBlockContext(ctx, cursor);
@@ -1307,6 +1328,21 @@ export function dispatchInForeignCode(run, cursor, ctx) {
 // braces against ctx.brackets; on the matching brace-depth-0 close, close the
 // context + emit its block.
 export function scanBraceDelimitedSketch(cursor, ctx) {
+    // P5-13 — brace-in-string skip (BS-narrow 3-char pattern). Same rationale
+    // as dispatchInLogicEscape: a `{` / `}` of the form `"{"` / `"}"` / `'{'`
+    // / `'}'` is string-literal content, not a structural brace. Suppress the
+    // matching-close test + noteBraceOpen + noteBraceClose so the body-extent
+    // brace-depth calculation balances on the SAME inputs the live BS
+    // balances on (block-splitter.js L1163-1185). The sketch-depth sub-
+    // dispatchers (InCss / InSql / InErrorEffect / InMeta / InTest) all share
+    // this scan, so the fix lands once here for all five.
+    const here = peekChar(cursor, 0);
+    if ((here === openBrace() || here === closeBraceChar())
+        && braceIsInStringLiteral(cursor)) {
+        advance(cursor, 1);
+        return;
+    }
+
     if (isBlockContextClose(ctx, cursor)) {
         const frame = closeBlockContext(ctx, cursor);
         // F7.b — pass the cursor so an .InSql block's emitContextBlock can
@@ -1316,7 +1352,6 @@ export function scanBraceDelimitedSketch(cursor, ctx) {
         return;
     }
 
-    const here = peekChar(cursor, 0);
     if (here === openBrace()) {
         noteBraceOpen(ctx, cursor);
         advance(cursor, 1);
@@ -1573,6 +1608,30 @@ export function openBrace() {
 }
 export function closeBraceChar() {
     return String.fromCharCode(125);
+}
+
+// braceIsInStringLiteral — calculation. A `{` / `}` at the cursor is brace-in-
+// string content, NOT a structural brace, when it is the exact 3-character
+// pattern `"{"` / `"}"` / `'{'` / `'}'` — a brace immediately surrounded by
+// matching quotes. This is the SAME narrow detection the live block-splitter
+// uses (block-splitter.js L1163-1185, "Bug 2 C-narrow S109"): full string-state
+// tracking is impractical because a quote char is ambiguous (regex, template
+// interpolation, apostrophe-in-comment), so the BS detects only the exact
+// quote-brace-quote shape. The native parser MIRRORS that narrow detection so
+// the body-extent brace-depth count balances on the SAME inputs the live BS
+// balances on — a wider rule would diverge the dual-pipeline FileAST. Without
+// this skip a `{` inside a string literal (`const c = "{"`) is counted as a
+// real brace, depth never balances, the `${...}` opener's matching `}` is
+// never found, and the whole block degrades to a `Text` node — every
+// declaration inside it is lost.
+export function braceIsInStringLiteral(cursor) {
+    const prev1 = peekChar(cursor, -1);
+    const next1 = peekChar(cursor, 1);
+    const doubleQuote = String.fromCharCode(34);
+    const singleQuote = String.fromCharCode(39);
+    if (prev1 === doubleQuote && next1 === doubleQuote) return true;
+    if (prev1 === singleQuote && next1 === singleQuote) return true;
+    return false;
 }
 
 // --- P4-2 — the BARE-MARKUP-STATEMENT lift pass -----------------------------
