@@ -135,6 +135,51 @@ export function topKindSequence(nodes) {
   return (nodes || []).map((n) => (n !== undefined && n !== null ? n.kind : null));
 }
 
+// =============================================================================
+// isLiveDegenerate — the oracle is not infallible. On some files the LIVE
+// block-splitter silently drops all markup content and produces a degenerate
+// FileAST: a comment+text(+empty-logic)-only tree with ZERO `markup` nodes,
+// while the native parser produces the correct, substantial markup tree.
+// Such a file is NOT a native gap — the live oracle is the broken side.
+//
+// The detector is structural and ratio-gated, so it cannot mistake a small
+// legitimate non-`<program>` file (whose two pipelines agree at comparable
+// size) for a degenerate-live one:
+//   - the LIVE deep tree carries ZERO `markup` nodes, AND
+//   - the NATIVE deep tree carries at least one `markup` node, AND
+//   - the NATIVE deep tree is at least 3x the size of the LIVE deep tree.
+// The 3x ratio is what excludes a genuine small component-only file (where
+// native and live land within ~2x of each other) from the degenerate class.
+// =============================================================================
+export function isLiveDegenerate(liveDeep, nativeDeep) {
+  const liveMarkup = liveDeep.filter((k) => k === "markup").length;
+  const nativeMarkup = nativeDeep.filter((k) => k === "markup").length;
+  if (liveMarkup !== 0) return false;
+  if (nativeMarkup < 1) return false;
+  return nativeDeep.length >= 3 * Math.max(liveDeep.length, 1);
+}
+
+// =============================================================================
+// deepDiffIsOnlyDroppedTests — true iff the ONLY difference between the two
+// recursive node-kind sequences is `test` nodes the native parser dropped per
+// the D2 deferral (`Test` blocks are dropped with an `I-NATIVE-BLOCK-DROPPED`
+// info — the live pipeline strips Test pre-codegen). The top-level
+// `DEFERRAL-test-block` class only sees a TOP-LEVEL dropped `test`; a `test`
+// block in NESTED position (inside a markup body) is invisible to the
+// top-kind set and would otherwise land in `DIFF-deep-seq`. This helper lets
+// the canary recognise the nested case as the SAME deliberate D2 deferral:
+// the live deep sequence, with every `test` entry removed, must equal the
+// native deep sequence exactly.
+// =============================================================================
+export function deepDiffIsOnlyDroppedTests(liveDeep, nativeDeep) {
+  const liveWithoutTests = liveDeep.filter((k) => k !== "test");
+  if (liveWithoutTests.length !== nativeDeep.length) return false;
+  // native must itself carry no `test` node (D2 drops them all), and the live
+  // sequence sans `test` must match native position-for-position.
+  if (nativeDeep.some((k) => k === "test")) return false;
+  return liveWithoutTests.every((k, i) => k === nativeDeep[i]);
+}
+
 // hoistCounts — the six hoisted-collection lengths, as a plain record.
 const HOIST_FIELDS = [
   "imports", "exports", "components",
@@ -233,8 +278,19 @@ export function diffFileASTs(liveAst, nativeAst) {
 //   - "NATIVE-CRASH"       — the native parser crashed (no-throw violation —
 //                            a hard regression). `explained: false`.
 //   - "DEFERRAL-test-block"— the ONLY diff is the live pipeline carrying a
-//                            top-level `test` node native dropped per the D2
-//                            deferral. `explained: true` — acceptable.
+//                            `test` node native dropped per the D2 deferral.
+//                            Covers BOTH a top-level dropped `test` (top-kind
+//                            set diff) AND a NESTED dropped `test` (the deep
+//                            sequence differs only by removed `test` nodes —
+//                            the same deliberate D2 choice in nested
+//                            position). `explained: true` — acceptable.
+//   - "LIVE-DEGENERATE"    — the LIVE pipeline produced a degenerate
+//                            comment+text-only FileAST (zero `markup` nodes)
+//                            while the native parser produced the correct,
+//                            substantial markup tree. The oracle is the
+//                            broken side (a live `block-splitter.js`
+//                            content-drop defect), NOT a native gap.
+//                            `explained: true` — native is correct.
 //   - "GAP-state-block"    — the live pipeline produced a `state` /
 //                            `state-constructor-def` node native rendered as
 //                            `markup` (the native parser has no `State`
@@ -272,12 +328,37 @@ export function classifyDivergence(filePath, source) {
 
   const d = diffFileASTs(live.ast, native.ast);
 
+  // LIVE-DEGENERATE — the oracle is the broken side. The live block-splitter
+  // silently dropped all markup content and produced a comment+text-only
+  // FileAST (zero `markup` nodes) while the native parser produced the
+  // correct, substantial markup tree. NOT a native gap — `explained: true`.
+  // Checked BEFORE the EXACT / GAP branches: such a file would otherwise be
+  // mis-blamed on native as `GAP-native-extra-block` / `GAP-mixed`.
+  if (isLiveDegenerate(d.liveDeep, d.nativeDeep)) {
+    return { class: "LIVE-DEGENERATE", explained: true, detail: d };
+  }
+
   // True EXACT — the two FileASTs match on BOTH axes: the top-level kind
   // sequence + hoist counts + `hasProgramRoot`, AND the recursive node-kind
   // sequence. A file passing the top-level check but failing the deep check
   // is NOT EXACT (it falls through to the DIFF-deep-seq branch below).
   if (d.topSeqEqual && d.hoistEqual && d.programRootEqual && d.deepSeqEqual) {
     return { class: "EXACT", explained: true, detail: d };
+  }
+
+  // DEFERRAL D2 (nested) — the top-level diff is clean and the ONLY deep-axis
+  // divergence is `test` nodes native dropped per the D2 deferral. The
+  // top-level `DEFERRAL-test-block` branch below only sees a TOP-LEVEL
+  // dropped `test`; a `test` block NESTED inside a markup body is invisible
+  // to the top-kind set and would otherwise be mis-classed `DIFF-deep-seq`.
+  // Dropping a nested `test` is the SAME deliberate, documented D2 choice as
+  // dropping a top-level one — `explained: true`.
+  if (
+    d.topSeqEqual && d.hoistEqual && d.programRootEqual &&
+    d.deepSeqEqual === false &&
+    deepDiffIsOnlyDroppedTests(d.liveDeep, d.nativeDeep)
+  ) {
+    return { class: "DEFERRAL-test-block", explained: true, detail: d };
   }
 
   // DIFF-deep-seq — the top-level diff is clean (today's `EXACT` criteria)
@@ -363,6 +444,12 @@ export function summarizeDetail(verdict) {
     return verdict.detail;
   }
   const d = verdict.detail;
+  if (verdict.class === "LIVE-DEGENERATE") {
+    return "live AST is degenerate (zero markup nodes) — live block-splitter " +
+      "dropped all markup; native is correct (deep len live=" +
+      (d.liveDeep ? d.liveDeep.length : "?") +
+      " native=" + (d.nativeDeep ? d.nativeDeep.length : "?") + ")";
+  }
   const parts = [];
   if (d.liveOnlyKinds && d.liveOnlyKinds.length > 0) {
     parts.push("live-only-kinds=[" + d.liveOnlyKinds.join(",") + "]");

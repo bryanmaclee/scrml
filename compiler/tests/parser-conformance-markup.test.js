@@ -69,6 +69,8 @@ import {
     isBodyWhitespace,
     scanCodeDefaultRunExtent,
     isValidCodeRun,
+    // P4-3 — the orphan-brace suppression counter (read accessor).
+    markupOrphanBraceDepth,
 } from "../native-parser/parse-markup.js";
 import { makeParseContext } from "../native-parser/parse-ctx.js";
 // K9 (S114) — DelegationFrame surface moved to delegation-frame.js
@@ -5906,5 +5908,200 @@ describe("P4-2 — bare-markup-statement segmentation (native vs live buildAST)"
         expect(nativeKinds).toEqual(liveKinds);
         // No type decl was hoisted from the prose.
         expect(native.typeDecls.length).toBe(live.typeDecls.length);
+    });
+});
+
+// =============================================================================
+// P4-3 — the ORPHAN-BRACE suppression (M5 gap-ledger Phase 4, Unit P4-3).
+//
+// A bare `{` in markup-child position (no preceding sigil) opens an
+// orphan-brace region — the body of a bare inline control-flow / expression
+// construct sitting directly in markup (`match @s { ... }`, `for (...) {...}`,
+// an `&&` ghost `{@cond && <El>}`). The live block-splitter tracks an
+// `orphanBraceDepth` counter (block-splitter.js L223) and, while it is `> 0`,
+// treats EVERY structural construct inside the region as one verbatim text
+// run — `<tag>` openers, `</>` closers, the sigil block-openers, `//`
+// comments. parse-markup.js mirrors that counter as `markupOrphanBraceDepth`
+// on `ctx` and gates `handleOrphanBrace` + the recognizer suppression.
+//
+// Backfill for Unit P4-3 (landed 9819911d) — the P4-3 agent stalled before
+// writing its conformance tests; this block is the Unit-P4-C backfill.
+// =============================================================================
+describe("P4-3 orphan-brace — markupOrphanBraceDepth: the ctx-borne counter", () => {
+    test("a null / undefined ctx reads as depth 0 (no slot)", () => {
+        // The counter is lazily initialised — a ctx with no slot reads 0.
+        expect(markupOrphanBraceDepth(null)).toBe(0);
+        expect(markupOrphanBraceDepth(undefined)).toBe(0);
+    });
+
+    test("a ctx with no `markupOrphanBraceDepth` slot reads as depth 0", () => {
+        expect(markupOrphanBraceDepth({})).toBe(0);
+    });
+
+    test("a ctx carrying a positive slot reads that depth", () => {
+        expect(markupOrphanBraceDepth({ markupOrphanBraceDepth: 3 })).toBe(3);
+    });
+
+    test("a slot of 0 reads 0 — the depth is never negative", () => {
+        expect(markupOrphanBraceDepth({ markupOrphanBraceDepth: 0 })).toBe(0);
+    });
+
+    test("a balanced orphan-brace run leaves the counter back at 0", () => {
+        // `{ <div>x</div> }` — the bare `{`/`}` pair balances; after the run
+        // the ctx counter is back to its 0 resting state.
+        const t = parseMarkupTrace("{ <div>x</div> }");
+        expect(markupOrphanBraceDepth(t.ctx)).toBe(0);
+    });
+
+    test("an UNBALANCED open `{` leaves the counter elevated", () => {
+        // A bare `{` with no matching `}` — the region never closes; the
+        // counter stays at 1 (the live BS leaves `orphanBraceDepth` elevated
+        // identically on an unterminated region).
+        const t = parseMarkupTrace("text { still inside");
+        expect(markupOrphanBraceDepth(t.ctx)).toBe(1);
+    });
+});
+
+describe("P4-3 orphan-brace — a `<tag>` inside a bare `{ ... }` region stays text", () => {
+    test("a `<div>` inside a bare `{ ... }` region is NOT a Markup block", () => {
+        // The bare `{` opens an orphan-brace region; the `<div>` opener is
+        // suppressed and the whole region accumulates as one verbatim Text
+        // run — no Markup block is emitted.
+        const blocks = parseMarkup("a { <div>x</div> } b");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+        expect(blocks.filter((b) => b.kind === "Markup").length).toBe(0);
+    });
+
+    test("a `< Ident>` state-opener inside a bare `{ ... }` region stays text", () => {
+        // A `< Ident>` (space-prefixed — a state-block opener shape) is
+        // likewise suppressed inside the orphan-brace region.
+        const blocks = parseMarkup("{ < Counter> } ");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+    });
+});
+
+describe("P4-3 orphan-brace — the counter NESTS", () => {
+    test("`{ { <p>y</p> } }` — a nested bare `{` keeps the region one text run", () => {
+        // The inner `{` increments to depth 2; the suppression holds until
+        // BOTH `}` close. The `<p>` opener never escapes the region.
+        const blocks = parseMarkup("{ { <p>y</p> } }");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+        expect(blocks.filter((b) => b.kind === "Markup").length).toBe(0);
+    });
+
+    test("the first `}` of a depth-2 region does NOT re-enable recognition", () => {
+        // `{ { <a></a> } <b></b> }` — after the first `}` the counter is
+        // still 1 (> 0), so the `<b>` opener is ALSO suppressed. The whole
+        // span is one verbatim Text run.
+        const blocks = parseMarkup("{ { <a></a> } <b></b> }");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+    });
+});
+
+describe("P4-3 orphan-brace — `</>` / `${...}` / `//` are suppressed in the region", () => {
+    test("a `</>` inferred closer inside a bare `{ ... }` region stays text", () => {
+        // The `</>` closer pairs with a `<tag>` opener that is itself being
+        // treated as text — so the closer is suppressed too (live BS L1530).
+        const blocks = parseMarkup("{ <div> </> }");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+    });
+
+    test("a `${...}` sigil block-opener inside the region is NOT entered", () => {
+        // Inside an orphan-brace region the `$` of a `${` is raw text — no
+        // LogicEscape block is emitted; the whole span is one Text run.
+        const blocks = parseMarkup("{ leading ${value} trailing }");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+        expect(blocks.filter((b) => b.kind === "LogicEscape").length).toBe(0);
+    });
+
+    test("a `//` line comment inside the region is NOT a Comment block", () => {
+        // The live BS gates `//` recognition on `orphanBraceDepth`; native
+        // mirrors it — the `//` is verbatim text inside the region.
+        const blocks = parseMarkup("{ value // not a comment\n}");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+        expect(blocks.filter((b) => b.kind === "Comment").length).toBe(0);
+    });
+
+    test("all three constructs together in one region collapse to one Text run", () => {
+        const blocks = parseMarkup("{ </> ${val} // c }");
+        expect(blocks.map((b) => b.kind)).toEqual(["Text"]);
+    });
+});
+
+describe("P4-3 orphan-brace — a properly-nested `${...}` sigil does NOT perturb the counter", () => {
+    test("a `${...}` at markup top level is a SIGIL, not a bare brace", () => {
+        // `${ a }` — the `{` is the second char of the two-char `${` sigil;
+        // it is consumed by the sigil path, never reaches handleOrphanBrace.
+        // The counter is untouched: a `<section>` AFTER the `${...}` is still
+        // recognised as a Markup block.
+        const blocks = parseMarkup("${ a } <section>z</section>");
+        const kinds = blocks.map((b) => b.kind);
+        expect(kinds).toContain("LogicEscape");
+        expect(kinds).toContain("Markup");
+        // The counter never went positive — proof the `${}` did not perturb
+        // it.
+        const t = parseMarkupTrace("${ a } <section>z</section>");
+        expect(markupOrphanBraceDepth(t.ctx)).toBe(0);
+    });
+
+    test("a `${...}` with a nested object literal still does not perturb the counter", () => {
+        // The `{` inside the `${ ... }` interpolation is the sigil context's
+        // own brace — the orphan-brace counter (a MARKUP-child mechanism) is
+        // never touched.
+        const t = parseMarkupTrace("${ obj.x } after");
+        expect(markupOrphanBraceDepth(t.ctx)).toBe(0);
+    });
+});
+
+describe("P4-3 orphan-brace — a legitimate element OUTSIDE the region is still recognized", () => {
+    test("a `<div>` with no enclosing bare `{` IS a Markup block", () => {
+        // The suppression is GATED on `markupOrphanBraceDepth > 0`. With no
+        // orphan-brace region open, normal markup recognition is untouched.
+        const blocks = parseMarkup("<div>hello</div>");
+        expect(blocks.map((b) => b.kind)).toEqual(["Markup"]);
+    });
+
+    test("an element AFTER a closed orphan-brace region is recognized again", () => {
+        // `{ <p>x</p> } <ul>y</ul>` — once the region's `}` closes the
+        // counter to 0, the `<ul>` opener is recognised normally: a Text
+        // run (the region) followed by a Markup block.
+        const blocks = parseMarkup("{ <p>x</p> } <ul>y</ul>");
+        const kinds = blocks.map((b) => b.kind);
+        expect(kinds).toContain("Markup");
+        expect(kinds[kinds.length - 1]).toBe("Markup");
+    });
+});
+
+describe("P4-3 orphan-brace — the mechanism is GATED OFF in a code-default body", () => {
+    test("isCodeDefault(currentBodyMode) is true in an engine/match body — orphan suppression disabled", () => {
+        // SPEC §4.18.1 — an engine state-child / match-arm body is
+        // code-default mode; it has its own `{`-bearing grammar (the §4.18
+        // body dispatch). parse-markup.js gates the orphan-brace mechanism
+        // OFF there: `orphanActive = !isCodeDefault(currentBodyMode(ctx))`.
+        // A ctx whose innermost open TagFrame carries a CodeDefault body
+        // mode yields `orphanActive === false`.
+        const codeCtx = {
+            tagFrameStack: [{ name: "engine", bodyMode: BodyMode.CodeDefault }],
+        };
+        expect(isCodeDefault(currentBodyMode(codeCtx))).toBe(true);
+        const orphanActive = !isCodeDefault(currentBodyMode(codeCtx));
+        expect(orphanActive).toBe(false);
+    });
+
+    test("a free-text body keeps the orphan-brace mechanism ENABLED", () => {
+        // A `<div>` body is free-text mode — `orphanActive` is true, the
+        // orphan-brace suppression is the markup-child position the P4-3
+        // target files exercise.
+        const freeCtx = {
+            tagFrameStack: [{ name: "div", bodyMode: BodyMode.FreeText }],
+        };
+        expect(isCodeDefault(currentBodyMode(freeCtx))).toBe(false);
+        expect(!isCodeDefault(currentBodyMode(freeCtx))).toBe(true);
+    });
+
+    test("a top-level ctx (no open tag) is free-text — orphan mechanism enabled", () => {
+        // No enclosing body — the §4.18.1 default free-text mode applies, so
+        // the orphan-brace mechanism is active at markup top level.
+        expect(isCodeDefault(currentBodyMode({ tagFrameStack: [] }))).toBe(false);
     });
 });
