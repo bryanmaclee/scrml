@@ -40,8 +40,17 @@
  * JS-only no-throw SMOKE test (still kept below — it is a different surface:
  * `parseProgram(lex(source))`) to a STRICT dual-pipeline canary: each corpus
  * file is run through BOTH the live BS+buildAST pipeline AND `nativeParseFile`
- * and the two FileASTs are structurally diffed (node-kind sequence, hoisted-
- * collection counts, hasProgramRoot — see dual-pipeline-canary.js).
+ * and the two FileASTs are structurally diffed along TWO node-kind axes — the
+ * TOP-LEVEL kind sequence AND the RECURSIVE (deep) kind sequence — plus
+ * hoisted-collection counts and hasProgramRoot (see dual-pipeline-canary.js).
+ *
+ * M5 gap-ledger deepening — the canary's `diffFileASTs` now diffs the
+ * RECURSIVE node-kind sequence in addition to the top-level one. A file whose
+ * top-level kind sequence matches in both pipelines but which diverges in a
+ * nested position (the common `<state>`-inside-`<program>` shape) is no
+ * longer scored `EXACT` — it is the `DIFF-deep-seq` gap-ledger class. True
+ * `EXACT` now requires BOTH axes to match. The strict-pass count is therefore
+ * a TRUE residual ledger, not the top-level-only FLOOR it was before.
  *
  * The strict gate is SCOPED. `classifyDivergence` partitions the corpus:
  *   - `EXACT` / `DEFERRAL-test-block` files (the native FileAST matches the
@@ -215,7 +224,9 @@ describe("M4.3 — corpus-wide diagnostic-shape audit (informational)", () => {
 // Each `.scrml` corpus file is classified ONCE at module load by
 // `classifyDivergence` (dual-pipeline-canary.js): the file is run through
 // BOTH the live BS+buildAST pipeline AND `nativeParseFile`, and the two
-// FileASTs are structurally diffed.
+// FileASTs are structurally diffed on BOTH the top-level AND the recursive
+// node-kind axes (a nested-position divergence — e.g. a `<state>` inside a
+// top-level `<program>` markup — surfaces as the `DIFF-deep-seq` class).
 //
 //   - `explained` files (verdict class EXACT or DEFERRAL-test-block) are
 //     gated STRICT: a `test` asserts the canary verdict is `explained` — i.e.

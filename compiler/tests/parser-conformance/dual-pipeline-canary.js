@@ -9,29 +9,53 @@
 //            behind `--parser=scrml-native`.
 //
 // Both pipelines return the SAME `{ filePath, ast: FileAST, errors }` shape,
-// so the canary can structurally diff the two FileASTs:
-//   - the recursive node-KIND sequence (top-level + markup children);
+// so the canary can structurally diff the two FileASTs along TWO axes:
+//   - the TOP-LEVEL node-KIND sequence (`topKindSequence`, no recursion) — the
+//     axis the divergence taxonomy (`DIFF-top-seq`, `GAP-state-block`, ...) is
+//     built on. A top-level diff keeps its existing class.
+//   - the RECURSIVE node-KIND sequence (`nodeKindSequence`, walks each node's
+//     `children`) — the DEEP axis. It catches files whose top-level kind
+//     sequence is identical in both pipelines but which diverge in a nested
+//     position (e.g. a `<state>` buried inside a top-level `<program>` markup
+//     — the common app shape). Such files would be top-level-`EXACT` and the
+//     deep axis is the only thing that surfaces them.
 //   - the six hoisted-collection COUNTS (imports / exports / components /
 //     typeDecls / machineDecls / channelDecls);
 //   - `hasProgramRoot`;
 //   - the diagnostic (error) streams — count + code multiset.
 //
+// True `EXACT` requires BOTH the top-level AND the recursive sequence to
+// match. A file whose top level is clean but whose recursive sequence differs
+// is `DIFF-deep-seq` — its own gap-ledger class.
+//
 // THE CLASSIFICATION CONTRACT. C1 landed with three KNOWN, documented
 // deferrals that WILL surface as canary diffs — these are EXPECTED, not bugs
 // (see parse-file.js header):
 //   D1 — `DisplayTextLiteral` is mapped to a `text` node (the §4.18.6 escape
-//        pass is deferred).
+//        pass is deferred). NOTE: because the native assembler maps a
+//        `DisplayTextLiteral` block to ASTNode kind `text` — and the live
+//        pipeline's `Text` block also yields ASTNode kind `text` — a nested
+//        display-text literal produces NO node-kind diff on EITHER axis. D1
+//        is invisible to a kind walk; it needs no `DEFERRAL-*` class. (If a
+//        future change made the two pipelines land on different kinds for a
+//        display-text literal, that tranche would be a `DEFERRAL-*` class
+//        per the test-block precedent — but today they agree on `text`.)
 //   D2 — `Test` / `ForeignCode` blocks are dropped with an
 //        `I-NATIVE-BLOCK-DROPPED` info diagnostic (the live pipeline strips
 //        Test pre-codegen; ForeignCode has no live ASTNode).
 //   D3 — `synthLogicNode` leaves the per-node `logic.{imports,exports,
 //        typeDecls,components}` arrays empty (the file-level `collectHoisted`
-//        is the authoritative source).
+//        is the authoritative source). These are array CONTENTS, not nodes —
+//        a node-kind walk does not see them; D3 is invisible to BOTH axes.
 //
 // `classifyDivergence` partitions every divergent file into:
-//   - `EXACT`              — the two FileASTs match structurally.
+//   - `EXACT`              — the two FileASTs match structurally on BOTH the
+//        top-level and the recursive node-kind axes.
 //   - `DEFERRAL-test-block`— the only diff is the live pipeline having a
 //        top-level `test` node native dropped (D2). ACCEPTABLE.
+//   - `DIFF-deep-seq`      — the top-level diff is clean (today's `EXACT`
+//        criteria) but the RECURSIVE node-kind sequence differs: a divergence
+//        nested below the top level. `explained: false` — a gap-ledger entry.
 //   - one of several `GAP-*` / `DIFF-*` classes — an UNEXPLAINED native-vs-
 //        live divergence: a real fidelity gap. The conformance gate
 //        (parser-conformance-corpus.test.js) `.skip`s these with the class
@@ -72,8 +96,10 @@ export function runNativePipeline(filePath, source) {
 
 // =============================================================================
 // nodeKindSequence — the recursive node-KIND walk. Top-level nodes plus, for
-// every `markup` node, its `children` (recursively). The kind sequence is the
-// primary structural signature the canary diffs.
+// every node carrying a `children` array, its children (recursively). The
+// pre-order kind sequence is the DEEP structural signature the canary diffs —
+// it catches divergences nested below a top-level node (e.g. a `<state>`
+// inside a top-level `<program>` markup) that `topKindSequence` cannot see.
 // =============================================================================
 export function nodeKindSequence(nodes) {
   const out = [];
@@ -86,6 +112,22 @@ export function nodeKindSequence(nodes) {
   }
   for (const n of nodes || []) walk(n);
   return out;
+}
+
+// firstSeqDivergence — the index + the two kinds at the first position where
+// two kind sequences differ, or `null` when they are equal. Used to give the
+// gap ledger a concrete "diverges at i=N: live=X native=Y" detail rather than
+// dumping two long sequences.
+function firstSeqDivergence(liveSeq, nativeSeq) {
+  const n = Math.max(liveSeq.length, nativeSeq.length);
+  for (let i = 0; i < n; i = i + 1) {
+    const lk = i < liveSeq.length ? liveSeq[i] : "(end)";
+    const nk = i < nativeSeq.length ? nativeSeq[i] : "(end)";
+    if (lk !== nk) {
+      return { index: i, liveKind: lk, nativeKind: nk };
+    }
+  }
+  return null;
 }
 
 // topKindSequence — the top-level node-kind sequence only (no recursion).
@@ -118,11 +160,15 @@ export function errorCodeMultiset(errors) {
 
 // =============================================================================
 // diffFileASTs — the structural diff. Returns a record:
-//   { topSeqEqual, hoistEqual, programRootEqual,
+//   { topSeqEqual, deepSeqEqual, hoistEqual, programRootEqual,
 //     liveTop, nativeTop, liveOnlyKinds, nativeOnlyKinds,
+//     liveDeep, nativeDeep, deepFirstDivergence,
 //     liveHoist, nativeHoist, liveHasProgramRoot, nativeHasProgramRoot }
 // `liveOnlyKinds` / `nativeOnlyKinds` are the top-kind SET differences — the
 // kinds one pipeline produced at top level that the other did not.
+// `liveDeep` / `nativeDeep` are the RECURSIVE pre-order kind sequences;
+// `deepSeqEqual` is true iff they match; `deepFirstDivergence` (or `null`)
+// pinpoints the first differing position.
 // =============================================================================
 export function diffFileASTs(liveAst, nativeAst) {
   const liveTop = topKindSequence(liveAst.nodes);
@@ -136,6 +182,19 @@ export function diffFileASTs(liveAst, nativeAst) {
   const liveOnlyKinds = [...liveSet].filter((k) => nativeSet.has(k) === false);
   const nativeOnlyKinds = [...nativeSet].filter((k) => liveSet.has(k) === false);
 
+  // The DEEP axis — the recursive pre-order node-kind sequence over each
+  // node's `children`. `topSeqEqual` only sees the top-level row; a divergence
+  // nested inside (the common `<state>`-inside-`<program>` shape) is caught
+  // only here.
+  const liveDeep = nodeKindSequence(liveAst.nodes);
+  const nativeDeep = nodeKindSequence(nativeAst.nodes);
+  const deepSeqEqual =
+    liveDeep.length === nativeDeep.length &&
+    liveDeep.every((k, i) => k === nativeDeep[i]);
+  const deepFirstDivergence = deepSeqEqual
+    ? null
+    : firstSeqDivergence(liveDeep, nativeDeep);
+
   const liveHoist = hoistCounts(liveAst);
   const nativeHoist = hoistCounts(nativeAst);
   const hoistEqual = HOIST_FIELDS.every((f) => liveHoist[f] === nativeHoist[f]);
@@ -145,8 +204,9 @@ export function diffFileASTs(liveAst, nativeAst) {
   const programRootEqual = liveHasProgramRoot === nativeHasProgramRoot;
 
   return {
-    topSeqEqual, hoistEqual, programRootEqual,
+    topSeqEqual, deepSeqEqual, hoistEqual, programRootEqual,
     liveTop, nativeTop, liveOnlyKinds, nativeOnlyKinds,
+    liveDeep, nativeDeep, deepFirstDivergence,
     liveHoist, nativeHoist, liveHasProgramRoot, nativeHasProgramRoot,
   };
 }
@@ -156,7 +216,18 @@ export function diffFileASTs(liveAst, nativeAst) {
 // pipelines, structurally diffs, and returns:
 //   { class, explained, detail }
 // where `class` is one of:
-//   - "EXACT"              — structural match. `explained: true`.
+//   - "EXACT"              — structural match on BOTH the top-level and the
+//                            recursive node-kind axes. `explained: true`.
+//   - "DIFF-deep-seq"      — the top-level diff is clean (today's `EXACT`
+//                            criteria: `topSeqEqual && hoistEqual &&
+//                            programRootEqual`) BUT the recursive node-kind
+//                            sequence differs — a divergence nested below the
+//                            top level (typically a `<state>` inside a
+//                            top-level `<program>` markup). `explained: false`
+//                            — a gap-ledger entry. A file with a TOP-LEVEL
+//                            cause keeps its top-level class (the top-level
+//                            cause is reported first); `DIFF-deep-seq` is
+//                            ONLY for files the top-level diff cleared.
 //   - "LIVE-CRASH"         — the live pipeline crashed. Surfaced; not C2's
 //                            remit. `explained: false`.
 //   - "NATIVE-CRASH"       — the native parser crashed (no-throw violation —
@@ -201,8 +272,24 @@ export function classifyDivergence(filePath, source) {
 
   const d = diffFileASTs(live.ast, native.ast);
 
-  if (d.topSeqEqual && d.hoistEqual && d.programRootEqual) {
+  // True EXACT — the two FileASTs match on BOTH axes: the top-level kind
+  // sequence + hoist counts + `hasProgramRoot`, AND the recursive node-kind
+  // sequence. A file passing the top-level check but failing the deep check
+  // is NOT EXACT (it falls through to the DIFF-deep-seq branch below).
+  if (d.topSeqEqual && d.hoistEqual && d.programRootEqual && d.deepSeqEqual) {
     return { class: "EXACT", explained: true, detail: d };
+  }
+
+  // DIFF-deep-seq — the top-level diff is clean (today's `EXACT` criteria)
+  // but the recursive node-kind sequence differs. This is the deep-axis
+  // tranche: a divergence nested below the top level that `topKindSequence`
+  // cannot see. A file with a TOP-LEVEL cause does NOT land here — it falls
+  // through to the top-level branches below and keeps its top-level class.
+  if (
+    d.topSeqEqual && d.hoistEqual && d.programRootEqual &&
+    d.deepSeqEqual === false
+  ) {
+    return { class: "DIFF-deep-seq", explained: false, detail: d };
   }
 
   const liveOnly = d.liveOnlyKinds;
@@ -299,6 +386,19 @@ export function summarizeDetail(verdict) {
   if (d.topSeqEqual === false && parts.length === 0) {
     parts.push("top-seq differs (same kind set): live=[" +
       d.liveTop.join(",") + "] native=[" + d.nativeTop.join(",") + "]");
+  }
+  // The DEEP axis — surfaced when the top-level diff is clean. `DIFF-deep-seq`
+  // is exactly this case; the first-divergence index pinpoints the nested
+  // node where the two recursive sequences part.
+  if (
+    parts.length === 0 && d.deepSeqEqual === false &&
+    d.deepFirstDivergence !== undefined && d.deepFirstDivergence !== null
+  ) {
+    const fd = d.deepFirstDivergence;
+    parts.push("deep-seq diverges at i=" + fd.index +
+      ": live=" + fd.liveKind + " native=" + fd.nativeKind +
+      " (deep len live=" + (d.liveDeep ? d.liveDeep.length : "?") +
+      " native=" + (d.nativeDeep ? d.nativeDeep.length : "?") + ")");
   }
   return parts.join(" | ") || "structural divergence";
 }
