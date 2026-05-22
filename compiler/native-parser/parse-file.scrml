@@ -1,0 +1,95 @@
+// parse-file.scrml — C1 / M5-swap — the native-parser analogue of the live
+// pipeline's `buildAST` (ast-builder.js ~L11971). `nativeParseFile` is the
+// FileAST ASSEMBLER.
+//
+// PILLAR 5b classification (DD §C1):
+//   nativeParseFile is CALCULATION (pure). It is a fold over the native
+//   parser's block-stream — it drives `parseMarkupTrace` (the parser is the
+//   stateful engine; the assembler only reads its output), maps each block to
+//   a live ASTNode, and folds the hoisted collections. It carries no state of
+//   its own: no transitions, no lifecycle. The one mutable thing it threads —
+//   the `idGen` counter — is an argument-passed allocator, the same discipline
+//   collect-hoisted + translate-stmt follow; it is not module state. The spec's
+//   `fn` + struct primitives are sufficient; no missing primitive surfaced.
+//
+// PURPOSE — the FileAST assembler:
+//   The downstream compiler stages (name-resolver, route-inference, auth-graph,
+//   codegen) consume a `FileAST` (compiler/src/types/ast.ts:1487). The live
+//   pipeline builds it in `ast-builder.js:buildAST`. The M5 swap routes the
+//   native parser into that seam; `nativeParseFile` is the function that turns
+//   the native parser's block-stream into the SAME `FileAST` shape — a drop-in
+//   replacement for `buildAST`'s `{ filePath, ast, errors }` output. C1 builds
+//   this function; C2 routes `compileScrml` to it.
+//
+// THE LIVE CONTRACT (transplant source — behavioral spec):
+//   buildAST(blocks) returns { filePath, ast: FileAST, errors }. The FileAST:
+//     { filePath, nodes, imports, exports, components, typeDecls,
+//       machineDecls, channelDecls, hasProgramRoot, authConfig,
+//       middlewareConfig }
+//   - `nodes` — the lowercase ASTNode union;
+//   - the six hoisted collections — folded by `collectHoisted`;
+//   - `hasProgramRoot` — a top-level `markup` node with tag "program";
+//   - `authConfig` / `middlewareConfig` — S115 (DD #27 / F6 / Pivot 2): NOT
+//     computed at AST-build time. The pipeline-agnostic PRECG pass
+//     `computeProgramConfig` (api.js Stage 3.004) derives them; `nativeParseFile`
+//     leaves both `null` and PRECG overwrites them. The 4 PGO `has*` flags are
+//     derived the same way by `computePGOFlags`.
+//
+// THE NATIVE NODE-CATALOG ADAPTATION (DD §C1 / M5-divergence-ledger):
+//   The native parser emits a flat `Block[]` per file (parse-markup.js
+//   `parseMarkup` / `parseMarkupTrace`). Each Block carries a PascalCase
+//   `kind`. The BlockKind -> live ASTNode-kind map:
+//     "Markup"      -> "markup"        "Text"        -> "text"
+//     "Comment"     -> "comment"       "Sql"         -> "sql"
+//     "Css"         -> "css-inline"    "Meta"        -> "meta"
+//     "ErrorEffect" -> "error-effect"  "LogicEscape" -> "logic"
+//   Three native BlockKinds have NO live ASTNode and are NOT in the DD map:
+//     "DisplayTextLiteral" -> mapped to a `text` node (verbatim literal source;
+//        the §4.18.4 segments/exprs payload is a downstream escape-pass concern);
+//     "Test"        -> dropped (the live pipeline strips test blocks pre-codegen);
+//     "ForeignCode" -> dropped (no live ASTNode kind today).
+//   A dropped kind is logged onto the result `errors` as an `I-`-prefixed info
+//   diagnostic — the disposition is observable, never silent.
+//
+// THE BRIDGE SEAM:
+//   - A1 `translateStmtList` (translate-stmt.scrml) — a LogicEscape / Meta
+//     block's native `Stmt[]` body -> the live `LogicStatement[]`. A1 calls the
+//     A2 expression bridge internally, so the assembler does not call A2 directly.
+//   - A3 `collectHoisted` (collect-hoisted.scrml) — folds the native block-stream
+//     into the six hoisted file-level collections + `hasProgramRoot`.
+//
+// THE SHARED idGen:
+//   Every synthesized node (the `nodes` ASTNodes, the translated LogicStatements,
+//   the hoisted EngineDecl / ComponentDef / TypeDecl nodes) needs a numeric `id`
+//   (the live `BaseNode` contract — ast.ts:204). `nativeParseFile` creates ONE
+//   `{ next }` counter and threads the SAME instance through `collectHoisted`,
+//   every `translateStmtList` call, and every directly-synthesized node — so the
+//   whole native->live FileAST shares one id space.
+//
+// Status (C1 / v0.7): COMPILABLE skeleton. The `${...}` JS-escape block carries
+// the canonical Pillar 5b SHAPE; the .js shadow runs (README ANOMALY-2 — the
+// shadow discipline every native-parser file follows). C2 routes `compileScrml`
+// to `nativeParseFile`; C1 is purely additive — zero live-pipeline blast radius.
+
+${
+    // -----------------------------------------------------------------
+    // nativeParseFile — CALCULATION (pure; threads the `idGen` allocator).
+    // The C1 entry point. Parse `source` with the native parser, assemble
+    // the live `FileAST`, return `{ filePath, ast, errors }` — the drop-in
+    // analogue of `buildAST`'s output.
+    //
+    //   filePath — the absolute source path (onto the FileAST verbatim).
+    //   source   — the scrml source text.
+    //
+    // Steps: (1) parse via parseMarkupTrace + collect ctx.diagnostics;
+    // (2) map each native block to its live ASTNode (A1 bridge on logic /
+    // meta bodies); (3) fold the hoisted collections via A3 collectHoisted;
+    // (4) produce the FileAST with authConfig / middlewareConfig null.
+    //
+    // (live surface in parse-file.js — the .scrml shape carries the
+    // canonical Pillar 5b SHAPE; the .js shadow runs.)
+    // -----------------------------------------------------------------
+    export fn nativeParseFile(filePath, source) {
+        // see parse-file.js for the running shadow
+    }
+}
