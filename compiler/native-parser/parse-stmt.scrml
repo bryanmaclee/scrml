@@ -2133,9 +2133,17 @@ ${
     // -- parseTry — a `try { } catch (param) { } finally { }` statement --
     // At least one of `catch` / `finally` must be present; M3.3 records a
     // diagnostic for the bare form and still emits the Try node.
+    //
+    // M5-swap Wave 2 (B7) — `try` is FORBIDDEN scrml vocabulary. parseTry
+    // fires E-TRY-NOT-IN-SCRML at the `try` keyword and recovers by parsing
+    // the construct anyway (the M4.3 `E-ASYNC-NOT-IN-SCRML` posture).
     export fn parseTry(ctx) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
+
+        recordError(ctx, "E-TRY-NOT-IN-SCRML",
+            "scrml has no `try`/`catch`/`finally`. The error model is `fail` (§19.3), the `?` propagate operator, the `!{}` guarded-expression handler, and `<errorBoundary>` — no source-level try/catch is needed.",
+            kw.span)
 
         const block = parseBlock(ctx)
 
@@ -2193,9 +2201,17 @@ ${
     // The no-LineTerminator restricted production: a `throw` with nothing on
     // its source line is a JS syntax error. M3.3 records a diagnostic for the
     // no-argument form and still emits the Throw node.
+    //
+    // M5-swap Wave 2 (B7) — `throw` is FORBIDDEN scrml vocabulary. scrml uses
+    // `fail Type::Variant(...)` (§19.3). parseThrow fires E-THROW-NOT-IN-SCRML
+    // at the `throw` keyword and recovers by parsing the argument anyway.
     export fn parseThrow(ctx) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
+
+        recordError(ctx, "E-THROW-NOT-IN-SCRML",
+            "scrml has no `throw`. To signal a failure use `fail Type::Variant(...)` (§19.3) inside an `!` failable function — no source-level throw is needed.",
+            kw.span)
 
         if (sameLineFollows(ctx, kw) == false) {
             recordError(ctx, "E-STMT-THROW-NO-ARGUMENT",

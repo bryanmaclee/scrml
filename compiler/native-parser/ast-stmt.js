@@ -48,6 +48,14 @@ export const StmtKind = Object.freeze({
     //     form and the `: kind` alias form ride this one kind.
     LinDecl:      "LinDecl",       // `lin name = expr`
     TypeDecl:     "TypeDecl",      // `type Name : kind = { ... }`
+
+    // --- M5-swap Wave 2 — `~` tilde (pipeline-reactive) declaration kind ---
+    // B3: `~name = pipeline` declares a pipeline-reactive cell (SPEC §32).
+    //     `~` lexes as a `BitNot` token; the §32 standalone-`~` accumulator
+    //     ATOM (ast-expr's `Tilde` ExprKind) is unaffected — TildeDecl is the
+    //     statement-position DECLARATION form, disambiguated from prefix
+    //     bitwise-`~` by the source-adjacent `~ Ident =` shape.
+    TildeDecl:    "TildeDecl",     // `~name = pipeline`
 });
 
 // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).
@@ -359,6 +367,24 @@ export function makeLinDecl(name, init, span) {
 // the live `TypeDeclNode` shape (ast.ts:1235 — `{name, typeKind, raw}`).
 export function makeTypeDecl(name, typeKind, raw, span) {
     return { kind: StmtKind.TypeDecl, name, typeKind, raw, span };
+}
+
+// =============================================================================
+// `~` tilde-declaration node constructor — M5-swap Wave 2 (B3).
+// =============================================================================
+
+// makeTildeDecl — a `~name = pipeline` tilde (pipeline-reactive) declaration
+// (SPEC §32). `~` declares a must-use pipeline-reactive cell; `name` is the
+// bound identifier text and `init` is the initializer Expr (the pipeline
+// expression). A `~` declaration always has an initializer — `~name` with no
+// `= expr` is a malformed shape the production records a diagnostic for, then
+// carries `init` as `null`. This mirrors `makeLinDecl`'s shape (the live
+// `TildeDeclNode` and `LinDeclNode` are structural twins — ast.ts:480/492).
+// The standalone-`~` accumulator atom (§32, ast-expr's `Tilde` ExprKind) is a
+// SEPARATE construct — a `~`-led declaration is recognized only at statement
+// position by the `~ Ident =` shape (see parseTildeDecl).
+export function makeTildeDecl(name, init, span) {
+    return { kind: StmtKind.TildeDecl, name, init, span };
 }
 
 // =============================================================================

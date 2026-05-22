@@ -551,8 +551,10 @@ describe("§11 — catalog coverage: native ExprKind → live ExprNode kind", ()
     test("the native ExprKind catalog has the expected entry count", () => {
         // Guard against silent catalog drift — if a kind is added to
         // ast-expr.js this count changes and this test flags the bridge for
-        // review.
-        expect(ALL_KINDS.length).toBe(40);
+        // review. M5-swap Wave 2 (B1/B2) added `Propagate` + `GuardedExpr`
+        // (40 -> 42); the bridge routes both to `escape-hatch` (the statement
+        // bridge un-wraps the common ExprStmt-position case before A2 runs).
+        expect(ALL_KINDS.length).toBe(42);
     });
 
     for (const kind of ALL_KINDS) {

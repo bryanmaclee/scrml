@@ -65,6 +65,13 @@ const SCRML = enumerateScrmlCorpus();
 // raw source (NO preprocess shim). M4.3 cascade-removal bound: this is the
 // proof.
 // =============================================================================
+// FORBIDDEN_VOCAB_CODES — the M5-swap Wave 2 (B7) parse-layer rejection codes.
+// `try` / `throw` are forbidden scrml vocabulary; the native parser parses
+// them for diagnostic recovery (the `r.ok` no-throw gate still holds) but
+// fires these codes. The `stmt-try-catch.js` bench fixture exercises the
+// `try`/`catch` parse SHAPE — it carries `E-TRY-NOT-IN-SCRML` by design.
+const FORBIDDEN_VOCAB_CODES = ["E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML"];
+
 describe("M4.3 — bench corpus parses cleanly through the native parser (raw source, no preprocess shim)", () => {
   for (const row of BENCH) {
     test(`[bench] ${row.relpath}`, () => {
@@ -76,8 +83,12 @@ describe("M4.3 — bench corpus parses cleanly through the native parser (raw so
       // async/await — see compiler/tests/parser-conformance/bench/
       // expr-async-await.js + expr-yield-generator.js + expr-arrow.js
       // headers). The diagnostic-free parse confirms the JS-subset bound
-      // the native parser CURRENTLY enforces.
-      expect(r.errors).toEqual([]);
+      // the native parser CURRENTLY enforces — EXCEPT the B7
+      // forbidden-vocabulary rejections (`try` / `throw`), which are an
+      // expected, by-design diagnostic, not a divergence.
+      const nonVocab = (r.errors || []).filter(
+        (e) => FORBIDDEN_VOCAB_CODES.includes(e.code) === false);
+      expect(nonVocab).toEqual([]);
     });
   }
 });

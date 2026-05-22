@@ -167,6 +167,11 @@ ${
         // / `type Name : kind` (SPEC §14).
         LinDecl:      "LinDecl",
         TypeDecl:     "TypeDecl",
+
+        // --- M5-swap Wave 2 — `~` tilde (pipeline-reactive) declaration ---
+        // B3 `~name = pipeline` (SPEC §32). The standalone-`~` accumulator
+        // atom (ast-expr `Tilde`) is a separate construct.
+        TildeDecl:    "TildeDecl",
     })
 
     // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).
@@ -393,6 +398,16 @@ ${
     // / alias-expression text or "". Mirrors the live TypeDeclNode shape.
     export fn makeTypeDecl(name, typeKind, raw, span) {
         return { kind: StmtKind.TypeDecl, name, typeKind, raw, span }
+    }
+
+    // -- `~` tilde-declaration node constructor — M5-swap Wave 2 (B3) --
+
+    // makeTildeDecl — a `~name = pipeline` tilde (pipeline-reactive)
+    // declaration (§32). `name` is the bound identifier; `init` is the
+    // initializer Expr. Mirrors the live TildeDeclNode shape (ast.ts:480) —
+    // a structural twin of makeLinDecl.
+    export fn makeTildeDecl(name, init, span) {
+        return { kind: StmtKind.TildeDecl, name, init, span }
     }
 
     // -- Class-member node constructors (M3.3) --

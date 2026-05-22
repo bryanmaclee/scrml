@@ -202,6 +202,16 @@ ${
         Lift:          "Lift",           // `lift expr` (§10)
         Fail:          "Fail",           // `fail Type::Variant(args)` (§19)
 
+        // scrml-extension postfix-`?` / `!{}` forms — M5-swap Wave 2 (B1/B2).
+        // `Propagate` — `expr?` postfix fail-propagation operator (§19).
+        // `GuardedExpr` — `expr !{ arms }` inline guarded-expression handler
+        // (§19). Both are statement-shaped; the statement bridge un-wraps an
+        // `ExprStmt{ Propagate | GuardedExpr }` into the live `propagate-expr`
+        // / `guarded-expr` LogicStatement (the same un-wrap `Lift` / `Fail`
+        // use).
+        Propagate:     "Propagate",       // `expr?`          propagate-expr
+        GuardedExpr:   "GuardedExpr",     // `expr !{ arms }` guarded-expr
+
         // Generator operator expression (M4.1 — D5 MUST PARSE).
         // `Yield` is built by parseAssignmentExpr when the cursor is inside a
         // `function*` body (`ctx.inGenerator`). The M4.3 async retraction
@@ -578,6 +588,25 @@ ${
     // later-stage concern.
     export fn makeFail(variant, span) {
         return { kind: ExprKind.Fail, variant, span }
+    }
+
+    // -- scrml-extension postfix-`?` / `!{}` constructors — M5-swap Wave 2 --
+
+    // makePropagate — an `expr?` propagate-expression (§19). `argument` is
+    // the guarded Expr; the postfix `?` propagates a `fail` to the enclosing
+    // `!` failable function. Statement-shaped — the statement bridge un-wraps
+    // an `ExprStmt{ Propagate }` into the live `propagate-expr`.
+    export fn makePropagate(argument, span) {
+        return { kind: ExprKind.Propagate, argument, span }
+    }
+
+    // makeGuardedExpr — an `expr !{ arms }` guarded-expression (§19).
+    // `expression` is the guarded Expr; `arms` is the parsed error-arm array
+    // (the `ErrorArm[]` shape parseErrorArms produces). Statement-shaped —
+    // the statement bridge un-wraps an `ExprStmt{ GuardedExpr }` into the
+    // live `guarded-expr`.
+    export fn makeGuardedExpr(expression, arms, span) {
+        return { kind: ExprKind.GuardedExpr, expression, arms, span }
     }
 
     // ---------------------------------------------------------------------

@@ -276,6 +276,18 @@ export function translateExpr(nativeExpr) {
             return makeEscapeHatch("Lift", "", nativeExpr.span);
         case ExprKind.Fail:
             return makeEscapeHatch("Fail", "", nativeExpr.span);
+        case ExprKind.Propagate:
+        case ExprKind.GuardedExpr:
+            // M5-swap Wave 2 (B1 / B2). `Propagate` (`expr?`) and `GuardedExpr`
+            // (`expr !{ arms }`) are statement-shaped — the live
+            // `propagate-expr` / `guarded-expr` are `LogicStatement` kinds, not
+            // `ExprNode` kinds. The STATEMENT bridge (translate-stmt.js)
+            // un-wraps the common `ExprStmt`-position case into the live
+            // LogicStatement before A2 ever sees it. A `Propagate` /
+            // `GuardedExpr` reaching `translateExpr` is a genuine
+            // expression-CHILD position (rare); escape-hatch so the node is
+            // preserved, not dropped — the same posture `Lift` / `Fail` take.
+            return makeEscapeHatch(String(nativeExpr.kind), "", nativeExpr.span);
 
         // --- param / body-stub support nodes (not expression-position) -----
         case ExprKind.RestElement:

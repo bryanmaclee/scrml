@@ -58,6 +58,19 @@ export const ExprKind = Object.freeze({
     Lift:          "Lift",           // `lift expr` (§10)
     Fail:          "Fail",           // `fail Type::Variant(args)` (§19)
 
+    // scrml-extension postfix-`?` / `!{}` forms — M5-swap Wave 2 (B1 / B2).
+    // `Propagate` is the `expr?` postfix error-propagation operator (§19) —
+    // the §32 pipeline accumulator `~` is NOT this; `?` postfix is the
+    // fail-propagation operator. `GuardedExpr` is the `expr !{ arms }` inline
+    // guarded-expression handler (§19). Both are statement-shaped at the
+    // language level (`propagate-expr` / `guarded-expr` are live
+    // `LogicStatement` kinds); they are modelled as Expr nodes here (the same
+    // way `Lift` / `Fail` are) and the STATEMENT bridge (translate-stmt.js)
+    // un-wraps an `ExprStmt{ Propagate | GuardedExpr }` into the live
+    // LogicStatement.
+    Propagate:     "Propagate",       // `expr?`            propagate-expr (§19)
+    GuardedExpr:   "GuardedExpr",     // `expr !{ arms }`   guarded-expr (§19)
+
     // Generator operator expression (M4.1 — D5 MUST PARSE).
     // `Yield` is built by parseAssignmentExpr when the cursor is inside a
     // `function*` body (`ctx.inGenerator`). The M4.3 async retraction
@@ -383,6 +396,30 @@ export function makeLift(argument, span) {
 // `fail` requires an `!` function) is a later-stage concern.
 export function makeFail(variant, span) {
     return { kind: ExprKind.Fail, variant, span };
+}
+
+// --- scrml-extension postfix-`?` / `!{}` constructors — M5-swap Wave 2 -------
+
+// makePropagate — an `expr?` propagate-expression (§19). `argument` is the
+// guarded Expr; the postfix `?` propagates a `fail` from `argument` to the
+// enclosing `!` failable function. `propagate` is statement-shaped at the
+// language level (the live `propagate-expr` is a `LogicStatement`); it is
+// modelled as an Expr node here (the same way `Lift` / `Fail` are), and the
+// statement bridge un-wraps a `ExprStmt{ Propagate }` into `propagate-expr`.
+// Use-site validity (`?` requires an `!` function) is a later-stage concern.
+export function makePropagate(argument, span) {
+    return { kind: ExprKind.Propagate, argument, span };
+}
+
+// makeGuardedExpr — an `expr !{ arms }` guarded-expression (§19). `expression`
+// is the guarded Expr; `arms` is the parsed error-arm array (the same
+// `ErrorArm[]` shape `parseErrorArms` produces for `<errors>` / the
+// `ErrorEffect` block — `{ pattern, binding, handler, span }` per arm).
+// `guarded-expr` is a live `LogicStatement` kind; like `Propagate` it is
+// modelled as an Expr node here and the statement bridge un-wraps a
+// `ExprStmt{ GuardedExpr }` into the live `guarded-expr`.
+export function makeGuardedExpr(expression, arms, span) {
+    return { kind: ExprKind.GuardedExpr, expression, arms, span };
 }
 
 // --- Generator operator-expression constructor (M4.1 — D5 MUST PARSE).

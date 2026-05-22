@@ -155,12 +155,15 @@ function appendTranslatedStmt(out, stmt, counter) {
 
         case StmtKind.ExprStmt: {
             // `expr ;`. The native expression decides the live kind:
-            //   - a `Lift` expression  -> `lift-expr` LogicStatement
-            //   - a `Fail` expression  -> `fail-expr` LogicStatement
-            //   - anything else        -> `bare-expr` LogicStatement
-            // The un-wrap is THE structural translation `lift`/`fail` need:
-            // the native parser models them as expressions, the live union as
-            // statements.
+            //   - a `Lift` expression        -> `lift-expr` LogicStatement
+            //   - a `Fail` expression        -> `fail-expr` LogicStatement
+            //   - a `Propagate` expression   -> `propagate-expr` (Wave 2 B1)
+            //   - a `GuardedExpr` expression -> `guarded-expr` (Wave 2 B2)
+            //   - anything else              -> `bare-expr` LogicStatement
+            // The un-wrap is THE structural translation `lift`/`fail`/`?`/`!{}`
+            // need: the native parser models them as expressions, the live
+            // union as statements (`propagate-expr` / `guarded-expr` are
+            // BaseNode-extending LogicStatement kinds — ast.ts:1140/1152).
             const e = stmt.expression;
             if (e && e.kind === "Lift") {
                 out.push(makeLiftExpr(e, stmt.span, counter));
@@ -168,6 +171,14 @@ function appendTranslatedStmt(out, stmt, counter) {
             }
             if (e && e.kind === "Fail") {
                 out.push(makeFailExpr(e, stmt.span, counter));
+                return;
+            }
+            if (e && e.kind === "Propagate") {
+                out.push(makePropagateExpr(e, stmt.span, counter));
+                return;
+            }
+            if (e && e.kind === "GuardedExpr") {
+                out.push(makeGuardedExprNode(e, stmt.span, counter));
                 return;
             }
             out.push(makeBareExpr(e, stmt.span, counter));
@@ -297,6 +308,16 @@ function appendTranslatedStmt(out, stmt, counter) {
             out.push(makeTypeDeclNode(stmt, counter));
             return;
 
+        // --- M5-swap Wave 2 — `~` tilde declaration (B3) -------------------
+        case StmtKind.TildeDecl:
+            // `~name = pipeline` -> live `tilde-decl` (SPEC §32). The native
+            // parser DOES recognize the `~name =` declaration shape as of B3.
+            // The R1 header documented bare `name = expr` NOT being promoted
+            // to `tilde-decl` — that remains true; B3 promotes only the
+            // explicit `~`-sigil form.
+            out.push(makeTildeDeclNode(stmt, counter));
+            return;
+
         default:
             // An unrecognized native StmtKind. The native catalog is closed at
             // 20 kinds (ast-stmt.js StmtKind) — this arm should be
@@ -395,6 +416,49 @@ function makeFailExpr(nativeFail, span, counter) {
     };
 }
 
+// makePropagateExpr — a `propagate-expr` node (M5-swap Wave 2 — B1). The live
+// `PropagateExprNode` (ast.ts:1140) carries `binding` (a `string | null` —
+// the bound name for `let name = expr?`, `null` for a bare `expr?`) and
+// `exprNode` (the structured expression). The native `Propagate{argument}`
+// surfaces as a bare `expr?` statement (the un-wrap sees the `ExprStmt`
+// wrapper); `binding` is `null` — a bound `let name = ...?` form is a
+// `let-decl` whose initializer is the `Propagate` expression and is reached
+// through the VarDecl arm, not here. `exprNode` carries the native guarded
+// Expr verbatim (the R1 ride-through posture — C1 invokes translate-expr).
+function makePropagateExpr(nativePropagate, span, counter) {
+    const arg = nativePropagate ? nativePropagate.argument : null;
+    return {
+        id: stampId(counter),
+        kind: "propagate-expr",
+        binding: null,
+        exprNode: arg === undefined ? null : arg,
+        span: spanOrZero(span),
+    };
+}
+
+// makeGuardedExprNode — a `guarded-expr` node (M5-swap Wave 2 — B2). The live
+// `GuardedExprNode` (ast.ts:1152) carries `guardedNode` (the wrapped
+// `LogicStatement`) and `arms` (an `ErrorArm[]`). The native `GuardedExpr`
+// carries `expression` (an Expr) + `arms` (already parsed by `parseErrorArms`
+// — the same `{ pattern, binding, handler, span }` arm shape the live
+// `ErrorArm` uses). The guarded Expr is wrapped as a `bare-expr`
+// LogicStatement (the live emit-logic.ts `guarded-expr` arm walks
+// `guardedNode` as a LogicStatement). The wrapped `bare-expr` consumes one id
+// from the SAME shared `counter` — ids stay unique within the file. The
+// `bare-expr` is stamped FIRST (a lower id than the wrapping `guarded-expr`),
+// matching the live ast-builder's child-before-parent id order.
+function makeGuardedExprNode(nativeGuarded, span, counter) {
+    const inner = nativeGuarded ? nativeGuarded.expression : null;
+    const guardedNode = makeBareExpr(inner, nativeGuarded ? nativeGuarded.span : span, counter);
+    return {
+        id: stampId(counter),
+        kind: "guarded-expr",
+        guardedNode,
+        arms: Array.isArray(nativeGuarded && nativeGuarded.arms) ? nativeGuarded.arms : [],
+        span: spanOrZero(span),
+    };
+}
+
 // --- VarDecl translation -----------------------------------------------------
 
 // makeVarDeclNode — one declarator -> one `let-decl` / `const-decl` node.
@@ -457,6 +521,27 @@ function makeTypeDeclNode(stmt, counter) {
         raw: stmt.raw === undefined ? "" : stmt.raw,
         span: spanOrZero(stmt.span),
     };
+}
+
+// makeTildeDeclNode — native `TildeDecl{name,init}` -> live `tilde-decl`
+// (TildeDeclNode, ast.ts:480 — `{kind:"tilde-decl", name, initExpr?}`). The
+// structural twin of `makeLinDeclNode` (B4): the live `TildeDeclNode` and
+// `LinDeclNode` share the `{name, initExpr?}` shape. The native expression
+// child is ridden through verbatim on `initExpr` (the R1 deferral C1
+// resolves by invoking translate-expr); `initExpr` is present only when the
+// declaration has an initializer. M5-swap Wave 2 (B3).
+function makeTildeDeclNode(stmt, counter) {
+    const node = {
+        id: stampId(counter),
+        kind: "tilde-decl",
+        name: stmt.name === undefined ? "" : stmt.name,
+        init: "",
+        span: spanOrZero(stmt.span),
+    };
+    if (stmt.init !== undefined && stmt.init !== null) {
+        node.initExpr = stmt.init;
+    }
+    return node;
 }
 
 // translateBindingTarget — a native binding node -> the live `name` field.

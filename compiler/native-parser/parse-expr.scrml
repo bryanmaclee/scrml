@@ -125,7 +125,12 @@ ${
         makeMatch, makeMatchArm, makeVariantPattern, makeWildcardPattern,
         makeIsPattern, makeMatchBinding, makeRender, makeLift, makeFail,
         makeYield,
+        // M5-swap Wave 2 — postfix-`?` / `!{}` scrml-extension constructors.
+        makePropagate, makeGuardedExpr,
     } from "./ast-expr.scrml"
+    // M5-swap Wave 2 (B2) — the `!{ arms }` guarded-expression postfix reuses
+    // the shared error-arm grammar `parseErrorArms` produces.
+    import { parseErrorArms } from "./parse-error-body.scrml"
     // M4.2 — binding-pattern constructors (ast-stmt's BindingKind catalog,
     // the declaration-target shapes M3.1 produces for vardecl destructuring).
     // parseParamTarget calls parseBinding (now hosted in THIS file) so a
@@ -1105,10 +1110,107 @@ ${
                 continue
             }
 
+            // `expr?` — the postfix propagate operator (§19 — Wave 2 B1).
+            // `propagateFollows` tells a propagate `?` from a ternary `?`: a
+            // ternary `?` is always followed (same line) by a consequent
+            // expression; a propagate `?` is followed by a terminator /
+            // closer / `:` / `!{` / a later-line token. An ambiguous `?` is
+            // LEFT for parseConditional (a ternary is never mis-built).
+            if (kind == TokenKind.Question && propagateFollows(cursor)) {
+                const q = advance(cursor)
+                const span = makeSpan(startOf(node), q.span.end, lineOf(node), colOf(node))
+                node = makePropagate(node, span)
+                continue
+            }
+
+            // `expr !{ arms }` — the inline guarded-expression handler (§19 —
+            // Wave 2 B2). A `!` immediately followed by `{` in POSTFIX
+            // position is the guard sigil; a prefix logical-`!` is parsed by
+            // parseUnary at the START of a unary and never reaches here.
+            if (kind == TokenKind.Bang && peekKind(cursor, 1) == TokenKind.LBrace) {
+                node = parseGuardedExprTail(ctx, node)
+                continue
+            }
+
             break
         }
 
         return node
+    }
+
+    // ---------------------------------------------------------------------
+    // propagateFollows — is the cursor's `?` the postfix propagate operator?
+    // True iff the `?` is the §19 propagate operator (not a ternary `?`),
+    // decided by what follows: a terminator / closer / separator / `:` / a
+    // logic-escape close, OR a `!{` guard lead, OR a later-line token. A `?`
+    // followed by anything that could begin a consequent is a ternary `?`.
+    // ---------------------------------------------------------------------
+    export fn propagateFollows(cursor) {
+        if (currentKind(cursor) != TokenKind.Question) {
+            return false
+        }
+        const q = current(cursor)
+        const next = peek(cursor, 1)
+        if (next is not) {
+            return true
+        }
+        if (q is some && q.span is some && next.span is some
+            && next.span.line > q.span.line) {
+            return true
+        }
+        const k = next.kind
+        if (k == TokenKind.Semicolon || k == TokenKind.RBrace
+            || k == TokenKind.RParen || k == TokenKind.RBracket
+            || k == TokenKind.Comma || k == TokenKind.Colon
+            || k == TokenKind.EOF || k == TokenKind.LogicEscapeClose) {
+            return true
+        }
+        if (k == TokenKind.Bang && peekKind(cursor, 2) == TokenKind.LBrace) {
+            return true
+        }
+        return false
+    }
+
+    // ---------------------------------------------------------------------
+    // parseGuardedExprTail — the `!{ arms }` guarded-expr postfix (B2). The
+    // cursor sits on the `!` of a `!{` postfix guard; `guarded` is the
+    // already-parsed expression the guard wraps. Captures the brace-delimited
+    // arm-list body as raw text (a balanced `{ ... }` scan) and parses it
+    // with parseErrorArms (the shared `<errors>` / `ErrorEffect` arm
+    // grammar). A missing `}` records E-EXPR-GUARDED-UNCLOSED.
+    // ---------------------------------------------------------------------
+    fn parseGuardedExprTail(ctx, guarded) {
+        const cursor = ctx.cursor
+        advance(cursor)
+        const open = advance(cursor)
+
+        let parts = []
+        let depth = 1
+        let closeEnd = open.span.end
+        while (atEnd(cursor) == false && depth > 0) {
+            const k = currentKind(cursor)
+            if (k == TokenKind.LBrace) {
+                depth = depth + 1
+            } else if (k == TokenKind.RBrace) {
+                depth = depth - 1
+                if (depth == 0) {
+                    const close = advance(cursor)
+                    closeEnd = close.span.end
+                    break
+                }
+            }
+            const tok = advance(cursor)
+            parts.push(tok.text)
+        }
+        if (depth > 0) {
+            recordError(ctx, "E-EXPR-GUARDED-UNCLOSED",
+                "expected '}' to close a '!{ }' guarded-expression handler", open.span)
+        }
+        const bodyText = parts.join(" ").trim()
+        const arms = parseErrorArms(bodyText)
+
+        const span = makeSpan(startOf(guarded), closeEnd, lineOf(guarded), colOf(guarded))
+        return makeGuardedExpr(guarded, arms, span)
     }
 
     // ---------------------------------------------------------------------

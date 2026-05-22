@@ -64,6 +64,8 @@ import {
     makeMatch, makeMatchArm, makeVariantPattern, makeWildcardPattern,
     makeIsPattern, makeMatchBinding, makeRender, makeLift, makeFail,
     makeYield, makeMarkupValue,
+    // M5-swap Wave 2 — postfix-`?` / `!{}` scrml-extension constructors.
+    makePropagate, makeGuardedExpr,
 } from "./ast-expr.js";
 // M4.2 — binding-pattern constructors (ast-stmt's BindingKind catalog —
 // the declaration-target shapes M3.1 produces for vardecl destructuring).
@@ -92,6 +94,12 @@ import {
 // import to avoid the parse-markup -> parse-expr -> parse-markup cycle at
 // module-init time).
 import { markupValueAllowedAfter } from "./parse-seam.js";
+
+// M5-swap Wave 2 (B2) — the `!{ arms }` guarded-expression postfix reuses the
+// shared error-arm grammar `parseErrorArms` produces (the same arm shape the
+// `<errors>` block / the markup-layer `ErrorEffect` block use). parse-error-
+// body.js has no imports — no module cycle is introduced.
+import { parseErrorArms } from "./parse-error-body.js";
 
 // --- makeParseExprContext — parser state constructor ---
 // M4.1 added an ASYNC/GENERATOR SCOPE pair (`inAsync` / `inGenerator`). M4.3
@@ -1025,10 +1033,131 @@ export function parsePostfixChain(ctx, base) {
             continue;
         }
 
+        // `expr?` — the postfix propagate operator (§19 — M5-swap Wave 2 B1).
+        // A `?` in postfix position is the propagate operator ONLY when it is
+        // NOT a ternary `?`. `propagateFollows` makes that call: a ternary
+        // `?` is always followed (on the same source line) by a consequent
+        // expression; a propagate `?` is followed by a statement terminator /
+        // a closer / `:` / a `!{` guard / a later-line token. When the `?` is
+        // ambiguous (followed by something that COULD start a consequent), it
+        // is LEFT for `parseConditional` to consume as a ternary — the
+        // conservative choice (a ternary is never mis-built as a propagate).
+        if (kind === TokenKind.Question && propagateFollows(cursor)) {
+            const q = advance(cursor);   // consume `?`
+            const span = makeSpan(startOf(node), q.span.end, lineOf(node), colOf(node));
+            node = makePropagate(node, span);
+            continue;
+        }
+
+        // `expr !{ arms }` — the inline guarded-expression handler (§19 —
+        // M5-swap Wave 2 B2). A `!` immediately followed by `{` in POSTFIX
+        // position (after a parsed `node`) is the guarded-expr sigil. This is
+        // unambiguous: a prefix logical-`!` is parsed by `parseUnary` at the
+        // START of a unary, never reaching the postfix chain; a `!` after a
+        // complete expression is not valid JS, so `! {` here is the scrml
+        // guard. (B6's signature `!` is consumed inside
+        // `parseScrmlFunctionDecl` before the body — it never reaches a
+        // postfix chain.) The arm-list `{ ... }` body is captured as raw text
+        // and parsed with `parseErrorArms` — the same arm grammar the
+        // `<errors>` block / the `ErrorEffect` block use.
+        if (kind === TokenKind.Bang && peekKind(cursor, 1) === TokenKind.LBrace) {
+            node = parseGuardedExprTail(ctx, node);
+            continue;
+        }
+
         break;
     }
 
     return node;
+}
+
+// --- propagateFollows — is the cursor's `?` the postfix propagate operator? ---
+// The cursor sits on a `Question` token. True iff the `?` is the §19 propagate
+// operator (NOT a ternary `?`). The decision is by what follows the `?`:
+//   - a statement terminator / closer / separator (`;` `}` `)` `]` `,` EOF
+//     `:` / a logic-escape close) — cannot begin a ternary consequent
+//   - a `!{` guard lead (the `expr? !{ ... }` propagate-then-guard combo)
+//   - a token on a LATER source line (ASI — a ternary consequent is on the
+//     same line as its `?`)
+// A `?` followed by anything that COULD begin an expression on the same line
+// is treated as a ternary `?` and LEFT for `parseConditional`. This is the
+// conservative rule from the M5-swap re-decomposition (§B1): "a `?` NOT
+// followed by an expression-then-`:` is propagate" — a ternary is never
+// mis-built as a propagate.
+export function propagateFollows(cursor) {
+    if (currentKind(cursor) !== TokenKind.Question) {
+        return false;
+    }
+    const q = current(cursor);
+    const next = peek(cursor, 1);
+    // No token after `?` — end of input: a bare trailing `?` is a propagate.
+    if (next === undefined || next === null) {
+        return true;
+    }
+    // A later source line — the restricted-production posture: a ternary
+    // consequent sits on the `?`'s line; a later-line token means propagate.
+    if (q !== undefined && q !== null && q.span !== undefined && next.span !== undefined
+        && next.span.line > q.span.line) {
+        return true;
+    }
+    const k = next.kind;
+    // Statement terminators / closers / separators — none can begin a ternary
+    // consequent, so a `?` before one is unambiguously a propagate.
+    if (k === TokenKind.Semicolon || k === TokenKind.RBrace
+        || k === TokenKind.RParen || k === TokenKind.RBracket
+        || k === TokenKind.Comma || k === TokenKind.Colon
+        || k === TokenKind.EOF || k === TokenKind.LogicEscapeClose) {
+        return true;
+    }
+    // `expr? !{ ... }` — a propagate immediately followed by a guarded-expr
+    // handler. The `!{` lead is the guard sigil; the `?` before it propagates.
+    if (k === TokenKind.Bang && peekKind(cursor, 2) === TokenKind.LBrace) {
+        return true;
+    }
+    // Anything else (an identifier / literal / `(` / `-` / a `match` lead /
+    // ...) COULD begin a ternary consequent — leave the `?` for the ternary.
+    return false;
+}
+
+// --- parseGuardedExprTail — the `!{ arms }` guarded-expr postfix (B2) ---
+// The cursor sits on the `Bang` of a `!{` postfix guard; `guarded` is the
+// already-parsed expression the guard wraps. Captures the brace-delimited
+// arm-list body as raw text (a balanced `{ ... }` scan — the same posture
+// `typeBodyText` in parse-stmt takes) and parses it with `parseErrorArms`
+// (the shared `<errors>` / `ErrorEffect` arm grammar). A missing closing `}`
+// records `E-EXPR-GUARDED-UNCLOSED` and the partial arm-list is still used.
+function parseGuardedExprTail(ctx, guarded) {
+    const cursor = ctx.cursor;
+    advance(cursor);                 // consume `!`
+    const open = advance(cursor);    // consume `{`
+
+    const parts = [];
+    let depth = 1;
+    let closeEnd = open.span.end;
+    while (atEnd(cursor) === false && depth > 0) {
+        const k = currentKind(cursor);
+        if (k === TokenKind.LBrace) {
+            depth = depth + 1;
+        } else if (k === TokenKind.RBrace) {
+            depth = depth - 1;
+            if (depth === 0) {
+                const close = advance(cursor);   // consume the matching `}`
+                closeEnd = close.span.end;
+                break;
+            }
+        }
+        const tok = advance(cursor);
+        parts.push(tok.text);
+    }
+    if (depth > 0) {
+        recordError(ctx, "E-EXPR-GUARDED-UNCLOSED",
+            "expected '}' to close a '!{ }' guarded-expression handler", open.span);
+    }
+    const bodyText = parts.join(" ").trim();
+    const arms = parseErrorArms(bodyText);
+
+    const span = makeSpan(startOf(guarded), closeEnd, lineOf(guarded), colOf(guarded));
+    return makeGuardedExpr(guarded, arms, span);
 }
 
 // --- parseMemberProperty — the property name after `.` / `?.` ---

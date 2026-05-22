@@ -1206,21 +1206,39 @@ const DECL_MODULE_CORPUS = [
     { name: "export default — class",          src: "export default class {}" },
 
     // --- try / catch / finally + throw ---
-    { name: "try-catch",                       src: "try { f(); } catch (e) { log(e); }" },
-    { name: "try-catch-finally",               src: "try { f(); } catch (e) {} finally { done(); }" },
-    { name: "try-finally (no catch)",          src: "try { f(); } finally { cleanup(); }" },
-    { name: "try — optional catch binding",    src: "try { f(); } catch { recover(); }" },
-    { name: "try — destructuring catch param", src: "try { f(); } catch ({ message }) { log(message); }" },
-    { name: "try — nested try in block",       src: "try { try { f(); } catch (e) {} } catch (e2) {}" },
-    { name: "throw — identifier",              src: "throw err;" },
-    { name: "throw — new expression",          src: "throw new Error('bad');" },
-    { name: "throw — inside a catch",          src: "try { f(); } catch (e) { throw e; }" },
+    // M5-swap Wave 2 (B7): `try` / `throw` are FORBIDDEN scrml vocabulary —
+    // the native parser parses them (for diagnostic recovery; the node-kind
+    // sequence matches Acorn) but fires `E-TRY-NOT-IN-SCRML` /
+    // `E-THROW-NOT-IN-SCRML`. The `forbidsVocab` tag marks entries whose
+    // native parse carries those B7 diagnostics; the Tier-1 conformance
+    // tolerates exactly those codes (the node-kind shape is still asserted).
+    { name: "try-catch",                       src: "try { f(); } catch (e) { log(e); }", forbidsVocab: true },
+    { name: "try-catch-finally",               src: "try { f(); } catch (e) {} finally { done(); }", forbidsVocab: true },
+    { name: "try-finally (no catch)",          src: "try { f(); } finally { cleanup(); }", forbidsVocab: true },
+    { name: "try — optional catch binding",    src: "try { f(); } catch { recover(); }", forbidsVocab: true },
+    { name: "try — destructuring catch param", src: "try { f(); } catch ({ message }) { log(message); }", forbidsVocab: true },
+    { name: "try — nested try in block",       src: "try { try { f(); } catch (e) {} } catch (e2) {}", forbidsVocab: true },
+    { name: "throw — identifier",              src: "throw err;", forbidsVocab: true },
+    { name: "throw — new expression",          src: "throw new Error('bad');", forbidsVocab: true },
+    { name: "throw — inside a catch",          src: "try { f(); } catch (e) { throw e; }", forbidsVocab: true },
 
     // --- mixed declaration / module programs ---
     { name: "program — import then function",  src: 'import d from "m"; function use() { return d; }' },
     { name: "program — class then export",     src: "class C {} export const made = new C();" },
-    { name: "program — fn decl + try",         src: "function f() {} try { f(); } catch (e) {}" },
+    { name: "program — fn decl + try",         src: "function f() {} try { f(); } catch (e) {}", forbidsVocab: true },
 ];
+
+// FORBIDDEN_VOCAB_CODES — the B7 parse-layer rejection codes a `forbidsVocab`
+// corpus entry is allowed to carry. The construct still parses (node-kind
+// conformance holds); only these diagnostics are tolerated.
+const FORBIDDEN_VOCAB_CODES = ["E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML"];
+
+// nonVocabErrors — the diagnostics of a native parse with the tolerated B7
+// forbidden-vocabulary codes filtered out. For a non-`forbidsVocab` corpus
+// entry this is the full error list.
+function nonVocabErrors(errors) {
+    return (errors || []).filter((e) => FORBIDDEN_VOCAB_CODES.includes(e.code) === false);
+}
 
 describe("M3.1 statement-parser conformance — Tier 1 (node-kind sequence)", () => {
     for (const c of ACORN_CORPUS) {
@@ -1301,8 +1319,11 @@ describe("M3.3 decl/module/try conformance — Tier 1 (node-kind sequence)", () 
             expect(a.ok).toBe(true);
             expect(n.ok).toBe(true);
             // The native parser must report NO diagnostics on a clean
-            // M3.3-declaration/module/try-throw program.
-            expect(n.errors).toEqual([]);
+            // M3.3-declaration/module/try-throw program — EXCEPT the B7
+            // forbidden-vocabulary rejections (`E-TRY-NOT-IN-SCRML` /
+            // `E-THROW-NOT-IN-SCRML`) a `forbidsVocab` entry carries by
+            // design (M5-swap Wave 2 — `try`/`throw` are not scrml vocab).
+            expect(nonVocabErrors(n.errors)).toEqual([]);
 
             const acornSeq = nodeKindSequence(a.ast);
             const nativeSeq = nodeKindSequence(nativeProgramToEstree(n.body));
@@ -1629,14 +1650,18 @@ describe("statement-parser — M3.3 closes the forward seam (all leads parsed)",
 
     test("a `try` lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("try {} catch (e) {}");
-        expect(r.errors).toEqual([]);
+        // The seam is closed iff `try` reaches M3.3 (no forward-seam code) and
+        // builds a Try node. M5-swap Wave 2 (B7) adds `E-TRY-NOT-IN-SCRML` —
+        // a forbidden-vocabulary rejection, NOT a seam failure — so the
+        // assertion is seam-specific, not a blanket empty-error-list.
         expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
         expect(r.body[0].kind).toBe(StmtKind.Try);
     });
 
     test("a `throw` lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("throw e;");
-        expect(r.errors).toEqual([]);
+        // As above — B7 adds `E-THROW-NOT-IN-SCRML`; the seam-closed assertion
+        // checks the forward-seam code is absent and the Throw node is built.
         expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
         expect(r.body[0].kind).toBe(StmtKind.Throw);
     });
@@ -2325,10 +2350,15 @@ describe("M3.3 statement-parser — import / export (native shape)", () => {
     });
 });
 
+// M5-swap Wave 2 (B7): `try` / `throw` are forbidden scrml vocabulary — the
+// native parser parses them for diagnostic recovery (the node shape these
+// tests assert is intact) but fires `E-TRY-NOT-IN-SCRML` / `E-THROW-NOT-IN-
+// SCRML`. These tests assert the RECOVERY-PARSE SHAPE, so the error list is
+// checked with the B7 forbidden-vocabulary codes filtered out.
 describe("M3.3 statement-parser — try / catch / finally + throw (native shape)", () => {
     test("try-catch — Try node, handler populated", () => {
         const r = parseWithNative("try { f(); } catch (e) { log(e); }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const t = r.body[0];
         expect(t.kind).toBe(StmtKind.Try);
         expect(t.block.kind).toBe(StmtKind.Block);
@@ -2340,7 +2370,7 @@ describe("M3.3 statement-parser — try / catch / finally + throw (native shape)
 
     test("try-catch-finally — handler + finalizer populated", () => {
         const r = parseWithNative("try { f(); } catch (e) {} finally { done(); }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const t = r.body[0];
         expect(t.handler).not.toBe(null);
         expect(t.finalizer).not.toBe(null);
@@ -2349,7 +2379,7 @@ describe("M3.3 statement-parser — try / catch / finally + throw (native shape)
 
     test("try-finally with no catch — handler is not", () => {
         const r = parseWithNative("try { f(); } finally { cleanup(); }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const t = r.body[0];
         expect(t.handler === undefined || t.handler === null).toBe(true);
         expect(t.finalizer).not.toBe(null);
@@ -2357,7 +2387,7 @@ describe("M3.3 statement-parser — try / catch / finally + throw (native shape)
 
     test("optional catch binding — param is not", () => {
         const r = parseWithNative("try { f(); } catch { recover(); }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const t = r.body[0];
         expect(t.handler).not.toBe(null);
         expect(t.handler.param === undefined || t.handler.param === null).toBe(true);
@@ -2365,13 +2395,13 @@ describe("M3.3 statement-parser — try / catch / finally + throw (native shape)
 
     test("destructuring catch param — ObjectPat binding", () => {
         const r = parseWithNative("try { f(); } catch ({ message }) {}");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].handler.param.bindingKind).toBe(BindingKind.ObjectPat);
     });
 
     test("throw — Throw node, argument populated", () => {
         const r = parseWithNative("throw err;");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const t = r.body[0];
         expect(t.kind).toBe(StmtKind.Throw);
         expect(t.argument.kind).toBe(ExprKind.Ident);
@@ -2380,7 +2410,7 @@ describe("M3.3 statement-parser — try / catch / finally + throw (native shape)
 
     test("throw new Error — argument is a New expression", () => {
         const r = parseWithNative("throw new Error('bad');");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].argument.kind).toBe(ExprKind.New);
     });
 });
@@ -2603,7 +2633,11 @@ const FULL_SUBSET_CORPUS = [
         // the FULL_SUBSET_CORPUS clean (`async function` would fire
         // E-ASYNC-NOT-IN-SCRML and the corpus harness asserts a zero-error
         // parse). The shape exercised (import + fn + try/catch) is unchanged.
+        // M5-swap Wave 2 (B7) — the `try`/`catch` carries `E-TRY-NOT-IN-SCRML`;
+        // `forbidsVocab` lets the Tier-1 harness tolerate exactly that code
+        // (the node-kind sequence is still asserted against Acorn).
         src: 'import { load } from "data"; function run() { try { const v = load(); return v; } catch (e) { return 0; } }',
+        forbidsVocab: true,
     },
     {
         name: "for-of over a destructured iterable + labeled break",
@@ -2615,7 +2649,9 @@ const FULL_SUBSET_CORPUS = [
     },
     {
         name: "do-while + if/else + throw",
+        // M5-swap Wave 2 (B7) — the `throw` carries `E-THROW-NOT-IN-SCRML`.
         src: "function attempt(limit) { let tries = 0; do { tries = tries + 1; if (tries > limit) { throw new Error('too many'); } } while (tries < limit); return tries; }",
+        forbidsVocab: true,
     },
     {
         name: "generator fn + for-in + continue",
@@ -2627,7 +2663,9 @@ const FULL_SUBSET_CORPUS = [
     },
     {
         name: "try/finally + var hoisting shape + while",
+        // M5-swap Wave 2 (B7) — the `try`/`finally` carries `E-TRY-NOT-IN-SCRML`.
         src: "function drain(queue) { var seen = 0; try { while (queue.length) { seen = seen + 1; } } finally { return seen; } }",
+        forbidsVocab: true,
     },
     {
         name: "arrow callbacks at statement position + decl",
@@ -2647,8 +2685,12 @@ describe("M3.4 full statement subset — conformance Tier 1 (node-kind sequence)
 
             expect(a.ok).toBe(true);
             expect(n.ok).toBe(true);
-            // A clean full-subset program reports NO diagnostics.
-            expect(n.errors).toEqual([]);
+            // A clean full-subset program reports NO diagnostics — except the
+            // B7 forbidden-vocabulary rejections (`E-TRY-NOT-IN-SCRML` /
+            // `E-THROW-NOT-IN-SCRML`) a `forbidsVocab`-tagged entry carries
+            // by design (M5-swap Wave 2). The node-kind sequence is asserted
+            // against Acorn regardless.
+            expect(nonVocabErrors(n.errors)).toEqual([]);
 
             const acornSeq = nodeKindSequence(a.ast);
             const nativeSeq = nodeKindSequence(nativeProgramToEstree(n.body));

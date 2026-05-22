@@ -127,6 +127,8 @@ import {
     makeExportSpecifier, makeCatchClause,
     // M5-swap Wave 1 — core scrml declaration node constructors (B4 / B5).
     makeLinDecl, makeTypeDecl,
+    // M5-swap Wave 2 — `~` tilde-declaration node constructor (B3).
+    makeTildeDecl,
 } from "./ast-stmt.js";
 import {
     SyncToken,
@@ -494,6 +496,18 @@ export function parseStatement(ctx) {
     // M5-swap Wave 1 — a `type` declaration (B5, SPEC §14).
     if (kind === TokenKind.KwType) {
         return parseTypeDecl(ctx);
+    }
+
+    // M5-swap Wave 2 — a `~name = pipeline` tilde declaration (B3, SPEC §32).
+    // `~` lexes as a `BitNot` token. `tildeDeclLeadFollows` confirms the
+    // `~ Ident =` declaration shape before committing — a `~` used as a
+    // prefix bitwise-NOT (`~x`) or as the §32 standalone accumulator atom
+    // falls through to the expression-statement arm (parseExprStatement /
+    // parsePrimary build those). The disambiguation is source-adjacency +
+    // the trailing `=`: a tilde-DECLARATION is `~` adjacent to an identifier
+    // that is immediately assigned.
+    if (kind === TokenKind.BitNot && tildeDeclLeadFollows(cursor)) {
+        return parseTildeDecl(ctx);
     }
 
     // --- M3.2 control-flow keyword leads ---
@@ -2308,9 +2322,24 @@ function finishStatementTerminator(ctx, kwTok) {
 // At least one of `catch` / `finally` must be present (a bare `try {}` is a
 // JS syntax error); M3.3 records a diagnostic for the bare form and still
 // emits the Try node.
+//
+// M5-swap Wave 2 (B7) — `try` is FORBIDDEN scrml vocabulary. scrml has no
+// `try`/`catch`/`finally`; the error model is `fail` / `?` / `!{}` /
+// `<errorBoundary>` (SPEC §19). parseTry fires E-TRY-NOT-IN-SCRML at the
+// `try` keyword and RECOVERS by parsing the construct anyway (the underlying
+// statements still parse cleanly so error recovery surfaces diagnostics on
+// the rest of the program). This mirrors the M4.3 `E-ASYNC-NOT-IN-SCRML`
+// posture — a forbidden keyword gets a parse-layer rejection, not a silent
+// pass. The earlier E-STMT-TRY-NO-HANDLER stays as a malformed-construct
+// diagnostic (the two are complementary: B7 rejects `try` as vocabulary,
+// E-STMT-TRY-NO-HANDLER guards the JS-level well-formedness of the recovery).
 export function parseTry(ctx) {
     const cursor = ctx.cursor;
     const kw = advance(cursor);   // consume `try`
+
+    recordError(ctx, "E-TRY-NOT-IN-SCRML",
+        "scrml has no `try`/`catch`/`finally`. The error model is `fail` (§19.3), the `?` propagate operator, the `!{}` guarded-expression handler, and `<errorBoundary>` — no source-level try/catch is needed.",
+        kw.span);
 
     const block = parseBlock(ctx);
 
@@ -2371,9 +2400,19 @@ function parseCatchClause(ctx) {
 // source line is a syntax error in JS (`throw` requires an argument and ASI
 // must NOT insert a `;` right after `throw`). M3.3 records a diagnostic for
 // the no-argument form and still emits the Throw node.
+//
+// M5-swap Wave 2 (B7) — `throw` is FORBIDDEN scrml vocabulary. scrml uses
+// `fail Type::Variant(...)` (SPEC §19.3), not `throw`. parseThrow fires
+// E-THROW-NOT-IN-SCRML at the `throw` keyword and RECOVERS by parsing the
+// argument anyway (the M4.3 `E-ASYNC-NOT-IN-SCRML` posture). The earlier
+// E-STMT-THROW-NO-ARGUMENT stays as a malformed-construct diagnostic.
 export function parseThrow(ctx) {
     const cursor = ctx.cursor;
     const kw = advance(cursor);   // consume `throw`
+
+    recordError(ctx, "E-THROW-NOT-IN-SCRML",
+        "scrml has no `throw`. To signal a failure use `fail Type::Variant(...)` (§19.3) inside an `!` failable function — no source-level throw is needed.",
+        kw.span);
 
     if (sameLineFollows(ctx, kw) === false) {
         recordError(ctx, "E-STMT-THROW-NO-ARGUMENT",
@@ -2562,6 +2601,100 @@ export function parseTypeDecl(ctx) {
     const endE = (prevTok === undefined || prevTok === null) ? kw.span.end : prevTok.span.end;
     const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
     return makeTypeDecl(name, typeKind, raw, span);
+}
+
+// =============================================================================
+// `~` tilde-declaration production — M5-swap Wave 2 (B3).
+//
+// `~name = pipeline` declares a pipeline-reactive cell (SPEC §32). The native
+// parser knew `~` only as the §32 standalone pipeline-accumulator ATOM (the
+// `Tilde` ExprKind, built by parse-expr's parsePrimary) and as the prefix
+// bitwise-NOT operator (`~x`). B3 adds the statement-position DECLARATION.
+//
+// THE DISAMBIGUATION (prefix-bitwise-`~` / accumulator-`~` vs tilde-decl):
+// `tildeDeclLeadFollows` commits to a tilde-declaration only when the `~` is
+// SOURCE-ADJACENT to an identifier AND that identifier is immediately followed
+// by `=`. `~total = ...` matches; `~x` (bitwise-NOT, no `=`) and a standalone
+// `~` accumulator (no adjacent identifier) do not. A `~x = ...` at statement
+// position is unambiguous: `~x` is not a valid assignment target, so the only
+// well-formed reading of `~ Ident =` at statement position is a declaration.
+// =============================================================================
+
+// --- tildeDeclLeadFollows — does a `~name =` tilde-declaration lead begin? ---
+// The cursor sits on a `BitNot` token. True iff the next token is an `Ident`
+// SOURCE-ADJACENT to the `~` (no whitespace between — `~total`, not `~ total`)
+// and the token after the identifier is `=` (`Assign`). This is the same
+// source-adjacency discriminator `tildeIsStandalone` (parse-expr.js) uses to
+// tell a bitwise-`~` from the §32 accumulator atom.
+export function tildeDeclLeadFollows(cursor) {
+    if (currentKind(cursor) !== TokenKind.BitNot) {
+        return false;
+    }
+    const tilde = current(cursor);
+    const name = peek(cursor, 1);
+    const after = peek(cursor, 2);
+    if (tilde === undefined || tilde === null || name === undefined || name === null) {
+        return false;
+    }
+    if (name.kind !== TokenKind.Ident) {
+        return false;
+    }
+    // Source-adjacency — the `~` must abut the identifier (`~total`). A gap
+    // (`~ total`) is a standalone accumulator `~` followed by an identifier,
+    // NOT a tilde-declaration lead.
+    if (tilde.span === undefined || name.span === undefined
+        || name.span.start !== tilde.span.end) {
+        return false;
+    }
+    // The trailing `=` — a tilde DECLARATION assigns its pipeline.
+    if (after === undefined || after === null || after.kind !== TokenKind.Assign) {
+        return false;
+    }
+    return true;
+}
+
+// --- parseTildeDecl — a `~name = pipeline` tilde declaration (B3) ---
+//   tilde-declaration ::= '~' identifier '=' expression
+// SPEC §32. A `~` declaration always has an initializer; a missing name or a
+// missing `= expr` records a diagnostic and the parser recovers (the node is
+// still emitted so downstream error recovery surfaces useful diagnostics).
+// Structural twin of `parseLinDecl` (B4).
+export function parseTildeDecl(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `~`
+
+    // The bound name. `tildeDeclLeadFollows` already confirmed an Ident
+    // follows, but parseTildeDecl is also exported for direct testing — guard
+    // defensively.
+    let name = "";
+    if (currentKind(cursor) === TokenKind.Ident) {
+        name = advance(cursor).name;
+    } else {
+        recordError(ctx, "E-STMT-TILDE-NAME",
+            "expected a name after '~' in a tilde declaration", spanHere(ctx));
+    }
+
+    // The initializer — the pipeline expression. A `~` declaration must bind
+    // a value.
+    let init = null;
+    if (currentKind(cursor) === TokenKind.Assign) {
+        advance(cursor);   // consume `=`
+        const prior = enterMode(ctx, ParseMode.InExpression);
+        init = parseAssignmentLevelExpr(ctx);
+        exitMode(ctx, prior);
+        reenterBlockStubs(init);
+    } else {
+        recordError(ctx, "E-STMT-TILDE-INIT",
+            "a '~' declaration must have an initializer ('~name = pipeline')",
+            spanHere(ctx));
+    }
+
+    const prevTok = lastTokenBefore(ctx);
+    consumeSemicolon(ctx, prevTok);
+
+    const endE = (init === undefined || init === null) ? kw.span.end : nodeEnd(init);
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeTildeDecl(name, init, span);
 }
 
 // =============================================================================

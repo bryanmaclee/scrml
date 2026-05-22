@@ -63,6 +63,20 @@
 //     `FunctionDecl`; the `FunctionDecl` arm now READS those fields (R1
 //     defaulted them — a silent semantic flattening B6 closes).
 //
+// M5-SWAP WAVE 2 (B1 / B2 / B3 / B7) closed the remaining feature gaps:
+//   - `tilde-decl` — B3 added a `~`-declaration production + a `TildeDecl`
+//     Stmt kind; the `TildeDecl` arm maps native `TildeDecl` -> live
+//     `tilde-decl`. (R1's "bare `name = expr` is NOT promoted" still holds —
+//     only the explicit `~`-sigil form is a tilde-declaration.)
+//   - `propagate-expr` (`?`) / `guarded-expr` (`!{}`) — B1/B2 added the
+//     `Propagate` / `GuardedExpr` ExprKinds; the `ExprStmt` arm UN-WRAPS an
+//     `ExprStmt{ Propagate | GuardedExpr }` into the live `propagate-expr` /
+//     `guarded-expr` LogicStatement (the same un-wrap the `Lift` / `Fail`
+//     arms use).
+//   - `throw` / `try` — B7 added the forbidden-vocabulary parse diagnostics
+//     `E-THROW-NOT-IN-SCRML` / `E-TRY-NOT-IN-SCRML` at the native parser
+//     (parse-stmt.js); translation of `Throw` / `Try` is unchanged.
+//
 // THE NATIVE -> LIVE STATEMENT-KIND MAP (the 20-kind native catalog):
 //   native Empty        -> (dropped — no live empty-statement kind)
 //   native Block        -> (flattened — no live block-statement kind)
@@ -87,6 +101,7 @@
 //   native Try          -> live try-stmt     (diagnostic-recovery kind)
 //   native LinDecl      -> live lin-decl     (M5-swap Wave 1 — B4)
 //   native TypeDecl     -> live type-decl    (M5-swap Wave 1 — B5)
+//   native TildeDecl    -> live tilde-decl   (M5-swap Wave 2 — B3)
 //
 // Status (R1 / v0.5): COMPILABLE skeleton. The `${...}` JS-escape block
 // carries the live surface; the .js shadow (translate-stmt.js) runs (README
