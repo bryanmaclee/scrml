@@ -774,3 +774,161 @@ describe("§B2.11 spans + cross-cell-display", () => {
     expect(sym.errors[0].message).toContain("<form>");
   });
 });
+
+// ===========================================================================
+// §B2.12 — Wave 13 Unit Z: did-you-mean hint on let-decl collisions
+// ===========================================================================
+//
+// E-NAME-COLLIDES-STATE for `let-decl` carries an additional "did you mean"
+// hint covering the JS-transliteration shape (`let p = 0` + `@p = @p + 1`).
+// The hint names two fix paths in scrml-author terms (no compiler jargon):
+//   (a) remove the `let`, write to `@cell` directly
+//   (b) rename the local, use plain reassignment
+//
+// const/lin/tilde decls keep the existing message UNCHANGED (different
+// ergonomics — once-bound forms don't need a reassignment hint).
+// ===========================================================================
+
+describe("§B2.12 hint — let-decl collision carries did-you-mean for V5-strict fix paths", () => {
+  test("`let p` shadowing `<p>` includes the JS-transliteration hint", () => {
+    const src = `<program>\${
+      <p> = 0
+      function f() {
+        let p = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const err = sym.errors[0];
+    // Base message preserved (existing assertions still hold).
+    expect(err.message).toContain("E-NAME-COLLIDES-STATE");
+    expect(err.message).toContain("let p");
+    expect(err.message).toContain("V5-strict");
+    // Hint additive — labelled `hint:` and names both fix paths.
+    expect(err.message).toContain("hint:");
+    expect(err.message).toContain("`let p = ...`");
+    expect(err.message).toContain("`@p = ...`");
+    expect(err.message).toContain("(a)");
+    expect(err.message).toContain("(b)");
+    // The hint uses the qualifiedPath in its (a) path so it matches the
+    // base message's cell reference.
+    expect(err.message).toContain("`@p` directly");
+    // The hint names a concrete rename for fix path (b).
+    expect(err.message).toContain("pLocal");
+  });
+
+  test("`const p` shadowing `<p>` does NOT include the hint (different ergonomics)", () => {
+    const src = `<program>\${
+      <p> = 0
+      function f() {
+        const p = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const err = sym.errors[0];
+    // Base diagnostic still fires.
+    expect(err.message).toContain("E-NAME-COLLIDES-STATE");
+    expect(err.message).toContain("const p");
+    // No JS-transliteration hint on const-decl.
+    expect(err.message).not.toContain("hint:");
+    expect(err.message).not.toContain("JS-style");
+  });
+
+  test("`lin p` shadowing `<p>` does NOT include the hint", () => {
+    const src = `<program>\${
+      <p> = 0
+      function f() {
+        lin p = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const err = sym.errors[0];
+    expect(err.message).toContain("E-NAME-COLLIDES-STATE");
+    expect(err.message).toContain("lin p");
+    expect(err.message).not.toContain("hint:");
+  });
+
+  test("tilde-decl `p = 5` shadowing `<p>` does NOT include the hint", () => {
+    const src = `<program>\${
+      <p> = 0
+      function f() {
+        p = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const err = sym.errors[0];
+    expect(err.message).toContain("E-NAME-COLLIDES-STATE");
+    expect(err.message).toContain("`p`");
+    expect(err.message).not.toContain("hint:");
+  });
+
+  test("let-decl hint uses compound qualified-path for nested cells", () => {
+    // The hint's (a) path writes to `@<qualifiedPath>` — for compound
+    // collisions, the cell display uses the full dotted path.
+    const src = `<program>\${
+      <form>
+        <name> = ""
+      </>
+      function f() {
+        let form = "x"
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const err = sym.errors[0];
+    expect(err.message).toContain("let form");
+    expect(err.message).toContain("<form>");
+    // Hint fires for let-decl + names the qualified cell.
+    expect(err.message).toContain("hint:");
+    expect(err.message).toContain("`@form`");
+  });
+
+  test("no collision = no hint (no E-NAME-COLLIDES-STATE at all)", () => {
+    // Negative regression: hint must NOT appear in any unrelated diagnostic
+    // (or as a literal string) when there's nothing to collide with.
+    const src = `<program>\${
+      function f() {
+        let p = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(0);
+    // No diagnostic should contain the hint text.
+    for (const e of sym.errors) {
+      expect(e.message).not.toContain("hint: This often arises");
+    }
+  });
+
+  test("snapshot — full message text for the canonical let-shadow case", () => {
+    // Anti-folklore snapshot: lock the exact final message wording so any
+    // future drift (typo, rephrase) surfaces in review.
+    const src = `<program>\${
+      <count> = 0
+      function f() {
+        let count = 5
+      }
+    }</program>`;
+    const { sym } = buildSymbolTable(src);
+    expect(symErrorCount(sym)).toBe(1);
+    const msg = sym.errors[0].message;
+    // Spot-check key phrases — the test is intentionally not a verbatim
+    // string compare to allow trivial wording cleanup, but the load-bearing
+    // tokens are pinned.
+    expect(msg).toContain(
+      "E-NAME-COLLIDES-STATE: local `let count` shadows registered state cell `<count>`",
+    );
+    expect(msg).toContain("Rename the local, or use `@count`");
+    expect(msg).toContain(
+      "hint: This often arises when JS-style code uses `let count = ...`",
+    );
+    expect(msg).toContain("The structural cell `<count>` is the reactive store");
+    expect(msg).toContain("(a) If you wanted to mutate the state cell");
+    expect(msg).toContain("remove the `let count` line");
+    expect(msg).toContain("use `@count` directly (read) and `@count = expr` (write)");
+    expect(msg).toContain("(b) If you wanted a separate local, rename it");
+    expect(msg).toContain("`let countLocal = ...`");
+  });
+});

@@ -1232,12 +1232,33 @@ function checkLocalDeclCollidesState(
   // qualifiedPath disambiguates which cell is being shadowed (relevant for
   // compound-child collisions where the user's `let` sits in an outer
   // function but the state cell lives at a nested compound qualifiedPath).
+  //
+  // W13-Z hint: for `let-decl` collisions specifically, add a "did you mean"
+  // hint covering the JS-transliteration shape (`let p = 0` + `@p = @p + 1`).
+  // The hint names both fix paths in scrml-author terms (no compiler jargon).
+  // `const`/`lin`/`tilde` decls don't get the hint — `const`/`lin` are
+  // once-bound (mutation path doesn't apply); `tilde-decl` is a v0.next form
+  // with distinct semantics. The base message remains the same for those.
+  let hint = "";
+  if (decl.kind === "let-decl" && typeof decl.name === "string") {
+    const n = decl.name;
+    const qp = collided.qualifiedPath;
+    hint =
+      `\n\nhint: This often arises when JS-style code uses \`let ${n} = ...\` `
+      + `then writes \`@${n} = ...\` as if mutating the local. `
+      + `The structural cell \`<${qp}>\` is the reactive store. Two fixes:\n`
+      + `  (a) If you wanted to mutate the state cell, remove the \`let ${n}\` `
+      + `line and use \`@${qp}\` directly (read) and \`@${qp} = expr\` (write).\n`
+      + `  (b) If you wanted a separate local, rename it (e.g., \`let ${n}Local = ...\`) `
+      + `and use the plain name in subsequent reassignments.`;
+  }
   errors.push({
     code: "E-NAME-COLLIDES-STATE",
     message:
       `E-NAME-COLLIDES-STATE: local \`${declDisplay}\` shadows registered state cell \`<${collided.qualifiedPath}>\`. `
       + `Local names cannot shadow registered state-cell names (V5-strict, SPEC §6.1.3). `
-      + `Rename the local, or use \`@${collided.qualifiedPath}\` to read the cell directly.`,
+      + `Rename the local, or use \`@${collided.qualifiedPath}\` to read the cell directly.`
+      + hint,
     span: decl.span,
     severity: "error",
   });
