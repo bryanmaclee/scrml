@@ -5,13 +5,24 @@
 // ~L11426).
 //
 // PILLAR 5b classification (DD §D1):
-//   shapeSqlBlock / extractSqlQuery / scanChainedCalls are all CALCULATION
-//   (pure). scanChainedCalls is a left-to-right scan over a source slice —
-//   read-only, no cursor object, no engine, no lifecycle. shapeSqlBlock
-//   writes the derived payload onto the passed Sql block the same way
-//   emitContextBlock stamps `.bodyText` — a payload stamp on a freshly-
-//   built struct, not a state transition. The spec's `fn` + struct
-//   primitives are sufficient; no missing primitive surfaced.
+//   The HIGH-LEVEL contract is calculation — shapeSqlBlock takes an
+//   input block + emits a derived payload. scanChainedCalls is a left-
+//   to-right scan over a source slice — read-only, no cursor object,
+//   no engine, no lifecycle. shapeSqlBlock writes the derived payload
+//   onto the passed Sql block the same way emitContextBlock stamps
+//   `.bodyText` — a payload stamp on a freshly-built struct, not a
+//   state transition. extractSqlQuery is genuinely pure (`fn`).
+//
+//   INTERNAL HELPERS use cursor-mutating `function` declarations because
+//   the parser-scanner pattern uses local mutable position cursors
+//   (`@p = @p + 1`, `@q = @q + 1`, `@depth`) for performance + ergonomics.
+//   The CALLER-VISIBLE shape is calculation-equivalent (no observable
+//   mutation outside the helper's local scope); the body-internal
+//   `function` is a §48.6.2 cascade artifact under §33.6 / §48.11
+//   (`fn` ≡ `pure function`). The spec's `fn` + `function` distinction +
+//   struct primitives are sufficient; no missing primitive surfaced.
+//   Mirrors parse-css-body.scrml / parse-error-body.scrml /
+//   parse-state-body.scrml / parse-markup.scrml.
 //
 // PURPOSE — the SQL-block payload bridge:
 //   The downstream compiler stages (the Batch Planner §8.9, codegen)
@@ -49,7 +60,11 @@
 
 ${
     // -----------------------------------------------------------------
-    // shapeSqlBlock — CALCULATION. Given a native Sql block with
+    // shapeSqlBlock — caller-visible CALCULATION (payload stamp on
+    // freshly-built struct); bare `function` declaration because the
+    // body uses local-cell mutation (`@nobatch`) that the §48.3.3
+    // E-FN-003 check flags, and it calls scanChainedCalls which is
+    // `function` (§48.6.2 cascade). Given a native Sql block with
     // `block.bodyText` set + the host source string + the offset one
     // past the block's closing `}`, derive + stamp the SQL payload:
     //   block.query        — the SQL query text.
@@ -100,12 +115,17 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanChainedCalls — CALCULATION (pure). Walk a `.method(args)` chain
-    // from `start` in `source`. Mirrors the live `consumeSqlChainedCalls`:
-    // each link is a `.`, a method identifier, then an OPTIONAL `( args )`
-    // group whose `args` is the verbatim inter-paren text. Inter-link
-    // whitespace is skipped. The scan STOPS at the first byte that is not
-    // a chain continuation.
+    // scanChainedCalls — caller-visible CALCULATION (read-only over the
+    // source string; returns a fresh { calls, end } record); bare
+    // `function` declaration because the body uses local-cell mutation
+    // forms (`@p`, `@q`, `@depth`, `@inGroup`, `@scanning`, `@args`,
+    // `@lastConsumed`, calls.push(...)) that the §48.3.3 E-FN-003 check
+    // flags. Walk a `.method(args)` chain from `start` in `source`.
+    // Mirrors the live `consumeSqlChainedCalls`: each link is a `.`, a
+    // method identifier, then an OPTIONAL `( args )` group whose `args`
+    // is the verbatim inter-paren text. Inter-link whitespace is
+    // skipped. The scan STOPS at the first byte that is not a chain
+    // continuation.
     //
     // Returns { calls: { method, args }[], end } — `end` is one past the
     // last consumed chain byte (equal to `start` when no chain present).

@@ -6,14 +6,24 @@
 // arm ~L11457).
 //
 // PILLAR 5b classification (DD §D1):
-//   shapeCssBlock / parseCssRules / scanReactiveRefs (and the private
-//   scan/skip helpers) are all CALCULATION (pure). parseCssRules is a
+//   The HIGH-LEVEL contract is calculation — each `shape*` entry point
+//   takes an input block + emits a derived payload. parseCssRules is a
 //   left-to-right scan over a body slice — read-only, no cursor object,
 //   no engine, no lifecycle. shapeCssBlock writes the derived `rules`
 //   array onto the passed Css block the same way emitContextBlock stamps
 //   `.bodyText` — a payload stamp on a freshly-built struct, not a state
-//   transition. The spec's `fn` + struct primitives are sufficient; no
-//   missing primitive surfaced.
+//   transition.
+//
+//   INTERNAL HELPERS use cursor-mutating `function` declarations because
+//   the parser-scanner pattern uses local mutable position cursors
+//   (`@p = @p + 1`) for performance + ergonomics. The CALLER-VISIBLE
+//   shape is calculation-equivalent (no observable mutation outside the
+//   helper's local scope); the body-internal `function` is a §48.6.2
+//   cascade artifact under §33.6 / §48.11 (`fn` ≡ `pure function`). The
+//   spec's `fn` + `function` distinction + struct primitives are
+//   sufficient; no missing primitive surfaced. Mirrors
+//   parse-error-body.scrml / parse-sql-body.scrml / parse-state-body.scrml /
+//   parse-markup.scrml.
 //
 // PURPOSE — the CSS-block payload bridge:
 //   The downstream compiler stages (codegen's emit-css) consume a
@@ -57,9 +67,12 @@
 
 ${
     // -----------------------------------------------------------------
-    // shapeCssBlock — CALCULATION. Given a native Css block with
-    // `block.bodyText` set, parse the body into `block.rules` — the live
-    // CSSInlineNode payload.
+    // shapeCssBlock — caller-visible CALCULATION (payload stamp on
+    // freshly-built struct); bare `function` declaration because
+    // parseCssRules is `function` (§48.6.2 cascade — `fn` may not call
+    // `function`). Given a native Css block with `block.bodyText` set,
+    // parse the body into `block.rules` — the live CSSInlineNode
+    // payload.
     // -----------------------------------------------------------------
     export function shapeCssBlock(block) {
         if (block is not || block.kind != "Css") return block
@@ -69,11 +82,14 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // parseCssRules — CALCULATION (pure). Parse a CSS body string into a
-    // CSSRule[]. A single-pass scan recognizing comments, at-rules,
-    // property declarations, and selector rules (with their declaration
-    // blocks). Mirrors the live `tokenizeCSS` + `parseCSSTokens` pipeline
-    // fused into one scan.
+    // parseCssRules — caller-visible CALCULATION (read-only over the
+    // body string; returns a fresh CSSRule[]); bare `function`
+    // declaration because the body uses local-cell mutation forms
+    // (`@p = @p + 1`, `@q = @q + 1`, `rules.push(...)`) that the §48.3.3
+    // E-FN-003 check flags. A single-pass scan recognizing comments,
+    // at-rules, property declarations, and selector rules (with their
+    // declaration blocks). Mirrors the live `tokenizeCSS` +
+    // `parseCSSTokens` pipeline fused into one scan.
     // -----------------------------------------------------------------
     export function parseCssRules(bodyText) {
         const rules = []
@@ -163,10 +179,13 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanPropertyRule — CALCULATION (pure). The cursor is past a
-    // property-name ident; `afterIdent` is the offset after inter-token
-    // whitespace. Produce a property rule { prop, value, span,
-    // reactiveRefs?, isExpression? } + the offset one past the rule.
+    // scanPropertyRule — caller-visible CALCULATION (returns a fresh
+    // rule + end-offset); bare `function` declaration because the body
+    // uses local-cell mutation forms (`@p`, `@value`) that the §48.3.3
+    // E-FN-003 check flags. The cursor is past a property-name ident;
+    // `afterIdent` is the offset after inter-token whitespace. Produce a
+    // property rule { prop, value, span, reactiveRefs?, isExpression? } +
+    // the offset one past the rule.
     // -----------------------------------------------------------------
     function scanPropertyRule(src, propStart, prop, afterIdent) {
         const len = src.length
@@ -192,10 +211,12 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanCompoundSelectorRule — CALCULATION (pure). The cursor is past a
-    // compound-selector run's leading element name; consume the rest of
-    // the selector text up to the `{` (or `}`), then the declaration
-    // block.
+    // scanCompoundSelectorRule — caller-visible CALCULATION (returns a
+    // fresh rule + end-offset); bare `function` declaration because the
+    // body uses local-cell mutation forms (`@p = @p + 1`) that the
+    // §48.3.3 E-FN-003 check flags. The cursor is past a compound-
+    // selector run's leading element name; consume the rest of the
+    // selector text up to the `{` (or `}`), then the declaration block.
     // -----------------------------------------------------------------
     function scanCompoundSelectorRule(src, ruleStart, ident, hadWs, afterIdent) {
         const len = src.length
@@ -211,9 +232,12 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // finishSelectorRule — CALCULATION (pure). `selectorEnd` is the offset
-    // at the `{` (or `}` / EOF for a brace-less selector). Consume the
-    // declaration block + return the rule + end offset.
+    // finishSelectorRule — caller-visible CALCULATION (returns a fresh
+    // rule + end-offset); bare `function` declaration because the body
+    // uses local-cell mutation forms (`@p = @p + 1`, `@q`, declarations.
+    // push(...)) that the §48.3.3 E-FN-003 check flags. `selectorEnd`
+    // is the offset at the `{` (or `}` / EOF for a brace-less selector).
+    // Consume the declaration block + return the rule + end offset.
     // -----------------------------------------------------------------
     function finishSelectorRule(src, ruleStart, selector, selectorEnd) {
         const len = src.length
@@ -267,10 +291,13 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanAtRule — CALCULATION (pure). Capture an `@`-rule verbatim. A
-    // statement at-rule (`@import` / `@charset` / `@namespace`) ends at
-    // `;`; a block at-rule has a depth-tracked brace body. Returns
-    // { atRule, end }.
+    // scanAtRule — caller-visible CALCULATION (returns a fresh
+    // { atRule, end } record); bare `function` declaration because the
+    // body uses local-cell mutation forms (`@p`, `@name`, `@text`,
+    // `@depth`) that the §48.3.3 E-FN-003 check flags. Capture an
+    // `@`-rule verbatim. A statement at-rule (`@import` / `@charset` /
+    // `@namespace`) ends at `;`; a block at-rule has a depth-tracked
+    // brace body.
     // -----------------------------------------------------------------
     function scanAtRule(src, start) {
         const len = src.length
@@ -349,8 +376,13 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanReactiveRefs — CALCULATION (pure). Scan a CSS value string for
-    // `@identifier` reactive references. Returns { refs, isExpression }.
+    // scanReactiveRefs — caller-visible CALCULATION (returns a fresh
+    // { refs, isExpression } record); bare `function` declaration
+    // because the body uses local-cell mutation forms (`@p`, `@q`,
+    // refs.push(...)) that the §48.3.3 E-FN-003 check flags, and it
+    // calls isSimpleReactiveRef which is `function` (§48.6.2 cascade).
+    // Scan a CSS value string for `@identifier` reactive references.
+    // Returns { refs, isExpression }.
     //   refs         — { name, expr }[] (first-seen order, deduped).
     //   isExpression — true when the value is more than a bare `@var`.
     // -----------------------------------------------------------------
@@ -391,7 +423,9 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // isSimpleReactiveRef — CALCULATION (pure predicate). True iff
+    // isSimpleReactiveRef — caller-visible PREDICATE; bare `function`
+    // declaration because the body uses local-cell mutation form
+    // (`@p = @p + 1`) that the §48.3.3 E-FN-003 check flags. True iff
     // `trimmed` is a bare `@name` or `@name unit` reference.
     // -----------------------------------------------------------------
     function isSimpleReactiveRef(trimmed) {
@@ -421,8 +455,10 @@ ${
 
     // --- character-class + lookahead helpers (mirror tokenizer.ts) ----
 
-    // colonIntroducesSelector — CALCULATION (pure). At a `:` after an
-    // ident, scan forward for the earliest `{` / `;` / `}`.
+    // colonIntroducesSelector — caller-visible PREDICATE; bare
+    // `function` declaration because the body uses local-cell mutation
+    // (`@p = @p + 1`) that the §48.3.3 E-FN-003 check flags. At a `:`
+    // after an ident, scan forward for the earliest `{` / `;` / `}`.
     function colonIntroducesSelector(src, colonPos) {
         @p = colonPos + 1
         while (@p < src.length) {
@@ -434,8 +470,10 @@ ${
         return false
     }
 
-    // hasBraceBeforeSemiOrRbrace — CALCULATION (pure). True iff a `{`
-    // appears before the next `;` / `}`.
+    // hasBraceBeforeSemiOrRbrace — caller-visible PREDICATE; bare
+    // `function` declaration because the body uses local-cell mutation
+    // (`@p = @p + 1`) that the §48.3.3 E-FN-003 check flags. True iff a
+    // `{` appears before the next `;` / `}`.
     function hasBraceBeforeSemiOrRbrace(src, startPos) {
         @p = startPos
         while (@p < src.length) {
@@ -447,8 +485,11 @@ ${
         return false
     }
 
-    // scanSelectorPrelude — CALCULATION (pure). From a selector-leading
-    // char, return the offset of the terminating `{` / `}` / EOF.
+    // scanSelectorPrelude — caller-visible CALCULATION (returns an
+    // offset); bare `function` declaration because the body uses local-
+    // cell mutation (`@p = @p + 1`) that the §48.3.3 E-FN-003 check
+    // flags. From a selector-leading char, return the offset of the
+    // terminating `{` / `}` / EOF.
     function scanSelectorPrelude(src, start) {
         @p = start
         while (@p < src.length && src.charAt(@p) != "{" && src.charAt(@p) != "}") {
@@ -457,7 +498,10 @@ ${
         return @p
     }
 
-    // skipCssWhitespace — CALCULATION (pure). Advance past CSS whitespace.
+    // skipCssWhitespace — caller-visible CALCULATION (returns an
+    // offset); bare `function` declaration because the body uses local-
+    // cell mutation (`@p = @p + 1`) that the §48.3.3 E-FN-003 check
+    // flags. Advance past CSS whitespace.
     function skipCssWhitespace(src, p) {
         @p = p
         while (@p < src.length && isCssWhitespaceChar(src.charAt(@p))) {
@@ -466,8 +510,11 @@ ${
         return @p
     }
 
-    // skipCssComment — CALCULATION (pure). The cursor is at a `/*`;
-    // return the offset one past the closing `*/`.
+    // skipCssComment — caller-visible CALCULATION (returns an offset);
+    // bare `function` declaration because the body uses local-cell
+    // mutation (`@p = @p + 1`) that the §48.3.3 E-FN-003 check flags.
+    // The cursor is at a `/*`; return the offset one past the closing
+    // `*/`.
     function skipCssComment(src, p) {
         @p = p + 2 // skip `/*`
         while (@p < src.length && (src.charAt(@p) != "*" || @p + 1 >= src.length || src.charAt(@p + 1) != "/")) {

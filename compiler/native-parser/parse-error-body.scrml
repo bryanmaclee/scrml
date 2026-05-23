@@ -4,14 +4,24 @@
 // `buildBlock` `case "error-effect"` arm ~L11493).
 //
 // PILLAR 5b classification (DD §D1):
-//   shapeErrorEffectBlock / parseErrorArms / the scan helpers are all
-//   CALCULATION (pure). parseErrorArms is a left-to-right scan over a
-//   source slice — read-only, no cursor object, no engine, no lifecycle.
-//   shapeErrorEffectBlock writes the derived payload onto the passed
-//   ErrorEffect block the same way emitContextBlock stamps `.bodyText` — a
-//   payload stamp on a freshly-built struct, not a state transition. The
-//   spec's `fn` + struct primitives are sufficient; no missing primitive
-//   surfaced. Mirrors parse-css-body.scrml / parse-sql-body.scrml.
+//   The HIGH-LEVEL contract is calculation — each `shape*` entry point
+//   takes an input block + emits a derived payload. parseErrorArms is a
+//   left-to-right scan over a source slice — read-only, no cursor
+//   object, no engine, no lifecycle. shapeErrorEffectBlock writes the
+//   derived payload onto the passed ErrorEffect block the same way
+//   emitContextBlock stamps `.bodyText` — a payload stamp on a freshly-
+//   built struct, not a state transition.
+//
+//   INTERNAL HELPERS use cursor-mutating `function` declarations because
+//   the parser-scanner pattern uses local mutable position cursors
+//   (`@p = @p + 1`, `@q = @q + 1`) for performance + ergonomics. The
+//   CALLER-VISIBLE shape is calculation-equivalent (no observable
+//   mutation outside the helper's local scope); the body-internal
+//   `function` is a §48.6.2 cascade artifact under §33.6 / §48.11
+//   (`fn` ≡ `pure function`). The spec's `fn` + `function` distinction +
+//   struct primitives are sufficient; no missing primitive surfaced.
+//   Mirrors parse-css-body.scrml / parse-sql-body.scrml /
+//   parse-state-body.scrml / parse-markup.scrml.
 //
 // PURPOSE — the error-effect-block payload bridge:
 //   The downstream compiler stages (type-system §5615, codegen
@@ -50,9 +60,12 @@
 
 ${
     // -----------------------------------------------------------------
-    // shapeErrorEffectBlock — CALCULATION. Given a native ErrorEffect
-    // block with `block.bodyText` set, parse the body into `block.arms`
-    // — the live ErrorEffectNode payload.
+    // shapeErrorEffectBlock — caller-visible CALCULATION (payload stamp
+    // on freshly-built struct); bare `function` declaration because
+    // parseErrorArms is `function` (§48.6.2 cascade — `fn` may not call
+    // `function`). Given a native ErrorEffect block with `block.bodyText`
+    // set, parse the body into `block.arms` — the live ErrorEffectNode
+    // payload.
     // -----------------------------------------------------------------
     export function shapeErrorEffectBlock(block) {
         if (block is not || block.kind != "ErrorEffect") return block
@@ -62,11 +75,14 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // parseErrorArms — CALCULATION (pure). Parse an error-effect body
-    // string into an ErrorArm[]. A single-pass scan recognizing the
-    // legacy `| ::Type binding -> handler` arm form and the no-pipe
-    // `::Type(binding) -> handler` form. Mirrors the live `tokenizeError`
-    // + `parseErrorTokens` pipeline fused into one character scan.
+    // parseErrorArms — caller-visible CALCULATION (read-only over the
+    // body string; returns a fresh ErrorArm[]); bare `function`
+    // declaration because the body uses local-cell mutation forms
+    // (`@p = @p + 1`, arms.push(...)) that the §48.3.3 E-FN-003 check
+    // flags. A single-pass scan recognizing the legacy `| ::Type binding
+    // -> handler` arm form and the no-pipe `::Type(binding) -> handler`
+    // form. Mirrors the live `tokenizeError` + `parseErrorTokens`
+    // pipeline fused into one character scan.
     // -----------------------------------------------------------------
     export function parseErrorArms(bodyText) {
         const arms = []
@@ -133,7 +149,11 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanErrorPattern — CALCULATION. At `p`, recognize an arm pattern:
+    // scanErrorPattern — caller-visible CALCULATION (returns a fresh
+    // { pattern, end } record or `not`); bare `function` declaration
+    // because the body uses local-cell mutation (`@q = @q + 1`) that
+    // the §48.3.3 E-FN-003 check flags. At `p`, recognize an arm
+    // pattern:
     //   `::Name`   -> { pattern: "::Name", end }
     //   `.Variant` -> { pattern: ".Variant", end }  (uppercase-led)
     //   `_`        -> { pattern: "_", end }
@@ -179,7 +199,12 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanErrorBinding — CALCULATION. At `p`, recognize an arm binding:
+    // scanErrorBinding — caller-visible CALCULATION (returns a fresh
+    // { binding, end } record or `not`); bare `function` declaration
+    // because the body uses local-cell mutation (`@q = @q + 1`) that
+    // the §48.3.3 E-FN-003 check flags, and it calls skipErrorWhitespace
+    // which is `function` (§48.6.2 cascade). At `p`, recognize an arm
+    // binding:
     //   `(ident)` -> { binding: "ident", end }   (tuple form, §19.4.3)
     //   `ident`   -> { binding: "ident", end }   (bare form)
     // Returns `not` (absent) when no binding begins at `p`.
@@ -233,7 +258,11 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // scanErrorHandler — CALCULATION. From `p`, scan the handler run:
+    // scanErrorHandler — caller-visible CALCULATION (returns the
+    // handler-end offset); bare `function` declaration because the body
+    // uses local-cell mutation (`@q`, `@depth`) that the §48.3.3
+    // E-FN-003 check flags, and it calls skipErrorString which is
+    // `function` (§48.6.2 cascade). From `p`, scan the handler run:
     // every character up to the next arm-starting `|` at brace/paren
     // depth 0, or end of body. A `|` inside a `{...}` / `(...)` / `[...]`
     // group, or inside a string, does NOT end the handler.
@@ -273,9 +302,11 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // skipErrorString — CALCULATION. From the opening quote at `p`,
-    // return the offset one past the matching closing `quote`. Backslash
-    // escapes are honored.
+    // skipErrorString — caller-visible CALCULATION (returns an offset);
+    // bare `function` declaration because the body uses local-cell
+    // mutation (`@q`) that the §48.3.3 E-FN-003 check flags. From the
+    // opening quote at `p`, return the offset one past the matching
+    // closing `quote`. Backslash escapes are honored.
     // -----------------------------------------------------------------
     function skipErrorString(src, p, quote) {
         const len = src.length
@@ -295,8 +326,11 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // skipErrorWhitespace — CALCULATION. Return the offset of the first
-    // non-whitespace character at or after `p`.
+    // skipErrorWhitespace — caller-visible CALCULATION (returns an
+    // offset); bare `function` declaration because the body uses
+    // local-cell mutation (`@q = @q + 1`) that the §48.3.3 E-FN-003
+    // check flags. Return the offset of the first non-whitespace
+    // character at or after `p`.
     // -----------------------------------------------------------------
     function skipErrorWhitespace(src, p) {
         const len = src.length

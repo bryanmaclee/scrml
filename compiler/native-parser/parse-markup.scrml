@@ -17,11 +17,23 @@
 //   shape governs which per-context body runs. This mirrors lex.scrml's
 //   classification exactly: the loop is engine-routed.
 //
-//   `parseMarkup` as a whole is `fn` per D1 OQ1: it takes a source
-//   string and produces a node array — a calculation classification at
-//   the outermost layer, even though its inner machinery is engine-
-//   shaped. "The operational test classifies the LOCUS, and a
-//   calculation may contain state-shape subroutines."
+//   The HIGH-LEVEL contract of `parseMarkup` is calculation per D1 OQ1:
+//   it takes a source string and produces a node array — a calculation
+//   classification at the outermost layer, even though its inner
+//   machinery is engine-shaped. "The operational test classifies the
+//   LOCUS, and a calculation may contain state-shape subroutines."
+//
+//   INTERNAL HELPERS use bare `function` declarations because the
+//   parser-scanner pattern walks a mutable cursor (`cursor.pos` /
+//   `cursor.line` / `cursor.col`) for performance + ergonomics, and
+//   inner predicates use local-cell mutation forms (`@p = @p + 1`) that
+//   the §48.3.3 E-FN-003 check flags. The CALLER-VISIBLE shape is
+//   calculation-equivalent (no observable mutation outside the helper's
+//   local scope); the body-internal `function` is a §48.6.2 cascade
+//   artifact under §33.6 / §48.11 (`fn` ≡ `pure function`). The spec's
+//   `fn` + `function` distinction + struct primitives are sufficient;
+//   no missing primitive surfaced. Mirrors parse-css-body.scrml /
+//   parse-error-body.scrml / parse-sql-body.scrml / parse-state-body.scrml.
 //
 // MK1.3 SCOPE (this dispatch):
 //   - The trampoline now PRODUCES A BLOCK-STREAM. MK1.2 recognized /
@@ -324,12 +336,14 @@ ${
     }
 
     // -------------------------------------------------------------------
-    // isStateTagBoundaryAfterLt — CALCULATION (predicate). The cursor is
-    // AT a `<`. Look past the inter-`<`-and-name whitespace: a `< Ident`
-    // state opener (SPEC §4.3) has at least one whitespace char then a
-    // tag-name start letter. A `<` then whitespace then anything else (a
-    // bare `< ` in free text) is NOT a tag boundary — it stays free-text
-    // per §4.6.
+    // isStateTagBoundaryAfterLt — PREDICATE (caller-visible calculation;
+    // bare `function` declaration — the body uses local-cell mutation
+    // forms `@k = @k + 1` that the §48.3.3 E-FN-003 check flags). The
+    // cursor is AT a `<`. Look past the inter-`<`-and-name whitespace: a
+    // `< Ident` state opener (SPEC §4.3) has at least one whitespace
+    // char then a tag-name start letter. A `<` then whitespace then
+    // anything else (a bare `< ` in free text) is NOT a tag boundary —
+    // it stays free-text per §4.6. Cursor is NOT mutated (peek only).
     // -------------------------------------------------------------------
     export function isStateTagBoundaryAfterLt(cursor) {
         // The char after `<` must be whitespace (a `<ident` opener with
@@ -381,22 +395,28 @@ ${
     // block; `liftBareDeclarations`'s `TOPLEVEL_STATE_DECL_RE` then lifts
     // it into a synthetic `logic` node.
     //
-    // `isStateDeclOpenerAt` is the native analogue — a non-mutating cursor
-    // peek. The trampoline consults it at a `<ident` boundary: at a
-    // declaration site, when the opener's `>` is followed by a state-decl
-    // signal, the markup-tag entry is SUPPRESSED — the `<` falls through
-    // to the text-run accumulator and `liftBareBlocks` lifts it.
+    // `isStateDeclOpenerAt` is the native analogue. The caller-visible
+    // shape is a cursor-peek (cursor.pos is NOT mutated by this body),
+    // but the internal scan uses local-cell mutation forms (`@p`,
+    // `@braceDepth`, etc.) so the declaration is bare `function`. The
+    // trampoline consults it at a `<ident` boundary: at a declaration
+    // site, when the opener's `>` is followed by a state-decl signal,
+    // the markup-tag entry is SUPPRESSED — the `<` falls through to the
+    // text-run accumulator and `liftBareBlocks` lifts it.
     // -------------------------------------------------------------------
 
-    // isStateDeclOpenerAt — CALCULATION (predicate; non-mutating cursor
-    // peek). The cursor is AT a `<` that `isMarkupTagOpener` already
-    // accepted. Peek past the opener body to its `>`, then past horizontal
-    // whitespace: a `=` (not `==` / `=>`) or a `:` is the state-decl
-    // signal (SPEC §6.2 Shape 1 / §35.2 typed-decl). A VERBATIM port of
-    // block-splitter's `peekTopLevelStateDeclSignal` — the live oracle's
-    // recognition. The opener-body scan mirrors that oracle's brace /
-    // paren / string balancing so an attr value containing `>` does not
-    // end the scan early.
+    // isStateDeclOpenerAt — PREDICATE (caller-visible peek; bare
+    // `function` declaration — the body uses local-cell mutation forms
+    // `@p = @p + 1` / `@braceDepth = @braceDepth + 1` etc. that the
+    // §48.3.3 E-FN-003 check flags). The cursor is AT a `<` that
+    // `isMarkupTagOpener` already accepted. Peek past the opener body
+    // to its `>`, then past horizontal whitespace: a `=` (not `==` /
+    // `=>`) or a `:` is the state-decl signal (SPEC §6.2 Shape 1 /
+    // §35.2 typed-decl). A VERBATIM port of block-splitter's
+    // `peekTopLevelStateDeclSignal` — the live oracle's recognition.
+    // The opener-body scan mirrors that oracle's brace / paren / string
+    // balancing so an attr value containing `>` does not end the scan
+    // early. Cursor is NOT mutated (peek only).
     export function isStateDeclOpenerAt(cursor) {
         const src = cursor.source
         const len = src.length
@@ -503,11 +523,14 @@ ${
         // see parse-markup.js for the running shadow
     }
 
-    // peekTagNameLower — CALCULATION. The cursor sits at a `<` markup-tag
-    // opener; return the LOWERCASED tag name (the `isTagNameChar` run
-    // after `<`), or "" when no name char follows. Used by the `<style>`
-    // recognizer in dispatchTopLevel — peeking the name without consuming
-    // the opener.
+    // peekTagNameLower — caller-visible PEEK; bare `function` declaration
+    // — the body uses local-cell mutation forms (`@p = @p + 1`, `@name`
+    // accumulation) that the §48.3.3 E-FN-003 check flags. The cursor
+    // sits at a `<` markup-tag opener; return the LOWERCASED tag name
+    // (the `isTagNameChar` run after `<`), or "" when no name char
+    // follows. Used by the `<style>` recognizer in dispatchTopLevel —
+    // peeking the name without consuming the opener. Cursor is NOT
+    // mutated (peek only).
     export function peekTagNameLower(cursor) {
         const src = cursor.source
         const len = src.length
@@ -520,12 +543,15 @@ ${
         return name.toLowerCase()
     }
 
-    // scanPastStyleBlock — CALCULATION. The cursor sits at a `<style`
-    // opener. Return the offset just past the matching `</style>` closer
-    // (case-insensitive), or the source length when no closer
-    // materializes (an unterminated `<style>` runs to EOF — the live BS
-    // does the same: block-splitter.js L1732-1738 terminates at
-    // `</style>` OR `len`).
+    // scanPastStyleBlock — caller-visible SCAN-AND-RETURN-OFFSET; bare
+    // `function` declaration — the body uses local-cell mutation
+    // (`@p = @p + 1`) that the §48.3.3 E-FN-003 check flags. The cursor
+    // sits at a `<style` opener. Return the offset just past the
+    // matching `</style>` closer (case-insensitive), or the source
+    // length when no closer materializes (an unterminated `<style>`
+    // runs to EOF — the live BS does the same: block-splitter.js
+    // L1732-1738 terminates at `</style>` OR `len`). Cursor is NOT
+    // mutated (returns the offset; the caller advances).
     export function scanPastStyleBlock(cursor) {
         const src = cursor.source
         const len = src.length
@@ -1744,10 +1770,11 @@ ${
     }
 
     // -------------------------------------------------------------------
-    // parseMarkup — entry point. Pure fn over the source string
-    // (calculation at the outermost layer; engine-shaped internals
-    // dispatch per BlockContext). Returns the typed block-stream
-    // (ctx.nodes).
+    // parseMarkup — entry point. Caller-visible CALCULATION over the
+    // source string (calculation at the outermost layer; engine-shaped
+    // internals dispatch per BlockContext); bare `function` declaration
+    // because runMarkup is `function` (§48.6.2 cascade — `fn` may not
+    // call `function`). Returns the typed block-stream (ctx.nodes).
     // -------------------------------------------------------------------
     export function parseMarkup(source) {
         return runMarkup(source).ctx.nodes
@@ -1758,13 +1785,18 @@ ${
     // BlockContext transition sequence + the final ctx state (brackets /
     // delegationStack / blockContextStack / nodes). The contextTrace is
     // the @blockContext value recorded at the TOP of every trampoline
-    // iteration.
+    // iteration. Bare `function` declaration because runMarkup is
+    // `function` (§48.6.2 cascade).
     export function parseMarkupTrace(source) {
         return runMarkup(source)
     }
 
     // -------------------------------------------------------------------
     // runMarkup — the shared trampoline. Returns { ctx, contextTrace }.
+    // Bare `function` declaration because the trampoline body mutates
+    // the local cursor + ctx through the dispatcher cascade (and calls
+    // dispatchTopLevel which is `function`); §48.6.2 cascade forces the
+    // outer trampoline to `function` as well.
     //
     // The dispatch table mirrors the BlockContext engine's state-
     // children. The loop is a thin trampoline — the SAME shape as

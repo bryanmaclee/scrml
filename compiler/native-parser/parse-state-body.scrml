@@ -4,14 +4,28 @@
 // `buildBlock` `case "state"` arm ~L11250).
 //
 // PILLAR 5b classification (DD §D1):
-//   shapeStateBlock / parseTypedAttrTokens / splitTypedAttr / isStateBlock
-//   are all CALCULATION (pure). They are folds over the native parser's
-//   already-produced ATTR_* token stream — read-only, no cursor, no engine,
-//   no lifecycle. shapeStateBlock writes the derived payload onto the
-//   passed Markup block the same way emitMarkupElement stamps `.attrs` —
-//   the WRITE is a payload stamp on a freshly-built struct, not a state
-//   transition. The spec's `fn` + struct primitives are sufficient; no
-//   missing primitive surfaced.
+//   The HIGH-LEVEL contract is calculation — each `shape*` entry point
+//   takes an input block + emits a derived payload. They are folds over
+//   the native parser's already-produced ATTR_* token stream — read-
+//   only, no cursor, no engine, no lifecycle. shapeStateBlock writes
+//   the derived payload onto the passed Markup block the same way
+//   emitMarkupElement stamps `.attrs` — the WRITE is a payload stamp on
+//   a freshly-built struct, not a state transition. isStateBlock is
+//   genuinely pure (`fn`).
+//
+//   INTERNAL HELPERS use cursor-mutating `function` declarations:
+//   shapeStateBlock writes to passed block fields (`block.stateType`
+//   etc.); parseTypedAttrTokens cascades through splitTypedAttr (§48.6.2);
+//   splitTypedAttr uses local-cell mutation forms (`@typeExpr`,
+//   `@defaultValue`, `@optional`) that the §48.3.3 E-FN-003 check
+//   flags. The CALLER-VISIBLE shape is calculation-equivalent (no
+//   observable mutation outside the helper's local scope; shapeStateBlock's
+//   block-field writes are payload stamps on a freshly-built struct);
+//   the body-internal `function` is a §48.6.2 cascade artifact under
+//   §33.6 / §48.11 (`fn` ≡ `pure function`). The spec's `fn` +
+//   `function` distinction + struct primitives are sufficient; no
+//   missing primitive surfaced. Mirrors parse-css-body.scrml /
+//   parse-error-body.scrml / parse-sql-body.scrml / parse-markup.scrml.
 //
 // PURPOSE — the state-block payload bridge:
 //   The downstream compiler stages consume a `StateNode` / a
@@ -53,8 +67,14 @@
 
 ${
     // -----------------------------------------------------------------
-    // shapeStateBlock — CALCULATION. Given a Markup block whose opener
-    // TagKind is StateOpener, derive + stamp the state payload:
+    // shapeStateBlock — caller-visible CALCULATION (payload stamp on
+    // freshly-built struct); bare `function` declaration because the
+    // body writes to passed-block fields (`block.stateType`,
+    // `block.typedAttrs`, `block.stateNodeKind` — which the §48.3.3
+    // E-FN-003 check flags as outer-object property mutation), and it
+    // calls parseTypedAttrTokens which is `function` (§48.6.2 cascade).
+    // Given a Markup block whose opener TagKind is StateOpener, derive
+    // + stamp the state payload:
     //   block.stateNodeKind — "state" | "state-constructor-def"
     //   block.stateType     — the opener name
     //   block.typedAttrs    — TypedAttrDecl[] (empty for a plain state)
@@ -133,10 +153,13 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // parseTypedAttrTokens — CALCULATION (pure). Scan an ATTR_* token
-    // stream for ATTR_TYPED_DECL tokens and produce the TypedAttrDecl[]
-    // the live `parseTypedAttributes` produces. Each ATTR_TYPED_DECL
-    // token's `.text` is JSON `{ name, typeExpr }`.
+    // parseTypedAttrTokens — caller-visible CALCULATION (read-only over
+    // the token stream; returns a fresh TypedAttrDecl[]); bare `function`
+    // declaration because the body calls splitTypedAttr which is
+    // `function` (§48.6.2 cascade). Scan an ATTR_* token stream for
+    // ATTR_TYPED_DECL tokens and produce the TypedAttrDecl[] the live
+    // `parseTypedAttributes` produces. Each ATTR_TYPED_DECL token's
+    // `.text` is JSON `{ name, typeExpr }`.
     //
     // EMPTY-PAREN DISCRIMINATION (M5 P5-8 — r10-bun-admin T-state).
     //   A `name(type)` typed-attr declaration ALWAYS carries a non-empty
@@ -173,11 +196,15 @@ ${
     }
 
     // -----------------------------------------------------------------
-    // splitTypedAttr — CALCULATION (pure). Split a raw `name(type)`
-    // typeExpr into the TypedAttrDecl shape { name, typeExpr, optional,
-    // defaultValue, span }. Mirrors `parseTypedAttributes`'s inner block:
-    // an `=` peels the default; a trailing `?` peels the optional marker;
-    // a default value implies optional.
+    // splitTypedAttr — caller-visible CALCULATION (returns a fresh
+    // TypedAttrDecl record); bare `function` declaration because the
+    // body uses local-cell mutation forms (`@typeExpr`, `@defaultValue`,
+    // `@optional`) that the §48.3.3 E-FN-003 check flags. Split a raw
+    // `name(type)` typeExpr into the TypedAttrDecl shape { name,
+    // typeExpr, optional, defaultValue, span }. Mirrors
+    // `parseTypedAttributes`'s inner block: an `=` peels the default;
+    // a trailing `?` peels the optional marker; a default value implies
+    // optional.
     // -----------------------------------------------------------------
     export function splitTypedAttr(name, rawTypeExpr, span) {
         @typeExpr = (typeof rawTypeExpr == "string" ? rawTypeExpr : "").trim()
