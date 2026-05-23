@@ -79,7 +79,14 @@ function isLegalImportSpecifier(source) {
  *
  * Returns a Map where:
  *   key = absolute file path
- *   value = { imports: [{ names: string[], source: string, absSource: string, span }], exports: [{ name, kind, span }] }
+ *   value = { imports: [{ names: string[], specifiers: ImportSpecifier[], source: string, absSource: string, isDefault, span }], exports: [{ name, kind, span }] }
+ *
+ * S122 Wave 12 Unit W: `specifiers` is carried through so cross-file consumers
+ * (name-resolver.ts, api.js importedTypes seeder) can resolve aliased imports
+ * (`import { Foo as Bar } from './lib.scrml'`) correctly — `names[]` holds the
+ * IMPORTED source-side names per ast-builder.js:7039-7044, but use-site lookups
+ * need to be keyed by the LOCAL alias `spec.local`. See ImportSpecifier in
+ * compiler/src/types/ast.ts for shape.
  *
  * Also returns E-IMPORT-005 errors for any import with a bare npm-style
  * specifier (non-relative, non-scrml:, non-vendor:).
@@ -153,6 +160,10 @@ export function buildImportGraph(fileASTs) {
 
       imports.push({
         names: imp.names || [],
+        // S122 Wave 12 Unit W: carry specifiers[] through so consumers can
+        // map aliased imports correctly. Empty array for default imports
+        // (parser emits `specifiers: []` with `isDefault: true`).
+        specifiers: Array.isArray(imp.specifiers) ? imp.specifiers : [],
         source: imp.source,
         absSource,
         isDefault: imp.isDefault || false,
