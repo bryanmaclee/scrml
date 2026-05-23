@@ -1703,6 +1703,27 @@ function walkResolveAtNames(
       // would have silently synthesised a phantom cell pre-V-kill. See the
       // auto-state-cell-synthesis DD §6 + SPEC §6.1.1 + §6.2 + §6.1.3.
       if ((anyN as any)._isReactiveAssign === true && typeof anyN.name === "string") {
+        // V-kill EXEMPTION (S123) — native-parser `.scrml` self-host mirrors.
+        // The 5 files at `compiler/native-parser/parse-{css,error,markup,sql,state}-body.scrml`
+        // are pre-M6-self-host source. They rely heavily on the legacy
+        // auto-synth pattern (~176 fires aggregate). All five sunset at the
+        // M6.7/M6.8 cutover when the JS native-parser becomes the only
+        // implementation (the `.scrml` mirrors are deleted). Per pa.md Rule 3
+        // (right answer beats easy answer): migrating files scheduled for
+        // imminent deletion is wasted work; the SPEC normative rule (§6.1.1)
+        // is preserved at the LANGUAGE level — this is an IMPLEMENTATION
+        // exemption for source files in the M6 deletion queue. Sunset is
+        // automatic — when the files disappear, the exemption becomes inert.
+        // File path is read from the node's span (not scope's qualifiedPath,
+        // which is the SCOPE's dotted compound-parent chain, NOT a file path).
+        const filePath = (anyN.span && typeof anyN.span.file === "string") ? anyN.span.file : "";
+        const isNativeParserSelfHost =
+          filePath.includes("/compiler/native-parser/") &&
+          filePath.endsWith(".scrml");
+        if (isNativeParserSelfHost) {
+          // Exempt — skip the fire. Sunsets at M6.7/M6.8.
+          continue;
+        }
         const targetName: string = anyN.name;
         const targetResolved = lookupStateCell(currentScope, targetName);
         if (!targetResolved) {
