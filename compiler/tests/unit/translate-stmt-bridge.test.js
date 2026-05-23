@@ -51,12 +51,13 @@ describe("§1 — statement substrate", () => {
         expect(out).toEqual([]);
     });
 
-    test("ExprStmt translates to bare-expr", () => {
+    test("ExprStmt translates to bare-expr (exprNode is LIVE lowercase per R4-U1)", () => {
         const out = translate("foo(1);");
         expect(out.length).toBe(1);
         expect(out[0].kind).toBe("bare-expr");
         expect(out[0].exprNode).not.toBeNull();
-        expect(out[0].exprNode.kind).toBe("Call");
+        // R4-U1: makeBareExpr wires translateExpr; exprNode is live `call`, not native `Call`.
+        expect(out[0].exprNode.kind).toBe("call");
     });
 
     test("Block flattens its body into the surrounding stream", () => {
@@ -504,6 +505,68 @@ describe("§5b — M6.2a translateMarkupValueToLiveNode bridge", () => {
         expect(out[0].expr.kind).toBe("expr");
         // No node field on the expr-target shape.
         expect(out[0].expr.node).toBeUndefined();
+    });
+});
+
+// =============================================================================
+// §5c — R4-U1: translateExpr wired at bare-expr / return-stmt / throw-stmt
+// ride-throughs. The three text-interpolation sites surfaced in the R4 survey
+// (docs/changes/r4-expression-catalog-continuation-survey/progress.md Phase 3a).
+// Asserts that `exprNode` slots on the three wired sites carry LIVE lowercase
+// `ExprNode` (per ast.ts:1939 ExprNode union), NOT native PascalCase Exprs.
+// Locking tests for the still-unwired sites (R4-U2 / U3 / U4 / U5) confirm
+// that scope is still required — they still emit PascalCase, which is the
+// regression bug-5 / M6.2 wip-patch reproduced.
+// =============================================================================
+describe("§5c — R4-U1 wired ride-through sites (translateExpr bridged)", () => {
+    test("bare-expr Call: exprNode is live `call`, not native `Call`", () => {
+        const out = translate("foo(1);");
+        expect(out[0].kind).toBe("bare-expr");
+        expect(out[0].exprNode.kind).toBe("call");
+    });
+
+    test("bare-expr Binary: exprNode is live `binary`, not native `Binary`", () => {
+        const out = translate("1 + 2;");
+        expect(out[0].kind).toBe("bare-expr");
+        expect(out[0].exprNode.kind).toBe("binary");
+    });
+
+    test("bare-expr Member: exprNode is live `member`, not native `Member`", () => {
+        const out = translate("task.title;");
+        expect(out[0].kind).toBe("bare-expr");
+        // native Member -> live member (computed:false dotted form per translate-expr.js L85-90)
+        expect(out[0].exprNode.kind).toBe("member");
+    });
+
+    test("return-stmt Ident: exprNode is live `ident`, not native `Ident`", () => {
+        const out = translate("return value;");
+        expect(out[0].kind).toBe("return-stmt");
+        expect(out[0].exprNode.kind).toBe("ident");
+    });
+
+    test("return-stmt Binary: exprNode is live `binary`, not native `Binary`", () => {
+        const out = translate("return 1 + 2;");
+        expect(out[0].kind).toBe("return-stmt");
+        expect(out[0].exprNode.kind).toBe("binary");
+    });
+
+    test("throw-stmt Ident: exprNode is live `ident`, not native `Ident`", () => {
+        const out = translate("throw err;");
+        expect(out[0].kind).toBe("throw-stmt");
+        expect(out[0].exprNode.kind).toBe("ident");
+    });
+
+    // Locking test: confirms R4-U2 scope (for-stmt iterExpr) is STILL needed.
+    // If this assertion ever flips, R4-U2 has landed and this guard can be
+    // removed / inverted. The reverse direction would be a quiet test-silent
+    // regression of R4-U2's "what still needs doing" surface.
+    test("LOCK: for-of iterExpr still leaks PascalCase Ident (R4-U2 NOT done)", () => {
+        const out = translate("for (const x of items) { use(x); }");
+        expect(out[0].kind).toBe("for-stmt");
+        expect(out[0].iterExpr).not.toBeNull();
+        // Should be PascalCase Ident until R4-U2 lands; if this flips to "ident"
+        // then R4-U2 has shipped and the lock test should be removed.
+        expect(out[0].iterExpr.kind).toBe("Ident");
     });
 });
 

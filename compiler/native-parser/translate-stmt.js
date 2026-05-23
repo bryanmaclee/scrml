@@ -88,6 +88,7 @@
 // =============================================================================
 
 import { StmtKind } from "./ast-stmt.js";
+import { translateExpr } from "./translate-expr.js";
 
 // =============================================================================
 // translateStmtList — calculation (pure). The module entry point. Translates a
@@ -359,16 +360,20 @@ function spanOrZero(span) {
 
 // --- ExprStmt translations ---------------------------------------------------
 
-// makeBareExpr — a `bare-expr` node. `exprNode` carries the native expression
-// verbatim. The legacy runtime `.expr` string is left empty — the native
-// parser does not retain raw source text on Expr nodes, and codegen prefers
-// `exprNode` (BareExprNode contract, ast.ts:1086).
+// makeBareExpr — a `bare-expr` node. `exprNode` carries the LIVE lowercase
+// `ExprNode` produced by the A2 expression bridge (translate-expr.js). The
+// legacy runtime `.expr` string is left empty — the native parser does not
+// retain raw source text on Expr nodes, and codegen prefers `exprNode`
+// (BareExprNode contract, ast.ts:1086). R4-U1 wired translateExpr into the
+// three text-interpolation ride-through sites (bare-expr / return-stmt /
+// throw-stmt); native PascalCase Exprs were leaking through to emit-expr.ts
+// where the lowercase-only switch hit `default` and silently returned `""`.
 function makeBareExpr(nativeExpr, span, counter) {
     return {
         id: stampId(counter),
         kind: "bare-expr",
         expr: "",
-        exprNode: nativeExpr === undefined ? null : nativeExpr,
+        exprNode: nativeExpr === undefined ? null : translateExpr(nativeExpr),
         span: spanOrZero(span),
     };
 }
@@ -1042,7 +1047,10 @@ function makeForStmtInOf(stmt, counter, label) {
 
 // makeReturnStmt — native `Return{argument}` -> live `return-stmt`. A bare
 // `return` has `argument: null` -> live `exprNode` omitted + `expr: ""` (the
-// live bare-return shape, ast-builder.js L8786).
+// live bare-return shape, ast-builder.js L8786). When `argument` is set, the
+// native Expr is bridged to a LIVE lowercase `ExprNode` via the A2 expression
+// bridge — R4-U1 closes the return-stmt ride-through site so downstream
+// emit-logic.ts emitReturn can dispatch on the lowercase kind.
 function makeReturnStmt(stmt, counter) {
     const node = {
         id: stampId(counter),
@@ -1051,7 +1059,7 @@ function makeReturnStmt(stmt, counter) {
         span: spanOrZero(stmt.span),
     };
     if (stmt.argument !== undefined && stmt.argument !== null) {
-        node.exprNode = stmt.argument;
+        node.exprNode = translateExpr(stmt.argument);
     }
     return node;
 }
@@ -1350,7 +1358,10 @@ function exportSpecifierName(spec) {
 // makeThrowStmt — native `Throw{argument}` -> live `throw-stmt` (ast.ts:1015).
 // scrml has no `throw`; the live pipeline produces a `throw-stmt` node ONLY
 // for diagnostic recovery (paired with a hard E-ERROR-006). The `exprNode`
-// carries the native thrown-value Expr.
+// carries the LIVE lowercase `ExprNode` produced by the A2 expression bridge —
+// R4-U1 wires the throw-stmt ride-through site so downstream emit-logic.ts
+// emitThrow can dispatch on the lowercase kind even on the diagnostic-recovery
+// path.
 function makeThrowStmt(stmt, counter) {
     const node = {
         id: stampId(counter),
@@ -1359,7 +1370,7 @@ function makeThrowStmt(stmt, counter) {
         span: spanOrZero(stmt.span),
     };
     if (stmt.argument !== undefined && stmt.argument !== null) {
-        node.exprNode = stmt.argument;
+        node.exprNode = translateExpr(stmt.argument);
     }
     return node;
 }
