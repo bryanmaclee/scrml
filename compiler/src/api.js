@@ -1455,6 +1455,21 @@ export function compileScrml(options = {}) {
     for (const imp of graphEntry.imports) {
       const depExports = moduleResult.exportRegistry.get(imp.absSource);
       if (!depExports) continue; // dep not in compile set
+
+      // S122 Wave 12 Unit W: alias-aware iteration. importGraph carries both
+      // `names[]` (source-side imported names, populated by ast-builder.js:
+      // 7039-7044) and `specifiers[]` ({imported, local, pinned}, populated
+      // by ast-builder.js:7049-7057 for the braced form). Prefer specifiers
+      // when present so aliased type imports (`import { Foo as Bar } from
+      // '...'`) seed importedTypes under the LOCAL name `Bar` — that's what
+      // TS use-sites (match-arm patterns, type annotations) look up. The
+      // imported side is still used for exportRegistry lookup (correct —
+      // exportRegistry is source-side keyed). Fall back to names[] for
+      // default imports (specifiers empty; default-import locals are
+      // unaliasable per ES syntax, so imported === local).
+      const pairs = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+        ? imp.specifiers.map(s => ({ imported: s.imported, local: s.local }))
+        : (imp.names ?? []).map(n => ({ imported: n, local: n }));
       const importedNames = imp.names ?? [];
 
       // Direct path: dep declares the type itself in its typeDecls.
@@ -1463,9 +1478,12 @@ export function compileScrml(options = {}) {
         for (const [typeName, resolvedType] of depRegistry) {
           if (resolvedType.kind === 'unknown') continue;
           const isExported = depExports.has(typeName);
-          const isImported = importedNames.length === 0 || importedNames.includes(typeName);
+          // Look up by IMPORTED name (source-side); seed under LOCAL name.
+          const pair = pairs.find(p => p.imported === typeName);
+          const isImported = importedNames.length === 0 || pair !== undefined;
           if (isExported && isImported) {
-            importedTypes.set(typeName, resolvedType);
+            const localKey = pair ? pair.local : typeName;
+            importedTypes.set(localKey, resolvedType);
           }
         }
       }
@@ -1476,13 +1494,17 @@ export function compileScrml(options = {}) {
       // Handles multi-hop chains (a → b → c) via recursion. Renamed re-exports
       // (`export { X as Y }`) and `export *` are out of scope — the TAB regex
       // does not currently parse them; add when grammar grows.
-      for (const name of importedNames) {
-        if (importedTypes.has(name)) continue;
-        if (!depExports.has(name)) continue;
+      //
+      // Wave 12 Unit W: iterate pairs (alias-aware) — resolve via the IMPORTED
+      // name (matches dep's export list), seed under the LOCAL name (matches
+      // TS use-site lookup).
+      for (const { imported: importedName, local: localName } of pairs) {
+        if (importedTypes.has(localName)) continue;
+        if (!depExports.has(importedName)) continue;
         const visited = new Set();
-        const resolved = resolveTypeThroughReExport(imp.absSource, name, visited);
+        const resolved = resolveTypeThroughReExport(imp.absSource, importedName, visited);
         if (resolved) {
-          importedTypes.set(name, resolved);
+          importedTypes.set(localName, resolved);
         }
       }
     }
