@@ -415,13 +415,18 @@ function buildMatchArms(
     };
   };
 
+  // M6.3 (M6 Wave 1, S122) — bare-body arm re-parse routes through
+  // `nativeParseFile`, the C1 drop-in analogue of `buildAST` (returns
+  // `{ filePath, ast: FileAST, errors }` with identical `ast.nodes` shape).
+  // Pre-M6.3 this site lazy-required `splitBlocks` + `buildAST` (one of the
+  // 5 hard-bound BS synthesis re-invocations per the M6 cutover plan); the
+  // arm's bodyRaw is markup-shape (nested tags, text, `${...}` interp,
+  // event handlers — all consumed downstream by `generateHtml`), squarely
+  // within `nativeParseFile`'s remit. The synth filePath label
+  // `<match:${matchBlock.id}:${tag}>` is opaque (span-attribution only).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { splitBlocks } = require("../block-splitter.js") as {
-    splitBlocks: (filePath: string, src: string) => any;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { buildAST } = require("../ast-builder.js") as {
-    buildAST: (bsOutput: any, tokenizerOverrides: any) => any;
+  const { nativeParseFile } = require("../../native-parser/parse-file.js") as {
+    nativeParseFile: (filePath: string, src: string) => { filePath: string; ast: any; errors: any[] };
   };
   // S108 Phase 4 — `:`-shorthand body codegen uses parseExprToNode directly
   // to treat the bodyRaw as an expression (not as markup). The synthesized
@@ -508,12 +513,13 @@ function buildMatchArms(
       }
     } else if (entry.bodyForm !== "self-closing" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
       // bare-body: re-parse as markup fragment (Phase 3 path).
+      // M6.3 — native-parser route (see import above for rationale).
       try {
         const synthSrc = entry.bodyRaw;
-        const synthBs = splitBlocks(`<match:${matchBlock.id}:${tag}>`, synthSrc);
-        const synthTab = buildAST(synthBs, null);
-        if (synthTab && Array.isArray(synthTab.ast?.nodes)) {
-          body = synthTab.ast.nodes;
+        const synthLabel = `<match:${matchBlock.id}:${tag}>`;
+        const synthResult = nativeParseFile(synthLabel, synthSrc);
+        if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+          body = synthResult.ast.nodes;
         }
       } catch (_e) {
         // Defensive: same recovery shape as the shorthand path.
