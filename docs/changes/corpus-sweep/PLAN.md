@@ -111,9 +111,24 @@ Without this, the ouroboros refills.
 6. Realtime `<channel>` server fn reading a channel cell (`@entries`) → the
    server handler reads `_scrml_body["entries"]` that the client never sends.
 7. **Gate blind spot** — compile-only gates pass compile-but-broken-JS.
+8. **Server-side stdlib scheme not resolved.** Server codegen
+   (`compiler/src/codegen/emit-server.ts` — line 448 comment claims to mirror
+   client handling) emits literal `import { … } from "scrml:fs"` (or any
+   other `scrml:*` stdlib module) into the generated `app.server.js`. Node's
+   resolver rejects the `scrml:` scheme at runtime → `Cannot find package
+   'scrml:fs'` → server module fails to load entirely → server-fn endpoints
+   return 404. `scrml compile` exits 0 with no warning. **Found S121 running
+   `dashboard/app.scrml`** — the dashboard imports `readFileSync` /
+   `writeFileSync` / `existsSync` from `scrml:fs`; HTML shell serves (1398
+   bytes); every `data-scrml-logic` slot is unfillable; every button hits
+   404. `emit-client.ts` lines 331, 994, 1522 have the scheme-resolution
+   logic for client-side imports — server-side parity is the apparent fix
+   (post-M6, per this PLAN's timing rule).
 
-Bugs 1-6 are provisional: re-confirm each against the native-parser front-end
+Bugs 1-7 are provisional: re-confirm each against the native-parser front-end
 once it is the basis — some may change shape or vanish; new ones will surface.
+Bug 8 is a server-codegen defect — independent of front-end basis; will
+persist across M6.
 
 ## Deliverables
 

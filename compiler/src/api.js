@@ -237,36 +237,95 @@ export function collectStdlibSpecifiers(tabResults) {
 /**
  * Copy the runtime shim for each referenced `scrml:NAME` specifier into
  * `<outputDir>/_scrml/<name>.js` so emitted JS can `import` it via a relative
- * path. Modules without a hand-written shim are silently skipped — emitted
- * JS that imports them will fail loudly at runtime, which matches the
- * pre-bundle behaviour and lets the gap surface as a finding.
+ * path.
+ *
+ * For each name, also bundle any sub-module files that live in a directory
+ * matching `name` (e.g., `scrml:oauth` umbrella file is bundled alongside
+ * `_scrml/oauth/pkce.js`, `_scrml/oauth/google.js`, etc.) so the umbrella's
+ * `import "./oauth/pkce.js"` lines resolve at runtime.
+ *
+ * If a referenced name has no shim file at all, the bundler emits a
+ * `W-STDLIB-SHIM-MISSING` warning via the `diagnostics` array (when
+ * supplied) and continues — the emitted JS retains the literal `scrml:NAME`
+ * which will fail loudly at runtime. The warning lets adopters see the gap
+ * at compile time and lets stdlib maintainers catch missing shims after a
+ * new stdlib module lands.
  *
  * @param {Set<string>} names — bare stdlib names (from collectStdlibSpecifiers)
  * @param {string} outputDir — absolute path of the user's output directory
  * @param {(msg: string) => void} [log]
+ * @param {object[]} [diagnostics] — optional diagnostics sink; pushed
+ *   `W-STDLIB-SHIM-MISSING` entries for each name without a shim. Each entry
+ *   matches the `allErrors`-array shape elsewhere in api.js.
  * @returns {Set<string>} — the subset of names that were actually bundled
  */
-export function bundleStdlibForRun(names, outputDir, log) {
+export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
   const bundled = new Set();
   if (!names || names.size === 0 || !outputDir) return bundled;
   const stdlibOut = join(outputDir, "_scrml");
   let made = false;
-  for (const name of names) {
-    const src = join(STDLIB_RUNTIME_DIR, `${name}.js`);
-    if (!existsSync(src)) {
-      // No shim available — leave this name to fail loudly at runtime so the
-      // gap is visible. Future M16 work can replace this with truly-compiled
-      // stdlib output.
-      continue;
-    }
+  function ensureOut() {
     if (!made) {
       mkdirSync(stdlibOut, { recursive: true });
       made = true;
+    }
+  }
+  function copyTree(srcDir, dstDir) {
+    mkdirSync(dstDir, { recursive: true });
+    for (const entry of readdirSync(srcDir)) {
+      const s = join(srcDir, entry);
+      const d = join(dstDir, entry);
+      const stat = statSync(s);
+      if (stat.isDirectory()) {
+        copyTree(s, d);
+      } else if (stat.isFile()) {
+        copyFileSync(s, d);
+      }
+    }
+  }
+
+  for (const name of names) {
+    const src = join(STDLIB_RUNTIME_DIR, `${name}.js`);
+    if (!existsSync(src)) {
+      // No shim available. Emit a W-STDLIB-SHIM-MISSING warning so the gap is
+      // visible at compile time (the emitted JS still carries the literal
+      // `scrml:NAME` import, which fails loudly at runtime per
+      // `rewriteStdlibImports`'s loud-failure-preserved contract).
+      if (Array.isArray(diagnostics)) {
+        diagnostics.push({
+          code: "W-STDLIB-SHIM-MISSING",
+          message:
+            `W-STDLIB-SHIM-MISSING: scrml:${name} has no runtime shim — imports will fail at runtime. `
+            + `Add compiler/runtime/stdlib/${name}.js.`,
+          severity: "warning",
+          stage: "STDLIB-BUNDLE",
+          filePath: "",
+          line: 1,
+          column: 1,
+        });
+      }
+      continue;
+    }
+    ensureOut();
+    // If `name` has a `/` (sub-path like `oauth/google`), make sure the
+    // intermediate dirs exist under `_scrml/` so copyFileSync doesn't ENOENT.
+    if (name.includes("/")) {
+      mkdirSync(join(stdlibOut, dirname(name)), { recursive: true });
     }
     const dst = join(stdlibOut, `${name}.js`);
     copyFileSync(src, dst);
     bundled.add(name);
     if (log) log(`  [STDLIB] Bundled scrml:${name} -> _scrml/${name}.js`);
+
+    // If a sibling directory matching `name` exists (e.g. `oauth/` next to
+    // `oauth.js`), copy its tree alongside so the umbrella shim's internal
+    // imports (`import "./oauth/pkce.js"`) resolve at runtime.
+    const subDir = join(STDLIB_RUNTIME_DIR, name);
+    if (existsSync(subDir) && statSync(subDir).isDirectory()) {
+      const dstSub = join(stdlibOut, name);
+      copyTree(subDir, dstSub);
+      if (log) log(`  [STDLIB] Bundled scrml:${name}/* -> _scrml/${name}/`);
+    }
   }
   return bundled;
 }
@@ -1574,7 +1633,7 @@ export function compileScrml(options = {}) {
   // ---------------------------------------------------------------------------
   const stdlibSpecifiers = collectStdlibSpecifiers(tabResults);
   const bundledStdlib = (write && outputDir)
-    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null)
+    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
     : new Set();
 
   // ---------------------------------------------------------------------------

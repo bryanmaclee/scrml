@@ -202,6 +202,7 @@ Total lines: 29,124 | Total sections: 58 + appendices  (S118 Build Story follow-
 - middleware / handle() → §40 (16269-16492)
 - `<program>` documentary attributes / HTML head metadata → §40.7 (Phase A1a, 2026-05-05)
 - use / import system → §41 (16493-16742)
+- W-STDLIB-SHIM-MISSING (S121 Bug #8 — compile-time warning when an adopter `import { ... } from 'scrml:NAME'` references a stdlib module with no runtime shim at `compiler/runtime/stdlib/<name>.js`; emitted JS still carries literal `scrml:NAME` and fails loudly at runtime; warning surfaces the gap before deploy + acts as regression guard for future stdlib additions) → §34 + §41
 - registerMessages / scrml:data → §41.12 (16698+) (L12, D4)
 - formFor — type-driven form generation FLAGSHIP (S102 — L22 family second general-position member; SHIPPED S102-S103 end-to-end incl. stdlib re-export) → §41.14 (18389+)
 - schemaFor — type-driven SQL DDL generation (S104 — L22 family THIRD general-position member; SHIPPED S104 incl. stdlib re-export + 62 tests + flagship enum-lowering per OQ-SCH-12) → §41.15 (~18540+)
