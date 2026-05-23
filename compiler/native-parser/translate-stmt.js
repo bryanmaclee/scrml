@@ -568,7 +568,9 @@ function makeLiftExpr(nativeLift, span, counter) {
         const liveNode = translateMarkupValueToLiveNode(arg, counter);
         target = { kind: "markup", node: liveNode };
     } else {
-        target = { kind: "expr", expr: "", exprNode: arg === undefined ? null : arg };
+        // R4-U5: wrap non-MV exprNode with translateExpr (MV branch handled by
+        // translateMarkupValueToLiveNode via M6.2a; do NOT touch it).
+        target = { kind: "expr", expr: "", exprNode: arg === undefined || arg === null ? null : translateExpr(arg) };
     }
     return {
         id: stampId(counter),
@@ -594,7 +596,10 @@ function makeFailExpr(nativeFail, span, counter) {
         enumType: "",
         variant: "",
         args: "",
-        variantExpr: nativeFail ? (nativeFail.variant === undefined ? null : nativeFail.variant) : null,
+        // R4-U5: wrap variantExpr with translateExpr. The legacy enumType/variant/
+        // args string-triple stays empty (R1 deferral) — downstream consumers read
+        // variantExpr once the expression catalog is reconciled (C1).
+        variantExpr: nativeFail && nativeFail.variant !== undefined && nativeFail.variant !== null ? translateExpr(nativeFail.variant) : null,
         span: spanOrZero(span),
     };
 }
@@ -614,7 +619,9 @@ function makePropagateExpr(nativePropagate, span, counter) {
         id: stampId(counter),
         kind: "propagate-expr",
         binding: null,
-        exprNode: arg === undefined ? null : arg,
+        // R4-U5: wrap exprNode with translateExpr (parity with makeLiftExpr non-MV
+        // branch above).
+        exprNode: arg === undefined || arg === null ? null : translateExpr(arg),
         span: spanOrZero(span),
     };
 }

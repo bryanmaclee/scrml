@@ -729,22 +729,96 @@ describe("§5f — R4-U4 wired let/const/lin/tilde-decl initExpr sites", () => {
         expect(out[0].initExpr.kind).toBe("object");
     });
 
-    // Locking test: confirms R4-U5 scope (lift-expr / propagate-expr /
-    // guarded-expr / fail-expr expression-CHILD ride-throughs in
-    // translate-stmt.js) is STILL needed. `lift x + y;` produces a lift-expr
-    // whose `expr.exprNode` is the native Binary (non-MarkupValue path —
-    // M6.2a closed the MarkupValue path only). When R4-U5 lands and
-    // makeLiftExpr's exprNode slot becomes lowercase, flip this lock's
-    // assertion `"Binary"` -> `"binary"` and update the comment to point at
-    // the next R4 unit (or close the chain).
-    test("LOCK: lift-expr (non-MV) expr.exprNode still leaks PascalCase Binary (R4-U5 NOT done)", () => {
+    // R4 wrap surface CLOSED at R4-U5; no further wraps. R4-U6 is M6.2 wip-patch
+    // re-application + M6.2b closure (no LOCK needed — surface is complete).
+    test("lift-expr (non-MV) expr.exprNode is now live `binary` (R4-U5 closed)", () => {
         const out = translate("lift x + y;");
         expect(out[0].kind).toBe("lift-expr");
         expect(out[0].expr).not.toBeNull();
         expect(out[0].expr.kind).toBe("expr");
         expect(out[0].expr.exprNode).not.toBeNull();
-        // Should be PascalCase Binary until R4-U5 lands; flip to `binary` then.
-        expect(out[0].expr.exprNode.kind).toBe("Binary");
+        // R4-U5 closed: makeLiftExpr's non-MV branch now wraps via translateExpr;
+        // `x + y` is a Binary and surfaces as live lowercase `binary`.
+        expect(out[0].expr.exprNode.kind).toBe("binary");
+    });
+});
+
+// =============================================================================
+// §5g — R4-U5: translateExpr wired at lift-expr (non-MV) / fail-expr (variantExpr) /
+// propagate-expr (exprNode) sites. Closes the R4 wrap surface in
+// translate-stmt.js — every expression-CHILD ride-through (bare-expr,
+// return/throw, for-iter+cStyleParts, if/while/do-while cond, let/const/lin/
+// tilde init, lift-non-MV, fail-variant, propagate) now wraps via translateExpr.
+//
+// makeGuardedExprNode is transitively covered: it calls makeBareExpr for its
+// guardedNode (translate-stmt.js L635), and makeBareExpr was R4-U1's wrap site
+// (L384). Test 5 below double-checks that transitive path.
+//
+// Closing convention (PA): R4 wrap surface CLOSED. Any future ride-through
+// additions should be R4-wired at definition time (not deferred to a
+// continuation unit). R4-U6 is M6.2 wip-patch re-application + M6.2b closure,
+// NOT a new wrap unit — no new LOCK is added here.
+// =============================================================================
+describe("§5g — R4-U5 wired lift-non-MV / fail-variant / propagate-expr sites", () => {
+    test("lift-expr non-MV bare-ident exprNode is live `ident` (R4-U5)", () => {
+        const out = translate("lift x;");
+        expect(out[0].kind).toBe("lift-expr");
+        expect(out[0].expr).not.toBeNull();
+        expect(out[0].expr.kind).toBe("expr");
+        expect(out[0].expr.exprNode).not.toBeNull();
+        // `x` is a bare Ident; R4-U5 brings live lowercase `ident`.
+        expect(out[0].expr.exprNode.kind).toBe("ident");
+    });
+
+    test("lift-expr MV path STILL works (M6.2a not disturbed)", () => {
+        // `parseProgram` does NOT thread `ctx.source`, so parseMarkupValue takes
+        // the token-range fallback path; the M6.2a bridge produces a defensive
+        // empty MarkupNode (kind:"markup", empty tag/attrs/children). The PRIMARY
+        // structural-recovery path is exercised by §5b's source-available tests
+        // and bug-5-nested-component-ce-phantom-dom.test.js end-to-end. The
+        // critical assertion here is that the lift's expr is the `{ kind:"markup",
+        // node }` MV-branch shape — NOT the `{ kind:"expr", exprNode }` shape
+        // that R4-U5 newly touched. R4-U5 must NOT disturb this branch.
+        const out = translate("lift <div>hello</div>;");
+        expect(out[0].kind).toBe("lift-expr");
+        expect(out[0].expr).not.toBeNull();
+        expect(out[0].expr.kind).toBe("markup");
+        expect(out[0].expr.node).not.toBeNull();
+        expect(out[0].expr.node.kind).toBe("markup");
+        // Token-range fallback — tag is the defensive empty string (cf. §5b L460).
+        expect(out[0].expr.node.tag).toBe("");
+        // The MV branch does NOT put an `exprNode` on `expr`.
+        expect(out[0].expr.exprNode).toBeUndefined();
+    });
+
+    test("fail-expr Member variantExpr is live `member` (R4-U5)", () => {
+        const out = translate("fail Error::NotFound;");
+        expect(out[0].kind).toBe("fail-expr");
+        expect(out[0].variantExpr).not.toBeNull();
+        // `Error::NotFound` is a Member (qualified variant); R4-U5 brings live
+        // lowercase `member`.
+        expect(out[0].variantExpr.kind).toBe("member");
+    });
+
+    test("propagate-expr Call exprNode is live `call` (R4-U5)", () => {
+        const out = translate("compute()?;");
+        expect(out[0].kind).toBe("propagate-expr");
+        expect(out[0].exprNode).not.toBeNull();
+        // `compute()` is a Call; R4-U5 brings live lowercase `call`.
+        expect(out[0].exprNode.kind).toBe("call");
+    });
+
+    test("guarded-expr.guardedNode inherits R4-U1 wrap via makeBareExpr (transitive)", () => {
+        const out = translate("compute() !{ | ::E => return };");
+        expect(out[0].kind).toBe("guarded-expr");
+        expect(out[0].guardedNode).not.toBeNull();
+        // makeGuardedExprNode wraps the inner Expr as a bare-expr via
+        // makeBareExpr (translate-stmt.js L635); makeBareExpr was R4-U1's wrap
+        // site (L384). So the guarded expression's exprNode is live lowercase.
+        expect(out[0].guardedNode.kind).toBe("bare-expr");
+        expect(out[0].guardedNode.exprNode).not.toBeNull();
+        // `compute()` is a Call; live kind is lowercase `call`.
+        expect(out[0].guardedNode.exprNode.kind).toBe("call");
     });
 });
 
