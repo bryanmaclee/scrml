@@ -1936,12 +1936,27 @@ export function dispatchTagMismatchRecovery(ctx, closer) {
 // mismatch, drives ErrorRecovery + the diagnostic sink).
 //
 // PARAMETERS:
-//   ctx    — the parse context (carries ctx.tagFrameStack +
-//            ctx.diagnostics + ctx.recovery).
-//   closer — the closer descriptor from tokenizeCloser (form + name +
-//            span). For a `/>` self-close the caller passes a synthetic
-//            descriptor { form: .SelfClosing, name, span } — see
-//            closeSelfClosedFrame.
+//   ctx     — the parse context (carries ctx.tagFrameStack +
+//             ctx.diagnostics + ctx.recovery).
+//   closer  — the closer descriptor from tokenizeCloser (form + name +
+//             span). For a `/>` self-close the caller passes a synthetic
+//             descriptor { form: .SelfClosing, name, span } — see
+//             closeSelfClosedFrame.
+//   options — optional { allowMismatchPop } config. P5-14 v2 (S121):
+//             when `allowMismatchPop` is true, an explicit-mismatch
+//             closer POPS the open frame (E-MARKUP-002 diagnostic still
+//             emitted), mirroring the live block-splitter's
+//             `popTagContext("explicit")` recovery at
+//             block-splitter.js L1576-1586. Default (false) preserves the
+//             original MK2.2 behavior — the mismatch does NOT pop, the
+//             open tag stays for a later correct closer / EOF unterminated
+//             path. The caller (handleCloser) derives the value from a
+//             slice-vs-file mode flag threaded through parseMarkupTrace —
+//             file-level parseMarkup ENABLES the pop; slice-mode
+//             parseMarkup (parseMarkupValue's source-substring call) keeps
+//             the bail-no-pop semantics so a mismatched closer inside an
+//             in-expression markup-value substring does not prematurely
+//             pop the slice's root and truncate the MarkupValue.
 //
 // THE PAIRING LOGIC (charter Q1.F rule= contract):
 //   - `</>` inferred — pops the innermost open tag REGARDLESS of name.
@@ -1949,16 +1964,19 @@ export function dispatchTagMismatchRecovery(ctx, closer) {
 //     closer (E-CTX-003).
 //   - `</name>` explicit — the innermost open tag's name MUST be `name`.
 //     A match pops it. A mismatch is E-MARKUP-002: dispatch ErrorRecovery,
-//     record the diagnostic, and recover by NOT popping (the open tag
-//     stays — the mismatched closer is treated as skipped, the trampoline
-//     resumes; the open tag will be paired by a later correct closer or
-//     surface as unterminated at EOF). An empty stack is a stray closer
+//     record the diagnostic; with `allowMismatchPop: false` (default) the
+//     open tag stays; with `allowMismatchPop: true` the open frame is
+//     popped (live-BS parity recovery). An empty stack is a stray closer
 //     (E-CTX-003).
 //
 // Returns { ok, popped, code } — `popped` is the closed TagFrame (null on
-// a mismatch / stray closer) and `code` is the diagnostic code (null on a
-// clean close). The `ok` flag is true only for a clean close.
-export function closeTagFrame(ctx, closer) {
+// a stray closer / non-popping mismatch; the popped frame on an
+// allow-pop mismatch) and `code` is the diagnostic code (null on a
+// clean close, "E-MARKUP-002" on a mismatch, "E-CTX-003" on a stray
+// closer). The `ok` flag is true ONLY for a clean close — a mismatch
+// that pops still reports `ok: false` (the diagnostic was raised), so
+// callers can distinguish "clean pair" from "recovery pop".
+export function closeTagFrame(ctx, closer, options) {
     ensureTagFrameStack(ctx);
     const top = topTagFrame(ctx);
 
@@ -1975,8 +1993,8 @@ export function closeTagFrame(ctx, closer) {
     }
 
     // An explicit `</name>` whose name does NOT match the innermost open
-    // tag — E-MARKUP-002. Dispatch ErrorRecovery; do NOT pop (recover by
-    // skipping the mismatched closer).
+    // tag — E-MARKUP-002. Dispatch ErrorRecovery; pop or do-not-pop per
+    // the `allowMismatchPop` option (P5-14 v2 — see header).
     if (closer.form === CloserForm.Explicit && closer.name !== top.name) {
         const code = "E-MARKUP-002";
         pushDiagnostic(ctx, makeDiagnostic(
@@ -1985,6 +2003,17 @@ export function closeTagFrame(ctx, closer) {
             closer.span,
         ));
         dispatchTagMismatchRecovery(ctx, closer);
+        const allowMismatchPop = options !== null
+            && options !== undefined
+            && options.allowMismatchPop === true;
+        if (allowMismatchPop) {
+            // Live-BS parity recovery — pop the open frame so the closer's
+            // span end can stand in as the element's close. The caller
+            // (handleCloser) is responsible for emitting the Markup block
+            // for the popped frame using `result.popped`.
+            const popped = popTagFrame(ctx);
+            return { ok: false, popped, code };
+        }
         return { ok: false, popped: null, code };
     }
 

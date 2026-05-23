@@ -2258,6 +2258,19 @@ function findMarkupValueCloseEndFromSource(source, startPos) {
 // ctx is accessible. The caller (parseMarkupValue) FORWARDS the markup-
 // layer diagnostics into the expression ctx's errors with the JS->markup
 // delegation marker attached (R1 spike §1.4 — cross-seam error attribution).
+//
+// P5-14 v2 (S121): every parseMarkupViaLazyRequire call IS a slice-mode
+// parse — parse-expr.js invokes the markup engine on a SUBSTRING of the
+// host source extracted at the `<` opener (parseMarkupValue's source-
+// available path) or for a depth-walk lookahead (findMarkupValueCloseEnd
+// FromSource). Both are conceptually "parse this markup-as-value
+// substring", so the lazy-requirer unconditionally passes
+// `{ inMarkupValueSlice: true }`. The markup-layer's handleCloser then
+// derives `allowMismatchPop: false`, mirroring the live `parseLiftTag`
+// BAIL recovery (ast-builder.js L3098-3099) — a mismatched explicit
+// closer inside the slice does NOT pop the slice's root, so the slice
+// returns a truncated-but-not-prematurely-collapsed block stream and
+// the LIVE-side raw-text component-def fallback can fire downstream.
 let _parseMarkupTraceCached = null;
 function parseMarkupViaLazyRequire(source) {
     if (_parseMarkupTraceCached === null) {
@@ -2270,7 +2283,7 @@ function parseMarkupViaLazyRequire(source) {
         }
     }
     if (typeof _parseMarkupTraceCached !== "function") return null;
-    const trace = _parseMarkupTraceCached(source);
+    const trace = _parseMarkupTraceCached(source, { inMarkupValueSlice: true });
     if (trace === null || trace === undefined) return null;
     return trace;  // { ctx, contextTrace } where ctx.nodes is the block stream
 }

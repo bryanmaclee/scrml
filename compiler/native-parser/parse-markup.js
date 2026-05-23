@@ -1779,6 +1779,19 @@ export function closeMarkupElement(ctx, tagFrame, closerForm, closerEnd) {
 //     ErrorRecovery + recorded the diagnostic; the trampoline resumes
 //     (the closer is consumed — progress is guaranteed).
 //
+// P5-14 v2 (S121): the `allowMismatchPop` option to closeTagFrame is
+// derived from `ctx.inMarkupValueSlice`. File-level parses (the default —
+// inMarkupValueSlice = false) get pop-on-mismatch recovery, mirroring
+// live-BS `popTagContext("explicit")` at block-splitter.js L1576-1586 —
+// the popped frame's Markup block is emitted with the closer's span end
+// standing in for the close. Slice-mode parses (the substring path
+// parseMarkupValue takes via parse-expr.js — inMarkupValueSlice = true)
+// keep the bail-no-pop semantics so a mismatched closer inside an
+// in-expression markup-value substring does not prematurely pop the
+// slice's root and truncate the MarkupValue (the LIVE pipeline takes
+// the parseLiftTag BAIL path at ast-builder.js L3098-3099 — falls
+// through to the raw-text component-def detector).
+//
 // The text run is flushed before the closer so the block-stream order is
 // children-then-(parent emitted on close).
 export function handleCloser(run, cursor, ctx) {
@@ -1792,16 +1805,25 @@ export function handleCloser(run, cursor, ctx) {
     // Consume the closer token — the cursor advances past the `>`.
     const closer = tokenizeCloser(cursor);
 
-    // Pair the closer with its open TagFrame.
-    const result = closeTagFrame(ctx, closer);
-    if (result.ok && result.popped !== null) {
-        // A clean pop — emit the whole-element Markup block with the
-        // children (the blocks emitted since the opener) nested.
+    // Pair the closer with its open TagFrame. The slice-vs-file mode
+    // flag picks the mismatch-recovery shape (see fn header).
+    const allowMismatchPop = ctx.inMarkupValueSlice !== true;
+    const result = closeTagFrame(ctx, closer, { allowMismatchPop });
+    if (result.popped !== null) {
+        // A clean pop OR a recovery pop (file-mode mismatch with
+        // allowMismatchPop=true). closeMarkupElement emits the
+        // whole-element Markup block with the children (the blocks
+        // emitted since the opener) nested. The closer.form is recorded
+        // on the popped TagFrame for downstream emit-time
+        // discrimination — a recovery pop still records the mismatched
+        // explicit form so the assembler can see the closer shape.
         closeMarkupElement(ctx, result.popped, closer.form, closer.span.end);
     }
-    // A mismatch / stray closer: closeTagFrame recorded the E-MARKUP-002
-    // / E-CTX-003 diagnostic + dispatched ErrorRecovery. The closer is
-    // consumed; the trampoline resumes (no Markup block — recovery).
+    // A stray closer / slice-mode mismatch: closeTagFrame recorded the
+    // E-CTX-003 / E-MARKUP-002 diagnostic + dispatched ErrorRecovery.
+    // The closer is consumed; the trampoline resumes (no Markup block —
+    // recovery, the open frame stays for a later closer or EOF
+    // unterminated path).
     return true;
 }
 
@@ -2331,8 +2353,11 @@ function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, co
 // parseMarkup — entry point. Pure fn over the source string; the loop is a
 // thin trampoline dispatching by BlockContext, mirroring lex.js. Returns the
 // typed block-stream (ctx.nodes).
-export function parseMarkup(source) {
-    return runMarkup(source).ctx.nodes;
+//
+// `options` (optional) is forwarded to runMarkup. P5-14 v2 (S121): the only
+// recognized option is `inMarkupValueSlice` — see parseMarkupTrace.
+export function parseMarkup(source, options) {
+    return runMarkup(source, options).ctx.nodes;
 }
 
 // parseMarkupTrace — like parseMarkup, but returns the full run record
@@ -2340,8 +2365,22 @@ export function parseMarkup(source) {
 // sequence + the final ctx state (brackets / delegationStack /
 // blockContextStack / nodes). The contextTrace is the @blockContext value
 // recorded at the TOP of every trampoline iteration.
-export function parseMarkupTrace(source) {
-    return runMarkup(source);
+//
+// `options` (optional) — P5-14 v2 (S121):
+//   - `inMarkupValueSlice` (bool, default false) — when true the markup
+//     run is parsing a substring extracted by parse-expr's parseMarkupValue
+//     (an in-expression markup-value). The slice's mismatch-recovery
+//     semantics MUST mirror the live `parseLiftTag` (ast-builder.js
+//     L3098-3099): BAIL (no pop) on an explicit-closer mismatch so the
+//     caller's cursor stays before the mismatched closer and the LIVE-side
+//     raw-text component-def fallback can fire. When false (the default —
+//     file-level parsing), the mismatch POPS the open frame to mirror the
+//     live block-splitter's `popTagContext("explicit")` recovery at
+//     block-splitter.js L1576-1586. handleCloser derives the
+//     `allowMismatchPop` flag passed to closeTagFrame from this single
+//     option (`allowMismatchPop = !ctx.inMarkupValueSlice`).
+export function parseMarkupTrace(source, options) {
+    return runMarkup(source, options);
 }
 
 // runMarkup — the shared trampoline. Returns { ctx, contextTrace }.
@@ -2357,7 +2396,7 @@ export function parseMarkupTrace(source) {
 // unterminated context (it emits an E-CTX-003 error instead). The native
 // layer's unterminated-context diagnostic is a later milestone; the frame
 // persistence is the MK1.2 contract this dispatch preserves.
-function runMarkup(source) {
+function runMarkup(source, options) {
     const cursor = makeCursor(source);
     const ctx = makeParseContext();
     // MK4 — thread the source onto the ctx so emitContextBlock can slice a
@@ -2366,6 +2405,16 @@ function runMarkup(source) {
     // walks; this is a read-only reference, not a copy (one buffer, one
     // coordinate space — punch-list P2 one-cursor invariant).
     ctx.source = source;
+    // P5-14 v2 (S121): record slice-mode on the ctx so handleCloser can
+    // derive the `allowMismatchPop` option for closeTagFrame. Default false
+    // (file-level parse mode). The flag is set ONCE at runMarkup-entry and
+    // never mutated — a SINGLE parseMarkupTrace invocation is either
+    // slice-mode for its entire lifetime or file-mode for its entire
+    // lifetime. parseMarkupValue's recursive slice descent gets its own
+    // fresh ctx via the lazy-required parseMarkupTrace call.
+    ctx.inMarkupValueSlice = options !== null
+        && options !== undefined
+        && options.inMarkupValueSlice === true;
     const contextTrace = [];
 
     // The text-run accumulator (see beginTextRun / flushTextRun).

@@ -2107,6 +2107,67 @@ describe("MK2.2 closeTagFrame — opener/closer pairing (the `.Open* -> .Closed`
         expect(tagFrameDepth(ctx)).toBe(1);
     });
 
+    // ---- P5-14 v2 (S121): `{ allowMismatchPop: true }` recovery -------------
+    // The opt-in pop-on-mismatch recovery — mirrors the live block-splitter's
+    // `popTagContext("explicit")` at block-splitter.js L1576-1586. Enabled by
+    // parse-markup.js's `handleCloser` ONLY when the parse is NOT in
+    // markup-value-slice mode (the file-level parseMarkup). The default is
+    // still the no-pop bail (preserved by the preceding test).
+
+    test("with { allowMismatchPop: true } a mismatch STILL records E-MARKUP-002 but POPS the frame", () => {
+        const ctx = ctxWithOpen("div");
+        const r = closeTagFrame(ctx, explicitCloserDesc("span"), { allowMismatchPop: true });
+        // ok stays false (the diagnostic was raised — this is a recovery
+        // pop, not a clean close); but popped is non-null and the stack
+        // is drained.
+        expect(r.ok).toBe(false);
+        expect(r.code).toBe("E-MARKUP-002");
+        expect(r.popped).not.toBe(null);
+        expect(r.popped.name).toBe("div");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("with { allowMismatchPop: true } the diagnostic still records at the closer span", () => {
+        const ctx = ctxWithOpen("div");
+        closeTagFrame(ctx, explicitCloserDesc("span"), { allowMismatchPop: true });
+        expect(ctx.diagnostics.length).toBe(1);
+        expect(ctx.diagnostics[0].code).toBe("E-MARKUP-002");
+        expect(ctx.diagnostics[0].span.start).toBe(10);
+    });
+
+    test("with { allowMismatchPop: false } a mismatch DOES NOT pop (the default behavior, opt-out form)", () => {
+        const ctx = ctxWithOpen("div");
+        const r = closeTagFrame(ctx, explicitCloserDesc("span"), { allowMismatchPop: false });
+        // Identical to the no-options call — the default is no-pop, so an
+        // explicit { allowMismatchPop: false } is the same shape.
+        expect(r.ok).toBe(false);
+        expect(r.code).toBe("E-MARKUP-002");
+        expect(r.popped).toBe(null);
+        expect(tagFrameDepth(ctx)).toBe(1);
+    });
+
+    test("with { allowMismatchPop: true } a CLEAN match still pops cleanly (the option only affects the mismatch branch)", () => {
+        const ctx = ctxWithOpen("div");
+        const r = closeTagFrame(ctx, explicitCloserDesc("div"), { allowMismatchPop: true });
+        // A clean match returns ok:true — the option is a no-op on the
+        // happy path.
+        expect(r.ok).toBe(true);
+        expect(r.code).toBe(null);
+        expect(r.popped.name).toBe("div");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("with { allowMismatchPop: true } a stray closer is STILL E-CTX-003 (the option does not synthesize a frame to pop)", () => {
+        // An empty stack + an explicit closer cannot pop anything regardless
+        // of the option — the option only governs the explicit-mismatch
+        // branch, not the stray-closer branch.
+        const ctx = makeParseContext();
+        const r = closeTagFrame(ctx, explicitCloserDesc("span"), { allowMismatchPop: true });
+        expect(r.ok).toBe(false);
+        expect(r.code).toBe("E-CTX-003");
+        expect(r.popped).toBe(null);
+    });
+
     test("a closer with no open tag is E-CTX-003 (a stray closer)", () => {
         const ctx = makeParseContext();
         const r = closeTagFrame(ctx, inferredCloserDesc());
