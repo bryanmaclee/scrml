@@ -340,6 +340,34 @@ function emitSpread(node: SpreadExpr, ctx: EmitExprContext): string {
 // ---------------------------------------------------------------------------
 
 function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
+  // W14-BB: postfix `@x++` / `@x--` on a reactive var must lower to the
+  // canonical setter form (SPEC §6.1.2 + §5.2.3 line 1385). The naive
+  // emission `_scrml_reactive_get("x")++` is invalid JS — `++` cannot be
+  // applied to the return value of a call expression. Mirrors the compound-
+  // assign branch in emitAssign (lines 736-741) and `rewriteReactiveAssign`'s
+  // string-pipeline lowering (rewrite.ts:1855).
+  //
+  // SCOPE LIMITATION (matches rewrite.ts:1813-1821): the lowering returns
+  // the NEW value, not the postfix-old value. For statement-position uses
+  // (the only form scrml SPEC enumerates for `@x++`) the difference is
+  // invisible. Value-position postfix on `@x` is vanishingly rare and the
+  // precise fix would require an IIFE wrapper. Filed inline for revisit.
+  if (!node.prefix && (node.op === "++" || node.op === "--")) {
+    const target = node.argument;
+    if (target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@")) {
+      const bare = target.name.slice(1);
+      if (ctx.mode === "server") {
+        // Server boundary: @x is `_scrml_body["x"]` (a plain assignment lvalue).
+        // Postfix on a member expression IS valid JS, so emit as-is.
+        return `_scrml_body["${bare}"]${node.op}`;
+      }
+      const sign = node.op === "++" ? "+" : "-";
+      const getter = ctx.derivedNames?.has(bare)
+        ? `_scrml_derived_get("${bare}")`
+        : `_scrml_reactive_get("${bare}")`;
+      return `_scrml_reactive_set("${bare}", ${getter} ${sign} 1)`;
+    }
+  }
   const arg = emitExpr(node.argument, ctx);
   if (node.prefix) {
     // typeof, void, delete, await need a space before the operand

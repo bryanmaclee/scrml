@@ -2524,6 +2524,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               if (tok.kind === "AT_IDENT" && lastPart !== "=") break;
               if (tok.kind === "IDENT" && lastPart !== "." && lastPart !== "=" && lastPart !== ":") break;
             }
+            // W14-BB: extend the assignment-boundary check to compound assigns
+            // (`+=`, `-=`, `*=`, `/=`, `%=`) and postfix updates (`++`, `--`)
+            // on reactive `@x` cells. SPEC §6.1.2 + §50.13 enumerate the
+            // compound forms; §5.2.3 line 1385 enumerates `@count++`. Without
+            // this gate, a state-decl RHS like `<x> = 0` followed by a
+            // newline-separated `@y += 1` greedily swallowed the second
+            // statement into the first decl's init string (`init: "0\n@y += 1"`)
+            // and the @y write was silently dropped. The peek(1) shape is
+            // OPERATOR (multi-char), not PUNCT — so this guard sits parallel
+            // to the existing `=`-PUNCT check rather than re-using it.
+            // Bitwise compound assigns (`<<=`, `>>=`, `&=`, `|=`, `^=`,
+            // `**=`, `&&=`, `||=`, `??=`, `>>>=`) are NOT listed in SPEC
+            // §50.13 — excluded conservatively per scope rules.
+            const COMPOUND_OPS = new Set(["+=", "-=", "*=", "/=", "%=", "++", "--"]);
+            const isCompoundOrUpdate = next1 && next1.kind === "OPERATOR" && COMPOUND_OPS.has(next1.text);
+            if (isCompoundOrUpdate && tok.kind === "AT_IDENT" && lastPart !== "=") break;
             // S25 — S22 §6 bug fix: `@name :` at depth 0 always begins a
             // typed state-decl (§53). Without this guard, an untyped
             // `@x = 1` followed by `@y: Type = expr` in the same logic
