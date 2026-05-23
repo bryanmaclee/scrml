@@ -146,6 +146,57 @@ import { resolveModulePath } from "./module-resolver.js";
 import { parseMatchArms, extractEnumVariants } from "./match-statechild-parser.ts";
 import type { MatchArmEntry, MatchArmAttr } from "./match-statechild-parser.ts";
 
+// Unit CC (S123 — companion to V-kill): per-file exemption list for the
+// E-WRITE-NOT-IN-LOGIC-CONTEXT diagnostic. The 110-ish-file pre-S123 corpus
+// uses bare `@x = expr` at `<program>` / `<page>` body-top — a pattern that
+// V-kill carved out from its own fire and Unit CC now enforces per Option 2.
+// Adopter migration is deferred; each file sunsets by removing its entry
+// from the JSON. List shape: repo-relative path strings (e.g.,
+// "samples/contact-directory.scrml").
+//
+// Loaded once at module init via synchronous readFileSync. JSON file lives
+// in compiler/src/ so it ships with the compiler. Path normalization in
+// isUnitCCExempt() strips the absolute repo prefix, fall-through to a
+// best-effort suffix match (covers worktree/checkout-location variance).
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+const __filename_unitcc = fileURLToPath(import.meta.url);
+const __dirname_unitcc = dirname(__filename_unitcc);
+const UNIT_CC_EXEMPTION_LIST: string[] = (() => {
+  try {
+    const raw = readFileSync(join(__dirname_unitcc, "unit-cc-exemption-list.json"), "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+      return parsed as string[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+})();
+const UNIT_CC_EXEMPT_SET = new Set<string>(UNIT_CC_EXEMPTION_LIST);
+
+function isUnitCCExempt(filePath: string): boolean {
+  if (!filePath) return false;
+  // Strict: try direct membership (caller passed a repo-relative path).
+  if (UNIT_CC_EXEMPT_SET.has(filePath)) return true;
+  // Lenient: peel any known repo prefixes. The list is repo-relative; spans
+  // typically carry absolute paths. The worktree harness adds the
+  // `.claude/worktrees/agent-XXX/` segment; strip that and the repo root.
+  for (const entry of UNIT_CC_EXEMPT_SET) {
+    if (filePath.endsWith(entry)) {
+      // Guard against accidental short-suffix collisions (e.g., "a.scrml"
+      // matching "/foo/bar/a.scrml"): require a `/` boundary just before
+      // the entry, OR the entry to BE the full path.
+      const idx = filePath.length - entry.length;
+      if (idx === 0 || filePath[idx - 1] === "/") return true;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
 // ---------------------------------------------------------------------------
@@ -1751,6 +1802,60 @@ function walkResolveAtNames(
             });
           }
         }
+      }
+      // Unit CC (S123 — companion to V-kill): for `_isUnitCCWrite`-tagged
+      // state-decls (bare `@name = expr` writes at default-logic body-top —
+      // the §40.8 auto-lifted `<program>` / `<page>` / `<channel>` body),
+      // fire E-WRITE-NOT-IN-LOGIC-CONTEXT regardless of whether the target
+      // cell is declared. Per the S122 user-voice Option-2 ratification,
+      // §40.8 auto-lift covers DECLARATIONS only (`<x> = 0`, `function f()
+      // { }`) — NOT writes. Writes are LOGIC; logic goes in `${...}`.
+      //
+      // The diagnostic is a SHAPE error, not a name-resolution error: the
+      // cell may or may not exist; the wrong is the bare write at body-top.
+      // PASS 1 deliberately STILL registers the auto-synthesised cell for
+      // _isUnitCCWrite nodes (unlike V-kill which skips registration), so
+      // downstream stages remain unchanged — only the loud diagnostic is
+      // new. The user fixes by either:
+      //   (a) wrapping the write in `${...}`: `${ @name = expr }`, OR
+      //   (b) converting to a structural decl: `<name> = expr`.
+      //
+      // EXEMPTION: per-file path-based suppression for the 110-file corpus
+      // that pre-dates Unit CC's enforcement. Each exempted file sunsets
+      // per-file as adopters migrate (remove the file's path from
+      // `unit-cc-exemption-list.json`). Sunset is intentionally manual
+      // (vs V-kill's auto-sunset on file deletion) because these files are
+      // not scheduled for deletion — they are adopter source that needs
+      // migration. The exemption set is loaded once at module init time
+      // (UNIT_CC_EXEMPT_SET); `isUnitCCExempt(filePath)` checks repo-
+      // relative paths.
+      if ((anyN as any)._isUnitCCWrite === true && typeof anyN.name === "string") {
+        const filePath = (anyN.span && typeof anyN.span.file === "string") ? anyN.span.file : "";
+        if (isUnitCCExempt(filePath)) {
+          // Exempt — skip the fire. Sunset is per-file (remove entry from JSON).
+          continue;
+        }
+        const targetName: string = anyN.name;
+        const declSpan = anyN.span ?? {
+          file: currentScope.qualifiedPath || "",
+          start: 0,
+          end: 0,
+          line: 1,
+          col: 1,
+        };
+        errors.push({
+          code: "E-WRITE-NOT-IN-LOGIC-CONTEXT",
+          message:
+            `E-WRITE-NOT-IN-LOGIC-CONTEXT: bare \`@${targetName} = ...\` write at `
+            + `default-logic body-top. Default-logic mode (SPEC §40.8) auto-lifts `
+            + `DECLARATIONS only (\`<${targetName}> = ...\`, \`function f() {}\`) — `
+            + `NOT writes. Writes are logic; wrap in \`\${...}\`: `
+            + `\`\${ @${targetName} = ... }\`. `
+            + `Alternative: if this was meant to be a declaration, use the `
+            + `structural form \`<${targetName}> = ...\`.`,
+          span: declSpan as Span,
+          severity: "error",
+        });
       }
       // Use the compound sub-scope for nested @-refs inside compound bodies.
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;

@@ -385,6 +385,34 @@ const TOPLEVEL_STATE_DECL_RE =
 const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
 
 /**
+ * Unit CC (S123) — bare `@name = expr` write text at `<program>` / `<page>` /
+ * `<channel>` direct-child position. Pre-Unit-CC, such text was NOT auto-
+ * lifted (BARE_DECL_RE matches keyword-led decls only, TOPLEVEL_STATE_DECL_RE
+ * matches `<name>` opener) and stayed as a TEXT node — silently dropped at
+ * codegen with no diagnostic. (Bug-q-1 reproducer: `<program>` body opening
+ * with `@cell = X` produced a silent runtime miss.)
+ *
+ * Per the S122 user-voice Option-2 ratification, this shape is a SEMANTIC
+ * error (writes are logic; logic goes in `${...}`). The lift wraps the text
+ * in a synthetic `${...}` so the parser's V5-strict `@name = expr` site sees
+ * the write, tags it `_isUnitCCWrite: true` via the synthetic-wrapper +
+ * body-top discrimination, and SYM PASS 3 fires E-WRITE-NOT-IN-LOGIC-CONTEXT.
+ *
+ * Without this lift, Unit CC's enforcement would have a gap — the very shape
+ * the diagnostic is meant to catch would silently skip the parser. The lift
+ * is what makes the loud-error path reachable.
+ *
+ * Regex: matches text whose leading non-whitespace token is `@IDENT = ...`
+ * (with the `=` not followed by another `=`, to exclude `==` comparison).
+ * Conservative — only the canonical write shape is admitted; nested-path
+ * forms (`@obj.path = X`) and array mutations (`@arr.push(X)`) reach the
+ * parser via their own routes (they parse as expression statements at the
+ * parser site and are tagged separately, not at the lift gate).
+ */
+const TOPLEVEL_AT_WRITE_RE =
+  /^\s*@[A-Za-z_][A-Za-z0-9_]*\s*=(?!=)/;
+
+/**
  * P2: regex matching a text block whose only meaningful content is the bare
  * `export` keyword. Used to detect the `export <ComponentName ...>...</>`
  * pattern (text "export " block followed by a PascalCase markup block).
@@ -737,7 +765,7 @@ function shiftBlockSpans(blocks, delta, lineDelta = 0) {
  * @param {object[]} blocks  — Block[] from the Block Splitter
  * @returns {object[]}  — transformed Block[] (new array, no mutation)
  */
-function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }) {
+function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
   const result = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -746,7 +774,12 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // are real declarations and need the same lift treatment. Pass
     // parentType="state" so a state block nested inside markup still lifts.
     if (block.type === "state") {
-      const newChildren = liftBareDeclarations(block.children || [], errors, filePath, "state", _p3aSynthCounter);
+      // STATE blocks (`<state>` / `<db>` / etc.) are NOT default-logic-body
+      // contexts (Unit CC's §40.8 surface). Pass isDefaultLogicBody=false
+      // explicitly to ensure bare `@x = []` inside `<db>` bodies (canonical
+      // reactive-cell declaration in V5-strict state-block grammar) is NOT
+      // lifted into a Unit CC fire site.
+      const newChildren = liftBareDeclarations(block.children || [], errors, filePath, "state", _p3aSynthCounter, false);
       result.push({ ...block, children: newChildren });
       continue;
     }
@@ -780,7 +813,15 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       const isChannelRoot = parentType !== "markup" && block.name === "channel";
       const isPageRoot = parentType !== "markup" && block.name === "page";
       const childContext = (isProgramRoot || isChannelRoot || isPageRoot) ? "state" : "markup";
-      const newChildren = liftBareDeclarations(block.children || [], errors, filePath, childContext, _p3aSynthCounter);
+      // Unit CC (S123) — propagate a precise default-logic-body marker (true
+      // only for direct children of <program>/<page>/<channel> markup, the
+      // canonical §40.8 default-logic-mode surface). The existing
+      // `parentType === "state"` is overloaded — it admits BOTH this case AND
+      // `<state>`/`<db>` STATE-block children (where bare `@x = []` is the
+      // canonical reactive-cell declaration in V5-strict state-block
+      // grammar). Unit CC fires only inside the §40.8 surface.
+      const childIsDefaultLogicBody = (isProgramRoot || isChannelRoot || isPageRoot);
+      const newChildren = liftBareDeclarations(block.children || [], errors, filePath, childContext, _p3aSynthCounter, childIsDefaultLogicBody);
       result.push({ ...block, children: newChildren });
       continue;
     }
@@ -1110,8 +1151,9 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
           });
           // Re-run the lift recursively on a 1-block list so the prefix's
           // own lift rules (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE) fire.
+          // Forward isDefaultLogicBody so Unit CC lift gating composes.
           const last = result.pop();
-          const lifted = liftBareDeclarations([last], errors, filePath, parentType, _p3aSynthCounter);
+          const lifted = liftBareDeclarations([last], errors, filePath, parentType, _p3aSynthCounter, isDefaultLogicBody);
           for (const b of lifted) result.push(b);
         }
         // Pair the trailer `(export )?(const|let) NAME = ` with the next
@@ -1215,6 +1257,34 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         isComponent: false,
         _synthetic: true,
         _tildeBearingLift: true,  // diagnostic marker
+      });
+      continue;
+    }
+
+    // Unit CC (S123) — bare `@name = expr` write at <program>/<page>/
+    // <channel> direct-child text position. Wrap in synthetic `${...}` so
+    // the parser observes the write and the SYM PASS 3 fire site reaches
+    // E-WRITE-NOT-IN-LOGIC-CONTEXT. See TOPLEVEL_AT_WRITE_RE comment for
+    // rationale (pre-Unit-CC silent drop closed at the lift gate).
+    //
+    // Gated on `isDefaultLogicBody === true` — the PRECISE §40.8 default-
+    // logic-body surface. Suppressed inside `<db>` / `<state>` STATE-block
+    // bodies (parentType === "state" but isDefaultLogicBody === false), where
+    // bare `@x = []` is the canonical V5-strict reactive-cell declaration
+    // for the state-block grammar (e.g., `<db>` direct-child `@products =
+    // []` is intentional, not a Unit CC violation).
+    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_AT_WRITE_RE.test(block.raw)) {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        isComponent: false,
+        _synthetic: true,
+        _atWriteLift: true,  // diagnostic marker — Unit CC lift origin
       });
       continue;
     }
@@ -3450,12 +3520,39 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // Cleared after the next statement that contains `~` is parsed.
   let _tildeActive = false;
 
+  // Unit CC (S123) — nested-block depth counter. Used by the V5-strict
+  // `@name = expr` parse site to discriminate between:
+  //   (a) bare write at the IMMEDIATE body-top of the synthetic default-logic
+  //       lift wrapper (`<program>` / `<page>` / `<channel>` body-top under
+  //       §40.8) → fires E-WRITE-NOT-IN-LOGIC-CONTEXT (Unit CC's surface)
+  //   (b) bare write nested inside a fn / function body OR an explicit
+  //       `${...}` block whose enclosing top-level wrapper happens to be
+  //       synthetic → DOES NOT fire Unit CC (the nested context IS valid
+  //       logic context; V-kill governs this region instead)
+  //
+  // `parentBlock._synthetic === true` alone is too coarse — it stays true
+  // for the entire recursive parse tree under the synthetic wrapper. The
+  // depth counter is incremented around any `{ ... }` body parse
+  // (parseRecursiveBody) so nested-body sites observe `_nestedBlockDepth >
+  // 0` even when parentBlock is synthetic. The Unit CC tag fires only when
+  // (parentBlock._synthetic === true) AND (_nestedBlockDepth === 0).
+  let _nestedBlockDepth = 0;
+
   /**
    * Parse a braced body `{ ... }` into a structured LogicNode[] tree.
    * Caller should have already consumed the opening `{`.
    * Consumes up to and including the closing `}`.
    */
   function parseRecursiveBody() {
+    _nestedBlockDepth++;
+    try {
+      return _parseRecursiveBodyInner();
+    } finally {
+      _nestedBlockDepth--;
+    }
+  }
+
+  function _parseRecursiveBodyInner() {
     const stmts = [];
     while (true) {
       const tok = peek();
@@ -4982,8 +5079,38 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // V-kill: tag fn/function/${} body emissions with _isReactiveAssign so
         // SYM PASS 1 SKIPS registration (preventing phantom-synth + clobber)
         // and SYM PASS 3 fires E-STATE-UNDECLARED on undeclared targets.
+        //
+        // Unit CC (S123 — companion to V-kill): tag default-logic body-top
+        // emissions (parentBlock._synthetic === true AND _nestedBlockDepth
+        // === 0 — the §40.8 auto-lifted `<program>` / `<page>` / `<channel>`
+        // body wrapping, at IMMEDIATE body-top, NOT nested inside a fn /
+        // function body or explicit `${...}` block under the wrapper) with
+        // `_isUnitCCWrite: true`. Per S122 user-voice Option-2 ratification,
+        // §40.8 auto-lift covers DECLARATIONS only (`<x> = 0`,
+        // `function f() { }`) — NOT writes (`@x = 5`). Writes are logic;
+        // logic goes in `${...}`. SYM PASS 3 fires
+        // E-WRITE-NOT-IN-LOGIC-CONTEXT on tagged nodes whose file path is
+        // not on the corpus exemption list.
+        //
+        // Discrimination (mutually exclusive after Unit CC's depth-counter
+        // narrowing):
+        //   - isAtBodyTopOfSyntheticLift → _isUnitCCWrite (Unit CC fire)
+        //   - V-kill region (default-logic-lift carve-out preserved): no tag,
+        //     legacy phantom-synth via state-decl registration. This carve-out
+        //     keeps V-kill's pre-Unit-CC behavior for nested writes under
+        //     synthetic wrappers (e.g., `<program> function f() { @x = 5 }`)
+        //     to avoid blast radius on the 110-file unmigrated corpus. The
+        //     carve-out is documented as a V-kill follow-up; Unit CC narrows
+        //     it ONLY at the IMMEDIATE body-top surface.
+        //   - isMetaContext → no tag (BUG-META-6 dependency)
+        //   - else (fn / function / user-written ${}) → _isReactiveAssign (V-kill fire)
         const isDefaultLogicLift = parentBlock && parentBlock._synthetic === true;
         const isMetaContext = blockContext === "meta";
+        const isAtBodyTopOfSyntheticLift = isDefaultLogicLift && _nestedBlockDepth === 0;
+        const isUnitCCWrite = isAtBodyTopOfSyntheticLift;
+        // V-kill fire region: preserve original V-kill discrimination
+        // (synthetic-wrapper carve-out) to avoid expanding V-kill's surface
+        // beyond Unit CC's narrow body-top fire.
         const isReactiveAssign = !isDefaultLogicLift && !isMetaContext;
         return {
           id: ++counter.next,
@@ -4995,6 +5122,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           structuralForm: false,
           isConst: false,
           ...(isReactiveAssign ? { _isReactiveAssign: true } : {}),
+          ...(isUnitCCWrite ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         };
       }
@@ -7802,6 +7930,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
       // Simple reactive decl: @name = expr
       // Phase A1a Step 4 — `shape: "plain"`, `structuralForm: false`, `isConst: false` for legacy @-form.
+      //
+      // Unit CC (S123) — main-loop fire site adds the `_isUnitCCWrite` tag
+      // for the IMMEDIATE default-logic body-top case (parentBlock is the
+      // synthetic auto-lift wrapper AND _nestedBlockDepth === 0). Tagged
+      // nodes fire E-WRITE-NOT-IN-LOGIC-CONTEXT at SYM PASS 3 unless the
+      // file path is on the corpus exemption list.
+      //
+      // Unit CC scope is deliberately narrow: it does NOT extend V-kill's
+      // `_isReactiveAssign` tagging to this main-loop site. The
+      // parseOneStatement V-kill site (above ~L5096) is the canonical
+      // V-kill fire surface (fn / function / nested `${...}` body writes).
+      // Extending `_isReactiveAssign` to top-level explicit-`${...}` body
+      // writes is a separate V-kill follow-up (out of Unit CC scope) — the
+      // existing corpus uses bare `@name = expr` at this site freely (177+
+      // legitimate uses) and migrating them is a separate workstream.
+      // Therefore the legacy phantom-synth path is preserved for the
+      // non-default-logic-body-top case here.
       if (peek().text === "=" && peek(1)?.text !== "=") {
         consume(); // consume `=`
         // fix-cg-cps-return-sql-ref-placeholder: detect `@x = ?{...}.method()`.
@@ -7809,6 +7954,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Without this, safeParseExprToNode produces the broken sql-ref placeholder
         // ExprNode that emit-expr renders as `/* sql-ref:-1 */` — the leak this
         // fix targets in combined-007-crud (server.js:38,74 and client.js:55).
+        // SQL-init keeps state-decl shape regardless of context (legacy
+        // V5-strict declaration syntax flowing through CPS-split).
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
           nodes.push({
@@ -7825,6 +7972,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
         const { expr, span } = collectExpr();
+        const isDefaultLogicLift_ml = parentBlock && parentBlock._synthetic === true;
+        const isAtBodyTopOfSyntheticLift_ml = isDefaultLogicLift_ml && _nestedBlockDepth === 0;
+        const isUnitCCWrite_ml = isAtBodyTopOfSyntheticLift_ml;
         nodes.push({
           id: ++counter.next,
           kind: "state-decl",
@@ -7834,6 +7984,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           shape: "plain",
           structuralForm: false,
           isConst: false,
+          ...(isUnitCCWrite_ml ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         });
         continue;

@@ -153,21 +153,25 @@ describe("§4: on mount inside nested context", () => {
 
 describe("§5: on mount with async calls", () => {
   test("on mount body can contain async function call", () => {
-    const source = "<program>\n@users = []\n\${ on mount { @users = fetchUsers() } }\n</>";
+    // S123 Unit CC: bare `@users = []` at <program> body-top is now
+    // E-WRITE-NOT-IN-LOGIC-CONTEXT. Migrated to structural form `<users> = []`
+    // per §40.8 + §6.2 (declarations only auto-lift; writes are logic).
+    const source = "<program>\n<users> = []\n\${ on mount { @users = fetchUsers() } }\n</>";
     const { ast, errors } = parseSource(source);
     expect(errors).toHaveLength(0);
     const logicNodes = findNodes(ast.nodes, "logic");
-    const mountNode = logicNodes[0].body?.find(n => n?.kind === "bare-expr");
+    const mountNode = logicNodes[1].body?.find(n => n?.kind === "bare-expr");
     expect(mountNode).toBeDefined();
     expect(mountNode.expr).toContain("fetchUsers");
   });
 
   test("on mount body preserves reactive assignment with server data", () => {
-    const source = "<program>\n@data = []\n\${ on mount { @data = loadFromServer() } }\n</>";
+    // S123 Unit CC migration — see sibling test above.
+    const source = "<program>\n<data> = []\n\${ on mount { @data = loadFromServer() } }\n</>";
     const { ast, errors } = parseSource(source);
     expect(errors).toHaveLength(0);
     const logicNodes = findNodes(ast.nodes, "logic");
-    const mountNode = logicNodes[0].body?.find(n => n?.kind === "bare-expr");
+    const mountNode = logicNodes[1].body?.find(n => n?.kind === "bare-expr");
     expect(mountNode).toBeDefined();
     expect(mountNode.expr).toContain("@data");
     expect(mountNode.expr).toContain("loadFromServer");
