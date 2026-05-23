@@ -467,12 +467,12 @@ ${
         const body = []
 
         while (atEnd(cursor) == false) {
-            if (terminatorKind is not not && currentKind(cursor) == terminatorKind) {
+            if (terminatorKind is some && currentKind(cursor) == terminatorKind) {
                 break
             }
             const before = cursor.idx
             const stmt = parseStatement(ctx)
-            if (stmt is not not) {
+            if (stmt is some) {
                 body.push(stmt)
             }
             // Forward-progress check — if parseStatement consumed nothing the
@@ -1418,7 +1418,7 @@ ${
             recordError(ctx, "E-STMT-UNCLOSED-FUNCTION-BODY",
                 "expected '}' to close a function body", open.span)
             const prevTok = lastTokenBefore(ctx)
-            if (prevTok is not not && prevTok.span is not not) {
+            if (prevTok is some && prevTok.span is some) {
                 endPos = prevTok.span.end
             }
         }
@@ -1659,7 +1659,7 @@ ${
 
         let endPos = (body.length > 0) ? nodeEnd(body[body.length - 1]) : kw.span.end
         const prevTok = lastTokenBefore(ctx)
-        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+        if (prevTok is some && prevTok.span is some && prevTok.span.end > endPos) {
             endPos = prevTok.span.end
         }
         const span = makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col)
@@ -1687,7 +1687,7 @@ ${
             }
             const before = cursor.idx
             const member = parseClassMember(ctx)
-            if (member is not not) {
+            if (member is some) {
                 members.push(member)
             }
             // Forward-progress guard — a malformed class member that consumed
@@ -1792,7 +1792,7 @@ ${
         consumeSemicolon(ctx, prevTok)
 
         let fieldEnd = (value is not) ? nodeEnd(key) : nodeEnd(value)
-        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > fieldEnd) {
+        if (prevTok is some && prevTok.span is some && prevTok.span.end > fieldEnd) {
             fieldEnd = prevTok.span.end
         }
         const fieldSpan = makeSpan(startSpan.start, fieldEnd, startSpan.line, startSpan.col)
@@ -1892,7 +1892,7 @@ ${
         }
         if (isKeywordTokenKind(kind)) {
             const tok = advance(cursor)
-            const text = (tok.text is not not) ? tok.text : ""
+            const text = (tok.text is some) ? tok.text : ""
             return {
                 key: { kind: "Ident", name: text, span: tok.span },
                 computed: false, plainName: text,
@@ -1918,7 +1918,7 @@ ${
         const cursor = ctx.cursor
         if (currentKind(cursor) == TokenKind.StringLit) {
             const tok = advance(cursor)
-            return (tok.cooked is not not) ? tok.cooked : ""
+            return (tok.cooked is some) ? tok.cooked : ""
         }
         recordError(ctx, "E-STMT-MODULE-SOURCE",
             "expected a module-specifier string", spanHere(ctx))
@@ -2057,7 +2057,7 @@ ${
             const source = expectModuleString(ctx)
             const endPos = finishStatementTerminator(ctx, kw)
             const specs = []
-            if (nsName is not not) {
+            if (nsName is some) {
                 specs.push(makeImportNamespace(nsName, kw.span))
             }
             return makeExport(not, specs, source, false,
@@ -2082,7 +2082,7 @@ ${
         const declaration = parseExportedDeclaration(ctx)
         let endPos = nodeEnd(declaration)
         const prevTok = lastTokenBefore(ctx)
-        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+        if (prevTok is some && prevTok.span is some && prevTok.span.end > endPos) {
             endPos = prevTok.span.end
         }
         return makeExport(declaration, [], not, false,
@@ -2126,7 +2126,7 @@ ${
 
         let endPos = nodeEnd(declaration)
         const prevTok = lastTokenBefore(ctx)
-        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+        if (prevTok is some && prevTok.span is some && prevTok.span.end > endPos) {
             endPos = prevTok.span.end
         }
         return makeExport(declaration, [], not, true,
@@ -2230,7 +2230,7 @@ ${
     fn finishStatementTerminator(ctx, kwTok) {
         const prevTok = lastTokenBefore(ctx)
         consumeSemicolon(ctx, prevTok)
-        if (prevTok is not not && prevTok.span is not not) {
+        if (prevTok is some && prevTok.span is some) {
             return prevTok.span.end
         }
         return kwTok.span.end
@@ -2277,9 +2277,9 @@ ${
         }
 
         let endE = nodeEnd(block)
-        if (finalizer is not not) {
+        if (finalizer is some) {
             endE = nodeEnd(finalizer)
-        } else if (handler is not not) {
+        } else if (handler is some) {
             endE = nodeEnd(handler)
         }
         const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col)
@@ -2891,12 +2891,12 @@ ${
         let eofCol = 1
         if (stubTokens.length > 0) {
             const last = stubTokens[stubTokens.length - 1]
-            if (last is not not && last.span is not not) {
+            if (last is some && last.span is some) {
                 eofPos = last.span.end
                 eofLine = last.span.line
                 eofCol = last.span.col
             }
-        } else if (stub is not not && stub.span is not not) {
+        } else if (stub is some && stub.span is some) {
             eofPos = stub.span.end
             eofLine = stub.span.line
             eofCol = stub.span.col
@@ -2973,7 +2973,7 @@ ${
                     for (const el of child) {
                         count = count + reenterBlockStubs(el, childAsync, childGen)
                     }
-                } else if (child is not not && typeof child == "object") {
+                } else if (child is some && typeof child == "object") {
                     count = count + reenterBlockStubs(child, childAsync, childGen)
                 }
             }
@@ -2988,7 +2988,7 @@ ${
                 for (const el of child) {
                     count = count + reenterBlockStubs(el, aScope, gScope)
                 }
-            } else if (child is not not && typeof child == "object") {
+            } else if (child is some && typeof child == "object") {
                 count = count + reenterBlockStubs(child, aScope, gScope)
             }
         }

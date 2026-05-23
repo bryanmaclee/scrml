@@ -529,6 +529,6 @@ ${
         if (node is not) {
             return false
         }
-        return StmtKind[node.kind] is not not
+        return StmtKind[node.kind] is some
     }
 }

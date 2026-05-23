@@ -477,7 +477,7 @@ ${
     export fn matchAssignmentOperator(ctx) {
         const kind = currentKind(ctx.cursor)
         const op = ASSIGN_OPS[kind]
-        if (op is not not) {
+        if (op is some) {
             return { op }
         }
         return not
@@ -643,7 +643,7 @@ ${
             if (binPrec is not && logPrec is not) {
                 break
             }
-            const prec = binPrec is not not ? binPrec : logPrec
+            const prec = binPrec is some ? binPrec : logPrec
             if (prec < minPrec) {
                 break
             }
@@ -674,7 +674,7 @@ ${
             const right = parseBinary(ctx, rightMinPrec)
 
             const span = spanOf(left, right)
-            if (logPrec is not not) {
+            if (logPrec is some) {
                 // ?? cannot be combined with && / || without parentheses.
                 if (kind == TokenKind.NullishCoalesce) {
                     if (isUnparenthesizedLogical(left, ["&&", "||"])
@@ -755,7 +755,7 @@ ${
 
         // Prefix unary operators
         const unaryOpText = prefixUnaryOpText(kind)
-        if (unaryOpText is not not) {
+        if (unaryOpText is some) {
             const opTok = advance(cursor)
             const operand = parseUnary(ctx)
             const span = makeSpan(opTok.span.start, endOf(operand), opTok.span.line, opTok.span.col)
@@ -1772,10 +1772,10 @@ ${
         if (tok is not) {
             return ""
         }
-        if (tok.name is not not) {
+        if (tok.name is some) {
             return tok.name
         }
-        if (tok.text is not not) {
+        if (tok.text is some) {
             return tok.text
         }
         return ""
@@ -2162,7 +2162,7 @@ ${
         }
 
         const variantTok = current(cursor)
-        if (variantTok is not not
+        if (variantTok is some
             && (variantTok.kind == TokenKind.Ident || isKeywordKind(variantTok.kind))) {
             advance(cursor)
             const prop = makeIdent(identTextOf(variantTok), variantTok.span)
@@ -2378,7 +2378,7 @@ ${
         }
         if (kind == TokenKind.Ident) {
             const here = current(cursor)
-            if (here is not not && here.name == "_") {
+            if (here is some && here.name == "_") {
                 advance(cursor)
                 return makeWildcardPattern("_", here.span)
             }
@@ -2685,7 +2685,7 @@ ${
         // named `get`. ---
         if (currentKind(cursor) == TokenKind.Ident) {
             const here = current(cursor)
-            const word = (here is not not) ? here.name : ""
+            const word = (here is some) ? here.name : ""
             if ((word == "get" || word == "set") && isMethodPrefixAhead(cursor)) {
                 advance(cursor)   // consume `get` / `set`
                 const keyInfo = parseObjectPropertyKey(ctx)
