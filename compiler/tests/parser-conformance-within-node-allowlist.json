@@ -6909,6 +6909,14 @@
     "COUNT-LENGTH": 4,
     "SPAN-COORD": 225
   },
+  "stdlib/mcp/index.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 34,
+    "EXTRA-FIELD": 6,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 9
+  },
   "stdlib/oauth/discord.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 4,

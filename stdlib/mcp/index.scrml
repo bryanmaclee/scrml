@@ -1,0 +1,75 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:mcp — V0 MCP DevTools surface (11 read-only tools over MCP stdio)
+    //
+    // COMPILER-INTERNAL stdlib module. Adopters DO NOT `import { ... } from
+    // 'scrml:mcp'` directly — they opt in by adding the `<program mcp>` attribute
+    // (Sub-unit D, separate dispatch), and the compiler-generated boot code
+    // imports this module to start the MCP server. Authority:
+    // docs/changes/mcp-v0-devtools-scoping/SCOPING.md §3 Sub-unit C + Q4 (a).
+    //
+    // The real implementation lives in compiler/runtime/stdlib/mcp.js (the
+    // hand-authored ES module shim), which is copied to <outputDir>/_scrml/mcp.js
+    // by bundleStdlibForRun() in compiler/src/api.js — the same source-stub /
+    // runtime-shim convention as scrml:host and scrml:cron.
+    //
+    // The shim is server-process-only (like scrml:auth / scrml:db) — the MCP
+    // stdio server runs server-side and reads server-side runtime state.
+    //
+    // The 11 V0 tools (LOCKED public API — adopter agent configs depend on these
+    // exact names):
+    //   get_app_topology, list_engines, get_engine, list_forms, get_form_status,
+    //   list_routes, get_route_chunks, list_server_functions, list_channels,
+    //   get_channel_state, get_reachable_server_fns.
+    // All read-only; list_server_functions + get_reachable_server_fns are
+    // enumeration-only (`dispatchable: false`) — V0 has no call surface.
+    //
+    // STDIO logging discipline (SCOPING §5 Risk 4): the stdio MCP server MUST
+    // NOT write to stdout — stdout carries JSON-RPC framing only. The shim
+    // routes all diagnostics to stderr.
+    // ---------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------
+    // startMcpServer — long-lived-server-wrap boot entry.
+    //
+    // Sub-unit D's compiler-generated boot code calls this once at server start,
+    // passing the program's runtime read helpers + the output directory the
+    // descriptor sidecars (engines/forms/channels/serverfns.json) + chunks.json
+    // were emitted to.
+    //
+    //   - reactiveGet / derivedGet — the runtime cell readers (the same
+    //     _scrml_reactive_get / _scrml_derived_get that live in generated-code
+    //     module scope); passed in as params (the shim cannot reach the
+    //     generated module's globals directly — Q4).
+    //   - outputDir — directory holding the emitted JSON artifacts the tools read.
+    //   - watch (optional) — when true, the shim fs.watch'es the sidecars so a
+    //     dev rebuild refreshes the cache without restarting the MCP server
+    //     (SCOPING §5 Risk 5). Default off for deterministic boots.
+    //
+    // Returns an McpHandle: { server, transport, shutdown } so D can wire the
+    // process lifecycle (SIGINT/SIGTERM → handle.shutdown()).
+    //
+    // @param config — { reactiveGet, derivedGet, outputDir, watch? }
+    // @returns McpHandle — { server, transport, shutdown() }
+    // ---------------------------------------------------------------------------
+    export async function startMcpServer(config) {
+        // Stub body — runtime is provided by compiler/runtime/stdlib/mcp.js.
+        // The bundler replaces this with the hand-authored shim that imports the
+        // MCP TypeScript SDK, installs the runtime, loads the sidecars + chunks
+        // manifest, registers the 11 tools, and binds StdioServerTransport.
+        return config
+    }
+
+    // ---------------------------------------------------------------------------
+    // shutdownMcpServer — clean shutdown for the handle returned by
+    // startMcpServer. Stops fs.watch handles and closes the transport. Idempotent.
+    //
+    // @param handle — the McpHandle returned by startMcpServer
+    // ---------------------------------------------------------------------------
+    export async function shutdownMcpServer(handle) {
+        // Stub body — runtime is provided by compiler/runtime/stdlib/mcp.js.
+        return handle
+    }
+}
+</program>

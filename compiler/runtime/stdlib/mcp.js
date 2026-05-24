@@ -76,6 +76,12 @@ var _engines = null;   // [{ name, type, variants, rules, kind, cellKey }, ...]
 var _forms = null;     // [{ formName, fields: [...], compoundKeys: {...} }, ...]
 var _channels = null;  // [{ name, topic, autoSyncedCells: [{ name, key }] }, ...]
 
+// Sub-unit C additions. serverfns.json is an ARRAY (Sub-unit A shape);
+// chunks.json is the per-app ChunksManifest OBJECT (NOT an array) — read with
+// a dedicated object reader so _readSidecar's array-coercion doesn't blank it.
+var _serverFns = null; // [{ name, params, returnType, file, dispatchable }, ...]
+var _chunks = null;    // { version, compiler, entryPoints: { <ep>: { <role>: {...} } } }
+
 // fs.watch handles, kept for shutdown / test cleanup.
 var _watchers = [];
 
@@ -136,12 +142,17 @@ export function loadSidecars(outputDir, options) {
   _engines = _readSidecar(join(dir, "engines.json"));
   _forms = _readSidecar(join(dir, "forms.json"));
   _channels = _readSidecar(join(dir, "channels.json"));
+  // Sub-unit C — the two additional artifacts the 11-tool surface needs.
+  _serverFns = _readSidecar(join(dir, "serverfns.json"));
+  _chunks = _readChunksManifest(join(dir, "chunks.json"));
 
   if (opts.watch) {
     _stopWatchers();
     _startWatcher(join(dir, "engines.json"), function () { _engines = _readSidecar(join(dir, "engines.json")); });
     _startWatcher(join(dir, "forms.json"), function () { _forms = _readSidecar(join(dir, "forms.json")); });
     _startWatcher(join(dir, "channels.json"), function () { _channels = _readSidecar(join(dir, "channels.json")); });
+    _startWatcher(join(dir, "serverfns.json"), function () { _serverFns = _readSidecar(join(dir, "serverfns.json")); });
+    _startWatcher(join(dir, "chunks.json"), function () { _chunks = _readChunksManifest(join(dir, "chunks.json")); });
   }
 }
 
@@ -179,6 +190,21 @@ function _readSidecar(path) {
     // Missing or malformed — return [] so callers see a deterministic
     // empty surface instead of an exception.
     return [];
+  }
+}
+
+// _readChunksManifest(path) — chunks.json is a single ChunksManifest OBJECT
+// ({ version, compiler, entryPoints }), not an array, so it has its own reader.
+// A missing / malformed manifest degrades to null — the topology tools then
+// return a deterministic "no manifest" surface rather than throwing.
+function _readChunksManifest(path) {
+  try {
+    var raw = readFileSync(path, "utf-8");
+    var parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch (_err) {
+    return null;
   }
 }
 
@@ -410,7 +436,8 @@ function _findForm(list, formName) {
 
 export function _stateForTests() {
   return {
-    sidecars: { engines: _engines, forms: _forms, channels: _channels },
+    sidecars: { engines: _engines, forms: _forms, channels: _channels, serverFns: _serverFns },
+    chunks: _chunks,
     runtime: _runtime,
     loadedOutputDir: _loadedOutputDir,
     watcherCount: _watchers.length,
@@ -425,5 +452,409 @@ export function _resetForTests() {
   _engines = null;
   _forms = null;
   _channels = null;
+  _serverFns = null;
+  _chunks = null;
   _loadedOutputDir = null;
+}
+
+// ===========================================================================
+// Sub-unit C — the 11 read-only MCP tools.
+//
+// Each tool's DATA LOGIC is a pure exported resolver (`tool*`) that reads the
+// loaded sidecars / chunks manifest and composes with the B helpers where
+// runtime state is needed. The MCP SDK handlers (registerTool, below) are thin
+// JSON wrappers over these resolvers, so the data behavior is unit-testable
+// without booting the SDK.
+//
+// Tool names are a LOCKED public API (adopter agent configs depend on them):
+//   get_app_topology, list_engines, get_engine, list_forms, get_form_status,
+//   list_routes, get_route_chunks, list_server_functions, list_channels,
+//   get_channel_state, get_reachable_server_fns.
+// ===========================================================================
+
+function _requireSidecars(toolName) {
+  // The five surfaces are populated together by loadSidecars(). Engines being
+  // null is a sufficient sentinel that loadSidecars() has not run.
+  if (_engines === null) {
+    throw new Error(
+      "[scrml:mcp] " + toolName + " called before loadSidecars() / startMcpServer() — " +
+        "descriptor sidecars not loaded."
+    );
+  }
+}
+
+// Tool 1 — get_app_topology() → the chunks.json manifest verbatim.
+// Returns null when no manifest was emitted (degenerate / non-per-route build).
+export function toolGetAppTopology() {
+  _requireSidecars("get_app_topology");
+  return _chunks;
+}
+
+// Tool 2a — list_engines() → engines.json descriptors WITHOUT runtime variant
+// (compile-time facts only; the agent calls get_engine for live state).
+export function toolListEngines() {
+  _requireSidecars("list_engines");
+  return Array.isArray(_engines) ? _engines : [];
+}
+
+// Tool 2b — get_engine(name) → the engine descriptor + live currentVariant.
+// Returns null for an unknown engine name.
+export function toolGetEngine(name) {
+  _requireSidecars("get_engine");
+  var descriptor = _findByName(_engines, name);
+  if (!descriptor) return null;
+  // currentVariant composes with the B helper (requires install()).
+  var currentVariant = getCurrentVariant(name);
+  return Object.assign({}, descriptor, { currentVariant: currentVariant });
+}
+
+// Tool 3a — list_forms() → form descriptors (names + field lists), no live state.
+export function toolListForms() {
+  _requireSidecars("list_forms");
+  return Array.isArray(_forms) ? _forms : [];
+}
+
+// Tool 3b — get_form_status(formName) → the live validity surface (B helper).
+// Returns null for an unknown form name.
+export function toolGetFormStatus(formName) {
+  _requireSidecars("get_form_status");
+  var status = getFormStatus(formName);
+  return status === undefined ? null : status;
+}
+
+// Tool 4a — list_routes() → the (entryPoint, role) index from chunks.json.
+// Shape: [{ entryPoint, roles: [roleName, ...] }, ...]. Empty when no manifest.
+export function toolListRoutes() {
+  _requireSidecars("list_routes");
+  var out = [];
+  if (!_chunks || !_chunks.entryPoints || typeof _chunks.entryPoints !== "object") return out;
+  var eps = _chunks.entryPoints;
+  for (var ep in eps) {
+    if (!Object.prototype.hasOwnProperty.call(eps, ep)) continue;
+    var roleMap = eps[ep] || {};
+    out.push({ entryPoint: ep, roles: Object.keys(roleMap) });
+  }
+  return out;
+}
+
+// Tool 4b — get_route_chunks(entryPoint, role) → the per-(EP,role) tier entry
+// from chunks.json ({ initial?, tier1?, tier2?, tierN? }). Returns null when the
+// (EP, role) pair is absent.
+export function toolGetRouteChunks(entryPoint, role) {
+  _requireSidecars("get_route_chunks");
+  if (!_chunks || !_chunks.entryPoints) return null;
+  var roleMap = _chunks.entryPoints[entryPoint];
+  if (!roleMap || typeof roleMap !== "object") return null;
+  var entry = roleMap[role];
+  return entry === undefined ? null : entry;
+}
+
+// Tool 5 — list_server_functions() → serverfns.json verbatim. Enumeration only
+// (`dispatchable: false` on every entry — V0 has no call surface).
+export function toolListServerFunctions() {
+  _requireSidecars("list_server_functions");
+  return Array.isArray(_serverFns) ? _serverFns : [];
+}
+
+// Tool 6a — list_channels() → channels.json descriptors (names + topic +
+// auto-synced cell list), no live state.
+export function toolListChannels() {
+  _requireSidecars("list_channels");
+  return Array.isArray(_channels) ? _channels : [];
+}
+
+// Tool 6b — get_channel_state(name) → live channel cell state (B helper).
+// Returns null for an unknown channel name.
+export function toolGetChannelState(name) {
+  _requireSidecars("get_channel_state");
+  var state = getChannelState(name);
+  return state === undefined ? null : state;
+}
+
+// Tool 7 — get_reachable_server_fns(entryPoint, role, depth) → DEGRADED-HONEST.
+//
+// SHAPE GAP (surfaced to PA, see docs/changes/mcp-v0-c-stdlib/progress.md):
+// the emitted chunks.json carries only chunk filename strings per (EP, role),
+// NOT ChunkContents.serverFnNodeIds. reachability.json (a separate
+// `--emit-reachability` flag, not auto-emitted by --emit-per-route) carries
+// serverFnNodeIds but as node IDs, and serverfns.json has no node-id field to
+// join on. So per-route filtering is NOT faithfully computable from the
+// artifacts a --emit-per-route build produces.
+//
+// Rather than fabricate reachability, this tool validates the (EP, role) pair
+// against chunks.json, then returns the FULL server-fn list annotated
+// `reachabilityFiltered: false` with a `note`. When the (EP, role) is unknown
+// it returns `{ found: false }`. The real fix (node-id↔name join) is an A+D
+// follow-on.
+export function toolGetReachableServerFns(entryPoint, role, depth) {
+  _requireSidecars("get_reachable_server_fns");
+  var routeEntry = toolGetRouteChunks(entryPoint, role);
+  if (routeEntry === null) {
+    return {
+      found: false,
+      entryPoint: entryPoint,
+      role: role,
+      depth: typeof depth === "number" ? depth : null,
+      reachabilityFiltered: false,
+      serverFns: [],
+      note:
+        "Unknown (entryPoint, role) — not present in chunks.json. Call list_routes " +
+        "for valid pairs.",
+    };
+  }
+  return {
+    found: true,
+    entryPoint: entryPoint,
+    role: role,
+    depth: typeof depth === "number" ? depth : null,
+    reachabilityFiltered: false,
+    serverFns: Array.isArray(_serverFns) ? _serverFns : [],
+    note:
+      "V0 limitation: per-route server-fn reachability filtering is unavailable — " +
+      "chunks.json carries no serverFnNodeIds and serverfns.json carries no node-id " +
+      "to join on. Returning the full app-wide server-fn list. A node-id<->name join " +
+      "(serverfns.json + auto-emitted reachability) is a documented follow-on.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool registration table — single source of truth for the 11 tool names,
+// descriptions, input schemas, and the resolver each wraps. Consumed by
+// registerMcpTools() (SDK wiring) AND by tests that assert the full surface.
+// `inputSchema` entries are zod RAW SHAPES (plain objects of zod validators),
+// the form `McpServer.registerTool` expects — see startMcpServer for where zod
+// is imported. A null inputSchema means a no-argument tool.
+// ---------------------------------------------------------------------------
+
+/** Build the tool spec table. `z` is the imported zod module (passed in so the
+ *  shim has no hard top-level zod import — the SDK pulls zod transitively and
+ *  startMcpServer imports it lazily). */
+export function buildToolSpecs(z) {
+  return [
+    {
+      name: "get_app_topology",
+      description:
+        "Return the application chunk topology (chunks.json) verbatim: per " +
+        "entry-point, per-role initial/tier1/tier2/tierN chunk URLs.",
+      inputSchema: null,
+      resolve: function () { return toolGetAppTopology(); },
+    },
+    {
+      name: "list_engines",
+      description:
+        "List all state-machine engines (compile-time facts: name, governing " +
+        "type, variants, transition rules, kind). Use get_engine for live state.",
+      inputSchema: null,
+      resolve: function () { return toolListEngines(); },
+    },
+    {
+      name: "get_engine",
+      description:
+        "Return one engine's descriptor including its live currentVariant.",
+      inputSchema: { name: z.string() },
+      resolve: function (args) { return toolGetEngine(args.name); },
+    },
+    {
+      name: "list_forms",
+      description:
+        "List all forms (compound validity surfaces): form name + field list. " +
+        "Use get_form_status for live validity state.",
+      inputSchema: null,
+      resolve: function () { return toolListForms(); },
+    },
+    {
+      name: "get_form_status",
+      description:
+        "Return one form's live validity status: isValid, errors, touched, " +
+        "submitted, and per-field { isValid, errors, touched }.",
+      inputSchema: { formName: z.string() },
+      resolve: function (args) { return toolGetFormStatus(args.formName); },
+    },
+    {
+      name: "list_routes",
+      description:
+        "List all routes as (entryPoint, roles[]) pairs from the chunk topology.",
+      inputSchema: null,
+      resolve: function () { return toolListRoutes(); },
+    },
+    {
+      name: "get_route_chunks",
+      description:
+        "Return the chunk set ({ initial, tier1, tier2, tierN }) for one " +
+        "(entryPoint, role).",
+      inputSchema: { entryPoint: z.string(), role: z.string() },
+      resolve: function (args) { return toolGetRouteChunks(args.entryPoint, args.role); },
+    },
+    {
+      name: "list_server_functions",
+      description:
+        "Enumerate server functions (name, params, return type, file). " +
+        "Enumeration only — V0 cannot invoke server functions (dispatchable: false).",
+      inputSchema: null,
+      resolve: function () { return toolListServerFunctions(); },
+    },
+    {
+      name: "list_channels",
+      description:
+        "List all real-time channels: name, topic, and auto-synced cell names. " +
+        "Use get_channel_state for live cell values.",
+      inputSchema: null,
+      resolve: function () { return toolListChannels(); },
+    },
+    {
+      name: "get_channel_state",
+      description:
+        "Return one channel's live state: name, topic, and current cellState map.",
+      inputSchema: { name: z.string() },
+      resolve: function (args) { return toolGetChannelState(args.name); },
+    },
+    {
+      name: "get_reachable_server_fns",
+      description:
+        "Server functions reachable for an (entryPoint, role, depth). " +
+        "Enumeration only (dispatchable: false). V0 limitation: returns the " +
+        "full app-wide server-fn list with reachabilityFiltered:false — per-route " +
+        "filtering awaits a node-id join follow-on.",
+      inputSchema: {
+        entryPoint: z.string(),
+        role: z.string(),
+        depth: z.number().int().optional(),
+      },
+      resolve: function (args) {
+        return toolGetReachableServerFns(args.entryPoint, args.role, args.depth);
+      },
+    },
+  ];
+}
+
+/** The 11 LOCKED tool names, in registration order — exported for tests that
+ *  assert the public surface didn't drift. */
+export var TOOL_NAMES = [
+  "get_app_topology",
+  "list_engines",
+  "get_engine",
+  "list_forms",
+  "get_form_status",
+  "list_routes",
+  "get_route_chunks",
+  "list_server_functions",
+  "list_channels",
+  "get_channel_state",
+  "get_reachable_server_fns",
+];
+
+// ---------------------------------------------------------------------------
+// SDK wiring — registerMcpTools(server, z)
+//
+// Registers all 11 tools on an McpServer. Each handler calls the resolver and
+// wraps the result in the MCP content-block shape. Resolver throws (e.g.
+// not-loaded / runtime-not-installed) are converted to an isError content
+// response so the JSON-RPC channel stays well-formed — a thrown handler would
+// otherwise surface as a protocol-level error.
+// ---------------------------------------------------------------------------
+
+export function registerMcpTools(server, z) {
+  var specs = buildToolSpecs(z);
+  for (var i = 0; i < specs.length; i++) {
+    _registerOneTool(server, specs[i]);
+  }
+  return specs.length;
+}
+
+function _registerOneTool(server, spec) {
+  var config = { description: spec.description };
+  // registerTool requires inputSchema to be a ZodRawShape; for no-arg tools we
+  // pass an empty shape so the SDK still routes the call cleanly.
+  config.inputSchema = spec.inputSchema || {};
+  server.registerTool(spec.name, config, function (args) {
+    var payload;
+    try {
+      payload = spec.resolve(args || {});
+    } catch (err) {
+      var msg = err && err.message ? err.message : String(err);
+      return {
+        isError: true,
+        content: [{ type: "text", text: JSON.stringify({ error: msg }) }],
+      };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// startMcpServer(config) — long-lived-server-wrap boot entry (SCOPING §1 Q4).
+//
+//   config = { reactiveGet, derivedGet, outputDir, watch? }
+//
+// Boot sequence:
+//   1. install({ reactive_get, derived_get })   — connect runtime read helpers.
+//   2. loadSidecars(outputDir, { watch })        — load the 5 artifacts.
+//   3. new McpServer(...) + registerMcpTools()   — register the 11 tools.
+//   4. new StdioServerTransport() + server.connect(transport).
+//
+// STDIO discipline (SCOPING §5 Risk 4): nothing here writes to stdout — the
+// transport owns stdout for JSON-RPC framing. Diagnostics go to stderr.
+//
+// Returns an McpHandle { server, transport, shutdown } for D's lifecycle wiring.
+// The SDK + zod imports are LAZY (dynamic import) so importing this shim for the
+// B-helpers / tool resolvers does not require the SDK to be present.
+// ---------------------------------------------------------------------------
+
+export async function startMcpServer(config) {
+  var cfg = config || {};
+  if (!cfg.outputDir) {
+    throw new Error(
+      "[scrml:mcp] startMcpServer requires config.outputDir (the directory the " +
+        "descriptor sidecars + chunks.json were emitted to)."
+    );
+  }
+
+  install({ reactive_get: cfg.reactiveGet, derived_get: cfg.derivedGet });
+  loadSidecars(cfg.outputDir, { watch: cfg.watch === true });
+
+  var mcpMod = await import("@modelcontextprotocol/sdk/server/mcp.js");
+  var stdioMod = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  var zodMod = await import("zod");
+  var McpServer = mcpMod.McpServer;
+  var StdioServerTransport = stdioMod.StdioServerTransport;
+  var z = zodMod.z || zodMod.default || zodMod;
+
+  var server = new McpServer({ name: "scrml-mcp", version: "0" });
+  registerMcpTools(server, z);
+
+  var transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  // stderr-only readiness line — MUST NOT go to stdout (Risk 4).
+  try { process.stderr.write("[scrml:mcp] server ready (stdio) — 11 tools registered\n"); } catch (_e) { /* ignore */ }
+
+  var handle = {
+    server: server,
+    transport: transport,
+    shutdown: function () { return shutdownMcpServer(handle); },
+  };
+  return handle;
+}
+
+// ---------------------------------------------------------------------------
+// shutdownMcpServer(handle) — clean shutdown. Stops fs.watch handles, closes the
+// transport, and releases the runtime ref. Idempotent. Swallows close errors so
+// a double-shutdown / partial-boot handle never throws.
+// ---------------------------------------------------------------------------
+
+export async function shutdownMcpServer(handle) {
+  stopWatchers();
+  if (handle) {
+    try {
+      if (handle.transport && typeof handle.transport.close === "function") {
+        await handle.transport.close();
+      }
+    } catch (_e) { /* ignore */ }
+    try {
+      if (handle.server && typeof handle.server.close === "function") {
+        await handle.server.close();
+      }
+    } catch (_e) { /* ignore */ }
+  }
+  uninstall();
 }

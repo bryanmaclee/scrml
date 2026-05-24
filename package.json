@@ -55,6 +55,7 @@
     "e2e:install": "playwright install chromium firefox webkit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.11"
   },
