@@ -1,143 +1,128 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-05-23T09:52:00-06:00  commit: c2d93544
+# updated: 2026-05-23T00:00:00Z  commit: 73dd816c
 
 ## Entry Points
-compiler/bin/scrml.js — CLI executable shim; re-exports src/cli.js so `bun run scrml` / `npx scrml` / direct invocation all work.
-compiler/src/cli.js — subcommand router; dispatches compile / dev / build / migrate / promote / generate / init / serve; falls through to compile when arg 0 is a .scrml file or directory.
-compiler/src/api.js — programmatic compiler API; `compileScrml(options)` runs the full BS→TAB→PRECG→…→CG pipeline; the M5 native-parser swap seam. As of C2 (S119), `--parser=scrml-native` ROUTES the per-file TAB stage through `nativeParseFile` (api.js:729-736). S122 Wave 12 Unit W: api.js threads `spec.local` (alias) through aliased-import handling.
-compiler/native-parser/parse-file.js — `nativeParseFile(filePath, source)` — the C1 FileAST assembler; the native-parser analogue of `buildAST`. Returns `{ filePath, ast: FileAST, errors }`. S121 P5-7 added inline `match-block` ASTNode synthesis; 1037 LOC as of S122.
-lsp/server.js — Language Server Protocol entry; `bun run lsp`.
-docs/build.ts — docs-site builder; `bun run docs:build`.
+
+`compiler/bin/scrml.js` — CLI executable shim; re-exports src/cli.js.
+`compiler/src/cli.js` — subcommand router; dispatches compile/dev/build/migrate/promote/generate/init/serve; falls through to compile when arg 0 is a .scrml file or directory.
+`compiler/src/api.js` — programmatic compiler API; `compileScrml(options)` runs the full BS→TAB→PRECG→GCP1/3→MOD→NR→SYM→CE→VP→PA→RI→MC→TS→META→DG→BP→AG→RS→CG pipeline; the M5 native-parser swap seam (`--parser=scrml-native` routes per-file TAB through `nativeParseFile`).
+`compiler/native-parser/parse-file.js` — `nativeParseFile(filePath, source)` — the C1 FileAST assembler; 1037 LOC; 12 per-BlockKind synth* builders; imported by meta-eval.ts, codegen/emit-match.ts, component-expander.ts.
+`lsp/server.js` — Language Server Protocol entry.
+`docs/build.ts` — docs-site builder.
 
 ## Directory Ownership
-compiler/src/                  — JS+TS compiler pipeline stages (BS, TAB, CE, PA, RI, MC, TS, META, DG, BP, AG, RS, CG) plus lints and validators. S122 NEW: `lint-i-fn-promotable.js` (Unit EE I-FN-PROMOTABLE info lint, sibling to I-MATCH-PROMOTABLE).
-compiler/src/codegen/          — Stage 8 code generation; ~55 emit-* modules + index.ts (runCG), route-splitter, IR, source-map. S122 Wave 14: emit-expr.ts postfix-reactive lowering restored (BB-followup); emit-logic.ts paren-wraps 5 thunk emit sites (Unit DD GITI-014); emit-match.ts migrated to nativeParseFile for per-arm bare-body re-parse (M6.3 Wave 1).
-compiler/src/codegen/compat/   — parser-workaround shims (BPP overrides via parser-workarounds.js); S122 M6.5 path-a documentation + regression gate prove the helpers are no-op under the native upstream pre-M6.8 deletion.
-compiler/src/commands/         — CLI subcommand implementations (compile.js, dev.js, build.js, migrate.js, promote.js, generate.js, init.js, serve.js).
-compiler/src/reachability/     — Stage 7.6 Reachability Solver components (component-1..5, entry-points, gate-classifier, outer-fixpoint).
-compiler/src/types/            — shared TypeScript type declarations (ast.ts, auth-graph.ts, reachability.ts).
-compiler/src/validators/       — post-CE / lint validators (attribute-allowlist, attribute-interpolation, post-ce-invariant, lint-try-catch, lint-async-user-source, ast-walk).
-compiler/native-parser/        — the scrml-native composed-engines front-end. M1 (lexer) complete; expr/stmt/markup parsers + the native→live FileAST bridge + the `nativeParseFile` assembler all landed. `--parser=scrml-native` ROUTES the TAB stage through it (C2, S119). M6 Wave 1 (S122) began consumer-side retirement of the legacy front-end. .scrml canonical sources + 1:1 .js shadow files. 37 .js modules. See "Native-Parser Layout" below.
-compiler/native-parser/dist/   — compiled native-parser artifacts (client.js + html); generated.
-compiler/self-host/            — from-scratch scrml self-host compiler sources (.scrml) + JS bridge; separate post-v1.0 effort.
-compiler/runtime/              — hand-written ES-module runtime shims; runtime/stdlib/*.js bundled into emitted output as _scrml/*.js; idempotency.js.
-compiler/runtime/stdlib/       — 18 top-level shim .js files (auth/crypto/data/host/store + S121 Bug 8: cron/format/fs/http/oauth/path/process/redis/regex/router/test/time/compiler) + 5 oauth/ providers (discord/github/google/microsoft/pkce) + the scrml:compiler family per-stage dir (compiler/{bs,tab,mod,ce,bpp,pa,ri,ts,mc,me,dg,cg,expr}.js — 13 deferred-thunk siblings, Wave 8 Unit F).
-compiler/tests/                — 740 .test.js files: unit (517), integration (77), conformance (105) + browser, commands, lsp, self-host, fixtures, helpers, parser-conformance. 19,907 pass / 0 fail / 175 skip / 1 todo as of S122 wrap.
-compiler/bin/                  — CLI executable shim.
-compiler/dist/                 — compiled compiler artifacts; generated.
-stdlib/                        — scrml standard library .scrml sources (auth, crypto, data, host, store, etc.).
-lsp/                           — Language Server Protocol implementation.
-editors/                       — editor integrations / syntax files.
-examples/                      — numbered example .scrml apps + multifile dirs (22-multifile, 23-trucking-dispatch).
-samples/                       — ad-hoc sample apps + gauntlet repro sets; samples/compilation-tests/ holds ~318 test-case dirs (count only — not enumerated).
-benchmarks/                    — perf + LLM-efficiency + framework-comparison benchmarks.
-e2e/                           — Playwright end-to-end tests + configs.
-docs/                          — articles, audits, changes (per-dispatch BRIEF/SCOPING/progress files; 111 dirs / 209 .md as of S122), website, tutorial, PA-SCRML-PRIMER (NEW §6.2 Match block-form Tier 1 added S122), changelog.
-scripts/                       — build/maintenance scripts (compile-test-samples, regen-spec-index, rebuild-*-dist, git-hooks).
-dashboard/                     — scrml examples verification dashboard (v1, S120); dashboard/app.scrml is the single .scrml app; dashboard/dist is generated output.
-handOffs/                      — historical session hand-off docs (out of scope).
+
+`compiler/src/` — JS+TS compiler pipeline stages (BS, TAB, CE, PA, RI, MC, TS, META, DG, BP, AG, RS, CG) plus lints and validators.
+`compiler/src/codegen/` — Stage 8 code generation; ~55 emit-* modules + index.ts (runCG), route-splitter, IR, source-map, runtime-chunks, rewrite.
+`compiler/src/codegen/compat/` — parser-workaround shims (BPP-override compatibility layer).
+`compiler/src/commands/` — CLI subcommand implementations (compile, dev, build, migrate, promote, generate, init, serve).
+`compiler/src/types/` — TypeScript type declarations: `ast.ts` (all AST node shapes), `auth-graph.ts`, `reachability.ts`.
+`compiler/src/reachability/` — Reachability Solver sub-components (component-1..5, entry-points, gate-classifier, outer-fixpoint).
+`compiler/src/native-parser-canary/` — M6.5 within-node divergence classifier (`within-node-classifier.ts`); 7-class taxonomy for parity testing.
+`compiler/src/native-walker/` — Native-pipeline AST walkers; `engine-statechild-walker.ts` (M6.6.b.2) — walks native engine block child stream → live `EngineStateChildEntry[]`, replacing legacy `parseEngineStateChildren` text-rescanner in SYM PASS 11.
+`compiler/src/validators/` — Post-CE validators: attribute-allowlist, attribute-interpolation, post-ce-invariant, lint-try-catch, lint-async-user-source, ast-walk.
+`compiler/native-parser/` — Self-hosted scrml native parser (`.scrml` sources + compiled `.js` outputs); M5 SWAP target; M6 Wave 1 consumer migrations active.
+`compiler/runtime/` — Hand-written ES-module runtime shims; copied into emitted output as `_scrml/*.js`.
+`compiler/runtime/stdlib/` — Per-module runtime shims: 18 top-level + oauth/ providers + compiler/ 13-shim family.
+`compiler/self-host/` — From-scratch scrml self-host compiler prototype (`.scrml` sources); separate post-v1.0 effort.
+`compiler/self-host/cg-parts/` — CG sub-unit scrml sources.
+`compiler/tests/unit/` — Unit tests (535 files at HEAD); `bun:test` framework.
+`compiler/tests/integration/` — Integration tests (77 files).
+`compiler/tests/conformance/` — Conformance tests (105 files): block-grammar suite + S32 fn-state-machine suite + tab.
+`compiler/tests/browser/` — Browser runtime tests (12 files); happy-dom sandbox.
+`compiler/tests/commands/` — CLI command tests (6 files).
+`compiler/tests/lsp/` — LSP integration tests (10 files).
+`compiler/tests/parser-conformance/` — Parser conformance canary tests (24 files in dir); plus top-level `parser-conformance-*.test.js` files including the new `parser-conformance-within-node.test.js` (M6.5.b.0).
+`compiler/tests/self-host/` — Self-host compiler smoke tests (4 files).
+`compiler/tests/helpers/` — Test helper utilities: `expr.ts`, `extract-user-fns.js`.
+`compiler/tests/fixtures/` — Test fixtures: promote-match-canonical, promote-multi-file-app.
+`samples/compilation-tests/` — ~318 compilation test sample directories (counted only, not enumerated). Two new samples at HEAD: `gauntlet-r10-zig-buildconfig.scrml`, `tailwind-prose-coverage.scrml`.
+`samples/gauntlet-r*/` — Gauntlet round samples (r11, r13–r15, r18–r19); regression anchors.
+`stdlib/` — 18 stdlib modules (auth, compiler, cron, crypto, data, format, fs, host, http, oauth, path, process, redis, regex, router, store, test, time).
+`examples/` — 23 canonical scrml example apps (01-hello through 23-trucking-dispatch).
+`benchmarks/` — Performance benchmarks: browser, fullstack-react, fullstack-scrml, llm-efficiency, per-route-roles, sql-batching, todomvc variants.
+`lsp/` — Language server (vscode-languageserver); entry at `lsp/server.js`.
+`editors/neovim/` — Neovim editor plugin.
+`e2e/` — Playwright end-to-end test suite.
+`scripts/` — Utility scripts + git-hooks (pre-commit runs unit+integration+conformance; pre-push runs full suite).
+`docs/` — PA-SCRML-PRIMER, tutorial, known-gaps, lin, changelog, changes/, audits/, articles/, website/.
+`docs/changes/` — Per-change SCOPING, BRIEF, and progress tracking documents (100+ subdirs).
 
 ## Native-Parser Layout
+
 Front-end flow: lex → parse-stmt/parse-expr → parse-markup → bridge layer → nativeParseFile → live FileAST.
 
-  Lexing      — lex.js + lex-mode.js + 7 lex-in-* dispatchers (code, single/double-string,
-                template, line/block-comment, regex); token.js + token-cursor.js + cursor.js.
-                P5-9 (S120): `CONTEXTUAL_KEYWORDS` added to token.js — `type` lexes as
-                `Ident` with a `ctxKw:"type"` payload; parse-stmt.js reads that field at
-                statement position to decide whether the `type` keyword reading applies.
-  Statements  — parse-stmt.js (3335L), ast-stmt.js (StmtKind: 20 variants), parse-ctx.js,
-                parse-mode.js, parse-seam.js, block-context.js, body-mode.js.
-                P5-3 (S120): `^{}` meta-block at statement position + `type:kind` decl ordering.
-                P5-9 (S120): `type` as contextual keyword — `export type ...` fixed.
-                P5-11 (S120): V5-strict structural state-decl `<NAME ...> = expr` recognition
-                inside `${}` logic-escape bodies.
-  Expressions — parse-expr.js, ast-expr.js (ExprKind: 40 variants). S122 Wave 7-C continuation
-                — typed-decl `:type` annotation consume.
-  Markup      — parse-markup.js (S122 Unit X: @-sigil cleanup, 9→0 E-NAME-COLLIDES-STATE),
-                tag-frame.js (TagKind calc + VOID_ELEMENTS void-element set + isVoidElementName,
-                S119 HTML void-element support; S122 M6.6.b.1 IMPL: in-opener colon-shorthand
-                recognition for EngineStateChildEntry contract derivation),
-                display-text-literal.js (S121 Wave 11-R / 10-M: `null`→`not`, `===`→`==`
-                migration in the .scrml mirror), parse-css-body.js, parse-sql-body.js,
-                parse-state-body.js (shapeStateBlock + STATE_FORM_KEYWORDS `{db,schema}`
-                + isStateBlock — S119 no-space `<db>`/`<schema>` recognition),
-                parse-error-body.js, delegation-frame.js.
-                P5-1..P5-13, P5-14 v2, Wave 5-12b, Wave 6-A landings unchanged (see S121 notes).
-  BRIDGE      — translate-stmt.js (R1 — native Stmt[] → live LogicStatement[]; 1448L as of S122
-                R4-U1 + R4-U2 wired translateExpr at bare-expr/return-stmt/throw-stmt sites
-                and at for-stmt iterExpr + cStyleParts slots — 2 of ~5 R4-continuation units
-                landed; R4-U3/U4/U5 remaining),
-                translate-expr.js (A2 — native Expr → live ExprNode; module complete since
-                S118 but integration wired progressively through R4-Ux units),
-                translate-stmt-bridge.test.js (NEW S122 — regression gate for R4-Ux landings),
-                collect-hoisted.js (A3 — native Block[] → imports/exports/typeDecls/
-                components/machineDecls/channelDecls/hasProgramRoot; also exports
-                isEngineBlock + synthEngineDecl; S122 M6.4a Wave 1: P2-Form1 synthesis +
-                cross-file Export/Import shape — closes 1+2 E-COMPONENT-035 fires).
-                NEW S122 Wave 1: `translateMarkupValueToLiveNode` bridge (M6.2a) — closes
-                the lift-expr.expr.node consumer gap that blocked M6.2 component-expander.
-  ASSEMBLER   — parse-file.js — `nativeParseFile(filePath, source)` (C1, S119; 1037L).
-                Composes parseMarkupTrace + the three bridges into the live `FileAST`
-                shape. 12 per-BlockKind synthesizers as of S121:
-                  synthMarkupNode / synthStateNode / synthEngineNode / synthTextNode /
-                  synthCommentNode / synthSqlNode / synthCssNode / synthMetaNode /
-                  synthErrorEffectNode / synthLogicNode + drop path
-                  + **synthMatchBlockNode** (S121 P5-7, Wave 9-J) — recognized via
-                    `isMatchBlock(block)` (Markup tag-name `match`); routed BEFORE
-                    `isStateBlock` so `<engine for=Phase>` stays in engine-decl.
-                    FileAST shape: `{ kind: "match-block", forType, onExprRaw, armsRaw,
-                    bodyChildren, span }` — mirrors live ast-builder.js L10518-L10698.
-                One shared `idGen`.
-                Now imported by `meta-eval.ts` and `codegen/emit-match.ts` (M6.1 + M6.3,
-                S122 Wave 1).
-  Support     — span.js, bracket-stack.js, error-recovery.js, char-classify.js.
-  Docs        — native-parser/README.md (current reference), M5-ast-bridge-scoping.md,
-                M5-divergence-ledger.md, M5-SWAP-residual-decomposition.md.
-                NEW S122: **M6.6-CONTRACT-DERIVATION.md** (540L) — cookbook for
-                M6.6.b.2..b.6 consumer migrations once the M6.6.b.1 IMPL seam is in
-                place; documents `EngineStateChildEntry` contract derivation path-b.
+| Sub-system | Files |
+|---|---|
+| Lexing | lex.js + lex-mode.js + 7 lex-in-* dispatchers; token.js, token-cursor.js, cursor.js |
+| Statements | parse-stmt.js (3335L), ast-stmt.js (20 StmtKind variants), parse-ctx.js, parse-mode.js, parse-seam.js, block-context.js, body-mode.js |
+| Expressions | parse-expr.js, ast-expr.js (40 ExprKind variants) |
+| Markup | parse-markup.js, tag-frame.js (M6.6.b.1.5: attr tokenizer extensions), display-text-literal.js, parse-css-body.js, parse-sql-body.js, parse-state-body.js, parse-error-body.js, delegation-frame.js |
+| Bridge | translate-stmt.js (R4 COMPLETE — all 6 translateExpr sites wired); translate-expr.js (A2 complete S118); collect-hoisted.js (A3; M6.6.b.1.5 updates) |
+| Assembler | parse-file.js — `nativeParseFile` (1037L); 12 per-BlockKind synth* builders |
+| Support | span.js, bracket-stack.js, error-recovery.js, char-classify.js |
+| Docs | README.md, M5-ast-bridge-scoping.md, M5-divergence-ledger.md, M5-SWAP-residual-decomposition.md, M6.6-CONTRACT-DERIVATION.md (540L cookbook — updated M6.6.b.1.5) |
 
-## .scrml Mirror Discipline
-Native-parser .js files are PRIMARY (executable surface); .scrml mirrors carry canonical
-SHAPE per the Pillar 5b discipline. S121 invested heavily in mirror cohesion:
-  - Wave 9-I: 36 sites migrated `is not not` → `is some` across .scrml mirrors.
-  - Wave 10-K: parse-markup.scrml `fn` → `function` (8 in-file E-FN-003 sites).
-  - Wave 10-L: 4 sibling body-parsers `fn` → `function` (full mirror set E-FN-003-clean).
-  - Wave 10-M / 11-R: display-text-literal.scrml `===`→`==`, `!==`→`!=`, `null`/`undef`
-    → `is not`/`is some` (+2 final sites `null`→`not`).
-  - Wave 10-N: doc-comment realignment in 5 .scrml mirrors after K+L `fn`→`function`.
-S122 mirror touches:
-  - Unit U: tag-frame.scrml tilde-decl reassignment fix (sibling to ast-builder/type-system).
-  - Unit X: parse-markup.scrml @-sigil cleanup (9→0 E-NAME-COLLIDES-STATE in the mirror).
+## Key New Module — M6.6.b.2 Native Walker
 
-## Parser-Conformance Suite (compiler/tests/parser-conformance/)
-  dual-pipeline-canary.js — the C2 proof instrument: runs LIVE (splitBlocks→buildAST)
-                AND NATIVE (nativeParseFile) on a source, structurally diffs the two
-                FileASTs along the top-level AND recursive node-kind sequences + 6 hoist
-                counts + hasProgramRoot + the diagnostic streams. `classifyDivergence`
-                tags EXACT / DIFF-top-seq / DIFF-deep-seq / DEFERRAL-* / LIVE-DEGENERATE /
-                **LIVE-PHANTOM** (S121 Wave 6-B — credits native when live admits malformed
-                state opener) / **LIVE-HOIST-MISCLASSIFY** (S121 Wave 9-H — credits native
-                when only the hoist counts differ). Wave 8-G lowered the LIVE-DEGENERATE
-                ratio guard 3.0x → 1.5x. Strict-pass remains 998/1000 through S122.
-  corpus-enumerator.js, parsers.js (Acorn-oracle adapter), tier-diff.js, bench/, markup-bench/.
+`compiler/src/native-walker/engine-statechild-walker.ts` — Replaces `parseEngineStateChildren` text-rescanner in SYM PASS 11. Walks native `<engine for=...>` Markup block's child stream → live `EngineStateChildEntry[]`. Imports `parseRuleAttrValue` from the legacy `engine-statechild-parser.ts` (still the canonical rule= parser). The legacy `engine-statechild-parser.ts` survives as fallback for synthetic ASTs (test harnesses). M6.6.b.3 retired `isLegacyArrowRulesBody` + `scanForOnIdleEntries` from the legacy path.
+
+## Key Canary Module — M6.5.b.0
+
+`compiler/src/native-parser-canary/within-node-classifier.ts` — Extended M6.5.b.0 (Wave 2 unblocked). 7-class divergence taxonomy: KIND-NAME, FIELD-SHAPE, MISSING-FIELD, EXTRA-FIELD, COUNT-LENGTH, SPAN-COORD, NESTED-SHAPE plus PARSE-FAILURE pseudo-class. Consumes same corpus enumerator as dual-pipeline-canary. Allowlist: `compiler/tests/parser-conformance-within-node-allowlist.json`.
+
+## Key Codegen Modules (Stage 8)
+
+`codegen/rewrite.ts` — string-rewrite helpers; GITI-017: `rewriteNotKeyword` regex-literal + comment aware; `REGEX_PERMISSIVE_KEYWORDS` + `regexAllowedAfter`.
+`codegen/runtime-chunks.ts` — runtime chunk detection; 6nz Bug P: `CHUNK_DEPENDENCIES = { scope: ['timers','animation'] }` + `applyChunkDependencies`.
+`codegen/emit-client.ts` — wires `applyChunkDependencies` call (emit-client.ts:864).
+
+## Key Symbol Table Modules (Stage 3.06)
+
+`compiler/src/symbol-table.ts` — 9730+ LOC; Stage 3.06 SYM orchestrator; 21 PASSes.
+- PASS 11 (`validateEngineStateChildrenAndRules`) — **M6.6.b.2 LANDED**: now calls `walkEngineStateChildren` from `compiler/src/native-walker/engine-statechild-walker.ts` when native block stream is available; legacy `parseEngineStateChildren` call retained as fallback for synthetic ASTs.
+- M6.6.b.3 LANDED: `isLegacyArrowRulesBody` + `scanForOnIdleEntries` migrated to native walker.
+- V-kill: PASS 3 fires E-STATE-UNDECLARED + E-WRITE-NOT-IN-LOGIC-CONTEXT.
+- Per-file exemption: `compiler/src/unit-cc-exemption-list.json`.
+
+## M6 Status at HEAD (73dd816c — S124 wrap)
+
+| Milestone | Status |
+|---|---|
+| M6.1 meta-eval | LANDED |
+| M6.2a markup-value bridge | LANDED |
+| M6.2b component-expander | LANDED (S123) |
+| M6.3 emit-match | LANDED |
+| M6.4a P2-Form1 | LANDED |
+| M6.5 no-op proof | PROVEN |
+| M6.5.b.0 within-node canary | LANDED (Wave 2 unblocked, S124) |
+| M6.6.b.1 attr tokenizer | LANDED |
+| M6.6.b.1.5 attr tokenizer ext | LANDED (S124) |
+| M6.6.b.2 engine-statechild-walker | LANDED (S124) |
+| M6.6.b.3 legacy helper migration | LANDED (S124) |
+| M6.7 flag flip | STOP — flag flip REVERTED; corpus migrations landed; canary closed |
+| M6.6.b.4..b.6, M6.8 | PENDING |
 
 ## Compiler Spec / Pipeline References
-compiler/SPEC.md         — normative scrml language spec (58 sections; §34.1 is the native-parser diagnostic catalog — 81 codes stable through S122; §34 adds W-STDLIB-SHIM-MISSING + W-STDLIB-COMPILER-DEFERRED (S121) + I-FN-PROMOTABLE (S122 Unit EE); §41.17 scrml:compiler family deferral; §56.9 NEW S122 — I-FN-PROMOTABLE sibling promotion lint).
-compiler/SPEC-INDEX.md   — navigation map into SPEC.md (section anchors).
-compiler/PIPELINE.md     — pipeline-stage reference.
-docs/PA-SCRML-PRIMER.md  — adopter-side primer; NEW §6.2 Match block-form (Tier 1) subsection added S122 (Wave 12 close + S121 P5-7 catchup; primer reference, not normative spec).
+
+`compiler/SPEC.md` — normative scrml language spec (58 sections; §34 catalog growing).
+`compiler/SPEC-INDEX.md` — navigation map into SPEC.md.
+`compiler/PIPELINE.md` — pipeline-stage reference.
+`docs/PA-SCRML-PRIMER.md` — adopter-side primer.
 
 ## Ignored / Generated Paths
-node_modules, dist, compiler/dist, compiler/native-parser/dist, build, target, .git, .jj, .claude, vendor, *.db (SQLite test DBs), examples/dist, samples/dist, dashboard/dist
+
+`node_modules/`, `compiler/node_modules/`, `compiler/dist/`, `compiler/native-parser/dist/`,
+`compiler/self-host/dist/`, `stdlib/*/dist/`, `samples/dist/`, `benchmarks/*/dist/`,
+`.git/`, `.claude/`, `archive/`, `handOffs/`
 
 ## Monorepo Note
-package.json declares a Bun workspace `["compiler"]`. compiler/package.json is the
-sub-package manifest (acorn + astring). Single map set covers the whole repo.
+
+`package.json` declares a Bun workspace `["compiler"]`. `compiler/package.json` is the sub-package manifest (acorn + astring). Single map set covers the whole repo.
 
 ## Tags
-#scrmlts #map #structure #compiler #native-parser #pipeline #m5-swap #m6-wave1 #stdlib-shims
+#scrmlts #map #structure #compiler #native-parser #pipeline #m5-swap #m6-wave1 #m6-6-b2 #m6-5-b0 #stdlib-shims #native-walker #s124
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -145,3 +130,4 @@ sub-package manifest (acorn + astring). Single map set covers the whole repo.
 - [pa.md](../../pa.md)
 - [build.map.md](./build.map.md)
 - [dependencies.map.md](./dependencies.map.md)
+- [domain.map.md](./domain.map.md)
