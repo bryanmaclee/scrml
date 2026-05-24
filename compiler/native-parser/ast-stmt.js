@@ -72,6 +72,16 @@ export const StmtKind = Object.freeze({
     //   <name v1 v2(...)> = expr    Shape 2 validators (raw-capture only)
     // Translated to live `state-decl` by translate-stmt.js.
     StateDecl:    "StateDecl",     // V5-strict structural reactive decl
+
+    // --- M6.7-D7 — `given` presence-guard statement (SPEC §42.2.3) ---
+    // `given ident [, ident]* => { body }` — a presence-narrowing guard: the
+    // body runs only when EVERY named `T | not` variable is present (not the
+    // absence value). Translated to the live `given-guard` LogicStatement
+    // (ast-builder.js:5525) by translate-stmt.js. `given` is a hard keyword
+    // (token.js KwGiven); the statement-position dispatch is the only place it
+    // leads a production — an expression-position `given` is unaffected (no
+    // parsePrimary arm), matching live's STMT_KEYWORDS-gated recognition.
+    GivenGuard:   "GivenGuard",    // `given x [, y]* => { body }`
 });
 
 // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).
@@ -401,6 +411,25 @@ export function makeTypeDecl(name, typeKind, raw, span) {
 // position by the `~ Ident =` shape (see parseTildeDecl).
 export function makeTildeDecl(name, init, span) {
     return { kind: StmtKind.TildeDecl, name, init, span };
+}
+
+// =============================================================================
+// `given` presence-guard node constructor — M6.7-D7 (SPEC §42.2.3).
+// =============================================================================
+
+// makeGivenGuard — a `given ident [, ident]* => { body }` presence guard
+// (SPEC §42.2.3). `variables` is the array of bound identifier-name strings
+// (plain idents only — §42.2.3 v1 rejects property paths). `body` is the
+// guarded statement list (the `{ ... }` block contents, parsed recursively;
+// NOT wrapped in a Block node — the live `given-guard` carries a flat
+// statement array). Mirrors the live `given-guard` LogicStatement shape
+// (ast-builder.js:5523 — `{kind:"given-guard", variables, body, span}`).
+// `given` is a hard keyword recognized as a guard lead ONLY at statement
+// position; the same production runs inside a `match { ... }` arm body (the
+// match body uses the shared statement-list parser), so this one node closes
+// both the standalone and the in-match given positions.
+export function makeGivenGuard(variables, body, span) {
+    return { kind: StmtKind.GivenGuard, variables, body, span };
 }
 
 // =============================================================================

@@ -129,6 +129,8 @@ import {
     makeLinDecl, makeTypeDecl,
     // M5-swap Wave 2 — `~` tilde-declaration node constructor (B3).
     makeTildeDecl,
+    // M6.7-D7 — `given` presence-guard node constructor (SPEC §42.2.3).
+    makeGivenGuard,
 } from "./ast-stmt.js";
 import {
     SyncToken,
@@ -560,6 +562,25 @@ export function parseStatement(ctx) {
     // that is immediately assigned.
     if (kind === TokenKind.BitNot && tildeDeclLeadFollows(cursor)) {
         return parseTildeDecl(ctx);
+    }
+
+    // M6.7-D7 — a `given x [, y]* => { body }` presence guard (SPEC §42.2.3).
+    // `given` is a hard keyword (token.js KwGiven). The live ast-builder
+    // (ast-builder.js:5485 / 9477) recognizes a statement-position `given`
+    // KEYWORD as the presence-guard lead unconditionally (it is in the live
+    // STMT_KEYWORDS set); the native parser mirrors that. Without this arm a
+    // statement-position `given` fell through to parseExprStatement, where
+    // KwGiven is not a valid expression head (parsePrimary has no arm) — native
+    // fired E-EXPR-UNEXPECTED:KwGiven + E-STMT-MISSING-SEMICOLON +
+    // E-STMT-UNEXPECTED-TOKEN, bailing the whole `${...}` logic block. The same
+    // production runs inside a `match { ... }` arm body (the match body uses the
+    // shared statement-list parser), so this one arm closes BOTH the standalone
+    // and the in-match given positions (subsumes the D3b follow-on). An
+    // expression-position `given` is unaffected — no parsePrimary arm exists, so
+    // a bare `given` identifier use (rare; §4.11.4 admits it) still falls
+    // through to the expression path exactly as before this change.
+    if (kind === TokenKind.KwGiven) {
+        return parseGivenGuard(ctx);
     }
 
     // --- M3.2 control-flow keyword leads ---
@@ -2709,6 +2730,95 @@ export function parseLinDecl(ctx) {
     const endE = (init === undefined || init === null) ? kw.span.end : nodeEnd(init);
     const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
     return makeLinDecl(name, init, span);
+}
+
+// --- parseGivenGuard — a `given x [, y]* => { body }` presence guard (D7) ---
+//   given-guard ::= 'given' identifier (',' identifier)* '=>' '{' statement* '}'
+// SPEC §42.2.3 presence-narrowing guard: the body runs only when EVERY named
+// `T | not` variable is present (single: `given x => {...}`; multi:
+// `given x, y => {...}` is all-or-nothing). The native parser mirrors the live
+// ast-builder given-guard production (ast-builder.js:5485 / 9477) field-for-
+// field — `variables` is the array of bound identifier-name strings, `body` is
+// the guarded statement list (the `{ ... }` block contents, parsed via the
+// shared parseStatementList — NOT a Block-wrapped node; the live `given-guard`
+// carries a FLAT statement array). §42.2.3 v1 takes BARE identifiers, not
+// property paths — a `given u.name` is rejected with E-SYNTAX-044 (mirroring
+// live ast-builder.js:5494) and the dotted tail is skipped so parsing recovers.
+// A leading `@` on a name (`given @x`) is stripped (live ast-builder.js:5492).
+export function parseGivenGuard(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `given`
+
+    // Collect comma-separated plain identifiers (§42.2.3 v1 — no property paths).
+    const variables = [];
+    while (currentKind(cursor) === TokenKind.Ident
+           || currentKind(cursor) === TokenKind.ScrmlAt) {
+        let name;
+        if (currentKind(cursor) === TokenKind.ScrmlAt) {
+            // `given @x` — the `@`-prefixed cell name. The live ast-builder
+            // strips the leading `@` (ast-builder.js:5492). The native lexer
+            // emits a ScrmlAt token carrying the bare name on `.name`.
+            const atTok = advance(cursor);
+            name = (atTok.name === undefined || atTok.name === null) ? "" : atTok.name;
+            if (name.startsWith("@")) name = name.slice(1);
+        } else {
+            name = advance(cursor).name;
+        }
+
+        // §42.2.3: `given` takes bare identifiers, not property paths. Reject a
+        // `given u.name` form (E-SYNTAX-044, mirroring live) and skip the dotted
+        // tail so the parser keeps going.
+        if (currentKind(cursor) === TokenKind.Dot) {
+            recordError(ctx, "E-SYNTAX-044",
+                "`given` takes bare identifiers, not property paths (§42.2.3). " +
+                "Bind the property to a local variable first: `let n = " + name +
+                ".<field>`, then `given n { ... }`.",
+                spanHere(ctx));
+            while (currentKind(cursor) === TokenKind.Dot) {
+                advance(cursor);   // consume `.`
+                if (currentKind(cursor) === TokenKind.Ident) advance(cursor);
+            }
+        }
+
+        variables.push(name);
+        if (currentKind(cursor) === TokenKind.Comma) {
+            advance(cursor);   // consume `,`
+        } else {
+            break;
+        }
+    }
+
+    // Consume the `=>` arrow (the native lexer lexes `=>` as a single Arrow
+    // token). A missing arrow is tolerated (the live production guards on
+    // isMatchArrow but does not error when absent); the body parse below still
+    // runs so a malformed guard recovers usefully.
+    if (currentKind(cursor) === TokenKind.Arrow) {
+        advance(cursor);   // consume `=>`
+    }
+
+    // Parse the guarded body — the `{ ... }` block contents as a FLAT statement
+    // list (matching the live given-guard.body shape; not a Block node). Uses
+    // the same parseStatementList path parseBlock uses, so nested decls /
+    // functions / control flow inside the guard parse recursively.
+    let body = [];
+    let endE = kw.span.end;
+    if (currentKind(cursor) === TokenKind.LBrace) {
+        const open = advance(cursor);   // consume `{`
+        const prior = enterMode(ctx, ParseMode.InBlock);
+        body = parseStatementList(ctx, TokenKind.RBrace);
+        exitMode(ctx, prior);
+        endE = open.span.end;
+        if (currentKind(cursor) === TokenKind.RBrace) {
+            const close = advance(cursor);   // consume `}`
+            endE = close.span.end;
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-BLOCK",
+                "expected '}' to close the `given` guard body", open.span);
+        }
+    }
+
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeGivenGuard(variables, body, span);
 }
 
 // --- typeBodyText — reconstruct the brace-delimited `type` body raw text ---

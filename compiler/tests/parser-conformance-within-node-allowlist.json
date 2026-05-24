@@ -2390,12 +2390,10 @@
     "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-multi-088.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 15,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 6
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 3,
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-old-syntax-089.scrml": {
     "KIND-NAME": 1,
@@ -2406,20 +2404,17 @@
     "SPAN-COORD": 5
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-property-path-090.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 15,
-    "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 8
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 4,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-single-087.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 4
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 5,
+    "EXTRA-FIELD": 3,
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-and-else-same-elem-021.scrml": {
     "FIELD-SHAPE": 1,
@@ -3237,28 +3232,23 @@
     "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-multi-095.scrml": {
-    "KIND-NAME": 1,
     "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 4,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 5
+    "MISSING-FIELD": 2,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-property-path-096.scrml": {
-    "KIND-NAME": 1,
     "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 4,
-    "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 7
+    "MISSING-FIELD": 2,
+    "EXTRA-FIELD": 3,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-single-094.scrml": {
-    "KIND-NAME": 1,
     "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 3,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 3
+    "MISSING-FIELD": 1,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 7
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-attribute-quoted-111.scrml": {
     "FIELD-SHAPE": 1,
@@ -3454,7 +3444,7 @@
     "FIELD-SHAPE": 4,
     "MISSING-FIELD": 26,
     "EXTRA-FIELD": 11,
-    "COUNT-LENGTH": 1,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 5
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-is-expr-117.scrml": {
@@ -3486,7 +3476,7 @@
     "FIELD-SHAPE": 3,
     "MISSING-FIELD": 15,
     "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 1,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 4
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-chain-087.scrml": {

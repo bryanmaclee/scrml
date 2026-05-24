@@ -357,6 +357,20 @@ function appendTranslatedStmt(out, stmt, counter) {
             out.push(makeStateDeclNode(stmt, counter));
             return;
 
+        // --- M6.7-D7 — `given` presence-guard statement (SPEC §42.2.3) ------
+        case StmtKind.GivenGuard:
+            // `given x [, y]* => { body }` -> live `given-guard`
+            // (ast-builder.js:5523 — `{kind:"given-guard", variables, body, span}`).
+            // The native parser DOES recognize the statement-position `given`
+            // lead as of D7. The guarded `body` is translated recursively so the
+            // nested logic statements (`let`/`function`/control flow) bridge to
+            // their live LogicStatement kinds — mirroring the live ast-builder's
+            // parseRecursiveBody body. The same node is produced standalone AND
+            // inside a `match { ... }` arm (the match body shares the
+            // statement-list parser), so one bridge arm covers both positions.
+            out.push(makeGivenGuardNode(stmt, counter));
+            return;
+
         default:
             // An unrecognized native StmtKind. The native catalog is closed at
             // 20 kinds (ast-stmt.js StmtKind) — this arm should be
@@ -916,6 +930,34 @@ function makeStateDeclNode(stmt, counter) {
     // PA as a sibling unit). The captured raw text is retained on the native
     // StateDecl node for the future sibling unit to consume.
     return node;
+}
+
+// --- GivenGuard translation — M6.7-D7 (SPEC §42.2.3) -------------------------
+
+// makeGivenGuardNode — native `GivenGuard{variables, body}` -> live
+// `given-guard` (ast-builder.js:5523 — `{kind:"given-guard", variables, body,
+// span}`). A flat 1:1 field copy of `variables` (the bound identifier-name
+// strings); the guarded `body` is translated recursively (the native body is a
+// FLAT native-Stmt array — the live given-guard body is likewise a flat
+// LogicStatement array), so the nested `let`/`function`/control-flow statements
+// inside the guard bridge to their live kinds. The live ast-builder stamps NO
+// `init`/`raw` companion on a given-guard — the native bridge matches that
+// exactly (only `id, kind, variables, body, span`), so the within-node canary
+// sees no EXTRA-FIELD divergence.
+function makeGivenGuardNode(stmt, counter) {
+    const body = [];
+    if (Array.isArray(stmt.body)) {
+        for (const inner of stmt.body) {
+            appendTranslatedStmt(body, inner, counter);
+        }
+    }
+    return {
+        id: stampId(counter),
+        kind: "given-guard",
+        variables: Array.isArray(stmt.variables) ? stmt.variables.slice() : [],
+        body,
+        span: spanOrZero(stmt.span),
+    };
 }
 
 // translateBindingTarget — a native binding node -> the live `name` field.
