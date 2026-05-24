@@ -188,3 +188,19 @@ To land the Phase A flip cleanly, the next dispatch needs to:
    git reflog if a follow-up wants the exact text as a starting
    point. See git reflog entries from this dispatch's branch.
 
+
+---
+
+# M6.7-D3 — match-arm `:>` colon-arrow (dominant cluster sub-form)
+
+- [start] branch worktree-agent-a03bc182fa5a32427 @ HEAD 003ee3a8 (== main parser source; D4/s128-open ahead are docs-only). Startup pwd verified under .claude/worktrees/agent-. bun install + pretest OK.
+- [phase-0] Re-measured corpus NSBH = 293/110 at HEAD (matches d4). Isolated the 24 match-cluster first-error files (MATCH-ARROW 13 + MATCH-PATTERN 11). Committed probe scripts (52d4f94a).
+- [phase-0] Empirically decomposed the cluster into 7 sub-forms: :> colon-arrow (12), literal-arm (5), given-binding (3), alternation| (1), guard-if (1), not-pattern (1), same-line-space-sep (1). DOMINANT = :> (12/24).
+- [phase-0] Confirmed LIVE pipeline ACCEPTS all 8 probed sub-forms (parity-completeness, not corpus-stale). Confirmed live `:>` and `=>` produce byte-identical match-expr AST.
+- [decision] STOP-and-split per brief condition (b): fix DOMINANT (:>) only; file the other 6 as named follow-on units (D3a-D3f). Mirrors D1's STOP-and-split.
+- [fix] parse-expr.js: parseMatchArm :> branch + isColonArrowAliasAhead helper + isArmArrowAt :> branch. Source + within-node allowlist regen (6 moved files) in SAME COMMIT (2f7b34f8).
+- [gate] strict-pass EXACT HELD at 964 (full histogram unchanged). within-node 1005 pass/0 fail post-regen; content classes net -157, SPAN-COORD +116 cosmetic.
+- [test] m67-d3-match-arm-parse.test.js — 25 pass/0 fail with fix; 13 fail/12 pass against pre-fix (LOAD-BEARING). Committed (f1a4ffc6).
+- [gate] full `bun run test` — 21362 pass / 174 skip / 1 todo / 0 fail / 781 files (2 consecutive stable runs; an earlier 2-fail was transient network flake).
+- [impact] corpus NSBH 293/110 -> 246/99 (-47 fires, -11 files). MATCH-ARROW first-error 13 -> 2 (residual = | alternation + if guard, both follow-ons).
+- [doc] d3-match-arm.md written. DONE.

@@ -2687,12 +2687,25 @@ export function parseMatchArm(ctx) {
         return null;
     }
 
-    // The separator — `=>` (canonical) or `->` (alias). M1 lexes `->` as a
-    // Minus token followed by a GreaterThan token (no single `->` token);
-    // re-compose it here when the two are source-adjacent.
+    // The separator — `=>` (canonical), `:>` (the colon-arrow alias, §18.2),
+    // or `->` (legacy alias). M1 lexes `=>` as a single Arrow token; it lexes
+    // `:>` as an adjacent Colon + GreaterThan pair and `->` as an adjacent
+    // Minus + GreaterThan pair (no single-token form for either alias) —
+    // re-compose each here when the two are source-adjacent. M6.7-D3: `:>` is
+    // the DOMINANT match-arm arrow in the corpus (12 of the 24 cluster files);
+    // the live tokenizer lexes `:>` as a first-class operator (tokenizer.ts)
+    // and ast-builder treats `=>` / `:>` / `->` identically (ast-builder.js
+    // isArmArrow), normalising the flavour away — so accepting `:>` here is
+    // parity-COMPLETENESS for a form live already accepts, not an expansion.
+    // The bridge (translate-expr.js reconstructMatchArm) serialises the arm
+    // with the canonical `=>`, matching the live re-parse path exactly.
     let separator = "=>";
     if (currentKind(cursor) === TokenKind.Arrow) {
         advance(cursor);   // consume `=>`
+    } else if (isColonArrowAliasAhead(cursor)) {
+        advance(cursor);   // consume `:`
+        advance(cursor);   // consume `>`
+        separator = ":>";
     } else if (isArrowAliasAhead(cursor)) {
         advance(cursor);   // consume `-`
         advance(cursor);   // consume `>`
@@ -2748,6 +2761,31 @@ export function isArrowAliasAhead(cursor) {
     return m.span.end === g.span.start;
 }
 
+// --- isColonArrowAliasAhead — is the cursor at a `:>` match-arm separator? ---
+// M1 lexes `:>` as a Colon token then a GreaterThan token (no single `:>`
+// token — the colon lexer maximal-munches only `::`). The `:>` colon-arrow
+// alias (§18.2) is the two source-adjacent. M6.7-D3 — the DOMINANT corpus
+// match-arm arrow. Scoped strictly to match-arm parsing (only parseMatchArm
+// and the isArmArrowAt boundary check call this), so it cannot affect a
+// type-annotation `:` followed by a comparison `>` in general expressions.
+export function isColonArrowAliasAhead(cursor) {
+    if (currentKind(cursor) !== TokenKind.Colon) {
+        return false;
+    }
+    if (peekKind(cursor, 1) !== TokenKind.GreaterThan) {
+        return false;
+    }
+    const c = current(cursor);
+    const g = peek(cursor, 1);
+    if (c === undefined || c === null || g === undefined || g === null) {
+        return false;
+    }
+    if (c.span === undefined || g.span === undefined) {
+        return false;
+    }
+    return c.span.end === g.span.start;
+}
+
 // --- isArmArrowAt — is the token at offset `k` a match-arm arrow (`=>` or
 // `->`)? `=>` lexes as a single Arrow token; `->` lexes as adjacent Minus +
 // GreaterThan (re-composed inline). Helper for peekStartsArmPattern.
@@ -2756,6 +2794,14 @@ function isArmArrowAt(cursor, k) {
     const kind = peekKind(cursor, k);
     if (kind === TokenKind.Arrow) {
         return true;
+    }
+    // `:>` colon-arrow alias — adjacent Colon + GreaterThan (M6.7-D3).
+    if (kind === TokenKind.Colon && peekKind(cursor, k + 1) === TokenKind.GreaterThan) {
+        const c = peek(cursor, k);
+        const g = peek(cursor, k + 1);
+        if (c === undefined || c === null || g === undefined || g === null) return false;
+        if (c.span === undefined || g.span === undefined) return false;
+        return c.span.end === g.span.start;
     }
     if (kind === TokenKind.Minus && peekKind(cursor, k + 1) === TokenKind.GreaterThan) {
         const m = peek(cursor, k);

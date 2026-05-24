@@ -589,12 +589,12 @@
     "SPAN-COORD": 66
   },
   "samples/admin-panel.scrml": {
-    "KIND-NAME": 41,
-    "FIELD-SHAPE": 64,
-    "MISSING-FIELD": 272,
-    "EXTRA-FIELD": 138,
-    "COUNT-LENGTH": 9,
-    "SPAN-COORD": 283
+    "KIND-NAME": 39,
+    "FIELD-SHAPE": 65,
+    "MISSING-FIELD": 263,
+    "EXTRA-FIELD": 116,
+    "COUNT-LENGTH": 6,
+    "SPAN-COORD": 302
   },
   "samples/api-dashboard.scrml": {
     "FIELD-SHAPE": 1,
@@ -2605,12 +2605,11 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-colon-arrow-024.scrml": {
-    "KIND-NAME": 2,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 17,
-    "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 8
+    "MISSING-FIELD": 7,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-dash-arrow-023.scrml": {
     "FIELD-SHAPE": 4,
@@ -5527,10 +5526,10 @@
   },
   "samples/compilation-tests/test-008-test-enum.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 5,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 7,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 7
   },
   "samples/compilation-tests/test-009-test-reactive.scrml": {
@@ -5759,12 +5758,12 @@
     "COUNT-LENGTH": 2
   },
   "samples/gauntlet-r11/rust-state-machine.scrml": {
-    "KIND-NAME": 25,
-    "FIELD-SHAPE": 41,
-    "MISSING-FIELD": 193,
-    "EXTRA-FIELD": 77,
-    "COUNT-LENGTH": 9,
-    "SPAN-COORD": 133
+    "KIND-NAME": 20,
+    "FIELD-SHAPE": 52,
+    "MISSING-FIELD": 187,
+    "EXTRA-FIELD": 56,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 197
   },
   "samples/gauntlet-r13/bun-sql-operations.scrml": {
     "KIND-NAME": 12,
@@ -6085,11 +6084,11 @@
   },
   "samples/kanban-r11.scrml": {
     "KIND-NAME": 38,
-    "FIELD-SHAPE": 82,
-    "MISSING-FIELD": 284,
-    "EXTRA-FIELD": 103,
-    "COUNT-LENGTH": 12,
-    "SPAN-COORD": 203
+    "FIELD-SHAPE": 79,
+    "MISSING-FIELD": 292,
+    "EXTRA-FIELD": 101,
+    "COUNT-LENGTH": 6,
+    "SPAN-COORD": 223
   },
   "samples/login.scrml": {
     "KIND-NAME": 7,
@@ -6157,12 +6156,12 @@
     "COUNT-LENGTH": 2
   },
   "samples/todo-list.scrml": {
-    "KIND-NAME": 14,
-    "FIELD-SHAPE": 31,
-    "MISSING-FIELD": 131,
-    "EXTRA-FIELD": 54,
-    "COUNT-LENGTH": 7,
-    "SPAN-COORD": 179
+    "KIND-NAME": 12,
+    "FIELD-SHAPE": 29,
+    "MISSING-FIELD": 121,
+    "EXTRA-FIELD": 41,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 189
   },
   "samples/user-profile.scrml": {
     "KIND-NAME": 22,
