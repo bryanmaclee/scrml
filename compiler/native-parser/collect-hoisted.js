@@ -438,6 +438,19 @@ export function synthEngineDecl(block, stamp, source) {
         openerHadSpaceAfterLt: block.tagKind === "StateOpener",
         legacyMachineKeyword: block.name === "machine",
         span: block.span,
+        // M6.6.b.2 — native-walker bridge. Stamp the source native engine
+        // Markup block + the full file source so symbol-table's PASS 11
+        // can walk the engine state-children via the native block stream
+        // (compiler/src/native-walker/engine-statechild-walker.ts) instead
+        // of re-tokenizing rulesRaw through engine-statechild-parser.ts.
+        //
+        // Underscore-prefixed (consumer-private). The fields are populated
+        // ONLY on the native pipeline; the live pipeline's engineDecl never
+        // carries them. Symbol-table uses presence as the discriminator:
+        // when present, walk natively; when absent, fall back to the legacy
+        // text re-tokenizer. Additive — no FileAST contract change.
+        _nativeEngineBlock: block,
+        _source: typeof source === "string" ? source : "",
     };
 }
 
