@@ -5,76 +5,76 @@
 // ul, ol, hr, img, a, kbd, figure, figcaption).
 
 <article class="prose prose-slate prose-lg">
-    <h1>Typography Plugin Test</>
-    <p>This article exercises the <code>prose</> utility family per SPEC §26.6. The container has <code>class="prose prose-slate prose-lg"</> applied, so nested typography should pick up base styling, slate color overrides, and large-size scaling.</>
+    <h1>Typography Plugin Test</h1>
+    <p>This article exercises the <code>prose</code> utility family per SPEC §26.6. The container has <code>class="prose prose-slate prose-lg"</code> applied, so nested typography should pick up base styling, slate color overrides, and large-size scaling.</p>
 
-    <h2>Headings</>
-    <p>The <kbd>prose</> family styles <code>h1</> through <code>h4</> with progressive sizes.</>
+    <h2>Headings</h2>
+    <p>The <kbd>prose</kbd> family styles <code>h1</code> through <code>h4</code> with progressive sizes.</p>
 
-    <h3>Inline content</>
-    <p>Links like <a href="https://example.com">example.com</> render with prose link styling. <strong>Bold text</> uses the heading color. Inline <code>code</> appears in monospace with backtick markers.</>
+    <h3>Inline content</h3>
+    <p>Links like <a href="https://example.com">example.com</a> render with prose link styling. <strong>Bold text</strong> uses the heading color. Inline <code>code</code> appears in monospace with backtick markers.</p>
 
-    <h4>Code blocks</>
+    <h4>Code blocks</h4>
     <pre><code>function greet(name) {
   return `Hello, ${name}`;
-}</></>
+}</code></pre>
 
-    <h2>Lists</>
+    <h2>Lists</h2>
     <ul>
-        <li>Unordered item one</>
-        <li>Unordered item two with <em>emphasis</></>
-        <li>Unordered item three</>
+        <li>Unordered item one</li>
+        <li>Unordered item two with <em>emphasis</em></li>
+        <li>Unordered item three</li>
     </ul>
 
     <ol>
-        <li>Ordered item one</>
-        <li>Ordered item two</>
-        <li>Ordered item three</>
+        <li>Ordered item one</li>
+        <li>Ordered item two</li>
+        <li>Ordered item three</li>
     </ol>
 
-    <h2>Blockquotes</>
+    <h2>Blockquotes</h2>
     <blockquote>
-        <p>A quoted passage uses italic styling, a left border in the variant's 200-shade, and the variant's 900-shade for body color.</>
+        <p>A quoted passage uses italic styling, a left border in the variant's 200-shade, and the variant's 900-shade for body color.</p>
     </blockquote>
 
-    <h2>Tables</>
+    <h2>Tables</h2>
     <table>
         <thead>
             <tr>
-                <th>Property</>
-                <th>Description</>
+                <th>Property</th>
+                <th>Description</th>
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td>prose</>
-                <td>Base nested-typography styling</>
+                <td>prose</td>
+                <td>Base nested-typography styling</td>
             </tr>
             <tr>
-                <td>prose-slate</>
-                <td>Slate-tone color overrides</>
+                <td>prose-slate</td>
+                <td>Slate-tone color overrides</td>
             </tr>
             <tr>
-                <td>prose-lg</>
-                <td>Large size scaling</>
+                <td>prose-lg</td>
+                <td>Large size scaling</td>
             </tr>
         </tbody>
     </table>
 
     <hr/>
 
-    <h2>Opt-out (not-prose)</>
-    <p>The block below is marked <code>not-prose</> and should escape prose styling entirely:</>
+    <h2>Opt-out (not-prose)</h2>
+    <p>The block below is marked <code>not-prose</code> and should escape prose styling entirely:</p>
 
     <div class="not-prose">
-        <h3>Plain heading inside not-prose</>
-        <p>This paragraph uses default browser styling, not prose typography.</>
-        <a href="#">A link with no prose styling</>
+        <h3>Plain heading inside not-prose</h3>
+        <p>This paragraph uses default browser styling, not prose typography.</p>
+        <a href="#">A link with no prose styling</a>
     </div>
 
-    <h2>Figures</>
+    <h2>Figures</h2>
     <figure>
         <img src="/example.png" alt="example"/>
-        <figcaption>A caption rendered in the prose figcaption style.</>
+        <figcaption>A caption rendered in the prose figcaption style.</figcaption>
     </figure>
 </article>

@@ -53,7 +53,7 @@ Markup layer:        MK1 → MK2 → MK3 → MK4 ─┘
 | MK3 | Markup | `BodyMode` + `DisplayTextLiteral` — §4.18 native quoted-text | 18-38h |
 | MK4 | Markup | Markup↔JS seam; re-tokenizer scaffolding deletion | ✅ COMPLETE (S114) |
 | M5 | Both | Pipeline swap behind `--parser=scrml-native` + canary | 16-36h |
-| M6 | Both | Joint retirement — BS + Acorn + BPP deleted; flag retired | 12-28h |
+| M6 | Both | Joint retirement — BS + Acorn + BPP deleted; flag retired | 12-28h (Phase A flip ⏳ — S124 attempt deferred pending native-vs-live AST shape adapter per cutover plan §M6.5; corpus migrations + canary close LANDED S124, canary 998 → 999/1000) |
 
 Headline: **~239-518h, midpoint ~380h (~10-14 focused sessions)** past M1.
 

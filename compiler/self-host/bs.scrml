@@ -53,7 +53,7 @@ ${
 
         // Context stack frames.
         // Markup/state: { type, name, isComponent, depth, startPos, startLine, startCol, children, braceDepth:0 }
-        // Brace-delimited: { type, name:null, depth, startPos, startLine, startCol, children, braceDepth, tagNesting, _inDouble, _inSingle, _inBacktick }
+        // Brace-delimited: { type, name:not, depth, startPos, startLine, startCol, children, braceDepth, tagNesting, _inDouble, _inSingle, _inBacktick }
         const stack = []
 
         // Root-level blocks (when stack is empty)
@@ -83,12 +83,12 @@ ${
         }
 
         fn topFrame() {
-            return stack.length > 0 ? stack[stack.length - 1] : null
+            return stack.length > 0 ? stack[stack.length - 1] : not
         }
 
         fn topIsBraceContext() {
             const f = topFrame()
-            return f != null && (
+            return f is some && (
                 f.type == "logic" || f.type == "sql" ||
                 f.type == "css" || f.type == "error-effect" ||
                 f.type == "meta" || f.type == "test"
@@ -141,8 +141,8 @@ ${
                     span: { start: textStart, end: pos, line: textStartLine, col: textStartCol },
                     depth: currentDepth(),
                     children: [],
-                    name: null,
-                    closerForm: null,
+                    name: not,
+                    closerForm: not,
                     isComponent: false,
                 })
             }
@@ -279,11 +279,11 @@ ${
         // Push a brace-delimited context frame. The opener (sigil + '{') has been consumed.
         function pushBraceContext(type, openPos, openLine, openCol) {
             const parentFrame = topFrame()
-            const inheritedTagNesting = (parentFrame != null && parentFrame.tagNesting != null)
+            const inheritedTagNesting = (parentFrame is some && parentFrame.tagNesting is some)
                 ? parentFrame.tagNesting : 0
             stack.push({
                 type,
-                name: null,
+                name: not,
                 isComponent: false,
                 depth: stack.length,
                 startPos: openPos,
@@ -323,8 +323,8 @@ ${
                 span: { start: frame.startPos, end: pos, line: frame.startLine, col: frame.startCol },
                 depth: frame.depth,
                 children: frame.children,
-                name: null,
-                closerForm: null,
+                name: not,
+                closerForm: not,
                 isComponent: false,
             }
             // Propagate tagNesting from the parent frame at creation time.
@@ -374,8 +374,8 @@ ${
                     span: { start: commentStart, end: pos, line: commentStartLine, col: commentStartCol },
                     depth: currentDepth(),
                     children: [],
-                    name: null,
-                    closerForm: null,
+                    name: not,
+                    closerForm: not,
                     isComponent: false,
                 })
                 continue
@@ -710,7 +710,7 @@ ${
                     if (pos < len && source[pos] == ">") step()
 
                     const frame = topFrame()
-                    if (frame == null || (frame.type != "markup" && frame.type != "state")) {
+                    if (frame is not || (frame.type != "markup" && frame.type != "state")) {
                         errors.push(new BSError(
                             "E-CTX-001",
                             `Unexpected '</${tagName}>' — there is no matching '<${tagName}>' open above. Check for a typo in the tag name, or a missing opening tag.`,
@@ -834,7 +834,7 @@ ${
                 // This IS a bare/trailing closer.
 
                 const frame = topFrame()
-                if (frame == null) {
+                if (frame is not) {
                     // No open context — '/' is just raw content at top level
                     beginText()
                     step()

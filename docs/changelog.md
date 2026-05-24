@@ -2586,6 +2586,33 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-05-23 (S124 M6.7 Phase A PARTIAL — corpus migrations landed; flag flip REVERTED + canary 998 → 999)
+
+The M6.7 dispatch landed the 3 corpus-stale migrations cleanly but reverted the api.js parser-default flip after surfacing a class of native-vs-live AST shape divergences the C2 canary's 998/1000 strict-pass metric does not exercise.
+
+**Landed corpus migrations:**
+
+- **`compiler/self-host/bs.scrml` null → not migration (10 real absence sites + 1 comment doc string)** at `378e6d66`. Surprise structural finding: the migration also eliminated a phantom native-parser typeDecl at line 241 (the H-bs-tail Wave 5 signature). The `name: null,` in object-literal position was being mis-recognized by the native parser as a TYPE-DECL position; migrating to `name: not,` canonicalizes the absence AND closes the parser-side mis-recognition. **Canary delta:** bs.scrml DIFF-hoist-count (gap-ledger) → EXACT (strict-pass). C2 canary: 998 → 999/1000.
+- **`samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml` + `samples/compilation-tests/tailwind-prose-coverage.scrml` inferred-closer migration (34 + 44 sites)** at `a30cf79a`. Required a file-wide stack-based scanner (v2) to handle multi-tag-per-line + multi-line `<pre><code>...</code></pre>` shapes correctly; per-line regex got confused by both. Both files moved LIVE-DEGENERATE (explained-true crutch crediting native correctness against broken live oracle) → EXACT (both pipelines agree exactly). Retires the LIVE-DEGENERATE crutch for these files.
+- **Coupled canary regression-guard update** at `305211d5`. The pre-S124 `parser-conformance-canary.test.js` test asserted bs.scrml classifies DIFF-hoist-count (the H-bs-tail phantom typeDecl). Post-migration the file is EXACT, so the assertion is flipped + the docstring updated to keep the test as a regression-guard against the phantom returning.
+
+**Reverted (STOP per brief):**
+
+- api.js flag flip (`parser !== "legacy"` for `useNativeParser`; was `parser === "scrml-native"`).
+- I-PARSER-NATIVE-SHADOW → I-PARSER-LEGACY-OPT-OUT diagnostic rename (severity info → warning; fires on opt-out path).
+- `--parser=legacy` CLI wiring (both `compile.js` arg parser + `cli.js` help text).
+- SPEC §34 catalog row for I-PARSER-LEGACY-OPT-OUT (placed after W-ABSENCE-IN-SCRML-SOURCE).
+
+**Why the revert:** the post-flip pre-commit gate surfaced **845 test failures across conformance / unit / browser / self-host suites**. Root cause finding via the W-CG-001 failure: native parser produces `kind: "bare-expr"` wrapping a `sql-ref` exprNode where live parser produces `kind: "sql"` for top-level `?{}` blocks, breaking `isServerOnlyNode` detection in `codegen/collect.ts:416` → cascade of warning-not-fired + many sibling within-node shape divergences the canary does not see. **Real-world fixture spot-check confirms:** `examples/23-trucking-dispatch/app.scrml` fails with 11 errors under `--parser=scrml-native` (clean under legacy); `examples/14-mario-state-machine.scrml` fails with 48 errors; `examples/01-hello.scrml` compiles clean. The M6 cutover plan §M6.5 path (a) — an adapter layer normalizing native AST to live shape — is the canonical answer; without it the flip cannot land.
+
+**M6.4b disposition:** naturally dead-code under the planned native default (`ast-builder.js:934 _splitBlocksForP2Form1` only fires inside the live `buildAST` path which only runs when `parser === "legacy"`); no gate needed; M6.8 deletes the whole live path.
+
+**Final test baseline:** 20,041 pass / 0 fail / 170 skip / 1 todo / 758 files (net +1 from updated regression-guard).
+
+**Quiz-app GAP-state-block remains** as the sole gap-ledger entry (out of M6.7 brief scope; uses `</>` as expression-position division operator at line 60 plus state-blocks).
+
+**Disposition for next dispatch:** investigate native AST shape divergences with a diff harness BEFORE re-flipping; fix or adapter-layer the load-bearing divergences; re-flip with adapter in place. The flip artifacts (diagnostic text, CLI wiring, SPEC catalog row) are recoverable from this session's reverted state via git reflog. See `docs/changes/m67-phase-a-flag-flip/progress.md` for full disposition.
+
 ### 2026-05-04 (S58 CLOSED — Stage 0b COMPLETE: D3 + D4 + scrml:oauth + const-form sweep + F4 addendum)
 
 S58 closed Stage 0b. The v0.next spec engineering target is finalized; Phase A1+ implementation phase opens at S59. 47 commits past S57 close, all pushed.

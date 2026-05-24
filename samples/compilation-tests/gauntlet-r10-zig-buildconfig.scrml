@@ -239,10 +239,10 @@ ${
 // --- Markup ---
 // Platform selector
 <div class="build-config-dashboard">
-    <h1>Build Configuration</>
+    <h1>Build Configuration</h1>
 
     <section class="config-section">
-        <h2>Target Platform</>
+        <h2>Target Platform</h2>
         // FRICTION NOTE: I want to render these platform buttons by iterating over
         // Platform.variants (§14.4.2). The spec says enum types have a .variants property
         // for iteration. But: (a) I don't know if this is implemented in the compiler,
@@ -250,16 +250,16 @@ ${
         // enum comparison. The enum type and the runtime state are decoupled.
         // I fall back to manual buttons -- same workaround that kills type safety.
         <div class="platform-buttons">
-            <button onclick=setPlatform("WASM")>WASM</>
-            <button onclick=setPlatform("LinuxX64")>Linux x64</>
-            <button onclick=setPlatform("MacOSArm64")>macOS ARM64</>
-            <button onclick=setPlatform("WindowsX64")>Windows x64</>
+            <button onclick=setPlatform("WASM")>WASM</button>
+            <button onclick=setPlatform("LinuxX64")>Linux x64</button>
+            <button onclick=setPlatform("MacOSArm64")>macOS ARM64</button>
+            <button onclick=setPlatform("WindowsX64")>Windows x64</button>
         </div>
-        <p>Selected: ${@platform}</>
+        <p>Selected: ${@platform}</p>
     </section>
 
     <section class="config-section">
-        <h2>Optimization Level</>
+        <h2>Optimization Level</h2>
         // FRICTION NOTE: Again, I want match here. The @optLevel is a string. I want:
         //   match @optLevel {
         //     ::Debug -> "No optimization, full debug info"
@@ -270,52 +270,52 @@ ${
         // But @optLevel is a string, not an OptLevel enum value. The type system cannot
         // help me here. If/else chains are the only option.
         <div class="opt-buttons">
-            <button onclick=setOptLevel("Debug")>Debug</>
-            <button onclick=setOptLevel("ReleaseSafe")>ReleaseSafe</>
-            <button onclick=setOptLevel("ReleaseFast")>ReleaseFast</>
-            <button onclick=setOptLevel("ReleaseSmall")>ReleaseSmall</>
+            <button onclick=setOptLevel("Debug")>Debug</button>
+            <button onclick=setOptLevel("ReleaseSafe")>ReleaseSafe</button>
+            <button onclick=setOptLevel("ReleaseFast")>ReleaseFast</button>
+            <button onclick=setOptLevel("ReleaseSmall")>ReleaseSmall</button>
         </div>
-        <p>Selected: ${@optLevel}</>
+        <p>Selected: ${@optLevel}</p>
     </section>
 
     <section class="config-section">
-        <h2>Feature Flags</>
+        <h2>Feature Flags</h2>
         // FRICTION NOTE: Boolean flags are the cleanest part of this app.
         // @stripDebug is a bool, the toggle function flips it, the disabled attribute
         // reads it. This is the part of scrml that most resembles Zig: explicit bool,
         // explicit toggle, explicit read. No hidden behavior.
         <div class="feature-flags">
             <div class="flag-row">
-                <label>Strip Debug Info</>
-                <button onclick=toggleStripDebug()>${@stripDebug ? "ON" : "OFF"}</>
+                <label>Strip Debug Info</label>
+                <button onclick=toggleStripDebug()>${@stripDebug ? "ON" : "OFF"}</button>
             </div>
             <div class="flag-row">
-                <label>Link-Time Optimization</>
-                <button onclick=toggleLTO()>${@enableLTO ? "ON" : "OFF"}</>
+                <label>Link-Time Optimization</label>
+                <button onclick=toggleLTO()>${@enableLTO ? "ON" : "OFF"}</button>
             </div>
             <div class="flag-row">
-                <label>Single-Threaded</>
-                <button onclick=toggleSingleThreaded()>${@enableSingleThreaded ? "ON" : "OFF"}</>
+                <label>Single-Threaded</label>
+                <button onclick=toggleSingleThreaded()>${@enableSingleThreaded ? "ON" : "OFF"}</button>
             </div>
             <div class="flag-row">
-                <label>Sanitize Thread</>
-                <button onclick=toggleSanitizeThread()>${@enableSanitizeThread ? "ON" : "OFF"}</>
+                <label>Sanitize Thread</label>
+                <button onclick=toggleSanitizeThread()>${@enableSanitizeThread ? "ON" : "OFF"}</button>
             </div>
             <div class="flag-row">
-                <label>Emit Documentation</>
-                <button onclick=toggleEmitDocs()>${@enableEmitDocs ? "ON" : "OFF"}</>
+                <label>Emit Documentation</label>
+                <button onclick=toggleEmitDocs()>${@enableEmitDocs ? "ON" : "OFF"}</button>
             </div>
         </div>
     </section>
 
     <section class="config-section">
-        <h2>Dependencies</>
+        <h2>Dependencies</h2>
         <div class="dep-list">
             ${
                 for (let dep of @deps) {
                     lift <div class="dep-row">
-                        <span class="dep-name">${dep}</>
-                        <button onclick=removeDep(dep)>Remove</>
+                        <span class="dep-name">${dep}</span>
+                        <button onclick=removeDep(dep)>Remove</button>
                     </div>
                 }
             }
@@ -329,12 +329,12 @@ ${
             // but it IS friction from the scrml promise perspective: the spec
             // says "bind:value=@newDepInput" should work but doesn't yet.
             <input type="text" placeholder="Add dependency" oninput=updateNewDepInput(event.target.value)/>
-            <button onclick=addDependency()>Add</>
+            <button onclick=addDependency()>Add</button>
         </div>
     </section>
 
     <section class="config-section">
-        <h2>Generated Command</>
+        <h2>Generated Command</h2>
         // POSITIVE SIGNAL: This is where const @buildCommand shines. The command
         // preview updates automatically whenever @platform, @optLevel, any flag, or
         // @deps changes. I did not wire any subscription -- the compiler inferred all
@@ -343,7 +343,7 @@ ${
         // construction from expression analysis. In Zig this would require explicit
         // invalidation logic.
         <div class="command-preview">
-            <code>${@buildCommand}</>
+            <code>${@buildCommand}</code>
         </div>
         // bun.eval() for compile-time constant -- testing §29 integration
         // FRICTION NOTE: bun.eval() and ^{} are two separate compile-time mechanisms.
@@ -354,11 +354,11 @@ ${
         // the BOUNDARY between them is not clearly specified. Can I call bun.eval()
         // inside a ^{} block? Can a ^{} block produce a compile-time constant that gets
         // inlined like bun.eval()? The spec does not answer this.
-        <p class="build-meta">scrml compiler version ${ bun.eval("'0.5.0-draft'") }</>
+        <p class="build-meta">scrml compiler version ${ bun.eval("'0.5.0-draft'") }</p>
     </section>
 
     <section class="config-section">
-        <h2>Save Configuration</>
+        <h2>Save Configuration</h2>
         // FRICTION NOTE: The save/load flow exposes the deepest error handling gap.
         // handleSave() sets @saveStatus = "Saving", calls saveConfig() (server fn),
         // then sets @saveStatus = "Saved". But if saveConfig() fails, there is no
@@ -374,8 +374,8 @@ ${
         // But nothing forces me to write that !{} handler. If I omit it, the error is
         // silently dropped. This is the opposite of Zig's mandatory error handling.
         <div class="save-status">
-            <p>Status: ${@saveStatus}</>
-            <button onclick=handleSave()>Save Config</>
+            <p>Status: ${@saveStatus}</p>
+            <button onclick=handleSave()>Save Config</button>
         </div>
     </section>
 </div>

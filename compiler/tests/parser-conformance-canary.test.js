@@ -841,15 +841,32 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
     expect(v.detail.nativeHoist.imports).toBe(0);
   });
 
-  test("the real bs.scrml corpus file does NOT classify LIVE-HOIST-MISCLASSIFY (native-phantom typeDecl — Wave 5 H-bs-tail)", () => {
-    // Native phantoms an empty type-decl at line 241 col 17 (a `step()` call
-    // mid-statement). Source has zero `type` declarations; native is wrong;
-    // the file must stay in unexplained `DIFF-hoist-count` for Wave 5
-    // investigation, NOT be absorbed into LIVE-HOIST-MISCLASSIFY.
+  test("the real bs.scrml corpus file classifies EXACT post-S124 null-to-not migration (was DIFF-hoist-count phantom typeDecl)", () => {
+    // S124 M6.7 Phase 1 corpus migration eliminated the phantom typeDecl.
+    // Pre-S124 history: the file held 10 `null` absence-sentinel sites + 1
+    // comment-doc null reference. `name: null,` in object-literal position
+    // (line 286 pre-migration) triggered a native-parser mis-recognition
+    // as a TYPE-DECL position, producing an empty typeDecl with span 8317-
+    // 8321 (line 241 col 17). The phantom typeDecl was what made bs.scrml
+    // sit in the C2 dual-pipeline canary's DIFF-hoist-count gap-ledger
+    // entry (998/1000 strict-pass shape).
+    //
+    // The S89 ABSOLUTE rule null → not migration (S124 M6.7 dispatch)
+    // canonicalized the absence tokens AND closed the parser-side mis-
+    // recognition: name: null → name: not parses cleanly with no type-decl
+    // mis-cue. liveHoist === nativeHoist === { ..., typeDecls: 0, ... };
+    // file classifies EXACT, lands in the strict-pass set, and the canary
+    // count moved 998 → 999.
+    //
+    // This test stays as a regression-guard against the phantom typeDecl
+    // returning if someone reintroduces a `null` token in an object-literal
+    // value position in bs.scrml without the canonical `not` migration.
     const path = __dirname + "/../../compiler/self-host/bs.scrml";
     const src = readFileSync(path, "utf8");
     const v = classifyDivergence(path, src);
-    expect(v.class).toBe("DIFF-hoist-count");
-    expect(v.explained).toBe(false);
+    expect(v.class).toBe("EXACT");
+    expect(v.explained).toBe(true);
+    expect(v.detail.liveHoist.typeDecls).toBe(0);
+    expect(v.detail.nativeHoist.typeDecls).toBe(0);
   });
 });
