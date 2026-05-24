@@ -262,3 +262,63 @@ The total GROWTH is the "more correct parse -> more comparison surface" artifact
 
 ### STOP conditions
 None hit. Case (2) (bare-expr statement boundary) was covered by the SAME localized ctx-flag (no statement-loop architecture change). Mechanism stayed within 2 source files. No unexplained class regression.
+
+# M6.5.b.3 — FIX-NATIVE hoist-gap (collect-hoisted misses <program>/<page>-body decls)
+
+- [start] Worktree: /home/bryan/scrmlMaster/scrmlTS/.claude/worktrees/agent-ab7806e6b64f7fa7c
+- Startup verification PASSED: pwd under worktree prefix, toplevel==worktree, status clean, merged main 0e0b4498 (fast-forward), bun install ok (204 pkgs), pretest compiled 13 samples.
+- Mailbox `.claude/agent-mail/m6-5-b-3.md` ABSENT → proceed.
+- Maps: read primary.map.md in full; task-shape = "Native-parser bug fix". Maps consulted but NOT load-bearing for the actual root cause (the bug-specific detail lives in source; maps correctly routed me to collect-hoisted.js but the SCOPING-era hypothesis was already stale).
+
+## Phase 0 — VERIFIED root cause (vs the brief's HEDGED hypothesis)
+
+**HEADLINE: the brief's two cited divergences do NOT reproduce at HEAD 0e0b4498. The Class C hoist-gap is ALREADY CLOSED for the structural <program>/<page>-body recursion case.** A prior unit (the `liftBareBlocks` work + M6.4a/A3 collect-hoisted synthesis) closed it. Verified empirically:
+
+- `examples/22-multifile/app.scrml`: brief said native imports=0 vs live 2. **MEASURED: native imports=2 = live 2.** The block-dump shows `Markup<program>` carries `children` containing `LogicEscape body=[Import,Import,VarDecl]`, and `walkBlocks` (collect-hoisted.js:138-140) DOES recurse `block.children` → reaches the LogicEscape → `walkStmts` (line 146-147) collects the imports. CLOSED.
+- `examples/14-mario-state-machine.scrml`: brief said native typeDecls=0 vs live 3. **MEASURED: native typeDecls=3 = live 3, machineDecls=2 = live 2.** Same mechanism: `Markup<program>` children carry `LogicEscape body=[TypeDecl,TypeDecl]` + `LogicEscape body=[TypeDecl]`, all walked. CLOSED.
+
+So the hedged hypothesis ("walkBlocks doesn't reach the program-body decls") is REFUTED at current HEAD — walkBlocks DOES reach them. The recursion is correct.
+
+### Corpus-wide sweep (1001 files, both pipelines, six hoisted lengths + hasProgramRoot)
+Tool: `docs/changes/m65-path-b-adapter-scoping/tools/m65b3-hoist-sweep.js`. Result:
+- **HOIST-GAP files (native length < live length): exactly 1** — `compiler/self-host/cg.scrml` `imports:0<5`.
+- hasProgramRoot mismatch: 5 files, ALL `liveProg=false nativeProg=true` (native OVER-detects, the OPPOSITE of a gap; touching this risks the explicit MUST-NOT). Same 5 files also show `typeDecls native>live` over-counts. Inspection (`samples/expense-tracker.scrml`) shows the file has a real top-level `<program>` + `type` decl — LIVE is failing/truncating on these, native is MORE correct. OUT OF SCOPE (not a hoist-gap; native is the better oracle here).
+- OVER-COUNT files: 6 (the 5 above + `stdlib/auth/jwt.scrml exports:4>1`). Different class (over-collection), not Class C.
+
+### The ONE residual (cg.scrml imports:0<5) — VERIFIED root cause: NOT a recursion gap; an INTENTIONAL semantic guard
+`compiler/self-host/cg.scrml` top-level is `<program> ^{ const cgCore = await import("./cg-parts/section-core.js") ... } </program>` — five `await import(...)` **dynamic-import EXPRESSIONS** inside a `^{}` META block.
+- The Meta block IS walked (collect-hoisted.js:149-158 → walkStmts) — recursion reaches the body. Native Meta body = `[VarDecl,Import,ExprStmt]×5 + Export×2`. The `Import` Stmts each carry `source:"" specifiers:0` (the parse-error-recovery degenerate shape for a dynamic `import(...)` expr, per parse-stmt.js:2050-2051).
+- **collect-hoisted.js:205-207 DELIBERATELY SKIPS these** (`if (typeof stmt.source !== "string" || stmt.source.length===0) continue;`). The code's own comment (lines 196-204) asserts "the live pipeline (Acorn) parses it as an ImportExpression and never hoists it."
+- **That assertion is EMPIRICALLY WRONG for this source shape.** LIVE hoists all 5 as degenerate `import-decl` `{ source:null, names:[], raw:"import ( \"./...\" )" }`. So live DOES hoist dynamic-import-expressions (as degenerate import-decls); native deliberately rejects them.
+
+### Disposition: STOP condition #3 (semantic disambiguation, not a recursion fix)
+The residual requires deciding "is a dynamic `import()` expression a hoisted file-level import-decl (live: yes, degenerate) or not (native guard: no)?" — a SEMANTIC disambiguation between dynamic-import-expression and static-import-decl, NOT a structural recursion gap. Per brief STOP #3 this is a PA semantics question. Additionally: matching live would require INTENTIONALLY reverting the P4-6 top-level-only / degenerate-skip guard (commit 5e58de15) whose comment explicitly justifies skipping these — reversing a prior deliberate decision is a PA call, not a unilateral recursion fix. Surfaced; NOT fixed here.
+
+### Conclusion
+The structural Class C hoist-gap (the unit's actual target) is CLOSED at HEAD. The remaining work is REGRESSION-LOCKING the now-correct <program>/<page>-body recursion so it cannot silently regress, since the only canary that would have caught it (within-node COUNT-LENGTH) is permissive. The dynamic-import residual is surfaced to PA as a separate semantics decision.
+
+## M6.5.b.3 — LANDED (worktree branch; PA does S67 file-delta to main)
+
+### Disposition: regression-lock (the structural Class C gap is CLOSED at HEAD)
+NO source change. The brief's hedged "walkBlocks doesn't reach <program>-body decls" was REFUTED in Phase 0 — the recursion is correct at HEAD 0e0b4498. The added value is a deterministic regression-lock test so the now-correct behavior cannot silently regress (the within-node COUNT-LENGTH canary that would catch it is permissive/allowlisted).
+
+### Files touched (test + docs/tools ONLY — zero parser/codegen/allowlist source)
+- compiler/tests/unit/m65-b3-hoist-gap.test.js — NEW, 14 tests (production-path driver: parseMarkupTrace -> liftBareBlocks -> collectHoisted).
+- docs/changes/m65-path-b-adapter-scoping/tools/m65b3-blockdump.js / m65b3-hoist-sweep.js / m65b3-meta-import.js — Phase-0 diagnostics.
+- docs/changes/m65-path-b-adapter-scoping/progress.md — this record.
+
+### Verification (exacting M6 gate)
+1. New unit tests: 14 pass / 0 fail; deterministic across 3 standalone runs (95-101ms).
+2. Within-node canary: 1005 pass / 0 fail. Histogram UNCHANGED from b.2.1 baseline (total 137888; KIND-NAME 3393, FIELD-SHAPE 15068, MISSING-FIELD 42576, EXTRA-FIELD 18373, COUNT-LENGTH 1319, SPAN-COORD 57159, NESTED-SHAPE 0, PARSE-FAILURE 0). No allowlist regen — nothing moved (source-inert change).
+3. Strict-pass canary: 1000/1001 (99.9%) HELD (≥999/1000). Histogram identical: EXACT 964, LIVE-DEGENERATE 12, GAP-state-block 1, LIVE-PHANTOM 1, DEFERRAL-test-block 21, LIVE-HOIST-MISCLASSIFY 2. 1019 pass / 0 fail.
+4. Full `bun run test`: 21248 pass / 174 skip / 1 todo / 0 fail across 773 files (TWO consecutive clean runs, ~52s each). One earlier run showed a non-reproducible 2-fail flake (pass=21247) — same flake class the b.2.1 record documented (non-parser browser/timing); not reproducible on runs 2+3; my test is deterministic.
+
+### STOP conditions hit
+- **STOP #3 (semantic disambiguation, not a recursion fix) — HIT, surfaced to PA, NOT fixed.** The ONE corpus residual where native hoisted-length < live (`compiler/self-host/cg.scrml imports:0<5`) is five `await import("./...")` DYNAMIC-import EXPRESSIONS inside a `^{}` meta block. The Meta block IS walked (recursion reaches the body); the degenerate `Import` Stmts (source:"") are DELIBERATELY skipped by the P4-6 top-level-only/degenerate guard (collect-hoisted.js:205-207, commit 5e58de15) whose comment asserts "live never hoists a dynamic import expr." That assertion is EMPIRICALLY WRONG for this shape — live DOES hoist them as degenerate import-decls {source:null,names:[],raw:"import ( ... )"}. Matching live would mean reverting a prior deliberate decision AND deciding the dynamic-import-expr-vs-static-import-decl semantics — a PA call, not a recursion fix.
+- **Out-of-scope (NOT touched per the explicit MUST-NOT):** 5 files show `hasProgramRoot` native=true / live=false (native OVER-detects) + typeDecls native>live over-count (samples/expense-tracker.scrml, api-dashboard.scrml, gauntlet-r11-zig-buildconfig.scrml, rust-dev-lin-lift-pipeline.scrml, rust-dev-lin-lift-edge-cases.scrml) and stdlib/auth/jwt.scrml exports:4>1. These are native OVER-collection / live-parse-truncation (native is the MORE-correct oracle on these), NOT a Class C gap. Contaminating hasProgramRoot is the brief's explicit MUST-NOT, so left untouched. Candidate follow-on class (native over-detect on nested/non-root <program>), surfaced to PA.
+
+### PA action requested
+- Decide the dynamic-import-expression hoist semantics for `^{}`-meta / `${}` bodies (cg.scrml shape): match live's degenerate-import-decl hoisting, or keep the native skip-guard and instead ADAPT the live oracle? This is the residual that keeps native<live; it is a deliberate prior-decision reversal, hence PA-owned.
+
+### Maps consulted
+primary.map.md (full) — task-shape "Native-parser bug fix". Maps consulted but NOT load-bearing for the root cause: they correctly routed to collect-hoisted.js, but the SCOPING-era bug hypothesis was already stale and the verified cause (gap already closed; residual is a dynamic-import semantic guard) came from empirical Phase-0 source tracing, not map content.
