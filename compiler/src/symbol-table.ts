@@ -125,22 +125,31 @@ import {
 } from "./derived-mutation-ops.ts";
 // B15 — engine state-child structural parser. Legacy text-rescanner; M6.6.b.2
 // retired its use at PASS 11 step 3 in favor of the native block-tree walker
-// (`walkEngineStateChildren`). The legacy parser survives here as a fallback
+// (`walkEngineStateChildren`). M6.6.b.3 extended the migration to
+// `isLegacyArrowRulesBody` + `scanForOnIdleEntries` (now also discriminated
+// via the native walker). The legacy parser survives here ONLY as a fallback
 // for synthetic ASTs that don't carry `_nativeEngineBlock` (test harnesses
 // that build an engine-decl directly without going through the native
-// pipeline). `isLegacyArrowRulesBody` + `scanForOnIdleEntries` remain in use.
+// pipeline). All three legacy helpers are still imported because the
+// discriminated branches at the call sites fall back to them when the
+// bridge fields are absent. The fallback retires at M6.8 once synthetic-AST
+// test harnesses migrate to native-pipeline construction.
 import {
   parseEngineStateChildren,
   isLegacyArrowRulesBody,
   scanForOnIdleEntries,
 } from "./engine-statechild-parser.ts";
-// M6.6.b.2 — native block-tree walker for engine state-children. Reads the
+// M6.6.b.2 + b.3 — native block-tree walkers for engine state-children +
+// legacy-arrow classification + onIdle entry scan. Each reads the
 // `_nativeEngineBlock` + `_source` fields stamped on the engine-decl by
-// `synthEngineDecl` (collect-hoisted.js) and produces the same
-// `EngineStateChildEntry[]` shape the legacy text-rescanner did. Used when
-// the engine-decl was synthesized by the native pipeline; falls back to the
+// `synthEngineDecl` (collect-hoisted.js). Used when the engine-decl was
+// synthesized by the native pipeline; the call sites fall back to the
 // legacy parser when the bridge fields are absent.
-import { walkEngineStateChildren } from "./native-walker/engine-statechild-walker.ts";
+import {
+  walkEngineStateChildren,
+  walkIsLegacyArrowRulesBody,
+  walkOnIdleEntries,
+} from "./native-walker/engine-statechild-walker.ts";
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 // B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
@@ -5046,7 +5055,18 @@ export function validateEngineStateChildrenAndRules(
   // wins.
   meta.idleWatchdog = null;
   if (!isDerived) {
-    const idleEntries = scanForOnIdleEntries(rulesRaw);
+    // M6.6.b.3 — prefer the native walker when the engine-decl was
+    // synthesized by the native pipeline. Fall back to the legacy regex
+    // scanner for synthetic ASTs (test harnesses that build an engine-decl
+    // directly without going through the native pipeline) — same pattern
+    // as Step 3 above.
+    const idleEntries =
+      nativeEngineBlock !== undefined && nativeEngineBlock !== null
+        ? walkOnIdleEntries(
+            nativeEngineBlock as Parameters<typeof walkOnIdleEntries>[0],
+            typeof nativeSource === "string" ? nativeSource : "",
+          )
+        : scanForOnIdleEntries(rulesRaw);
     if (idleEntries.length > 0) {
       // Build a list of state-child body ranges (rawOffset for the opener
       // through rawOffset + bodyRaw.length + closer). The parseEngineStateChildren
@@ -5151,7 +5171,18 @@ export function validateEngineStateChildrenAndRules(
   // For legacy arrow-rule bodies, the parser returns []. In that case,
   // we DO NOT fire E-ENGINE-STATE-CHILD-MISSING — the legacy form is
   // type-system territory, not B15 territory.
-  if (stateChildren.length === 0 && isLegacyArrowRulesBody(rulesRaw)) {
+  //
+  // M6.6.b.3 — prefer the native walker when the engine-decl was synthesized
+  // by the native pipeline. Fall back to the legacy regex helper for
+  // synthetic ASTs.
+  const isLegacyArrow =
+    nativeEngineBlock !== undefined && nativeEngineBlock !== null
+      ? walkIsLegacyArrowRulesBody(
+          nativeEngineBlock as Parameters<typeof walkIsLegacyArrowRulesBody>[0],
+          typeof nativeSource === "string" ? nativeSource : "",
+        )
+      : isLegacyArrowRulesBody(rulesRaw);
+  if (stateChildren.length === 0 && isLegacyArrow) {
     return;
   }
 

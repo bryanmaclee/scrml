@@ -42,8 +42,16 @@
 
 import { describe, test, expect } from "bun:test";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
-import { parseEngineStateChildren } from "../../src/engine-statechild-parser.ts";
-import { walkEngineStateChildren } from "../../src/native-walker/engine-statechild-walker.ts";
+import {
+  parseEngineStateChildren,
+  isLegacyArrowRulesBody,
+  scanForOnIdleEntries,
+} from "../../src/engine-statechild-parser.ts";
+import {
+  walkEngineStateChildren,
+  walkIsLegacyArrowRulesBody,
+  walkOnIdleEntries,
+} from "../../src/native-walker/engine-statechild-walker.ts";
 
 // ----- Helpers --------------------------------------------------------------
 
@@ -608,5 +616,245 @@ describe("M6.6.b.2 walker — kitchen-sink (every shape category in one engine)"
     // Field-by-field cross-validation: every populated field shape must
     // match the legacy parser byte-for-byte (modulo rawOffset).
     expect(stripRawOffsetRecursive(native)).toEqual(stripRawOffsetRecursive(legacy));
+  });
+});
+
+// =============================================================================
+// M6.6.b.3 — walkIsLegacyArrowRulesBody + walkOnIdleEntries parity tests.
+//
+// Same dual-pipeline structure as the b.2 tests: drive each fixture through
+// `nativeParseFile`, find the engine-decl, then run BOTH the legacy regex
+// helper (against `engineDecl.rulesRaw`) AND the native walker (against
+// `engineDecl._nativeEngineBlock` + `_source`). Assert structural parity
+// where the cookbook claims it; document the divergences.
+// =============================================================================
+
+// dualWalkLegacyArrow — produce both classifications for an engine fixture.
+function dualWalkLegacyArrow(src) {
+  const result = nativeParseFile("/m66-b3/legacy-arrow.scrml", src);
+  const engineDecl = findEngineDecl(result.ast);
+  if (!engineDecl) {
+    throw new Error("test fixture is malformed — no engine-decl found");
+  }
+  const legacy = isLegacyArrowRulesBody(engineDecl.rulesRaw || "");
+  const native = walkIsLegacyArrowRulesBody(
+    engineDecl._nativeEngineBlock,
+    typeof engineDecl._source === "string" ? engineDecl._source : "",
+  );
+  return { legacy, native, engineDecl };
+}
+
+// dualWalkOnIdle — produce both onIdle entry lists for an engine fixture.
+function dualWalkOnIdle(src) {
+  const result = nativeParseFile("/m66-b3/onidle.scrml", src);
+  const engineDecl = findEngineDecl(result.ast);
+  if (!engineDecl) {
+    throw new Error("test fixture is malformed — no engine-decl found");
+  }
+  const legacy = scanForOnIdleEntries(engineDecl.rulesRaw || "");
+  const native = walkOnIdleEntries(
+    engineDecl._nativeEngineBlock,
+    typeof engineDecl._source === "string" ? engineDecl._source : "",
+  );
+  return { legacy, native, engineDecl };
+}
+
+// stripIdleRawOffset — `rawOffset` measures from different bases across the
+// two pipelines (legacy: trimmed `rulesRaw`; native: post-trim child-span
+// window). Strip it for cross-pipeline equality. Same rationale as the
+// b.2 `stripRawOffsetRecursive` helper.
+function stripIdleRawOffset(entries) {
+  return entries.map((e) => {
+    const c = { ...e };
+    delete c.rawOffset;
+    return c;
+  });
+}
+
+describe("M6.6.b.3 walker — walkIsLegacyArrowRulesBody", () => {
+  test("legacy <machine> body with arrow grammar → legacy=true", () => {
+    // SPEC §51.0.K legacy form: event-arrow grammar produces NO PascalCase
+    // state-child openers; legacy parser fires the arrow-rule classifier.
+    // Native walker mirrors via the no-PascalCase + `=>` heuristic.
+    const src = `<program>
+      type Color = .Red | .Blue;
+      <machine for=Color>
+        click => .Blue
+        reset => .Red
+      </machine>
+    </program>`;
+    const { legacy, native } = dualWalkLegacyArrow(src);
+
+    expect(native).toBe(true);
+    expect(native).toBe(legacy);
+  });
+
+  test("new <engine> body with state-children → legacy=false", () => {
+    // PascalCase state-child openers present — not legacy arrow grammar.
+    const src = `<program>
+      type Size = .Small | .Big;
+      <engine for=Size>
+        <Small rule=.Big/>
+        <Big rule=.Small/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkLegacyArrow(src);
+
+    expect(native).toBe(false);
+    expect(native).toBe(legacy);
+  });
+
+  test("empty engine body → legacy=false", () => {
+    // No state-child openers AND no `=>` — not legacy arrow grammar.
+    const src = `<program>
+      type Mode = .Only;
+      <engine for=Mode>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkLegacyArrow(src);
+
+    expect(native).toBe(false);
+    expect(native).toBe(legacy);
+  });
+
+  test("engine body with state-children plus expression containing `=>` → legacy=false (PascalCase wins)", () => {
+    // The legacy regex is `hasStateChildOpener` AND `!hasStateChildOpener &&
+    // hasArrow` — i.e. PascalCase children DOMINATE. An arrow function
+    // expression inside a state-child body must NOT misclassify.
+    const src = `<program>
+      type State = .A | .B;
+      <engine for=State>
+        <A rule=.B>\${arr.map(x => x + 1)}</A>
+        <B/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkLegacyArrow(src);
+
+    expect(native).toBe(false);
+    expect(native).toBe(legacy);
+  });
+
+  test("defensive — null / undefined engineBlock returns false", () => {
+    expect(walkIsLegacyArrowRulesBody(null, "")).toBe(false);
+    expect(walkIsLegacyArrowRulesBody(undefined, "")).toBe(false);
+  });
+
+  test("defensive — engineBlock with empty children + empty source returns false", () => {
+    expect(
+      walkIsLegacyArrowRulesBody({ kind: "Markup", children: [] }, ""),
+    ).toBe(false);
+    expect(
+      walkIsLegacyArrowRulesBody({ kind: "Markup", children: null }, ""),
+    ).toBe(false);
+  });
+});
+
+describe("M6.6.b.3 walker — walkOnIdleEntries", () => {
+  test("single engine-root <onIdle/> with literal duration → entry recovered", () => {
+    const src = `<program>
+      type Auth = .Active | .Idle;
+      <engine for=Auth>
+        <Active rule=.Idle/>
+        <Idle/>
+        <onIdle after=5000ms to=.Idle/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkOnIdle(src);
+
+    expect(native).toHaveLength(1);
+    expect(legacy).toHaveLength(1);
+    expect(native[0].after).toBe(legacy[0].after);
+    expect(native[0].to).toBe("Idle");
+    expect(native[0].to).toBe(legacy[0].to);
+    expect(stripIdleRawOffset(native)).toEqual(stripIdleRawOffset(legacy));
+  });
+
+  test("single engine-root <onIdle/> with quoted duration → entry recovered (quotes stripped)", () => {
+    const src = `<program>
+      type Auth = .Active | .Idle;
+      <engine for=Auth>
+        <Active rule=.Idle/>
+        <Idle/>
+        <onIdle after="500ms" to=".Idle"/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkOnIdle(src);
+
+    expect(native).toHaveLength(1);
+    expect(native[0].after).toBe("500ms");
+    expect(native[0].to).toBe("Idle");
+    expect(stripIdleRawOffset(native)).toEqual(stripIdleRawOffset(legacy));
+  });
+
+  test("multiple <onIdle> siblings → both recovered (typer fires E-IDLE-DUPLICATE)", () => {
+    // Per SPEC §51.0.R, multiple <onIdle> entries are caught by the typer's
+    // E-IDLE-DUPLICATE check (symbol-table.ts:5128). The WALKER's job is to
+    // surface ALL entries so the typer can fire on the duplicate; we assert
+    // both entries are returned.
+    const src = `<program>
+      type Auth = .Active | .Idle | .Locked;
+      <engine for=Auth>
+        <Active rule=.Idle/>
+        <Idle/>
+        <Locked/>
+        <onIdle after=5000ms to=.Idle/>
+        <onIdle after=10000ms to=.Locked/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkOnIdle(src);
+
+    expect(native).toHaveLength(2);
+    expect(legacy).toHaveLength(2);
+    expect(native[0].to).toBe("Idle");
+    expect(native[1].to).toBe("Locked");
+    expect(stripIdleRawOffset(native)).toEqual(stripIdleRawOffset(legacy));
+  });
+
+  test("<onIdle> plus <onTimeout> + state-children — only <onIdle> entries returned", () => {
+    // The walker filters by name === "onIdle"; unrelated structural
+    // siblings (<onTimeout> on state-children, nested engines, etc.) must
+    // not contaminate the result.
+    const src = `<program>
+      type Auth = .Active | .Idle;
+      <engine for=Auth>
+        <Active rule=.Idle>
+          <onTimeout after=1s to=.Idle/>
+        </Active>
+        <Idle/>
+        <onIdle after=5000ms to=.Idle/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkOnIdle(src);
+
+    expect(native).toHaveLength(1);
+    expect(native[0].after).toBe("5000ms");
+    expect(native[0].to).toBe("Idle");
+    expect(stripIdleRawOffset(native)).toEqual(stripIdleRawOffset(legacy));
+  });
+
+  test("engine with no <onIdle> → empty array", () => {
+    const src = `<program>
+      type Auth = .Active | .Idle;
+      <engine for=Auth>
+        <Active rule=.Idle/>
+        <Idle/>
+      </engine>
+    </program>`;
+    const { legacy, native } = dualWalkOnIdle(src);
+
+    expect(native).toHaveLength(0);
+    expect(legacy).toHaveLength(0);
+  });
+
+  test("defensive — null / undefined engineBlock returns []", () => {
+    expect(walkOnIdleEntries(null, "")).toEqual([]);
+    expect(walkOnIdleEntries(undefined, "")).toEqual([]);
+  });
+
+  test("defensive — engineBlock without children returns []", () => {
+    expect(walkOnIdleEntries({ kind: "Markup", children: null }, "")).toEqual(
+      [],
+    );
+    expect(walkOnIdleEntries({ kind: "Markup", children: [] }, "")).toEqual([]);
   });
 });

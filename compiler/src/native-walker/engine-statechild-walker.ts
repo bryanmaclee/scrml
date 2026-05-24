@@ -36,6 +36,7 @@ import type {
   OnTransitionEntry,
   NestedEngineEntry,
   PayloadBinding,
+  OnIdleEntry,
 } from "../symbol-table.ts";
 
 // ------ Native shape (informal) ---------------------------------------------
@@ -528,6 +529,118 @@ export function walkEngineStateChildren(
     const first = name.charCodeAt(0);
     if (first < 65 || first > 90) continue;
     out.push(walkOneStateChild(child, source, rulesRawStart));
+  }
+  return out;
+}
+
+// =============================================================================
+// M6.6.b.3 — walkIsLegacyArrowRulesBody
+//
+// Replace the legacy `isLegacyArrowRulesBody(rulesRaw)` text regex
+// (`engine-statechild-parser.ts:343-352`). The legacy heuristic: body
+// contains `=>` but no `<UpperCase` opener.
+//
+// Native equivalent: with the engine block in hand, check whether the
+// block has ANY Markup child whose name is PascalCase (a state-child
+// opener). If none AND the body text contains `=>`, classify as legacy
+// arrow-rule.
+//
+// For the body-text `=>` check we need the source slice; we use the same
+// `computeRulesRawStart`-style slice (post-trim body window). This
+// preserves the legacy regex's input domain — only the body region
+// between first-child and last-child spans is considered.
+//
+// EXPORT — symbol-table.ts:5154 swap target.
+// =============================================================================
+export function walkIsLegacyArrowRulesBody(
+  engineBlock: Block | undefined | null,
+  source: string,
+): boolean {
+  if (!engineBlock || !Array.isArray(engineBlock.children)) return false;
+  // Any PascalCase Markup child means this is the new `<engine>` form;
+  // legacy arrow grammar is `event -> Variant`, which produces NO
+  // PascalCase state-child openers at the engine body.
+  for (const child of engineBlock.children) {
+    if (!child || child.kind !== "Markup") continue;
+    const name = child.name;
+    if (typeof name !== "string" || name.length === 0) continue;
+    const first = name.charCodeAt(0);
+    if (first >= 65 && first <= 90) return false;
+  }
+  // No state-child opener. Now check whether the body text contains `=>`.
+  // Body text = the slice from first-child-span.start to last-child-span.end,
+  // OR the engine block's own span if there are no children at all (rare
+  // edge case — empty engine body returns false either way).
+  const bodyText = sliceBodyFromChildren(engineBlock, source);
+  if (bodyText.length === 0) return false;
+  return bodyText.indexOf("=>") >= 0;
+}
+
+// =============================================================================
+// M6.6.b.3 — walkOnIdleEntries
+//
+// Replace the legacy `scanForOnIdleEntries(rulesRaw)` regex scanner
+// (`engine-statechild-parser.ts:598-648`). The legacy scanner walks the
+// engine's `rulesRaw` for `<onIdle ... />` self-closing elements and
+// extracts `after=` + `to=` attributes; the result is later cross-
+// referenced against state-child boundaries for E-IDLE-MISPLACED.
+//
+// Native equivalent: `<onIdle>` lives in `engineBlock.children[]` directly
+// (cookbook §Open Questions OQ #4 — confirmed at M6.6 contract derivation).
+// We filter by name and produce one entry per child, reading `after=` /
+// `to=` via the standard cookbook accessors.
+//
+// SHAPE PARITY
+//   - `after`: legacy accepts `Nms`/`Ns` (bare token), `"500ms"` (quoted),
+//     and `${expr}<unit>` (computed). Native gives us `expr.raw` for `${}`,
+//     `string-literal` for quoted, `variable-ref` for bare-token. The
+//     legacy regex strips surrounding quotes but otherwise returns the
+//     verbatim text — we mirror via `readExprValue → readAttrName →
+//     readRuleAttrInput` chain (same order as `readOnTimeoutEntry`).
+//   - `to`: legacy strips leading dot. We do the same via `stripLeadingDot`.
+//   - `rawOffset`: legacy reports the offset of the `<` of `<onIdle>`
+//     within `rulesRaw`. Native reports the offset of the block's
+//     `span.start` (also pointing at the `<`). The basis differs (legacy:
+//     trimmed `rulesRaw`; native: absolute file offset relative to
+//     `computeRulesRawStart`). We compute relative to `rulesRawStart`
+//     for legacy parity.
+//
+// SCOPE — legacy scanned for `<onIdle\b...\/>` (self-closing form). The
+// native parser parses `<onIdle/>` as a self-close Markup block — already
+// the only legal shape per SPEC §51.0.R. We DO accept any `<onIdle>` Markup
+// regardless of `tagClass` since the malformed-shape case is the typer's
+// concern, not the walker's; but in practice all valid `<onIdle>` are
+// `SelfClose`.
+//
+// EXPORT — symbol-table.ts:5049 swap target.
+// =============================================================================
+export function walkOnIdleEntries(
+  engineBlock: Block | undefined | null,
+  source: string,
+): OnIdleEntry[] {
+  if (!engineBlock || !Array.isArray(engineBlock.children)) return [];
+  if (typeof source !== "string") source = "";
+  const rulesRawStart = computeRulesRawStart(engineBlock, source);
+  const out: OnIdleEntry[] = [];
+  const idleBlocks = filterChildrenByName(engineBlock.children, "onIdle");
+  for (const block of idleBlocks) {
+    const attrs = block.attrs ?? [];
+    // `after=` — admits expr (`${expr}<unit>`), string-literal (`"500ms"`),
+    // variable-ref / bare token (`500ms`). Same chain as `readOnTimeoutEntry`.
+    const after =
+      readExprValue(attrs, "after") ??
+      readAttrName(attrs, "after") ??
+      readRuleAttrInput(attrs, "after") ??
+      "";
+    // `to=` — admits dotted-ident (`.Variant`), string-literal (`"Variant"`),
+    // variable-ref (`Variant`). Strip leading dot for the variant name.
+    const toRaw =
+      readRuleAttrInput(attrs, "to") ??
+      readAttrName(attrs, "to") ??
+      "";
+    const to = stripLeadingDot(toRaw);
+    const rawOffset = (block.span ? block.span.start : 0) - rulesRawStart;
+    out.push({ after, to, rawOffset });
   }
   return out;
 }
