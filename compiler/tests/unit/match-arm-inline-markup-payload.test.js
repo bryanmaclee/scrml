@@ -78,8 +78,9 @@ describe("Bug 6.5 — match-arm-block payload binding flows into lift-markup arm
     expect(fatal).toEqual([]);
     // Prelude must appear inside the .B arm before the lift body fires.
     expect(clientJs).toMatch(/const msg = _scrml_match_\d+\.data\.message;\s*_scrml_lift\(/);
-    // Sanity: the bare `String(msg ?? "")` reference still lands in the lift.
-    expect(clientJs).toMatch(/String\(msg \?\? ""\)/);
+    // Sanity: the `msg` reference still lands in the lift, parenthesized before
+    // the `?? ""` guard (GITI-019: `String((msg) ?? "")`).
+    expect(clientJs).toMatch(/String\(\(msg\) \?\? ""\)/); // GITI-019: source expr parenthesized before `?? ""`
   });
 
   test("multi-binding lift-markup arm emits one prelude line per binding", () => {
@@ -205,6 +206,6 @@ describe("Bug 6.5 — match-arm-block payload binding flows into lift-markup arm
     // in the lifted text node — together they prove the binding flows through
     // both the codegen prelude AND the lift expression's interp.
     expect(clientJs).toMatch(/const msg = _scrml_match_\d+\.data\.message;\s*_scrml_lift\(/);
-    expect(clientJs).toMatch(/String\(msg \?\? ""\)/);
+    expect(clientJs).toMatch(/String\(\(msg\) \?\? ""\)/); // GITI-019: source expr parenthesized before `?? ""`
   });
 });

@@ -208,7 +208,7 @@ describe("lift-li-text-template §4: mixed text-template and for/lift inside str
 
     const output = reset(() => emitLiftExpr(node));
     // header text-template must appear
-    expect(output).toContain('createTextNode(String(count');
+    expect(output).toContain('createTextNode(String((count) ?? ""');
     // for-loop and inner <li> must appear
     expect(output).toContain("for (const r of rows)");
     expect(output).toContain('document.createElement("li")');
@@ -225,6 +225,6 @@ describe("lift-li-text-template §5: bare-expr-only logic block (regression guar
     const node = liftExprMarkup(root);
     const output = reset(() => emitLiftExpr(node));
     expect(output).toContain('document.createElement("li")');
-    expect(output).toContain('createTextNode(String(r . name');
+    expect(output).toContain('createTextNode(String((r . name) ?? ""');
   });
 });

@@ -799,7 +799,12 @@ export function emitCreateElementFromMarkup(node, lines) {
             // Phase 4d Step 8: ExprNode-only (bare-expr.expr deleted)
             if (logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
               const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), { mode: "client" }));
-              lines.push(`${elVar}.appendChild(document.createTextNode(String(${rewritten} ?? "")));`);
+              // GITI-019: parenthesize the source expr before the `?? ""` coalesce guard.
+              // ES2020 forbids mixing `??` with a top-level `||`/`&&` operand without
+              // explicit parens (e.g. `a || b ?? ""` is a SyntaxError). Wrapping the
+              // inner expr unconditionally is safe for every shape and is the simplest
+              // lowering. Scope: lift-loop/markup-embedded text interpolation only.
+              lines.push(`${elVar}.appendChild(document.createTextNode(String((${rewritten}) ?? "")));`);
             } else if (logicChild.kind === "lift-expr") {
               // Nested ${ lift <inner/> } inside markup — route to current element
               const code = emitLiftExpr(logicChild, { containerVar: elVar });
