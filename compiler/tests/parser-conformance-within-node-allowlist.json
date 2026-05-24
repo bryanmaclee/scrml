@@ -94,76 +94,76 @@
     "SPAN-COORD": 27
   },
   "examples/02-counter.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 17,
-    "MISSING-FIELD": 57,
-    "EXTRA-FIELD": 36,
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 20,
+    "MISSING-FIELD": 61,
+    "EXTRA-FIELD": 34,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 77
+    "SPAN-COORD": 80
   },
   "examples/03-contact-book.scrml": {
-    "KIND-NAME": 9,
-    "FIELD-SHAPE": 31,
-    "MISSING-FIELD": 90,
-    "EXTRA-FIELD": 58,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 146
+    "KIND-NAME": 10,
+    "FIELD-SHAPE": 34,
+    "MISSING-FIELD": 91,
+    "EXTRA-FIELD": 57,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 149
   },
   "examples/04-live-search.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 14,
-    "MISSING-FIELD": 27,
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 26,
     "EXTRA-FIELD": 16,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 121
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 123
   },
   "examples/05-multi-step-form.scrml": {
-    "KIND-NAME": 7,
-    "FIELD-SHAPE": 23,
-    "MISSING-FIELD": 87,
-    "EXTRA-FIELD": 46,
+    "KIND-NAME": 10,
+    "FIELD-SHAPE": 27,
+    "MISSING-FIELD": 100,
+    "EXTRA-FIELD": 53,
     "COUNT-LENGTH": 5,
-    "SPAN-COORD": 113
+    "SPAN-COORD": 117
   },
   "examples/06-kanban-board.scrml": {
     "KIND-NAME": 7,
-    "FIELD-SHAPE": 35,
-    "MISSING-FIELD": 94,
-    "EXTRA-FIELD": 57,
-    "COUNT-LENGTH": 6,
-    "SPAN-COORD": 187
+    "FIELD-SHAPE": 38,
+    "MISSING-FIELD": 95,
+    "EXTRA-FIELD": 53,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 232
   },
   "examples/07-admin-dashboard.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 25,
-    "MISSING-FIELD": 77,
-    "EXTRA-FIELD": 36,
-    "COUNT-LENGTH": 5,
-    "SPAN-COORD": 189
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 26,
+    "MISSING-FIELD": 78,
+    "EXTRA-FIELD": 34,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 192
   },
   "examples/08-chat.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 26,
-    "MISSING-FIELD": 95,
-    "EXTRA-FIELD": 60,
-    "COUNT-LENGTH": 7,
-    "SPAN-COORD": 168
+    "KIND-NAME": 13,
+    "FIELD-SHAPE": 36,
+    "MISSING-FIELD": 109,
+    "EXTRA-FIELD": 64,
+    "COUNT-LENGTH": 9,
+    "SPAN-COORD": 179
   },
   "examples/09-error-handling.scrml": {
     "KIND-NAME": 9,
-    "FIELD-SHAPE": 29,
-    "MISSING-FIELD": 123,
-    "EXTRA-FIELD": 58,
-    "COUNT-LENGTH": 4,
-    "SPAN-COORD": 119
+    "FIELD-SHAPE": 32,
+    "MISSING-FIELD": 117,
+    "EXTRA-FIELD": 55,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 121
   },
   "examples/10-inline-tests.scrml": {
-    "KIND-NAME": 5,
-    "FIELD-SHAPE": 20,
-    "MISSING-FIELD": 69,
-    "EXTRA-FIELD": 40,
+    "KIND-NAME": 6,
+    "FIELD-SHAPE": 23,
+    "MISSING-FIELD": 73,
+    "EXTRA-FIELD": 38,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 85
+    "SPAN-COORD": 88
   },
   "examples/11-meta-programming.scrml": {
     "KIND-NAME": 1,
@@ -174,83 +174,84 @@
     "SPAN-COORD": 161
   },
   "examples/12-snippets-slots.scrml": {
-    "KIND-NAME": 3,
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 22,
-    "MISSING-FIELD": 64,
-    "EXTRA-FIELD": 24,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 161
+    "MISSING-FIELD": 57,
+    "EXTRA-FIELD": 19,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 195
   },
   "examples/13-worker.scrml": {
     "KIND-NAME": 7,
-    "FIELD-SHAPE": 27,
-    "MISSING-FIELD": 108,
-    "EXTRA-FIELD": 54,
+    "FIELD-SHAPE": 29,
+    "MISSING-FIELD": 102,
+    "EXTRA-FIELD": 55,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 129
+    "SPAN-COORD": 130
   },
   "examples/14-mario-state-machine.scrml": {
-    "KIND-NAME": 35,
-    "FIELD-SHAPE": 85,
-    "MISSING-FIELD": 243,
-    "EXTRA-FIELD": 135,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 299
+    "KIND-NAME": 34,
+    "FIELD-SHAPE": 92,
+    "MISSING-FIELD": 232,
+    "EXTRA-FIELD": 150,
+    "COUNT-LENGTH": 9,
+    "SPAN-COORD": 305
   },
   "examples/15-channel-chat.scrml": {
     "KIND-NAME": 11,
     "FIELD-SHAPE": 40,
-    "MISSING-FIELD": 108,
-    "EXTRA-FIELD": 52,
-    "COUNT-LENGTH": 4,
-    "SPAN-COORD": 257
+    "MISSING-FIELD": 98,
+    "EXTRA-FIELD": 57,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 259
   },
   "examples/16-remote-data.scrml": {
     "KIND-NAME": 3,
     "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 34,
-    "EXTRA-FIELD": 21,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 91
+    "MISSING-FIELD": 43,
+    "EXTRA-FIELD": 17,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 98
   },
   "examples/17-schema-migrations.scrml": {
     "KIND-NAME": 9,
-    "FIELD-SHAPE": 26,
+    "FIELD-SHAPE": 28,
     "MISSING-FIELD": 91,
-    "EXTRA-FIELD": 56,
+    "EXTRA-FIELD": 58,
     "COUNT-LENGTH": 7,
-    "SPAN-COORD": 151
+    "SPAN-COORD": 152
   },
   "examples/18-state-authority.scrml": {
-    "KIND-NAME": 11,
-    "FIELD-SHAPE": 38,
-    "MISSING-FIELD": 114,
-    "EXTRA-FIELD": 59,
-    "COUNT-LENGTH": 6,
-    "SPAN-COORD": 168
+    "KIND-NAME": 12,
+    "FIELD-SHAPE": 37,
+    "MISSING-FIELD": 116,
+    "EXTRA-FIELD": 62,
+    "COUNT-LENGTH": 11,
+    "SPAN-COORD": 158
   },
   "examples/19-lin-token.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 13,
-    "MISSING-FIELD": 61,
-    "EXTRA-FIELD": 25,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 16,
+    "MISSING-FIELD": 62,
+    "EXTRA-FIELD": 27,
     "COUNT-LENGTH": 6,
-    "SPAN-COORD": 154
+    "SPAN-COORD": 156
   },
   "examples/20-middleware.scrml": {
     "KIND-NAME": 3,
-    "FIELD-SHAPE": 12,
+    "FIELD-SHAPE": 13,
     "MISSING-FIELD": 51,
-    "EXTRA-FIELD": 21,
-    "SPAN-COORD": 107
+    "EXTRA-FIELD": 26,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 106
   },
   "examples/21-navigation.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 11,
-    "MISSING-FIELD": 47,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 46,
     "EXTRA-FIELD": 18,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 125
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 127
   },
   "examples/22-multifile/app.scrml": {
     "KIND-NAME": 1,
@@ -271,7 +272,7 @@
     "KIND-NAME": 3,
     "FIELD-SHAPE": 8,
     "MISSING-FIELD": 36,
-    "EXTRA-FIELD": 11,
+    "EXTRA-FIELD": 13,
     "COUNT-LENGTH": 5,
     "SPAN-COORD": 14
   },
@@ -284,35 +285,35 @@
     "SPAN-COORD": 289
   },
   "examples/23-trucking-dispatch/channels/customer-events.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 22,
-    "MISSING-FIELD": 62,
-    "EXTRA-FIELD": 23,
-    "COUNT-LENGTH": 2,
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 26,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 40
   },
   "examples/23-trucking-dispatch/channels/dispatch-board.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 21,
-    "MISSING-FIELD": 62,
-    "EXTRA-FIELD": 23,
-    "COUNT-LENGTH": 2,
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 26,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 36
   },
   "examples/23-trucking-dispatch/channels/driver-events.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 23,
-    "MISSING-FIELD": 62,
-    "EXTRA-FIELD": 23,
-    "COUNT-LENGTH": 2,
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 26,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 42
   },
   "examples/23-trucking-dispatch/channels/load-events.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 22,
-    "MISSING-FIELD": 62,
-    "EXTRA-FIELD": 23,
-    "COUNT-LENGTH": 2,
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 26,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 45
   },
   "examples/23-trucking-dispatch/components/address-form.scrml": {
@@ -386,164 +387,164 @@
     "SPAN-COORD": 51
   },
   "examples/23-trucking-dispatch/pages/auth/login.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 35,
-    "MISSING-FIELD": 93,
-    "EXTRA-FIELD": 52,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 38,
+    "MISSING-FIELD": 94,
+    "EXTRA-FIELD": 54,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 174
+    "SPAN-COORD": 176
   },
   "examples/23-trucking-dispatch/pages/auth/register.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 39,
-    "MISSING-FIELD": 111,
-    "EXTRA-FIELD": 70,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 42,
+    "MISSING-FIELD": 112,
+    "EXTRA-FIELD": 72,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 220
+    "SPAN-COORD": 222
   },
   "examples/23-trucking-dispatch/pages/customer/home.scrml": {
-    "KIND-NAME": 13,
-    "FIELD-SHAPE": 109,
-    "MISSING-FIELD": 267,
-    "EXTRA-FIELD": 133,
+    "KIND-NAME": 14,
+    "FIELD-SHAPE": 112,
+    "MISSING-FIELD": 271,
+    "EXTRA-FIELD": 135,
     "COUNT-LENGTH": 12,
-    "SPAN-COORD": 464
+    "SPAN-COORD": 466
   },
   "examples/23-trucking-dispatch/pages/customer/invoices.scrml": {
     "KIND-NAME": 26,
     "FIELD-SHAPE": 117,
     "MISSING-FIELD": 359,
-    "EXTRA-FIELD": 156,
+    "EXTRA-FIELD": 158,
     "COUNT-LENGTH": 12,
     "SPAN-COORD": 410
   },
   "examples/23-trucking-dispatch/pages/customer/load-detail.scrml": {
-    "KIND-NAME": 42,
-    "FIELD-SHAPE": 215,
-    "MISSING-FIELD": 596,
-    "EXTRA-FIELD": 293,
-    "COUNT-LENGTH": 24,
-    "SPAN-COORD": 887
+    "KIND-NAME": 43,
+    "FIELD-SHAPE": 223,
+    "MISSING-FIELD": 604,
+    "EXTRA-FIELD": 296,
+    "COUNT-LENGTH": 22,
+    "SPAN-COORD": 894
   },
   "examples/23-trucking-dispatch/pages/customer/loads.scrml": {
-    "KIND-NAME": 18,
-    "FIELD-SHAPE": 104,
-    "MISSING-FIELD": 307,
+    "KIND-NAME": 20,
+    "FIELD-SHAPE": 108,
+    "MISSING-FIELD": 313,
     "EXTRA-FIELD": 154,
-    "COUNT-LENGTH": 13,
-    "SPAN-COORD": 421
+    "COUNT-LENGTH": 14,
+    "SPAN-COORD": 425
   },
   "examples/23-trucking-dispatch/pages/customer/profile.scrml": {
-    "KIND-NAME": 6,
-    "FIELD-SHAPE": 91,
-    "MISSING-FIELD": 254,
-    "EXTRA-FIELD": 99,
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 94,
+    "MISSING-FIELD": 258,
+    "EXTRA-FIELD": 101,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 446
+    "SPAN-COORD": 448
   },
   "examples/23-trucking-dispatch/pages/customer/quote.scrml": {
-    "KIND-NAME": 9,
-    "FIELD-SHAPE": 135,
-    "MISSING-FIELD": 357,
-    "EXTRA-FIELD": 182,
+    "KIND-NAME": 10,
+    "FIELD-SHAPE": 138,
+    "MISSING-FIELD": 358,
+    "EXTRA-FIELD": 184,
     "COUNT-LENGTH": 7,
-    "SPAN-COORD": 674
+    "SPAN-COORD": 676
   },
   "examples/23-trucking-dispatch/pages/dispatch/billing.scrml": {
-    "KIND-NAME": 17,
-    "FIELD-SHAPE": 110,
-    "MISSING-FIELD": 263,
-    "EXTRA-FIELD": 131,
+    "KIND-NAME": 20,
+    "FIELD-SHAPE": 112,
+    "MISSING-FIELD": 267,
+    "EXTRA-FIELD": 135,
     "COUNT-LENGTH": 13,
-    "SPAN-COORD": 389
+    "SPAN-COORD": 390
   },
   "examples/23-trucking-dispatch/pages/dispatch/board.scrml": {
-    "KIND-NAME": 20,
-    "FIELD-SHAPE": 97,
-    "MISSING-FIELD": 235,
-    "EXTRA-FIELD": 127,
-    "COUNT-LENGTH": 16,
-    "SPAN-COORD": 359
+    "KIND-NAME": 22,
+    "FIELD-SHAPE": 108,
+    "MISSING-FIELD": 236,
+    "EXTRA-FIELD": 135,
+    "COUNT-LENGTH": 15,
+    "SPAN-COORD": 372
   },
   "examples/23-trucking-dispatch/pages/dispatch/customers.scrml": {
-    "KIND-NAME": 16,
-    "FIELD-SHAPE": 73,
-    "MISSING-FIELD": 200,
-    "EXTRA-FIELD": 108,
+    "KIND-NAME": 17,
+    "FIELD-SHAPE": 76,
+    "MISSING-FIELD": 204,
+    "EXTRA-FIELD": 110,
     "COUNT-LENGTH": 11,
-    "SPAN-COORD": 263
+    "SPAN-COORD": 265
   },
   "examples/23-trucking-dispatch/pages/dispatch/drivers.scrml": {
-    "KIND-NAME": 9,
-    "FIELD-SHAPE": 62,
-    "MISSING-FIELD": 181,
-    "EXTRA-FIELD": 88,
+    "KIND-NAME": 10,
+    "FIELD-SHAPE": 65,
+    "MISSING-FIELD": 183,
+    "EXTRA-FIELD": 90,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 283
+    "SPAN-COORD": 285
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml": {
-    "KIND-NAME": 25,
-    "FIELD-SHAPE": 197,
-    "MISSING-FIELD": 443,
-    "EXTRA-FIELD": 213,
+    "KIND-NAME": 26,
+    "FIELD-SHAPE": 200,
+    "MISSING-FIELD": 447,
+    "EXTRA-FIELD": 215,
     "COUNT-LENGTH": 14,
-    "SPAN-COORD": 818
+    "SPAN-COORD": 820
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-new.scrml": {
-    "KIND-NAME": 15,
-    "FIELD-SHAPE": 116,
-    "MISSING-FIELD": 306,
-    "EXTRA-FIELD": 196,
+    "KIND-NAME": 16,
+    "FIELD-SHAPE": 119,
+    "MISSING-FIELD": 307,
+    "EXTRA-FIELD": 198,
     "COUNT-LENGTH": 10,
-    "SPAN-COORD": 500
+    "SPAN-COORD": 502
   },
   "examples/23-trucking-dispatch/pages/driver/home.scrml": {
-    "KIND-NAME": 28,
-    "FIELD-SHAPE": 152,
-    "MISSING-FIELD": 396,
-    "EXTRA-FIELD": 196,
-    "COUNT-LENGTH": 9,
-    "SPAN-COORD": 719
+    "KIND-NAME": 33,
+    "FIELD-SHAPE": 168,
+    "MISSING-FIELD": 409,
+    "EXTRA-FIELD": 210,
+    "COUNT-LENGTH": 11,
+    "SPAN-COORD": 732
   },
   "examples/23-trucking-dispatch/pages/driver/hos.scrml": {
-    "KIND-NAME": 53,
-    "FIELD-SHAPE": 169,
-    "MISSING-FIELD": 436,
-    "EXTRA-FIELD": 258,
-    "COUNT-LENGTH": 8,
-    "SPAN-COORD": 638
+    "KIND-NAME": 60,
+    "FIELD-SHAPE": 185,
+    "MISSING-FIELD": 454,
+    "EXTRA-FIELD": 270,
+    "COUNT-LENGTH": 10,
+    "SPAN-COORD": 650
   },
   "examples/23-trucking-dispatch/pages/driver/load-detail.scrml": {
-    "KIND-NAME": 89,
-    "FIELD-SHAPE": 386,
-    "MISSING-FIELD": 961,
-    "EXTRA-FIELD": 480,
-    "COUNT-LENGTH": 36,
-    "SPAN-COORD": 1230
+    "KIND-NAME": 97,
+    "FIELD-SHAPE": 434,
+    "MISSING-FIELD": 989,
+    "EXTRA-FIELD": 481,
+    "COUNT-LENGTH": 32,
+    "SPAN-COORD": 1308
   },
   "examples/23-trucking-dispatch/pages/driver/load-log.scrml": {
-    "KIND-NAME": 11,
-    "FIELD-SHAPE": 67,
-    "MISSING-FIELD": 190,
-    "EXTRA-FIELD": 101,
+    "KIND-NAME": 12,
+    "FIELD-SHAPE": 70,
+    "MISSING-FIELD": 194,
+    "EXTRA-FIELD": 103,
     "COUNT-LENGTH": 4,
-    "SPAN-COORD": 299
+    "SPAN-COORD": 301
   },
   "examples/23-trucking-dispatch/pages/driver/messages.scrml": {
-    "KIND-NAME": 17,
-    "FIELD-SHAPE": 95,
-    "MISSING-FIELD": 258,
-    "EXTRA-FIELD": 149,
-    "COUNT-LENGTH": 13,
-    "SPAN-COORD": 399
+    "KIND-NAME": 18,
+    "FIELD-SHAPE": 99,
+    "MISSING-FIELD": 267,
+    "EXTRA-FIELD": 148,
+    "COUNT-LENGTH": 15,
+    "SPAN-COORD": 402
   },
   "examples/23-trucking-dispatch/pages/driver/profile.scrml": {
-    "KIND-NAME": 11,
-    "FIELD-SHAPE": 103,
-    "MISSING-FIELD": 287,
-    "EXTRA-FIELD": 143,
+    "KIND-NAME": 12,
+    "FIELD-SHAPE": 106,
+    "MISSING-FIELD": 291,
+    "EXTRA-FIELD": 145,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 482
+    "SPAN-COORD": 484
   },
   "examples/23-trucking-dispatch/schema.scrml": {
     "KIND-NAME": 4,
@@ -573,8 +574,8 @@
     "KIND-NAME": 26,
     "FIELD-SHAPE": 64,
     "MISSING-FIELD": 149,
-    "EXTRA-FIELD": 92,
-    "COUNT-LENGTH": 4,
+    "EXTRA-FIELD": 94,
+    "COUNT-LENGTH": 6,
     "SPAN-COORD": 262
   },
   "examples/26-type-derived-schema.scrml": {
@@ -587,10 +588,10 @@
   "examples/27-type-derived-table.scrml": {
     "KIND-NAME": 2,
     "FIELD-SHAPE": 21,
-    "MISSING-FIELD": 59,
-    "EXTRA-FIELD": 21,
-    "COUNT-LENGTH": 4,
-    "SPAN-COORD": 191
+    "MISSING-FIELD": 56,
+    "EXTRA-FIELD": 18,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 193
   },
   "samples/admin-panel.scrml": {
     "KIND-NAME": 35,
@@ -710,36 +711,35 @@
     "SPAN-COORD": 24
   },
   "samples/compilation-tests/channel-basic.scrml": {
-    "KIND-NAME": 5,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 38,
-    "EXTRA-FIELD": 18,
+    "KIND-NAME": 6,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 35,
+    "EXTRA-FIELD": 26,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 52
+    "SPAN-COORD": 54
   },
   "samples/compilation-tests/combined-001-counter.scrml": {
     "KIND-NAME": 3,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 57,
-    "EXTRA-FIELD": 22,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 50
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 60,
+    "EXTRA-FIELD": 18,
+    "SPAN-COORD": 53
   },
   "samples/compilation-tests/combined-002-todo.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 10,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 12,
     "MISSING-FIELD": 29,
-    "EXTRA-FIELD": 16,
+    "EXTRA-FIELD": 19,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 45
+    "SPAN-COORD": 47
   },
   "samples/compilation-tests/combined-003-form-validation.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 14,
-    "MISSING-FIELD": 49,
-    "EXTRA-FIELD": 22,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 17,
+    "MISSING-FIELD": 50,
+    "EXTRA-FIELD": 24,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 66
+    "SPAN-COORD": 68
   },
   "samples/compilation-tests/combined-004-data-table.scrml": {
     "KIND-NAME": 2,
@@ -750,68 +750,67 @@
     "SPAN-COORD": 48
   },
   "samples/compilation-tests/combined-005-dashboard.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 32,
-    "MISSING-FIELD": 72,
-    "EXTRA-FIELD": 22,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 90
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 26,
+    "MISSING-FIELD": 65,
+    "EXTRA-FIELD": 16,
+    "SPAN-COORD": 94
   },
   "samples/compilation-tests/combined-006-search-filter.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 10,
-    "MISSING-FIELD": 36,
-    "EXTRA-FIELD": 21,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 46
-  },
-  "samples/compilation-tests/combined-007-crud.scrml": {
-    "KIND-NAME": 5,
-    "FIELD-SHAPE": 21,
-    "MISSING-FIELD": 66,
-    "EXTRA-FIELD": 33,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 57
-  },
-  "samples/compilation-tests/combined-008-wizard.scrml": {
     "KIND-NAME": 3,
-    "FIELD-SHAPE": 17,
-    "MISSING-FIELD": 57,
-    "EXTRA-FIELD": 33,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 61
-  },
-  "samples/compilation-tests/combined-009-chat.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 14,
-    "MISSING-FIELD": 35,
-    "EXTRA-FIELD": 22,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 51
-  },
-  "samples/compilation-tests/combined-010-theme-switcher.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 14,
-    "MISSING-FIELD": 39,
-    "EXTRA-FIELD": 15,
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 37,
+    "EXTRA-FIELD": 23,
     "COUNT-LENGTH": 2,
     "SPAN-COORD": 48
   },
-  "samples/compilation-tests/combined-011-shopping-cart.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 24,
-    "MISSING-FIELD": 68,
-    "EXTRA-FIELD": 26,
+  "samples/compilation-tests/combined-007-crud.scrml": {
+    "KIND-NAME": 6,
+    "FIELD-SHAPE": 23,
+    "MISSING-FIELD": 66,
+    "EXTRA-FIELD": 36,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 85
+    "SPAN-COORD": 59
+  },
+  "samples/compilation-tests/combined-008-wizard.scrml": {
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 20,
+    "MISSING-FIELD": 58,
+    "EXTRA-FIELD": 35,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 63
+  },
+  "samples/compilation-tests/combined-009-chat.scrml": {
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 16,
+    "MISSING-FIELD": 35,
+    "EXTRA-FIELD": 25,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 53
+  },
+  "samples/compilation-tests/combined-010-theme-switcher.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 42,
+    "EXTRA-FIELD": 11,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 51
+  },
+  "samples/compilation-tests/combined-011-shopping-cart.scrml": {
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 27,
+    "MISSING-FIELD": 81,
+    "EXTRA-FIELD": 27,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 89
   },
   "samples/compilation-tests/combined-012-login.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 16,
-    "MISSING-FIELD": 52,
-    "EXTRA-FIELD": 23,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 19,
+    "MISSING-FIELD": 53,
+    "EXTRA-FIELD": 25,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 73
+    "SPAN-COORD": 75
   },
   "samples/compilation-tests/combined-013-blog.scrml": {
     "KIND-NAME": 2,
@@ -822,67 +821,67 @@
     "SPAN-COORD": 30
   },
   "samples/compilation-tests/combined-014-settings.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 21,
-    "MISSING-FIELD": 69,
-    "EXTRA-FIELD": 34,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 69
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 24,
+    "MISSING-FIELD": 75,
+    "EXTRA-FIELD": 32,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 72
   },
   "samples/compilation-tests/combined-015-user-list.scrml": {
     "KIND-NAME": 3,
     "FIELD-SHAPE": 11,
     "MISSING-FIELD": 31,
-    "EXTRA-FIELD": 20,
-    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 21,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 36
   },
   "samples/compilation-tests/combined-016-notification.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 35,
-    "EXTRA-FIELD": 30,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 33
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 40,
+    "EXTRA-FIELD": 29,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 36
   },
   "samples/compilation-tests/combined-017-color-picker.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 39,
-    "EXTRA-FIELD": 16,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 50
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 42,
+    "EXTRA-FIELD": 12,
+    "SPAN-COORD": 53
   },
   "samples/compilation-tests/combined-018-timer.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 54,
-    "EXTRA-FIELD": 27,
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 18,
+    "MISSING-FIELD": 59,
+    "EXTRA-FIELD": 25,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 50
+    "SPAN-COORD": 53
   },
   "samples/compilation-tests/combined-019-gallery.scrml": {
-    "KIND-NAME": 5,
-    "FIELD-SHAPE": 19,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 15,
     "MISSING-FIELD": 55,
-    "EXTRA-FIELD": 24,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 60
+    "EXTRA-FIELD": 19,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 67
   },
   "samples/compilation-tests/combined-020-calculator.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 27,
-    "MISSING-FIELD": 101,
-    "EXTRA-FIELD": 45,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 100
+    "KIND-NAME": 7,
+    "FIELD-SHAPE": 32,
+    "MISSING-FIELD": 121,
+    "EXTRA-FIELD": 49,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 105
   },
   "samples/compilation-tests/combined-021-component-basic.scrml": {
-    "FIELD-SHAPE": 10,
-    "MISSING-FIELD": 22,
-    "EXTRA-FIELD": 7,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 9,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 42
+    "SPAN-COORD": 44
   },
   "samples/compilation-tests/comp-001-basic.scrml": {
     "FIELD-SHAPE": 3,
@@ -904,27 +903,24 @@
   },
   "samples/compilation-tests/comp-004-modal.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 56,
-    "EXTRA-FIELD": 21,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 59
+    "FIELD-SHAPE": 14,
+    "MISSING-FIELD": 59,
+    "EXTRA-FIELD": 17,
+    "SPAN-COORD": 62
   },
   "samples/compilation-tests/comp-005-tabs.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 9,
-    "MISSING-FIELD": 32,
-    "EXTRA-FIELD": 14,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 37
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 35,
+    "EXTRA-FIELD": 10,
+    "SPAN-COORD": 40
   },
   "samples/compilation-tests/comp-006-alert.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 22,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 24
+    "MISSING-FIELD": 25,
+    "EXTRA-FIELD": 8,
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/comp-007-breadcrumb.scrml": {
     "FIELD-SHAPE": 6,
@@ -943,18 +939,16 @@
   "samples/compilation-tests/comp-009-dropdown.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 11,
-    "MISSING-FIELD": 37,
-    "EXTRA-FIELD": 16,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 41
+    "MISSING-FIELD": 40,
+    "EXTRA-FIELD": 12,
+    "SPAN-COORD": 44
   },
   "samples/compilation-tests/comp-010-progress.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 23,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 30
+    "FIELD-SHAPE": 9,
+    "MISSING-FIELD": 26,
+    "EXTRA-FIELD": 8,
+    "SPAN-COORD": 33
   },
   "samples/compilation-tests/comp-011-badge.scrml": {
     "FIELD-SHAPE": 4,
@@ -963,35 +957,31 @@
     "SPAN-COORD": 26
   },
   "samples/compilation-tests/comp-012-pagination.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 31,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 38
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 34,
+    "EXTRA-FIELD": 8,
+    "SPAN-COORD": 41
   },
   "samples/compilation-tests/comp-013-tooltip.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 17,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 16,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 26
+    "SPAN-COORD": 28
   },
   "samples/compilation-tests/comp-014-accordion.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 50,
-    "EXTRA-FIELD": 19,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 65
+    "FIELD-SHAPE": 16,
+    "MISSING-FIELD": 53,
+    "EXTRA-FIELD": 15,
+    "SPAN-COORD": 68
   },
   "samples/compilation-tests/comp-015-search-input.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 24,
-    "EXTRA-FIELD": 17,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 36
+    "MISSING-FIELD": 27,
+    "EXTRA-FIELD": 13,
+    "SPAN-COORD": 39
   },
   "samples/compilation-tests/component-scoped-css.scrml": {
     "KIND-NAME": 2,
@@ -1052,11 +1042,10 @@
     "SPAN-COORD": 20
   },
   "samples/compilation-tests/control-009-conditional-attr.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/control-010-nested-loops.scrml": {
     "FIELD-SHAPE": 4,
@@ -1065,12 +1054,10 @@
     "SPAN-COORD": 30
   },
   "samples/compilation-tests/control-011-if-reactive.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 15,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 7,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/control-012-for-lift-complex.scrml": {
     "KIND-NAME": 2,
@@ -1102,18 +1089,18 @@
     "SPAN-COORD": 22
   },
   "samples/compilation-tests/control-show-basic.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/control-show-expr.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 3,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
+    "EXTRA-FIELD": 5,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/css-001-inline.scrml": {
     "FIELD-SHAPE": 2,
@@ -1220,12 +1207,12 @@
     "SPAN-COORD": 84
   },
   "samples/compilation-tests/engine-006-ontimeout-computed.scrml": {
-    "KIND-NAME": 24,
-    "FIELD-SHAPE": 38,
-    "MISSING-FIELD": 77,
-    "EXTRA-FIELD": 103,
+    "KIND-NAME": 25,
+    "FIELD-SHAPE": 41,
+    "MISSING-FIELD": 78,
+    "EXTRA-FIELD": 105,
     "COUNT-LENGTH": 6,
-    "SPAN-COORD": 77
+    "SPAN-COORD": 79
   },
   "samples/compilation-tests/engine-007-cancel-timer.scrml": {
     "KIND-NAME": 36,
@@ -1359,18 +1346,16 @@
   "samples/compilation-tests/func-004-reactive-mutation.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 18,
-    "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 17
+    "MISSING-FIELD": 21,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/func-005-multiple.scrml": {
     "KIND-NAME": 3,
-    "FIELD-SHAPE": 10,
-    "MISSING-FIELD": 45,
-    "EXTRA-FIELD": 18,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 28
+    "FIELD-SHAPE": 8,
+    "MISSING-FIELD": 48,
+    "EXTRA-FIELD": 14,
+    "SPAN-COORD": 31
   },
   "samples/compilation-tests/func-006-fn-shorthand.scrml": {
     "FIELD-SHAPE": 3,
@@ -1397,12 +1382,10 @@
     "SPAN-COORD": 29
   },
   "samples/compilation-tests/func-009-oninput.scrml": {
-    "KIND-NAME": 1,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 15,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 17
+    "MISSING-FIELD": 11,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 21
   },
   "samples/compilation-tests/func-010-server.scrml": {
     "KIND-NAME": 1,
@@ -1432,11 +1415,10 @@
   },
   "samples/compilation-tests/func-015-event-with-args.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 23,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 24
+    "FIELD-SHAPE": 7,
+    "MISSING-FIELD": 26,
+    "EXTRA-FIELD": 8,
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-r10-bun-admin.scrml": {
     "KIND-NAME": 1,
@@ -1447,100 +1429,100 @@
     "SPAN-COORD": 73
   },
   "samples/compilation-tests/gauntlet-r10-elixir-chat.scrml": {
-    "KIND-NAME": 26,
-    "FIELD-SHAPE": 91,
-    "MISSING-FIELD": 338,
-    "EXTRA-FIELD": 135,
+    "KIND-NAME": 27,
+    "FIELD-SHAPE": 94,
+    "MISSING-FIELD": 339,
+    "EXTRA-FIELD": 137,
     "COUNT-LENGTH": 11,
-    "SPAN-COORD": 661
+    "SPAN-COORD": 663
   },
   "samples/compilation-tests/gauntlet-r10-go-contacts.scrml": {
-    "KIND-NAME": 52,
-    "FIELD-SHAPE": 127,
+    "KIND-NAME": 53,
+    "FIELD-SHAPE": 129,
     "MISSING-FIELD": 576,
-    "EXTRA-FIELD": 220,
+    "EXTRA-FIELD": 223,
     "COUNT-LENGTH": 15,
-    "SPAN-COORD": 491
+    "SPAN-COORD": 493
   },
   "samples/compilation-tests/gauntlet-r10-htmx-feedback.scrml": {
-    "KIND-NAME": 8,
-    "FIELD-SHAPE": 70,
-    "MISSING-FIELD": 237,
-    "EXTRA-FIELD": 116,
+    "KIND-NAME": 9,
+    "FIELD-SHAPE": 73,
+    "MISSING-FIELD": 238,
+    "EXTRA-FIELD": 118,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 436
+    "SPAN-COORD": 438
   },
   "samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml": {
-    "KIND-NAME": 29,
-    "FIELD-SHAPE": 103,
-    "MISSING-FIELD": 340,
-    "EXTRA-FIELD": 175,
-    "COUNT-LENGTH": 6,
-    "SPAN-COORD": 445
+    "KIND-NAME": 32,
+    "FIELD-SHAPE": 109,
+    "MISSING-FIELD": 345,
+    "EXTRA-FIELD": 176,
+    "COUNT-LENGTH": 7,
+    "SPAN-COORD": 450
   },
   "samples/compilation-tests/gauntlet-r10-rails-blog.scrml": {
-    "KIND-NAME": 56,
-    "FIELD-SHAPE": 197,
-    "MISSING-FIELD": 754,
-    "EXTRA-FIELD": 264,
+    "KIND-NAME": 57,
+    "FIELD-SHAPE": 200,
+    "MISSING-FIELD": 755,
+    "EXTRA-FIELD": 266,
     "COUNT-LENGTH": 11,
-    "SPAN-COORD": 961
+    "SPAN-COORD": 963
   },
   "samples/compilation-tests/gauntlet-r10-react-wizard.scrml": {
-    "KIND-NAME": 19,
-    "FIELD-SHAPE": 136,
+    "KIND-NAME": 17,
+    "FIELD-SHAPE": 134,
     "MISSING-FIELD": 400,
-    "EXTRA-FIELD": 221,
-    "COUNT-LENGTH": 4,
-    "SPAN-COORD": 549
+    "EXTRA-FIELD": 216,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 551
   },
   "samples/compilation-tests/gauntlet-r10-rust-orders.scrml": {
-    "KIND-NAME": 19,
-    "FIELD-SHAPE": 99,
-    "MISSING-FIELD": 260,
-    "EXTRA-FIELD": 130,
-    "COUNT-LENGTH": 14,
-    "SPAN-COORD": 273
+    "KIND-NAME": 23,
+    "FIELD-SHAPE": 108,
+    "MISSING-FIELD": 269,
+    "EXTRA-FIELD": 147,
+    "COUNT-LENGTH": 18,
+    "SPAN-COORD": 281
   },
   "samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml": {
-    "KIND-NAME": 18,
-    "FIELD-SHAPE": 90,
+    "KIND-NAME": 19,
+    "FIELD-SHAPE": 92,
     "MISSING-FIELD": 192,
-    "EXTRA-FIELD": 84,
+    "EXTRA-FIELD": 87,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 374
+    "SPAN-COORD": 376
   },
   "samples/compilation-tests/gauntlet-r10-svelte-dashboard.scrml": {
-    "KIND-NAME": 13,
-    "FIELD-SHAPE": 96,
+    "KIND-NAME": 14,
+    "FIELD-SHAPE": 100,
     "MISSING-FIELD": 242,
-    "EXTRA-FIELD": 80,
-    "COUNT-LENGTH": 5,
-    "SPAN-COORD": 605
+    "EXTRA-FIELD": 82,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 609
   },
   "samples/compilation-tests/gauntlet-r10-ts-components.scrml": {
-    "KIND-NAME": 10,
-    "FIELD-SHAPE": 53,
-    "MISSING-FIELD": 158,
-    "EXTRA-FIELD": 54,
-    "COUNT-LENGTH": 7,
-    "SPAN-COORD": 297
+    "KIND-NAME": 12,
+    "FIELD-SHAPE": 59,
+    "MISSING-FIELD": 162,
+    "EXTRA-FIELD": 55,
+    "COUNT-LENGTH": 9,
+    "SPAN-COORD": 302
   },
   "samples/compilation-tests/gauntlet-r10-vue-datatable.scrml": {
     "KIND-NAME": 46,
-    "FIELD-SHAPE": 147,
-    "MISSING-FIELD": 531,
-    "EXTRA-FIELD": 220,
-    "COUNT-LENGTH": 16,
-    "SPAN-COORD": 483
+    "FIELD-SHAPE": 149,
+    "MISSING-FIELD": 530,
+    "EXTRA-FIELD": 218,
+    "COUNT-LENGTH": 17,
+    "SPAN-COORD": 485
   },
   "samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml": {
-    "KIND-NAME": 26,
-    "FIELD-SHAPE": 146,
-    "MISSING-FIELD": 400,
-    "EXTRA-FIELD": 138,
+    "KIND-NAME": 27,
+    "FIELD-SHAPE": 149,
+    "MISSING-FIELD": 401,
+    "EXTRA-FIELD": 140,
     "COUNT-LENGTH": 15,
-    "SPAN-COORD": 489
+    "SPAN-COORD": 491
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-component.scrml": {
     "FIELD-SHAPE": 2,
@@ -1551,11 +1533,11 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/_helper-types.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 10,
-    "MISSING-FIELD": 34,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 38,
     "EXTRA-FIELD": 8,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 10
+    "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-adjacent-decls-014.scrml": {
     "FIELD-SHAPE": 5,
@@ -1570,11 +1552,10 @@
     "SPAN-COORD": 10
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-array-type-005.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 24
+    "SPAN-COORD": 26
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-bare-001.scrml": {
     "FIELD-SHAPE": 3,
@@ -1836,10 +1817,9 @@
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-mutates-reactive-003.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 12,
-    "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "MISSING-FIELD": 15,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-nested-006.scrml": {
     "KIND-NAME": 1,
@@ -2063,16 +2043,16 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-012.scrml": {
     "FIELD-SHAPE": 15,
-    "MISSING-FIELD": 24,
-    "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 26,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 4,
     "SPAN-COORD": 31
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-asymmetric-013.scrml": {
     "FIELD-SHAPE": 13,
-    "MISSING-FIELD": 20,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 22,
+    "EXTRA-FIELD": 9,
+    "COUNT-LENGTH": 4,
     "SPAN-COORD": 28
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-not-consumed-002.scrml": {
@@ -2116,18 +2096,16 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-bare-001.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 5,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 4,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 10
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-debounced-004.scrml": {
-    "FIELD-SHAPE": 3,
+    "FIELD-SHAPE": 4,
     "MISSING-FIELD": 9,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 19
+    "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-file-level-003.scrml": {
     "FIELD-SHAPE": 3,
@@ -2144,19 +2122,18 @@
     "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-throttled-005.scrml": {
-    "FIELD-SHAPE": 2,
+    "FIELD-SHAPE": 3,
     "MISSING-FIELD": 5,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-typed-002.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 14,
-    "EXTRA-FIELD": 4,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 16,
+    "EXTRA-FIELD": 7,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 13
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-bare-006.scrml": {
     "KIND-NAME": 1,
@@ -2167,11 +2144,12 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-derived-from-local-009.scrml": {
-    "KIND-NAME": 2,
+    "KIND-NAME": 1,
     "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 21,
-    "EXTRA-FIELD": 7,
-    "SPAN-COORD": 15
+    "MISSING-FIELD": 13,
+    "EXTRA-FIELD": 6,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-not-007.scrml": {
     "KIND-NAME": 1,
@@ -2227,11 +2205,11 @@
     "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-inside-program-013.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-multiline-005.scrml": {
     "FIELD-SHAPE": 3,
@@ -2331,18 +2309,16 @@
     "SPAN-COORD": 7
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-named-012.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-vendor-013.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-using-keyword-001.scrml": {
     "KIND-NAME": 1,
@@ -2419,11 +2395,10 @@
     "SPAN-COORD": 34
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-double-020.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 18,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 17,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 22
+    "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-orphan-018.scrml": {
     "FIELD-SHAPE": 4,
@@ -2483,12 +2458,11 @@
     "SPAN-COORD": 29
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 22,
-    "EXTRA-FIELD": 16,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 9,
+    "MISSING-FIELD": 13,
+    "EXTRA-FIELD": 7,
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-in-jsobj-053.scrml": {
     "FIELD-SHAPE": 6,
@@ -2498,27 +2472,26 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 16
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 28
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
-    "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 14
-  },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
+    "FIELD-SHAPE": 5,
     "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
+  },
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 4,
+    "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml": {
     "FIELD-SHAPE": 2,
@@ -2528,19 +2501,18 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-without-key-primitive-100.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 10,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 9,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-object-iteration-052.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 16
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 23
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-bare-044.scrml": {
     "KIND-NAME": 1,
@@ -2596,11 +2568,10 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-and-else-same-elem-021.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-else-008.scrml": {
     "KIND-NAME": 2,
@@ -2612,11 +2583,11 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-in-markup-interp-105.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-intermediate-014.scrml": {
     "KIND-NAME": 2,
@@ -2673,26 +2644,23 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-bare-016.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-chain-after-unrelated-099.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 17,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 16,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 21
+    "SPAN-COORD": 23
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-show-compose-110.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 18,
-    "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 20,
+    "EXTRA-FIELD": 9,
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-003.scrml": {
     "KIND-NAME": 2,
@@ -2702,11 +2670,10 @@
     "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-attr-chain-017.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 20,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 19,
     "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 25
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-chain-004.scrml": {
     "KIND-NAME": 3,
@@ -2751,20 +2718,17 @@
     "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-reactive-write-096.scrml": {
-    "KIND-NAME": 2,
+    "KIND-NAME": 1,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 26,
-    "EXTRA-FIELD": 11,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 13
+    "MISSING-FIELD": 18,
+    "EXTRA-FIELD": 5,
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-sql-in-body-097.scrml": {
-    "KIND-NAME": 3,
     "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 34,
-    "EXTRA-FIELD": 17,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 21
+    "MISSING-FIELD": 16,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 37
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-triple-equals-007.scrml": {
     "KIND-NAME": 1,
@@ -2774,17 +2738,19 @@
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-arm-after-else-extra-101.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-block-arm-034.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-colon-arrow-024.scrml": {
@@ -2803,10 +2769,11 @@
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-duplicate-arm-030.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-default-027.scrml": {
@@ -2817,17 +2784,19 @@
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-not-last-029.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-fat-arrow-022.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-given-in-arm-104.scrml": {
@@ -2848,31 +2817,33 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-for-lift-098.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 16
-  },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-markup-direct-040.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-mixed-arrows-025.scrml": {
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 5,
     "COUNT-LENGTH": 1,
     "SPAN-COORD": 21
   },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-non-exhaustive-026.scrml": {
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-markup-direct-040.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
+    "EXTRA-FIELD": 3,
     "COUNT-LENGTH": 1,
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-mixed-arrows-025.scrml": {
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 21
+  },
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-non-exhaustive-026.scrml": {
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-asIs-103.scrml": {
@@ -2889,9 +2860,11 @@
     "SPAN-COORD": 25
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-optional-039.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 12,
-    "EXTRA-FIELD": 4,
+    "MISSING-FIELD": 22,
+    "EXTRA-FIELD": 9,
+    "COUNT-LENGTH": 1,
     "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml": {
@@ -2909,32 +2882,35 @@
     "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-positional-031.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-redundant-else-102.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-return-038.scrml": {
     "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
     "MISSING-FIELD": 28,
-    "EXTRA-FIELD": 10,
+    "EXTRA-FIELD": 12,
     "COUNT-LENGTH": 3,
     "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-type-mismatch-arms-036.scrml": {
+    "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-underscore-default-028.scrml": {
@@ -2954,26 +2930,26 @@
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-all-covered-042.scrml": {
     "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 24,
-    "EXTRA-FIELD": 15,
+    "MISSING-FIELD": 26,
+    "EXTRA-FIELD": 11,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-in-lift-043.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 16
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-stmt-041.scrml": {
     "KIND-NAME": 2,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 24,
-    "EXTRA-FIELD": 15,
+    "MISSING-FIELD": 26,
+    "EXTRA-FIELD": 11,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-bare-079.scrml": {
     "KIND-NAME": 2,
@@ -3030,44 +3006,43 @@
     "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-multi-083.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 27,
-    "EXTRA-FIELD": 6,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 29,
+    "EXTRA-FIELD": 9,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-single-082.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 25,
-    "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 21,
+    "EXTRA-FIELD": 9,
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-empty-body-084.scrml": {
-    "KIND-NAME": 2,
+    "KIND-NAME": 1,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 18,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 27,
-    "EXTRA-FIELD": 10,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 6,
     "COUNT-LENGTH": 1,
     "SPAN-COORD": 12
   },
-  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-self-write-085.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 18,
-    "EXTRA-FIELD": 8,
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml": {
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 21,
+    "EXTRA-FIELD": 12,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-self-write-085.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 7,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-as-expr-bare-063.scrml": {
     "KIND-NAME": 2,
@@ -3436,11 +3411,10 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-for-arith-iterable-090.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 10,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 9,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 21
+    "SPAN-COORD": 26
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-multi-095.scrml": {
     "KIND-NAME": 1,
@@ -3467,25 +3441,25 @@
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-attribute-quoted-111.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-markup-as-attr-value-108.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 17,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 16,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 23
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 25
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-when-guard-093.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 12
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-is-not-not-105.scrml": {
     "FIELD-SHAPE": 4,
@@ -3550,11 +3524,10 @@
     "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-reactive-009.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 12,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 11,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 16
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-bare-007.scrml": {
     "FIELD-SHAPE": 4,
@@ -3587,18 +3560,18 @@
     "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-class-attr-003.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-reactive-002.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-054.scrml": {
     "FIELD-SHAPE": 5,
@@ -3641,11 +3614,11 @@
     "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-arrow-variant-073.scrml": {
-    "KIND-NAME": 1,
+    "KIND-NAME": 3,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 19,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
+    "MISSING-FIELD": 33,
+    "EXTRA-FIELD": 11,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-dash-arrow-074.scrml": {
@@ -3668,8 +3641,8 @@
     "KIND-NAME": 1,
     "FIELD-SHAPE": 5,
     "MISSING-FIELD": 13,
-    "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 12,
+    "COUNT-LENGTH": 2,
     "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-arm-101.scrml": {
@@ -3705,10 +3678,9 @@
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-in-attr-089.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 18,
-    "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 17
+    "MISSING-FIELD": 21,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-on-optchain-109.scrml": {
     "KIND-NAME": 1,
@@ -3763,11 +3735,10 @@
     "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-basic-033.scrml": {
     "FIELD-SHAPE": 5,
@@ -3782,11 +3753,10 @@
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-in-interp-034.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-is-some-107.scrml": {
     "FIELD-SHAPE": 7,
@@ -3847,11 +3817,11 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-reactive-038.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 10,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 9,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-paren-grouping-arith-100.scrml": {
     "FIELD-SHAPE": 6,
@@ -3873,11 +3843,11 @@
     "SPAN-COORD": 28
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-reactive-086.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 14
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-return-expr-092.scrml": {
     "KIND-NAME": 1,
@@ -3910,11 +3880,10 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-reactive-068.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 16,
-    "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 18,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-mixed-type-059.scrml": {
     "FIELD-SHAPE": 6,
@@ -3941,19 +3910,18 @@
     "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-in-interp-030.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 16
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-condition-032.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 15,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 15
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-not-106.scrml": {
     "FIELD-SHAPE": 5,
@@ -3980,11 +3948,10 @@
     "SPAN-COORD": 7
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-braces-ghost-020.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-component-sql-071.scrml": {
     "KIND-NAME": 1,
@@ -4020,18 +3987,16 @@
     "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-interpolated-019.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-reactive-018.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-special-chars-077.scrml": {
     "KIND-NAME": 1,
@@ -4048,26 +4013,22 @@
     "SPAN-COORD": 6
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-checked-030.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-conflict-035.scrml": {
-    "KIND-NAME": 1,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 16,
-    "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "MISSING-FIELD": 12,
+    "EXTRA-FIELD": 6,
+    "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-group-031.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 16,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 15,
     "EXTRA-FIELD": 14,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 36
+    "SPAN-COORD": 38
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-non-reactive-033.scrml": {
     "FIELD-SHAPE": 3,
@@ -4076,25 +4037,22 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-path-032.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-unsupported-attr-034.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-value-text-029.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 12
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bad-rhs-038.scrml": {
     "FIELD-SHAPE": 1,
@@ -4109,25 +4067,24 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-directive-036.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-multiple-037.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 10,
-    "EXTRA-FIELD": 5,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 11,
+    "EXTRA-FIELD": 7,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-className-ghost-040.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-closer-midline-070.scrml": {
     "FIELD-SHAPE": 2,
@@ -4158,12 +4115,12 @@
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-jsx-brace-ghost-057.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 17,
-    "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 11,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml": {
     "FIELD-SHAPE": 5,
@@ -4188,12 +4145,12 @@
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-reactive-prop-056.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 17,
-    "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 11,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-deep-nesting-075.scrml": {
     "FIELD-SHAPE": 7,
@@ -4202,11 +4159,12 @@
     "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-dynamic-class-template-076.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 4,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
+    "EXTRA-FIELD": 6,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 13
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-jsx-arrow-ghost-027.scrml": {
     "FIELD-SHAPE": 3,
@@ -4234,12 +4192,12 @@
     "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onsubmit-025.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 27,
-    "EXTRA-FIELD": 15,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 28,
+    "EXTRA-FIELD": 17,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 29
+    "SPAN-COORD": 31
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-extract-keyword-051.scrml": {
     "KIND-NAME": 3,
@@ -4249,32 +4207,28 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-for-markup-044.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 10,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 9,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 16
+    "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-else-043.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 19,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 18,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 24
+    "SPAN-COORD": 26
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-static-042.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-jsx-logical-and-ghost-073.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 9
+    "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-conditional-048.scrml": {
     "FIELD-SHAPE": 6,
@@ -4283,11 +4237,10 @@
     "SPAN-COORD": 35
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-duplicate-keys-050.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 16
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-inline-markup-045.scrml": {
     "FIELD-SHAPE": 4,
@@ -4296,11 +4249,10 @@
     "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-keyed-049.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 19
+    "SPAN-COORD": 31
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-nested-047.scrml": {
     "FIELD-SHAPE": 5,
@@ -4434,18 +4386,16 @@
     "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-interp-064.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 13
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-textarea-no-closer-068.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 10
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-void-br-010.scrml": {
     "FIELD-SHAPE": 2,
@@ -4484,28 +4434,28 @@
     "SPAN-COORD": 4
   },
   "samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 9,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 11,
     "MISSING-FIELD": 30,
-    "EXTRA-FIELD": 19,
+    "EXTRA-FIELD": 22,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 50
+    "SPAN-COORD": 52
   },
   "samples/compilation-tests/gauntlet-s20-channels/channel-multiple-001.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 16,
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 18,
     "MISSING-FIELD": 50,
-    "EXTRA-FIELD": 28,
+    "EXTRA-FIELD": 31,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 65
+    "SPAN-COORD": 67
   },
   "samples/compilation-tests/gauntlet-s20-channels/channel-shared-state-001.scrml": {
     "KIND-NAME": 6,
-    "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 41,
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 40,
     "EXTRA-FIELD": 23,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 45
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 47
   },
   "samples/compilation-tests/gauntlet-s20-error-test/error-effect-typed-001.scrml": {
     "FIELD-SHAPE": 5,
@@ -4536,8 +4486,8 @@
   "samples/compilation-tests/gauntlet-s20-error-test/failable-fn-match-001.scrml": {
     "FIELD-SHAPE": 5,
     "MISSING-FIELD": 14,
-    "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 3,
+    "EXTRA-FIELD": 10,
+    "COUNT-LENGTH": 4,
     "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s20-error-test/failable-inline-catch-001.scrml": {
@@ -4615,12 +4565,10 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/gauntlet-s20-error-ux/err-fn-001-impure.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 11,
-    "EXTRA-FIELD": 9,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 9
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 4,
+    "EXTRA-FIELD": 4,
+    "SPAN-COORD": 19
   },
   "samples/compilation-tests/gauntlet-s20-error-ux/err-import-001-not-found.scrml": {
     "FIELD-SHAPE": 3,
@@ -4669,11 +4617,10 @@
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-cleanup-001.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 7,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 9,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 20
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-compile-time-pure-001.scrml": {
     "FIELD-SHAPE": 7,
@@ -4742,11 +4689,12 @@
     "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-multiple-blocks-001.scrml": {
-    "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 2,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 11,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 4,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 25
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-nested-deep-001.scrml": {
     "KIND-NAME": 2,
@@ -4757,11 +4705,10 @@
     "SPAN-COORD": 11
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-phase-sep-005.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 22
+    "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-001.scrml": {
     "FIELD-SHAPE": 7,
@@ -4771,11 +4718,11 @@
     "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-002.scrml": {
-    "FIELD-SHAPE": 11,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 35
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 37
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-outside-008.scrml": {
     "FIELD-SHAPE": 5,
@@ -4791,32 +4738,29 @@
     "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-runtime-reactive-001.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 30
+    "SPAN-COORD": 32
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-scopeid-001.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 23
+    "SPAN-COORD": 25
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-sql-runtime-007.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 19
+    "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s20-meta/meta-type-registry-001.scrml": {
-    "FIELD-SHAPE": 9,
-    "MISSING-FIELD": 12,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 11,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 37
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 39
   },
   "samples/compilation-tests/gauntlet-s20-sql/protect-basic-001.scrml": {
     "KIND-NAME": 1,
@@ -5014,88 +4958,86 @@
     "SPAN-COORD": 28
   },
   "samples/compilation-tests/gauntlet-s20-validation/predicate-email-001.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 20
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s20-validation/predicate-number-range-001.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 20
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s20-validation/predicate-url-001.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 11,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 20
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/gauntlet-s20-validation/reactive-encoded-001.scrml": {
-    "FIELD-SHAPE": 3,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
     "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 2,
+    "EXTRA-FIELD": 5,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/gauntlet-s79-calculator.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 27,
-    "MISSING-FIELD": 101,
-    "EXTRA-FIELD": 69,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 228
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 30,
+    "MISSING-FIELD": 104,
+    "EXTRA-FIELD": 70,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 231
   },
   "samples/compilation-tests/gauntlet-s79-counter-todo.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 34,
-    "MISSING-FIELD": 93,
-    "EXTRA-FIELD": 54,
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 37,
+    "MISSING-FIELD": 98,
+    "EXTRA-FIELD": 53,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 233
+    "SPAN-COORD": 236
   },
   "samples/compilation-tests/gauntlet-s79-signup-form.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 34,
-    "EXTRA-FIELD": 20,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 90
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 35,
+    "EXTRA-FIELD": 34,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 92
   },
   "samples/compilation-tests/gauntlet-s79-theme-settings.scrml": {
-    "KIND-NAME": 4,
-    "FIELD-SHAPE": 57,
-    "MISSING-FIELD": 156,
-    "EXTRA-FIELD": 80,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 386
+    "KIND-NAME": 8,
+    "FIELD-SHAPE": 60,
+    "MISSING-FIELD": 195,
+    "EXTRA-FIELD": 83,
+    "COUNT-LENGTH": 7,
+    "SPAN-COORD": 395
   },
   "samples/compilation-tests/helpers/dnd-setup.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 32,
-    "EXTRA-FIELD": 5,
+    "KIND-NAME": 2,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 33,
+    "EXTRA-FIELD": 7,
     "COUNT-LENGTH": 3,
-    "SPAN-COORD": 18
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/input-canvas-demo.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 17,
-    "MISSING-FIELD": 46,
-    "EXTRA-FIELD": 24,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 20,
+    "MISSING-FIELD": 47,
+    "EXTRA-FIELD": 26,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 63
+    "SPAN-COORD": 65
   },
   "samples/compilation-tests/integration-001-stripe-mini.scrml": {
-    "KIND-NAME": 5,
-    "FIELD-SHAPE": 39,
+    "KIND-NAME": 6,
+    "FIELD-SHAPE": 41,
     "MISSING-FIELD": 124,
-    "EXTRA-FIELD": 54,
+    "EXTRA-FIELD": 57,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 144
+    "SPAN-COORD": 146
   },
   "samples/compilation-tests/is-not-compound.scrml": {
     "KIND-NAME": 1,
@@ -5296,8 +5238,8 @@
     "KIND-NAME": 21,
     "FIELD-SHAPE": 36,
     "MISSING-FIELD": 86,
-    "EXTRA-FIELD": 79,
-    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 81,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 153
   },
   "samples/compilation-tests/machine-basic.scrml": {
@@ -5309,25 +5251,26 @@
     "SPAN-COORD": 74
   },
   "samples/compilation-tests/match-001-nested-with-call.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 9,
-    "MISSING-FIELD": 39,
-    "EXTRA-FIELD": 19,
-    "COUNT-LENGTH": 4,
-    "SPAN-COORD": 24
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 47,
+    "EXTRA-FIELD": 24,
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 29
   },
   "samples/compilation-tests/match-002-block-form-arm-swap.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 9,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 8,
     "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 20
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 22
   },
   "samples/compilation-tests/match-as-expression.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 11,
-    "EXTRA-FIELD": 8,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 13,
+    "EXTRA-FIELD": 10,
     "COUNT-LENGTH": 1,
     "SPAN-COORD": 17
   },
@@ -5340,12 +5283,11 @@
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/match-pipe-alternation.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 22,
-    "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 15
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 8,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 18
   },
   "samples/compilation-tests/meta-001-basic.scrml": {
     "FIELD-SHAPE": 3,
@@ -5467,12 +5409,12 @@
     "SPAN-COORD": 19
   },
   "samples/compilation-tests/meta-013-runtime-meta-dg002.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 24,
-    "EXTRA-FIELD": 6,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 25,
+    "EXTRA-FIELD": 8,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 27
+    "SPAN-COORD": 29
   },
   "samples/compilation-tests/meta-component-gen.scrml": {
     "FIELD-SHAPE": 3,
@@ -5506,11 +5448,11 @@
   },
   "samples/compilation-tests/modern-001-state-with-tests.scrml": {
     "KIND-NAME": 3,
-    "FIELD-SHAPE": 13,
-    "MISSING-FIELD": 41,
-    "EXTRA-FIELD": 18,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 45
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 44,
+    "EXTRA-FIELD": 14,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 48
   },
   "samples/compilation-tests/modern-002-projection.scrml": {
     "KIND-NAME": 1,
@@ -5521,12 +5463,12 @@
     "SPAN-COORD": 26
   },
   "samples/compilation-tests/modern-003-full-app.scrml": {
-    "KIND-NAME": 3,
-    "FIELD-SHAPE": 16,
+    "KIND-NAME": 4,
+    "FIELD-SHAPE": 18,
     "MISSING-FIELD": 52,
-    "EXTRA-FIELD": 21,
+    "EXTRA-FIELD": 24,
     "COUNT-LENGTH": 4,
-    "SPAN-COORD": 75
+    "SPAN-COORD": 77
   },
   "samples/compilation-tests/modern-004-canary-pattern.scrml": {
     "KIND-NAME": 1,
@@ -5544,19 +5486,18 @@
   },
   "samples/compilation-tests/modern-007-dnd-with-helpers.scrml": {
     "KIND-NAME": 5,
-    "FIELD-SHAPE": 17,
-    "MISSING-FIELD": 47,
-    "EXTRA-FIELD": 42,
-    "COUNT-LENGTH": 5,
-    "SPAN-COORD": 110
+    "FIELD-SHAPE": 19,
+    "MISSING-FIELD": 50,
+    "EXTRA-FIELD": 38,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 134
   },
   "samples/compilation-tests/multi-meta-source-order.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 10,
-    "MISSING-FIELD": 20,
-    "EXTRA-FIELD": 9,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 54
+    "FIELD-SHAPE": 11,
+    "MISSING-FIELD": 23,
+    "EXTRA-FIELD": 5,
+    "SPAN-COORD": 57
   },
   "samples/compilation-tests/payload-variants-001.scrml": {
     "FIELD-SHAPE": 10,
@@ -5573,82 +5514,78 @@
     "SPAN-COORD": 32
   },
   "samples/compilation-tests/protect-001-basic-auth.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 18,
-    "MISSING-FIELD": 50,
-    "EXTRA-FIELD": 28,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 21,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 30,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 69
+    "SPAN-COORD": 71
   },
   "samples/compilation-tests/reactive-001-basic-decl.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/reactive-002-multiple.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-003-string.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-004-number.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-005-boolean.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-006-array.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-007-object.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-008-null.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
-  },
-  "samples/compilation-tests/reactive-009-empty-string.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 10,
     "EXTRA-FIELD": 4,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 15
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/reactive-003-string.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/reactive-004-number.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/reactive-005-boolean.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 4,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/reactive-006-array.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 16
+  },
+  "samples/compilation-tests/reactive-007-object.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 17
+  },
+  "samples/compilation-tests/reactive-008-null.scrml": {
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 13
+  },
+  "samples/compilation-tests/reactive-009-empty-string.scrml": {
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 6,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/reactive-010-empty-array.scrml": {
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 10,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 9,
     "EXTRA-FIELD": 2,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 14
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/reactive-011-with-logic.scrml": {
     "KIND-NAME": 3,
@@ -5659,54 +5596,58 @@
     "SPAN-COORD": 15
   },
   "samples/compilation-tests/reactive-012-computed.scrml": {
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 2,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 9,
+    "EXTRA-FIELD": 4,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/reactive-013-nested-markup.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 17,
+    "FIELD-SHAPE": 7,
+    "MISSING-FIELD": 15,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 24
+    "SPAN-COORD": 28
   },
   "samples/compilation-tests/reactive-014-form-state.scrml": {
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 19,
-    "EXTRA-FIELD": 9,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 8,
+    "MISSING-FIELD": 20,
+    "EXTRA-FIELD": 11,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 32
+    "SPAN-COORD": 34
   },
   "samples/compilation-tests/reactive-015-complex-init.scrml": {
-    "FIELD-SHAPE": 2,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 4,
     "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 2,
+    "EXTRA-FIELD": 5,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 11
+    "SPAN-COORD": 13
   },
   "samples/compilation-tests/reactive-016-bind-value.scrml": {
-    "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 50,
-    "EXTRA-FIELD": 34,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 36,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 111
+    "SPAN-COORD": 113
   },
   "samples/compilation-tests/reactive-017-arrays.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 13,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 15,
     "MISSING-FIELD": 39,
-    "EXTRA-FIELD": 27,
+    "EXTRA-FIELD": 30,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 59
+    "SPAN-COORD": 61
   },
   "samples/compilation-tests/reactive-018-class-binding.scrml": {
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 23,
-    "EXTRA-FIELD": 13,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 9,
+    "MISSING-FIELD": 24,
+    "EXTRA-FIELD": 15,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 54
+    "SPAN-COORD": 56
   },
   "samples/compilation-tests/ref-001-basic.scrml": {
     "FIELD-SHAPE": 4,
@@ -5788,10 +5729,9 @@
   "samples/compilation-tests/server-007-client-only.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 15,
-    "EXTRA-FIELD": 11,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 16
+    "MISSING-FIELD": 18,
+    "EXTRA-FIELD": 7,
+    "SPAN-COORD": 19
   },
   "samples/compilation-tests/server-008-form-handler.scrml": {
     "KIND-NAME": 1,
@@ -5823,11 +5763,11 @@
   },
   "samples/compilation-tests/snippet-002-parametric.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 6,
-    "MISSING-FIELD": 14,
+    "FIELD-SHAPE": 7,
+    "MISSING-FIELD": 13,
     "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 25
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 42
   },
   "samples/compilation-tests/sql-001-basic-select.scrml": {
     "FIELD-SHAPE": 2,
@@ -5908,10 +5848,9 @@
   "samples/compilation-tests/state-003-constructor-with-logic.scrml": {
     "KIND-NAME": 1,
     "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 21,
-    "EXTRA-FIELD": 11,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 31
+    "MISSING-FIELD": 24,
+    "EXTRA-FIELD": 7,
+    "SPAN-COORD": 34
   },
   "samples/compilation-tests/state-004-instantiation.scrml": {
     "FIELD-SHAPE": 4,
@@ -5965,11 +5904,11 @@
     "SPAN-COORD": 44
   },
   "samples/compilation-tests/tableFor-basic.scrml": {
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 15,
+    "FIELD-SHAPE": 8,
+    "MISSING-FIELD": 14,
     "EXTRA-FIELD": 5,
-    "COUNT-LENGTH": 3,
-    "SPAN-COORD": 18
+    "COUNT-LENGTH": 2,
+    "SPAN-COORD": 47
   },
   "samples/compilation-tests/tailwind-prose-coverage.scrml": {
     "FIELD-SHAPE": 51,
@@ -5987,11 +5926,11 @@
   },
   "samples/compilation-tests/test-002-with-logic.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 18,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 17,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/test-003-multiple-tests.scrml": {
     "KIND-NAME": 1,
@@ -6043,11 +5982,11 @@
   },
   "samples/compilation-tests/test-009-test-reactive.scrml": {
     "KIND-NAME": 2,
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 18,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 17,
     "EXTRA-FIELD": 6,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/test-010-nested-context.scrml": {
     "KIND-NAME": 1,
@@ -6059,11 +5998,10 @@
   },
   "samples/compilation-tests/transition-001-basic.scrml": {
     "KIND-NAME": 1,
-    "FIELD-SHAPE": 7,
-    "MISSING-FIELD": 35,
+    "FIELD-SHAPE": 8,
+    "MISSING-FIELD": 34,
     "EXTRA-FIELD": 10,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 42
+    "SPAN-COORD": 44
   },
   "samples/compilation-tests/type-001-enum.scrml": {
     "FIELD-SHAPE": 4,
@@ -6087,11 +6025,11 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/type-004-enum-use.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 8,
+    "FIELD-SHAPE": 5,
+    "MISSING-FIELD": 7,
     "EXTRA-FIELD": 3,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 16
   },
   "samples/compilation-tests/type-005-multiple-types.scrml": {
     "FIELD-SHAPE": 6,
@@ -6150,11 +6088,12 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/type-013-type-with-reactive.scrml": {
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 9,
-    "EXTRA-FIELD": 3,
+    "KIND-NAME": 1,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 11,
+    "EXTRA-FIELD": 6,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 13
+    "SPAN-COORD": 15
   },
   "samples/compilation-tests/type-014-type-before-markup.scrml": {
     "FIELD-SHAPE": 4,
@@ -6164,28 +6103,27 @@
     "SPAN-COORD": 13
   },
   "samples/compilation-tests/type-015-combined.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 16,
-    "EXTRA-FIELD": 11,
-    "COUNT-LENGTH": 2,
-    "SPAN-COORD": 16
+    "FIELD-SHAPE": 9,
+    "MISSING-FIELD": 12,
+    "EXTRA-FIELD": 5,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/when-001-basic-effect.scrml": {
     "KIND-NAME": 5,
-    "FIELD-SHAPE": 11,
-    "MISSING-FIELD": 43,
-    "EXTRA-FIELD": 18,
+    "FIELD-SHAPE": 13,
+    "MISSING-FIELD": 37,
+    "EXTRA-FIELD": 19,
     "COUNT-LENGTH": 1,
-    "SPAN-COORD": 35
+    "SPAN-COORD": 36
   },
   "samples/compilation-tests/when-002-message-handler.scrml": {
     "KIND-NAME": 5,
-    "FIELD-SHAPE": 13,
-    "MISSING-FIELD": 57,
-    "EXTRA-FIELD": 25,
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 51,
+    "EXTRA-FIELD": 26,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 44
+    "SPAN-COORD": 45
   },
   "samples/contact-directory.scrml": {
     "EXTRA-FIELD": 3,
@@ -6634,12 +6572,12 @@
     "SPAN-COORD": 155
   },
   "samples/quiz-app.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 9,
-    "MISSING-FIELD": 20,
-    "EXTRA-FIELD": 28,
-    "COUNT-LENGTH": 5,
-    "SPAN-COORD": 41
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 19,
+    "EXTRA-FIELD": 31,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 46
   },
   "samples/react-dev-lin-lift-edge-cases.scrml": {
     "KIND-NAME": 5,
@@ -6725,12 +6663,12 @@
     "SPAN-COORD": 20
   },
   "stdlib/auth/templates/login.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 21,
-    "MISSING-FIELD": 66,
-    "EXTRA-FIELD": 45,
+    "KIND-NAME": 3,
+    "FIELD-SHAPE": 24,
+    "MISSING-FIELD": 67,
+    "EXTRA-FIELD": 47,
     "COUNT-LENGTH": 2,
-    "SPAN-COORD": 137
+    "SPAN-COORD": 139
   },
   "stdlib/compiler/bpp.scrml": {
     "KIND-NAME": 3,
