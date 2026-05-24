@@ -760,10 +760,10 @@
     "SPAN-COORD": 55
   },
   "samples/compilation-tests/combined-007-crud.scrml": {
-    "KIND-NAME": 6,
-    "FIELD-SHAPE": 24,
-    "MISSING-FIELD": 74,
-    "EXTRA-FIELD": 23,
+    "KIND-NAME": 5,
+    "FIELD-SHAPE": 23,
+    "MISSING-FIELD": 72,
+    "EXTRA-FIELD": 21,
     "COUNT-LENGTH": 1,
     "SPAN-COORD": 69
   },
@@ -1448,10 +1448,10 @@
     "SPAN-COORD": 839
   },
   "samples/compilation-tests/gauntlet-r10-rails-blog.scrml": {
-    "KIND-NAME": 56,
-    "FIELD-SHAPE": 211,
-    "MISSING-FIELD": 740,
-    "EXTRA-FIELD": 264,
+    "KIND-NAME": 53,
+    "FIELD-SHAPE": 208,
+    "MISSING-FIELD": 734,
+    "EXTRA-FIELD": 258,
     "COUNT-LENGTH": 10,
     "SPAN-COORD": 989
   },
@@ -5464,10 +5464,9 @@
     "SPAN-COORD": 41
   },
   "samples/compilation-tests/postgres-program-driver.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 5,
-    "MISSING-FIELD": 19,
-    "EXTRA-FIELD": 7,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 17,
+    "EXTRA-FIELD": 5,
     "SPAN-COORD": 32
   },
   "samples/compilation-tests/protect-001-basic-auth.scrml": {
@@ -5734,24 +5733,21 @@
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/sql-005-insert.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 4,
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/sql-006-update.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 4,
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/sql-007-delete.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 4,
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/sql-008-order-limit.scrml": {
@@ -5767,10 +5763,9 @@
     "SPAN-COORD": 14
   },
   "samples/compilation-tests/sql-010-create-table.scrml": {
-    "KIND-NAME": 1,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 8,
-    "EXTRA-FIELD": 4,
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 6,
+    "EXTRA-FIELD": 2,
     "SPAN-COORD": 12
   },
   "samples/compilation-tests/state-001-basic-constructor.scrml": {

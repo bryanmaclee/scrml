@@ -322,3 +322,74 @@ NO source change. The brief's hedged "walkBlocks doesn't reach <program>-body de
 
 ### Maps consulted
 primary.map.md (full) — task-shape "Native-parser bug fix". Maps consulted but NOT load-bearing for the root cause: they correctly routed to collect-hoisted.js, but the SCOPING-era bug hypothesis was already stale and the verified cause (gap already closed; residual is a dynamic-import semantic guard) came from empirical Phase-0 source tracing, not map content.
+
+---
+
+# M6.5.b.4 — FIX-NATIVE: promote bare `?{}` statement to `kind:"sql"`
+
+**Dispatch:** S(this) — security-relevant native-parser bug (M6.7-STOP / 845-failure root cause class)
+**Worktree:** `/home/bryan/scrmlMaster/scrmlTS/.claude/worktrees/agent-a80177c5d6c2ea98d`
+**Base SHA after `git merge main`:** `319dbf26` (b.2.1 + b.3 absorbed; fast-forward)
+**Maps consulted:** primary.map.md (full) + Task-Shape Routing "Native-parser bug fix" row.
+
+## Phase 0 — verified findings (BEFORE fix)
+
+### 0.1 Leak repro (native pipeline through codegen)
+Fixture: `${ ?{\`SELECT secret FROM credentials\`} }` at non-server scope inside `<program db="postgres">`.
+
+| parser | W-CG-001 fires? | client has `_scrml_sql`/SELECT? | client emission |
+|---|---|---|---|
+| live (default) | YES | NO | SQL correctly suppressed; W-CG-001 warns |
+| scrml-native | **NO** | NO (this fixture) | emits `null /* sql-ref unresolved: nodeId=-1 ... */` into client.js + reactive display wiring |
+
+Nuance vs brief: at current HEAD the *literal query text* does not reach client.js for THIS shape — the bare statement-position `sql-ref` is never re-stamped with a real `nodeId` by the C1 assembler, so `emitSqlRef` renders the `nodeId<0` placeholder `null /* sql-ref unresolved */` instead of `_scrml_sql_exec(...)`. The brief's `_scrml_sql_exec` leak is the GENERAL class risk (fires once a `bare-expr+sql-ref` DOES carry a resolved nodeId / a chained form resolves). The LOAD-BEARING confirmed defect is: **W-CG-001 does NOT fire under native** (the M6.7-STOP root cause) AND the SQL statement is mis-shaped as a broken client `null` expression rather than a server-only `kind:"sql"` node. Both are closed by promotion to `kind:"sql"` (routes through `isServerOnlyNode` collect.ts:420 + the live emit-logic.ts SQL path).
+
+### 0.2 Live `kind:"sql"` LogicStatement oracle
+`compiler/src/ast-builder.js:11672-11680` (case "sql"):
+`{ id, kind:"sql", query, chainedCalls: filteredCalls, span, [nobatch] }`
+Type: `SQLNode` (`compiler/src/types/ast.ts:311`). `chainedCalls: SQLChainedCall[]` where `SQLChainedCall = { method:string, args:string }` (ast.ts:182). `id` is counter-derived (stripped by within-node classifier). Field set to match: `{kind, query, chainedCalls, span}`.
+
+### 0.3 Native locus + Sql.raw shape
+- Bug locus: `compiler/native-parser/translate-stmt.js` ExprStmt arm (lines 160-189). It dispatches on `e.kind` (Lift/Fail/Propagate/GuardedExpr → specialized statement kinds; else `makeBareExpr`). NO `Sql` arm — bare `?{}` falls to `makeBareExpr` → `bare-expr`+`sql-ref` via `translateExpr`→`translateSql` (translate-expr.js:860).
+- Native `Sql` node: `makeSql(raw, span)` (ast-expr.js:311) → `{kind:"Sql", raw, span}`. `raw` is the VERBATIM block text INCLUDING `?{` / `}` delimiters and backticks: probed `raw = "?{` + bt + `SELECT secret FROM credentials` + bt + `}"`.
+- Chained `?{}.get()`/`.all()`: lexed as the Sql atom wrapped in a postfix Member+Call chain (parse-expr.js:1907 makeSql is an atom; parsePostfixChain wraps `.get()` as `Call{callee:Member{object:Sql,...}}`). So `e.kind === "Sql"` is the BARE (un-chained) case ONLY. Chained form arrives as `e.kind === "Call"`.
+- Query extraction: live uses `tokenizeSQL(raw.slice(2,len-1))` → `SQL_RAW` token = content BETWEEN backticks (no backticks). For the bare case, reproducing that strip in a local helper is sufficient and avoids a native→src cross-import.
+
+### 0.4 chainedCalls disposition
+The bare `?{}` (no chain) is the security-critical + primary case and is what `e.kind === "Sql"` matches. Chained `?{}.get()`/`.all()` arrives as a `Call`-headed expression whose base is a `Sql`; promoting it to `kind:"sql"` with a faithful `chainedCalls` requires unwrapping the native Member/Call chain + stringifying each call's args back to source — a separable sub-task. Per the brief's STOP condition and SCOPING §3, chained-`?{}` is DEFERRED to a follow-on; this unit lands the bare promotion. The SECONDARY isServerOnlyNode hardening (below) closes the chained-form LEAK CLASS even while its shape stays `bare-expr`.
+
+## Implementation + verification (AFTER fix)
+
+### PRIMARY — `compiler/native-parser/translate-stmt.js`
+Added a `Sql`-promotion arm to the `ExprStmt` switch (alongside Lift/Fail/Propagate/GuardedExpr): when `e.kind === "Sql"` (a BARE, un-chained `?{}` atom at statement position) → emit `makeSqlStmt(e, ...)` producing `{id, kind:"sql", query, chainedCalls:[], span}` (matches live ast-builder.js:11672 exactly). New helpers `makeSqlStmt` + `extractSqlQuery` (strips `?{` / `}` delimiters + backtick fence locally — mirrors live `block.raw.slice(2,len-1)`+tokenizeSQL; reproduced locally to avoid a native→src cross-import / layering inversion).
+
+### SECONDARY — `compiler/src/codegen/collect.ts` (INCLUDED, KEPT)
+`isServerOnlyNode` bare-expr branch now returns `true` when a `sql-ref` appears ANYWHERE in the exprNode tree (new recursive `exprTreeContainsSqlRef`). Closes the residual leak CLASS for the DEFERRED chained `?{...}.get()`/`.run()` form whose sql-ref nests under `call → member.object` (the shallow `n.exprNode?.kind === "sql-ref"` the brief sketched would miss it). Additive (classifies MORE as server-only). Full suite stayed green WITH it in place (no over-classification regression) → STOP condition NOT triggered → SECONDARY KEPT.
+
+### chainedCalls disposition
+DEFERRED. `e.kind === "Sql"` is the bare form by construction; chained arrives as a `Call`-headed expr. Faithful chainedCalls reconstruction (unwrap native Member/Call chain + stringify args) is a separable follow-on (SCOPING §3). The SECONDARY covers the chained-form LEAK meanwhile (W-CG-001 now fires + client-suppressed under native for chained). Pinned by the unit test's DEFERRED case.
+
+### Verification gates (all GREEN)
+1. NEW tests: `compiler/tests/unit/m65-b4-sql-promotion.test.js` (5) + `compiler/tests/integration/m65-b4-sql-leak.test.js` (5). The leak gate drives the NATIVE pipeline THROUGH codegen and asserts NO `_scrml_sql`/SELECT/DELETE in client.js + W-CG-001 fires (bare PRIMARY + chained SECONDARY), matching live. (Leak is native-only — the default live suite cannot catch it.)
+2. Within-node canary (`parser-conformance-within-node.test.js`): 1005 pass / 0 fail.
+   - Before: KIND-NAME 3393, FIELD-SHAPE 15068, MISSING 42576, EXTRA 18373, COUNT-LEN 1319, SPAN 57159, NESTED 0, PARSE-FAIL 0, TOTAL 137888.
+   - After:  KIND-NAME 3384, FIELD-SHAPE 15059, MISSING 42558, EXTRA 18355, COUNT-LEN 1319, SPAN 57159, NESTED 0, PARSE-FAIL 0, TOTAL 137834.
+   - Movement: 7 fixtures shrank, 0 increased anywhere. KIND-NAME -9 = 5 sql-fixtures (1→0 each) + combined-007-crud (6→5) + gauntlet-r10-rails-blog (56→53, three bare ?{}). Every moved class explained by the bare-expr+sql-ref → kind:"sql" envelope swap (per promotion: KIND-NAME -1, FIELD-SHAPE -1, MISSING -2, EXTRA -2).
+   - Allowlist `parser-conformance-within-node-allowlist.json` regenerated downward SAME branch (23 ins / 28 del).
+3. Strict-pass canary (`parser-conformance-corpus.test.js`): HELD 1000/1001 (99.9%); 1019 pass / 0 fail. Histogram identical to baseline (EXACT:964...).
+4. Full `bun test compiler/tests/`: 21258 pass / 0 fail / 174 skip / 1 todo / 775 files (exit 0). 3 flaky tests (self-compilation bootstrap ts.scrml/ast.scrml + trucking-dispatch manifest double-compile) failed once under parallel load but PASS in isolation + on clean re-run; none SQL-related; the SECONDARY only adds `return true` for sql-ref-bearing nodes and cannot affect them.
+
+### STOP conditions
+- chained-`?{}` native sub-project → NOT hit as a blocker; chained promotion intentionally DEFERRED (bare landing + SECONDARY covers leak), per the brief's own minimal-landing allowance.
+- SECONDARY full-suite regression (over-classification) → NOT hit; secondary KEPT.
+- canary class regression → NONE (pure shrink).
+
+### Commits (worktree branch `worktree-agent-a80177c5d6c2ea98d`)
+- WIP: Phase-0 findings + leak repros
+- WIP: PRIMARY translate-stmt.js promotion
+- WIP: SECONDARY collect.ts hardening
+- test: unit + integration security gate
+- test: within-node allowlist regen + scratch artifacts
+- (this progress append)
+
+PA does the S67 file-delta landing + independent dual-verify (re-run scratch/m65b4-leak-repro.mjs + m65b4-chained-leak.mjs). Not pushed; main untouched.

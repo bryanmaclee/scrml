@@ -185,6 +185,29 @@ function appendTranslatedStmt(out, stmt, counter) {
                 out.push(makeGuardedExprNode(e, stmt.span, counter));
                 return;
             }
+            // M6.5.b.4 (FIX-NATIVE, SECURITY) — a BARE `?{ ... }` SQL block at
+            // statement position (`e.kind === "Sql"`, no chained `.get()`/
+            // `.all()`) is promoted to a first-class `kind:"sql"` LogicStatement
+            // matching the LIVE shape (ast-builder.js:11672 — `{ kind:"sql",
+            // query, chainedCalls, span }`). The default `makeBareExpr` path
+            // produced `{ kind:"bare-expr", exprNode:{ kind:"sql-ref",
+            // nodeId:-1 } }`, which the W-CG-001 server-only detector
+            // (collect.ts:isServerOnlyNode) FAILED to classify as server-only
+            // (its SQL_SIGIL_PATTERN runs against `emitStringFromTree(sql-ref)`,
+            // a comment placeholder that never matches `/\?\{`/`) — letting
+            // server-only SQL escape the server-only path. Emitting `kind:"sql"`
+            // routes through `isServerOnlyNode` collect.ts:420 (`kind==="sql"
+            // => true`) and the live emit-logic.ts SQL path, closing the
+            // M6.7-STOP leak class. CHAINED `?{...}.get()` arrives as a
+            // `Call`-headed expression (Sql atom + postfix Member/Call chain),
+            // NOT `e.kind === "Sql"` — its faithful `chainedCalls`
+            // reconstruction is DEFERRED to a follow-on (SCOPING §3); the
+            // isServerOnlyNode bare-expr+sql-ref hardening (collect.ts) covers
+            // the chained-form leak class meanwhile.
+            if (e && e.kind === "Sql") {
+                out.push(makeSqlStmt(e, stmt.span, counter));
+                return;
+            }
             out.push(makeBareExpr(e, stmt.span, counter));
             return;
         }
@@ -394,6 +417,45 @@ function makeBareExpr(nativeExpr, span, counter) {
         kind: "bare-expr",
         expr: "",
         exprNode: nativeExpr === undefined ? null : translateExpr(nativeExpr),
+        span: spanOrZero(span),
+    };
+}
+
+// extractSqlQuery — pull the query string OUT of a native `Sql.raw`. `raw` is
+// the VERBATIM block text INCLUDING the `?{` / `}` delimiters and the inner
+// backtick fence, e.g. "?{`SELECT 1`}". This mirrors the LIVE extraction
+// (ast-builder.js:11654 `block.raw.slice(2, len-1)` then tokenizeSQL, whose
+// SQL_RAW token is the content BETWEEN the backticks — no backticks, no
+// delimiters). Reproduced LOCALLY rather than cross-importing the live
+// tokenizer (translate-stmt.js imports only native-parser siblings — a src/
+// cross-import would invert the M6 "native parser IS the front-end" layering
+// and risk a cycle). Defensive: a malformed / non-string `raw` yields "".
+function extractSqlQuery(raw) {
+    if (typeof raw !== "string") return "";
+    let inner = raw;
+    // Strip the leading `?{` and the trailing `}` (the SQL-context delimiters).
+    if (inner.startsWith("?{")) inner = inner.slice(2);
+    if (inner.endsWith("}")) inner = inner.slice(0, inner.length - 1);
+    inner = inner.trim();
+    // Strip the backtick fence (the scrml SQL template delimiters, §8.1).
+    if (inner.startsWith("`") && inner.endsWith("`") && inner.length >= 2) {
+        inner = inner.slice(1, inner.length - 1);
+    }
+    return inner;
+}
+
+// makeSqlStmt — promote a BARE native `Sql{raw}` at statement position to a
+// live `kind:"sql"` LogicStatement (SQLNode, ast.ts:311). Matches the LIVE
+// field set exactly: `{ id, kind:"sql", query, chainedCalls, span }`.
+// `chainedCalls` is `[]` — `e.kind === "Sql"` is the UN-chained form by
+// construction (a chained `?{...}.get()` is a `Call`-headed expression, not a
+// bare `Sql` atom; see the ExprStmt arm note). M6.5.b.4 (FIX-NATIVE, security).
+function makeSqlStmt(nativeSql, span, counter) {
+    return {
+        id: stampId(counter),
+        kind: "sql",
+        query: extractSqlQuery(nativeSql === undefined || nativeSql === null ? "" : nativeSql.raw),
+        chainedCalls: [],
         span: spanOrZero(span),
     };
 }

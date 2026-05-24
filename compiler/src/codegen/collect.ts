@@ -397,6 +397,45 @@ function collectMetaExprStrings(body: Node[]): string[] {
 }
 
 /**
+ * M6.5.b.4 (SECONDARY, defense-in-depth) — does this ExprNode tree contain a
+ * `sql-ref` node ANYWHERE within it? A `sql-ref` is a reference to a server-
+ * only `?{}` SQL block (§8 — SQL contexts are server-only); its presence in a
+ * `bare-expr` means the statement is server-only regardless of how
+ * `emitStringFromTree` round-trips it (the round-trip emits a comment
+ * placeholder for the sql-ref, which the `SQL_SIGIL_PATTERN` backtick-anchored
+ * test never matches — the gap the M6.7-STOP leak rode through).
+ *
+ * The PRIMARY fix (translate-stmt.js) promotes a BARE `?{}` statement to
+ * `kind:"sql"` (caught at the top of isServerOnlyNode). This scanner closes the
+ * RESIDUAL leak CLASS: a `sql-ref` nested inside a CHAINED form
+ * (`?{...}.get()` -> `call -> member.object -> sql-ref`) or any other
+ * non-promoted `bare-expr` position. It is ADDITIVE — it can only classify
+ * MORE nodes as server-only, which is strictly safer for the leak (a false
+ * positive would over-suppress a client expression, but a `sql-ref` is by
+ * definition server-only, so there is no legitimate client-side `sql-ref`).
+ *
+ * Bounded recursion over the known ExprNode child-bearing fields; depth is the
+ * expression nesting depth (small in practice). Defensive against cycles via a
+ * visited set is unnecessary — the AST is a tree.
+ */
+function exprTreeContainsSqlRef(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as Record<string, unknown>;
+  if (n.kind === "sql-ref") return true;
+  for (const key of Object.keys(n)) {
+    const v = n[key];
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (exprTreeContainsSqlRef(item)) return true;
+      }
+    } else if (v && typeof v === "object") {
+      if (exprTreeContainsSqlRef(v)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Determine whether an AST node is server-only and must NOT be emitted to
  * client JavaScript output.
  *
@@ -449,6 +488,14 @@ export function isServerOnlyNode(node: unknown): boolean {
   // Catch inline ?{} SQL sigil in bare-expr nodes.
   // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
   if (n.kind === "bare-expr") {
+    // M6.5.b.4 (SECONDARY) — a `sql-ref` ANYWHERE in the exprNode tree is
+    // server-only SQL (§8). Catches the chained `?{...}.get()` form whose
+    // sql-ref is nested under `call -> member.object` and which the
+    // emitStringFromTree round-trip below does NOT match (the comment
+    // placeholder fails SQL_SIGIL_PATTERN). Additive — strictly safer for
+    // the leak; the bare un-chained `?{}` statement is already promoted to
+    // `kind:"sql"` upstream (translate-stmt.js, PRIMARY).
+    if ((n as any).exprNode && exprTreeContainsSqlRef((n as any).exprNode)) return true;
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof n.expr === "string" ? n.expr : "");
     if (SQL_SIGIL_PATTERN.test(expr)) return true;
     if (ENV_PATTERN.test(expr)) return true;
