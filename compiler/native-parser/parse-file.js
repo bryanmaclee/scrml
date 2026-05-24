@@ -183,6 +183,15 @@ export function nativeParseFile(filePath, source) {
         middlewareConfig: null,
     };
 
+    // 5. NORMALIZE — M6.5.b.5 (Class F shape) + M6.5.b.6 (Class G span.file).
+    //    Single boundary normalizer (SCOPING §4 Decision A) over the assembled
+    //    FileAST: stamps `span.file`, lowercases `closerForm`, defaults
+    //    `openerHadSpaceAfterLt` / `_p3a*` on markup nodes, and strips the
+    //    native-only `attrs[].value.sourceText` from translated markup-family
+    //    node attrs (via clone — the raw native blocks the engine walker reads
+    //    keep it). Native-path-only; cannot affect the live default.
+    normalizeNativeFileAST(ast, safePath);
+
     return { filePath: safePath, ast, errors };
 }
 
@@ -354,6 +363,16 @@ function synthMarkupNode(block, idGen, source, errors) {
         isComponent: isUpperInitial(tag),
         span: block.span !== undefined ? block.span : null,
     };
+    // M6.5.b.5 (Class F) — `openerHadSpaceAfterLt` + the P3a re-export markers
+    // are NOT stamped at this synth site. Live stamps them in `buildBlock`
+    // (ast-builder.js L11036/L11040-41) for BLOCK-PATH markup ONLY; live OMITS
+    // them on lift/match/for-expr markup-as-value SUBTREES (verified: 361 of 361
+    // field-less live markup nodes are under an expr/node/exprNode ancestor, 0
+    // outside). `synthMarkupNode` is reached on BOTH paths (the top-level block
+    // tree AND, via `mapBlocksToNodesForBridge`, a lift-expr markup subtree), so
+    // stamping here would over-stamp the subtree case. The context-aware stamp
+    // lives in `normalizeNativeFileAST` (it tracks the expr-context ancestor and
+    // stamps only block-path markup) — the faithful single-locus home.
 }
 
 // synthStateNode — SYNTHESIZE a live `StateNode` (ast.ts:265) or
@@ -729,6 +748,14 @@ function synthLogicNode(block, idGen) {
         typeDecls: [],
         components: [],
         span: block.span !== undefined ? block.span : null,
+        // M6.5.b.5 (Class F) — forward the `_synthetic` lift-wrapper marker the
+        // native `liftBareBlocks` stamps (parse-markup.js synthLiftedLogicBlock
+        // L2074 / synthPairedLogicBlock) onto the live `logic` node, EXACTLY as
+        // the live ast-builder does (ast-builder.js L11648). Present-only-when-
+        // true (a non-lifted logic node has NO `_synthetic` key on either
+        // pipeline). Consumed by the W-PROGRAM-REDUNDANT-LOGIC lint (live-only);
+        // surfaced here for within-node parity.
+        ...(block._synthetic === true ? { _synthetic: true } : {}),
     };
 }
 
@@ -1034,4 +1061,220 @@ function isUpperInitial(name) {
     if (typeof name !== "string" || name.length === 0) return false;
     const code = name.charCodeAt(0);
     return code >= 65 && code <= 90;
+}
+
+// =============================================================================
+// M6.5.b.5 (Class F) + M6.5.b.6 (Class G) — native→live FileAST shape + span
+// normalization. ONE explicit post-`nativeParseFile` normalizer (SCOPING §4
+// Decision A: a single boundary normalizer, NOT N consumer-side adapters).
+// Native-path-only by construction (nativeParseFile runs only when
+// `--parser=scrml-native`; api.js:849), so this CANNOT affect the live default.
+//
+// Per-node rules (all ADAPT — shape parity, no parser-behavior change):
+//   - span.file       (G) — stamp `span.file = filePath` on every span object
+//                           lacking it. Live `Span` carries `file` (ast.ts:21
+//                           `file?`); native spans omit it. ADDITIVE: adding a
+//                           `file` key does not change start/end/line/col, so
+//                           any consumer that shares a span object (e.g. the
+//                           engine state-child walker reading `_nativeEngineBlock`
+//                           offsets) is unaffected. Closes the SPAN-COORD
+//                           file-missing key-set divergences.
+//   - closerForm      (F) — lowercase the value on `markup` nodes. Native emits
+//                           PascalCase "Explicit"/"Inferred" via the TagFrame
+//                           close lifecycle (tag-frame.js CloserForm enum);
+//                           live emits "explicit"/"inferred" (ast-builder.js
+//                           L11034). `.toLowerCase()` is exact: corpus-wide the
+//                           ONLY native values are "Explicit"/"Inferred"/"" (no
+//                           "SelfClosing" — the self-close case is `""`, already
+//                           lowercase; the native ""-vs-live-"self-closing"
+//                           DISTINCTION gap is a separate parser-fidelity issue,
+//                           NOT a case adapter — out of this unit's scope).
+//   - openerHadSpaceAfterLt (F) — default `false` on a `markup` node missing it.
+//                           Faithful: a `markup` node is NEVER a StateOpener (a
+//                           `< Foo` space-opener routes to `synthStateNode`;
+//                           `<match>`/`< match` route to `synthMatchBlockNode`,
+//                           which already stamps the tagKind-derived value) — so
+//                           a markup node always had NO space after `<` ⇒ false.
+//                           Mirrors live ast-builder.js L11036.
+//   - _p3aIsExport / _p3aExportName (F) — default `undefined` (present-as-key)
+//                           on a `markup` node missing them. Live stamps them on
+//                           every markup node (ast-builder.js L11040-41),
+//                           present-as-undefined for normal markup (the
+//                           `true`/name re-export case is a `<channel>`-export
+//                           P3a shape, a separate divergence left as-is).
+//   - attrs[].value.sourceText (F) — STRIP from `markup`/`state`/`match-block`
+//                           node attrs, via a NON-MUTATING clone of the attr +
+//                           value. CRITICAL: the synth* builders pass
+//                           `block.attrs` BY REFERENCE, and those same AttrValue
+//                           objects are reachable via `machineDecls[].bodyChildren`
+//                           / `_nativeEngineBlock` (collect-hoisted.js L421/452)
+//                           where the engine state-child walker's `readIfExprRaw`
+//                           (engine-statechild-walker.ts:144) reads `sourceText`
+//                           for `ifExprRaw` legacy parity. Cloning (never
+//                           deleting in place) leaves the raw native blocks —
+//                           PascalCase `kind:"Markup"` — intact for the walker.
+//                           The discriminator is the LOWERCASE live `kind`: this
+//                           pass only touches translated FileAST nodes, never the
+//                           raw native blocks it transitively reaches.
+// =============================================================================
+
+// MARKUP_FAMILY_KINDS — the live lowercase markup-family node kinds whose attrs
+// carry the native-only `sourceText` debt. `match-block` keeps its attrs raw on
+// the node (forType/onExprRaw are read from them), but its translated attr
+// values still carry sourceText — strip there too.
+const MARKUP_ATTR_KINDS = new Set(["markup", "state", "state-constructor-def", "match-block"]);
+
+// stripSourceTextFromAttrs — calculation. Return a NEW attrs array with each
+// attr's `value.sourceText` removed via shallow clone. Never mutates the input
+// objects (they are shared with the raw native block stream the engine walker
+// reads). An attr whose value has no `sourceText` is passed through by
+// reference (no needless clone).
+function stripSourceTextFromAttrs(attrs) {
+    if (Array.isArray(attrs) === false) return attrs;
+    let changed = false;
+    const out = attrs.map((attr) => {
+        if (attr === null || attr === undefined) return attr;
+        const value = attr.value;
+        if (value === null || value === undefined || typeof value !== "object") return attr;
+        if (Object.prototype.hasOwnProperty.call(value, "sourceText") === false) return attr;
+        changed = true;
+        const newValue = {};
+        for (const k of Object.keys(value)) {
+            if (k === "sourceText") continue;
+            newValue[k] = value[k];
+        }
+        const newAttr = {};
+        for (const k of Object.keys(attr)) {
+            newAttr[k] = (k === "value") ? newValue : attr[k];
+        }
+        return newAttr;
+    });
+    return changed ? out : attrs;
+}
+
+// normalizeNode — calculation (mutates the translated node in place; the node
+// was freshly synthesized by the synth* builders, so in-place is safe for
+// everything EXCEPT attrs[].value, which is shared — handled via clone above).
+// `inExprContext` is true when the node sits inside a lift/match/for-expr
+// markup-as-value subtree (under an `expr`/`node`/`exprNode` ancestor); live
+// OMITS `openerHadSpaceAfterLt` + `_p3a*` on those, so they are gated on it.
+// Returns nothing; the caller walks children separately.
+function normalizeNode(node, filePath, inExprContext) {
+    if (node === null || node === undefined || typeof node !== "object") return;
+
+    // (G) span.file — additive stamp on a plain-object span lacking `file`.
+    const span = node.span;
+    if (span !== null && span !== undefined && typeof span === "object"
+        && Array.isArray(span) === false
+        && Object.prototype.hasOwnProperty.call(span, "file") === false) {
+        span.file = filePath;
+    }
+
+    const kind = node.kind;
+
+    // (F) closerForm case — markup nodes carry a non-null closerForm on BOTH
+    // the block path (synthMarkupNode) AND the lift-expr path
+    // (translate-stmt synthLiveMarkupNodeFromBlock); live lowercases on both,
+    // so lowercase here (a node-shape pass, path-agnostic).
+    if (kind === "markup" && typeof node.closerForm === "string" && node.closerForm.length > 0) {
+        node.closerForm = node.closerForm.toLowerCase();
+    }
+
+    // (F) openerHadSpaceAfterLt + _p3a* — BLOCK-PATH markup nodes ONLY. Live
+    // stamps them in `buildBlock` (ast-builder.js L11036/L11040-41) for the
+    // top-level/child markup TREE, and OMITS them on lift/match/for-expr
+    // markup-as-value subtrees (verified empirically: 361 of 361 field-less
+    // live markup nodes are under an expr/node/exprNode ancestor; 0 outside).
+    // The `inExprContext` gate reproduces that exact rule. A `markup` node is
+    // never a StateOpener (a `< Foo` space-opener routes to synthStateNode), so
+    // openerHadSpaceAfterLt is always `false`. _p3a* are present-as-`undefined`
+    // for normal markup (the `true`/name re-export is a `<channel>`-export P3a
+    // shape, a separate divergence left as-is). Present-as-key, value undefined.
+    if (kind === "markup" && inExprContext === false) {
+        if (Object.prototype.hasOwnProperty.call(node, "openerHadSpaceAfterLt") === false) {
+            node.openerHadSpaceAfterLt = false;
+        }
+        if (Object.prototype.hasOwnProperty.call(node, "_p3aIsExport") === false) {
+            node._p3aIsExport = undefined;
+        }
+        if (Object.prototype.hasOwnProperty.call(node, "_p3aExportName") === false) {
+            node._p3aExportName = undefined;
+        }
+    }
+
+    // (F) sourceText strip — clone the attrs of a translated markup-family node.
+    // Path-agnostic (live carries no sourceText on either path).
+    if (MARKUP_ATTR_KINDS.has(kind) && Array.isArray(node.attrs)) {
+        node.attrs = stripSourceTextFromAttrs(node.attrs);
+    }
+}
+
+// EXPR_CONTEXT_KEYS — the field names whose subtree is a markup-as-value /
+// expression context (lift-expr `{kind:"markup", node}`, for-expr / match-expr
+// `expr`, structured `exprNode`). Crossing any of these flips `inExprContext`
+// true for the descendant subtree, mirroring live's field-omission rule.
+const EXPR_CONTEXT_KEYS = new Set(["expr", "node", "exprNode"]);
+
+// normalizeNativeFileAST — state write. Walk the assembled FileAST and apply
+// the per-node F+G normalizations. Iterative stack walk (the live AST nests
+// deeply — engine fixtures ~12 levels; mirrors the within-node-classifier
+// walker discipline). Walks the FileAST node collections (`nodes` + the seven
+// hoisted decl arrays) and recurses every object/array value so nested
+// `children` / `body` / lift-expr markup subtrees are reached. The raw native
+// block escape hatches (`_nativeEngineBlock` / `_source`) are NOT descended
+// (the sourceText strip already discriminates by lowercase `kind`; skipping
+// them also avoids redundant span.file stamps on the shared raw blocks).
+export function normalizeNativeFileAST(ast, filePath) {
+    if (ast === null || ast === undefined || typeof ast !== "object") return ast;
+    const fp = typeof filePath === "string" ? filePath : "";
+    // Roots: every FileAST collection that carries nodes/spans.
+    const roots = [
+        ast.nodes, ast.imports, ast.exports, ast.components,
+        ast.typeDecls, ast.machineDecls, ast.channelDecls,
+    ];
+    // Each frame carries `{ value, inExprContext }`. Crossing an
+    // EXPR_CONTEXT_KEY flips the flag true for the descendant subtree.
+    const stack = [];
+    for (const root of roots) {
+        if (Array.isArray(root)) {
+            for (const item of root) stack.push({ value: item, inExprContext: false });
+        }
+    }
+    const seen = new Set();
+    while (stack.length > 0) {
+        const frame = stack.pop();
+        const cur = frame.value;
+        const inExpr = frame.inExprContext;
+        if (cur === null || cur === undefined || typeof cur !== "object") continue;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        if (Array.isArray(cur)) {
+            for (const item of cur) {
+                if (item !== null && typeof item === "object") {
+                    stack.push({ value: item, inExprContext: inExpr });
+                }
+            }
+            continue;
+        }
+        // Object — normalize THIS node, then descend its own fields.
+        normalizeNode(cur, fp, inExpr);
+        for (const k of Object.keys(cur)) {
+            // Do NOT descend the raw native-block escape hatches (they are the
+            // engine walker's source; the span.file stamp and sourceText strip
+            // must not reach them). Their PascalCase-`kind` blocks would also be
+            // skipped by normalizeNode's lowercase-kind guards, but pruning the
+            // recursion is cheaper and removes any chance of mutating them.
+            if (k === "_nativeEngineBlock" || k === "_source") continue;
+            const v = cur[k];
+            if (v !== null && typeof v === "object") {
+                // A markup-as-value / expression subtree is entered by crossing
+                // an EXPR_CONTEXT_KEY; once inside it stays inside (the flag is
+                // monotone — a markup tree nested in an expr stays expr-context,
+                // matching live's omission across the whole subtree).
+                const childInExpr = inExpr || EXPR_CONTEXT_KEYS.has(k);
+                stack.push({ value: v, inExprContext: childInExpr });
+            }
+        }
+    }
+    return ast;
 }

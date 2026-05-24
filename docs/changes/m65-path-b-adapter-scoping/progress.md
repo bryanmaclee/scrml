@@ -393,3 +393,113 @@ DEFERRED. `e.kind === "Sql"` is the bare form by construction; chained arrives a
 - (this progress append)
 
 PA does the S67 file-delta landing + independent dual-verify (re-run scratch/m65b4-leak-repro.mjs + m65b4-chained-leak.mjs). Not pushed; main untouched.
+
+---
+
+# M6.5.b.5 + M6.5.b.6 — ADAPT: native→live FileAST shape (Class F) + span normalization (Class G), batched
+
+**Worktree:** `/home/bryan/scrmlMaster/scrmlTS/.claude/worktrees/agent-ac3c091fb2a452185`
+**Startup pwd (verbatim):** `/home/bryan/scrmlMaster/scrmlTS/.claude/worktrees/agent-ac3c091fb2a452185`
+**Base SHA after `git merge main`:** `db2d4c28` (b.2.1 + b.3 + b.4 absorbed; fast-forward from 8cccc0f6).
+**Maps consulted:** primary.map.md (full) + Task-Shape Routing "Native-parser bug fix" row → schema.map.md (Span ast.ts:21 has `file?`; FileAST shape) + structure.map.md (Native-Parser Layout — parse-file.js synth* assembler). Load-bearing: schema.map.md confirmed live `Span` includes `file?` (the G target) and routed me to parse-file.js as the synth locus.
+
+## Phase 0 — empirical field-divergence dump (BEFORE any normalization)
+
+Tool: `scratch/m65b56-phase0-dump.mjs` (+ `-spanloc.mjs` + `-kinds.mjs`) — drives LIVE (splitBlocks+buildAST) + NATIVE (nativeParseFile) through the production within-node classifier and dumps F/G candidate-field samples. Fixtures: `examples/01-hello.scrml`, `examples/22-multifile/app.scrml`, `examples/14-mario-state-machine.scrml` (lifted blocks + engine + many markup).
+
+### LOCUS — confirmed (the SCOPING §3 "api.js boundary" is imprecise)
+The native→live node translation lives INSIDE `compiler/native-parser/parse-file.js` (`nativeParseFile` synth* builders). closerForm/selfClosing/openerHadSpaceAfterLt are ALREADY mapped there (parse-file.js synthMarkupNode L340 / synthStateNode L395 / synthEngineNode; translate-stmt.js makeMarkupNode L544). The home for F+G normalization is a single explicit `normalizeNativeFileAST(ast, filePath)` post-pass at the END of `nativeParseFile` (honors Decision A: one normalizer, not N consumer-side adapters), NOT a new api.js pass.
+
+### Native-path-only — confirmed
+`nativeParseFile` is invoked ONLY when `parser === "scrml-native"` (api.js:849; default `parser=null` → live `buildAST`). Extending it CANNOT affect the live default. Blast radius bounded to the opt-in native path.
+
+### Per-field table (diverges at HEAD `db2d4c28`? / COSMETIC|FUNCTIONAL / consumer / disposition)
+
+| Field | Diverges? | Class | Cosmetic/Functional | Consumer | Disposition |
+|---|---|---|---|---|---|
+| `closerForm` case | YES | FIELD-SHAPE | COSMETIC | live: `block.closerForm === "self-closing"` (ast-builder L11033) — lowercase; codegen does not string-eq it | NORMALIZE — lowercase. Native runtime value IS PascalCase (`"Explicit"`/`"Inferred"`) via the TagFrame close lifecycle (tag-frame.js CloserForm enum L2027, used at L2102/2133); the lowercase literals at parse-markup.js:1695 are overwritten by the frame. |
+| `attrs[].value.sourceText` | YES (native EXTRA) | EXTRA-FIELD | **FUNCTIONAL** | native-walker `readIfExprRaw` (engine-statechild-walker.ts:144) prefers it for `ifExprRaw` legacy-parity — but reads it off the RAW native block (`_nativeEngineBlock.children` == `machineDecls[].bodyChildren`, collect-hoisted.js:421/452), NOT the translated FileAST node | NORMALIZE on TRANSLATED markup nodes ONLY, via NON-MUTATING clone. Raw native blocks (PascalCase `kind:"Markup"`) keep sourceText for the walker. Discriminator: lowercase live `kind`. The 4 mario `machineDecls.bodyChildren` sourceText EXTRA are Class A (engine bodyChildren — OUT OF SCOPE, folded to M6.6) and are LEFT. |
+| `openerHadSpaceAfterLt` | YES on PLAIN markup (native omits) | MISSING-FIELD | informational (W-WHITESPACE-001, SPEC §4.3/§15.15.5) | live ast-builder L11036 stamps `=== true`. State/engine native nodes ALREADY set it (parse-file.js L406/534, collect-hoisted L438). Plain markup omits it. | NORMALIZE — stamp `false` on lowercase markup-family nodes missing it (canonical no-space `<tag>` → false; matches live default). NOT functional-risk: it is informational-only post-P1 (SPEC §4.3 "informational only"; NR uses registry, not whitespace). |
+| `_p3aIsExport` / `_p3aExportName` | YES (native omits) | MISSING-FIELD | P3a re-export shape; live stamps present-as-`undefined` on EVERY markup (ast-builder L11040-41), `true`/name only for re-exported `<channel>` | NORMALIZE — stamp `undefined` (present-as-key) on lowercase markup/state-family nodes missing them. All corpus samples are `live=undefined` (no FIELD-SHAPE on these — the rare `_p3aIsExport:true` channel re-export is a separate P3a divergence, pre-existing, left). |
+| `_synthetic` | YES on lifted logic nodes (native omits) | MISSING-FIELD | live-only marker; consumed by W-PROGRAM-REDUNDANT-LOGIC lint (ast-builder L12494) which runs INSIDE live `buildAST` ONLY — the native pipeline never runs that lint | DECISION: see below (deferred unless cheap). 6 instances on mario (`ast.nodes[22].children[N]`). |
+| `span.file` (G) | YES — every node | SPAN-COORD | live Span has `file` (ast.ts:21 `file?`); diagnostic formatters show `file:line:col` else fall back to FileAST.filePath | NORMALIZE — stamp `span.file = filePath` on every span lacking it. ALL SPAN-COORD on the 3 fixtures are file-missing key-set (offsetDelta=0 — confirmed). |
+| line/col/start/end deltas (G) | NO (0 on all 3 fixtures) | — | — | NO ACTION (brief: don't chase offset deltas). |
+
+### Class histograms (single-fixture, raw):
+- 01-hello: FIELD-SHAPE 5 (all closerForm), MISSING 15 (5×openerHadSpaceAfterLt + 5×_p3aIsExport + 5×_p3aExportName), EXTRA 6 (sourceText), SPAN-COORD 27 (all file-missing).
+- 22-multifile/app: FIELD-SHAPE 12, MISSING 24, EXTRA 8, SPAN-COORD 139 (all file-missing), KIND-NAME 1 + COUNT-LENGTH 2 (pre-existing, out of scope).
+- 14-mario: FIELD-SHAPE 92, MISSING 228, EXTRA 135, SPAN-COORD 309 (288 nodes + 18 machineDecls + 3 typeDecls; all file-missing), plus KIND-NAME 33 (pre-existing native match-arm/engine debt, out of scope).
+
+### Shared-reference hazards (drove the non-mutating design):
+1. `synthMarkupNode` (parse-file.js:350) passes `attrs: block.attrs` BY REFERENCE — the same AttrValue objects are reachable via `machineDecls[].bodyChildren` / `_nativeEngineBlock` that the engine walker reads. ⇒ sourceText strip MUST clone, never delete-in-place.
+2. `span: block.span` is also shared. ⇒ span.file is ADDITIVE (adding `file` to a shared span does not change start/end/line/col, so the walker's offset reads are unaffected — mutate-safe).
+
+## Disposition decisions
+- **NORMALIZE (safe, this unit):** closerForm lowercase; span.file stamp (whole FileAST); sourceText strip (translated markup nodes, clone); openerHadSpaceAfterLt:false default (markup-family); _p3aIsExport/_p3aExportName:undefined default (markup/state-family).
+- **_synthetic:** evaluated against STOP guidance (see Implementation below).
+
+## Implementation — LANDED (worktree branch; PA does S67 file-delta to main)
+
+### Locus + mechanism
+ONE explicit boundary normalizer `normalizeNativeFileAST(ast, filePath)` at the END of `nativeParseFile` (parse-file.js step 5), plus `_synthetic` forwarding in `synthLogicNode`. Honors SCOPING §4 Decision A (single normalizer, not N consumer-side adapters). Native-path-only (api.js:849). The normalizer is an iterative stack walk over the FileAST node collections that tracks an `inExprContext` flag (flips true on crossing an `expr`/`node`/`exprNode` key — the markup-as-value / expression boundary).
+
+### Per-field disposition (final)
+| Field | Disposition | How |
+|---|---|---|
+| closerForm case | NORMALIZED (translation) | `normalizeNode` lowercases markup `closerForm`. `.toLowerCase()` is exact — corpus-wide native emits only `"Explicit"`/`"Inferred"`/`""` (no `"SelfClosing"`). |
+| openerHadSpaceAfterLt | NORMALIZED | `normalizeNode` stamps `false` on BLOCK-PATH markup (`inExprContext===false`). A markup node is never a StateOpener. Live OMITS it on expr-subtree markup — the `inExprContext` gate reproduces this (verified 361/361). |
+| _p3aIsExport / _p3aExportName | NORMALIZED | `normalizeNode` stamps `undefined` (present-as-key) on block-path markup. Channel cross-file re-export (`true`/name) is a native P3a-detection gap, left (surfaces as a handful of FIELD-SHAPE). |
+| attrs[].value.sourceText | NORMALIZED via NON-MUTATING clone | `stripSourceTextFromAttrs` clones attr+value minus sourceText on translated markup-family nodes. Raw native blocks (`_nativeEngineBlock`/`bodyChildren`, PascalCase `kind:"Markup"`) KEPT intact — the engine state-child walker's `readIfExprRaw` source. The walk skips `_nativeEngineBlock`/`_source` recursion. |
+| _synthetic | NORMALIZED (FIX at synth site) | `synthLogicNode` forwards `block._synthetic` (native `liftBareBlocks`/synthLiftedLogicBlock already stamps it). Mirrors live ast-builder L11648. 6/6 on mario. NOT a balloon — one-line conditional spread; the lift-site set maps cleanly. |
+| span.file | NORMALIZED (translation) | `normalizeNode` stamps `span.file = filePath` additively on every span lacking it (nodes + all hoisted collections). Coords untouched (additive — engine walker offset reads unaffected). |
+| line/col/start/end deltas | NO ACTION | Per brief — not chased; pre-existing offset deltas remain (out of scope). |
+
+### FIX-NATIVE vs translation
+- closerForm / openerHadSpaceAfterLt / _p3a / sourceText / span.file: TRANSLATION (normalizer). Default per SCOPING Decision A.
+- _synthetic: FIX at the synth site (`synthLogicNode`) — the native marker already exists on the block; just forward it. Cleaner than re-deriving in the normalizer.
+- closerForm NOT fixed at the native emit site (tag-frame.js CloserForm enum) — that enum is the parser's internal lifecycle tag; lowercasing it could ripple into other native consumers. The translation is the contained, safe choice.
+
+### STOP conditions
+- `_synthetic` balloon — NOT hit. Native already stamps `block._synthetic` (synthLiftedLogicBlock L2074); forwarding is one line, lift-site set maps 1:1 to live (6/6 on mario). Landed, not deferred.
+- sourceText FUNCTIONAL consumer (engine walker) — handled by non-mutating clone + recursion pruning; the raw walker source is provably untouched (unit test asserts the raw `_nativeEngineBlock` block KEEPS sourceText). Full engine/walker/symbol-table suites green (121 targeted tests).
+- ambiguous FUNCTIONAL field value — NOT hit. The one semantically-ambiguous case (channel re-export `_p3aIsExport:true`) is a pre-existing native P3a-detection gap; stamping `undefined` matches the COMMON contract and only shuffles a handful of MISSING→FIELD-SHAPE on 4 channel files (documented, not guessed).
+- unexplained canary regression — NOT hit. All 6 increases explained (see allowlist commit). KIND-NAME + COUNT-LENGTH net delta 0 (pure ADAPT, no parser-behavior change).
+
+### Verification (exacting M6 gate)
+1. NEW unit tests `compiler/tests/unit/m65-b56-shape-span-normalize.test.js` — 12 pass / 0 fail (48 expect calls). Per-field, drives the production native path; includes the walker-source-preservation assertion (raw `_nativeEngineBlock` KEEPS sourceText).
+2. Within-node canary `parser-conformance-within-node.test.js` — 1005 pass / 0 fail; PARSE-FAILURE 0. Allowlist regenerated SAME commit. Histogram below.
+3. Strict-pass canary `parser-conformance-corpus.test.js` — 1000/1001 (99.9%) HELD (≥999/1000); histogram IDENTICAL to baseline (EXACT:964, LIVE-DEGENERATE:12, GAP-state-block:1, LIVE-PHANTOM:1, DEFERRAL-test-block:21, LIVE-HOIST-MISCLASSIFY:2); 1019 pass / 0 fail. (ADAPT didn't move the shape-level canary — expected.)
+4. Full `bun run test` — 21270 pass / 174 skip / 1 todo / 0 fail across 776 files (TWO consecutive clean runs, ~51s). One earlier run showed 2 fails — the documented bootstrap self-compilation + trucking double-compile flake (non-reproducible on clean re-run; ADAPT-on-native cannot affect the live-default bootstrap paths). Targeted engine-walker/symbol-table consumer suites: 121 pass / 0 fail. Native-path end-to-end compile (compileScrml parser:scrml-native on 01-hello): 0 hard errors, outputs produced.
+
+### Within-node histogram (corpus aggregate, 1001 files) — before → after
+| Class | Before (b.4) | After (b.5/b.6) | Delta | Explanation |
+|---|---|---|---|---|
+| KIND-NAME | 3384 | 3384 | 0 | No parser-behavior change (ADAPT only). |
+| FIELD-SHAPE | 15059 | 10389 | **-4670** | closerForm PascalCase→lowercase. (+ a handful of channel-re-export MISSING→FIELD-SHAPE nets in.) |
+| MISSING-FIELD | 42558 | 28170 | **-14388** | openerHadSpaceAfterLt + _p3a* on block markup + _synthetic on lifted logic. |
+| EXTRA-FIELD | 18355 | 14105 | **-4250** | sourceText stripped from translated markup attrs. |
+| COUNT-LENGTH | 1319 | 1319 | 0 | No parser-behavior change. |
+| SPAN-COORD | 57159 | 32445 | **-24714** | span.file stamp closes the file-missing key-set divergences (offset deltas left). |
+| NESTED-SHAPE | 0 | 0 | 0 | |
+| PARSE-FAILURE | 0 | 0 | 0 | |
+| **TOTAL** | **137834** | **89812** | **-48022** | |
+
+### 6 explained class INCREASES (NOT regressions)
+- `phase1-{function,const}-inside-test-017/018`: EXTRA +3 each. Native drops the `<test>` node (mapOneBlock Test→null) → top-level alignment shifts by one → the 3 added parity fields count as EXTRA against the misaligned live `text` node. Pre-existing KIND/COUNT misalignment (allowlisted).
+- 4× `examples/23-trucking-dispatch/channels/*`: FIELD-SHAPE +1 each. Cross-file channel re-export markup: live `_p3aIsExport:true`/`_p3aExportName:name`; native lacks P3a re-export detection → stamps undefined → 2 MISSING become 2 FIELD-SHAPE (net +1 after the closerForm -1). Pre-existing P3a-detection gap.
+
+### Files touched
+- compiler/native-parser/parse-file.js — `normalizeNativeFileAST` + `normalizeNode` + `stripSourceTextFromAttrs` + `EXPR_CONTEXT_KEYS`/`MARKUP_ATTR_KINDS` (+243 LOC); `synthLogicNode` `_synthetic` forward; `synthMarkupNode` comment (field stamp moved to normalizer); step-5 normalize call.
+- compiler/tests/unit/m65-b56-shape-span-normalize.test.js — NEW, 12 tests.
+- compiler/tests/parser-conformance-within-node-allowlist.json — regenerated (downward).
+- scratch/m65b56-*.mjs — Phase-0 diagnostics + allowlist regen + delta-increase reporter + native e2e probe.
+- docs/changes/m65-path-b-adapter-scoping/progress.md — this record.
+
+### Residuals filed (out of scope, surfaced)
+- Class A `machineDecls[].bodyChildren` raw-block divergences (closerForm/openerHadSpaceAfterLt/_p3a/sourceText) — the engine walker's source, MUST stay raw; folded to M6.6 closure per SCOPING.
+- Native `closerForm:""` vs live `"self-closing"`/`"void"`/`"bare-ref"` self-close DISTINCTION gap — a parser-fidelity gap (native doesn't distinguish self-close subtypes), NOT a case adapter; separate FIX-NATIVE candidate.
+- Native channel cross-file re-export P3a detection (`_p3aIsExport:true`) — native lacks it; separate P3a unit.
+- Pre-existing span offset deltas (line/col/start/end) — left per brief.
+
+### PA action requested
+None blocking. The three residuals above are pre-existing parser-fidelity gaps surfaced by the shrink, not introduced here.

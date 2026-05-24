@@ -1,0 +1,10 @@
+import { readFileSync } from "node:fs";
+import { splitBlocks } from "../compiler/src/block-splitter.js";
+import { buildAST } from "../compiler/src/ast-builder.js";
+import { nativeParseFile } from "../compiler/native-parser/parse-file.js";
+const fx=process.argv[2];
+const src=readFileSync(fx,"utf8");
+const live=buildAST(splitBlocks(fx,src),null).ast;
+const native=nativeParseFile(fx,src).ast;
+console.log("LIVE top-level node kinds:", live.nodes.map(n=>n.kind));
+console.log("NATIVE top-level node kinds:", native.nodes.map(n=>n.kind));
