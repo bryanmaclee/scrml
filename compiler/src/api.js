@@ -31,6 +31,7 @@ import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
+import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
@@ -1975,6 +1976,42 @@ export function compileScrml(options = {}) {
       if (verbose) {
         const manifestBytes = Buffer.byteLength(manifestBody, "utf8");
         log(`  [CG] Wrote chunks manifest: chunks.json (${manifestBytes} B)`);
+      }
+
+      // ---------------------------------------------------------------------
+      // MCP V0 Sub-unit A — compile-time descriptor sidecars.
+      //
+      // Four read-only descriptor surfaces consumed by `scrml:mcp` v0
+      // (Sub-unit C, sequenced later). Emitted next to `chunks.json` in
+      // `<outputDir>/`, gated by the same `--emit-per-route` flag (Sub-unit
+      // D auto-flips this flag when `<program mcp>` is present — out of
+      // scope here). Authority: docs/changes/mcp-v0-devtools-scoping/SCOPING.md
+      // §3 Sub-unit A.
+      //
+      // Degenerate-app case (SCOPING §5 Risk 6): zero-engine / zero-form /
+      // zero-channel / zero-server-fn apps emit `[]` for the respective
+      // sidecar — every adopter app gets the four files unconditionally so
+      // the MCP server has predictable contracts to read.
+      // ---------------------------------------------------------------------
+      const mcpDescriptors = buildMcpDescriptors(tabResults);
+      const sidecarSpecs = [
+        { name: "engines.json", body: mcpDescriptors.engines },
+        { name: "forms.json", body: mcpDescriptors.forms },
+        { name: "channels.json", body: mcpDescriptors.channels },
+        { name: "serverfns.json", body: mcpDescriptors.serverFns },
+      ];
+      for (const spec of sidecarSpecs) {
+        const sidecarPath = join(outputDir, spec.name);
+        const sidecarBody = JSON.stringify(spec.body, null, 2);
+        writeFileSync(sidecarPath, sidecarBody);
+        fileCount++;
+        if (verbose) {
+          const sidecarBytes = Buffer.byteLength(sidecarBody, "utf8");
+          log(`  [CG] Wrote MCP descriptor: ${spec.name} (${spec.body.length} entries, ${sidecarBytes} B)`);
+        }
+      }
+
+      if (verbose) {
         // A-4.3 tier-1 summary — single-line aggregate over all (EP,
         // role) chunks. Useful at the CLI level to confirm the idle-
         // prefetch budget at a glance ("0 tier-1 files at 0 B" means

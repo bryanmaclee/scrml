@@ -107,3 +107,69 @@ The `engines.json` entry's optional `cellKey` field (for cases where the runtime
 ## Final SHA
 
 `9ae5603b`
+
+---
+
+# Sub-unit A — Descriptor sidecars (separate dispatch — agent-a03ab192db85596bb)
+
+**Worktree:** `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a03ab192db85596bb`
+**Base after merge main:** `5b1afb9d` (S125 OPEN maps refresh)
+**Dispatch:** Sub-unit A — 4 compile-time descriptor sidecars + api.js write sites
+
+## Landed (PARTIAL — tests deferred to follow-on dispatch)
+
+- `compiler/src/codegen/mcp-descriptors.ts` (NEW ~868 LOC)
+  - `buildMcpDescriptors(tabResults)` extractor with 4 per-sidecar sub-extractors
+    (engines / forms / channels / serverFns). Source-of-truth wiring per
+    SCOPING §3 Sub-unit A:
+    - engines: AST walks `kind: "engine-decl"` + §51.0 variants/rules; emits
+      `cellKey` and `kind: "primary"|"derived"`.
+    - forms: emit-validators + emit-synth-surface + emit-form-for triangulation;
+      emits PRE-RESOLVED runtime keys per Sub-unit B coordination signal —
+      `compoundKeys` field included (the B-speculated optional field is now
+      load-bearing).
+    - channels: emit-channel + §38.4 auto-synced walks; emits resolved cell keys.
+    - serverfns: RI Stage 5 registry + TS Stage 6 signatures; `dispatchable: false`
+      permanent v0 annotation.
+- `compiler/src/api.js` (+37 LOC)
+  - Imports buildMcpDescriptors; 4-sidecar write loop after chunks.json write
+    site (line ~1976); same `--emit-per-route` flag gating; per-sidecar
+    verbose log.
+  - Degenerate-app case handled: empty `[]` emit unconditionally so every
+    adopter app has predictable sidecar contracts.
+
+## NOT Landed (tests follow-on — M6.5-style sibling sub-unit)
+
+- Per-sidecar unit tests (4 tests, one per sidecar — fixture compile +
+  assert JSON shape).
+- Cross-cutting integration test (multi-engine, multi-form, multi-channel,
+  2+ server fns fixture; all 4 sidecars present + valid JSON + resolved
+  keys decode at runtime via the B helpers).
+- Degenerate SPA case test (zero-page-zero-channel fixture).
+
+**Filed as MCP-V0.A-tests follow-on dispatch.** Per S125 user direction
+("wrap when what's going now is landed"), tests NOT dispatched this
+session. Blocks Sub-unit C until landed.
+
+## Process
+
+- Agent: a03ab192db85596bb
+- Branch: worktree-agent-a03ab192db85596bb (2 commits: aa3d6075 / c07457b4)
+- Echo-pwd discipline verified at aa3d6075.
+- Agent stalled mid-dispatch (stream watchdog: 600s no progress) AFTER
+  committing both substantive files BEFORE writing tests. PA-side
+  recovery via S89 §13.2 — branch-tip work coherent + complete for the
+  production-code half.
+- Per pa.md Rule 3: landing the partial-but-coherent extractor + wiring
+  is the right answer (preserves the agent's productive code work);
+  re-dispatching tests as a separate agent is the natural follow-on.
+- Zero S99 path-discipline incidents (counter remains 11).
+
+## Final SHA
+
+`c07457b4` (last agent commit before stall)
+
+## PA landing SHA
+
+(To be filled after PA-authored commit fires.)
+
