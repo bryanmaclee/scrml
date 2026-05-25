@@ -31,7 +31,7 @@
   - Test impact: zero — markdown only. Pre-commit hook ran 0 regressions.
 - **0.7.0 (2026-05-04, Stage 0b D4):** v0.next pipeline updates — engineering target for Phase A1+ implementation. Per SPEC.md §1.4–§1.6 (markup-as-value pillar, north-star Tier ladder, V5-strict access), §6 (V5-strict reactivity), §18.0 (match block-form), §38 (file-level channels), §51.0 (engines as Tier 2), §55 (validators + auto-synthesized validity surface), and §4.14–§4.16 (`:`-shorthand, structural-elements registry, M7 negative-space). Affected stages get a v0.next addendum at each stage's end documenting the new contract surface; existing contract content remains authoritative for v1 features.
   - **Stage 3 TAB:** new tokens (`pinned`, `is some`, `is not`), recognition of `<engine>`/`<match>`/`<errors>`/`<onTransition>` as scrml-defined structural elements, `:`-shorthand body recognition, V5-strict `<x>` decl AST shape, render-spec-RHS classification, `default=` attribute capture.
-  - **Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run, strip trailing "Machine"); category routing for new structural elements; `pinned` forward-reference detection.
+  - **Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run; legacy `Machine` suffix kept per §51.0.C); category routing for new structural elements; `pinned` forward-reference detection.
   - **Stage 3.1 MOD:** export registry includes `category: "engine"` entries (alongside `"channel"`, `"user-component"`).
   - **Stage 3.3 UVB / VP-1:** attribute allowlists for `<engine>`, `<match>`, `<errors>`, `<onTransition>` registered in `compiler/src/attribute-registry.js`.
   - **Stage 6 TS:** auto-synthesized validity surface type-checking (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`); `ValidationError` enum + `.Custom(tag)` extension; render-spec validity classification (bindable vs display-only); engine `derived=expr` type compatibility; bare-variant inference type completion; positional binding for predefined-shape compound state.
@@ -822,12 +822,12 @@ to the same walk:
    deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
      if varAttr is non-null:
        return varAttr   # explicit override
-     let stripped = typeName.endsWith("Machine") ? typeName.slice(0, -7) : typeName
-     return stripped[0].toLowerCase() + stripped.slice(1)
+     return typeName[0].toLowerCase() + typeName.slice(1)   # literal lowercase-first; legacy `Machine` suffix KEPT per §51.0.C
    ```
 
    Examples: `<engine for=PhaseState>` declares `phaseState`; `<engine for=MarioMachine>`
-   declares `mario` (suffix stripped); `<engine for=AppMachine var=app>` declares `app`.
+   declares `marioMachine` (legacy suffix KEPT per §51.0.C — new code prefers names
+   that don't end in `Machine`); `<engine for=AppMachine var=app>` declares `app`.
 
 2. **`pinned` forward-reference detection (SPEC §6.10).** NR walks pinned-cell
    initialiser expressions and collects all referenced cell names; if any
