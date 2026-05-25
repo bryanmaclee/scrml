@@ -6,7 +6,7 @@
 > **Amendments applied:** 2026-04-07 — §49 added: `while`, `do...while`, `break`, `continue` with labeled control flow (E-LOOP-001..E-LOOP-007).
 > **Amendments applied:** 2026-04-07 — §50 added: Assignment as Expression (W-ASSIGN-001, E-ASSIGN-001..E-ASSIGN-004).
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `< machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
-> **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`server @var` Tier 2, `authority=` on `< Type>` Tier 1), compiler-generated sync infrastructure. §6.1.2 added: `server @var` grammar. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
+> **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `< Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
 > **Amendments applied:** 2026-04-08 — §51 revised: `for EnumTypeName` → `for TypeName` (machines govern structs too). `self.*` in guards, `[label]` named clauses, `* => *` wildcard rules, E-ENGINE-013. Radical doubt debate Approach C.
 > **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout.
 > **Amendments applied:** 2026-04-08 — §53 added: Inline Type Predicates. Stateless value constraints (`number(>0 && <10000)`, `string(email)`), three-zone SPARK enforcement, named shape registry, `bind:value` HTML attribute generation. E-CONTRACT-001..E-CONTRACT-004-WARN.
@@ -739,8 +739,8 @@ compiled as a separate worker bundle.
 ```scrml
 <program db="./app.db">
 
-@result = not
-@loading = false
+<result> = not
+<loading> = false
 
 <program name="heavyCompute">
     // Separate compilation unit — no parent scope access
@@ -1323,7 +1323,7 @@ Both forms are valid. The expression form is required when:
 **Worked example — expression form with closure capture (valid):**
 
 ```scrml
-@items = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }]
+<items> = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }]
 ${ server function deleteItem(id) {
     ?{`DELETE FROM items WHERE id = ${id}`}.run()
 } }
@@ -1519,7 +1519,7 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
 **Worked example — valid:**
 
 ```scrml
-@name = ""
+<name> = ""
 <input bind:value=@name>
 <p>Hello, ${@name}!</>
 ```
@@ -1530,7 +1530,7 @@ Typing in the input updates `@name` reactively. The `<p>` re-renders on each cha
 **Worked example — valid (checkbox):**
 
 ```scrml
-@agreed = false
+<agreed> = false
 <input type="checkbox" bind:checked=@agreed>
 <button disabled=@agreed if=@agreed>Proceed</>
 ```
@@ -1538,7 +1538,7 @@ Typing in the input updates `@name` reactively. The `<p>` re-renders on each cha
 **Worked example — valid (radio group):**
 
 ```scrml
-@color = "red"
+<color> = "red"
 <input type="radio" name="color" value="red" bind:group=@color>
 <input type="radio" name="color" value="blue" bind:group=@color>
 <input type="radio" name="color" value="green" bind:group=@color>
@@ -1669,7 +1669,7 @@ class-expr       ::= '@' identifier             // reactive variable
 **Example:**
 
 ```scrml
-@isActive = false
+<isActive> = false
 <button class:active=@isActive onclick=toggle()>Toggle</>
 ```
 
@@ -1713,8 +1713,8 @@ full re-render.
 **Worked example — multiple conditional classes:**
 
 ```scrml
-@loading = false
-@hasError = false
+<loading>  = false
+<hasError> = false
 
 <div class="status" class:loading=@loading class:error=@hasError>
     ${@loading ? "Loading..." : @hasError ? "Error" : "OK"}</>
@@ -1726,7 +1726,7 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — combined with bind:checked:**
 
 ```scrml
-@agreed = false
+<agreed> = false
 <label class:agreed=@agreed>
     <input type="checkbox" bind:checked=@agreed>
     I agree to the terms
@@ -1736,7 +1736,7 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — property access expression:**
 
 ```scrml
-@todo = { completed: false, text: "Buy milk" }
+<todo> = { completed: false, text: "Buy milk" }
 <li class:done=todo.completed>${@todo.text}</>
 ```
 
@@ -1745,8 +1745,8 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — parenthesized expression:**
 
 ```scrml
-@index = 0
-@selectedIndex = 2
+<index>         = 0
+<selectedIndex> = 2
 
 <ul>
     // for each item...
@@ -1775,7 +1775,7 @@ class="<static-prefix>${<expression>}<static-suffix>"
 **Example:**
 
 ```scrml
-@status = "active"
+<status> = "active"
 <div class="item-${@status}">content</>
 ```
 
@@ -1804,7 +1804,7 @@ called.
 **Worked example — prefix and reactive suffix:**
 
 ```scrml
-@theme = "dark"
+<theme> = "dark"
 <div class="card card-${@theme}">content</>
 ```
 
@@ -1814,8 +1814,8 @@ Renders `class="card card-dark"` initially. Changing `@theme` to `"light"` updat
 **Worked example — multiple reactive parts:**
 
 ```scrml
-@size = "md"
-@variant = "primary"
+<size>    = "md"
+<variant> = "primary"
 <button class="btn btn-${@size} btn-${@variant}">Click</>
 ```
 
@@ -1835,8 +1835,8 @@ class-expr ::= 'class=' '{' js-expression '}'
 **Example:**
 
 ```scrml
-@isActive = false
-@hasError = false
+<isActive> = false
+<hasError> = false
 <div class=${isActive ? "active" : ""} ${hasError ? "error" : ""}>content</>
 ```
 
@@ -1881,7 +1881,7 @@ const Card = <div class="card">
 </>
 
 // Usage
-@featured = true
+<featured> = true
 <Card class="featured-card" class:featured=@featured>
     Content
 /Card>
@@ -2013,6 +2013,39 @@ The two-form discipline exists for three reasons:
 - §3.4 — V5-strict access form per context locus (table)
 - §6.2 — Three RHS shapes (which cells get render-by-tag vs. plain `@varname` access)
 - §34 — E-NAME-COLLIDES-STATE definition
+
+#### 6.1.5 State Declaration Grammar
+
+The V-kill structural form (§6.1.1) is governed by a single grammar production. This production lives here in §6.1 (the V-kill normative section) rather than in §7.5 (Type Annotation Grammar) because the state-cell declaration is a foundational element of scrml's reactive surface, not a sub-form of type annotation.
+
+```
+state-decl       ::= '<' identifier ws (decl-attr ws)* '>' [ ws ':' ws type-expr ] ws '=' ws expr
+decl-attr        ::= 'pinned' | 'server' | validator-attr
+validator-attr   ::= /* per §55.1 universal-core predicate vocabulary */
+```
+
+**Production parts:**
+
+- `'<' identifier`: opening tag with the cell's name. Identifier rules follow §1.2.
+- `(decl-attr ws)*`: zero or more bare flag attributes inside the opening tag. Each attribute is a single keyword (no `=value`).
+  - `pinned` — identity-stable cell, no forward-reference resolution through this cell (§6.10).
+  - `server` — server-authoritative cell; compiler synthesizes fetch-on-mount + optimistic update + rollback (§52.4).
+  - `validator-attr` — any predicate from §55.1 universal-core vocabulary (`req`, `length(>=N)`, `pattern(...)`, etc.). Validators contribute to the auto-synthesized validity surface (§55).
+- `'>'`: closing of the opening tag.
+- `[ ws ':' ws type-expr ]`: optional type annotation; `type-expr` per §7.5.
+- `ws '=' ws expr`: required initializer.
+
+**RHS shapes:** the `expr` is one of three forms (§6.2): plain expression (Shape 1), bindable markup (Shape 2 — render-spec coupling), or `const`-prefixed derived expression (Shape 3 — read-only).
+
+**Attribute composition:** decl-attrs compose freely. `<cards server>` and `<cards server pinned>` and `<userName req length(>=2)>` are all legal. Cross-attribute interaction rules (e.g., `server + validators` evaluation timing) are open carry-forward items for the heads-up follow-up (HU-3 Q5.B.1/2).
+
+**Cross-references:**
+- §6.1.1 / §6.1.2 — the two access forms this production realizes.
+- §6.2 — RHS shape semantics for the `expr` position.
+- §6.10 — `pinned` flag semantics.
+- §52.4 — `server` flag semantics (Tier 2 instance-level authority).
+- §55.1 — validator-attr vocabulary.
+- §7.5 — `type-expr` grammar (the optional annotation position).
 
 ---
 
@@ -2201,12 +2234,12 @@ There is no syntax to override a cell's render-spec at a particular render site.
 
 
 
-A reactive array is declared with `@` exactly like any other reactive variable:
+A reactive array is declared with the V-kill structural form like any other reactive cell (§6.1.5):
 
 ```scrml
-@items = []
-@items = [1, 2, 3]
-@items = ["alice", "bob", "carol"]
+<items> = []
+<items> = [1, 2, 3]
+<items> = ["alice", "bob", "carol"]
 ```
 
 The array is a first-class reactive value. Any write to `@items` — whether by full
@@ -2387,7 +2420,7 @@ reactive. Mutating an inner array does NOT trigger subscribers of the outer vari
 the outer array is explicitly written:
 
 ```scrml
-@matrix = [[1, 2], [3, 4]]
+<matrix> = [[1, 2], [3, 4]]
 
 ${ function addToRow(rowIdx, val) {
     const newRow = @matrix[rowIdx].concat(val)
@@ -2407,7 +2440,7 @@ reactivity: only explicit `@variable` writes propagate.
 A reactive array may contain state objects:
 
 ```scrml
-@todos = [
+<todos> = [
     { id: 1, text: "Buy groceries", done: false },
     { id: 2, text: "Walk the dog", done: true }
 ]
@@ -2433,8 +2466,8 @@ plain JavaScript expression; the compiler does not intercept it (non-mutating, �
 
 ```scrml
 <program>
-    @todos = []
-    @newText = ""
+    <todos>   = []
+    <newText> = ""
 
     ${ function addTodo() {
         @todos.push({ id: Date.now(), text: @newText, done: false })
@@ -2467,7 +2500,7 @@ array, pushes the new item, and writes back via `_scrml_reactive_set("todos", ..
 
 ```scrml
 <program>
-    @items = []
+    <items> = []
     const <doneCount> = @items.filter(i => i.done).length
 
     <p>Done: ${@doneCount} of ${@items.length}</>
@@ -2482,7 +2515,7 @@ in the same flush after any mutation to `@items`.
 
 ```scrml
 <program>
-    @names = ["Charlie", "Alice", "Bob"]
+    <names> = ["Charlie", "Alice", "Bob"]
 
     ${ function sortNames() {
         @names.sort()
@@ -2744,8 +2777,8 @@ A diamond dependency arises when two derived values share a common upstream `@va
 and a third derived value depends on both of them:
 
 ```scrml
-@price    = 10
-@quantity = 3
+<price>    = 10
+<quantity> = 3
 
 const <subtotal> = @price * @quantity         // depends on @price and @quantity
 const <discount> = @price * 0.05              // depends on @price only
@@ -3045,8 +3078,8 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 
 ```scrml
 <program>
-    @price    = 10
-    @quantity = 3
+    <price>    = 10
+    <quantity> = 3
     const <total> = @price * @quantity
 
     <p>Total: ${@total}</>
@@ -3073,8 +3106,8 @@ _scrml_derived_subscribe("total", "quantity");
 
 ```scrml
 <program>
-    @price    = 100
-    @quantity = 2
+    <price>    = 100
+    <quantity> = 2
 
     const <subtotal> = @price * @quantity          // depends on @price, @quantity
     const <discount> = @price * 0.1                // depends on @price only
@@ -3126,8 +3159,8 @@ _scrml_derived_subscribe("total", "discount");
 **Invalid — assignment to derived value (E-REACTIVE-002):**
 
 ```scrml
-@price    = 10
-@quantity = 3
+<price>    = 10
+<quantity> = 3
 const <total> = @price * @quantity
 
 ${ function clearCart() {
@@ -3158,7 +3191,7 @@ Cycle: @a → @b → @a
 **Invalid — reading derived value in server function (E-REACTIVE-003):**
 
 ```scrml
-@price = 10
+<price> = 10
 const <total> = @price * 3
 
 ${ server function saveOrder() {
@@ -3426,7 +3459,7 @@ SHALL be able to determine, without compiler introspection, which code runs when
 
 ```scrml
 <program>
-    @users = []
+    <users> = []
     on mount { @users = fetchUsers() }
     ${ for (u of @users) { lift <li>${u.name}/ } }
 </>
@@ -4147,7 +4180,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 ```scrml
 <program>
-    @userId = 42
+    <userId> = 42
 
     <request id="profile">
         ${ @user = fetchUser(@userId) }
@@ -4376,7 +4409,7 @@ compiler SHALL emit E-LIN-004 if a `lin` variable is referenced inside a `<timeo
 
 ```scrml
 <program>
-    @sessionExpired = false
+    <sessionExpired> = false
 
     <timeout id="sessionGuard" delay=1800000>
         ${ @sessionExpired = true }
@@ -4416,7 +4449,7 @@ Error E-TIMEOUT-001 at line 1: `<timeout>` requires a `delay` attribute.
 
 ```scrml
 <program>
-    @paymentTimedOut = false
+    <paymentTimedOut> = false
 
     <timeout id="paymentGuard" delay=10000>
         ${ @paymentTimedOut = true }
@@ -4616,9 +4649,9 @@ reads inside an `animationFrame` callback body.
 <program>
     ${ loadDashboard() }
 
-    @autoRefresh = false
-    @intervalSecs = 30      // reactive @variable — this is NOT the timer interval attribute
-    @countdown = 30
+    <autoRefresh>  = false
+    <intervalSecs> = 30      // reactive @ cell — this is NOT the timer interval attribute
+    <countdown>    = 30
 
     <timer id="refresh" interval=1000 running=@autoRefresh>
         ${
@@ -4657,7 +4690,7 @@ callbacks (none were registered).
 
 ```scrml
 <program>
-    @showChat = false
+    <showChat> = false
 
     <button onclick=${@showChat = !@showChat}>Toggle Chat</>
 
@@ -4694,11 +4727,11 @@ When `@showChat` transitions false → true a second time:
 
 ```scrml
 <program>
-    @query = ""
-    @minPrice = 0
-    @maxPrice = 1000
-    @page = 1
-    @results = []
+    <query>    = ""
+    <minPrice> = 0
+    <maxPrice> = 1000
+    <page>     = 1
+    <results>  = []
 
     when (@query, @minPrice, @maxPrice) changes {
         @page = 1
@@ -4726,7 +4759,7 @@ only fire (if enabled) for `@variables` read in the body that are NOT in the dep
 
 ```scrml
 <program>
-    @page = 1
+    <page> = 1
 
     when @page changes {
         @page = 1   // E-LIFECYCLE-006: writes to dep-list variable @page
@@ -4764,9 +4797,9 @@ E-LIFECYCLE-002: `cleanup()` argument must be a function expression, not a call 
 
 ```scrml
 <program>
-    @price = 10
-    @qty = 2
-    @total = 0
+    <price> = 10
+    <qty>   = 2
+    <total> = 0
 
     when @price changes {
         @total = @price * @qty   // W-LIFECYCLE-006
@@ -4800,8 +4833,8 @@ unrelated variables), W-LIFECYCLE-006 does NOT fire.
 
 ```scrml
 <program>
-    @tickerId = "AAPL"
-    @currentPrice = not
+    <tickerId>     = "AAPL"
+    <currentPrice> = not
 
     <poll id="price" interval=5000>
         ${ @currentPrice = fetchPrice(@tickerId) }
@@ -4817,7 +4850,7 @@ unrelated variables), W-LIFECYCLE-006 does NOT fire.
 
 ```scrml
 <program>
-    @shapes = []
+    <shapes> = []
 
     <canvas ref=@canvasEl width="800" height="600">
         ${
@@ -4869,8 +4902,8 @@ is not server-escalated. When the `<div if=@connected>` scope destroys, `ws.clos
 
 ```scrml
 <program>
-    @count = 0
-    @enabled = true
+    <count>   = 0
+    <enabled> = true
 
     ${
         if (@enabled) {
@@ -5560,10 +5593,11 @@ Type annotations appear on variable declarations, function parameters, and funct
 ```
 type-expr       ::= primitive-type | identifier | type-expr '[]' | type-expr '|' type-expr | type-expr '?'
 primitive-type  ::= 'string' | 'number' | 'boolean' | 'void' | 'not'
-state-decl   ::= '@' identifier [ ':' type-expr ] '=' expr
 param-decl      ::= identifier ':' type-expr | identifier '?' ':' type-expr
 return-type     ::= '->' type-expr
 ```
+
+(The `state-decl` production lives at §6.1.5. It composes `type-expr` from this section in its optional annotation slot, but is itself a foundational reactive-surface construct, not a sub-form of type annotation.)
 
 #### Semantics
 
@@ -5591,9 +5625,9 @@ function add(a: number, b: number) -> number { return a + b }
 #### Worked Examples
 
 ```scrml
-@count: number = 0
-@items: string[] = []
-@selected: string? = not
+<count>: number = 0
+<items>: string[] = []
+<selected>: string? = not
 function greet(name: string, formal?: boolean) -> string {
     if (formal) { return "Good day, " + name }
     return "Hey, " + name
@@ -6208,7 +6242,7 @@ The key column is the column referenced by the single equality predicate in the 
 
 #### 8.10.5 Writes Out of Scope for v1
 
-`.run()` inside a loop (UPDATE/DELETE/INSERT) is NOT rewritten in v1. Write batching collides with `<machine>` transition enforcement (§51) and `server @var` optimistic-rollback granularity (§52.4.2). Tier 2 writes queued for post-v1 spec extension.
+`.run()` inside a loop (UPDATE/DELETE/INSERT) is NOT rewritten in v1. Write batching collides with `<machine>` transition enforcement (§51) and `<var server>` optimistic-rollback granularity (§52.4.2). Tier 2 writes queued for post-v1 spec extension.
 
 #### 8.10.6 Parameter Count Bound
 
@@ -6226,15 +6260,15 @@ Tier 2 introduces a new sibling DGNode (the hoisted pre-loop query). The lift-ch
 
 #### 8.11.1 Scope
 
-On-mount initial-load fetches for `server @var` declarations (§52.4.2) SHALL be coalesced into a single synthetic server handler named `__mountHydrate` per page/component. Individual `server @var` *assignments* (which carry optimistic-update + rollback semantics) SHALL remain 1:1 with their own routes.
+On-mount initial-load fetches for `<var server>` declarations (§52.4.2) SHALL be coalesced into a single synthetic server handler named `__mountHydrate` per page/component. Individual `<var server>` *assignments* (which carry optimistic-update + rollback semantics) SHALL remain 1:1 with their own routes.
 
 #### 8.11.2 Synthetic Handler
 
-The boundary pass SHALL emit a `__mountHydrate` RouteSpec whose handler body contains all `server @var` initial-read queries as sibling DGNodes. Because they share a handler, §8.9 Tier 1 coalescing applies automatically.
+The boundary pass SHALL emit a `__mountHydrate` RouteSpec whose handler body contains all `<var server>` initial-read queries as sibling DGNodes. Because they share a handler, §8.9 Tier 1 coalescing applies automatically.
 
 #### 8.11.3 Write Isolation
 
-`server @var` assignments continue to generate per-var routes. Coalescing writes would collapse per-assignment rollback scopes (§52.4.2 (3)) and is forbidden.
+`<var server>` assignments continue to generate per-var routes. Coalescing writes would collapse per-assignment rollback scopes (§52.4.2 (3)) and is forbidden.
 
 ---
 
@@ -6943,7 +6977,7 @@ ${
         }
     }
 
-    @usersState = UsersState.NotAsked
+    <usersState> = UsersState.NotAsked
 
     server function fetchUsers() {
         return ?{`SELECT id, name, email FROM users`}.all()
@@ -7003,8 +7037,8 @@ ${
         }
     }
 
-    @submitState = OrderSubmit.Idle
-    @orders = []
+    <submitState> = OrderSubmit.Idle
+    <orders>      = []
 
     server function createOrder(product, qty) {
         ?{`INSERT INTO orders (product, qty) VALUES (${product}, ${qty})`}.run()
@@ -7041,8 +7075,8 @@ ${
         transitions { .Loading => .Ready; .Loading => .Failed; .Ready => .Loading; .Failed => .Loading }
     }
 
-    @usersState = UsersState.Loading
-    @metricsState = MetricsState.Loading
+    <usersState>   = UsersState.Loading
+    <metricsState> = MetricsState.Loading
 
     function loadDashboard() {
         @usersState = UsersState.Loading
@@ -7249,7 +7283,7 @@ at runtime. The issue is type clarity and developer intent, not runtime correctn
 type TaskStatus:enum = { Todo | InProgress | Done }
 
 < db src="./app.db" tables="tasks">
-    @tasks = ?{`SELECT * FROM tasks`}.all()
+    <tasks> = ?{`SELECT * FROM tasks`}.all()
 </>
 
 ${ @tasks = @tasks.map(row => ({
@@ -8079,7 +8113,7 @@ export const Modal = <div class="modal" props={ bind visible: boolean, title: st
 
 // Parent
 <program>
-    @showModal = false
+    <showModal> = false
 
     <button onclick=${ @showModal = true }>Open settings</>
     <Modal bind:visible=@showModal title="Settings">
@@ -8477,7 +8511,7 @@ Components are instantiated using their PascalCase name as an HTML-like tag: `<M
 Component definitions capture reactive bindings from the enclosing scope. When a component instance is used, reactive variables (`@var`) referenced in the component body maintain their reactivity — changes to `@var` in the parent scope re-render the component's dependent elements.
 
 ```scrml
-@count = 0
+<count> = 0
 
 const Counter = <div>
     <p>Count: ${@count}</>
@@ -10754,7 +10788,7 @@ accessible by the `is` expression itself.
 
 **Worked example — conditional:**
 ```scrml
-@filter:FilterMode = .All
+<filter>: FilterMode = .All
 
 ${ if (@filter is .Active) {
     loadActiveItems()
@@ -10770,7 +10804,7 @@ ${ if (@filter is .Active) {
 **Worked example — with reactive variable:**
 ```scrml
 type Tab:enum = { Overview, Activity, Settings }
-@tab:Tab = .Overview
+<tab>: Tab = .Overview
 
 <nav>
     <a class=active(@tab is .Overview) onclick={@tab = .Overview}>Overview</>
@@ -11023,7 +11057,7 @@ achievable at no additional cost.
         Active, Pending, Failed(err: Error), Timeout, Cancelled
     }
 
-    @status:PaymentStatus = .Active
+    <status>: PaymentStatus = .Active
 
     ${ function handleTerminalStates() {
         partial match @status {
@@ -11043,7 +11077,7 @@ are intentionally unhandled.
 ```scrml
 <program>
     type Status:enum = { Active, Inactive }
-    @status:Status = .Active
+    <status>: Status = .Active
 
     <div>
         ${
@@ -11070,7 +11104,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
 
 ```scrml
 type Mode:enum = { Dark, Light }
-@mode:Mode = .Light
+<mode>: Mode = .Light
 
 ${ function applyMode() {
     partial match @mode {
@@ -11923,10 +11957,10 @@ The compiler MAY synthesize an implicit transactional envelope around the body o
 
 #### 19.11.1 Reactive Error State
 
-Error values from `!` functions can be stored in reactive variables (§6):
+Error values from `!` functions can be stored in reactive cells (§6):
 
 ```scrml
-@error = not
+<error> = not
 
 ${
     function handlePayment() {
@@ -11953,10 +11987,10 @@ ${
 
 #### 19.11.2 Reactive Propagation Shorthand
 
-When a reactive variable is assigned the result of a `?` propagation, the error is captured into the reactive variable:
+When a reactive cell is assigned the result of a `?` propagation, the error is captured into the reactive cell:
 
 ```scrml
-@paymentResult = not
+<paymentResult> = not
 
 ${
     function attemptPayment() {
@@ -12220,8 +12254,8 @@ ${
 <div class="payment-form">
     <h2>Process Payment</>
     < errorBoundary>
+        <receipt> = not
         ${
-            @receipt = not
             function handleSubmit() {
                 @receipt = processPayment(@amount, @customerId)
             }
@@ -13391,7 +13425,7 @@ type User:struct = {
   age:  number
 }
 
-@selectedType = "User"
+<selectedType> = "User"
 
 ^{
   const info = reflect(@selectedType)
@@ -13643,7 +13677,7 @@ type User:struct = {
   age:  number
 }
 
-@selectedType = "User"
+<selectedType> = "User"
 
 ^{
   const info = meta.types.reflect(meta.get("selectedType"))
@@ -14176,8 +14210,8 @@ generate WASM binding glue (type marshaling, WASM memory management, result dese
     ${ extern r applyFilter(params: FilterParams, imageData: number[]) -> FilterResult }
     ${ extern r grayscale(imageData: number[]) -> number[] }
 
-    @brightness = 1.0
-    @imageData = []
+    <brightness> = 1.0
+    <imageData>  = []
 
     ${ const <filtered> = r{ applyFilter({ brightness: @brightness, contrast: 1.0, saturation: 1.0 }, @imageData) } }
 </>
@@ -14222,8 +14256,8 @@ generate WASM binding glue (type marshaling, WASM memory management, result dese
 
     ${ extern r applyFilter(brightness: number, pixels: number[]) -> number[] }
 
-    @brightness = 1.0
-    @rawPixels = []
+    <brightness> = 1.0
+    <rawPixels>  = []
 
     ${ const <filtered> = r{ applyFilter(@brightness, @rawPixels) } }
 
@@ -15150,7 +15184,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-CASE-001 | §15.15.4 | A user-declared state-type or component name is lowercase and shadows a built-in HTML element name. Resolution still succeeds (the user declaration takes precedence). Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |
 | W-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener uses whitespace between `<` and the identifier. The canonical form is no-space (`<identifier>`); the with-space form is deprecated and becomes E-WHITESPACE-001 in P3. Migration via `scrml-migrate`. Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |
 | W-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is deprecated; use the canonical `<engine>` keyword. Both forms continue to compile in P1; `<machine>` becomes E-DEPRECATED-001 in P3. Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1):** emitted by TAB (`compiler/src/ast-builder.js` engine-decl path) — the keyword distinction is decided at TAB time, NR is not required for this diagnostic. | Warning |
-| W-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration (`server function name() { ... }`) is redundant — the function body's escalation triggers (§12.2 T1/T2/T3) and/or caller-context propagation (T5) already classify the function as server-side. The keyword is deprecated as of v0.next per Insight 26 (2026-05-08); remove from new code. The keyword fires this warning ONLY when at least one other trigger would escalate the function regardless. The keyword on its own (no other trigger, no caller-context evidence) does NOT fire this warning during the deprecation window — that case preserves in-progress development. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D5) for any explicitly-`server`-annotated function whose escalation reasons include at least one non-explicit-annotation entry, OR whose call-graph caller set is non-empty and consists entirely of server-classified callers. The `server @var` cell authority modifier (§52.4) is NOT affected. | Warning |
+| W-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration (`server function name() { ... }`) is redundant — the function body's escalation triggers (§12.2 T1/T2/T3) and/or caller-context propagation (T5) already classify the function as server-side. The keyword is deprecated as of v0.next per Insight 26 (2026-05-08); remove from new code. The keyword fires this warning ONLY when at least one other trigger would escalate the function regardless. The keyword on its own (no other trigger, no caller-context evidence) does NOT fire this warning during the deprecation window — that case preserves in-progress development. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D5) for any explicitly-`server`-annotated function whose escalation reasons include at least one non-explicit-annotation entry, OR whose call-graph caller set is non-empty and consists entirely of server-classified callers. The `<var server>` cell-authority attribute (§52.4, §6.1.5) is NOT affected. | Warning |
 | E-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration is removed. Use a plain `function` declaration; route inference (§12.2) will classify the function based on its body content and call graph. Deprecation cycle endpoint: this code activates after the W-DEPRECATED-SERVER-MODIFIER deprecation window, when the parser stops accepting `server function` syntax. Mirrors the `<machine>` → `<engine>` deprecation cycle (W-DEPRECATED-001 → E-DEPRECATED-001). | Error |
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement | Error |
@@ -15297,11 +15331,11 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
 | E-ASSIGN-004 | §50.9 | `const` variable as assignment expression target | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
-| E-AUTH-002 | §52.11 | `server @var` initial value directly derived from a client-local `@var` | Error |
+| E-AUTH-002 | §52.11 | `<var server>` initial value directly derived from a client-local `@var` | Error |
 | E-AUTH-003 | §52.11 | State type declares `authority="server"` without `table=` attribute | Error |
 | E-AUTH-004 | §52.11 | Two declarations of the same state type with conflicting `authority=` values | Error |
-| E-AUTH-005 | §52.11 | `server @var` declared inside a client-only component (no server context) | Error |
-| W-AUTH-001 | §52.11 | `server @var` has no detectable initial load pattern | Warning |
+| E-AUTH-005 | §52.11 | `<var server>` declared inside a client-only component (no server context) | Error |
+| W-AUTH-001 | §52.11 | `<var server>` has no detectable initial load pattern | Warning |
 | W-ATTR-001 | §52.13 | Attribute name not recognized on a scrml-special element (informational; attribute is forwarded to HTML as-is) | Warning |
 | W-ATTR-002 | §52.13 | Attribute value-shape not recognized (e.g. `auth="role:X"` on `<page>`) — silently accepted but has no compile-time effect | Warning |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
@@ -16728,9 +16762,7 @@ On the client, calling a `server function*` by name creates an `EventSource` con
 Assigning the result of a generator call to an `@` reactive variable binds the variable to the stream. Each SSE event updates the variable and triggers reactive re-render.
 
 ```scrml
-${
-    @latestPrice = livePrices()
-}
+<latestPrice> = livePrices()
 <p>Current price: ${@latestPrice}</>
 ```
 
@@ -16808,6 +16840,7 @@ The same security invariants that apply to standard server functions apply to SS
 
 ```scrml
 <program>
+<count> = 0
 ${
     server function* countdown(from) {
         for (let i = from; i >= 0; i--) {
@@ -16815,7 +16848,6 @@ ${
         }
     }
 
-    @count = 0
     @count = countdown(10)
 }
 <p>Count: ${@count}</>
@@ -18803,7 +18835,7 @@ use vendor:my-date-picker { DatePicker }
 
 ${ import { formatCurrency } from './utils.scrml' }
 
-@count = 0
+<count> = 0
 
 <div>
     <Button onclick=${() => @count++}>Increment</>
@@ -21088,9 +21120,8 @@ Capturing a reactive reference as a live subscription (i.e., in a way that would
 If a `fn` body contains an expression that would create a live reactive dependency on an `@variable` declared outside the `fn` boundary — such as wrapping the call in a reactive observer or registering a watcher — the compiler emits E-FN-009.
 
 ```scrml
+<count> = 0
 ${ 
-    @count = 0
-
     // Invalid — E-FN-009
     fn buildSnapshot() {
         let s = < Snapshot>
@@ -22338,7 +22369,7 @@ The assigned value is produced exactly once. The right-hand side expression is e
 
 #### 50.3.4 Reactive Variables (`@x = value`)
 
-Assignment to a reactive variable as an expression is valid:
+Assignment to a reactive cell as an expression is valid (the `<x>` cell is assumed declared elsewhere — §6.1.5):
 
 ```scrml
 @x = computeValue()
@@ -24364,7 +24395,7 @@ type OrderStatus:enum = {
     }
 }
 
-@status = OrderStatus.Pending
+<status> = OrderStatus.Pending
 
 ${ function advance() {
     @status = OrderStatus.Processing   // legal: .Pending => .Processing
@@ -24385,7 +24416,7 @@ type OrderStatus:enum = {
     }
 }
 
-@status = OrderStatus.Delivered
+<status> = OrderStatus.Delivered
 
 ${ function reopen() {
     @status = OrderStatus.Pending   // E-ENGINE-001: illegal transition .Delivered => .Pending;
@@ -24632,7 +24663,7 @@ A reactive variable is bound to a machine at its declaration site using the type
 syntax:
 
 ```scrml
-@status: UserFlow = OrderStatus.Pending
+<status>: UserFlow = OrderStatus.Pending
 ```
 
 This syntax is an extension of the existing type annotation form `@var: Type = val` (§6.1,
@@ -24709,14 +24740,14 @@ type Column:enum = {
 }
 </>
 
-@currentUser = { name: "alice", isAdmin: false }
-@auditLog    = []
+<currentUser> = { name: "alice", isAdmin: false }
+<auditLog>    = []
 
 // Regular user — governed by UserFlow
-@cardColumn: UserFlow = Column.Todo
+<cardColumn>:  UserFlow  = Column.Todo
 
 // Admin — governed by AdminFlow
-@adminColumn: AdminFlow = Column.Todo
+<adminColumn>: AdminFlow = Column.Todo
 ```
 
 Transition attempt by regular user:
@@ -24757,8 +24788,8 @@ type OrderStatus:enum = {
     }
 }
 
-@deliveryLog = []
-@order       = OrderStatus.Pending
+<deliveryLog> = []
+<order>       = OrderStatus.Pending
 
 ${ function shipOrder() {
     @order = OrderStatus.Processing   // .Pending => .Processing — legal
@@ -24792,7 +24823,7 @@ type AuthState:enum = {
     }
 }
 
-@authState = AuthState.Locked
+<authState> = AuthState.Locked
 
 ${ function unlockAccount() {
     @authState = AuthState.Anonymous   // E-ENGINE-001: .Locked is terminal in AuthState
@@ -24850,9 +24881,9 @@ type TaskStatus:enum = {
 }
 </>
 
-@devTask: DeveloperFlow = TaskStatus.Backlog
-@qaTask:  QAFlow        = TaskStatus.InReview
-@pmTask:  PMFlow        = TaskStatus.Backlog
+<devTask>: DeveloperFlow = TaskStatus.Backlog
+<qaTask>:  QAFlow        = TaskStatus.InReview
+<pmTask>:  PMFlow        = TaskStatus.Backlog
 ```
 
 **Normative statement:**
@@ -25103,7 +25134,7 @@ type UIMode:enum = { Editable, ReadOnly, Terminal }
 ```
 
 Today, the projection has to be hand-maintained: either as a `~derived` scalar computed in
-a `match`, or as a `server @var` that's re-assigned after every `@order` write. Both forms
+a `match`, or as a `<var server>` cell that's re-assigned after every `@order` write. Both forms
 drift. Hand-maintenance is the bug: the projection's transition graph is **implicit in the
 source machine's transition graph**, and the compiler should derive it.
 
@@ -25128,7 +25159,7 @@ projection-rule      ::= variant-ref-list '=>' variant-ref                -- map
     .Delivered | .Cancelled | .Refunded     => .Terminal
 </>
 
-@order: OrderMachine = OrderState.Draft
+<order>: OrderMachine = OrderState.Draft
 // No @ui declaration required — the compiler synthesizes it from the derived machine.
 // Reading @ui: resolves via the projection. Writing @ui: compile error (E-ENGINE-017).
 ```
@@ -25185,13 +25216,13 @@ exhaustiveness and write-blocking, prefer a derived machine.
 Before (observed in `samples/gauntlet-r11/rust-state-machine.scrml`):
 
 ```scrml
-${
-  @state: FetchState = FetchState.Idle
-  @isIdle = true
-  @isLoading = false
-  @isSuccess = false
-  @isError = false
+<state>: FetchState = FetchState.Idle
+<isIdle>    = true
+<isLoading> = false
+<isSuccess> = false
+<isError>   = false
 
+${
   function setState(next) {
     @state = next
     @isIdle    = next == FetchState.Idle
@@ -25205,9 +25236,7 @@ ${
 After (with derived machine):
 
 ```scrml
-${
-  @state: FetchMachine = FetchState.Idle
-}
+<state>: FetchMachine = FetchState.Idle
 
 < engine name=FetchMachine for=FetchState>
     .Idle    => .Loading
@@ -25295,9 +25324,9 @@ transition rules).
 **Worked example:**
 
 ```scrml
+<auditLog> = []
+<order>: OrderFlow = OrderStatus.Pending
 ${
-    @auditLog = []
-    @order: OrderFlow = OrderStatus.Pending
     function advance() { @order = OrderStatus.Processing }
 }
 
@@ -25389,7 +25418,7 @@ existing fields SHALL NOT be renamed or retyped.
 - **Derived machines (§51.9):** audit attaches to the source machine. A
   derived projection cannot itself be audited directly — audit its source.
 - **Server-authoritative machines (§52):** the audit target may be a
-  `server @var` declared with `db=`. In that case audit entries persist
+  `<var server>` declared with `db=`. In that case audit entries persist
   to the server; the client sees only the projection. This is the
   intended shape of "server-side audit log" support. Full spec for the
   server-side audit machinery is deferred to a §52 amendment.
@@ -25496,9 +25525,9 @@ optional binding-list) and the `=>` arrow. It is optional — rules without
 **Worked example:**
 
 ```scrml
+${ type Fetch:enum = { Idle, Loading, Done, TimedOut } }
+<fetch>: FetchMachine = Fetch.Idle
 ${
-    type Fetch:enum = { Idle, Loading, Done, TimedOut }
-    @fetch: FetchMachine = Fetch.Idle
     function start() { @fetch = Fetch.Loading }
 }
 
@@ -25818,10 +25847,10 @@ Three arguments:
 **Worked example:**
 
 ```scrml
+${ type S:enum = { Pending, Processing, Shipped, Delivered } }
+<order>: OrderFlow = S.Pending
+<log> = []
 ${
-    type S:enum = { Pending, Processing, Shipped, Delivered }
-    @order: OrderFlow = S.Pending
-    @log = []
     function advance() { @order = S.Processing }
     function seekStart() { replay(@order, @log, 0) }
     function seekAfter(n: integer) { replay(@order, @log, n) }
@@ -25877,7 +25906,7 @@ ${
   the derived/projected reactive to re-read on next access. No
   special handling required.
 - **§52 server-authoritative machines:** `replay` operates
-  client-locally. A server @var replayed on the client produces
+  client-locally. A `<var server>` cell replayed on the client produces
   an optimistic client-side state that will be overwritten by the
   next server sync (§52.6). Server-side replay is out of scope
   for §51.14 and is deferred to a §52 amendment.
@@ -25984,7 +26013,7 @@ Mismatches emit **E-STATE-MACHINE-DIVERGENCE**.
 **Case 1: state-local transition on a machine-bound variable.**
 
 ```scrml
-@sub: Submission = < Draft> ...</>
+<sub>: Submission = < Draft> ...</>
 bind @sub -> < engine SubmissionFlow>
 @sub = @sub.validate(now)
 ```
@@ -25994,7 +26023,7 @@ The state-local transition body runs (produces the new `< Validated>` value). Th
 **Case 2: state-local transition on a non-machine-bound variable.**
 
 ```scrml
-@sub: Submission = < Draft> ...</>
+<sub>: Submission = < Draft> ...</>
 @sub = @sub.validate(now)
 ```
 
@@ -26005,7 +26034,7 @@ The state-local transition body runs. No machine rules apply. The assignment is 
 **Case 3: direct reassignment on a machine-bound variable (bypassing state-local).**
 
 ```scrml
-@sub: Submission = < Draft> ...</>
+<sub>: Submission = < Draft> ...</>
 bind @sub -> < engine SubmissionFlow>
 @sub = < Validated> id=..., title=..., body=..., validatedAt=now </>
 ```
@@ -26092,7 +26121,7 @@ ${
 // pages/driver/hos.scrml
 ${ import { DriverStatus } from '../../schema.scrml' }
 
-@status: DriverStatus = .OffDuty
+<status>: DriverStatus = .OffDuty
 
 < engine name=HOSMachine for=DriverStatus>
   .OffDuty      => .OnDuty | .SleeperBerth
@@ -26149,7 +26178,7 @@ promotion remains a P3-FOLLOW concern.
 
 **Reviewed for v0.next consistency (Stage 0b D4, 2026-05-04).** §52 composes cleanly with the v0.next framing:
 
-- **V5-strict access.** `@var` is the canonical expression access (§6.1). `server @var` annotation is on the declaration's authority modifier; the access form is unchanged. `<x>` structural form for declaration is also legal — `server <x> = init` with the `server` modifier preceding the structural form is the V5-strict-compatible variant.
+- **V5-strict access.** `@var` is the canonical expression access (§6.1). The `server` attribute on a declaration sets the cell's authority; the access form is unchanged. The canonical decl form per V-kill (§6.1.5) is `<var server> = init` — `server` as a bare flag attribute inside the structural opener tag, alongside `pinned` and validator-attrs.
 - **Auto-synthesized validity surface.** A cell with `server` authority MAY also carry validators. The validity surface (`@x.isValid`, `@x.errors` per §55.5–§55.7) is synthesised regardless of authority — the surface is computed client-side from the cell's current value. Server validators (§55.4 schema columns; §55.3 refinement-type predicates) are independent enforcement layers per §53.6.2.
 - **`protect=` on state cells / db blocks.** The `protect=` mechanism (§11 / §52.7) applies to db-typed authority cells; it composes with V5-strict because `protect=` is on the DB block (or the type-level authority declaration), not on the syntactic access form. Both `<x>` decl and `@x` access remain legal; the protected fields are simply absent from the client schema view.
 - **Channels (§38) and authority.** v0.next channels declared at file level use V5-strict body (`<x> = init` declares; `@x` reads/writes). The authority of a channel-declared cell is "channel-synced" — auto-synced across subscribed clients (§38.4). The `server` authority modifier IS NOT applicable inside a channel body (channel cells are wire-synced, not server-authoritative in the §52 sense). This is documented in §38.4 + the §38.4.1 v1→v0.next migration note.
@@ -26357,48 +26386,50 @@ Expected compiler output: no errors. `@draft` is `CardDraft` (local). `@cards` i
 
 #### 52.4.1 Syntax
 
-```ebnf
-state-decl      ::= (server-modifier ws)? "@" identifier ws "=" ws expr
-server-modifier    ::= "server"
+The `server` attribute is a bare flag attribute on the V-kill structural decl tag (§6.1.5):
+
+```scrml
+<varName server> = <placeholder-expr>
+<varName server>: T = <placeholder-expr>      // with optional type annotation
 ```
 
-`server @var = expr` declares that `@var` is server-authoritative. The initial value `expr` is a placeholder; the compiler replaces it with a server-fetch on mount.
+The full grammar production lives at §6.1.5. `server` joins `pinned` and validator-attrs (§55.1) as a `decl-attr` legal inside the opening tag. The initial value (`expr` in the production) is a placeholder; the compiler replaces it with a server-fetch on mount.
 
-`@var = expr` (no modifier) declares a client-local reactive variable. This is unchanged from §6.1.
+`<varName> = <expr>` (no `server` attribute) declares a client-local reactive variable. This is unchanged from §6.1.
 
-The `server` modifier in this position parallels — but is NOT — the (deprecated) `server function` modifier (§52.10). The shared keyword reads as "server-side" in both positions, but the cell-authority mechanism here is independent and remains canonical; only the function modifier is on the deprecation track per Insight 26 (2026-05-08).
+The `server` attribute in this position parallels — but is NOT — the (deprecated) `server function` modifier (§52.10). The shared keyword reads as "server-side" in both positions, but the cell-authority mechanism here is independent and remains canonical; only the function modifier is on the deprecation track per Insight 26 (2026-05-08).
 
 #### 52.4.2 Semantics
 
-A `server @var` declaration tells the compiler:
+A `<var server>` declaration tells the compiler:
 
-1. **Initial value on mount:** The compiler generates a fetch from the server to populate `@var` on component/page mount. The initial value in the declaration (e.g., `server @cards = []`) is the client-side placeholder displayed until the fetch completes.
+1. **Initial value on mount:** The compiler generates a fetch from the server to populate `@var` on component/page mount. The initial value in the declaration (e.g., `<cards server> = []`) is the client-side placeholder displayed until the fetch completes.
 2. **Optimistic update:** When `@var` is assigned in client code, the compiler generates: (a) an immediate local update for responsiveness, and (b) a server write call. If the server write fails, the previous value is restored.
 3. **Rollback on error:** If the server write returns an error, the compiler restores `@var` to its pre-assignment value and surfaces the error through the standard error state (§19).
 4. **Re-fetch on success:** After a successful server write, the compiler MAY re-fetch the authoritative value from the server to ensure the local value matches the persisted state.
 5. **SSR pre-render:** Server-authoritative vars are populated on the server during SSR and emitted into the initial HTML. Client-local vars are not pre-rendered; they use their declared initial value.
 
-A `server @var` declaration at the instance level is appropriate for primitive reactive state: loading flags, counters, IDs, simple scalar values. For structured data that maps to a database table, Tier 1 (type-level authority via `< Type authority="server" table="...">`) SHOULD be used instead.
+A `<var server>` declaration at the instance level is appropriate for primitive reactive state: loading flags, counters, IDs, simple scalar values. For structured data that maps to a database table, Tier 1 (type-level authority via `< Type authority="server" table="...">`) SHOULD be used instead.
 
 #### 52.4.3 Initial Value Semantics
 
-The expression on the right-hand side of a `server @var = expr` declaration is the **client placeholder**. It is displayed while the server fetch is in flight. It is NOT sent to the server. It is NOT the authoritative initial value.
+The expression on the right-hand side of a `<varName server> = expr` declaration is the **client placeholder**. It is displayed while the server fetch is in flight. It is NOT sent to the server. It is NOT the authoritative initial value.
 
-A `server @var` with an initial value of `not` (§42) means "no placeholder — render nothing until the server responds."
+A `<varName server>` with an initial value of `not` (§42) means "no placeholder — render nothing until the server responds."
 
 ```scrml
-server @userProfile = not     // renders nothing until profile loads
-server @count = 0             // renders 0 until server responds with authoritative count
+<userProfile server> = not     // renders nothing until profile loads
+<count server>       = 0       // renders 0 until server responds with authoritative count
 ```
 
 #### 52.4.4 Normative Statements — Instance-Level Authority
 
-- `server @var` SHALL cause the compiler to generate an initial load fetch on mount.
-- `server @var` SHALL cause the compiler to generate optimistic update logic on every assignment to `@var` in client code.
-- `server @var` SHALL cause the compiler to generate rollback logic that restores the pre-assignment value if the server write returns an error.
-- A `server @var` SHALL be treated as server-authoritative for all E-AUTH rule checks.
-- An unmodified `@var` SHALL be treated as client-local. No sync infrastructure SHALL be generated for it.
-- The compiler SHALL emit an error (E-AUTH-002) when a `server @var` is declared with an initial value that is derived from a client-local reactive variable, unless the derivation passes through an explicit server function call.
+- A `<varName server>` declaration SHALL cause the compiler to generate an initial load fetch on mount.
+- A `<varName server>` declaration SHALL cause the compiler to generate optimistic update logic on every assignment to `@varName` in client code.
+- A `<varName server>` declaration SHALL cause the compiler to generate rollback logic that restores the pre-assignment value if the server write returns an error.
+- A `<varName server>` cell SHALL be treated as server-authoritative for all E-AUTH rule checks.
+- A `<varName>` cell without the `server` attribute SHALL be treated as client-local. No sync infrastructure SHALL be generated for it.
+- The compiler SHALL emit an error (E-AUTH-002) when a `<varName server>` is declared with an initial value that is derived from a client-local reactive variable, unless the derivation passes through an explicit server function call.
 - The compiler SHALL emit an error (E-AUTH-001) when a client-local `@var` appears directly in a `?{}` block as a persisted value (as a bound parameter in INSERT/UPDATE/DELETE), outside of a server function.
 
 #### 52.4.5 Worked Example — Valid (Instance-Level Authority)
@@ -26406,21 +26437,21 @@ server @count = 0             // renders 0 until server responds with authoritat
 ```scrml
 <program db="sqlite:./kanban.db">
 
+// Tier 2: server-authoritative primitive var.
+// Compiler generates initial load on mount.
+// Assignment triggers optimistic update + server write.
+<cards server> = []
+
+// Client-local vars: no sync, no server interaction.
+<editingId>        = not
+<draftTitle>       = ""
+<draftDescription> = ""
+<addingToColumn>   = "Todo"
+
+// Derived values are local by definition.
+const <todoCards> = @cards.filter(c => c.column == "Todo")
+
 ${
-    // Tier 2: server-authoritative primitive var.
-    // Compiler generates initial load on mount.
-    // Assignment triggers optimistic update + server write.
-    server @cards = []
-
-    // Client-local vars: no sync, no server interaction.
-    @editingId = not
-    @draftTitle = ""
-    @draftDescription = ""
-    @addingToColumn = "Todo"
-
-    // Derived values are local by definition.
-    const <todoCards> = @cards.filter(c => c.column == "Todo")
-
     server function loadCards() {
         return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
     }
@@ -26449,9 +26480,9 @@ Expected compiler output: no errors. `@cards` is server-authoritative (instance-
 ```scrml
 <program db="sqlite:./kanban.db">
 
-${
-    @editingId = not    // client-local
+<editingId> = not    // client-local
 
+${
     // ERROR: @editingId is client-local. It cannot appear as a bound
     // parameter in a ?{} block outside of a server function.
     ?{`INSERT INTO audit_log (object_id) VALUES (${@editingId})`}.run()
@@ -26478,22 +26509,20 @@ E-AUTH-001: '@editingId' is client-local and cannot be used as a bound parameter
 ```scrml
 <program db="sqlite:./kanban.db">
 
-${
-    @localCount = 0                      // client-local
-    server @doubleCount = @localCount * 2  // ERROR: server var derives from local var
-}
+<localCount>                = 0                    // client-local
+<doubleCount server>        = @localCount * 2      // ERROR: server cell derives from local cell
 
 </program>
 ```
 
 Expected compiler output:
 ```
-E-AUTH-002: 'server @doubleCount' is declared server-authoritative, but its initial
+E-AUTH-002: '<doubleCount server>' is declared server-authoritative, but its initial
   value derives from '@localCount', which is client-local.
-  A server-authoritative variable's initial value must not derive directly from a
-  client-local variable. Use a server function as the authority boundary:
+  A server-authoritative cell's initial value must not derive directly from a
+  client-local cell. Use a server function as the authority boundary:
     server function computeDouble(n) { return n * 2 }
-    server @doubleCount = computeDouble(@localCount)
+    <doubleCount server> = computeDouble(@localCount)
   Or reconsider whether @doubleCount should be server-authoritative.
 ```
 
@@ -26501,8 +26530,8 @@ E-AUTH-002: 'server @doubleCount' is declared server-authoritative, but its init
 
 | Construct | Authority | Sync Generated | SSR Pre-Rendered | `?{}` Access |
 |-----------|-----------|---------------|------------------|-------------|
-| `@var = expr` | Local | None | No | Blocked (E-AUTH-001) |
-| `server @var = expr` | Server | Load + optimistic update + rollback | Yes | Allowed (inside server fn) |
+| `<var> = expr` | Local | None | No | Blocked (E-AUTH-001) |
+| `<var server> = expr` | Server | Load + optimistic update + rollback | Yes | Allowed (inside server fn) |
 | `<Type> @var` where `Type.authority = "server"` | Server | Load + optimistic update + rollback | Yes | Allowed (inside server fn) |
 | `<Type> @var` where `Type.authority = "local"` | Local | None | No | Blocked (E-AUTH-001) |
 | `const <derived> = expr` | Derived (always local) | None (derived from source) | Only if source is server | Read-only (cannot be persisted) |
@@ -26514,7 +26543,7 @@ When a variable is server-authoritative (either Tier 1 or Tier 2), the compiler 
 
 #### 52.6.1 Initial Load
 
-On component/page mount, the compiler generates a fetch call to load the authoritative value from the server. For Tier 1 types with `table=`, the compiler generates a `SELECT *` from the table. For Tier 2 `server @var` declarations, the compiler expects a corresponding `server function` that returns the initial value (see §52.6.5 for the load function convention).
+On component/page mount, the compiler generates a fetch call to load the authoritative value from the server. For Tier 1 types with `table=`, the compiler generates a `SELECT *` from the table. For Tier 2 `<var server>` declarations, the compiler expects a corresponding `server function` that returns the initial value (see §52.6.5 for the load function convention).
 
 The initial value in the declaration is displayed while the fetch is in flight (the placeholder). Once the fetch resolves, the placeholder is replaced by the authoritative value and dependents re-render.
 
@@ -26548,20 +26577,22 @@ After a successful server write, the compiler MAY generate a re-fetch of the aut
 
 Whether a re-fetch is generated is a compiler optimization decision, not a developer-facing API. The developer SHALL assume the client-side value is eventually consistent with the server after any write.
 
-#### 52.6.5 Load Function Convention for Tier 2 `server @var`
+#### 52.6.5 Load Function Convention for Tier 2 `<var server>`
 
-For a `server @var` declaration to generate an initial load, the compiler needs to know how to fetch the value. Two patterns are supported:
+For a `<var server>` declaration to generate an initial load, the compiler needs to know how to fetch the value. Two patterns are supported:
 
 **Pattern A — Inferred from assignment:**
 
 ```scrml
-server @cards = []
+<cards server> = []
 
-// Somewhere in the logic block:
-@cards = loadCards()
+${
+    // Somewhere in the logic block:
+    @cards = loadCards()
 
-server function loadCards() {
-    return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
+    server function loadCards() {
+        return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
+    }
 }
 ```
 
@@ -26570,14 +26601,14 @@ The compiler detects that `@cards` is assigned from `loadCards()` — a server f
 **Pattern B — Explicit `on mount` block (§6.7.1a):**
 
 ```scrml
-server @cards = []
+<cards server> = []
 
 on mount {
     @cards = ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
 }
 ```
 
-If neither pattern is present on a `server @var`, the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The variable will display its placeholder value until an explicit assignment occurs.
+If neither pattern is present on a `<var server>` declaration, the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The cell will display its placeholder value until an explicit assignment occurs.
 
 ### 52.7 Interaction with `protect=` (§52; see also §6.12)
 
@@ -26633,11 +26664,11 @@ The authority model directly controls which state is pre-rendered during SSR.
 
 `<request>` (§6.7.7) is a single-shot async fetch primitive. It is not a continuous authority declaration.
 
-`server @var` and `< Type authority="server">` are continuous authority declarations: the compiler generates sync infrastructure that persists for the lifetime of the component.
+`<var server>` and `< Type authority="server">` are continuous authority declarations: the compiler generates sync infrastructure that persists for the lifetime of the component.
 
 The two constructs are not interchangeable:
 
-| Feature | `<request>` | `server @var` / Tier 1 authority |
+| Feature | `<request>` | `<var server>` / Tier 1 authority |
 |---------|-------------|----------------------------------|
 | Load on mount | Yes | Yes |
 | Re-fetch on trigger | Yes (explicit) | Yes (on error, on mutation) |
@@ -26646,46 +26677,46 @@ The two constructs are not interchangeable:
 | SSR pre-render | Yes (§6.7.7 supports SSR) | Yes |
 | Mutation / write | No | Yes |
 
-A developer who needs read-only server data with manual re-fetch control SHOULD use `<request>`. A developer who needs read-write server state with automatic optimistic update SHOULD use `server @var` (primitive) or a type with `authority="server"` (structured).
+A developer who needs read-only server data with manual re-fetch control SHOULD use `<request>`. A developer who needs read-write server state with automatic optimistic update SHOULD use `<var server>` (primitive) or a type with `authority="server"` (structured).
 
 ### 52.10 Interaction with `server function` (Deprecated)
 
 The `server` keyword on a function declaration and the `server` modifier on a reactive variable declaration share the same keyword but have distinct semantics:
 
 - `server function name() { ... }` — historically forced server-side execution for the named function. **DEPRECATED** as of v0.next per Insight 26 (2026-05-08). The compiler classifies functions by body-content triggers (§12.2 Triggers 1-3) joined with caller-context propagation (Trigger 5) and dead-code-warn (Trigger 6); the keyword is structurally redundant. See W-DEPRECATED-SERVER-MODIFIER (§34) for the warn-then-error deprecation cycle.
-- `server @var = expr` — declares the reactive variable as server-authoritative. **NOT DEPRECATED.** The cell authority modifier on state declarations is a distinct mechanism from the function modifier; only the function modifier is on the deprecation track. See §52.4 (Tier 2 — Instance-Level Authority) for the full normative treatment.
+- `<var server> = expr` — declares the reactive cell as server-authoritative (per the V-kill `decl-attr` slot, §6.1.5). **NOT DEPRECATED.** The cell-authority attribute on state declarations is a distinct mechanism from the function modifier; only the function modifier is on the deprecation track. See §52.4 (Tier 2 — Instance-Level Authority) for the full normative treatment.
 
-The two constructs remain syntactically unambiguous so long as both forms continue to parse during the deprecation window. The parser identifies the token following `server`: if it is `function` or `fn`, it is a (deprecated) function declaration; if it is `@`, it is a reactive variable declaration.
+Under the V-kill canon (post-S123), the two constructs are syntactically distinct: a `<var server>` declaration starts with a `<` opener tag (the V-kill structural form, §6.1.5) where `server` appears as a bare flag attribute inside the tag; a (deprecated) `server function name() { ... }` declaration starts with the bare keyword `server` followed by `function`/`fn`. The parser distinguishes by leading token — `<` opens a state declaration; `server` as a leading bare keyword indicates the deprecated function-modifier form.
 
 **Migration note.** The `server function` modifier is deprecated as of v0.next; remove from new code; existing usage warns then errors per the deprecation cycle (`W-DEPRECATED-SERVER-MODIFIER` → `E-DEPRECATED-SERVER-MODIFIER`). The canonical replacement is no replacement at all: write `function name() { ... }` (or `async function`, `export function`, etc.) and rely on §12.2 inference. If the function body has no server-only triggers and the function is called only from server contexts, Trigger 5 (caller-context propagation) classifies it server. If the function body has server-only triggers (T1/T2/T3), those classify it server directly. Functions whose intended placement cannot be inferred from body content or call graph are either dead code (Trigger 6 fires `W-DEAD-FUNCTION`) or a structural smell that the deprecation cycle is designed to surface. The `<machine>` → `<engine>` keyword deprecation precedent (§51.3.2 / W-DEPRECATED-001) is the canonical shape: warn during the deprecation window, error on removal.
 
 **Normative statements:**
 
-- The parser SHALL distinguish `server function` from `server @var` by the token immediately following `server`. No ambiguity is possible.
+- The parser SHALL distinguish a `<var server>` state declaration from a (deprecated) `server function` declaration by the leading token: `<` opens the V-kill structural state-decl (§6.1.5); a bare leading `server` keyword indicates the deprecated function-modifier form. No ambiguity is possible.
 - During the deprecation window, the parser SHALL accept `server function` declarations and emit `W-DEPRECATED-SERVER-MODIFIER` (§34) per the firing conditions defined in route inference. After the deprecation cycle completes, `server function` SHALL be `E-DEPRECATED-SERVER-MODIFIER` and removed from the parser.
-- The `server` modifier on reactive variable declarations (`server @var`, §52.4) is unaffected by this deprecation. It is a distinct construct that names a state authority contract (initial load + optimistic update + rollback), not a function-execution-placement directive. The cell authority modifier remains canonical.
+- The `server` attribute on reactive cell declarations (`<var server>`, §52.4 / §6.1.5) is unaffected by this deprecation. It is a distinct construct that names a state authority contract (initial load + optimistic update + rollback), not a function-execution-placement directive. The cell-authority attribute remains canonical.
 
 ### 52.11 Error Codes
 
 | Code | Trigger | Message (normative form) |
 |------|---------|--------------------------|
 | E-AUTH-001 | A client-local `@var` appears as a bound parameter in a `?{}` INSERT, UPDATE, or DELETE block outside of a server function. | `'@{name}' is client-local and cannot be used as a bound parameter in a ?{} persistence block. Pass it to a server function first.` |
-| E-AUTH-002 | A `server @var` declaration has an initial value that is directly derived from a client-local `@var`. | `'server @{name}' derives from '{source}', which is client-local. Use a server function as the authority boundary.` |
+| E-AUTH-002 | A `<var server>` declaration has an initial value that is directly derived from a client-local `@var`. | `'<{name} server>' derives from '{source}', which is client-local. Use a server function as the authority boundary.` |
 | E-AUTH-003 | A state type declares `authority="server"` without a `table=` attribute. | `State type '{TypeName}' declares authority="server" but has no table= attribute. Add table="<tablename>".` |
 | E-AUTH-004 | Two declarations of the same state type use conflicting `authority=` values. | `Conflicting authority declarations for type '{TypeName}': cannot be both server-authoritative and local.` |
-| E-AUTH-005 | A `server @var` declaration appears inside a client-only component (a component with no server context). | `'server @{name}' declared in a client-only component. Server-authoritative variables require a server context. Add db= to the enclosing <program> or move the declaration.` |
+| E-AUTH-005 | A `<var server>` declaration appears inside a client-only component (a component with no server context). | `'<{name} server>' declared in a client-only component. Server-authoritative cells require a server context. Add db= to the enclosing <program> or move the declaration.` |
 
 | Code | Trigger | Message (normative form) |
 |------|---------|--------------------------|
-| W-AUTH-001 | A `server @var` declaration has no detectable initial load pattern (no mount assignment, no `on mount` block). | `'server @{name}' has no detected initial load. The variable will display its placeholder until explicitly assigned. Add an 'on mount' block or assign from a server function.` |
+| W-AUTH-001 | A `<var server>` declaration has no detectable initial load pattern (no mount assignment, no `on mount` block). | `'<{name} server>' has no detected initial load. The cell will display its placeholder until explicitly assigned. Add an 'on mount' block or assign from a server function.` |
 
 ### 52.12 Open Questions
 
 The following questions are not resolved by this spec section. Each is a tracked spec issue.
 
-**SPEC-ISSUE-025** (raised by this section): Does the compiler-generated initial load for `server @var` happen in parallel with other mount-time fetches, or sequentially? Interaction with `lift` ordering and concurrent detection (§10.5.5) is underspecified.
+**SPEC-ISSUE-025** (raised by this section): Does the compiler-generated initial load for `<var server>` happen in parallel with other mount-time fetches, or sequentially? Interaction with `lift` ordering and concurrent detection (§10.5.5) is underspecified.
 
-**SPEC-ISSUE-026** (raised by this section): When a Tier 2 `server @var` is assigned a value derived from multiple server function calls (e.g., `@cards = mergeLocalAndRemote(loadCards(), @localEdits)`), does the compiler generate optimistic update for the assignment, or does it require explicit authority handling? The spec does not currently address partial-authority expressions.
+**SPEC-ISSUE-026** (raised by this section): When a Tier 2 `<var server>` cell is assigned a value derived from multiple server function calls (e.g., `@cards = mergeLocalAndRemote(loadCards(), @localEdits)`), does the compiler generate optimistic update for the assignment, or does it require explicit authority handling? The spec does not currently address partial-authority expressions.
 
 **SPEC-ISSUE-027** (raised by this section): For Tier 1 state types, the compiler generates `SELECT *` for initial load. Does the developer have a way to constrain the initial load query (e.g., load only the first page, add a WHERE clause)? The current spec has no syntax for this; it may require an `on mount` override pattern analogous to §52.6.5 Pattern B.
 
@@ -26847,7 +26878,7 @@ An inline predicate MAY appear in any position where a type annotation is valid:
 
 ```
 variable declaration:   let x: number(>0 && <10000) = expr
-reactive variable:      @amount: number(>0 && <10000) = expr
+reactive cell:          <amount>: number(>0 && <10000) = expr
 function parameter:     fn process(amount: number(>0 && <10000))
 struct field:           type Invoice:struct = { amount: number(>0 && <10000) }
 return type:            fn computeFee() number(>=0): ...
@@ -26860,7 +26891,7 @@ closing parenthesis. The name is used in error messages only — it has no effec
 semantics.
 
 ```scrml
-@price: number(>0 && <10000) [valid_price] = userInput
+<price>: number(>0 && <10000) [valid_price] = userInput
 ```
 
 If the constraint is violated, the error message SHALL include the label name.
@@ -27175,7 +27206,7 @@ predicate.
 Where ε is `1` for integer constraints and the smallest step value for floating point.
 
 ```scrml
-@amount: number(>0 && <10000) = 0
+<amount>: number(>0 && <10000) = 0
 
 <input type="number" bind:value=@amount>
 // Compiled HTML: <input type="number" min="1" max="9999" ...>
@@ -27191,7 +27222,7 @@ Where ε is `1` for integer constraints and the smallest step value for floating
 | `.length <= N` | `maxlength="N"` |
 
 ```scrml
-@password: string(.length > 7 && .length < 255) = ""
+<password>: string(.length > 7 && .length < 255) = ""
 
 <input type="password" bind:value=@password>
 // Compiled HTML: <input type="password" minlength="8" maxlength="254" ...>
@@ -27204,7 +27235,7 @@ A named shape with a corresponding HTML type SHALL emit that type attribute, ove
 attribute, the compiler SHALL emit a warning and use the shape-derived type.
 
 ```scrml
-@email: string(email) = ""
+<email>: string(email) = ""
 
 <input bind:value=@email>
 // Compiled HTML: <input type="email" ...>
@@ -27253,7 +27284,7 @@ type Booking:struct = {
 }
 </>
 
-@booking: ValidBooking = { start: "2026-06-01", end: "2026-06-08", nights: 7 }
+<booking>: ValidBooking = { start: "2026-06-01", end: "2026-06-08", nights: 7 }
 ```
 
 ### §53.8.2 Execution Order
@@ -27278,7 +27309,7 @@ use `< machine>` instead.
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
-@hp: number(>=0 && <=@maxMana) = 100
+<hp>: number(>=0 && <=@maxMana) = 100
 // E-CONTRACT-003: predicate references external reactive variable '@maxMana'.
 // Inline predicates must be stateless.
 // For constraints that reference reactive state, use < machine>.
@@ -27287,7 +27318,7 @@ use `< machine>` instead.
 //       * => * given (value >= 0 && value <= @maxMana)
 //   }
 //   /
-//   @hp: HpRange = 100
+//   <hp>: HpRange = 100
 ```
 
 ---
@@ -27467,7 +27498,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
         * => * given (value >= 0 && value <= @maxMana)
     }
     /
-    @hp: HpRange = 100
+    <hp>: HpRange = 100
 ```
 
 Normative statements:
@@ -27511,7 +27542,7 @@ server function submitInvoice(amount: number(>0 && <10000) [invoice_amount]) {
     ?{`INSERT INTO invoices (amount) VALUES (${amount})`}.run()
 }
 
-@invoiceAmount: number(>0 && <10000) = 0
+<invoiceAmount>: number(>0 && <10000) = 0
 
 markup {
     <form>
@@ -27542,8 +27573,8 @@ Expected compiler output: No errors. Compiled HTML includes `min="1" max="9999"`
 ```scrml
 <program>
 
-@username: string(.length > 2 && .length < 32) = ""
-@email:    string(email) = ""
+<username>: string(.length > 2 && .length < 32) = ""
+<email>:    string(email) = ""
 
 markup {
     <input bind:value=@username placeholder="Username">
@@ -27605,8 +27636,8 @@ Expected compiler output: No errors. Single runtime check emitted at `shipping` 
 ```scrml
 <program>
 
-@maxScore: number = 100
-@playerScore: number(>=0 && <=@maxScore) = 0
+<maxScore>: number = 100
+<playerScore>: number(>=0 && <=@maxScore) = 0
 // ERROR
 ```
 
@@ -27627,7 +27658,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
         * => * given (value >= 0 && value <= @maxScore)
     }
     /
-    @playerScore: ScoreRange = 0
+    <playerScore>: ScoreRange = 0
 ```
 
 ---
@@ -27637,7 +27668,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
 ```scrml
 <program>
 
-@ssn: string(ssn) = ""
+<ssn>: string(ssn) = ""
 // ERROR
 ```
 
@@ -27717,8 +27748,8 @@ places, the developer must repeat it. A named type alias mechanism would allow:
 
 ```scrml
 type ValidAmount = number(>0 && <10000)
-@price: ValidAmount = ...
-@fee:   ValidAmount = ...
+<price>: ValidAmount = ...
+<fee>:   ValidAmount = ...
 ```
 
 This is different from a `< machine>` named binding because the alias is stateless. Whether
@@ -27959,7 +27990,7 @@ state-literal      ::= '< ' SubstateName attribute-list? '>' field-assignments '
 **Usage:**
 
 ```scrml
-@sub: Submission = < Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>
+<sub>: Submission = < Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>
 
 ${ function flow() {
     @sub = @sub.validate(Date.now())   // legal; Draft declares validate()
