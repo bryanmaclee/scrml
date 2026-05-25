@@ -117,7 +117,90 @@ What's OUT:
 
 ---
 
-## HU-2 candidate queue — next questions to surface
+## HU-2 — 2026-05-25 — Lifecycle annotation discovered + syntax disambiguated
+
+### Context
+
+During HU-2 (incremental), user clarified that their earlier `not -> string` sketch (which PA initially read in HU-1 as an informal union) was invoking the existing **`(A -> B)` lifecycle annotation** at SPEC §14.3 line 7107. User couldn't recall the exact syntax (forgot parens). PA grep'd the archive and surfaced:
+
+- SPEC §14.3 line 7099 + 7107 — current SPEC ratifies `(A -> B)` lifecycle annotation; post-S89 already uses `not` (`passwordHash: (not -> string)`); E-TYPE-001 fires on access-before-transition.
+- 3 deep-dives from 2026-04-08 (state-dynamics-design / debate-state-dynamics / contracts-mutable-data).
+- Article draft `scrml-support/voice/articles/mutability-contracts-draft-2026-04-29.md` — frames lifecycle annotation as flagship feature in 11 places.
+- state-dynamics-design DD `status: active` since 2026-04-08 — open extension question.
+
+Two audit holes surfaced:
+- **F-023 (NEW from HU-2)** — PRIMER + kickstarter v2 carry ZERO mentions of lifecycle annotation despite SPEC §14.3 ratifying it.
+- **F-024 (NEW from HU-2)** — Syntax-overload of `->` token: serves both static return-type annotation (`function f() -> string`) AND temporal lifecycle annotation (`(not -> string)`). Semantically disjoint uses; same glyph.
+
+### User-voice anchor (verbatim)
+
+> *"yes a. this was part of the basis. when I first envistioned the scrml type-system, this was my first real novel (at least to me (truck driver(no knowledge of specific prior art))) idea for scrmls type system"*
+
+Lifecycle annotation is FOUNDATIONAL to scrml's type-system identity; predates V5-strict, V-kill, engines-as-Tier-2. Catch-up scope for F-023 is FLAGSHIP-section, not footnote.
+
+> *"I dont care so much about what syntax we use, I dont want to crowd -> if it is fundamentally something else."*
+
+Syntax-overload concern legitimate. Return-type and lifecycle are static-vs-temporal — fundamentally different concepts. `->` keeps return-type (Rust/OCaml/Haskell/Python prior-art alignment); lifecycle gets a temporally-flavored token.
+
+### F-024 ratification — `to` (CONTEXTUAL keyword) for lifecycle annotation
+
+**User-voice trail (verbatim, HU-2 sub-thread):**
+
+> *"confirm then is unused, lock it"*
+
+[PA grep'd `then` — unused as scrml keyword. Initial lock landed.]
+
+> *"is "to" a kw?"*
+
+[PA grep'd `to` — NOT a scrml keyword at lex level; heavy use as `<onTransition to=>` / `<onTimeout to=>` / `<onIdle to=>` ATTRIBUTE name (semantic-consistent with lifecycle "transition to" reading); one existing sample uses `to` as parameter name: `samples/gauntlet-r14/rust-state-machine.scrml:26` — `function isValid(from, to) { ... }`.]
+
+> *"swap to to, but here's the thing If this compiler can infer everything that it does there should be no issue with to usage later ( or very minimal, and mitigabel )"*
+
+**FINAL LOCK: lifecycle annotation syntax is `(A to B)` with CONTEXTUAL-KEYWORD semantics for `to`.**
+
+`to` is recognized as `KwTo` only in the lifecycle-annotation type-expression context (`( A to B )` inside a type position — primarily struct-field type annotations per current SPEC §14.3, and any future contexts the heads-up extends lifecycle annotations to per the state-dynamics-design DD carry-forward). In every other context — function-parameter lists, local-variable declarations, expression position, property access — `to` parses as an ordinary identifier.
+
+**No existing sample needs migration.** The `samples/gauntlet-r14/rust-state-machine.scrml` `function isValid(from, to) { ... }` parameter-name use stays valid: `to` in a function-parameter list is NOT in lifecycle-annotation type-expr position, so contextual recognition doesn't fire.
+
+**Precedent for contextual-keyword semantics:** scrml ALREADY does this with `from` — `from` is a keyword in `import { x } from "..."` position and an identifier elsewhere. The composed-engines architecture (S98 + S111 charter B) treats lexer-mode and grammar-context as first-class design tools; adding `to` as a contextual keyword extends an established pattern without new mechanism.
+
+**User's mitigation framing (verbatim above):** the compiler's contextual-inference IS the mitigation. Future adopter use of `to` as identifier (variable / param / property) is unaffected outside lifecycle-annotation type-expr position. Edge cases (an adopter writes a lifecycle-annotation-shaped expression containing a `to` identifier inside the type — improbable shape) can be diagnosed via a `W-IDENT-CONTEXTUAL-KEYWORD` info-lint when the parser observes ambiguity — informational, not error.
+
+**Reserving discipline:** `to` is contextually-reserved at the scrml-source level FOR THE LIFECYCLE-ANNOTATION TYPE-EXPR CONTEXT ONLY. Future SPEC amendments SHALL NOT introduce additional context-positions that recognize `to` as a keyword without explicit heads-up ratification — the contextual-keyword surface stays narrow.
+
+### Migration scope (concrete; mechanical)
+
+**SPEC.md sites (Phase 2 amendment):**
+- §14.3 line 7099 — `passwordHash: (not -> string),` → `passwordHash: (not to string),`
+- §14.3 line 7107 — normative statement `(A -> B) — lifecycle annotation` → `(A to B) — lifecycle annotation`. Update the prose accordingly.
+- Any other `(A -> B)` in SPEC body referencing lifecycle — PA to grep + sweep during the Phase-2 SPEC amendment work.
+
+**Mutability-contracts article draft (status: draft, not shipped; revise before publication):**
+- Line 125, 250, 252, 338, 361 — all `(A -> B)` / `(null -> ...)` / `(null -> T)` / `null -> number` references migrate to the `to` form.
+- Note: line 338 still references `null -> string` (pre-S89). Two migrations in one sweep: `null` → `not` AND `->` → `to`.
+
+**PRIMER + kickstarter (F-023 catch-up):** new flagship sections use `(A to B)` from authoring outset.
+
+**Phase 3 example coverage:** new sample / example files demonstrating lifecycle annotation use the `(A to B)` form from authoring outset. Existing samples that use `to` as a non-lifecycle identifier (e.g., `function isValid(from, to)`) stay as-is — contextual-keyword semantics handle the distinction.
+
+**Native-parser implementation note (post-Phase-2):** when the lifecycle-annotation type-expr production is wired into the native parser, `to` recognition is gated on the parser's "in lifecycle-annotation type-expr" context-state; outside that context the lexer emits `Ident` for the `to` text. Same architectural pattern as the existing `from`-in-import handling. Bridge surface for the `->` legacy form remains available during the migration window (output the same lifecycle-annotation AST whether the source reads `(A -> B)` or `(A to B)`) until SPEC §14.3 amendment + corpus migration lands.
+
+### Findings closed by HU-2 partial-batch (lifecycle thread)
+
+- **F-024 (HU-2 NEW)** — RATIFIED. Lifecycle-annotation syntax disambiguates from return-type. Locked: `(A to B)`. `->` remains return-type-only.
+- **F-023 (HU-2 NEW, was Q9 from HU-1 close)** — RATIFIED direction (a): PRIMER + kickstarter catch up to SPEC on lifecycle annotation. Flagship-section scope, not footnote. Uses post-F-024 syntax `(A to B)`.
+
+### Open from HU-2 lifecycle thread (carry to HU-3)
+
+- **state-dynamics-design DD extension question** (DD at `scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md` — `status: active` since 2026-04-08). The DD asks "should `(A to B)` lifecycle annotations extend beyond struct fields to enum-state-cells, or do engines/Tier-2 subsume that use case?" Lifecycle annotation is foundational; the extension question is "did we accidentally narrow scrml's type-system in ratification?" PA recommends: read the DD in full + the debate sibling DD before HU-3 ratifies.
+
+### Banked S129 methodology rule (NEW from this exchange)
+
+**Bidirectional hole-detection in canon-anchored audits.** Phase 1b's hole-detection only fired on "canon claims X / SPEC silent on X" — it missed the inverse "SPEC ratifies X / canon silent on X." Both directions are signal. Future audit dispatches must include both checks. F-023 was the precedent that surfaced this: SPEC §14.3 ratifies lifecycle annotation as a load-bearing feature; PRIMER + kickstarter never mention it; Phase 1b's audit missed the gap entirely. (Memory to be banked separately if not already covered by [[feedback_triage_genuine_needs_spec_crosscheck]] — that's a sibling but distinct rule.)
+
+---
+
+## HU-3 candidate queue — next questions to surface
 
 Ordered by directional-cleanliness (mechanical-confirmations first; SPEC-internal contradictions needing user-eyeballs second; genuine design questions third). PA will present these in the next chat exchange — not yet asked.
 
