@@ -376,7 +376,7 @@ scrml is ~10-14x faster to build than Vite at v0.3.0 (was 8-12x at v0.2.x).
 
 ### State and Reactivity
 
-- **Reactive state — V5-strict.** `<count> = 0` declares a reactive cell; `@count` reads or writes it. The decl form is structural; the access form is canonical. The two forms are visually distinguishable, so a reader can scan a function body and count "how many state cells does this read or mutate." Bare names in expressions are LOCAL identifiers only — they do NOT resolve to reactive state (locals cannot shadow registered state names; `E-NAME-COLLIDES-STATE`).
+- **Reactive state — V5-strict.** `<count> = 0` declares a reactive cell; `@count` reads or writes it. The decl form is structural; the access form is canonical. The two forms are visually distinguishable, so a reader can scan a function body and count "how many state cells does this read or mutate." Bare names in expressions are LOCAL identifiers only — they do NOT resolve to reactive state (locals cannot shadow registered state names; `E-NAME-COLLIDES-STATE`). The declaration/write distinction is enforced — bare `@x = expr` at default-logic body-top (a `<program>` / `<page>` / `<channel>` body) fires `E-WRITE-NOT-IN-LOGIC-CONTEXT`: declarations use structural `<x>`, writes go inside `${...}` functions.
 - **Three RHS shapes for state decls.** Shape 1 plain (`<count> = 0`), Shape 2 decl-coupled-with-render-spec (`<userName req length(>=2)> = <input/>` — `<userName/>` in markup expands to the bound input with `bind:value` wired), Shape 3 derived (`const <doubled> = @count * 2` — read-only; recomputes on dep change; markup-typed derived cells legal per L1).
 - **Compound state (Variant C).** `<formRes> <name> = "" <email> = "" </>` — ad-hoc compound via structural children. Read `@formRes.name`; write `@formRes.email = "alice"`. Tier 3 predefined-shape compound supports positional sugar against a known type.
 - **Two-way binding (`bind:value`)** — compiler dispatches binding by render-spec (`<input type="checkbox">` → `bind:checked`; `<select>` → `bind:value`; etc.). Per L17.
@@ -423,6 +423,34 @@ The compiler uses a **three-zone enforcement model** (derived from SPARK/Ada):
 | **Trusted** | Value was already checked in the current scope | Zero — compiler remembers the proof |
 
 Boundary checks emit a single synchronous predicate test; on failure the compiler throws `E-CONTRACT-001-RT` labeled with the assignment site. Named shapes available today: `email`, `url`, `uuid`, `phone`, `date`, `time`, `color`. Composable predicates (`number(>0 && <10000)`, `string(.length > 7)`) cover the same ground as Zod schemas — with zero dependencies, zero bundle cost in proven code paths, and no separate schema language to keep in sync with your types.
+
+### Type-Derived Apps — `formFor` / `schemaFor` / `tableFor`
+
+A struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate. The same predicates that validate the values also derive the right HTML form controls and the right SQL column types.
+
+```scrml
+// gate: skip — illustrative; shows the three call-sites against one struct type
+import { formFor, schemaFor, tableFor } from "scrml:data"
+
+type Contact:struct = {
+    name:  string(.length > 0)
+    email: string(email)
+    phone: string(phone)?
+}
+
+// formFor — render a complete form from the type
+<formFor for=Contact onsubmit=save/>
+
+// schemaFor — emit SQL DDL from the type, inside a <schema> block
+<schema>${ schemaFor(Contact) }</schema>
+
+// tableFor — render a <table> from the type plus row data
+<tableFor for=Contact rows=@contacts/>
+```
+
+Each primitive reads the struct field validators directly: `string(email)` becomes a `<input type="email">` form control AND a `TEXT CHECK(...)` column. Add a field to `Contact` and form / schema / table all gain it at the next build — no second source of truth to keep in sync. `pick=["a","b"]` / `omit=["secret"]` / `partial=true` shape the field set per call site; `<slot name="fieldName">` overrides a single field's render.
+
+See [`examples/26-type-derived-schema.scrml`](examples/26-type-derived-schema.scrml) and [`examples/27-type-derived-table.scrml`](examples/27-type-derived-table.scrml) for the schemaFor + tableFor examples. A `formFor` worked example is pending.
 
 ### Free HTML Validation
 
@@ -489,6 +517,37 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
   *\* `_{}` foreign code and `import:host` are specified, not yet implemented; `vendor:` is a ratified design direction with its mechanism still under debate.*
 - **`<program>` root** — configure database connections, protection rules, HTML spec version, and program-wide settings from a single root element.
+
+### LLM Agent Integration — `scrml:mcp`
+
+> *V0 foundation shipped (stdlib + 11 tools + descriptor sidecars). The `<program mcp="dev-only">` adopter opt-in + end-to-end docs land in the next release.*
+
+scrml ships a Model Context Protocol surface so an LLM agent (Claude Code, Cursor, any MCP client) can read your running scrml app's structure first-hand instead of guessing. The compiler emits descriptor sidecars (`engines.json`, `forms.json`, `channels.json`, `serverfns.json`) at build time, and the `scrml:mcp` stdlib exposes them over MCP stdio as 11 read-only tools:
+
+| Tool | Surfaces |
+|---|---|
+| `get_app_topology` | the whole `<program>` tree shape |
+| `list_engines` / `get_engine` | engine state machines + current variant + legal transitions |
+| `list_forms` / `get_form_status` | form validity surfaces + per-field touched / errors |
+| `list_routes` / `get_route_chunks` | route table + which chunks each route loads |
+| `list_server_functions` | enumerable server-fn surface (V0 read-only — `dispatchable: false`) |
+| `list_channels` / `get_channel_state` | active WebSocket channels + shared state |
+| `get_reachable_server_fns` | per-route reachable server-fn closure |
+
+The strategic frame: the same structural exhaustiveness that makes a scrml app provable to a compiler — engines as exhaustive state machines, typed enums, V5-strict access, explicit `rule=` contracts, whole-program inference — makes it introspectable to an agent. Other frameworks reach for LLM-friendliness at the tools layer; scrml gets it at the language layer.
+
+V0 is read-only metadata. A future V1 would add server-fn dispatch behind a capability gate.
+
+### Recently Landed Quality Wins
+
+A short selection of silent-failure classes closed in v0.6.x:
+
+- **Precedence-preserving binary emission** — grouped expressions like `(2+3)*4` no longer drop the grouping parens during codegen (Bug W).
+- **`not` keyword no longer corrupts regex literals** — the lowering pass skips regex bodies + comments + string interiors (GITI-017; silent-corruption class closed).
+- **Runtime chunker tree-shake fix** — `_scrml_destroy_scope` declaratively pulls in its timer + animation helpers; no more orphan-helper class (6nz-P).
+- **Default-logic body-top writes surface loudly** — bare `@x = expr` at `<program>` body top fires `E-WRITE-NOT-IN-LOGIC-CONTEXT` instead of silently no-op'ing (Bug Q via S123 Unit CC).
+
+The compiler is actively hardening; see [`docs/changelog.md`](./docs/changelog.md) for the full landing log.
 
 ### The Build Story
 
