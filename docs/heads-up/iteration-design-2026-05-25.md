@@ -79,18 +79,37 @@ Element-shape `<each>` was ratified at S129 close in the late-session iteration 
 
 The parent-element `<ul for=actualInput>` form raised in S129 message 1 was an earlier iteration in the brainstorm; superseded by the `<each>` form (PA option 3 that the user said *"I really like"*).
 
-### Q3 — `:`-shorthand body admit on `<each>`
+### Q3 — `:`-shorthand body admit on `<each>` (RE-RATIFIED — actual §4.14 form)
 
-**Status:** ALREADY RATIFIED S129 — pre-dates this HU.
+**Status:** S129 PA-claim of *"already ratified `<li>:@.nameOrWhatever</>`"* was SPELLING-INCORRECT. The user correctly flagged the `<li>:@.name</>` shape as reading like type annotation. Per SPEC §4.14 the actual ratified `:`-shorthand puts `:` **inside the opener** with mandatory whitespace before, AND has NO closer on the shorthand-bodied element.
 
-`:`-shorthand body opens the per-item template into thin-logic mode where `@.field` works bare without `${...}` ceremony. Composes with the existing §4.14 `:`-shorthand mechanism rather than adding a new body-mode (the alternative `$` body-mode raised in S129 message 2 was rejected as less clear).
-
-**Canonical form (with body shorthand):**
+**ACTUAL canonical form per SPEC §4.14:**
 ```scrml
 <each in=@items>
-    <li>:@.name</>
+    <li : @.name>            // : INSIDE the opener; mandatory space before; NO </> closer on <li>
 </each>
 ```
+
+**Why this is unambiguous with type annotation:**
+- `:` is INSIDE the opener (between attributes and the closing `>`), not at the start of body content
+- Mandatory whitespace before `:` (per §4.14 line 969 — `<li : @.name>` ✅; `<li:@.name>` is `E-PARSE-001`)
+- No closer (`</li>` or `</>`) on the `:`-shorthand element — closer-presence is `E-CLOSER-001`
+- Reads as "tag opener with attrs and a single-expression body" — same shape as ratified `<Idle : startGame()>` engine state-children + `<.Variant : expr>` match arms
+
+**Falls back to bare-body for multi-expression / multi-element bodies:**
+```scrml
+<each in=@items>
+    <li>
+        ${@.name}
+        ${@.email}
+        <button onclick=removeContact(@.id)>×</>
+    </li>
+</each>
+```
+
+**S129 PA-error trail:** The previous PA at S129 conflated three ideas — your `$` body-mode spit-ball, the existing §4.14 `:`-shorthand, and a new body-prefix `:` shape. They wrote `<li>:@.name</>` and claimed "already ratified per §4.14." The shape they wrote isn't §4.14 (which puts `:` inside the opener). Banked as a methodology lesson — even within-session PA "X is ratified per Y" claims need SPEC verification before encoding into downstream amendment work.
+
+**Phase 2 amendment implication (simpler than previously framed):** Landing 1 doesn't need a NEW body-shorthand mechanism. SPEC §4.14 line 983 already says "Other state-types and HTML elements MAY accept `:`-shorthand where doing so is meaningful; the universal grammar registers the form, and per-element rules say whether each element accepts it." Landing 2 (SPEC amendment) just adds `<each>` body to the "loci where `:`-shorthand is legal" list at §4.14.
 
 ### Q6 — item-binding shape (PARTIALLY ratified S129)
 
@@ -207,29 +226,36 @@ The parent-element `<ul for=actualInput>` form raised in S129 message 1 was an e
 | 7 | Promotion ladder | a — Tier 0 → Tier 1 ladder + CLI + eventual sunset |
 | 8 | Kickstarter amendment | a — positive-statement rewrite teaching the design evolution |
 
-### Canonical iteration surface (post-HU-1)
+### Canonical iteration surface (post-HU-1; per Q3 RE-RATIFICATION — actual §4.14)
+
+**Single-expression per-item body uses §4.14 `:`-shorthand (`:` INSIDE the opener; mandatory space before; no closer on the shorthand-bodied element):**
 
 ```scrml
-// Common case — collection iteration with auto-inferred key
+// Common case — collection iteration; single-expression body via §4.14 `:`-shorthand
 <each in=@contacts>
-    <li>:@.name — :@.email</>
+    <li : @.name>
     <empty>No contacts yet.</>
 </each>
 
-// Collection + meaningful naming (nesting / readability)
+// Collection + meaningful naming; multi-element body → bare-body with explicit ${...}
 <each in=@reservationConflicts as conflict>
-    <h3>:@conflict.summary</h3>
-    <p>between :@conflict.partyA.name and :@conflict.partyB.name</p>
+    <div class="conflict-card">
+        <h3>${conflict.summary}</h3>
+        <p>between ${conflict.partyA.name} and ${conflict.partyB.name}</p>
+    </div>
 </each>
 
-// Count iteration
+// Count iteration; single-expression body via §4.14
 <each of=10>
-    <tr><td>Slot :@.</td></tr>
+    <li : "Slot " + @.>
 </each>
 
-// Count + naming
+// Count + naming + multi-element body
 <each of=@daysLeft as day>
-    <li>Day :${day + 1}</li>
+    <li>
+        Day ${day + 1}
+        <button onclick=removeDay(day)>×</button>
+    </li>
     <empty>Trip is over.</>
 </each>
 
@@ -241,7 +267,16 @@ The parent-element `<ul for=actualInput>` form raised in S129 message 1 was an e
         </each>
     </tr>
 </each>
+
+// Simple single-element bodies leverage §4.14 throughout
+<ul>
+    <each in=@tags>
+        <span : @.name>
+    </each>
+</ul>
 ```
+
+**Rule:** single-expression body → §4.14 `:`-shorthand (`<li : @.name>`, densest). Multi-element body → bare-body with explicit `${...}` where logic interleaves. Either is canonical depending on body complexity.
 
 ### Phase 2 amendment scope (5 landings)
 
@@ -252,11 +287,11 @@ The parent-element `<ul for=actualInput>` form raised in S129 message 1 was an e
 - `key=` inference logic (item type introspection for `.id`; fallback to W-EACH-KEY-001 lint)
 - `<each of=N>` count-iteration codegen (range emission; `@.` = current index semantics)
 - `as name` override (bind name to current iteration value in body scope)
-- `:`-shorthand body composition (existing §4.14 mechanism extends to `<each>` body)
+- `:`-shorthand body composition — **leverages existing §4.14 mechanism per Q3 RE-RATIFICATION**; no new body-shorthand mechanism. Landing 1 adds `<each>` body to the §4.14 "where legal" set per §4.14 line 983 ("Other state-types and HTML elements MAY accept `:`-shorthand where doing so is meaningful"). Per-item element opener admits `:` for single-expression body per existing §4.14 (`<li : @.name>` etc.)
 - W-EACH-PROMOTABLE info-lint (fires on `${ for/lift }` Tier-0 sites with promotability)
 - W-EACH-KEY-001 info-lint
 - New §34 catalog rows
-- Test surface: per-shape unit tests + integration tests for nested iteration + reactive collection deps + empty-state composition
+- Test surface: per-shape unit tests + integration tests for nested iteration + reactive collection deps + empty-state composition + §4.14 `:`-shorthand inside `<each>` body
 
 **Landing 2 — SPEC amendment** (doc-only):
 - NEW §17.X "Iteration (`<each>`)" subsection — canonical form + four shapes (collection / collection+naming / count / count+naming) + `<empty>` + `key=` inference + `:`-shorthand body composition
