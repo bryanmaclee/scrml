@@ -522,7 +522,7 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
 > *V0 foundation shipped (stdlib + 11 tools + descriptor sidecars). The `<program mcp="dev-only">` adopter opt-in + end-to-end docs land in the next release.*
 
-scrml ships a Model Context Protocol surface so an LLM agent (Claude Code, Cursor, any MCP client) can read your running scrml app's structure first-hand instead of guessing. The compiler emits descriptor sidecars (`engines.json`, `forms.json`, `channels.json`, `serverfns.json`) at build time, and the `scrml:mcp` stdlib exposes them over MCP stdio as 11 read-only tools:
+scrml ships a Model Context Protocol surface so an LLM agent can read your running scrml app's structure first-hand instead of guessing. The compiler emits descriptor sidecars (`engines.json`, `forms.json`, `channels.json`, `serverfns.json`) at build time, and the `scrml:mcp` stdlib exposes them over MCP stdio as 11 read-only tools:
 
 | Tool | Surfaces |
 |---|---|
