@@ -34,7 +34,6 @@
 // `<state>` / engine / match recognizers downstream meta-emit nodes rely on.
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { bodyUsesCompileTimeApis, bodyContainsNestedMeta, createReflect, buildFileTypeRegistry, collectMetaLocals, extractParamBindings } from "./meta-checker.ts";
-import { rewriteBunEval } from "./codegen/rewrite.ts";
 import { exprNodeContainsReactiveRef, emitStringFromTree } from "./expression-parser.ts";
 import type { Span, FileAST, ASTNode, ExprNode, MetaNode, LogicStatement } from "./types/ast.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
@@ -264,17 +263,17 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       // to double-quoted strings. When the string contains ${...}, it was originally a
       // template literal and needs backtick wrapping for correct JS evaluation.
       bareStr = restoreEmitBackticks(bareStr);
-      return `${rewriteReflectCalls(rewriteBunEval(bareStr), locals)};`;
+      return `${rewriteReflectCalls(bareStr, locals)};`;
     }
 
     case "let-decl": {
       const letStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return letStr != null ? `let ${n.name} = ${rewriteReflectCalls(rewriteBunEval(letStr), locals)};` : `let ${n.name};`;
+      return letStr != null ? `let ${n.name} = ${rewriteReflectCalls(letStr, locals)};` : `let ${n.name};`;
     }
 
     case "const-decl": {
       const constStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return constStr != null ? `const ${n.name} = ${rewriteReflectCalls(rewriteBunEval(constStr), locals)};` : `const ${n.name};`;
+      return constStr != null ? `const ${n.name} = ${rewriteReflectCalls(constStr, locals)};` : `const ${n.name};`;
     }
 
     case "for-loop": {
@@ -323,7 +322,7 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
     case "return-stmt": {
       // Phase 4d: ExprNode-first, string fallback
       const retStr = n.exprNode ? emitStringFromTree(n.exprNode as ExprNode) : (n.value ?? n.expr ?? null) as string | null;
-      return retStr ? `return ${rewriteBunEval(retStr)};` : "return;";
+      return retStr ? `return ${retStr};` : "return;";
     }
 
     case "html-fragment": {
@@ -333,7 +332,7 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       // Restore backtick wrapping so the JS evaluates correctly.
       let fragContent = (n.content as string) ?? "";
       fragContent = restoreEmitBackticks(fragContent);
-      return fragContent ? `${rewriteReflectCalls(rewriteBunEval(fragContent), locals)};` : "";
+      return fragContent ? `${rewriteReflectCalls(fragContent, locals)};` : "";
     }
 
     default:

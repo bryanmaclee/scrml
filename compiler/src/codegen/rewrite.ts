@@ -519,42 +519,29 @@ export function rewriteInputStateRefs(expr: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// rewriteBunEval
+// rewriteBunEval — RETIRED S133
+//
+// Retired per SPEC §22.12 (S130 Approach C extension — F-003 ratification) +
+// §30.1 ("`bun.eval()` is compiler-internal only" + "Generated output SHALL
+// NOT contain `bun.eval()` calls"). The user-facing `${ bun.eval(...) }`
+// markup-interpolation surface is RETIRED; canonical replacement is the
+// runtime stdlib helper `${ currentYear() }` (§30.1 note).
+//
+// Post-S133 Step A (commit 80b168e6), META_BUILTINS no longer includes
+// `bun` — user-written `^{ bun.eval(...) }` fires E-META-001 in compile-time
+// blocks. Runtime meta blocks with `bun.eval(` are caught by
+// `SERVER_CONTEXT_META_PATTERNS` in `isServerOnlyNode` (collect.ts:349) and
+// suppressed via W-CG-001. Either way, the rewrite is unreachable on
+// currently-accepted user input.
+//
+// `bun.eval` remains a compiler-internal mechanism used during compilation
+// (e.g. SQL schema inference, see §30.1) — those callers do NOT use this
+// rewrite; they call `bun.eval` directly.
+//
+// Empirically verified S133 D Step B: replacing the function with identity
+// produced zero e2e/integration/conformance failures; only the direct unit
+// tests (now deleted) reference the function.
 // ---------------------------------------------------------------------------
-
-/**
- * Evaluate `bun.eval("...")` calls at compile time and replace with literal results.
- */
-export function rewriteBunEval(expr: string, errors?: any[]): string {
-  if (!expr || typeof expr !== "string") return expr;
-  if (!expr.includes("bun") || !/\bbun\s*\.\s*eval\b/.test(expr)) return expr;
-
-  return expr.replace(/\bbun\s*\.\s*eval\s*\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)\s*\)/g, (match: string, strArg: string) => {
-    const code = strArg.slice(1, -1);
-    try {
-      const trimmedCode = code.trim();
-      const fn = (trimmedCode.startsWith("return ") || trimmedCode.startsWith("return\n") || trimmedCode.startsWith("return\t"))
-        ? new Function(code)
-        : new Function(`return (${code})`);
-      const result = fn();
-      if (result === undefined) return "undefined";
-      if (result === null) return "null";
-      if (typeof result === "string") return JSON.stringify(result);
-      if (typeof result === "number" || typeof result === "boolean") return String(result);
-      return JSON.stringify(result);
-    } catch (err: any) {
-      if (errors) {
-        errors.push({
-          code: "E-EVAL-001",
-          message: `E-EVAL-001: bun.eval() failed at compile time: ${err.message}. Expression: ${code}. ` +
-          `Check the expression for syntax errors. bun.eval() runs during compilation, so runtime APIs are not available.`,
-          severity: "error",
-        });
-      }
-      return match;
-    }
-  });
-}
 
 // ---------------------------------------------------------------------------
 // rewriteIsOperator
@@ -1971,7 +1958,7 @@ export function rewriteReactiveAssign(expr: string): string {
  *  Pass 1: rewritePresenceGuard     — converts (x) => { body } guard syntax before `is not` patterns
  *  Pass 2: rewriteNotKeyword        — rewrites `is not`, `is not not`, bare `not`; needs @x intact
  *  Pass 3: rewriteRenderKeyword     — diagnostic only; no transformation, safe anywhere early
- *  Pass 4: rewriteBunEval           — compile-time eval; independent of other rewrites
+ *  Pass 4: (retired S133) — `rewriteBunEval` was compile-time eval; surface retired per SPEC §22.12 + §30.1
  *  Pass 5: rewriteWorkerRefs        — <#name>.send() before rewriteInputStateRefs consumes <#name>
  *  Pass 6: rewriteRequestRefs       — <#name>.loading|data|... before rewriteInputStateRefs
  *  Pass 7: rewriteInputStateRefs    — <#name> → registry lookup; must run after worker+request refs
@@ -1988,7 +1975,7 @@ export function rewriteReactiveAssign(expr: string): string {
  * Pass 17: rewriteInlineFunctionBodies — insert semicolons in merged function bodies
  * Pass 18: rewriteEqualityOps       — == → ===, != → !==; outermost to avoid false matches
  *
- * Server passes omit rewriteRenderKeyword, rewriteBunEval, and rewriteEqualityOps.
+ * Server passes omit rewriteRenderKeyword and rewriteEqualityOps. (Pass 4 `rewriteBunEval` retired S133 — see comment above.)
  * Server pass 7 uses rewriteServerReactiveRefs instead of rewriteReactiveRefs.
  * Server passes reorder SQL and reactive refs: server-reactive runs before SQL (not after).
  * Server pass 8.5 re-runs rewriteServerReactiveRefs after SQL to catch @var references that
@@ -2019,8 +2006,7 @@ const clientPasses: RewritePass[] = [
   (s, ctx) => rewriteNotKeyword(s, ctx.errors),
   // Pass 3
   (s, ctx) => rewriteRenderKeyword(s, ctx.errors),
-  // Pass 4
-  (s, ctx) => rewriteBunEval(s, ctx.errors),
+  // Pass 4 (retired S133 — `bun.eval()` user-facing surface retired per SPEC §22.12 + §30.1; META_BUILTINS gating + isServerOnlyNode `SERVER_CONTEXT_META_PATTERNS` make the rewrite unreachable)
   // Pass 5
   (s, _ctx) => rewriteWorkerRefs(s),
   // Pass 6
@@ -2078,8 +2064,8 @@ const clientPasses: RewritePass[] = [
  *
  * Differences from client passes:
  * - No rewriteRenderKeyword (server code has no render calls)
- * - No rewriteBunEval (compile-time eval not needed on server path)
  * - No rewriteEqualityOps (server emitter handles equality separately)
+ * (Note: client Pass 4 `rewriteBunEval` was retired S133 — see retirement comment above.)
  * - Uses rewriteServerReactiveRefs instead of rewriteReactiveRefs
  * - rewriteServerReactiveRefs runs BEFORE rewriteSqlRefs (different ordering from client)
  * - rewriteSqlRefs uses ctx.dbVar for the database variable name
@@ -2241,7 +2227,7 @@ export function rewriteServerReactiveRefs(expr: string): string {
  * Apply all expression rewrites for server handler context.
  *
  * Pass ordering is defined in serverPasses above. Key differences from client:
- * - No rewriteEqualityOps, rewriteRenderKeyword, or rewriteBunEval
+ * - No rewriteEqualityOps or rewriteRenderKeyword
  * - Uses rewriteServerReactiveRefs (maps @var to request body) instead of rewriteReactiveRefs
  * - rewriteServerReactiveRefs runs BEFORE rewriteSqlRefs (opposite of client ordering)
  * - dbVar is threaded via context for the SQL pass
