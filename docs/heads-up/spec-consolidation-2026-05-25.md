@@ -377,6 +377,298 @@ Now that `server` is a bare flag attribute alongside `pinned` + validators, comp
 
 - **[[feedback_cohesion_and_falls_under_fingers]]** — design-evaluation lens. Weight cohesion (fits existing patterns) + falls-under-fingers (muscle-memory-friendly) heavily; lowest-touch option is NOT automatically the right answer. PA must surface non-cohesive options as such and offer the cohesive alternative explicitly, even if PA initially leaned the lowest-touch direction.
 
+---
+
+## HU-3 — 2026-05-25 — Q5.B sub-questions ratified (server-modifier composition)
+
+S131 lockdown wave 1. Per the user direction *"lets lockdown open qs"*, surfaced the 3 Q5.B sub-questions carried over from HU-2 Q5 close. All 3 ratified in one round.
+
+### Q5.B.1 RATIFICATION — (a) `pinned` applies to PLACEHOLDER
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** In `<cards server pinned>: T = []`, the `pinned` semantic applies to the **PLACEHOLDER**. The empty-array placeholder `[]` is pinned (cannot be reset to placeholder via `reset(@cards)`); the fetched server value is normal-reactive thereafter.
+
+**Cohesion rationale:** preserves the §6.10 `pinned` semantic verbatim ("hoisting-exempt, init-once at file-scope"). `server` is the dynamic surface; `pinned` is the static surface; the two compose without semantic overload. The runtime-write-freezing reading (option b) would have required redefining `pinned` to include semantics it doesn't carry today.
+
+**Operational interpretation:** "skip the placeholder reset — only the real data matters." Common case for caches / hydration-on-mount patterns where the empty placeholder is a startup artifact, not adopter-meaningful state.
+
+**Phase 2 amendment scope (Landing TBD):** §6.10 + §52.4 (or wherever server-cell composition is documented) clarify the composition rule. Worked example showing pinned-on-server-cell behavior at mount + post-fetch + post-`reset()`.
+
+### Q5.B.2 RATIFICATION — (b) validator runs at placeholder mount + at fetch arrival
+
+**User direction:** `b` (PA-recommended).
+
+**Decision:** In `<cards server req length(>=1)>: T = []`, the validator chain runs at BOTH placeholder mount AND at fetch arrival.
+
+**Behavior:**
+- **At mount:** placeholder `[]` runs validators → `req` passes (empty array is some), `length(>=1)` fails → `@cards.isValid = false`, `@cards.errors = [...]`
+- **At fetch arrival:** server data runs validators → if passes, `@cards.isValid = true`
+- **Subsequent writes:** re-validate per existing §55 rules
+
+**Cohesion rationale:** preserves SPEC §55 invariant — validators surface state from the cell value regardless of provenance. The "placeholder is invalid until fetch" surface IS useful UI signal (`@cards.isValid` drives spinner / "loading" state without an extra `<loading>` cell). Option (a) "fetch-only" would hide the load-bearing "data not yet present" signal; option (c) "every read" over-runs (validators in render loops).
+
+**Operational interpretation:** the validator chain is a STATE OBSERVATION, not a GATE on fetch. Adopters who want the placeholder treated as "valid by construction" use `<cards server pinned req length(>=1)>: T = []` per Q5.B.1 (pinned-on-placeholder) — but the validator still runs; pinned just prevents the placeholder from being re-installed via reset.
+
+**Phase 2 amendment scope (Landing TBD):** §55 server-cell composition addendum. Worked example showing isValid/errors transitions across mount + fetch + write cycles.
+
+### Q5.B.3 RATIFICATION — (b) Tier 1 vs Tier 2 distinct teaching surfaces
+
+**User direction:** `b` (PA-recommended).
+
+**Decision:** PRIMER + kickstarter teach the two tiers as distinct canonical surfaces with a clean "which one do I reach for?" rule:
+
+- **Tier 2 (`<x server>`)** = canonical for **per-cell server authority**. One cell, one server contract. Common case.
+- **Tier 1 (`<TypeName authority="server" table="...">`)** = canonical for **type-shared cross-file server contracts**. One type, all cells of this type share the contract. Cross-file declared.
+
+**Distinguishing rule:** "do I want this server-authority on one cell, or across all cells of this type?" One-cell → Tier 2 bare-attribute. Cross-cell-shared → Tier 1 type-level declaration.
+
+**Cohesion rationale:** gives adopters an unambiguous reach-for rule rather than an unscaffolded choice between two surfaces. Option (a) "Tier 1 as advanced" would have buried Tier 1 unnecessarily (it's not advanced, it's just SCOPE-DIFFERENT); option (c) "both equally first-class" leaves the choice unscaffolded.
+
+**Phase 2 amendment scope (Landing TBD, folds into PRIMER + kickstarter flagship sections per F-023/F-044/F-052):** PRIMER §X (TBD section number) lays out Tier 1 vs Tier 2 with the reach-for rule + one example per tier; kickstarter §11.2 auth recipe (or a new section) carries the same rule + cross-ref. Coupled with F-052 (§52 state-authority partial coverage) — fold together.
+
+### HU-3 SESSION CLOSE — Q5.B cluster fully closed
+
+All 3 sub-questions ratified. Q5.B cluster (HU-2 + HU-3) now CLOSED end-to-end.
+
+| Q | Topic | Ratified |
+|---|---|---|
+| Q5.B (HU-2) | Server-modifier form | (b) `<cards server>: T = []` bare-attribute |
+| Q5.B.1 (HU-3) | server + pinned composition | (a) `pinned` applies to placeholder |
+| Q5.B.2 (HU-3) | server + validators firing point | (b) validator runs at placeholder mount + at fetch arrival |
+| Q5.B.3 (HU-3) | Tier 1 vs Tier 2 documentation framing | (b) distinct canonical surfaces with reach-for rule |
+
+### Banked methodology from HU-3
+
+No new methodology rule. Re-validation:
+- [[feedback_cohesion_and_falls_under_fingers]] — all 3 ratifications used the cohesion lens directly; PA leans matched the user-ratified directions
+- [[feedback_no_greek_chars_in_options]] — ASCII a/b/c throughout
+- [[feedback_show_code_to_reason_about]] — worked-code shapes surfaced at each Q
+
+### Carry-forward (post-HU-3)
+
+The Phase 2 amendment work for HU-3 ratifications folds into:
+- §6.10 `pinned` composition with server modifier (Q5.B.1)
+- §55 server-cell validator firing rule (Q5.B.2)
+- §52 + F-052 Tier 1 vs Tier 2 teaching surface (Q5.B.3)
+- PRIMER + kickstarter post-F-023/F-044/F-052 flagship-section authoring will follow Q5.B.3 framing
+
+---
+
+## HU-4 — 2026-05-25 — Wave 3 standalone surfaces ratified (4 in one batch)
+
+S131 lockdown wave 3. 4 tractable standalone Qs ratified in one round.
+
+### Q-W3-1 RATIFICATION — (a) keep `if=` only; no `<if>` markup element
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** No `<if>` markup element. The kickstarter v2 "no `<for>` or `<if>` markup tags" claim — already broken on the `<for>` half by iteration HU-1 — survives intact on the `<if>` half. `if=` attribute remains the only conditional surface.
+
+**Asymmetry rationale (the key signal):** Gauntlet R10 documented 9-10/13 dev agents writing tripled markup because they didn't reach for `for/of` — empirical friction that drove `<each>` ratification. **No equivalent friction signal exists for `if=`** — it reads naturally as an HTML attribute extension, adopter discoverability is fine. Per pa.md Rule 3 (right answer = don't double surface without friction signal), keeping `if=` only is the right answer; symmetry-with-`<each>` was the easy answer (and the wrong one).
+
+**Carry-forward implication for kickstarter Q8 (iteration HU-1):** the kickstarter rewrite amends ONLY the iteration half of the "no markup tags" rule. The conditional half stays — kickstarter prose updates to "no `<for>` markup tag (use `<each>`); no `<if>` markup tag (use `if=` attribute)."
+
+### Q-W3-2 RATIFICATION — (b) `$(param){...}` fn shorthand needs DD first
+
+**User direction:** `b` (PA-recommended).
+
+**Decision:** The S129 user spit-ball `$(param){...}` shorthand has real motivation (the "logic contexts getting thinner" trajectory) but its design surface has too many open axes for one-round HU ratification:
+
+- Which contexts admit `$(param){...}` — event-handler position only, OR every `${}` position?
+- How does the param resolve — implicit-from-context (event → `event`; lift-body → iteration value), OR explicit named?
+- Zero-arg form `$(){...}` — does it degenerate to `${...}`-immediate-invocation, or distinct semantic?
+- Composition with `lift` / async stubs / `:`-shorthand body — how do these compose?
+
+**Disposition:** **DD required before HU.** PA dispatches a deep-dive surveying:
+- The prior-art space (Vue `(e) => {}`, React event-handler arrow forms, Svelte `on:click={handler}`, Marko `on-click(handler)`)
+- The contexts-admit matrix (event-handler / lift-body / `${}` / `:`-shorthand body)
+- The implicit-vs-explicit param resolution trade
+- Composition with existing logic-context forms
+- The relationship to L19 multi-statement-handler relaxation (likely coupled — both target logic-context-thinness)
+
+DD output feeds future HU. Queue with `~snapshot` + state-dynamics-design DD as part of the lockdown research-needed group.
+
+### Q-W3-3 RATIFICATION — (a) keep generators as full language vocabulary
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** `function*` / `yield` / `yield*` are FULL language vocabulary in scrml. Use cases beyond §37 SSE (`server function*`) are admissible. The S114 "no async/await" rule does NOT extend to generators.
+
+**Cohesion rationale — why generators escape the colored-functions ban:**
+- async/await is VIRAL: a function that awaits MUST be async; callers MUST await; the coloring propagates up the call stack indefinitely
+- generators are LOCAL: a function that yields is a generator (marked `*`), but callers consume via plain iteration (`for...of`, `Array.from`, manual `.next()`) — no propagation
+- The leaky-abstraction concern that killed async/await doesn't apply equally; generator-ness terminates at the function boundary
+
+§37 SSE (`server function*`) is the existing load-bearing surface; restricting generators to SSE-only would have forced SSE to a different mechanism with no cohesion gain.
+
+**Phase 2 amendment scope (Landing TBD):** SPEC documentation of generator policy (likely a §48.x or §13.x normative subsection). No compiler-source change — generators are already in the JS subset bound at M4.3.
+
+### Q-W3-4 RATIFICATION — (c) §29 Vanilla File Interop defer indefinitely
+
+**User direction:** `c` (PA-recommended).
+
+**Decision:** SPEC §29 stays as Nominal/INTENTIONAL-SILENCE pending adopter friction signal. NOT implemented as first-class build-pipeline feature; NOT retired from SPEC.
+
+**Rationale:**
+- No documented adopter friction signal — adopters today route vanilla-JS via `_{}` foreign code blocks or `use foreign:` sidecars
+- Implementing first-class is hours of work for unclear demand
+- Retiring the SPEC section would signal "scrml doesn't want vanilla interop" — wrong framing
+- "Nominal/spec-ahead-of-implementation" is the right disposition until empirical signal surfaces
+
+**Re-trigger condition:** ≥2 adopter friction reports requesting first-class vanilla interop re-opens the disposition.
+
+### HU-4 SESSION CLOSE — Wave 3 batch closed
+
+| Q | Topic | Ratified |
+|---|---|---|
+| Q-W3-1 | `<if>` markup element | (a) keep `if=` only; no `<if>`; kickstarter conditional half stays |
+| Q-W3-2 | `$(param){...}` fn shorthand | (b) needs DD before HU |
+| Q-W3-3 | Generator policy | (a) full language vocabulary; cohesion via "generators are local, not viral" |
+| Q-W3-4 | §29 Vanilla File Interop | (c) defer indefinitely until adopter friction signal |
+
+### Carry-forward (post-HU-4)
+
+- **`$(param){...}` DD authoring** — queues with `~snapshot` + state-dynamics-design DD as Wave 3.5 research-needed group. L19 multi-statement-handler relaxation likely couples into this DD.
+- **kickstarter Q8 conditional-half prose** — folds the "no `<if>` markup tag (use `if=` attribute)" rule into the Q8 iteration rewrite at Iteration Landing 4
+- **§29 + §48.x/§13.x generator-policy SPEC documentation** — small Phase 2 SPEC amendment dispatch (folds with Wave 5 cluster batches)
+
+---
+
+## HU-5 — 2026-05-25 — Wave 3.5 research-resolved standalones ratified (3 in one batch)
+
+S131 lockdown wave 3.5. After PA research surfaced concrete findings on `~snapshot` + state-dynamics-design DD + L19 coupling, 3 Qs ratified.
+
+### Q-W35-1 RATIFICATION — (a) `~snapshot` codegen bug fix only; not a new language form
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** `~snapshot` is NOT a new canonical sigil/state-decl-prefix form. The bug surfaced S125 Wave 14 DD (`~snapshot = {...}` tilde-decl with reactive deps emits raw `~` sigil leaked into `let _scrml_tilde_3 = ~;`) is a CODEGEN BUG, not a design vacancy. Fix is small-scope.
+
+**Rationale:**
+- SPEC §32 defines `~` as pipeline accumulator + lin variable + context boundary; canonical surface is `~name = pipeline` tilde-decl (B3 landed)
+- `~snapshot <x>` raw-sigil-as-state-decl-prefix has NEVER been in SPEC (per `m65-path-b-adapter-scoping/progress.md:114` confirmation)
+- No documented adopter demand for a new sigil form
+- The "design-pending" framing in known-gaps Bug 15 was misframing — the design has been clear since SPEC §32, only the bug is unresolved
+
+**Phase 2 amendment scope (Landing — small dispatch):** fix the codegen leak in tilde-decl reactive-deps case. Test surface: regression-guard reproducer. No SPEC amendment needed. Known-gaps Bug 15 framing updated from "design-pending" to "codegen bug — fix scheduled."
+
+### Q-W35-2 RATIFICATION — (a) state-dynamics-design DD mark `status: superseded` with closure addendum
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** The state-dynamics-design DD (`scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md`, 544L, `status: active`) is in fact CLOSED end-to-end — all 6 open Qs have been answered by subsequent ratifications between S57 and S130. Mark `status: superseded` with `superseded-by:` references + one-line closure addendum per Q.
+
+**The 6 closures:**
+| DD Open Q | Answered by |
+|---|---|
+| Transition enforcement opt-in or opt-out | Tier ladder (Tier 0 lints, Tier 2 engines) |
+| Guarded transitions × server functions | §51.0.F rule= + §52 |
+| Runtime denial behavior | §51.0.G `.advance()` loud |
+| Transition × `(A -> B)` lifecycle annotation | S130 Lifecycle HU-1 Q1=c (distinct mechanisms) |
+| Transition effects writing reactive vars | §51.0.F effect= + `<onTransition>` |
+| Compilation target | §51.x engines codegen |
+
+**Rationale — corpus-ouroboros closure:** the DD survived `status: active` because the same-landing discipline (pa.md S115 doc-currency convention) was missed at each closing ratification. This is a textbook instance of the [[feedback_stated_intent_vs_corpus_migration]] pattern. Closure brings the DD into compliance with the current-truth-only scope principle.
+
+**Phase 2 amendment scope (Landing — bookkeeping dispatch):** PA writes a closure addendum (6 one-liners pointing at the closing surfaces) + updates the DD frontmatter to `status: superseded` + `superseded-by: [§51.0, §52, S130 Lifecycle HU-1]` + `last-reviewed: 2026-05-25`. Small.
+
+### Q-W35-3 RATIFICATION — (a) L19 multi-statement-handler relaxation folds into `$(param){...}` DD
+
+**User direction:** `a` (PA-recommended).
+
+**Decision:** L19 relaxation question does NOT get a standalone HU ratification at this lockdown. Folds into the future `$(param){...}` DD per the coupling identified — both target logic-context-thinness for event handlers; both share the design surface of "how multi-statement bodies compose with attribute-position handler invocation."
+
+**Coupling justified:** the DD has to consider how the new shorthand composes with existing bare-form rules anyway (Q-W3-2 ratification text); ratifying L19 in isolation would force revisit when the DD lands. Per [[feedback_cohesion_and_falls_under_fingers]] the cohesive design surface is "logic-context-thinness for event handlers" — L19 + `$(param){...}` are two sides of the same coin.
+
+**Phase 2 amendment scope:** L19 status quo preserved (E-MULTI-STATEMENT-HANDLER continues to fire). When `$(param){...}` DD lands → HU surfaces both questions together → ratification covers both at once.
+
+### HU-5 SESSION CLOSE — Wave 3.5 closed
+
+| Q | Topic | Ratified |
+|---|---|---|
+| Q-W35-1 | `~snapshot` disposition | (a) codegen bug fix only; not a new language form |
+| Q-W35-2 | state-dynamics-design DD other open Qs | (a) mark `status: superseded` + closure addendum (DD effectively closed by subsequent work) |
+| Q-W35-3 | L19 multi-statement-handler relaxation | (a) fold into `$(param){...}` DD per coupling |
+
+### Carry-forward (post-HU-5)
+
+- `~snapshot` codegen bug fix (small dispatch; regression-guard test)
+- state-dynamics-design DD closure addendum (bookkeeping dispatch)
+- `$(param){...}` + L19 DD authoring (bundled — Wave 3.5 research-needed group reduces to: 1 DD covering both)
+
+---
+
+## HU-6 — 2026-05-25 — Wave 5 Phase 1c cluster batches ratified (8 clusters in one batch)
+
+S131 lockdown wave 5 — Phase 1c cluster lockdown. All 8 clusters (H/I/J/K/L/M/N/O) ratified to audit-recommended direction in one batch.
+
+**User direction:** `a a a a a a a a` — all 8 = (a) audit-recommended direction.
+
+### Decisions per cluster
+
+| Cluster | Ratified direction | Authoring scope (downstream Landing) |
+|---|---|---|
+| **H** — flagship reveal: `^{}` + type-as-arg family + refinement zones | (a) Single integrated flagship section in both PRIMER + kickstarter | Substantial new section; closes F-035 + F-044 + F-053 |
+| **I** — self-host idiom cluster: `lift` + `~` + while/break/continue + assign-as-expr | (a) Single integrated section in both canons titled "self-host idiom cluster" or similar | Substantial new integrated section; closes F-028 + F-038 + F-050 + F-051 |
+| **J** — error-handling depth | (a) Canon catches up to SPEC §19 advanced surfaces; PRIMER §6 + kickstarter §6 extend | Medium; closes F-032 (errorBoundary + per-handler-tx + CPS multi-batch) |
+| **K** — advanced engines extension | (a) Kickstarter §4 extension (PRIMER §7.1 already covers); cross-ref + worked `<onTimeout>` + history example | Small; mechanical catch-up |
+| **L** — worker/sidecar/SSE | (a) Unified compute-isolation recipe section in both canons | Substantial; closes F-042 + F-046 + F-048 (~500 SPEC lines combined silence — largest concentrated gap in audit) |
+| **M** — module/type-system extensions | (a) Mechanical batch catch-up | Medium; closes F-034 (Form 1/2 + pure-type files) + F-049 (`fn` distinction kickstarter) + F-039 (`pure` flagship) + F-054 (nested substates) |
+| **N** — minor surface gaps | (a) Footnote-level batch catch-up | Small; closes F-027/F-031/F-033/F-037/F-045/F-052/F-055 (7 footnote-level additions across both canons) |
+| **O** — borderline INTENTIONAL-SILENCE | (a) Defer both — `status: deferred` until empirical adopter signal | F-036 (foreign code `_{}`) + F-041 (input states `<keyboard>`/`<mouse>`/`<gamepad>`); no canon authoring needed |
+
+### Authoring-scope implication
+
+7 Phase 1c canon-authoring Landings unlocked (H/I/J/K/L/M/N — Cluster O defers); plus the Phase 2 SPEC amendments from HU-3 (server-cell composition) + HU-4 (generator policy) + Wave 3.5 small dispatches (~snapshot codegen fix + DD closure addendum + Iteration Landing 2 SPEC + Lifecycle Landing 2.5 fn-return).
+
+### HU-6 SESSION CLOSE — Wave 5 closed
+
+All 8 Phase 1c cluster batches ratified. Cluster O defers; H-N enter Phase 2 authoring queue.
+
+### Banked methodology from HU-6
+
+No new methodology rule. Re-validation:
+- [[feedback_designer_card_and_retirement_framing]] — designer-card axis surfaced on every cluster; user invoked none (audit calibration validated)
+- [[feedback_no_greek_chars_in_options]] — ASCII a/b/c throughout
+- [[feedback_cookbook_vs_empirical]] — audit's per-cluster recommendations were sound (user ratified all 8 unmodified)
+
+---
+
+## S131 LOCKDOWN COMPLETE — SESSION SUMMARY
+
+**6 HU sessions ratified between user direction "lets lockdown open qs" and this close:**
+
+| HU | Wave | Scope | Ratifications |
+|---|---|---|---|
+| HU-3 | 1 | Q5.B sub-questions (server-modifier composition) | 3 sub-Qs ratified — Q5.B.1=a / Q5.B.2=b / Q5.B.3=b |
+| HU-2 (lifecycle doc) | 2 | Lifecycle fn-return transition-marker mechanism | hybrid (e) for presence-progression + (a) for variant-progression |
+| HU-4 | 3 | 4 standalone surfaces | `<if>` markup element=a (keep `if=` only) / `$(param){...}` shorthand=b (DD first) / Generator policy=a (full vocabulary) / §29 vanilla-interop=c (defer) |
+| HU-5 | 3.5 | 3 research-resolved standalones | `~snapshot`=a (codegen bug only) / state-dynamics-design DD=a (mark superseded) / L19=a (fold into `$(param){...}` DD) |
+| HU-6 | 5 | Phase 1c cluster batches H-O | All 8 ratified to audit-recommended direction |
+
+Wave 4 (L19 standalone HU) eliminated by Q-W35-3 fold.
+
+### Post-lockdown unlock state
+
+**SPEC is now an un-equivocal source of truth across all surfaces previously open** (per S129 user-voice grammar-consolidation plan):
+- No carry-forward open language-shape decisions remain at the SPEC/ratification level
+- Two DD-shaped items queued (`$(param){...}`/L19 + future audits as adopter signals surface)
+- One bookkeeping closure pending (state-dynamics-design DD superseded mark)
+- One bug-fix pending (`~snapshot` codegen leak)
+
+**Phase 2 amendment + canon authoring queue unlocked** (all ready to dispatch, file-disjointness allows parallel):
+
+| Tier | Items | Sizing |
+|---|---|---|
+| Small SPEC | Q5.B.1/2/3 server-cell composition (§6.10/§55/§52) · generator policy §48.x or §13.x · Lifecycle 2.5 fn-return §14.12.6 · `~snapshot` codegen bug · state-dynamics-design DD closure addendum · Iteration Landing 2 SPEC §17.X NEW | small each; ~1-2h per |
+| Medium canon | Cluster K kickstarter §4 advanced engines · Cluster J errorBoundary+CPS · Cluster N 7 footnotes · Cluster M module/type-system extensions | ~3-8h per |
+| Substantial canon | Cluster H flagship reveal (^{}+type-as-arg+refinement) · Cluster I self-host idiom cluster · Cluster L worker/sidecar/SSE unified · Lifecycle Landing 3 (PRIMER+kickstarter F-023) · Iteration Landings 3/4/5 (CLI/canon/corpus migration) | ~10-40h per |
+
+**Phase 3 + Phase 4 still gated** but no longer blocked-on-ratification:
+- Phase 3 (100% example coverage corroborates SPEC) — sequences after Phase 2 amendment authoring stabilizes
+- Phase 4 (M6.7 D-class resume + v0.7 cut) — sequences after Phase 3 example coverage
+
 ## HU-2 (continued) — Q6 closure: PIPELINE.md `deriveEngineVarName` catches up to SPEC
 
 ### Question + user direction

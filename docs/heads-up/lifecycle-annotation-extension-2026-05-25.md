@@ -197,3 +197,117 @@ No NEW methodology rule. Re-validation:
 - [[feedback_no_greek_chars_in_options]] — ASCII a/b/c throughout
 
 HU-1 closes. Phase 2 dispatch authorization pending USER (or fold into next session's work-block per pace).
+
+---
+
+## HU-2 — 2026-05-25 — fn-return transition-marker mechanism ratified (S131 lockdown wave 2)
+
+Per S131 lockdown of HU-1 Q3 open sub-question. PA surfaced the original 4 candidates + added (e) discrimination-IS-transition per pa.md Rule 5 push-back + (f) designer-card retirement. Worked-code per [[feedback_show_code_to_reason_about]].
+
+### RATIFICATION — HYBRID (e) for presence-progression + (a) for variant-progression
+
+**User direction:** `hybrid e` — adopting the PA-leaned hybrid.
+
+**Decision:** Two-mechanism design that honors the asymmetry between presence-progression and variant-progression lifecycle annotations:
+
+- **Presence-progression `(not to T)`:** **discrimination IS transition (option e)**. The act of discriminating the `not` variant via existing surfaces (`given u = expr {}`, `if (u is not)` early-return, `match u { ... .Variant -> ... }`) AUTO-MARKS the lifecycle transition. Zero new vocabulary; composes with existing scrml; muscle-memory-friendly.
+
+- **Variant-progression `(VariantA to VariantB)`:** **explicit `transition(u)` keyword (option a)**. After the adopter discriminates the source variant (e.g., via `if (u is .Draft)` or `match`), call `transition(u)` to advance the value's lifecycle state. One new built-in; explicit at the advance point.
+
+**Cohesion rationale:** the presence-progression case is the dominant adopter shape (per S129 user-voice "first novel idea for scrmls type system" + S130 worked example `(passwordHash: not to string)`); piggy-backing on existing `given`/`is some`/`match` is maximally cohesive. The variant-progression case is a less-common typestate flavor (think `(Draft to Published)`); explicit `transition()` makes the advance point visible without ambiguity. The hybrid avoids the trap of forcing one mechanism to serve both shapes (which option c "uniform typed-binding" + option d "uniform markTransitioned" each tried, each with friction).
+
+### Worked-code canonical forms (for §14.12 Landing 2 amendment)
+
+**Presence-progression — discrimination-is-transition (e):**
+
+```scrml
+server fn loadUser(id: int) -> (not to User) {
+    const row = ?{ select * from users where id = ${id} }
+    return row     // not OR User
+}
+
+function profilePage() {
+    given u = loadUser(@userId) {
+        // u : User AND lifecycle-transitioned (given discriminates `not`)
+        return <h1>${u.name}</h1>
+    }
+    return <p>Not found</>
+}
+
+// Alternative discrimination surfaces (all auto-transition):
+function alt1() {
+    const u = loadUser(@userId)
+    if (u is not) { return <p>Not found</> }
+    // u : User AND lifecycle-transitioned (is-not early-return discriminates)
+    return <h1>${u.name}</h1>
+}
+
+function alt2() {
+    return match loadUser(@userId) {
+        not       -> <p>Not found</>
+        .User u   -> <h1>${u.name}</>    // u : User AND lifecycle-transitioned
+    }
+}
+```
+
+**Variant-progression — explicit `transition(u)` (a):**
+
+```scrml
+type Article:enum = { Draft(text: string), Published(text: string, slug: string) }
+
+server fn loadArticle(id: int) -> (Draft to Published) {
+    // Returns either Draft variant or Published variant (never `not`)
+    const row = ?{ select * from articles where id = ${id} }
+    return row    // .Draft OR .Published
+}
+
+function publishFlow() {
+    const a = loadArticle(@articleId)         // a: (Draft to Published)
+    if (a is .Draft) {
+        publish(a)                             // server-side publish step
+        transition(a)                          // ← explicit advance
+        // a is now Published; .slug access is safe
+        navigate("/articles/" + a.slug)
+    } else {
+        // a was already .Published — no transition needed
+        navigate("/articles/" + a.slug)
+    }
+}
+```
+
+### Open sub-questions for Phase 2 Landing 2.5 (the fn-return amendment)
+
+The hybrid ratification surfaces a few mechanical sub-questions that Landing 2.5 (the dispatch wiring fn-return + the mechanisms) needs to settle. PA will surface as needed during Landing 2.5 brief authoring:
+
+- **Compile-time enforcement of (a) `transition()`:** what's the diagnostic if adopter accesses post-transition variant field without `transition()` call? Likely E-TYPE-001 (existing) with message naming the missing call.
+- **`transition()` on variant-progression cases at the matching arm:** if adopter writes `match a { .Draft d -> { publish(d); ... } .Published p -> { ... } }`, the `.Draft d` arm provides discrimination but does NOT auto-transition (variant-progression is option a not e). Adopter must call `transition(d)` after publish step. Diagnostic if forgotten?
+- **`transition()` semantic — runtime no-op or runtime check?** Likely compile-time-only marker (zero runtime cost); the type system tracks the advance, runtime sees no difference.
+- **(d) `markTransitioned(u, .Variant)` as the multi-variant extension hook:** if scrml ever extends to `(A to B to C)` chained lifecycles, the binary `transition()` is insufficient. (d) could be the future extension form. Note as forward-pluggable; do NOT implement now (YAGNI per pa.md Rule 3).
+
+### Landing 2.5 scope (the fn-return amendment dispatch)
+
+Folds into Lifecycle Landing 2 already-shipped foundation. New work:
+
+- §14.12.6 NOTE (currently "fn-return mechanism pending HU") REPLACED with the hybrid (e)+(a) canonical prose
+- Worked examples per shape (one for `(not to T)` + one for `(VariantA to VariantB)`)
+- `transition(u)` built-in keyword wiring in compiler/src/type-system.ts (small fire-site addition; piggybacks on existing TSError infrastructure)
+- Discrimination-is-transition rule in resolver (the `given` / `if is not` / `match` discrimination paths auto-mark lifecycle-tracked values)
+- §34 +1 row: E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED (fires when adopter accesses post-transition variant field without `transition()` after discriminating source variant)
+- Test surface: per shape (presence + variant-progression) × per discrimination form (given / if-is / match)
+
+Estimated size: medium. File-disjoint with the smaller Wave 3 standalones; can sequence after Wave 5-6 lockdown.
+
+### HU-2 SESSION CLOSE — fn-return mechanism CLOSED
+
+| Q | Topic | Ratified |
+|---|---|---|
+| Q3 (HU-1) | Extend lifecycle to fn-return | a — extend |
+| Q3-followup (HU-2) | Transition-marker mechanism | **hybrid e** — presence-progression via discrimination; variant-progression via explicit `transition()` |
+
+### Banked methodology from HU-2
+
+No new methodology rule. Re-validation:
+- [[feedback_show_code_to_reason_about]] — worked-code shared scenario + per-option caller variants enabled the user to compare reading-shape; PA-added option (e) emerged from the shared-scenario analysis
+- [[feedback_cohesion_and_falls_under_fingers]] — the hybrid honors the asymmetry honestly rather than forcing one mechanism for both shapes
+- [[feedback_designer_card_and_retirement_framing]] — designer-card (f) explicitly surfaced as retirement option; not invoked
+- pa.md Rule 5 — PA push-back surfaced option (e) that wasn't in the original HU-1 surface; turned out to be the right shape

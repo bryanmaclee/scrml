@@ -2,7 +2,68 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-25 **S130 CLOSE**). Full `bun run test` **21,462 pass / 0 fail / 170 skip / 1 todo across 787 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Prior baseline (S129 CLOSE): 21,414 pass.
+Current baseline (2026-05-25 **S131 CLOSE**). Full `bun run test` **21,584 pass / 0 fail / 170 skip / 1 todo across 794 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Prior baseline (S130 CLOSE): 21,462 pass.
+
+### 2026-05-25 (S131 CLOSE — grammar-lockdown closure + 3+4 parallel dispatch waves + MCP V0 series COMPLETE + Lifecycle Landing 2+2.5 + Iteration Landing 1+2 SPEC + known-gaps Bug 15 closed)
+
+Sibling-of-S130 same-day session executing the S130 4-ratification-ready carry-forward. Opened clean (both repos in sync; main only; S99 path-discipline counter at **15**). **Three-arc structure:** (1) **3-parallel dispatch wave** (user *"dispatch 1+2+3 in parallel"*) — Lifecycle Landing 2 + Iteration Landing 1 + MCP V0.E. (2) **Open-question lockdown sweep** (user *"lets lockdown open qs"*) — 4 HU clusters across spec-consolidation + lifecycle-annotation-extension docs; 8 user inputs ratified all surfaces. (3) **4-parallel dispatch wave** (user *"1"*) — SPEC amendments AB + Iteration Landing 2 SPEC + ~snapshot codegen fix + Lifecycle Landing 2.5. **Plus PA-direct cross-repo work** — state-dynamics DD closure on scrml-support.
+
+**Arc 1 — 3-parallel dispatch (S130 carry-forward):**
+
+- `3840e07d` **Lifecycle Landing 2** — Approach C extension SPEC. NEW §14.X subsection (~480L) covering Shape 1 cells + fn params + fn return + schema fields + channel cells; `->` → `to` glyph migration per S129 F-024 folded in; `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection diagnostic + new §34 catalog row; §39 cross-ref to §14.X with SQL-shape addendum; worked examples per extension position. 11 integration tests + 25 unit tests. Note: deferred fn-return transition-marker mechanism to lockdown HU-4.
+- `23db318c` **Iteration Landing 1** — compiler-source impl per S130 HU-1 8-of-8 ratifications. `<each>` element + `@.` sigil + `<empty>` + `key=` inference + `<each of=N>` count form + `as name` override + `:`-shorthand body composition (leverages §4.14) + W-EACH-PROMOTABLE + W-EACH-KEY-001 + §34 catalog rows. +218L `lint-w-each-key.js` (NEW) + +213L `lint-w-each-promotable.js` (NEW) + parser updates in `ast-builder.js` (+270L) + type-system.ts (+50L) + html-elements.js (+55L) + dependency-graph.ts (+50L). 24 unit tests in `each-block.test.js`.
+- `152797ee` **MCP V0.E** — E2E + adopter docs + fixture multi-page app per SCOPING §3.E (~10-12h estimate; landed in ~7h reach). 22 new E2E tests in `mcp-v0-e2e.test.js` (444L) + 321L adopter doc at `docs/adopter/mcp-setup.md` + 3 fixture route files in `compiler/samples/mcp-v0-fixture/routes/`. **Closes MCP V0 series A+B+C+D+E in full** — no V0 work remains; V0.next deferred to post-§58 Build Story revisit per Rule 3.
+
+**CWD slip after Iteration Landing 1 agent completion** detected via `git status` reporting wrong branch (banked S128 pattern). Recovered cleanly via explicit `cd $M && pwd` reset + `git -C $M` discipline for subsequent commands. No work damaged; checkout into worktree's own branch was a no-op.
+
+**Three-way patch-apply** (per S88 [[feedback_file_delta_vs_cherry_pick]]) used for sibling-stale-view conflicts on SPEC.md / type-system.ts / ast-builder.js / emit-expr.ts. Lifecycle Landing 2 agent's "Iteration Landing 1 verified NOT to touch compiler/SPEC.md" was technically true but agent ONLY verified SPEC.md — Iteration DID touch ast-builder.js + type-system.ts. PA caught via empirical diff before landing.
+
+**Arc 2 — Grammar-lockdown HU sweep:**
+
+User direction: *"lets lockdown open qs"*. PA executed S129 4-phase grammar-lockdown plan. **4 HU clusters surfaced; 8 user inputs ratified all surfaces:**
+
+- **HU-3** (`docs/heads-up/spec-consolidation-2026-05-25.md` appended) — Cluster A Q5.B server-cell composition sub-questions (server+pinned valid composition; server+validators firing point; Tier-1 vs Tier-2 doc overlap); Q-W3-3 Generator policy.
+- **HU-4** (same doc) — Lifecycle Landing 2 fn-return transition-marker mechanism. Initially framed a/b/c/d (per [[feedback_no_greek_chars_in_options]]) then user spit-balled hybrid (e)+(a) — `transition()` marker for variant-progression cases + discrimination-IS-transition for `(not to T)` presence cases. Worked code per [[feedback_show_code_to_reason_about]] (multi-line realistic adopter scenarios).
+- **HU-5** (`docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` HU-2 section appended) — fn-return ratification follow-on (canonical worked-code forms + Landing 2.5 scope).
+- **HU-6** (spec-consolidation doc) — Phase 1c clusters H-N + 7 footnotes + retirement vs ratify register. **8 user inputs** ("a a a a a a a a") ratified entire downstream Phase 1c authoring queue + cleared 2 retirement candidates by marking them ratify-as-authored.
+
+User-voice anchors active: cohesion + falls-under-fingers ([[feedback_cohesion_and_falls_under_fingers]]); show-code-to-reason-about ([[feedback_show_code_to_reason_about]]); "lets not lose stuff" wrap directive from S130.
+
+**Arc 3 — 4-parallel dispatch (lockdown post-work):**
+
+- `1a37af60` **SPEC amendments AB** — Q5.B server-cell composition encoded into §52.14 + Generator policy ratified at §19.9.8 + HU-3 Q-W3-3 closure. Pure SPEC work; no compiler changes.
+- `2fff4d35` **Iteration Landing 2 SPEC** — NEW §17.7 + §17.4 marked Tier-0 + §56.10 `bun scrml promote --each` CLI + §3.4 `@.` sigil definition + SPEC-INDEX regen via `bun run scripts/regen-spec-index.ts`. Note: §17.7 line ranges shifted SPEC-INDEX; regen required twice this session (also post-Landing-2.5).
+- `3ae76826` **~snapshot codegen fix** — closes known-gaps **Bug 15** (orphan `~` sigil leak in bare-expr Phase 3 codegen). Two-site fix: bare-expr Phase 3 fast path skips orphan `~` (`emit-logic.ts` +23L) + defensive marker in `emitIdent` (`emit-expr.ts` +14L). 3 integration tests in `tilde-snapshot-codegen-fix.test.js`.
+- `ea7c44d5` **Lifecycle Landing 2.5** — fn-return transition-marker mechanism per HU-4 hybrid (e)+(a) ratification. +674 LOC `type-system.ts` (`buildFnReturnLifecycleMap` + `parseLifecycleReturnAnnotation` + `checkLifecycleBindingAccess` + `runLifecycleBindingAccessCheck`) + `transition` added to `LOGIC_SCOPE_GLOBAL_ALLOWLIST` + +46L `rewrite.ts` (`rewriteTransitionCalls` string-pipeline fallback). 28 new unit tests + 9 integration tests. **Closes open Phase 2 sub-Q from Lifecycle Landing 2.**
+
+**Arc 4 — PA-direct cross-repo work:**
+
+- `0829ead` (scrml-support) — `docs/deep-dives/state-dynamics-design-2026-04-08.md` frontmatter (status: active → superseded; superseded-by: + last-reviewed:) + CLOSURE BANNER prepended + S131 Closure Addendum appended. Closes DD per S131 lockdown wave 3.5 HU-5 Q-W35-2 (a). PA-direct via `git -C scrml-support` discipline per pa.md S90.
+
+**State at close:**
+
+| Item | Value |
+|---|---|
+| HEAD | (wrap commit) |
+| pkg.json | 0.6.0 (no tag) |
+| Full test | **21,584 pass / 0 fail / 170 skip / 1 todo / 794 files** (+122 from S130 baseline 21,462) |
+| Worktrees | main only (5 dispatch worktrees cleaned post-landing) |
+| S99 path-discipline counter | **15** (zero new leaks across 5 worktree dispatches: Lifecycle L2 + Iteration L1 + MCP V0.E + SPEC AB + Iteration L2 SPEC + ~snapshot fix + Lifecycle L2.5) |
+| Push state | UNPUSHED at wrap (scrmlTS 8 ahead through wrap; scrml-support 1 ahead) — awaiting explicit push auth |
+
+**Carry-forward (sequenced):**
+1. Lifecycle Landing 3 (PRIMER + kickstarter flagship per S130 F-023; ~25-40h)
+2. Iteration Landing 3 (`bun scrml promote --each` CLI impl; SPEC §56.10 spec'd S131)
+3. Iteration Landing 4 (PRIMER + kickstarter F-NEW catch-up)
+4. Iteration Landing 5 (corpus migration 113 sites; gradual via CLI)
+5. Phase 1c Cluster H-N authoring (HU-6 ratified S131; unblocked) + 7 footnote-level additions
+6. `$(param){...}` + L19 DD authoring (research dispatch)
+7. Phase 2 Cluster B-code Site 1 retirement arc (META_BUILTINS purge)
+8. dev.to platform actions (user's queue; PA awaits completion note)
+
+Tag: NONE.
+
+---
 
 ### 2026-05-25 (S130 CLOSE — Phase 2 amendment arc complete + 3-DD parallel batch + Lifecycle Landing 1 ships E-TYPE-001 fire + Iteration HU-1 closed + Q3 RE-RATIFICATION + README nominal-framing)
 
