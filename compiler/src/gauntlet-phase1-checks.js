@@ -32,6 +32,16 @@
  *   E-USE-005  — `use` declaration with an unknown prefix (only `scrml:` and
  *                `vendor:` are legal). §41.
  *
+ *   E-SCHEMA-003 — `<schema>` block placed anywhere other than as an immediate
+ *                  child of the `<program>` root. Per §39.3 normative + §39.12
+ *                  full prose, schemas SHALL appear as immediate children of
+ *                  `<program>`. Nesting inside `<db>`, component bodies,
+ *                  `<page>`, engine state-children, etc. is an error. A
+ *                  standalone `<schema>` at file top (no `<program>` parent)
+ *                  is also illegal. (Catalog row added S84 Wave 2 #5;
+ *                  placement enforcement landed S133 — Phase 2 amendment
+ *                  closure F-019.)
+ *
  * All errors use the same shape as TAB/TS diagnostics — `{ code, message,
  * span, severity }` — and are collected into the compiler's global error
  * stream by the api.js driver.
@@ -432,6 +442,135 @@ function checkFileScopeDuplicateBindings(ast, filePath, errors) {
 }
 
 // ---------------------------------------------------------------------------
+// Check 4 — `<schema>` placement enforcement (E-SCHEMA-003)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per SPEC §39.3 + §39.12, a `<schema>` block SHALL appear as an immediate
+ * child of the `<program>` root. Any other placement (nested inside `<db>`,
+ * a component body, `<page>`, an engine state-child, etc.) is a compile error
+ * (E-SCHEMA-003). A standalone `<schema>` at file top (no `<program>` wrapper)
+ * is also illegal.
+ *
+ * Note on logic-context placement: when a `<schema>` literal appears inside a
+ * `${ }` logic block, the parser converts the markup to an `html-fragment`
+ * string (see ast-builder.js parseLogicBody — `<` in expression position is
+ * not markup). Such a "schema" never enters the AST as a `state` node with
+ * `stateType === "schema"`, so this check does not fire for that shape. That
+ * is an orthogonal concern (silent swallow of markup in logic position) and
+ * is not in scope for E-SCHEMA-003.
+ *
+ * Implementation: a top-down AST walk with a parent-kind stack. Whenever a
+ * `kind:"state", stateType:"schema"` node is encountered, we inspect the
+ * immediate parent on the stack:
+ *
+ *   - Parent is the `<program>` root markup (kind:"markup", tag:"program")
+ *     → OK.
+ *   - Parent is anything else → E-SCHEMA-003.
+ *   - No parent (top of `ast.nodes` with no `<program>` wrapping)
+ *     → E-SCHEMA-003 (the SPEC text is "immediate children of `<program>`
+ *       only" — a standalone schema has no `<program>` parent).
+ *
+ * The walker descends through every container field we know about for the
+ * 12-member ASTNode union plus a few project-internal node shapes that hold
+ * markup descendants: `children`, `body`, `bodyChildren` (engine-decl),
+ * `defChildren` (state-constructor-def), `then`/`else`/`consequent`/`alternate`
+ * (control-flow), `arms[].body` (match). Logic-block `body` IS walked via the
+ * generic `body` descent, but logic statements never carry a real `<schema>`
+ * state node — the parser converts markup-in-logic to an html-fragment string,
+ * as documented above.
+ *
+ * @param {object} ast — FileAST
+ * @param {string} filePath
+ * @param {GauntletError[]} errors
+ */
+function checkSchemaPlacement(ast, filePath, errors) {
+  if (!ast) return;
+  const topNodes = ast.nodes ?? [];
+
+  /** Returns a stable description of the parent container for the message. */
+  function parentDescription(parentNode) {
+    if (!parentNode || typeof parentNode !== "object") return "the file root";
+    if (parentNode.kind === "markup") {
+      const t = parentNode.tag || "?";
+      // Distinguish lowercase HTML/scrml-structural elements from PascalCase
+      // user-component callsites in the message.
+      return `\`<${t}>\``;
+    }
+    if (parentNode.kind === "state") {
+      const st = parentNode.stateType || "?";
+      return `\`<${st}>\``;
+    }
+    if (parentNode.kind === "engine-decl") {
+      return "`<engine>`";
+    }
+    if (parentNode.kind === "component-def") {
+      const n = parentNode.name || "?";
+      return `the body of component \`${n}\``;
+    }
+    return `a \`${parentNode.kind}\` node`;
+  }
+
+  /**
+   * Returns true if `n` is the `<program>` root markup element.
+   */
+  function isProgramRoot(n) {
+    return n && typeof n === "object" && n.kind === "markup" && n.tag === "program";
+  }
+
+  /**
+   * Recursive walker. `parentStack` carries the chain of container nodes from
+   * file-root down to (but not including) the current node. The immediate
+   * parent of the current node is `parentStack[parentStack.length - 1]`, or
+   * `undefined` at the top level.
+   */
+  function walk(nodes, parentStack) {
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+
+      // Detect a `<schema>` state node.
+      if (node.kind === "state" && node.stateType === "schema") {
+        const immediateParent = parentStack[parentStack.length - 1];
+        if (!isProgramRoot(immediateParent)) {
+          const where = parentDescription(immediateParent);
+          errors.push(new GauntletError(
+            "E-SCHEMA-003",
+            `E-SCHEMA-003: \`<schema>\` block is placed inside ${where}, but \`<schema>\` SHALL appear as an immediate child of the \`<program>\` root only. ` +
+            `Nesting a schema inside any other block (\`<db>\`, component body, \`<page>\`, engine state-child, etc.) is forbidden. ` +
+            `Move the \`<schema>\` block out so it is a direct child of \`<program>\`.` +
+            ` (See SPEC §39.3 + §39.12.)`,
+            node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+        // Still descend; nested `<schema>` blocks inside the schema body
+        // (pathological) would each be reported separately. The body of a
+        // legitimately-placed `<schema>` is parsed by the schema DSL, not as
+        // child AST nodes, so this descent is normally a no-op.
+      }
+
+      // Push current node onto stack and descend into known container fields.
+      const nextStack = [...parentStack, node];
+      if (Array.isArray(node.children))     walk(node.children, nextStack);
+      if (Array.isArray(node.body))         walk(node.body, nextStack);
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, nextStack);
+      if (Array.isArray(node.defChildren))  walk(node.defChildren, nextStack);
+      if (Array.isArray(node.then))         walk(node.then, nextStack);
+      if (Array.isArray(node.else))         walk(node.else, nextStack);
+      if (Array.isArray(node.consequent))   walk(node.consequent, nextStack);
+      if (Array.isArray(node.alternate))    walk(node.alternate, nextStack);
+      if (Array.isArray(node.arms)) {
+        for (const arm of node.arms) {
+          if (arm && Array.isArray(arm.body)) walk(arm.body, nextStack);
+        }
+      }
+    }
+  }
+
+  walk(topNodes, []);
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -450,6 +589,7 @@ export function runGauntletPhase1Checks(bsResult, tabResult) {
   checkTopLevelTextPreamble(bsResult?.blocks ?? [], filePath, errors);
   checkAstMisplacedDecls(tabResult?.ast, filePath, errors);
   checkFileScopeDuplicateBindings(tabResult?.ast, filePath, errors);
+  checkSchemaPlacement(tabResult?.ast, filePath, errors);
 
   return errors;
 }
