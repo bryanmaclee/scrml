@@ -1780,7 +1780,7 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
       if (!isCompileTime && body.length > 0 && !metaRuntime) {
         allErrors.push(new MetaError(
           "E-META-001",
-          `E-META-001: Runtime ^{} block is not allowed when meta.runtime is false. ` +
+          `E-META-001: Runtime ^{} block is not allowed when meta.runtime is false (§22.5 / §22.7). ` +
           `Either remove the runtime meta block or set meta.runtime = true.`,
           metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
         ));
