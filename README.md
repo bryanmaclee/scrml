@@ -639,7 +639,7 @@ The [`examples/`](examples/) directory contains curated examples that show what 
 
 ## scrmlTS
 
-The working compiler for **scrml** — a single-file, full-stack reactive web language.
+The working compiler for **scrml** — a complete compiler for the web.
 This is the TypeScript/JavaScript implementation that compiles `.scrml` source into
 HTML, CSS, client JS, and server route handlers in a single pass.
 
