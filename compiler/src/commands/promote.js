@@ -52,7 +52,7 @@ const c = {
 };
 
 function printHelp() {
-  console.log(`scrml promote --match|--engine <file|directory> [options]
+  console.log(`scrml promote --match|--engine|--each <file|directory> [options]
 
 Mechanically promote scrml code up the tier ladder (primer §1).
 
@@ -62,6 +62,9 @@ Modes:
   --engine              Lift a \`<match>\` block with rule= attributes accruing
                         on its arms into an active \`<engine>\` (Tier 1→2).
                         DEFERRED to Tier C — currently prints "pending".
+  --each                Lift a \`\${ for (let x of @cell) { lift <markup/> } }\`
+                        Tier-0 iteration site into a \`<each in=@cell as x>\`
+                        Tier-1 structural-element block. SHIPPED S134.
 
 Arguments:
   <file>                A single .scrml file (optional :line suffix to target
@@ -74,6 +77,10 @@ Options:
   --include=<glob>      File pattern (default '*.scrml').
   --exclude=<glob>      Exclude pattern (substring match).
   --no-default-excludes Disable built-in samples/ + tests/ exclusions.
+  --shorthand           (--each only) When the per-item template is a single-
+                        expression markup element, apply §4.14 \`:\`-shorthand
+                        on the per-item opener. Default: emit bare-body for
+                        fidelity preservation.
   --help, -h            Show this message.
 
 Exit codes:
@@ -83,12 +90,16 @@ Exit codes:
 
 Pairs with:
   - I-MATCH-PROMOTABLE info-level lint — surfaces opportunity at compile time.
+  - W-EACH-PROMOTABLE info-level lint — surfaces opportunity for --each.
   - bun scrml migrate — different verb (deprecated→current); promote is tier-up.
 
 Examples:
   scrml promote --match src/app.scrml             # promote one file in place
   scrml promote --match src/app.scrml:42          # only the chain at line 42
   scrml promote --match src/ --dry-run            # preview all sites
+  scrml promote --each src/app.scrml              # lift \${ for/lift } -> <each>
+  scrml promote --each --shorthand src/           # lift + apply :-shorthand
+  scrml promote --each --dry-run src/             # preview iteration lifts
 `);
 }
 
@@ -105,6 +116,7 @@ function parseArgs(args) {
   let include = "*.scrml";
   const excludes = [];
   let useDefaultExcludes = true;
+  let shorthand = false;
   let help = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -113,16 +125,24 @@ function parseArgs(args) {
       help = true;
     } else if (arg === "--match") {
       if (mode !== null && mode !== "match") {
-        console.error(c.red("error:") + ` Cannot combine --match and --engine; choose one mode per invocation.`);
+        console.error(c.red("error:") + ` Cannot combine --match, --engine, and --each; choose one mode per invocation.`);
         process.exit(1);
       }
       mode = "match";
     } else if (arg === "--engine") {
       if (mode !== null && mode !== "engine") {
-        console.error(c.red("error:") + ` Cannot combine --match and --engine; choose one mode per invocation.`);
+        console.error(c.red("error:") + ` Cannot combine --match, --engine, and --each; choose one mode per invocation.`);
         process.exit(1);
       }
       mode = "engine";
+    } else if (arg === "--each") {
+      if (mode !== null && mode !== "each") {
+        console.error(c.red("error:") + ` Cannot combine --match, --engine, and --each; choose one mode per invocation.`);
+        process.exit(1);
+      }
+      mode = "each";
+    } else if (arg === "--shorthand") {
+      shorthand = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--check") {
@@ -151,7 +171,7 @@ function parseArgs(args) {
     excludes.push(`${sep}tests${sep}`);
   }
 
-  return { paths, mode, dryRun, check, include, excludes, help };
+  return { paths, mode, dryRun, check, include, excludes, shorthand, help };
 }
 
 // ---------------------------------------------------------------------------
@@ -759,12 +779,734 @@ function _collectTypedFilesViaApi(filePath) {
   }
 }
 
+// ===========================================================================
+// `--each` mode — Tier 0 → Tier 1 iteration lift (SPEC §56.10)
+// ===========================================================================
+//
+// Lifts `${ for (let x of @cell) { lift <markup/> } }` → `<each in=@cell as x>
+// <markup/></each>`. Pairs with the W-EACH-PROMOTABLE info-lint.
+//
+// Implementation strategy (mirrors --match):
+//   1. Compile source, capture typed-AST.
+//   2. Walk for-stmt nodes; filter by §56.10.2 promotable predicates.
+//   3. For each promotable site, compute the source span (Tier-0 wrapper +
+//      for-stmt header + body + optional else clause + closing wrapper).
+//   4. Build the `<each>` replacement string from extracted parts.
+//   5. Splice into source (descending offsets); sanity-parse; write or diff.
+//
+// Per §56.10.7, all source outside the rewritten span is preserved verbatim.
+// Per §56.10.6, the rewrite is idempotent (re-running on `<each>` is a no-op
+// because the detector only finds for-stmts, not <each> elements).
+
+/**
+ * Walk a typed FileAST and collect for-stmt nodes that are mechanically
+ * promotable to <each>. Mirrors the lint-w-each-promotable walker but
+ * returns the FULL nodes for span-based rewriting.
+ *
+ * @param {object} file
+ * @returns {object[]}  for-stmt nodes
+ */
+function findIterationSites(file) {
+  const sites = [];
+  const seen = new WeakSet();
+  function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+    if (node.kind === "for-stmt" || node.kind === "for-loop") {
+      sites.push(node);
+    }
+    for (const k of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "consequent", "alternate", "components"]) {
+      if (Array.isArray(node[k])) walk(node[k]);
+    }
+  }
+  walk(file.ast?.nodes ?? file.nodes ?? file);
+  if (file.ast?.components) walk(file.ast.components);
+  if (file.components) walk(file.components);
+  return sites;
+}
+
+/**
+ * Parse the for-loop header text to extract iter-variable, iterable expr,
+ * and optional `key=expr` clause. The AST flattens `key x.id` into the
+ * iterable string (`"@items key x.id"`), so this re-extracts.
+ *
+ * @param {string} iterableRaw — for-stmt.iterable string
+ * @param {string|null} variableRaw — for-stmt.variable string (may be null for C-style)
+ * @returns {{
+ *   iterVar: string,
+ *   iterable: string,
+ *   keyExpr: string | null,
+ *   countMode: boolean,
+ *   countExpr: string | null,
+ *   iterInit: string | null,
+ * }}
+ */
+function parseForHeader(iterableRaw, variableRaw) {
+  // Detect C-style first: `( init ; cond ; update )` shape.
+  // The AST stores C-style iterable as a parenthesized string.
+  if (typeof iterableRaw === "string" && iterableRaw.trim().startsWith("(") && iterableRaw.includes(";")) {
+    const m = iterableRaw.match(/^\(\s*let\s+(\w+)\s*=\s*(.+?)\s*;\s*(\w+)\s*<\s*(.+?)\s*;\s*\3\s*\+\s*\+\s*\)$/);
+    if (m && m[1] === m[3]) {
+      return {
+        iterVar: m[1],
+        iterable: null,
+        keyExpr: null,
+        countMode: true,
+        countExpr: m[4].trim(),
+        iterInit: m[2].trim(),
+      };
+    }
+    // Other C-style shapes — not promotable to <each of=N>; signal failure.
+    return null;
+  }
+
+  // For-of form: iterableRaw is the iter-expr text (post-`of`); variableRaw
+  // is the iter-var. The iter-expr may include trailing `key <expr>`.
+  if (variableRaw == null || typeof variableRaw !== "string") return null;
+  let iterable = iterableRaw == null ? "" : String(iterableRaw).trim();
+  let keyExpr = null;
+  // Match trailing " key <expr>" — token-aware: `key` is a standalone word
+  // followed by a key expression that runs to end-of-string.
+  const keyMatch = iterable.match(/\bkey\s+(.+)$/);
+  if (keyMatch) {
+    // Anchor the key match to a token boundary that is NOT preceded by `.`
+    // (rules out `obj.key`). Re-test with stricter regex.
+    const strict = iterable.match(/^(.+?)(?:\s+|^)key\s+(\S.*)$/);
+    if (strict) {
+      iterable = strict[1].trim();
+      keyExpr = strict[2].trim();
+    }
+  }
+  // The iterable string may also be a tokenized form like "@contacts key c . id".
+  // Re-collapse `.` whitespace.
+  iterable = iterable.replace(/\s+\.\s+/g, ".").replace(/\s+/g, " ").trim();
+  if (keyExpr) {
+    keyExpr = keyExpr.replace(/\s+\.\s+/g, ".").replace(/\s+/g, " ").trim();
+  }
+  return {
+    iterVar: variableRaw,
+    iterable,
+    keyExpr,
+    countMode: false,
+    countExpr: null,
+    iterInit: null,
+  };
+}
+
+/**
+ * Find the byte offsets of the enclosing Tier-0 `${ ... }` wrapper for a
+ * for-stmt site. The wrapper is the closest `${ ` before the for-stmt span
+ * whose matching `}` lies AT-OR-AFTER the for-stmt span end (with optional
+ * trailing else-block).
+ *
+ * @param {string} source
+ * @param {object} forStmt
+ * @returns {{ wrapStart: number, wrapEnd: number, wrapBodyStart: number, wrapBodyEnd: number } | null}
+ *   wrapStart/wrapEnd: outer span (`${` ... `}`)
+ *   wrapBodyStart/wrapBodyEnd: inside the braces
+ *   Returns null if the for-stmt is not wrapped by a `${...}` (logic-context).
+ */
+function findTier0Wrapper(source, forStmt) {
+  const forStart = forStmt.span?.start;
+  const forEnd = forStmt.span?.end;
+  if (typeof forStart !== "number" || typeof forEnd !== "number") return null;
+
+  // Walk back from forStart looking for `${` while respecting `}` levels.
+  let depth = 0;
+  let i = forStart - 1;
+  while (i >= 0) {
+    const ch = source[i];
+    if (ch === "}") depth++;
+    else if (ch === "{") {
+      if (depth === 0) {
+        // Check for `${` two chars before
+        if (i > 0 && source[i - 1] === "$") {
+          // Found the wrapper opener
+          const bodyStart = i + 1;
+          // Locate the matching `}` from bodyStart, accounting for nested braces.
+          let d = 1;
+          let j = bodyStart;
+          while (j < source.length && d > 0) {
+            const c = source[j];
+            if (c === "{") d++;
+            else if (c === "}") {
+              d--;
+              if (d === 0) break;
+            } else if (c === '"' || c === "'" || c === "`") {
+              j = skipStringLiteral(source, j);
+              continue;
+            } else if (c === "/" && source[j + 1] === "/") {
+              const nl = source.indexOf("\n", j);
+              j = nl < 0 ? source.length : nl;
+              continue;
+            } else if (c === "/" && source[j + 1] === "*") {
+              const close = source.indexOf("*/", j + 2);
+              j = close < 0 ? source.length : close + 2;
+              continue;
+            }
+            j++;
+          }
+          if (d !== 0) return null;
+          // j is at the matching `}`.
+          // Sanity: forStmt span must lie within wrap body.
+          if (forStart >= bodyStart && forEnd <= j) {
+            return {
+              wrapStart: i - 1,
+              wrapEnd: j + 1,
+              wrapBodyStart: bodyStart,
+              wrapBodyEnd: j,
+            };
+          }
+          return null;
+        }
+        return null;
+      }
+      depth--;
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      // Walk back past string literal — for backward scan, find matching quote
+      let k = i - 1;
+      while (k >= 0) {
+        if (source[k] === ch) {
+          // Check escape
+          let escapes = 0;
+          let m = k - 1;
+          while (m >= 0 && source[m] === "\\") { escapes++; m--; }
+          if (escapes % 2 === 0) break;
+        }
+        k--;
+      }
+      i = k;
+      if (i < 0) break;
+      i--;
+      continue;
+    }
+    i--;
+  }
+  return null;
+}
+
+/**
+ * Extract the loop body text between the for-stmt header's closing `)` and
+ * the matching closing `}`. Returns { bodyText, openBraceOffset, closeBraceOffset }
+ * where bodyText is the source between (but not including) `{` and `}`.
+ *
+ * Also probes for an `else { ... }` clause AFTER the closing brace.
+ */
+function extractForBodyAndElse(source, forStmt, wrapBodyEnd) {
+  const forStart = forStmt.span?.start;
+  const forEnd = forStmt.span?.end;
+  if (typeof forStart !== "number" || typeof forEnd !== "number") return null;
+
+  // Locate the for-loop's opening brace AFTER its `(...)` header.
+  // Strategy: scan forward from forStart finding the first `{` at the
+  // top brace level (after the `for(` paren-group).
+  // The header `for ( ... )` has paren-balanced parens. We scan until
+  // we see `{` outside parens.
+  let i = forStart;
+  // Skip past `for`
+  if (source.slice(forStart, forStart + 3) !== "for") return null;
+  i = forStart + 3;
+  let depth = 0;
+  let openBrace = -1;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === "{" && depth === 0) {
+      openBrace = i;
+      break;
+    } else if (c === '"' || c === "'" || c === "`") {
+      i = skipStringLiteral(source, i);
+      continue;
+    }
+    i++;
+  }
+  if (openBrace < 0) return null;
+
+  // Locate matching close brace
+  let d = 1;
+  let j = openBrace + 1;
+  while (j < source.length && d > 0) {
+    const c = source[j];
+    if (c === "{") d++;
+    else if (c === "}") {
+      d--;
+      if (d === 0) break;
+    } else if (c === '"' || c === "'" || c === "`") {
+      j = skipStringLiteral(source, j);
+      continue;
+    } else if (c === "/" && source[j + 1] === "/") {
+      const nl = source.indexOf("\n", j);
+      j = nl < 0 ? source.length : nl;
+      continue;
+    } else if (c === "/" && source[j + 1] === "*") {
+      const close = source.indexOf("*/", j + 2);
+      j = close < 0 ? source.length : close + 2;
+      continue;
+    }
+    j++;
+  }
+  if (d !== 0) return null;
+  const closeBrace = j;
+
+  // Probe for `else { ... }` clause after closeBrace, before the wrapper end.
+  let elseBlock = null;
+  let elseEnd = closeBrace + 1;
+  let k = closeBrace + 1;
+  // Skip whitespace and comments
+  while (k < wrapBodyEnd) {
+    const c = source[k];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") { k++; continue; }
+    if (c === "/" && source[k + 1] === "/") {
+      const nl = source.indexOf("\n", k);
+      k = nl < 0 ? source.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && source[k + 1] === "*") {
+      const close = source.indexOf("*/", k + 2);
+      k = close < 0 ? source.length : close + 2;
+      continue;
+    }
+    break;
+  }
+  if (source.slice(k, k + 4) === "else" && /[\s{]/.test(source[k + 4] || "")) {
+    let p = k + 4;
+    // Skip whitespace
+    while (p < wrapBodyEnd && /\s/.test(source[p])) p++;
+    if (source[p] === "{") {
+      // Match the closing brace
+      let dd = 1;
+      let q = p + 1;
+      while (q < source.length && dd > 0) {
+        const c = source[q];
+        if (c === "{") dd++;
+        else if (c === "}") {
+          dd--;
+          if (dd === 0) break;
+        } else if (c === '"' || c === "'" || c === "`") {
+          q = skipStringLiteral(source, q);
+          continue;
+        } else if (c === "/" && source[q + 1] === "/") {
+          const nl = source.indexOf("\n", q);
+          q = nl < 0 ? source.length : nl;
+          continue;
+        } else if (c === "/" && source[q + 1] === "*") {
+          const close = source.indexOf("*/", q + 2);
+          q = close < 0 ? source.length : close + 2;
+          continue;
+        }
+        q++;
+      }
+      if (dd === 0) {
+        elseBlock = {
+          openBrace: p,
+          closeBrace: q,
+          body: source.slice(p + 1, q),
+        };
+        elseEnd = q + 1;
+      }
+    }
+  }
+
+  return {
+    bodyOpenBrace: openBrace,
+    bodyCloseBrace: closeBrace,
+    bodyText: source.slice(openBrace + 1, closeBrace),
+    elseBlock,
+    siteEnd: elseEnd,
+  };
+}
+
+/**
+ * Count the lift statements in the for body. Multi-lift bodies skip
+ * (per §56.10.2 row 6).
+ *
+ * @param {object} forStmt
+ * @returns {number}
+ */
+function countLiftsInBody(forStmt) {
+  let count = 0;
+  function visit(stmts) {
+    if (!Array.isArray(stmts)) return;
+    for (const s of stmts) {
+      if (!s || typeof s !== "object") continue;
+      if (s.kind === "lift-expr") count++;
+      // Recurse into if/else/etc — but lifts inside conditional bodies still
+      // count as lift bodies for the multi-lift check.
+      if (Array.isArray(s.body)) visit(s.body);
+      if (Array.isArray(s.consequent)) visit(s.consequent);
+      if (Array.isArray(s.alternate)) visit(s.alternate);
+    }
+  }
+  visit(forStmt.body);
+  return count;
+}
+
+/**
+ * Check whether the iterable expression is a single `@cell` ref.
+ * Per §56.10.2 row 5, literal arrays / fn-call results are skipped.
+ *
+ * @param {string} iterable
+ * @returns {boolean}
+ */
+function iterableIsCellRef(iterable) {
+  if (!iterable) return false;
+  // Strict: bare `@ident` or `@ident.field.chain`.
+  return /^@[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(iterable);
+}
+
+/**
+ * Apply §56.10.3 :-shorthand heuristic: the body is a SINGLE markup element
+ * (no siblings, no surrounding text) whose body is a SINGLE `${...}`
+ * interpolation OR a single bare display-text run.
+ *
+ * Returns { ok: true, opener, body } if the heuristic matches; { ok: false }
+ * otherwise. `opener` is the tag-open-with-attrs (e.g. `<li>` or `<li class="x">`),
+ * `body` is the inner expression text or display text.
+ */
+function tryShorthandHeuristic(bodyText, iterVar) {
+  const trimmed = bodyText.trim();
+  // Strip optional trailing `;` after lift expression.
+  // Pattern: `lift <tag ...>...</tag>;?`  OR  `lift <tag ... />`
+  const m = trimmed.match(/^lift\s+(<[^>]*>)([\s\S]*?)(<\/[^>]*>|<\/>);?\s*$/);
+  if (!m) return { ok: false };
+  const opener = m[1].trim();
+  const inner = m[2];
+  // Reject if opener contains `${` (interpolation in attrs)
+  if (opener.includes("${")) return { ok: false };
+  // Inner must be a single ${...} interpolation OR plain display text.
+  const interpolationMatch = inner.match(/^\s*\$\{([\s\S]*?)\}\s*$/);
+  let bodyExpr;
+  if (interpolationMatch) {
+    bodyExpr = interpolationMatch[1].trim();
+  } else if (/^[\s\S]*\$\{/.test(inner)) {
+    // Mixed text + interpolation — heuristic fails.
+    return { ok: false };
+  } else {
+    // Plain display text — admissible per §56.10.3 ("single bare display-text run").
+    bodyExpr = JSON.stringify(inner.trim());
+  }
+  // Apply transform: replace bare iter-var refs in body with @. semantics.
+  // - `iterVar.field` → `@.field` (drops the iterVar AND its trailing dot)
+  // - bare `iterVar`  → `@.`
+  // Only when the iter-var appears as a standalone identifier (not nested
+  // inside another identifier or after a `.`).
+  //
+  // The `@.` sigil per §17.7.3 means "the current iteration value." Property
+  // access composes as `@.field` (one dot between `@.` and `field`).
+  let transformed = bodyExpr.replace(
+    new RegExp("(^|[^\\w.$])" + iterVar + "\\.", "g"),
+    "$1@.",
+  );
+  // Then handle bare iter-var (no trailing `.field`)
+  transformed = transformed.replace(
+    new RegExp("(^|[^\\w.$])" + iterVar + "(\\b)(?!\\.)", "g"),
+    "$1@.$2",
+  );
+  // Only emit shorthand if the transform actually used @. (i.e. iter-var
+  // was referenced). Otherwise the heuristic fails ("EXACTLY ONE reference").
+  if (transformed === bodyExpr) {
+    // No iter-var ref — heuristic fails per §56.10.3 condition 3.
+    return { ok: false };
+  }
+  return { ok: true, opener, body: transformed };
+}
+
+/**
+ * Rewrite a single iteration site. Returns { ok, rewritten, replaceStart,
+ * replaceEnd, reason }. On failure, ok:false + reason; rewritten/replace*
+ * undefined.
+ *
+ * @param {string} source
+ * @param {object} forStmt
+ * @param {{ shorthand: boolean }} opts
+ * @returns {{ ok: boolean, rewritten?: string, replaceStart?: number, replaceEnd?: number, reason?: string }}
+ */
+function rewriteOneIteration(source, forStmt, opts) {
+  // Step 1: parse the for-header.
+  const header = parseForHeader(forStmt.iterable, forStmt.variable);
+  if (!header) {
+    return { ok: false, reason: "for-loop header could not be parsed (C-style or destructured form)" };
+  }
+
+  // Step 2: validate iterable per §56.10.2.
+  if (header.countMode) {
+    // C-style count-loop — admissible per §56.10.2 row 4.
+    // The count expression and init must be standard `let i = 0; i < N; i++` shape.
+    if (header.iterInit !== "0") {
+      return { ok: false, reason: "C-style count-loop init must be `0` (non-zero init not promotable)" };
+    }
+  } else {
+    if (!iterableIsCellRef(header.iterable)) {
+      return { ok: false, reason: "iterable is not an `@cell` reference (literal arrays + function-call results are not promotable per §56.10.2)" };
+    }
+  }
+
+  // Step 3: count lifts; multi-lift bodies are skipped.
+  const liftCount = countLiftsInBody(forStmt);
+  if (liftCount === 0) {
+    return { ok: false, reason: "for-loop body contains no `lift` statement" };
+  }
+  if (liftCount > 1) {
+    return { ok: false, reason: "for-loop body contains multiple `lift` statements (per-item template must be one markup expression)" };
+  }
+
+  // Step 4: locate the Tier-0 `${...}` wrapper that encloses this for-stmt.
+  const wrap = findTier0Wrapper(source, forStmt);
+  if (!wrap) {
+    return { ok: false, reason: "for-loop is not inside a Tier-0 `${...}` logic-context wrapper" };
+  }
+
+  // Step 5: extract body + optional else clause.
+  const parts = extractForBodyAndElse(source, forStmt, wrap.wrapBodyEnd);
+  if (!parts) {
+    return { ok: false, reason: "for-loop body span could not be extracted" };
+  }
+
+  // Step 6: verify the wrapper contains ONLY this for-loop (allowing
+  // surrounding whitespace + the trailing else-block). If there is other
+  // content inside the wrapper (e.g. statements before/after the for-loop),
+  // skip — the safe rewrite would require pulling that content out, which
+  // is outside Landing 3 scope.
+  const wrapBody = source.slice(wrap.wrapBodyStart, wrap.wrapBodyEnd);
+  const preForBody = source.slice(wrap.wrapBodyStart, forStmt.span.start).trim();
+  if (preForBody.length > 0) {
+    return { ok: false, reason: "Tier-0 wrapper contains statements before the for-loop (not single-purpose; skipping)" };
+  }
+  const postSiteBody = source.slice(parts.siteEnd, wrap.wrapBodyEnd).trim();
+  if (postSiteBody.length > 0) {
+    return { ok: false, reason: "Tier-0 wrapper contains statements after the for-loop (not single-purpose; skipping)" };
+  }
+
+  // Step 7: derive indentation from the wrapper opener line.
+  const lineStart = source.lastIndexOf("\n", wrap.wrapStart - 1) + 1;
+  const wrapIndent = source.slice(lineStart, wrap.wrapStart).replace(/[^\s]/g, "");
+  const useTab = wrapIndent.includes("\t");
+  const oneStep = useTab ? "\t" : (detectIndentStep(source, wrapIndent) || "    ");
+  const innerIndent = wrapIndent + oneStep;
+
+  // Step 8 — try :-shorthand FIRST (because it determines whether the
+  // opener carries `as iterVar` per §56.10.3 example: bare-body retains the
+  // `as` clause; shorthand drops it since `@.` is contextual).
+  let shorthandOutcome = null;
+  if (opts.shorthand && !header.countMode) {
+    const sh = tryShorthandHeuristic(parts.bodyText, header.iterVar);
+    if (sh.ok) shorthandOutcome = sh;
+  }
+
+  // Step 9: build the <each> opener.
+  let opener;
+  if (header.countMode) {
+    opener = `<each of=${header.countExpr} as ${header.iterVar}>`;
+  } else {
+    opener = `<each in=${header.iterable}`;
+    // When shorthand applies, drop the `as iterVar` — the per-item body uses
+    // `@.` instead. When bare-body, keep `as iterVar` for the original name.
+    if (!shorthandOutcome) {
+      opener += ` as ${header.iterVar}`;
+    }
+    if (header.keyExpr) {
+      opener += ` key=${header.keyExpr}`;
+    }
+    opener += ">";
+  }
+
+  // Step 10: build the per-item template body.
+  const bodyLines = [];
+  if (shorthandOutcome) {
+    const openerInner = shorthandOutcome.opener.slice(1, -1).trim();
+    bodyLines.push(`${innerIndent}<${openerInner} : ${shorthandOutcome.body}>`);
+  } else {
+    // Bare-body emission — extract markup verbatim from `lift <markup>;`.
+    const trimmedBody = parts.bodyText.trim();
+    // Strip leading `lift ` and trailing `;`.
+    const liftMatch = trimmedBody.match(/^lift\s+([\s\S]*?);?\s*$/);
+    let markup = liftMatch ? liftMatch[1].trim() : trimmedBody;
+    // Re-indent markup to innerIndent.
+    bodyLines.push(reindent(markup, innerIndent));
+  }
+
+  // Step 11: append <empty>...</empty> if the source had an `else { lift ... }`.
+  if (parts.elseBlock) {
+    const elseInner = parts.elseBlock.body.trim();
+    const elseLiftMatch = elseInner.match(/^lift\s+([\s\S]*?);?\s*$/);
+    let elseMarkup = elseLiftMatch ? elseLiftMatch[1].trim() : elseInner;
+    bodyLines.push(`${innerIndent}<empty>${elseMarkup}</empty>`);
+  }
+
+  // Step 12: assemble final <each> block.
+  const eachBlock = [
+    opener,
+    ...bodyLines,
+    `${wrapIndent}</each>`,
+  ].join("\n");
+
+  // Step 13: substitute the wrapper span with the <each> block. The wrapper
+  // spans `${` ... `}` inclusive.
+  const replaceStart = wrap.wrapStart;
+  const replaceEnd = wrap.wrapEnd;
+
+  // Final assembled rewrite: re-indent the opener line. The wrap span is from
+  // the `$` of `${`. The opener begins at the `<each ...` text. Combine.
+  const finalText = eachBlock;
+  const rewritten = source.slice(0, replaceStart) + finalText + source.slice(replaceEnd);
+  return { ok: true, rewritten, replaceStart, replaceEnd };
+}
+
+/**
+ * Apply --each rewrites across all iteration sites in a file. Mirrors the
+ * applyMatchRewrite shape: descending offsets so earlier rewrites don't
+ * shift later ones.
+ *
+ * @param {string} sourceText
+ * @param {object[]} sites — for-stmt nodes
+ * @param {number|null} targetLine — restrict to site at this line (±1 lenient)
+ * @param {{ shorthand: boolean }} opts
+ */
+function applyEachRewrite(sourceText, sites, targetLine, opts) {
+  let rewritten = sourceText;
+  let count = 0;
+  const skipped = [];
+
+  let chosen = sites;
+  if (targetLine != null) {
+    chosen = sites.filter(s => {
+      const ln = s.span?.line ?? 0;
+      return Math.abs(ln - targetLine) <= 1;
+    });
+    if (chosen.length === 0) {
+      skipped.push({
+        line: targetLine,
+        reason: "no promotable iteration site at this line",
+      });
+      return { rewritten, count, skipped };
+    }
+  }
+
+  // Sort descending by start offset so we splice from end to start.
+  const sorted = chosen.slice().sort((a, b) => {
+    const aStart = a.span?.start ?? 0;
+    const bStart = b.span?.start ?? 0;
+    return bStart - aStart;
+  });
+
+  for (const site of sorted) {
+    const r = rewriteOneIteration(rewritten, site, opts);
+    if (r.ok) {
+      rewritten = r.rewritten;
+      count++;
+    } else {
+      skipped.push({ line: site.span?.line ?? 0, reason: r.reason });
+    }
+  }
+
+  return { rewritten, count, skipped };
+}
+
+/**
+ * Promote a single file via --each. Mirrors promoteMatchOnFile in shape.
+ *
+ * @param {string} filePath
+ * @param {number|null} targetLine
+ * @param {{ dryRun: boolean, check: boolean, shorthand: boolean }} opts
+ * @param {string} cwd
+ */
+export function promoteEachOnFile(filePath, targetLine, opts, cwd) {
+  const relPath = relative(cwd, filePath);
+
+  let source;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch (err) {
+    return { status: "unreadable", reason: err.message, relPath };
+  }
+
+  let compileResult;
+  try {
+    compileResult = compileScrml({
+      inputFiles: [filePath],
+      write: false,
+      gather: false,
+      log: () => {},
+    });
+  } catch (err) {
+    return { status: "failed", reason: `compile crashed: ${err.message}`, relPath };
+  }
+
+  const blockingErrors = (compileResult.errors || []).filter(
+    (e) => !e.severity || e.severity === "error"
+  );
+  if (blockingErrors.length > 0) {
+    const msg = blockingErrors.slice(0, 2).map(e => e.message || e.code || String(e)).join("; ");
+    return { status: "failed", reason: `source has compile errors: ${msg}`, relPath };
+  }
+
+  // Get typed-AST via the bridge.
+  const typedFiles = collectTypedFiles(filePath);
+  if (!typedFiles || typedFiles.length === 0) {
+    return { status: "failed", reason: "could not access typed-AST", relPath };
+  }
+  const fileAST = typedFiles.find(f => f.filePath === filePath) ?? typedFiles[0];
+
+  const sites = findIterationSites(fileAST);
+  if (sites.length === 0) {
+    return { status: "no-sites", relPath };
+  }
+
+  const { rewritten, count, skipped } = applyEachRewrite(source, sites, targetLine, opts);
+  if (count === 0) {
+    if (targetLine != null) {
+      return {
+        status: "ambiguous",
+        reason: `no promotable iteration site at line ${targetLine}`,
+        relPath,
+        skipped,
+      };
+    }
+    // No promotable sites — return no-sites + surface skip reasons informationally.
+    return { status: "no-sites", relPath, skipped };
+  }
+
+  // Sanity-check the rewritten source.
+  const parseResult = sanityCheckParse(rewritten, filePath);
+  if (!parseResult.ok) {
+    const messages = (parseResult.errors || []).slice(0, 2)
+      .map(e => e.message || String(e)).join("; ");
+    return {
+      status: "failed",
+      reason: `rewritten source failed to parse — file left untouched: ${messages}`,
+      relPath,
+    };
+  }
+
+  // Idempotency check.
+  if (rewritten === source) {
+    return { status: "no-sites", relPath };
+  }
+
+  if (opts.dryRun) {
+    const diff = simpleDiff(source, rewritten, relPath);
+    return { status: "promoted", count, skipped, diff, relPath };
+  }
+  if (opts.check) {
+    return { status: "promoted", count, skipped, relPath };
+  }
+  try {
+    writeFileSync(filePath, rewritten, "utf8");
+  } catch (err) {
+    return { status: "failed", reason: `write failed: ${err.message}`, relPath };
+  }
+  return { status: "promoted", count, skipped, relPath };
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 export function runPromote(args) {
-  const { paths, mode, dryRun, check, include, excludes, help } = parseArgs(args);
+  const { paths, mode, dryRun, check, include, excludes, shorthand, help } = parseArgs(args);
 
   if (help) {
     printHelp();
@@ -772,7 +1514,14 @@ export function runPromote(args) {
   }
 
   if (mode === null) {
-    console.error(c.red("error:") + " scrml promote requires either --match or --engine.");
+    console.error(c.red("error:") + " scrml promote requires one of --match, --engine, or --each.");
+    console.error(c.dim("Run `scrml promote --help` for usage."));
+    process.exit(1);
+  }
+
+  // --shorthand is meaningful only on --each. Reject on other modes.
+  if (shorthand && mode !== "each") {
+    console.error(c.red("error:") + ` --shorthand is meaningful only with --each (current mode: --${mode}).`);
     console.error(c.dim("Run `scrml promote --help` for usage."));
     process.exit(1);
   }
@@ -801,7 +1550,7 @@ export function runPromote(args) {
     process.exit(2);
   }
 
-  // --match: real rewrite path.
+  // --match and --each: real rewrite paths sharing file-walk machinery.
   const cwd = process.cwd();
 
   // Expand path:line forms; collect files.
@@ -843,7 +1592,9 @@ export function runPromote(args) {
 
   for (const file of uniqueFiles) {
     const targetLine = lineByFile.get(file) ?? null;
-    const r = promoteMatchOnFile(file, targetLine, { dryRun, check }, cwd);
+    const r = mode === "each"
+      ? promoteEachOnFile(file, targetLine, { dryRun, check, shorthand }, cwd)
+      : promoteMatchOnFile(file, targetLine, { dryRun, check }, cwd);
     if (r.status === "promoted") {
       promotedCount++;
       totalSites += r.count ?? 0;
