@@ -76,10 +76,10 @@ function compileSource(source, filename = "test.scrml") {
 // ---------------------------------------------------------------------------
 
 describe("meta-integration §1: runtime ^{} → _scrml_meta_effect", () => {
-  test("^{ console.log('hello') } produces _scrml_meta_effect in clientJs", () => {
+  test("^{ meta.emit('hello') } produces _scrml_meta_effect in clientJs", () => {
     const source = `h1 "hello"
 ^{
-  console.log("hello")
+  meta.emit("hello")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-runtime-basic.scrml");
@@ -98,7 +98,7 @@ describe("meta-integration §1: runtime ^{} → _scrml_meta_effect", () => {
   test("_scrml_meta_effect uses a stable scopeId pattern", () => {
     const source = `p "test"
 ^{
-  console.log("world")
+  meta.emit("world")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-scopeid.scrml");
@@ -113,7 +113,7 @@ describe("meta-integration §1: runtime ^{} → _scrml_meta_effect", () => {
   test("_scrml_meta_effect wraps a function(meta) callback", () => {
     const source = `p "test"
 ^{
-  console.log("meta callback")
+  meta.emit("meta callback")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-callback-shape.scrml");
@@ -145,7 +145,7 @@ describe("meta-integration §2: runtime ^{} @var reads", () => {
 <p>count: \${@count}</>
 ^{
   const x = @count
-  console.log(x)
+  meta.emit(String(x))
 }
 </>
 `;
@@ -172,7 +172,7 @@ describe("meta-integration §2: runtime ^{} @var reads", () => {
 \${ <value> = "hello" }
 <p>\${@value}</>
 ^{
-  console.log(@value)
+  meta.emit(String(@value))
 }
 </>
 `;
@@ -298,7 +298,7 @@ p "meta set test"
   test("meta.cleanup() call is preserved in the output", () => {
     const source = `p "meta cleanup test"
 ^{
-  meta.cleanup(function() { console.log("cleanup") })
+  meta.cleanup(function() { meta.emit("cleanup") })
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-cleanup.scrml");
@@ -320,11 +320,11 @@ describe("meta-integration §6: multiple ^{} blocks — independent scopeIds", (
   test("two runtime ^{} blocks produce two _scrml_meta_effect calls", () => {
     const source = `p "first"
 ^{
-  console.log("block one")
+  meta.emit("block one")
 }
 p "second"
 ^{
-  console.log("block two")
+  meta.emit("block two")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-two-blocks.scrml");
@@ -340,11 +340,11 @@ p "second"
   test("two ^{} blocks have different scopeIds", () => {
     const source = `p "first"
 ^{
-  console.log("alpha")
+  meta.emit("alpha")
 }
 p "second"
 ^{
-  console.log("beta")
+  meta.emit("beta")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-two-scopeids.scrml");
@@ -377,7 +377,7 @@ describe("meta-integration §7: ^{} alongside component definition", () => {
     const source = `\${ const Card = <div class="card"/> }
 <Card/>
 ^{
-  console.log("meta alongside component")
+  meta.emit("meta alongside component")
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-with-component.scrml");
@@ -397,7 +397,7 @@ describe("meta-integration §7: ^{} alongside component definition", () => {
 <count> = 0
 <Badge/>
 ^{
-  console.log(@count)
+  meta.emit(String(@count))
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-component-reactive.scrml");

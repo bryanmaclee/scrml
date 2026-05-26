@@ -637,10 +637,15 @@ describe("runMetaChecker", () => {
   });
 
   test("§24 integration: clean meta block (no errors)", () => {
+    // S134 Bug 17 fix retired the `bun.eval(...)` initializer from this test —
+    // it now fires E-META-001 unconditionally per SPEC §22.12 line 14687
+    // (JS-host ambient globals are not in META_BUILTINS). The replacement uses
+    // `JSON.stringify(...)` (JSON is still in META_BUILTINS) as a compile-time-
+    // evaluable initializer that preserves §24's "clean meta block" intent.
     const fileAST = makeFileAST({
       nodes: [
         makeMetaNode([
-          makeConstDecl("CONFIG", 'bun.eval(`return { port: 3000 }`)'),
+          makeConstDecl("CONFIG", 'JSON.parse(\'{ "port": 3000 }\')'),
         ]),
       ],
     });

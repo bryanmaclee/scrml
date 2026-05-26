@@ -161,6 +161,46 @@ export const META_BUILTINS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// JS-host forbidden identifiers (S134 Bug 17 — runtime-meta scoping fix)
+//
+// JS-host ambient globals that are NOT in scrml-native's meta primitive set
+// (§22.5.1 meta API + §22.4 compile-time API). Per SPEC §22.12 line 14687
+// (S114 Approach C ratification) + §22.5 line 14375 (S114 timer-primitive
+// ratification), referencing any of these identifiers inside a ^{} body — be
+// it compile-time or runtime — SHALL trigger E-META-001.
+//
+// Why a separate set from META_BUILTINS:
+//   META_BUILTINS gates compile-time runtime-variable enforcement (§22.4 / line 1233).
+//   JS_HOST_FORBIDDEN gates the categorical §22.12 constraint that applies regardless
+//   of compile-time vs runtime classification. A runtime ^{} body that uses
+//   the JS-host `bun.eval(...)` surface would otherwise silently pass through
+//   the compile-time-only gate (early-return at line 1091) and runtime-crash
+//   on a ReferenceError.
+//
+// Migration paths:
+//   setInterval / setTimeout / clearInterval / clearTimeout → meta.interval /
+//     meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1 / S114).
+//   fetch → server-fn boundary (no client-side direct fetch inside ^{}).
+//   bun / Bun / process / console → not available inside ^{} bodies; if a
+//     legitimate need arises, surface as an Approach C revisit (§22.12 trigger).
+// ---------------------------------------------------------------------------
+
+export const JS_HOST_FORBIDDEN = new Set<string>([
+  // Bun / Node ambient host
+  "bun",
+  "Bun",
+  "process",
+  "console",
+  // JS-host timers (replaced by meta.interval / meta.timeout under §22.5.1)
+  "setInterval",
+  "setTimeout",
+  "clearInterval",
+  "clearTimeout",
+  // JS-host network primitive (replaced by server-fn boundary)
+  "fetch",
+]);
+
+// ---------------------------------------------------------------------------
 // Compile-time-only API patterns
 //
 // If a meta block body contains any of these patterns, the block is classified
@@ -1124,6 +1164,120 @@ export function checkMetaBlock(
   walkForRuntimeRefs(body);
 }
 
+// ---------------------------------------------------------------------------
+// JS-host globals check (S134 Bug 17 — categorical §22.12 enforcement)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check a meta block (compile-time OR runtime) for references to JS-host
+ * ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.).
+ *
+ * Unlike `checkMetaBlock` (§22.4 compile-time runtime-variable enforcement),
+ * this walker is UNCONDITIONAL — it runs on every `^{}` body regardless of
+ * compile-time vs runtime classification. Per SPEC §22.12 line 14687 (S114
+ * Approach C ratification) and §22.5 line 14375 (S114 timer-primitive
+ * ratification), JS-host ambient globals are categorically not in scope inside
+ * `^{}` bodies; using them SHALL emit `E-META-001`.
+ *
+ * Local declarations inside the body (let/const) shadow JS-host globals and
+ * are NOT flagged — they reference the local binding, not the host global.
+ * Likewise, JS keywords (e.g. `new`, `typeof`) and the META_BUILTINS set
+ * (e.g. `Object`, `JSON`, `reflect`, `emit`) are skipped.
+ *
+ * Recursive: walks into nested ^{} blocks so a runtime parent containing a
+ * compile-time child (or vice versa) checks every body.
+ */
+export function checkMetaBlockForJsHostGlobals(
+  metaNode: LogicNode,
+  filePath: string,
+  errors: MetaError[],
+): void {
+  const body = metaNode.body;
+  if (!Array.isArray(body) || body.length === 0) return;
+
+  // Local declarations inside the body shadow JS-host globals.
+  const metaLocals = collectMetaLocals(body);
+
+  function checkIdent(id: string, span: Span | undefined): void {
+    if (!JS_HOST_FORBIDDEN.has(id)) return;
+    if (JS_KEYWORDS.has(id)) return; // belt-and-suspenders; no overlap today
+    if (META_BUILTINS.has(id)) return; // belt-and-suspenders; no overlap today
+    if (metaLocals.has(id)) return; // user shadowed with local decl — local wins
+
+    const errorSpan = span || metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span;
+    errors.push(new MetaError(
+      "E-META-001",
+      `E-META-001: JS-host ambient global '${id}' is not available inside ^{} meta blocks. ` +
+      `Per SPEC §22.12 (Approach C), only scrml-native and the enumerated meta primitive set ` +
+      `(reflect / emit / emit.raw / meta.*) are in scope. ` +
+      (id === "setInterval" || id === "setTimeout" || id === "clearInterval" || id === "clearTimeout"
+        ? `Hint: use meta.interval / meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1).`
+        : id === "fetch"
+          ? `Hint: move network calls behind a server-fn boundary.`
+          : `Hint: this surface is not available inside ^{} bodies.`),
+      errorSpan,
+    ));
+  }
+
+  function checkNodeIdents(node: LogicNode): void {
+    const nodeAny = node as Record<string, unknown>;
+    const span = (node.span || metaNode.span) as Span | undefined;
+
+    // Try ExprNode fields first (parallels checkNodeForRuntimeVars at line ~1218).
+    const exprNodeFields: unknown[] = [
+      nodeAny.exprNode, nodeAny.initExpr, nodeAny.condExpr,
+      nodeAny.valueExpr, nodeAny.iterExpr, nodeAny.headerExpr,
+    ];
+    let foundExprNode = false;
+    for (const field of exprNodeFields) {
+      if (!field || typeof field !== "object" || !(field as { kind?: string }).kind) continue;
+      foundExprNode = true;
+      forEachIdentInExprNode(field as ExprNode, (ident) => {
+        checkIdent(ident.name, span);
+      });
+    }
+
+    // Fall back to string init for let/const-decl when no ExprNode is present.
+    if (!foundExprNode) {
+      const expr = (node.kind === "let-decl" || node.kind === "const-decl") ? node.init : undefined;
+      if (expr) {
+        let ids: string[];
+        try {
+          ids = extractIdentifiersFromAST(expr);
+        } catch {
+          ids = extractIdentifiers(expr);
+        }
+        for (const id of ids) checkIdent(id, span);
+      }
+    }
+  }
+
+  function walk(nodes: LogicNode[]): void {
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+
+      if (isMetaKind(node.kind)) {
+        // Recurse into nested ^{} bodies — the categorical rule applies to
+        // every body in the nest, independent of classification.
+        checkMetaBlockForJsHostGlobals(node, filePath, errors);
+        continue;
+      }
+
+      if (node.kind === "bare-expr" || node.kind === "let-decl" || node.kind === "const-decl") {
+        checkNodeIdents(node);
+      }
+
+      if (Array.isArray(node.body)) walk(node.body);
+      if (Array.isArray(node.children)) walk(node.children);
+      if (Array.isArray(node.consequent)) walk(node.consequent);
+      if (Array.isArray(node.alternate)) walk(node.alternate);
+    }
+  }
+
+  walk(body);
+}
+
 /**
  * Check a nested meta block. Inner ^{} can access outer ^{} locals.
  * Only runs for compile-time meta blocks.
@@ -1613,6 +1767,12 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
       const isCompileTime = bodyUsesCompileTimeApis(body);
 
       checkMetaBlock(metaNode, fileAST.scopeChain, typeRegistry, filePath, allErrors, outerCompileTimeConsts);
+
+      // S134 Bug 17: JS-host ambient globals are categorically forbidden inside
+      // ^{} bodies (compile-time OR runtime) per SPEC §22.12 / §22.5 line 14375.
+      // This walker is UNCONDITIONAL — checkMetaBlock's early-return at line ~1131
+      // skips runtime classifications, but the §22.12 rule applies to both.
+      checkMetaBlockForJsHostGlobals(metaNode, filePath, allErrors);
 
       checkReflectCalls(body, typeRegistry, filePath, metaNode.span, allErrors);
 

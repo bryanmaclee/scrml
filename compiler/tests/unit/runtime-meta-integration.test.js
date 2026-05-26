@@ -169,7 +169,7 @@ p "type info"
 p "user type"
 ^{
   const info = meta.types.reflect("User")
-  console.log(info)
+  meta.emit(String(info))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt2-reflect-struct.scrml");
@@ -188,7 +188,7 @@ p "user type"
 p "runtime reflect"
 ^{
   const info = meta.types.reflect("Color")
-  console.log(info)
+  meta.emit(String(info))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt2-reflect-not-compiletime.scrml");
@@ -209,7 +209,7 @@ describe("runtime-meta RT-3: reactive variable access in runtime meta", () => {
     const source = `\${ @count = 0 }
 p "counter"
 ^{
-  console.log(@count)
+  meta.emit(String(@count))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt3-reactive-read.scrml");
@@ -241,7 +241,7 @@ p "counter"
 \${ @y = 2 }
 p "multi-var"
 ^{
-  console.log(@x + @y)
+  meta.emit(String(@x + @y))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt3-multi-reactive.scrml");
@@ -288,10 +288,10 @@ p "colors"
     expect(clientJs).not.toContain("_scrml_meta_effect(");
   });
 
-  test("runtime ^{ console.log() } DOES produce _scrml_meta_effect", () => {
+  test("runtime ^{ meta.emit(String()) } DOES produce _scrml_meta_effect", () => {
     const source = `p "hello"
 ^{
-  console.log("runtime meta")
+  meta.emit("runtime meta")
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt4-runtime-basic.scrml");
@@ -306,7 +306,7 @@ p "colors"
     const source = `\${ @count = 0 }
 p "test"
 ^{
-  console.log(@count)
+  meta.emit(String(@count))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt4-four-args.scrml");
@@ -330,7 +330,7 @@ describe("runtime-meta RT-5: captured bindings through full pipeline", () => {
     const source = `\${ @count = 0 }
 p "captured"
 ^{
-  console.log(meta.bindings)
+  meta.emit(String(meta.bindings))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt5-captured-reactive.scrml");
@@ -348,7 +348,7 @@ p "captured"
     const source = `\${ let x = 42 }
 p "let captured"
 ^{
-  console.log(meta.bindings)
+  meta.emit(String(meta.bindings))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt5-captured-let.scrml");
@@ -364,7 +364,7 @@ p "let captured"
     const source = `\${ const PI = 3.14 }
 p "const captured"
 ^{
-  console.log(meta.bindings)
+  meta.emit(String(meta.bindings))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt5-captured-const.scrml");
@@ -383,8 +383,8 @@ describe("runtime-meta RT-6: meta.cleanup() in runtime meta", () => {
   test("meta.cleanup() call compiles inside _scrml_meta_effect", () => {
     const source = `p "cleanup test"
 ^{
-  meta.cleanup(function() { console.log("cleaned up") })
-  console.log("effect ran")
+  meta.cleanup(function() { meta.emit("cleaned up") })
+  meta.emit("effect ran")
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt6-cleanup.scrml");
@@ -679,7 +679,7 @@ describe("runtime-meta RT-9: type registry codegen through full pipeline", () =>
 p "test"
 ^{
   const info = meta.types.reflect("User")
-  console.log(info)
+  meta.emit(String(info))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-struct-registry.scrml");
@@ -701,7 +701,7 @@ p "test"
 p "test"
 ^{
   const info = meta.types.reflect("Color")
-  console.log(info)
+  meta.emit(String(info))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-enum-registry.scrml");
@@ -721,8 +721,8 @@ p "test"
 \${ type Point:struct = { x: number, y: number } }
 p "test"
 ^{
-  console.log(meta.types.reflect("Color"))
-  console.log(meta.types.reflect("Point"))
+  meta.emit(String(meta.types.reflect("Color")))
+  meta.emit(String(meta.types.reflect("Point")))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-multi-type-registry.scrml");
@@ -738,7 +738,7 @@ p "test"
   test("no types in scope produces null type registry", () => {
     const source = `p "test"
 ^{
-  console.log("no types")
+  meta.emit("no types")
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-no-types.scrml");
@@ -755,7 +755,7 @@ p "test"
 p "test"
 ^{
   const info = meta.types.reflect("User")
-  console.log(info)
+  meta.emit(String(info))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-type-const.scrml");
@@ -771,7 +771,7 @@ p "test"
     const source = `\${ type Color:enum = { Red | Green | Blue } }
 p "test"
 ^{
-  console.log(meta.types.reflect("Color"))
+  meta.emit(String(meta.types.reflect("Color")))
 }
 `;
     const { clientJs, errors } = compileSource(source, "rt9-type-const-id-match.scrml");

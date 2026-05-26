@@ -14671,7 +14671,7 @@ Where:
 
 | Code | Condition | Severity |
 |---|---|---|
-| E-META-001 | Runtime `^{}` block used when `meta.runtime` is `false` | Error |
+| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) JS-host ambient global (`bun`, `Bun`, `process`, `console`, `setInterval`, `setTimeout`, `clearInterval`, `clearTimeout`, `fetch`) referenced inside any `^{}` body (compile-time OR runtime) per Approach C (§22.5 / §22.12) | Error |
 | E-META-002 | Invalid token inside `^{}` meta block (existing) | Error |
 | E-META-003 | `reflect()` called on unknown type in compile-time meta (existing) | Error |
 | E-META-004 | *Reserved.* Number unallocated; do not reuse — preserved for forensic search-hit stability against historical bug reports and design notes that may reference E-META-004. Future codes SHOULD start at E-META-011. | — |
