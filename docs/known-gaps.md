@@ -15,7 +15,7 @@
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
 | HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) | compiler-managed-async (deferred A9-class) · §29 vanilla-interop (open user decision) · 6nz-V class:NAME on for-lift (GENUINE) |
-| MED | 7 | (rotate out below) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · `~snapshot` raw-sigil · Generator policy · L19 multi-statement-handler |
+| MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
@@ -97,15 +97,6 @@ MCP V0 sub-units A+B+C+D shipped S125-S130. V0.E (E2E + adopter docs + fixture m
 
 - **Workaround:** for V0.E specifically, no workaround — the adopter setup doc + E2E examples don't exist. For deferred items: use `<program mcp="always">` to override the dev-only gate; build via `scrml build` not `scrml dev`.
 - **Status:** V0.E queued (~10-12h per SCOPING §3.E). Deferred items revisit at §58 land.
-
----
-
-### Bug 15 — `~snapshot` raw-sigil — `deferred`
-
-The `~snapshot` raw-sigil (snapshot the lift accumulator without consuming it) was queued in carry-forward. Not currently implemented; `~` works as the standard pipeline accumulator per SPEC §32, but the snapshot form is design-pending.
-
-- **Workaround:** rebind via `let x = ~` then continue the pipeline against `x` (consumes `~` but lets you reuse the value).
-- **Status:** design surface; no SCOPING yet. Filed.
 
 ---
 
@@ -225,7 +216,10 @@ Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-e
 
 ---
 
-## §7 Closed in S110-S130 (rotation; will rotate out next refresh)
+## §7 Closed in S110-S131 (rotation; will rotate out next refresh)
+
+**S131:**
+- **Bug 15 (MED) — `~snapshot` raw-sigil codegen leak** — SHIPPED per HU-5 Q-W35-1 (a) ratification. Two-part defensive codegen fix: (1) `emit-logic.ts:bare-expr` skips the spurious orphan `~` bare-expr the live parser peels off `~snapshot = {...}` leads; (2) `emit-expr.ts:emitIdent` adds a defensive marker `null /* ~ orphaned — codegen-fallback */` for any nested-expression orphan that bypasses the bare-expr branch. Regression test `compiler/tests/integration/tilde-snapshot-codegen-fix.test.js` (3 tests, all pass). SPEC §32 unchanged per pa.md Rule 4 — `~snapshot` is NOT a new language form; the native parser already handles the unified `~ IDENT = expr` lead, mirroring that in the live parser surfaceable as a separate follow-up. Closes the S125 Wave 14 DD-surfaced silent-correctness class for the tilde-decl reactive-deps path.
 
 **S130:**
 - **Bug 8 (HIGH) — E-TYPE-001 lifecycle access-before-transition fire** — Landing 1 SHIPPED (`1feaedc9`). Per-access transition-state tracking implemented in `compiler/src/type-system.ts` (+666 LOC + design pick β symbol-table side-table mirroring `checkFunctionBodyStateCompleteness` precedent). +33 new tests (27 unit / 6 integration) / +50 expect() calls. Closes the ~6+ week SPEC §14.3 line 7106 spec-vs-impl gap that the mutability-contracts article publish-twin's status banner had been acknowledging. Diagnostic message names binding + field name + struct type + pre-state type + post-state type + resolution path + SPEC anchor. Landing 2 (extension to non-engine cell positions + `->` → `to` glyph migration + engine-cell rejection diagnostic) queued.

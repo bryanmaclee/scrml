@@ -274,6 +274,20 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     return ctx.tildeVar;
   }
 
+  // §32 — orphan `~` defensive fallback. If `name === "~"` reaches emitIdent
+  // with `ctx.tildeVar === null`, the type-system's TildeTracker should have
+  // fired E-TILDE-001 (referenced but not initialized). In practice E-TILDE-001
+  // is not yet wired for every AST shape (see compiler/tests/integration/
+  // tilde-carry-forward.test.js:193 — "no-init ~ consumption" pre-existing gap),
+  // so without this fallback the literal `~` token would leak into generated JS
+  // (invalid — unary bitwise-NOT on nothing). Emit a clear marker so the cause
+  // is visible at inspection. Per HU-5 Q-W35-1 (a) ratification (`~snapshot`
+  // codegen bug fix, 2026-05-25): defense-in-depth landing companion to the
+  // emit-logic.ts:bare-expr orphan skip.
+  if (name === "~") {
+    return `null /* ~ orphaned \u2014 codegen-fallback */`;
+  }
+
   // §14.10 / §18.0.3 bare-variant inference codegen (C22, M9):
   // `.Variant` (leading dot, uppercase second char) lowers to its string tag,
   // matching the runtime convention used by enum objects (emitEnumVariantObjects),

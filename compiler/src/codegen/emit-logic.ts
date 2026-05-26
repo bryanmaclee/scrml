@@ -1181,6 +1181,29 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     case "bare-expr": {
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
+        // §32 — orphan `~` accumulator at statement position.
+        // When `~snapshot = {...}` (or any `~name = expr`) is parsed by the live
+        // parser (ast-builder.js), the leading `~` is peeled off as a spurious
+        // bare-expr (the statement-boundary check at collectExpr line 2588-2596
+        // breaks on `IDENT =` after `~`, leaving `~` as a standalone). The
+        // tilde-decl handler then matches `name = expr` and emits the tilde-decl
+        // correctly — but the orphan bare-expr `~` remains. Without this guard,
+        // codegen emits `let _scrml_tilde_N = ~;` (invalid JS — bitwise-NOT on
+        // nothing). Skip the orphan: there is no preceding initializer for `~`
+        // to consume, and the trailing tilde-decl is already self-contained.
+        // SPEC §32 ratifies `~` as the pipeline accumulator atom (READ-side);
+        // there is no statement-position production for a lone `~`. The native
+        // parser (parse-stmt.js:3015 — `tildeDeclLeadFollows`) correctly
+        // recognises the unified `~ IDENT = expr` lead; the live parser does
+        // not. Per HU-5 Q-W35-1 (a) ratification, the canonical-surface fix is
+        // bounded to codegen (no new SPEC §32 prose, no new language form).
+        if (
+          node.exprNode.kind === "ident" &&
+          node.exprNode.name === "~" &&
+          (!opts.tildeContext || opts.tildeContext.var === null)
+        ) {
+          return "";
+        }
         if (opts.tildeContext) {
           // §32 Gap 7: pure consume+reinit. A bare-expr that ALSO references `~`
           // in its RHS (e.g. `step2(~)` after `step1(2)` initialized `~`) must
