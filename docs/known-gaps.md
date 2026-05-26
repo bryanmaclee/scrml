@@ -14,7 +14,7 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **NEW S133 — Bug 17 E-META-001 runtime-meta scoping gap (SPEC §22.12 categorical / impl compile-time-only) — (a) RATIFIED S133, impl queued S134** |
+| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta scoping gap (RESOLVED S134 `6c6c0073`)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
 | MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
@@ -23,22 +23,23 @@
 
 ## §1 HIGH — adopter-visible / silent-wrong-output
 
-### Bug 17 — E-META-001 only fires in compile-time meta blocks; runtime blocks silently accept JS-host globals — `(a) RATIFIED S133; impl queued S134` (S133 NEW)
+### Bug 17 — E-META-001 only fires in compile-time meta blocks; runtime blocks silently accept JS-host globals — `RESOLVED S134 (commit 6c6c0073)` (was HIGH)
 
 **Surfaced S133 Step A** (commit `80b168e6`) — after closing the META_BUILTINS membership divergence, the Step A agent surfaced a second-order architectural gap. SPEC §22.12 line 14687 reads as **categorical**:
 
 > "JS-host ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.) are NOT in the META_BUILTINS set and trigger `E-META-001`."
 
-But current meta-checker fires E-META-001 only inside **compile-time** meta blocks (`bodyUsesCompileTimeApis === true` from `reflect` / `emit` / `emit.raw` API references). A pure **runtime** meta block — `^{ const x = bun.eval(...); /* no reflect/emit */ }` — gets early-returned in `checkMetaBlock` without consulting META_BUILTINS membership. The block emits unchanged into the generated `_scrml_meta_effect` body. At JS runtime: `bun` is not a Bun-runtime global (only `Bun` capital-B is), so the call **silently fails with ReferenceError** at runtime.
+But pre-S134 meta-checker fired E-META-001 only inside **compile-time** meta blocks (`bodyUsesCompileTimeApis === true` from `reflect` / `emit` / `emit.raw` API references). A pure **runtime** meta block — `^{ const x = bun.eval(...); /* no reflect/emit */ }` — got early-returned in `checkMetaBlock` without consulting META_BUILTINS membership. The block emitted unchanged into the generated `_scrml_meta_effect` body. At JS runtime: `bun` is not a Bun-runtime global (only `Bun` capital-B is), so the call **silently failed with ReferenceError** at runtime.
 
-- **Severity rationale:** HIGH. Compiles cleanly + crashes at runtime + adopter-visible. Exact "silent wrong output" class Rule 2 ("scrml is not a toy") + Rule 3 ("right answer beats easy answer") flag.
-- **Reproducer (verify-runnable post-Step-A):** `${ ^{ const x = bun.eval("Date.now()") } }` inside a `<program>` — compiles; runtime crashes.
-- **Workaround:** avoid JS-host globals (`bun` / `process` / `Bun` / `console` / `setInterval` / `fetch`) inside any `^{}` body, runtime OR compile-time. Use the enumerated `meta.*` API (§22.5.1) for runtime meta needs.
-- **Resolution path — (a) RATIFIED S133, impl queued S134:**
-  - User-ratified (a) after PA deliberation per `feedback_cohesion_and_falls_under_fingers` lens — extends Step A's compile-time fix symmetrically to runtime; matches SPEC §22.12 + §22.5.1 categorical reading; matches S114 Approach C design closure intent (scrml-native + `meta.*` API is the meta surface; no JS-host carve-outs).
-  - **PA-side pre-dispatch corpus sweep (S133):** grep'd `^{...}` blocks across `examples/`, `stdlib/`, `compiler/self-host/` for runtime references to `process`/`fetch`/`setInterval`/`setTimeout`/`Bun`/`console`. **Zero legitimate runtime-meta uses found.** Only matches: self-host meta-checker mirror files containing the META_BUILTINS list as literal strings (data, not runtime-meta usage; self-host parity deferred post-v1.0). Empirically clean — no corpus migration needed before (a) impl.
-  - **Brief shape for S134 dispatch (`scrml-js-codegen-engineer`, isolation:worktree):**
-    - Move the META_BUILTINS check OUTSIDE the `bodyUsesCompileTimeApis` early-return in `checkMetaBlock` (`compiler/src/meta-checker.ts`) — make it fire E-META-001 for runtime meta blocks too.
+- **Fix (S134 `6c6c0073`):** Approach A — new exported `checkMetaBlockForJsHostGlobals` walker (`compiler/src/meta-checker.ts` +160L) that runs UNCONDITIONALLY on every `^{}` body (compile-time AND runtime), parallel to `checkMetaBlock`. Scans against a new `JS_HOST_FORBIDDEN` Set (9 idents: `bun` / `Bun` / `process` / `console` / `setInterval` / `setTimeout` / `clearInterval` / `clearTimeout` / `fetch`). Respects local-decl shadowing, JS keywords, META_BUILTINS membership; recurses into nested `^{}`. Per-identifier hint messages (timer idents → `meta.interval`/`meta.timeout`; `fetch` → server-fn boundary; rest → generic 'not available'). Wired in `runMetaChecker` between `checkMetaBlock` and `checkReflectCalls` — preserves S133 Step A compile-time semantics verbatim. SPEC §22.11 catalog row broadened to enumerate the three E-META-001 fire conditions (disposition I; closes S114-introduced catalog drift). Regression tests at `compiler/tests/unit/meta-checker-bug17.test.js` (NEW, 33 tests = 1 set composition + 8 idents × runtime-fire + 2 bare-expr + 4 negative controls + 4 diagnostic-message + 1 reproducer end-to-end). Tests: 21,585 → 21,618 (+33, 0 fail). Full-suite gate green.
+- **Corpus migration silent under prior gate:** 25 pre-existing tests in `meta-integration.test.js` (13 sites) + `runtime-meta-integration.test.js` (19 sites) used `console.log(...)` inside runtime `^{}` bodies as a "force runtime classification + observe pipeline emission" pattern. Post-fix, these correctly fire E-META-001. Migrated cleanly to `meta.emit(...)` (canonical scrml-native surface per §22.5.1) — semantically equivalent for the codegen-shape assertions these tests carry. Same migration shape adopters with similar test/sample code would need.
+- **Open follow-ups (NOT regressions; separate concerns):**
+  1. `meta.runtime=false` diagnostic at `meta-checker.ts:~1622` still uses pre-S134 phrasing — broaden for §22.5/§22.11 consistency. Polish.
+  2. BS-path: `${ ^{} }` inside `<program>` markup interpolation produces only a `text` node (no meta block enters the pipeline). Latent issue separate from this fix. The canonical V5-strict shape (`p "test"\n^{ ... }\n`) surfaces the meta block correctly.
+  3. `compileScrml({source, filePath})` vs `({inputFiles:[filePath]})` API surface divergence — the `source` path may take a shortcut bypassing the meta-checker pipeline. Surfaced for awareness.
+- **Self-host parity DEFERRED** post-v1.0 per pa.md — `stdlib/compiler/meta-checker.scrml` + `compiler/self-host/meta-checker.scrml` mirrors carry pre-S134 META_BUILTINS as DATA only (no walker structure).
+- **Original brief shape (preserved for forensic):**
+  - Move the META_BUILTINS check OUTSIDE the `bodyUsesCompileTimeApis` early-return in `checkMetaBlock` (`compiler/src/meta-checker.ts`) — make it fire E-META-001 for runtime meta blocks too.
     - OR: add a sub-walker that runs unconditionally on every `^{...}` body and checks against META_BUILTINS / known-runtime-meta-API set.
     - Add regression-guard tests covering all 4 removed builtins × runtime context: `process` / `fetch` / `setInterval` / `setTimeout` / `Bun` / `console` (6 cases) inside `^{ ... }` with NO `reflect`/`emit`/`emit.raw` → assert E-META-001 fires.
     - Verify existing 14,566 baseline holds + add new tests (+6-8 logical assertions).
