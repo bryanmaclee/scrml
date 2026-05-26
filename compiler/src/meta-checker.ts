@@ -110,17 +110,22 @@ export interface TypeRegistryEntry {
 // ---------------------------------------------------------------------------
 // Compile-time builtins
 //
-// These identifiers are always available in ^{} meta contexts and should NOT
-// trigger E-META-001. They represent compile-time APIs, not runtime values.
+// JS-language built-ins (Object, Array, JSON, Math, …) + scrml meta API
+// (reflect, emit) + the reserved `compiler` namespace. These identifiers are
+// always available in ^{} meta contexts and should NOT trigger E-META-001
+// — they are compile-time-evaluable values, not runtime references.
+//
+// S133 Step A — JS-host ambient globals (`bun`, `process`, `Bun`, `console`,
+// `setInterval`, `fetch`, …) are NOT in this set per SPEC §22.12 (line 14687,
+// S114 Approach C ratification). Their presence in a `^{}` body that is
+// classified as compile-time meta SHALL trigger E-META-001 ("Runtime variable
+// referenced inside compile-time ^{} meta context"). This closes the latent
+// spec-vs-impl divergence that allowed `^{ const x = bun.eval(…); emit(…) }`
+// to silently fold to a literal at compile time.
 // ---------------------------------------------------------------------------
 
 export const META_BUILTINS = new Set([
-  // Bun/Node compile-time APIs
-  "bun",
-  "process",
-  "Bun",
-  "console",
-  // JS globals
+  // JS-language built-ins (compile-time-evaluable values)
   "Object",
   "Array",
   "String",
@@ -144,7 +149,7 @@ export const META_BUILTINS = new Set([
   "false",
   "NaN",
   "Infinity",
-  // scrml meta API
+  // scrml meta API (compile-time)
   "reflect",
   "emit",
   // S48: `compiler` is registered here so E-META-001/E-META-005 don't pile on

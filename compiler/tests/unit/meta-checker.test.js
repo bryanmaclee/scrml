@@ -335,12 +335,43 @@ describe("checkExprForRuntimeVars", () => {
     expect(errors).toHaveLength(0);
   });
 
-  test("§11 no error for META_BUILTINS (bun, process, etc.)", () => {
+  test("§11 no error for META_BUILTINS (JSON, Object, Math, etc.)", () => {
+    // S133 Step A — `bun` / `process` / `Bun` / `console` retired from
+    // META_BUILTINS per SPEC §22.12. The remaining built-ins are JS-language
+    // values (compile-time-evaluable) + scrml meta API + reserved `compiler`.
     const errors = [];
     const locals = new Set();
     const registry = new Map();
-    checkExprForRuntimeVars("bun.eval(process.env.FOO)", locals, registry, span(), "/test.scrml", errors);
+    checkExprForRuntimeVars("JSON.stringify(Object.keys(Math))", locals, registry, span(), "/test.scrml", errors);
     expect(errors).toHaveLength(0);
+  });
+
+  test("§11b E-META-001 fires for retired JS-host globals (S133 Step A — SPEC §22.12)", () => {
+    // Regression guard for the latent spec-vs-impl divergence closed in S133:
+    // `bun.eval(...)`, `process.env.X`, `Bun.serve(...)`, `console.log(...)`
+    // SHALL fire E-META-001 when referenced inside a compile-time ^{} meta
+    // context. checkExprForRuntimeVars is the inner helper called from
+    // checkMetaBlock; runtime-meta blocks early-return before reaching here.
+    {
+      const errors = [];
+      checkExprForRuntimeVars("bun.eval('1+1')", new Set(), new Map(), span(), "/test.scrml", errors);
+      expect(errors.filter(e => e.code === "E-META-001" && e.message.includes("'bun'"))).toHaveLength(1);
+    }
+    {
+      const errors = [];
+      checkExprForRuntimeVars("process.env.PORT", new Set(), new Map(), span(), "/test.scrml", errors);
+      expect(errors.filter(e => e.code === "E-META-001" && e.message.includes("'process'"))).toHaveLength(1);
+    }
+    {
+      const errors = [];
+      checkExprForRuntimeVars("Bun.serve({})", new Set(), new Map(), span(), "/test.scrml", errors);
+      expect(errors.filter(e => e.code === "E-META-001" && e.message.includes("'Bun'"))).toHaveLength(1);
+    }
+    {
+      const errors = [];
+      checkExprForRuntimeVars("console.log('x')", new Set(), new Map(), span(), "/test.scrml", errors);
+      expect(errors.filter(e => e.code === "E-META-001" && e.message.includes("'console'"))).toHaveLength(1);
+    }
   });
 
   test("§12 E-META-001 for runtime variable reference", () => {
@@ -449,18 +480,73 @@ describe("checkMetaBlock", () => {
     expect(errors).toHaveLength(0);
   });
 
-  test("§18 compile-time builtins allowed everywhere", () => {
+  test("§18 META_BUILTINS allowed inside compile-time meta", () => {
+    // S133 Step A — META_BUILTINS narrowed per SPEC §22.12. JS-language values
+    // (JSON / Object / Math / Date / etc.) remain compile-time-evaluable.
+    // The retired JS-host globals (bun / process / Bun / console) are
+    // exercised in §18b below.
     const errors = [];
     const meta = makeMetaNode([
       makeBareExpr("reflect(SomeType)"),
-      makeBareExpr("bun.eval(`return process.env.PORT || 3000`)"),
-      makeBareExpr("JSON.parse(bun.readFile('config.json'))"),
-      makeBareExpr("Object.keys(process.env)"),
-      makeBareExpr("console.log(Date.now())"),
+      makeBareExpr("JSON.stringify(Object.keys({}))"),
+      makeBareExpr("Math.max(1, 2, 3)"),
+      makeBareExpr("Date.now()"),
     ]);
     const registry = new Map([["SomeType", { kind: "enum", name: "SomeType" }]]);
     checkMetaBlock(meta, null, registry, "/test.scrml", errors);
-    expect(errors).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-META-001")).toHaveLength(0);
+  });
+
+  test("§18b E-META-001 fires for retired JS-host globals in compile-time meta (S133 Step A)", () => {
+    // SPEC §22.12 line 14687: JS-host ambient globals (`bun`, `process`, `Bun`,
+    // `console`, `setInterval`, `fetch`, …) are NOT in META_BUILTINS and SHALL
+    // trigger E-META-001 inside a compile-time `^{}` block. This guards the
+    // latent spec-vs-impl divergence closed in S133 — under the prior set,
+    // `^{ const x = bun.eval(...); emit(...) }` silently folded to a literal.
+    {
+      const errors = [];
+      const meta = makeMetaNode([
+        makeBareExpr("reflect(SomeType)"),
+        makeBareExpr("bun.eval(`return 1`)"),
+      ]);
+      const registry = new Map([["SomeType", { kind: "enum", name: "SomeType" }]]);
+      checkMetaBlock(meta, null, registry, "/test.scrml", errors);
+      const bunErrs = errors.filter(e => e.code === "E-META-001" && e.message.includes("'bun'"));
+      expect(bunErrs.length).toBeGreaterThanOrEqual(1);
+    }
+    {
+      const errors = [];
+      const meta = makeMetaNode([
+        makeBareExpr("reflect(SomeType)"),
+        makeBareExpr("Object.keys(process.env)"),
+      ]);
+      const registry = new Map([["SomeType", { kind: "enum", name: "SomeType" }]]);
+      checkMetaBlock(meta, null, registry, "/test.scrml", errors);
+      const processErrs = errors.filter(e => e.code === "E-META-001" && e.message.includes("'process'"));
+      expect(processErrs.length).toBeGreaterThanOrEqual(1);
+    }
+    {
+      const errors = [];
+      const meta = makeMetaNode([
+        makeBareExpr("reflect(SomeType)"),
+        makeBareExpr("Bun.serve({})"),
+      ]);
+      const registry = new Map([["SomeType", { kind: "enum", name: "SomeType" }]]);
+      checkMetaBlock(meta, null, registry, "/test.scrml", errors);
+      const bunCapErrs = errors.filter(e => e.code === "E-META-001" && e.message.includes("'Bun'"));
+      expect(bunCapErrs.length).toBeGreaterThanOrEqual(1);
+    }
+    {
+      const errors = [];
+      const meta = makeMetaNode([
+        makeBareExpr("reflect(SomeType)"),
+        makeBareExpr("console.log(Date.now())"),
+      ]);
+      const registry = new Map([["SomeType", { kind: "enum", name: "SomeType" }]]);
+      checkMetaBlock(meta, null, registry, "/test.scrml", errors);
+      const consoleErrs = errors.filter(e => e.code === "E-META-001" && e.message.includes("'console'"));
+      expect(consoleErrs.length).toBeGreaterThanOrEqual(1);
+    }
   });
 
   test("§47 let initializer checked for runtime vars", () => {

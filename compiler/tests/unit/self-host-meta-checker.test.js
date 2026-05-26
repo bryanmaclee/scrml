@@ -142,11 +142,15 @@ describe("self-host parity: MetaError", () => {
 // ---------------------------------------------------------------------------
 
 describe("self-host parity: META_BUILTINS", () => {
-  test("contains bun/process/Bun/console", () => {
-    expect(META_BUILTINS.has("bun")).toBe(true);
-    expect(META_BUILTINS.has("process")).toBe(true);
-    expect(META_BUILTINS.has("Bun")).toBe(true);
-    expect(META_BUILTINS.has("console")).toBe(true);
+  test("does NOT contain JS-host ambient globals (S133 Step A — SPEC §22.12)", () => {
+    // S133 Step A — SPEC §22.12 line 14687 ratification:
+    // "JS-host ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.)
+    // are NOT in the META_BUILTINS set and trigger `E-META-001`."
+    // Closes the latent spec-vs-impl divergence carried since S114.
+    expect(META_BUILTINS.has("bun")).toBe(false);
+    expect(META_BUILTINS.has("process")).toBe(false);
+    expect(META_BUILTINS.has("Bun")).toBe(false);
+    expect(META_BUILTINS.has("console")).toBe(false);
   });
 
   test("contains JS globals", () => {
@@ -793,14 +797,18 @@ describe("self-host parity: checkMetaBlock E-META-001", () => {
   });
 
   test("no errors when identifier is a META_BUILTIN", () => {
+    // S133 Step A — `console` is NOT in META_BUILTINS (SPEC §22.12). Use a
+    // remaining valid META_BUILTIN (`JSON`) to exercise the no-flag path on a
+    // compile-time meta block. JS-language built-ins are compile-time-evaluable.
     const body = [
       makeConstDecl("result", "reflect(MyType)"),
-      makeBareExpr("console.log(result)"),
+      makeBareExpr("emit(JSON.stringify(result))"),
     ];
     const typeRegistry = new Map([["MyType", { kind: "enum", name: "MyType", variants: [] }]]);
     const errors = [];
     checkMetaBlock(makeMetaNode(body), null, typeRegistry, "test.scrml", errors);
-    // `console` is a META_BUILTIN; `result` is a meta local; `MyType` is a type
+    // `JSON` is a META_BUILTIN; `result` is a meta local; `MyType` is a type;
+    // `emit` is the compile-time API. None should flag E-META-001.
     expect(errors.filter(e => e.code === "E-META-001")).toHaveLength(0);
   });
 
