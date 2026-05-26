@@ -508,6 +508,45 @@ S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 b
 - **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
 - **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
 
+## v0.6.1 — 2026-05-26 (patch — Bug W critical + Bug 15 + E-FN-003 + iteration/lifecycle/MCP-V0 feature bundle)
+
+v0.6.1 cuts a patch release covering 3 bug fixes (one CRITICAL) and bundles 5 days of feature additions (iteration `<each>`, lifecycle annotation `(A to B)`, MCP V0 series A+B+C+D+E) plus M5/M6 native-parser progress that lands non-adopter-visible. Per S94 bump-on-tag convention; per S133 PA workflow audit (drift between v0.6.0 tag and HEAD = 205 commits = needed release-cut). The v0.7 trigger (M5 pipeline swap + `--parser=scrml-native` routing default) is NOT yet hit (M6.7 STOP at S128 reverted the flip). Cut at S133.
+
+**Bug fixes (3):**
+
+- **Bug W (CRITICAL — silent grouping-paren-drop in `emitBinary`)** (S126 `a91ad5de`). The codegen `emitBinary` flattened `(2+3)*4` to `2+3*4` (= 14, not 20) by discarding grouping parens. Closed with precedence-aware paren emission. Adopter-impact: arithmetic expressions in compiled output silently produced wrong values when grouping was load-bearing. **Headline reason for the v0.6.1 cut.**
+- **Bug 15 (~snapshot orphan-sigil leak in bare-expr Phase 3 codegen)** (S130-S131). Orphan `~` sigil could leak through the bare-expr Phase 3 fast path. Closed via two-site fix (Phase 3 fast-path skip + defensive marker in `emitIdent`).
+- **Bug 12 / E-FN-003 (markup-attribute false-positive)** (S133 `dbef4f4d`). A `fn` returning attributed markup (`<span class="b">…`) false-fired `E-FN-003: writes to 'class'` because `checkOuterScopeMutation`'s text-heuristic regex misread serialized markup attribute names as outer-scope assignments. Defeated the canonical "fn returns markup" idiom (PRIMER §6.4 sub-shape 4, kickstarter §11.11). Closed: skip the heuristic when the statement's serialized text starts with `<`. +4 regression tests incl. negative-control.
+
+**Feature bundles (landed since v0.6.0, ride-along in this patch cut):**
+
+- **Iteration `<each>` (Landings 1-2-3-4):** `<each in=>` (collection form) + `<each of=N>` (count form); `@.` contextual sigil for current iteration value; `<empty>` sub-element for empty-state fallback; `key=` inference + `W-EACH-KEY-001` info-lint; `:`-shorthand body composition; `as name` alias for nested-each disambiguation; `W-EACH-PROMOTABLE` Tier-0→1 promotion-candidate lint; `bun scrml promote --each` CLI scaffolded (S130-S132). SPEC §17.7 NEW; §3.4 `@.` sigil definition; §17.4 marked Tier-0; §56.10 promotion CLI.
+- **Lifecycle annotation `(A to B)` (Landings 1-2-2.5):** Approach C extension SPEC + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` fire + `->` → `to` glyph migration + `transition()` marker for fn-return variant-progression. Extended to cells / fn params / fn return / schema fields / channel cells. Closes the ~6+ week SPEC §14.3 spec-vs-impl gap (S130-S131; `1feaedc9` per-access transition-state tracking +666 LOC + 27 unit + 6 integration tests).
+- **MCP V0 series A+B+C+D+E COMPLETE** (S125-S131): `scrml:mcp` stdlib module + 11 MCP tools + `<program mcp>` attribute wiring + auto-install + 22 E2E tests + 321L adopter doc + 3 fixture route files. v0.next = post-§58 Build Story revisit.
+- **Match block-form FileAST synthesis in native parser** (S121 `69388e28`). Companion to the live BS+Acorn pipeline `<match for=Type>` shape (PRIMER §6.2).
+
+**Spec / canon work landed since v0.6.0:**
+
+- Grammar-lockdown 3-audit cycle (Phase 1a SPEC.md inventory; Phase 1b PIPELINE + canon corroboration; Phase 1c inverse-direction coverage) + 4-phase consolidation plan ratified (S129).
+- One-shot-lift canon (PRIMER §6.4 sub-shape 4 + kickstarter §11.11 + SPEC §10.4 / §49 fix scoping `E-SYNTAX-002` to bare `function` not `fn`) (S132 `5d52e4c8`).
+- §29 Vanilla File Interop reframed as Nominal / spec-ahead-of-implementation; NOT retired (S132 `5ec5af56`).
+- V-kill write-side enforcement (`E-WRITE-NOT-IN-LOGIC-CONTEXT` at default-logic body-top) (S123).
+- Phase 2 amendment clusters closed: D §39 schema placement F-019, E §55.5 validity-surface predictability F-018, B-doc Approach C SPEC subsumption (drops user-facing `bun.eval` surface; retires `E-EVAL-001`), A V-kill SPEC sweep + ~90 worked-example sites (S130).
+
+**Native-parser progress (non-adopter-visible — pre-pipeline-swap):**
+
+- M5.5+ retire-class + downstream extraction + bridge-lights (continuation in v0.6.x landed S119+).
+- M6 arc opened: M6.5 path-b COMPLETE (S127), M6.6 path-c work, M6.7 D-class wave (S128 — 4 units; partial-landing reverted; flip not landed; v0.7 trigger condition not yet hit).
+
+**Compiler hygiene (S133 — PA workflow infrastructure):**
+
+- pa.md drift fixes (`scrml-dev-pipeline` → `scrml-js-codegen-engineer`, `agentStore` → `agents-store`) per S133 DD.
+- PRIMER §12 agent-name fix.
+- PA workflow infrastructure audit (`scrml-support/docs/deep-dives/pa-workflow-systems-audit-2026-05-26.md`) — defense-in-depth GREEN, BRIEFING-ANTI-PATTERNS exists (S132 "doesn't exist" claim corrected), maps-discipline measurement clarified.
+- Worktree disk hygiene: 7 orphan locked worktrees from S131 cleaned (461MB reclaimed).
+
+Tests: 21,588 pass / 0 fail / 170 skip / 1 todo across 794 files (+4 from S131 baseline = the E-FN-003 regression tests; zero regressions).
+
 ## v0.6.0 — 2026-05-21 (native-parser M5 — non-routing catalog units + Build Story SPEC)
 
 v0.6.0 cuts the M5 non-routing units — the catalog bridges and the §34 reconciliation that prepare the pipeline swap without performing it. The swap itself (Tier B native-parser feature completion + the `--parser=scrml-native` routing change) is **v0.7**. v0.6.0 also lands the Build Story SPEC section, spec-ahead-of-implementation. Cut at S118.
