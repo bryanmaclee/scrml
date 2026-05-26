@@ -1,0 +1,62 @@
+// MCP V0.E fixture — File 2/3 — Loads route ("/loads").
+//
+// Surface coverage on this page:
+//   - Engine #1: LoadPhase (Tier-2 state machine with payload variants)
+//   - Server fn #1: loadRows(limit) — body-content escalation via ?{...}
+//     (Insight 26 — no explicit `server` modifier required)
+//   - Channel #1: <channel name="dispatch" topic="lobby"> with auto-synced
+//     <pending> + <count> V5-strict cells (sibling of <page>/page-roots
+//     per Insight 30 §38.1).
+//
+// References UserRole.Anonymous transitively (the role enum was declared in
+// routes/index.scrml; the page does not gate on a role, so the chunk emits
+// for all roles including Anonymous + Driver + Admin).
+
+<program title="Loads" auth="required">
+
+type LoadPhase:enum = {
+  Idle
+  Loading
+  Loaded(rows: int)
+  Failed(message: string)
+}
+
+server function loadRows(limit: int) {
+  return ?{`SELECT id FROM items LIMIT ${limit}`}.all()
+}
+
+function load() {
+  @loadPhase = .Loading
+  const rows = loadRows(20)
+  @loadPhase = .Loaded(rows.length)
+}
+
+<channel name="dispatch" topic="lobby">
+  <pending> = []
+  <count>   = 0
+</>
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Loads</h1>
+  <a href="/" class="text-blue-600">Home</a>
+  <span class="text-slate-500">pending: ${@pending.length} / online: ${@count}</span>
+</nav>
+
+<engine for=LoadPhase initial=.Idle>
+  <Idle rule=.Loading>
+    <button onclick=load() class="px-3 py-1 rounded bg-slate-100">Load</button>
+  </>
+  <Loading rule=(.Loaded | .Failed)>
+    <p>Loading...</p>
+  </>
+  <Loaded(rows) rule=.Idle>
+    <p>Got ${rows} rows.</p>
+    <button onclick=@loadPhase = .Idle class="px-3 py-1 rounded bg-slate-100">Reset</button>
+  </>
+  <Failed(message) rule=.Idle>
+    <p class="text-red-600">Failed: ${message}</p>
+    <button onclick=@loadPhase = .Idle class="px-3 py-1 rounded bg-slate-100">Retry</button>
+  </>
+</>
+
+</program>

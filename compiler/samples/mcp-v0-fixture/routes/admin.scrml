@@ -1,0 +1,60 @@
+// MCP V0.E fixture — File 3/3 — Admin route ("/admin").
+//
+// Surface coverage on this page:
+//   - Engine #2: Health (Tier-2 enum-only state machine, no payload variants)
+//   - Form #1: <signup> compound state with validators (auto-synthesizes
+//     @signup.{isValid,errors,touched,submitted} + per-field surface per §55)
+//   - Server fn #2: pingAdmin() — body-content escalation via ?{...}
+//   - <auth role="Admin"> gate around the entire admin section — Component 4
+//     of the Reachability Solver admits this subtree to the Admin chunk and
+//     excludes it from Anonymous + Driver chunks per §40.9.5.
+//
+// References UserRole.Admin variant (declared in routes/index.scrml).
+
+<program title="Admin" auth="required">
+
+type Health:enum = { Healthy, Critical }
+
+<signup>
+  <name  req length(>=2)>  = <input type="text"/>
+  <email req>              = <input type="email"/>
+</>
+
+server function pingAdmin() {
+  return ?{`SELECT 1`}.get()
+}
+
+function flipHealth() {
+  @health = (@health == .Healthy) ? .Critical : .Healthy
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">Admin</h1>
+  <a href="/" class="text-blue-600">Home</a>
+</nav>
+
+<auth role="Admin">
+  <section class="p-4 border border-red-500 bg-red-50">
+    <h2 class="text-lg font-medium text-red-700">Admin-only controls</h2>
+
+    <engine for=Health initial=.Healthy>
+      <Healthy rule=.Critical>
+        <p>System healthy.</p>
+        <button onclick=flipHealth() class="px-3 py-1 rounded bg-slate-100">Mark Critical</button>
+      </>
+      <Critical rule=.Healthy>
+        <p class="text-red-600">System CRITICAL.</p>
+        <button onclick=flipHealth() class="px-3 py-1 rounded bg-slate-100">Mark Healthy</button>
+      </>
+    </>
+
+    <form class="mt-4">
+      <h3>Sign up an admin</h3>
+      <div><label>Name</label> <name/></div>
+      <div><label>Email</label> <email/></div>
+      <button onclick=pingAdmin() class="px-3 py-1 rounded bg-slate-100">Ping</button>
+    </form>
+  </section>
+</auth>
+
+</program>

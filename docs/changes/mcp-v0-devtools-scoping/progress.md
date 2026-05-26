@@ -203,3 +203,85 @@ auto-synced-cell collection) landed in the same dispatch — see the
 
 (To be filled after PA-authored commit fires.)
 
+
+---
+
+# Sub-unit E — Tests + adopter docs (separate dispatch — agent-a935f95138c2cb86a)
+
+**Worktree:** `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a935f95138c2cb86a`
+**Branch:** `worktree-agent-a935f95138c2cb86a`
+**Base:** `5551bca0` (S130 close — wrap commit, master-list §0.6, CHANGELOG)
+**Dispatch:** Sub-unit E — end-to-end integration tests against a multi-page fixture + adopter-facing setup doc.
+
+## Timeline
+
+- **T0** — Startup verification clean. `pwd` matches WORKTREE_ROOT; `git status --short` empty; tree clean; on branch `worktree-agent-a935f95138c2cb86a`.
+- **T0+1m** — `bun install` clean (204 packages, 236ms incl. @modelcontextprotocol/sdk@1.29.0). `bun run pretest` compiled 13 test samples.
+- **T0+2m** — First WIP commit echoing pwd per S99 discipline (`796de658`).
+- **T0+8m** — Mandated reads complete: primary.map.md (full), PA-SCRML-PRIMER §1-§13 + §13.7, SPEC-INDEX (full), SCOPING.md §3 Sub-unit E (lines 277-300) + §1 11-tool catalog, ALL FOUR mcp progress.md files (parent + A-tests + C-stdlib + D), llm-kickstarter-v2 §1-§11, BRIEFING-ANTI-PATTERNS in full, mcp-server-tools.test.js (Sub-unit C's reference integration test, 374 LOC), mcp-sidecar-compile.js helper, mcp.js entry-points (install / loadSidecars / registerMcpTools / startMcpServer / shutdownMcpServer / 11 tool resolvers), mcp-descriptors.ts interfaces, mcp-program-attr.test.js (Sub-unit D's reference), attribute-registry.js mcp= attribute spec, build.js generateServerEntry MCP boot block exact shape.
+- **T0+12m** — Fixture authored at `compiler/samples/mcp-v0-fixture/routes/` — 3-file multi-page app (mirrors the A-5 cornerstone shape): index.scrml (home + UserRole enum + auth-gated nav), loads.scrml (LoadPhase engine + loadRows server fn + dispatch channel), admin.scrml (Health engine + signup form + pingAdmin server fn + auth-gated admin subtree).
+- **T0+18m** — Smoke compile via CLI surfaced unintended `${...}` wrappers (W-PROGRAM-REDUNDANT-LOGIC) and that the MCP serverfns extractor intentionally surfaces ONLY explicit `server function` declarations (per mcp-descriptors.ts:826), not auto-escalated ones. Restored explicit `server function` modifier (W-DEPRECATED-SERVER-MODIFIER is acceptable for the fixture purpose — descriptor coverage trumps migration-roadmap lint). Smoke baseline post-cleanup: 0 fatal / 8 warnings + 2 ghost-pattern lints — all informational; comparable to the cornerstone A-5 fixture's warning set.
+- **T0+22m** — Fixture commit (`5b7511e1` — see below for SHA chain). All 4 sidecars + chunks.json populated correctly (2 engines / 1 form / 1 channel / 2 server fns).
+- **T0+30m** — Authored `compiler/tests/integration/mcp-v0-e2e.test.js` (~440 LOC, 22 tests). Strategy mirrors mcp-server-tools.test.js (in-process Client over InMemoryTransport, MOCK runtime with descriptor-resolved keys), but binds against on-disk multi-page fixture instead of inline source string.
+- **T0+32m** — First-run test: **22 pass / 0 fail / 136 expect() / 549ms.**
+- **T0+34m** — E2E test commit landed; pre-commit gate clean.
+- **T0+45m** — Authored `docs/adopter/mcp-setup.md` (~321 LOC). Quick-start + the two `mcp=` values + output artifact map + exact generated boot block (matches build.js generateServerEntry verbatim — promise-form + globalThis._scrml_mcp_handle stash + SCRML_MCP_WATCH=1 env) + LLM agent client config + per-tool reference + troubleshooting (top-level-only / globalThis-unset limitation / scrml-dev-vs-build / STDOUT discipline). Pa.md Rule 4 cross-check applied to EVERY claim against landed source.
+- **T0+48m** — Adopter doc commit landed; pre-commit gate clean.
+
+## Files Landed
+
+- `compiler/samples/mcp-v0-fixture/routes/index.scrml` (NEW ~38 LOC) — home page
+- `compiler/samples/mcp-v0-fixture/routes/loads.scrml` (NEW ~60 LOC) — engine + channel + server fn
+- `compiler/samples/mcp-v0-fixture/routes/admin.scrml` (NEW ~57 LOC) — engine + form + server fn + auth gate
+- `compiler/tests/integration/mcp-v0-e2e.test.js` (NEW ~440 LOC) — 22 tests, 11 tool round-trips + multi-page assertions
+- `docs/adopter/mcp-setup.md` (NEW ~321 LOC) — adopter-facing setup + reference
+
+## Test Coverage
+
+22 tests across 4 describe blocks:
+- §1 Fixture compile + sidecar emission (3 tests) — 0 fatal errors / 5 sidecars present / counts match
+- §2 MCP server registers the 11 LOCKED tools (1 test)
+- §3 Per-tool round-trip (15 tests covering all 11 tools + null-on-unknown variants)
+- §4 Multi-page-specific (2 tests) — multiple entry points + per-role chunk variance observable
+
+## SCOPING-vs-landed contradictions (Pa.md Rule 4)
+
+1. **Server-fn extractor scope** — SCOPING §1 Tool 5 description does not flag that the MCP descriptor extractor intentionally surfaces only EXPLICIT `server function` declarations (auto-escalated ones excluded). This is documented in mcp-descriptors.ts:826 as deliberate v0 posture ("what an adopter authored as RPC-callable"). The fixture must use explicit `server function` modifier despite W-DEPRECATED-SERVER-MODIFIER lint to populate serverfns.json. NOT A BUG — landed behavior wins; surfaced as a doc gap that the adopter doc now addresses.
+
+2. **Brief Q3.4 deferred** — the SCOPING risk register §3.D notes "no canonical dev-vs-production hook in compiler today" and the V0.D progress confirms the boot uses a runtime NODE_ENV gate in generated _server.js per pa.md Rule 3. This is the LANDED shape and the adopter doc documents it faithfully. The §58 Build Story implementation will revisit.
+
+3. **Tool 7 shape gap** — the SHAPE GAP surfaced in C's progress (Tool 7 cannot faithfully filter per-route because chunks.json carries no serverFnNodeIds and serverfns.json carries no node-id). Tool 7 is degraded-honest in the runtime; the adopter doc documents this explicitly. Real fix is a documented A+D follow-on.
+
+## V0.A-D cross-tool integration bugs surfaced
+
+NONE. The fixture compiles cleanly through the V0.A-D pipeline; all 4 sidecars + chunks.json land correctly; all 11 tools round-trip against the descriptors with deterministic mock runtime; the per-role chunk-variance test confirms `<auth role="Admin">` (V0.A → V0.D chain) drives multi-role topology surfaces correctly through to the MCP client view.
+
+The V0.D-documented limitation (per-module .server.js files don't yet stash _scrml_reactive_get on globalThis) is acknowledged in the test-file header AND in the adopter doc troubleshooting; it does NOT affect the E2E test (mock runtime injects deterministic values) and does NOT affect the topology tools (1, 2a, 3a, 4a, 4b, 5, 6a, 7 read from sidecars not the runtime).
+
+## Pre-commit gate
+
+Before: 14532 pass / 0 fail / 88 skip / 1 todo (from session-start baseline).
+After:  14554 pass / 0 fail / 88 skip / 1 todo. **+22 net new = exactly the new E2E tests. Zero regressions.**
+
+## File-disjoint coordination (with sibling Lifecycle Landing 2 + Iteration Landing 1)
+
+CONFIRMED file-disjoint:
+- This dispatch's writes: `compiler/samples/mcp-v0-fixture/**` (NEW directory), `compiler/tests/integration/mcp-v0-e2e.test.js` (NEW file), `docs/adopter/mcp-setup.md` (NEW file), `docs/changes/mcp-v0-devtools-scoping/progress.md` (APPEND ONLY).
+- Sibling dispatches touch SPEC.md + compiler core — zero overlap.
+- No coordination friction expected or observed.
+
+## Final SHA
+
+`d86962ef` (progress-doc append) → the SHA-fill commit immediately following is the dispatch close.
+
+## Maps consulted + load-bearing finding
+
+`primary.map.md` (full read). Load-bearing finding: the map's MCP routing table (lines 51-62 — "MCP descriptor-extractor work" and "MCP runtime / server work") was directly useful in identifying which source files to verify against. Map is from S127 (HEAD `3a909c1d`); current HEAD `5551bca0` is ~115 files newer (MCP V0.D landed at `2b51da82` per brief). Map content was used as a starting hypothesis verified via grep/Read against current source per brief mandate; the MCP descriptor + runtime / server module routings held up against current source.
+
+## Status: COMPLETE
+
+V0.A + V0.B + V0.C + V0.D + V0.E all SHIPPED. MCP V0 is feature-complete; remaining work is documented follow-ons:
+1. SHAPE GAP for Tool 7 (node-id join — A+D follow-on)
+2. globalThis._scrml_{reactive,derived}_get stash from per-module .server.js (follow-on wave)
+3. scrml dev in-process MCP boot (follow-on)
+4. Production §47 encoding pass-through for cellKey/compoundKeys

@@ -1,0 +1,39 @@
+// MCP V0.E fixture — multi-page app exercising all 11 MCP tools.
+//
+// File 1/3 — Home route ("/"). Declares the app-scope UserRole enum (referenced
+// by the `<auth role="Admin">` gate on the admin nav link and by routes/admin.scrml's
+// gated subtree). The (b)-rule role-enum resolver (auth-graph.ts:resolveRoleEnum)
+// discovers it via the cross-file role references.
+//
+// Surface coverage on this page:
+//   - <count> reactive cell (V5-strict declaration + access)
+//   - increment() local function (writes @count)
+//   - <auth role="Admin"> gate around the /admin link
+//   - Internal <a href="/loads"> + <a href="/admin"> for chunk prefetch wiring
+
+<program title="MCP Demo Home" auth="required">
+
+type UserRole:enum = { Anonymous, Driver, Admin }
+
+<count> = 0
+
+function increment() {
+  @count = @count + 1
+}
+
+<nav class="flex items-center gap-3 p-4 border-b">
+  <h1 class="text-xl font-semibold">MCP Demo</h1>
+  <a href="/loads" class="text-blue-600">Loads</a>
+  <auth role="Admin">
+    <a href="/admin" class="text-red-600">Admin</a>
+  </auth>
+</nav>
+
+<section class="p-4">
+  <p>Welcome. Click the counter to exercise reactive state.</p>
+  <button onclick=increment() class="px-3 py-1 rounded bg-slate-100">
+    ${@count}
+  </button>
+</section>
+
+</program>
