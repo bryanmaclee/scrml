@@ -2476,6 +2476,44 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       lines.push(`let ${resultVar} = ${_autoAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
 
+      // R24-BUG-2 (S136 / known-gaps Bug 29) — split a joined arm body on
+      // top-level `;` (depth-0). Mirrors rewriteBlockBody's separator pass so
+      // we can inspect the LAST top-level statement.
+      const splitTopLevelStmts = (joined: string): string[] => {
+        const parts: string[] = [];
+        let current = "";
+        let depth = 0;
+        for (let i = 0; i < joined.length; i++) {
+          const ch = joined[i];
+          if (ch === "{" || ch === "(" || ch === "[") {
+            depth++;
+            current += ch;
+            continue;
+          }
+          if (ch === "}" || ch === ")" || ch === "]") {
+            depth--;
+            current += ch;
+            continue;
+          }
+          if (ch === ";" && depth === 0) {
+            const s = current.trim();
+            if (s) parts.push(s);
+            current = "";
+            continue;
+          }
+          current += ch;
+        }
+        const tail = current.trim();
+        if (tail) parts.push(tail);
+        return parts;
+      };
+      // R24-BUG-2 — `return`/`throw`/`break`/`continue` are JS STATEMENTS,
+      // not expressions; wrapping `${resultVar} = <stmt>;` produces a
+      // SyntaxError like `_result = return;` (the dominant adopter shape per
+      // PRIMER §6 — early-return-on-error).
+      const isTerminatorStmt = (stmt: string): boolean =>
+        /^(?:return|throw|break|continue)(?:[\s;]|$)/.test(stmt);
+
       const emitArmAssign = (armBody: string): string[] => {
         const trimmed = armBody.trim();
         // M-7C-D-12 Track 3: empty-body arm produces `resultVar = null;` (was `= undefined;`)
@@ -2485,6 +2523,20 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // Multi-statement handler: emit body as-is (authors should assign to
           // resultVar themselves for non-trivial bodies).
           return trimmed.split("\n").map((l) => `    ${l}`);
+        }
+        // R24-BUG-2: when the LAST top-level statement of the arm body is a
+        // JS terminator (`return`/`throw`/`break`/`continue`), the body is
+        // statement-shaped, not expression-shaped. Skip the `_result = ...`
+        // wrap and emit each statement directly so the terminator flows up
+        // through the enclosing `if (... __scrml_error) { ... }` block; for
+        // `return` this exits the enclosing function (the canonical adopter
+        // idiom from PRIMER §6 / SPEC §19.4 — early-return-on-error). Bodies
+        // mixing side-effects then a terminal `return` (e.g. `@phase = .Error;
+        // return`) emit as a sequence of statements; preceding side-effects
+        // execute before the terminator fires.
+        const stmts = splitTopLevelStmts(trimmed);
+        if (stmts.length > 0 && isTerminatorStmt(stmts[stmts.length - 1])) {
+          return stmts.map((s) => `    ${s};`);
         }
         const bare = trimmed.replace(/;\s*$/, "");
         return [`    ${resultVar} = ${bare};`];
