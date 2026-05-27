@@ -12265,16 +12265,27 @@ function processFile(
   // Landing 1 (HU-1 Q2=b, 2026-05-25): struct-field-only scope. Landing 2
   // extends to non-engine cell positions (Shape 1, fn parameters, schema
   // fields, channel cells) per HU-1 Q1=c.
+  // B-prereq (S134 — Bug 19 HIGH): Sub-Pass 2.a extends collection to
+  // include `state-decl` AST nodes (Shape 1 reactive cells with struct-typed
+  // annotations); the orchestrator passes the engine-cell-name set so the
+  // collector skips engine-owned cells (handled separately by the carve-out).
   {
     const lifecycleTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
       ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
       ?? [];
+    const lifecycleEngineCellNames = new Set<string>();
+    for (const machine of machineRegistry.values()) {
+      if (typeof machine.name === "string" && machine.name.length > 0) {
+        lifecycleEngineCellNames.add(machine.name);
+      }
+    }
     runLifecycleAccessCheck(
       lifecycleTopNodes,
       typeRegistry,
       lifecycleRegistry,
       errors,
       fileSpan,
+      lifecycleEngineCellNames,
     );
   }
 
@@ -12294,6 +12305,38 @@ function processFile(
       runLifecycleBindingAccessCheck(
         lifecycleTopNodes,
         fnReturnLifecycleMap,
+        errors,
+        fileSpan,
+      );
+    }
+  }
+
+  // §14.12.3 + §14.12.10 — B-prereq (S134 — Bug 19 HIGH) Sub-Pass 2.b:
+  // Cell-value-typed Shape 1 reactive cell per-access lifecycle tracker.
+  // Closes the missing-tracker class for `<state>: (A to B) = init`-style
+  // declarations where the cell TYPE itself (not a struct-field within the
+  // cell's type) carries the lifecycle annotation. Engine-owned cells are
+  // skipped (carve-out fires separately). Reuses checkLifecycleBindingAccess
+  // walker via the optional initialStates seed.
+  {
+    const lifecycleTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+      ?? [];
+    const cellEngineCellNames = new Set<string>();
+    for (const machine of machineRegistry.values()) {
+      if (typeof machine.name === "string" && machine.name.length > 0) {
+        cellEngineCellNames.add(machine.name);
+      }
+    }
+    const cellValueMap = buildCellValueLifecycleMap(
+      lifecycleTopNodes,
+      typeRegistry,
+      cellEngineCellNames,
+    );
+    if (cellValueMap.size > 0) {
+      runCellValueLifecycleAccessCheck(
+        lifecycleTopNodes,
+        cellValueMap,
         errors,
         fileSpan,
       );
@@ -13564,6 +13607,31 @@ function checkLifecycleFieldAccess(
       if (stmt.kind === "function-decl") continue;
 
       const stmtSpan = (stmt.span ?? fileSpan) as Span;
+
+      // B-prereq (S134) — Sub-Pass 2.a structured-write recognition.
+      // `@cell.field = expr` is parsed as `reactive-nested-assign` with
+      // structured `target` + `path` + `value` fields. The text-driven
+      // detector below sees only the RHS (`value`) — the LHS field name
+      // is in `path[0]`. Without this structured pre-check, a `@u.passwordHash
+      // = "secret"` write doesn't transition the field, and a subsequent
+      // read fires E-TYPE-001 falsely.
+      if (stmt.kind === "reactive-nested-assign") {
+        const target = stmt.target as string | undefined;
+        const path = stmt.path as string[] | undefined;
+        if (target && Array.isArray(path) && path.length > 0) {
+          const perField = fieldStates.get(target);
+          const lifecycleFields = lifecycleRegistry.get(structInstances.get(target) ?? "");
+          if (perField && lifecycleFields && lifecycleFields.has(path[0])) {
+            perField.set(path[0], "post");
+          }
+        }
+        // Don't fall through to text-extraction — the `value` field is the
+        // RHS expression text only (no LHS access pattern); processing it
+        // as text would not record the write, and reads inside the RHS
+        // (uncommon but possible) are not load-bearing for the transition.
+        continue;
+      }
+
       const text = statementText(stmt);
 
       if (text) {
@@ -13653,6 +13721,14 @@ function runLifecycleAccessCheck(
   lifecycleRegistry: LifecycleRegistry,
   errors: TSError[],
   fileSpan: Span,
+  /**
+   * B-prereq (S134) — Sub-Pass 2.a: engine-cell name set, used to skip
+   * state-decls whose name is an engine-owned cell (the carve-out fires
+   * separately via `checkLifecycleOnEngineCells`). When unset (or empty),
+   * no state-decls are skipped — safe for unit-test entry points where no
+   * engine machinery exists.
+   */
+  orchestratorEngineCellNames?: Set<string>,
 ): void {
   if (!Array.isArray(topNodes) || topNodes.length === 0) return;
   if (lifecycleRegistry.size === 0) return;
@@ -13817,10 +13893,183 @@ function runLifecycleAccessCheck(
   }
 
   /**
-   * Run the lifecycle access check at one scope (top-level OR fn body).
+   * B-prereq (S134) — Sub-Pass 2.a: Recursive collector for state-decl struct
+   * bindings. State-decls HOIST per SPEC §6.9 — a `<u>: User = { ... }` is a
+   * file-scope structural declaration regardless of which `${...}` logic block
+   * happens to wrap it. Collection therefore walks all topNodes recursively.
+   *
+   * Recognises `state-decl` nodes whose `typeAnnotation` resolves to a struct
+   * type name that's in the lifecycleRegistry (i.e., the struct carries at
+   * least one lifecycle-annotated field). Records the binding name → struct
+   * type name; seeds initial per-field state from the `init` literal (a
+   * field initialised to a B-shape value at construction starts "post";
+   * otherwise "pre").
+   *
+   * Engine-cell carve-out: state-decls whose `name` is in `engineCellNames`
+   * are SKIPPED — engine cells are owned by the engine declaration; they're
+   * either caught by the carve-out (lifecycle-on-engine = error) or not
+   * lifecycle-annotated. Either way, no per-access tracking applies.
    */
-  function checkScope(body: ASTNodeLike[]): void {
+  function collectStateDeclStructBindings(
+    nodes: ASTNodeLike[],
+    engineCellNames: Set<string>,
+  ): {
+    structInstances: Map<string, string>;
+    initialFieldStates: Map<string, Map<string, "pre" | "post">>;
+  } {
+    const structInstances = new Map<string, string>();
+    const initialFieldStates = new Map<string, Map<string, "pre" | "post">>();
+
+    function visit(ns: ASTNodeLike[]): void {
+      for (const n of ns) {
+        if (!n || typeof n !== "object") continue;
+        // Don't descend into nested function bodies — fn-local state-decls
+        // are scope-local (rare; not a current pattern), and the fn-scope
+        // checkScope call handles its own bindings.
+        if (n.kind === "function-decl") continue;
+
+        if (n.kind === "state-decl" && typeof n.name === "string") {
+          const cellName = n.name;
+          const typeAnnotation = (n as ASTNodeLike).typeAnnotation as string | undefined;
+          if (typeAnnotation && !engineCellNames.has(cellName)) {
+            const annot = typeAnnotation.trim();
+            // The typeAnnotation must be a struct name (NOT a lifecycle
+            // expression `(A to B)` — that's the cell-value-typed Shape 1
+            // case handled by Sub-Pass 2.b below). Lifecycle expressions
+            // start with `(` and contain a top-level transition glyph.
+            if (lifecycleRegistry.has(annot)) {
+              structInstances.set(cellName, annot);
+              // Seed initial field states from the init literal. Two shapes:
+              // (a) object-literal `{ field: value, ... }` — for each lifecycle
+              //     field, if the value is non-`not` AND non-pre-shape, mark "post".
+              //     Conservative fallback: simply check whether the field appears
+              //     in the init text AND its value isn't `not`.
+              // (b) escape-hatch raw text — same heuristic.
+              const initText = readInitText(n);
+              const perField = seedInitialFromObjectLiteral(annot, initText);
+              if (perField.size > 0) initialFieldStates.set(cellName, perField);
+            }
+          }
+        }
+
+        // Recurse into body-bearing children — logic blocks, program-bodies,
+        // channel/engine/schema bodies, etc. (state-decls hoist to nearest
+        // structural scope per §6.9, but the AST nests them under the
+        // synthetic logic-block wrapper.)
+        for (const key of ["body", "children", "nodes", "ast", "bodyChildren"]) {
+          const val = (n as Record<string, unknown>)[key];
+          if (Array.isArray(val)) visit(val as ASTNodeLike[]);
+        }
+      }
+    }
+
+    visit(nodes);
+    return { structInstances, initialFieldStates };
+  }
+
+  /**
+   * Heuristic: parse an object-literal init text like `{ id: 1, passwordHash: not }`
+   * and seed per-field state. For each lifecycle field present in the literal
+   * with a NON-`not` value, mark it "post" (initialised at construction).
+   * Fields ABSENT from the literal default to "pre" via the walker's seeding
+   * logic. Fields PRESENT with `not` value remain "pre" (explicit absence).
+   *
+   * Conservative: only handles bare-identifier field names + literal values
+   * in the simplest case. Robust enough for the canonical Shape 1 idiom
+   * `<u>: User = { id: 1, email: "a@b.com", passwordHash: not }`.
+   */
+  function seedInitialFromObjectLiteral(
+    typeName: string,
+    initText: string,
+  ): Map<string, "pre" | "post"> {
+    const out = new Map<string, "pre" | "post">();
+    const lifecycleFields = lifecycleRegistry.get(typeName);
+    if (!lifecycleFields || !initText) return out;
+    const trimmed = initText.trim();
+    if (!trimmed.startsWith("{")) return out;
+    // Find the matching `}` for the opening `{` using depth-aware scan. This
+    // correctly bounds object-literal extent even when the parser's escape-
+    // hatch fallback concatenates subsequent statements into the init text
+    // (e.g., `{ val: not }\n@h.val` from a single-block reproducer).
+    let depth = 0;
+    let endIdx = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const c = trimmed[i];
+      if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) { endIdx = i; break; }
+      }
+    }
+    if (endIdx === -1) return out;
+    const inner = trimmed.slice(1, endIdx);
+    // Top-level comma split — depth-aware to handle nested `{}` / `()` / `[]`.
+    const parts = splitTopLevelCommas(inner);
+    for (const part of parts) {
+      const colonIdx = part.indexOf(":");
+      if (colonIdx === -1) continue;
+      const fieldName = part.slice(0, colonIdx).trim();
+      const fieldValue = part.slice(colonIdx + 1).trim();
+      if (!fieldName || !lifecycleFields.has(fieldName)) continue;
+      // `not` literal → pre. Any other value → post.
+      if (fieldValue === "not") {
+        out.set(fieldName, "pre");
+      } else if (fieldValue.length > 0) {
+        out.set(fieldName, "post");
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Depth-aware top-level comma split. `{ a: 1, b: [2,3], c: {x:4} }` →
+   * `["a: 1", "b: [2,3]", "c: {x:4}"]`. Tolerates whitespace; ignores commas
+   * inside nested `{}` / `()` / `[]`. Used by `seedInitialFromObjectLiteral`.
+   */
+  function splitTopLevelCommas(s: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === ")" || c === "]" || c === "}") depth--;
+      else if (c === "," && depth === 0) {
+        parts.push(s.slice(start, i));
+        start = i + 1;
+      }
+    }
+    if (start < s.length) parts.push(s.slice(start));
+    return parts;
+  }
+
+  /**
+   * Run the lifecycle access check at one scope (top-level OR fn body).
+   *
+   * `extraStateDeclBindings` (optional) — when non-empty, MERGE these bindings
+   * (sourced from `collectStateDeclStructBindings`, hoisted to top-level) into
+   * the scope's collected struct-instances. Only passed at the top-level
+   * scope invocation; fn-body invocations rely on their own scope-local
+   * collection (state-decls are file-scope-hoisted, but a fn body's reads of
+   * `@cell.field` should also fire — the merged map carries those bindings
+   * into the fn-body checkScope too).
+   */
+  function checkScope(
+    body: ASTNodeLike[],
+    extraStateDeclBindings?: {
+      structInstances: Map<string, string>;
+      initialFieldStates: Map<string, Map<string, "pre" | "post">>;
+    },
+  ): void {
     const { structInstances, initialFieldStates } = collectStructBindings(body);
+    if (extraStateDeclBindings) {
+      for (const [k, v] of extraStateDeclBindings.structInstances) {
+        if (!structInstances.has(k)) structInstances.set(k, v);
+      }
+      for (const [k, v] of extraStateDeclBindings.initialFieldStates) {
+        if (!initialFieldStates.has(k)) initialFieldStates.set(k, v);
+      }
+    }
     if (structInstances.size === 0) return;
     checkLifecycleFieldAccess(
       body, structInstances, lifecycleRegistry, errors, fileSpan, initialFieldStates,
@@ -13830,14 +14079,23 @@ function runLifecycleAccessCheck(
   /**
    * Walk the AST collecting every function-decl scope and the top-level scope.
    * Run the check at each.
+   *
+   * `extraStateDeclBindings` — passed through to fn-body checkScope calls so
+   * file-scope-hoisted state-decl bindings are visible to fn-internal reads.
    */
-  function collectScopes(nodes: ASTNodeLike[]): void {
+  function collectScopes(
+    nodes: ASTNodeLike[],
+    extraStateDeclBindings?: {
+      structInstances: Map<string, string>;
+      initialFieldStates: Map<string, Map<string, "pre" | "post">>;
+    },
+  ): void {
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
       if (node.kind === "function-decl") {
         const fnBody = node.body as ASTNodeLike[] | undefined;
         if (Array.isArray(fnBody)) {
-          checkScope(fnBody);
+          checkScope(fnBody, extraStateDeclBindings);
         }
         // Don't recurse into the fn body for further scope-collection — the
         // fn body's own scope is its boundary; nested fns will be discovered
@@ -13846,17 +14104,26 @@ function runLifecycleAccessCheck(
       }
       // Other body-bearing nodes — recurse to find nested function-decls.
       const body = node.body as ASTNodeLike[] | undefined;
-      if (Array.isArray(body)) collectScopes(body);
+      if (Array.isArray(body)) collectScopes(body, extraStateDeclBindings);
       const children = node.children as ASTNodeLike[] | undefined;
-      if (Array.isArray(children)) collectScopes(children);
+      if (Array.isArray(children)) collectScopes(children, extraStateDeclBindings);
     }
   }
 
-  // Top-level scope.
-  checkScope(topNodes);
+  // B-prereq (S134) — Sub-Pass 2.a collection (state-decl struct bindings,
+  // hoisted to file scope). Engine cell names come from the file's machine
+  // registry; passed in via the call site at runLifecycleAccessCheck's caller
+  // — for the unit-test entrypoint, callers pass an empty set (no engine cells).
+  // The caller seeds this via the optional 5th parameter on the orchestrator.
+  const engineCellNames = orchestratorEngineCellNames ?? new Set<string>();
+  const stateDeclBindings = collectStateDeclStructBindings(topNodes, engineCellNames);
 
-  // Nested function-decl scopes.
-  collectScopes(topNodes);
+  // Top-level scope — pass state-decl bindings to merge.
+  checkScope(topNodes, stateDeclBindings);
+
+  // Nested function-decl scopes — also receive state-decl bindings (hoisted
+  // bindings are visible inside fn bodies too).
+  collectScopes(topNodes, stateDeclBindings);
 }
 
 
@@ -14034,14 +14301,36 @@ function checkLifecycleBindingAccess(
   bindings: Map<string, FnReturnLifecycleSpec>,
   errors: TSError[],
   fileSpan: Span,
+  /**
+   * B-prereq (S134) — Sub-Pass 2.b: optional per-binding initial state seed.
+   * When supplied, each entry overrides the default "pre" initialisation
+   * for the matching binding name (used for cell-value-typed Shape 1 cells
+   * whose init expression already satisfies the post-type — per §6.8.3
+   * composition example `<state default=.Active>: (.Idle to .Active) =
+   * .Active`). Bindings absent from this map continue to default to "pre".
+   */
+  initialStates?: Map<string, "pre" | "post">,
+  /**
+   * B-prereq (S134) — Sub-Pass 2.b: optional diagnostic source-label override.
+   * Default `"from a function return"` (S131 HU-2 fn-return tracker). When
+   * called by the cell-value-typed Shape 1 tracker, supply `"on a Shape 1
+   * reactive cell"` so diagnostic messages name the correct source. The
+   * `@` prefix on access form (e.g., `@state.field`) is the V5-strict
+   * canonical form for cell access; messages reflect that.
+   */
+  bindingSourceLabel?: string,
 ): void {
   if (!Array.isArray(body) || body.length === 0) return;
   if (bindings.size === 0) return;
 
   // Per-binding state: name → "pre" | "post" — current transition state in
-  // this scope. Initialized to "pre" for every tracked binding.
+  // this scope. Initialised to "pre" for every tracked binding unless the
+  // optional `initialStates` seed (B-prereq Sub-Pass 2.b) overrides.
   const states = new Map<string, "pre" | "post">();
-  for (const name of bindings.keys()) states.set(name, "pre");
+  for (const name of bindings.keys()) {
+    const seed = initialStates?.get(name);
+    states.set(name, seed ?? "pre");
+  }
 
   // Detect `transition(<bindingName>)` calls. Whitespace-tolerant; the call
   // must reference one of our tracked bindings AS the SOLE argument.
@@ -14076,6 +14365,59 @@ function checkLifecycleBindingAccess(
 
   function escapeRe(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /**
+   * B-prereq (S134) — classify a re-assignment write's RHS against a
+   * binding's lifecycle spec. Returns the new transition state ("pre" or
+   * "post"), or null if the write is unclassifiable (in which case the
+   * walker leaves the existing state unchanged).
+   *
+   * Presence-progression `(not to T)`:
+   *   - init text "not" → "pre" (revert / explicit absence)
+   *   - init text anything else → "post" (transition)
+   *
+   * Variant-progression `(.A to .B)`:
+   *   - init text matches post-variant (bare `.B` or qualified `Foo.B`) → "post"
+   *   - init text matches pre-variant → "pre"
+   *   - otherwise: null (unclassifiable; leave state alone)
+   */
+  function classifyWriteAgainstSpec(
+    initText: string,
+    spec: FnReturnLifecycleSpec,
+  ): "pre" | "post" | null {
+    const t = initText.trim();
+    if (!t) return null;
+    if (spec.kind === "presence") {
+      return t === "not" ? "pre" : "post";
+    }
+    // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
+    const postName = spec.postVariantName;
+    const preName = spec.preVariantName;
+    if (postName) {
+      const postRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(postName)}\\b`);
+      if (postRe.test(t)) return "post";
+    }
+    if (preName) {
+      const preRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(preName)}\\b`);
+      if (preRe.test(t)) return "pre";
+    }
+    return null;
+  }
+
+  /**
+   * Read init text from a state-decl node. Mirrors `readNodeInitText` at
+   * module scope; kept local to avoid coupling.
+   */
+  function readNodeInitText(node: ASTNodeLike): string {
+    if (typeof node.init === "string") return node.init;
+    const nodeAny = node as Record<string, unknown>;
+    const initExpr = nodeAny.initExpr as { kind?: string; raw?: string } | undefined;
+    if (initExpr && typeof initExpr === "object") {
+      if (typeof initExpr.raw === "string") return initExpr.raw;
+    }
+    if (typeof node.value === "string") return node.value;
+    return "";
   }
 
   function statementText(node: ASTNodeLike): string {
@@ -14151,6 +14493,12 @@ function checkLifecycleBindingAccess(
       const state = localStates.get(binding);
       if (state !== "pre") continue; // already transitioned — read is OK
 
+      // B-prereq (S134) — Sub-Pass 2.b: select the binding-source label for
+      // diagnostic messages. Defaults to "from a function return" (S131 HU-2
+      // fn-return tracker); cell-value-typed Shape 1 callers supply "on a
+      // Shape 1 reactive cell".
+      const sourceLabel = bindingSourceLabel ?? "from a function return";
+
       if (spec.kind === "presence") {
         // E-TYPE-001 — pre-transition presence-progression access
         const preLabel = formatTypeForDiagnostic(spec.preType);
@@ -14158,7 +14506,7 @@ function checkLifecycleBindingAccess(
         errors.push(new TSError(
           "E-TYPE-001",
           `E-TYPE-001: binding \`${binding}\` has lifecycle annotation \`(${preLabel} to ${postLabel})\` ` +
-          `(from a function return) and is accessed before its lifecycle transition.\n` +
+          `(${sourceLabel}) and is accessed before its lifecycle transition.\n` +
           `  Field \`${field}\` reads the post-transition (\`${postLabel}\`) shape; at this access, ` +
           `the binding is still in the pre-transition state (\`${preLabel}\`).\n` +
           `  Resolution: discriminate the binding via \`given ${binding} => { ... }\`, ` +
@@ -14178,7 +14526,7 @@ function checkLifecycleBindingAccess(
           errors.push(new TSError(
             "E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED",
             `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED: binding \`${binding}\` has variant-progression ` +
-            `lifecycle annotation \`(.${spec.preVariantName} to .${spec.postVariantName})\` (from a function return). ` +
+            `lifecycle annotation \`(.${spec.preVariantName} to .${spec.postVariantName})\` (${sourceLabel}). ` +
             `Field \`${field}\` is on the post-transition variant (\`.${spec.postVariantName}\`); ` +
             `the source variant (\`.${spec.preVariantName}\`) was discriminated but \`transition(${binding})\` ` +
             `has not been called yet.\n` +
@@ -14192,7 +14540,7 @@ function checkLifecycleBindingAccess(
           errors.push(new TSError(
             "E-TYPE-001",
             `E-TYPE-001: binding \`${binding}\` has lifecycle annotation \`(${preLabel} to ${postLabel})\` ` +
-            `(from a function return) and is accessed before its lifecycle transition.\n` +
+            `(${sourceLabel}) and is accessed before its lifecycle transition.\n` +
             `  Field \`${field}\` reads the post-transition (\`${postLabel}\`) shape; at this access, ` +
             `the binding is still in the pre-transition state (\`${preLabel}\`).\n` +
             `  Resolution: discriminate the source variant via \`if (${binding} is .${spec.preVariantName})\`, ` +
@@ -14222,6 +14570,52 @@ function checkLifecycleBindingAccess(
       if (stmt.kind === "function-decl") continue; // nested scope
 
       const stmtSpan = (stmt.span ?? fileSpan) as Span;
+
+      // B-prereq (S134) — Sub-Pass 2.b: state-decl re-assignment recognition.
+      // `@state = newValue` is parsed as a `state-decl` node (the V-kill /
+      // Unit-CC wire form; per ast-builder.js ~5128-5145 the parser uses
+      // state-decl as the canonical shape for reactive assignment, tagged
+      // _isReactiveAssign or untagged in default-logic-lift carve-out).
+      // The walker tracks per-cell transition state via the init expression:
+      //   - presence-progression: init `not` → "pre"; otherwise → "post"
+      //   - variant-progression:  init matches post-variant → "post"; matches
+      //                            pre-variant → "pre"; otherwise no change
+      // This is the SECOND state-decl with the same name; the FIRST is the
+      // structural binding declaration (collected by buildCellValueLifecycle-
+      // Map) and skipped here (its transition state is governed by initial-
+      // States seed instead).
+      if (stmt.kind === "state-decl" && typeof stmt.name === "string") {
+        const cellName = stmt.name;
+        const spec = bindings.get(cellName);
+        // Only treat re-decls (non-structural form OR explicit reactive-assign
+        // tag) as writes; structural decls are the original declarations and
+        // their states come from initialStates seeding.
+        const isStructuralDecl = (stmt as ASTNodeLike).structuralForm === true;
+        if (spec && !isStructuralDecl) {
+          const initText = readNodeInitText(stmt);
+          if (initText) {
+            const newState = classifyWriteAgainstSpec(initText, spec);
+            if (newState) localStates.set(cellName, newState);
+          }
+        }
+        // Don't fall through — the state-decl's init text is the RHS;
+        // there's no LHS access to scan in the bare-expr surface.
+        continue;
+      }
+
+      // B-prereq (S134) — Sub-Pass 2.b: reactive-nested-assign recognition.
+      // `@state.field = value` for cell-value-typed Shape 1 transitions on
+      // any field write — the post-type IS the cell's struct type, so any
+      // field write counts as a structural-write transition. Conservative:
+      // any write to any field of a tracked cell → set state to "post"
+      // (read-after-write semantics for cell-typed lifecycle).
+      if (stmt.kind === "reactive-nested-assign") {
+        const target = stmt.target as string | undefined;
+        if (target && bindings.has(target)) {
+          localStates.set(target, "post");
+        }
+        continue;
+      }
 
       // Special: given-guard — inside body, listed variables promote to "post".
       if (stmt.kind === "given-guard") {
@@ -14349,13 +14743,29 @@ function checkLifecycleBindingAccess(
       const text = statementText(stmt);
       if (text) processStatementText(text, localStates, stmtSpan, activeVariantDiscrim);
 
-      // Recurse — same shape as checkLifecycleFieldAccess. Branches use
-      // cloned state to prevent inner transitions leaking outward.
+      // B-prereq (S134) — Sub-Pass 2.b: synthetic logic-block wrappers
+      // (`{kind: "logic"}` with `_synthetic: true` OR explicit user-written
+      // `${...}` blocks) are AST-structural pass-throughs at file scope, NOT
+      // semantic scopes. State transitions inside a sibling `${...}` block
+      // MUST be visible to subsequent sibling `${...}` blocks per hoisting
+      // semantics (§6.9). Pass localStates directly through logic-block
+      // bodies (no clone). For if-branch / match-arm bodies (which DO have
+      // scope semantics) the clone-and-discard still applies via the
+      // dedicated if-stmt / match-stmt handlers above.
+      const isLogicBlock = stmt.kind === "logic";
+
+      // Recurse — same shape as checkLifecycleFieldAccess. Non-logic
+      // branches use cloned state to prevent inner transitions leaking
+      // outward; logic blocks pass-through (block-transparent).
       for (const key of ["body", "children", "consequent", "alternate", "then", "else"]) {
         const val = (stmt as Record<string, unknown>)[key];
         if (Array.isArray(val)) {
-          const inner = new Map(localStates);
-          walk(val as ASTNodeLike[], inner, activeVariantDiscrim);
+          if (isLogicBlock) {
+            walk(val as ASTNodeLike[], localStates, activeVariantDiscrim);
+          } else {
+            const inner = new Map(localStates);
+            walk(val as ASTNodeLike[], inner, activeVariantDiscrim);
+          }
         }
       }
     }
@@ -14497,6 +14907,231 @@ function runLifecycleBindingAccessCheck(
     }
   }
 
+  checkScope(topNodes);
+  collectScopes(topNodes);
+}
+
+// ---------------------------------------------------------------------------
+// §14.12.3 / §14.12.10 — B-prereq (S134) — Sub-Pass 2.b
+// Cell-value-typed Shape 1 reactive cell per-access lifecycle tracker.
+// ---------------------------------------------------------------------------
+//
+// Closes Bug 19 HIGH (known-gaps §1): SPEC §14.12.3 + §14.12.10 promise
+// per-access tracking on Shape 1 reactive cells (`<state>: (A to B) = init`);
+// pre-S134 impl tracker covered struct-field + fn-return loci only — Shape 1
+// cells whose CELL TYPE carries the lifecycle annotation (as opposed to a
+// struct-field within the cell's type) were silently un-tracked.
+//
+// Architecture parallels the S131 fn-return tracker (`checkLifecycleBinding-
+// Access` at 14032+):
+//   1. `buildCellValueLifecycleMap` — collects state-decl AST nodes whose
+//      `typeAnnotation` is a lifecycle expression `(A to B)`. Reuses the
+//      existing `parseLifecycleReturnAnnotation` parser (same shape) — the
+//      return value is the same `FnReturnLifecycleSpec` carrier.
+//   2. `runCellValueLifecycleAccessCheck` — orchestrates per-scope walks via
+//      the same `checkLifecycleBindingAccess` walker. Cell bindings are
+//      HOISTED to file scope (state-decls per §6.9), so the bindings-map is
+//      built ONCE from topNodes and passed unchanged into each scope.
+//
+// Two engine integrations:
+//   - The cell binding-name carries NO `@` prefix in the bindings map (the
+//     regex `\b<name>\s*\.\s*<field>\b` matches against `@state.name`
+//     correctly — `@` is a non-word char, so `\b` matches between `@` and
+//     `state`; binding name extracted = `state`).
+//   - Engine-cell carve-out: cells whose name matches an engine's auto-
+//     declared variable are SKIPPED at collection time. The carve-out itself
+//     (`checkLifecycleOnEngineCells`) fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL
+//     separately.
+
+/**
+ * Recursively collect cell-value-typed Shape 1 lifecycle bindings from
+ * topNodes. A binding is a state-decl whose `typeAnnotation` is a parenthesised
+ * lifecycle expression `(A to B)` (canonical) or `(A -> B)` (legacy glyph,
+ * deprecation-window-supported). Engine-owned cells are skipped.
+ *
+ * For each found binding, computes:
+ *   - kind:            "presence" (pre-type is `not`) | "variant" (otherwise)
+ *   - preType/postType: ResolvedType via `resolveTypeExpr`
+ *   - preVariantName/postVariantName: bare variant names (for `if x is .V` matches)
+ *   - initIsPostType:  whether the init expression's value satisfies the post-type
+ *                       (informs the initial per-binding state — usually pre, but
+ *                        `<state default=.Active>: (.Idle to .Active) = .Active`
+ *                        starts post per §6.8.3 composition example)
+ *
+ * Returns a map: cellName → FnReturnLifecycleSpec (reusing the existing
+ * carrier shape). Walker is shape-conservative; only handles the simplest
+ * presence/variant classifications today.
+ */
+function buildCellValueLifecycleMap(
+  topNodes: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+  engineCellNames: Set<string>,
+): Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }> {
+  const map = new Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }>();
+
+  function isLifecycleAnnotation(typeExpr: string): boolean {
+    const trimmed = typeExpr.trim();
+    if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) return false;
+    const inner = trimmed.slice(1, -1);
+    return findTopLevelArrow(inner) !== null;
+  }
+
+  function visit(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      // Don't descend into fn bodies — fn-local state-decls (rare) are
+      // scope-local; not in the hoisted file-scope binding set.
+      if (n.kind === "function-decl") continue;
+
+      if (n.kind === "state-decl" && typeof n.name === "string") {
+        const cellName = n.name;
+        const typeAnnotation = (n as ASTNodeLike).typeAnnotation as string | undefined;
+        if (typeAnnotation && !engineCellNames.has(cellName)
+            && isLifecycleAnnotation(typeAnnotation)) {
+          const spec = parseLifecycleReturnAnnotation(typeAnnotation, typeRegistry);
+          if (spec) {
+            // Inspect init expression to determine initial transition state.
+            // For presence-progression `(not to T)`: init `not` → pre;
+            //   init anything else → post (write-equivalent at construction).
+            // For variant-progression `(.A to .B)`: init `.A` / `Foo.A` → pre;
+            //   init `.B` / `Foo.B` → post.
+            const initText = readNodeInitText(n);
+            const initIsPostType = isInitOfPostType(initText, spec);
+            map.set(cellName, { ...spec, initIsPostType });
+          }
+        }
+      }
+
+      for (const key of ["body", "children", "nodes", "ast", "bodyChildren"]) {
+        const val = (n as Record<string, unknown>)[key];
+        if (Array.isArray(val)) visit(val as ASTNodeLike[]);
+      }
+    }
+  }
+
+  visit(topNodes);
+  return map;
+}
+
+/**
+ * Extract the init expression text from a state-decl AST node. Mirrors
+ * `readInitText` in runLifecycleAccessCheck (kept as standalone here to
+ * avoid scope coupling with that function's closure).
+ */
+function readNodeInitText(node: ASTNodeLike): string {
+  if (typeof node.init === "string") return node.init;
+  const nodeAny = node as Record<string, unknown>;
+  const initExpr = nodeAny.initExpr as { kind?: string; raw?: string } | undefined;
+  if (initExpr && typeof initExpr === "object") {
+    if (typeof initExpr.raw === "string") return initExpr.raw;
+  }
+  if (typeof node.value === "string") return node.value;
+  return "";
+}
+
+/**
+ * Heuristic: does the init expression text appear to evaluate to a value
+ * satisfying the post-type?
+ *
+ * Conservative classification:
+ *   - presence-progression `(not to T)`:
+ *       init "not" → pre
+ *       init anything else (literal, identifier, expression) → post
+ *   - variant-progression `(.A to .B)`:
+ *       init matches post-variant name (bare `.B` or qualified `Foo.B`) → post
+ *       init matches pre-variant name → pre
+ *       otherwise: pre (conservative — adopter likely meant pre, or the
+ *         init form will surface a type error upstream)
+ *
+ * Returns `true` when the heuristic classifies the init as post-type.
+ */
+function isInitOfPostType(
+  initText: string,
+  spec: FnReturnLifecycleSpec,
+): boolean {
+  const t = initText.trim();
+  if (!t) return false;
+  if (spec.kind === "presence") {
+    return t !== "not";
+  }
+  // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
+  const postName = spec.postVariantName;
+  const preName = spec.preVariantName;
+  if (postName) {
+    const postRe = new RegExp(`(?:^|\\.)\\s*${postName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    if (postRe.test(t)) return true;
+  }
+  if (preName) {
+    const preRe = new RegExp(`(?:^|\\.)\\s*${preName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    if (preRe.test(t)) return false;
+  }
+  return false;
+}
+
+/**
+ * Pipeline-facing wrapper for cell-value-typed Shape 1 lifecycle tracking.
+ *
+ * Reuses the existing `checkLifecycleBindingAccess` walker — the walker
+ * machinery is binding-agnostic; the only difference between fn-return
+ * bindings and cell-value-typed cell bindings is the source of the binding
+ * name (cell decl vs `const x = fn()`).
+ *
+ * Cell bindings are file-scope-hoisted per §6.9 — collected ONCE from
+ * topNodes; visible at top-level scope AND inside fn-body scopes.
+ *
+ * Initial per-binding state:
+ *   - Bindings whose init satisfies the pre-type: start "pre" (default).
+ *   - Bindings whose init satisfies the post-type: start "post" (per the
+ *     §6.8.3 composition example — `<state default=.Active>: (.Idle to .Active)
+ *     = .Active` starts transitioned).
+ */
+function runCellValueLifecycleAccessCheck(
+  topNodes: ASTNodeLike[],
+  cellMap: Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }>,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  if (!Array.isArray(topNodes) || topNodes.length === 0) return;
+  if (cellMap.size === 0) return;
+
+  // Strip the initIsPostType discriminator out of the carrier and build
+  // the per-binding initial-state seed (only init-post bindings need
+  // explicit seeding; rest default to "pre" in the walker).
+  const bindings = new Map<string, FnReturnLifecycleSpec>();
+  const initialStates = new Map<string, "pre" | "post">();
+  for (const [name, spec] of cellMap) {
+    const { initIsPostType, ...rest } = spec;
+    bindings.set(name, rest);
+    if (initIsPostType) initialStates.set(name, "post");
+  }
+
+  const sourceLabel = "on a Shape 1 reactive cell";
+
+  function checkScope(body: ASTNodeLike[]): void {
+    checkLifecycleBindingAccess(body, bindings, errors, fileSpan, initialStates, sourceLabel);
+  }
+
+  function collectScopes(nodes: ASTNodeLike[]): void {
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "function-decl") {
+        const fnBody = node.body as ASTNodeLike[] | undefined;
+        if (Array.isArray(fnBody)) checkScope(fnBody);
+        continue;
+      }
+      const body = node.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectScopes(body);
+      const children = node.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectScopes(children);
+    }
+  }
+
+  // Cell-value-typed Shape 1 bindings are file-scope-hoisted (§6.9). The
+  // top-level scope sees all reads at the top of the file; the per-scope
+  // walker is invoked at each fn body too so that reads inside fn bodies
+  // also fire (per the walker's existing semantics, the per-scope state
+  // initialisation is re-applied for each scope — bindings are re-seeded
+  // via initialStates, giving each scope a fresh "starting state" view).
   checkScope(topNodes);
   collectScopes(topNodes);
 }
