@@ -14,9 +14,9 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta scoping gap (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape gap A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq SHIPPED)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
+| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
 | MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** |
-| LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
+| LOW | 6 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
 ---
@@ -27,7 +27,7 @@
 
 **Fix (S134 `fd58893e`):** Option α per PA lean — extended `collectStructBindings` to recognize `state-decl` AST nodes (Sub-Pass 2.a; struct-typed Shape 1 case) + authored a NEW cell-value-typed tracker reusing the existing `checkLifecycleBindingAccess` from S131 HU-2 via two additive optional params (`initialStates: Map<string, "pre"|"post">` + `bindingSourceLabel: string`) (Sub-Pass 2.b; cell-value-typed Shape 1 case). Discrimination semantics (Sub-Pass 2.d) fully reused — `given X => {}` / `if (X is not) return` / `match X` / `transition(X)` all apply uniformly. Engine-cell carve-out (Sub-Pass 2.c) preserved — both new collectors skip `engineCellNames`. Two material walker changes: synthetic `{kind:"logic"}` block recursion → block-transparent (state-decl writes visible to subsequent siblings per §6.9 hoisting); `reactive-nested-assign` write node recognized as transition write. Tests: NEW `compiler/tests/unit/lifecycle-shape1-tracker.test.js` (+621L, 25 tests). Baseline 21,676 → 21,701 (+25, 0 fail). Pre-commit gate green on all 7 agent commits + the PA-authored landing.
 
-**Composition with §6.8.3 — Q6-narrow now UNBLOCKED.** The tracker observes writes uniformly; Q6-narrow's reset-awareness extends the walker to recognize reset-path writes + route through `classifyWriteAgainstSpec` to revert per-access state per §6.8.3 ratified semantic. Architecture supports this cleanly. Estimated ~10-20h via `scrml-js-codegen-engineer` (isolation:worktree). Carry-forward dispatch queued.
+**Composition with §6.8.3 — Q6-narrow LANDED S135 `2ffe4f6a`.** The tracker observed writes uniformly; Q6-narrow's reset-awareness extended the walker to recognize `reset(@cell)` and `reset(@cell.field)` calls and route through `classifyWriteAgainstSpec` to revert/maintain per-access state per §6.8.3 ratified semantic. Tracker 1 (cell-value Shape 1) + Tracker 2 (struct-typed Shape 1 field lifecycle) both implemented. +25 tests in `compiler/tests/unit/lifecycle-shape1-reset.test.js`; baseline 21,701 → 21,726; zero regressions. Two new heuristic limitations filed as LOW (see §3): deep multi-level reset on nested compound uses `fieldPath[0]`; cross-cell `default=@otherCell` classification is heuristic.
 
 **Deferred items surfaced by B-prereq (NOT regressions; orthogonal limitations):**
 
@@ -239,6 +239,26 @@ The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). Th
 
 ---
 
+### Bug 21 — Q6-narrow heuristic: deep multi-level reset on nested compound — `heuristic` (S135)
+
+`reset(@a.b.c)` where `b` is itself a compound state with its own lifecycle-annotated fields: Q6-narrow's `applyResetToCellField` walker conservatively uses `fieldPath[0]` — the first hop after the cell root — for tracker classification. The §6.8.2 B22 ratification supports deeper compound-nav targets, but the canonical scrml idiom is one hop deep (per the §6.8.2 worked examples). Deeper nesting works at runtime via the existing `_scrml_reset` codegen; only the per-access tracker's state revert is shallow.
+
+- **Workaround:** none needed for canonical idiom; if deeper resets are exercised, the tracker may miss a lifecycle revert on the deeper field but the runtime behavior is correct.
+- **Status:** filed S135 in Q6-narrow progress.md follow-ups; extend on real adopter friction.
+- **Cross-refs:** SPEC §6.8.2 (multi-level compound-nav, B22 ratification); SPEC §6.8.3 (Q6-narrow impl); `docs/changes/q6-narrow-reset-lifecycle-2026-05-26/progress.md`.
+
+---
+
+### Bug 22 — Q6-narrow heuristic: cross-cell `default=@otherCell` reset value classification — `heuristic` (S135)
+
+`<state default=@otherCell>: (not to User) = not` — when `reset(@state)` evaluates `@otherCell` as the reset value, `classifyResetValueAgainstSpec` heuristically treats any non-`not` text as post-type for presence-progression. If `@otherCell` is itself in a pre-state at the reset moment, the heuristic misclassifies. The actual cross-cell type-check happens at the assignment site (`@state = @otherCell` would route through `classifyWriteAgainstSpec` properly); the heuristic only affects whether the per-access tracker reverts vs maintains state immediately after the reset.
+
+- **Workaround:** none needed in practice; the cross-cell scenario is uncommon and the type-check at the assignment site catches real type errors.
+- **Status:** filed S135 in Q6-narrow progress.md follow-ups; extend when adopters exercise cross-cell defaults under lifecycle annotations.
+- **Cross-refs:** SPEC §6.8.1 (`default=` attribute); SPEC §6.8.3 (Q6-narrow impl); `docs/changes/q6-narrow-reset-lifecycle-2026-05-26/progress.md`.
+
+---
+
 ## §4 Nominal — SPEC sections deliberately spec-ahead-of-implementation
 
 These are SPEC-only surfaces — designed, normatively documented, NOT yet implemented in the compiler. The author has explicitly ratified them as "spec-ahead-of-implementation" (Nominal sections). Adopters should treat as roadmap, not present capability.
@@ -289,9 +309,9 @@ S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells
 | 2 | Approach C SPEC extension to fn params + fn return + schema fields + channel cells + Shape 1 + `->` → `to` glyph migration + new §14.12 subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | **SPEC SHIPPED S130** (§14.12 normative; engine-cell carve-out + `W-LIFECYCLE-LEGACY-ARROW` + §34 catalog rows). ⚠️ **Shape 1 per-access tracker NOT implemented** — surfaced S134 Q6 Phase-0 STOP; filed as Bug 19 in §1 HIGH. |
 | 2.5 | S131 HU-2 fn-return hybrid mechanism (presence-progression discrimination-IS-transition + variant-progression explicit `transition()`); SPEC §14.12.6 + §14.12.6.1–6.4; `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` | **SHIPPED S131** |
 | 3 | PRIMER + kickstarter flagship section (per F-023) — `(A to B)` canon-corroboration | **SHIPPED S134** — PRIMER §6.5 + kickstarter §3.2 + §7 anti-pattern table rows (1 engine-cell, 1 legacy-glyph, 1 over-applied-`transition()`) |
-| 4 (S134 const-deep-freeze Q6 ratification) | SPEC §6.8.3 — `reset(@cell)` × lifecycle interaction (symmetric reset reverts per-access transition state per pre-type membership) + §14.12.10 cross-ref bullet | **SPEC SHIPPED S134** (this session). ⚠️ **Impl DEFERRED** — depends on Bug 19 (Shape 1 tracker prerequisite). |
+| 4 (S134 const-deep-freeze Q6 ratification) | SPEC §6.8.3 — `reset(@cell)` × lifecycle interaction (symmetric reset reverts per-access transition state per pre-type membership) + §14.12.10 cross-ref bullet | **SPEC SHIPPED S134** · **Impl SHIPPED S135 `2ffe4f6a`** via Q6-narrow (see below). |
 | **B-prereq (S134)** | Shape 1 per-access lifecycle tracker — covers `state-decl` AST nodes (both struct-typed Shape 1 with lifecycle in struct-field, and cell-value-typed Shape 1 with lifecycle in cell type) | **SHIPPED S134** (`fd58893e`) — Option α architecture; `collectStructBindings` extension + NEW cell-value-typed tracker via reused `checkLifecycleBindingAccess` with additive params. +25 tests. Closes Bug 19 HIGH. Unblocks Q6-narrow. |
-| **Q6-narrow (S134; queued unblocked)** | `reset(@cell)` × lifecycle interaction impl — type-system tracker observes reset-path writes + routes through `classifyWriteAgainstSpec` to revert per-access state per §6.8.3 SPEC | **QUEUED** — ~10-20h compiler-source via `scrml-js-codegen-engineer`. Now unblocked by B-prereq. Implements §6.8.3 ratified semantic. |
+| **Q6-narrow (S135)** | `reset(@cell)` × lifecycle interaction impl — type-system tracker observes reset-path writes + routes through `classifyWriteAgainstSpec` to revert per-access state per §6.8.3 SPEC. Tracker 1 (cell-value Shape 1) + Tracker 2 (struct-typed Shape 1 field lifecycle) | **SHIPPED S135** (`2ffe4f6a`) — Option α additive: `RESET_CALL_RE` regex + new Pass in `processStatementText` mirroring transition handling; +355/-10 type-system.ts; NEW `lifecycle-shape1-reset.test.js` 25 tests. Baseline 21,701 → 21,726; zero regressions. Closes §6.8.3 SPEC-ahead-of-impl bullet. Two heuristic limitations filed as LOW. |
 
 Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`; const-deep-freeze HU at `docs/heads-up/const-deep-freeze-2026-05-26.md` (Q6 ratification + Bug 19 surfacing); SPEC §14.12 + §6.8.3 normative spec.
 
