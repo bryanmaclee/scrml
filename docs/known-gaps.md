@@ -6,7 +6,7 @@
 >
 > **Per-gap status:** `spec'd` = SPEC normative + compiler does nothing · `partial-impl` = some sub-units shipped, others pending · `scoping` = SCOPING.md authored, OQs open · `in-impl` = implementation arc actively in flight · `deferred` = ratified to defer pending a precondition · `blocked` = waiting on something else · `nominal` = SPEC-only Nominal section (deliberately spec-ahead-of-implementation per author)
 >
-> Updated 2026-05-27 (S136 — R24 gauntlet bug-candidate intake; +7 net entries + 1 cross-ref escalation; previously S135 close).
+> Updated 2026-05-27 (S136 — R24 gauntlet bug intake + R24-BUG-1 RESOLVED in-session; net +7 new entries + 1 cross-ref escalation + Bug 28 flipped HIGH→RESOLVED + Bug 35 NEW MED from R24-BUG-1 triage; previously S135 close).
 
 ---
 
@@ -14,8 +14,8 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 4 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 28 `or`/`and` codegen lowering (NEW S136 R24)** · **Bug 29 `!{}` `{ return }` arm codegen (NEW S136 R24)** · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) |
-| MED | 9 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** |
+| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 29 `!{}` `{ return }` arm codegen (NEW S136 R24)** · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) |
+| MED | 10 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path gap (NEW S136 R24-BUG-1 triage)** |
 | LOW | 13 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
@@ -126,16 +126,27 @@ A `fn` that returned (or `let`-bound) markup carrying ANY attribute (`class`, `i
 
 ---
 
-### Bug 28 — `or` / `and` boolean operators not lowered to `||` / `&&` in derived-cell codegen — `HIGH` (S136 R24)
+### Bug 28 — `or` / `and` boolean operators not lowered to `||` / `&&` in derived-cell codegen — `RESOLVED S136 (commit 89008e97)` (was HIGH; R24)
 
-A `const <derived> = arr.filter(t => cond1 or cond2 and cond3)` style derived cell compiles with exit 0 but emits raw `or` / `and` tokens into the client JS, producing `SyntaxError: Unexpected identifier 'or'` when the runtime loads the chunk. Surfaced by both dev-1-react and dev-4-pascal in gauntlet R24; confirmed independently by 2 overseers.
+**Fix (S136 `89008e97`):** two-site landing per agent triage finding (a76e86b1c2b94ea00). The bug surface was two-sided:
+- **AST path** (`compiler/src/expression-parser.ts:preprocessForAcorn` +35L) — acorn doesn't know `or`/`and` are operators; without rewrite, the AST emission path produced no `BinaryExpr` for word-form. Added `or`→`||` / `and`→`&&` rewrite, fenced via `rewriteCodeSegments` (matches the `rewriteNotKeyword` precedent above it).
+- **String-rewrite fallback path** (`compiler/src/codegen/rewrite.ts` +47L) — when `rewriteReactiveRefsAST` bails (any expression containing `is` / `match` / `?{` / `::`), the regex-based passes in codegen/rewrite.ts run. There was NO pass for `or`/`and` lowering — they leaked verbatim into emitted JS. New `rewriteBooleanKeywords()` registered as Pass 2.5 in BOTH `clientPasses` and `serverPasses` after `rewriteNotKeyword`.
 
-- **Reproducer:** `const <visibleTickets> = @tickets.filter(t => (@statusFilter is .All or t.status == @statusFilter) and (@searchTerm == "" or t.title.includes(@searchTerm)))` inside a `.scrml` file; compile exits 0; `node --check dist/*.client.js` reports `SyntaxError`. Full reproducer in `scrml-support/docs/gauntlets/gauntlet-r24/dev-1-react.scrml` + `dev-4-pascal.scrml`.
-- **Spec reference:** SPEC §45 (equality semantics) + §7 (logic contexts) — `or` / `and` are scrml's word-form boolean operators, must lower to JS `||` / `&&`.
-- **Current behavior:** derived-cell expression translator emits identifiers verbatim.
-- **Expected behavior:** `or` → `||`, `and` → `&&` (word→symbol lowering at the codegen boundary).
-- **Suggested fix scope:** likely single-file — codegen translation table for derived-cell expressions (probably in `compiler/src/codegen/emit-expr.ts` or sibling). Highest blast radius of all R24 findings; affects every derived cell with mixed boolean operators.
-- **Cross-refs:** R24-BUG-1 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md` §"Compiler bugs surfaced".
+Pattern: lookbehind `(?<![A-Za-z0-9_$@.])`, lookahead `(?![A-Za-z0-9_$])` — excludes identifier-substring matches (`orange`/`xor`/`vendor`/`andrew`), member-access (`obj.or`), sigil-prefixed (`@or`).
+
+Regression test: `compiler/tests/unit/boolean-keywords-lowering.test.js` (NEW; +372L; 42 tests covering single-op, mixed-precedence, filter-callback shape from R24 reproducer, + negative controls). Reproducer verified: dev-1-react.scrml `or`/`and` raw before → 0 raw after; 27 properly lowered `||`/`&&` sites in compiled client.js.
+
+Tests: 14,743 → 14,785 pre-commit (+42, 0 fail, 88 skip, 1 todo) · 21,762 → 21,804 full suite (+42, 0 fail, 170 skip, 1 todo).
+
+**Spec status (R24-BUG-1 Rule-4 finding — RESOLVED in S136 SPEC amendment):** the brief asserted SPEC §45 + §7 canonicalize word-form `or`/`and`; agent's cross-check found SPEC was actually SILENT on word-form (SPEC §45 covers `==`/`!=` only; `BinaryExpr.op` AST union lists `||`/`&&` only; SPEC code blocks use `&&`/`||` exclusively; `or`/`and` appear ~1076× in SPEC but all English prose). User direction (S136 — option (i)): RATIFY word-form as canonical alongside `||`/`&&`. SPEC + PRIMER + kickstarter normative text added in the follow-up commit. Adopter signal (2/4 R24 devs reached for word-form instinctively) + zero-friction fix (matches `not` rewrite precedent) drove the ratification.
+
+**Cross-refs:** R24-BUG-1 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md` § "Compiler bugs surfaced"; agent dispatch brief at `docs/changes/r24-bug-1-or-and-codegen-lowering-2026-05-27/BRIEF.md` (S136 DD-Rec-14 archival).
+
+**Known limitations (accepted trade-offs):**
+- `obj . or` (whitespace-separated property access) would still rewrite — same accepted trade-off as the `not` precedent (`obj . not` also breaks). Not commonly written; matches accepted precedent.
+- `let and = 5` / `let or = 5` (valid JS identifier renamed to operator-keyword) would break — same accepted trade-off as the `not` precedent. Zero usages in current corpus.
+
+These can be hardened later with extended lookbehind if adopters report; not warranted preemptively.
 
 ---
 
@@ -276,6 +287,23 @@ A `<column field="status" :let={(row) => <span>${@.status}...}/>` inside a `<tab
 - **Expected behavior:** `@.` inside `<column :let={(row) => ...}>` lowers to the iteration-bound row.
 - **Suggested fix scope:** codegen — iteration-scope binding inside L22 column slot context.
 - **Cross-refs:** R24-BUG-6 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### Bug 35 — `rewriteIsPredicates` in `preprocessForAcorn` fails on BS-tokenizer space-padded dots — `MED` (S136 R24-BUG-1 triage finding)
+
+When the BS tokenizer space-pads dot tokens (`@x is . All` vs the canonical `@x is .All`), `rewriteIsPredicates` in `compiler/src/expression-parser.ts:preprocessForAcorn` FAILS to recognize the `is`-predicate. This forces the entire expression through the string-rewrite fallback path (which is the only reason R24-BUG-1 was visible in dev-1-react.scrml's filter callback). Surfaced as a deferred item during the R24-BUG-1 dispatch agent triage (a76e86b1c2b94ea00).
+
+- **Reproducer (direct AST probe):**
+  - `parseExprToNode("@x is . All", "test.scrml", 0)` returns `{kind: "ident"}` (only `@x` parsed; `is . All` lost)
+  - `parseExprToNode("@x is .All", ...)` returns `{kind: "binary", op: "is"}` (correctly parsed)
+- **Asymmetric behavior:** `rewriteIsOperator` STRING pass at `compiler/src/codegen/rewrite.ts:561-562` DOES handle the `\s*` between `.` and variant via tolerant regex — only the `preprocessForAcorn` AST-path is broken.
+- **Spec reference:** SPEC §3 + §4.4 — whitespace inside `is .Variant` predicate forms should be tolerated symmetrically across both pipeline paths (AST-emit + string-rewrite).
+- **Current behavior:** AST-emit path silently drops `is .Variant` predicate when dot is space-padded; codegen falls through to string-rewrite (which works) — so adopters see correct emitted JS BUT pay a perf cost from the path switch + lose AST-side optimization opportunities.
+- **Expected behavior:** `rewriteIsPredicates` regex should tolerate `\s*` between `.` and variant identifier (mirroring the string-rewrite pass).
+- **Suggested fix scope:** single-file regex tweak in `compiler/src/expression-parser.ts` `rewriteIsPredicates`. Likely <10 lines.
+- **Adopter impact:** none observable (correct JS still emits via fallback); compiler-internal performance + AST-path completeness gap only.
+- **Cross-refs:** surfaced by agent dispatch `a76e86b1c2b94ea00` (R24-BUG-1 landing); recorded in dispatch's final-report DEFERRED_ITEMS #2.
 
 ---
 
