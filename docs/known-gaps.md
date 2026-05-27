@@ -6,7 +6,7 @@
 >
 > **Per-gap status:** `spec'd` = SPEC normative + compiler does nothing · `partial-impl` = some sub-units shipped, others pending · `scoping` = SCOPING.md authored, OQs open · `in-impl` = implementation arc actively in flight · `deferred` = ratified to defer pending a precondition · `blocked` = waiting on something else · `nominal` = SPEC-only Nominal section (deliberately spec-ahead-of-implementation per author)
 >
-> Updated 2026-05-27 (S136 — R24 gauntlet bug intake + R24-BUG-1 RESOLVED in-session; net +7 new entries + 1 cross-ref escalation + Bug 28 flipped HIGH→RESOLVED + Bug 35 NEW MED from R24-BUG-1 triage; previously S135 close).
+> Updated 2026-05-27 (S136 — R25 gauntlet bug intake; net +6 new HIGH (Bugs 36-41) + +3 new MED (Bugs 42-44; Bug 43 duplicate-cross-ref of Bug 30) + +2 new LOW (Bugs 45-46) + Bug 29 status revised HIGH→PARTIALLY-RESOLVED (narrow `{return}` fix landed `c7e81962`; broader case Bug 38 still OPEN) + Bug 28 R24-BUG-1 RESOLVED held under R25 4/4 verification + R25 dispatch-shape S136 dev-returns-content VALIDATED 0-dispatch-failures.
 
 ---
 
@@ -14,9 +14,9 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 29 `!{}` `{ return }` arm codegen (NEW S136 R24)** · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) |
-| MED | 10 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path gap (NEW S136 R24-BUG-1 triage)** |
-| LOW | 13 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** |
+| HIGH | 9 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression; HELD 4/4 R25)** · **Bug 29 narrow `{ return }` arm RESOLVED S136 `c7e81962` (R24-BUG-2; +18 regression tests; broader case Bug 38 deferred)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) · **Bug 36 CRITICAL server-fn body silent drop (NEW S136 R25, BLOCKER for SQL servfns)** · **Bug 37 `<each in=@x.filter(c => ...)>` arrow truncation (NEW S136 R25, minimally reproduced)** · **Bug 38 `!{}` arm body codegen failure broader case (NEW S136 R25, 4/4; deeper than Bug 29 narrow)** · **Bug 39 phantom enum-object → el.textContent wiring (NEW S136 R25, 2/4 independent)** · **Bug 40 `:`-shorthand inside `<each>` item body empty (NEW S136 R25)** · **Bug 41 `<schema>` block content leaks into HTML body (NEW S136 R25)** |
+| MED | 13 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24; R25 confirmed via Bug 43 cross-ref)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path gap (NEW S136 R24-BUG-1 triage)** · **Bug 42 `?{}` SQL in `server function*` not lowered (NEW S136 R25; E-CG-006 misclassified for server-context)** · **Bug 44 W-LINT-007 false-positive on `fallback={<markup/>}` SPEC §19.6 canonical errorBoundary shape (NEW S136 R25; composes with R24 step-3b)** |
+| LOW | 15 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** · **Bug 45 `int` ghost type → asIs fallthrough → confusing E-SCHEMAFOR-NO-SQL-MAPPING (NEW S136 R25; 4/4 devs reached from canon)** · **Bug 46 tableFor `sortable=`/`selectable=` not implemented (NEW S136 R25; W-ATTR-001 forwarded as plain HTML)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
 ---
@@ -150,16 +150,102 @@ These can be hardened later with extended lookbehind if adopters report; not war
 
 ---
 
-### Bug 29 — `!{}` handler `{ return }` arm codegen emits `_result = return;` (invalid JS) — `HIGH` (S136 R24)
+### Bug 29 — `!{}` handler `{ return }` arm codegen emits `_result = return;` (invalid JS) — `PARTIALLY-RESOLVED S136 (commit c7e81962); broader case Bug 38 still OPEN` (was HIGH; R24)
 
-Any `failableCall() !{ | .Variant -> { return } }` no-op arm body (the canonical "early-return-on-error" idiom per PRIMER §6) compiles with exit 0 but emits `let _scrml__scrml_result_46 = return;` into the client JS, failing `node --check`. Surfaced 8 times in dev-1-react's output alone.
+**S136 partial fix (commit `c7e81962`):** terminating-statement detection added to `compiler/src/codegen/emit-logic.ts` `emitArmAssign` closure (case `"guarded-expr":`, lines 2479-2491). Two local helpers: `splitTopLevelStmts` (depth-tracked `;`-split mirroring `rewriteBlockBody`'s separator pass) + `isTerminatorStmt` (regex `/^(?:return|throw|break|continue)(?:[\s;]|$)/`). When arm body's last statement matches a terminator, emit each statement directly (no `_result = ...` wrap). Side-effect + terminator bodies (`{ @x = "y"; return }`) emit both as a sequence — reactive_set fires BEFORE return. +18 regression tests in `compiler/tests/unit/error-handler-terminator-arms.test.js`. Tests 21,762 → 21,780.
 
-- **Reproducer:** `function load() { const rows = fetchItems() !{ | ::Network msg -> { @phase = .Error(msg); return } | ::Empty -> { @phase = .Empty; return } }; @phase = .Success(rows.length) }` — every `return` in the arm body becomes a `let _result = return;` literal.
-- **Spec reference:** SPEC §19.4 (inline handler contract).
-- **Current behavior:** error-handler arm lowering binds the entire arm body to a `_result` let, even when the body's terminal statement is `return` (which is a statement, not an expression).
-- **Expected behavior:** treat `return` (or `throw`, `break`, `continue`) as a terminating statement; do not bind to `_result`; the parent context already has the early-return semantics.
-- **Suggested fix scope:** codegen — error-handler arm lowering; teach the arm-body emitter to detect terminating statements and skip the `_result = ...` wrap. Affects every error-handler arm with a no-op body (the dominant adopter shape).
-- **Cross-refs:** R24-BUG-2 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+**R25 finding — BROADER CASE STILL OPEN as Bug 38:** R25 confirmed via 4/4 dev exposure + overseer verification that the `!{}` arm-body codegen failure is DEEPER than the bare-`return` shape Bug 29 narrowly addressed. Multi-line arm bodies with reactive writes and no-op-return tail STILL fail to produce arm codegen even after S136 fix. The `const r = call() !{...}` workaround pattern suppresses E-ERROR-002 but per overseer-2 + overseer-3 does NOT produce arm codegen. Single-line collapse `!{ | .X -> @y = "z" }` ALSO fails per overseer-3 fresh compile. The deeper bug appears to be parser-vs-codegen split: the `!{` token kicks the parser into "statement boundary not detected" mode regardless of arm-body shape. See Bug 38.
+
+**Bug 29's narrow case is FIXED;** the broader R24-Bug-29-family is filed as Bug 38 for separate dispatch.
+
+- **Reproducer (Bug 29 narrow):** `function load() { fetchItems() !{ | .Network msg -> { return } } }` — pre-S136 emitted `let _result = return;`; post-S136 `c7e81962` emits the body directly.
+- **Reproducer (Bug 38 broader):** see Bug 38 entry below for R25 4/4-dev cross-confirmed scope.
+- **Spec reference:** SPEC §19.4 (inline handler contract); SPEC §19.5 (call-site `!{}`).
+- **Cross-refs:** R24-BUG-2 (scrml-support/docs/gauntlets/gauntlet-r24-report.md) → fix landing `c7e81962`; R25-Bug-38 (scrml-support/docs/gauntlets/gauntlet-r25-report.md § "Compiler bugs surfaced" → Bug 38) → broader case OPEN.
+
+---
+
+### Bug 36 — server-fn body silently dropped on `?{}` + `if (x is some/not) fail` pattern — `CRITICAL` (S136 R25; 3/4 devs)
+
+**The worst-of-both-worlds bug.** When a `server function` body contains `?{}` SQL + a presence-check `if` + a `fail` statement (the canonical CRUD-server-fn shape), the compiler emits 3× "statement boundary not detected — trailing content would be silently dropped" warnings per file at function-body offsets, exits 0, and `node --check` PASSES — because the emitted server-fn body is EMPTY (just auth boilerplate + parameter extraction). The `?{}` SQL queries, presence-check `if`s, `fail` statements, and `?{...}.run()` calls are ALL absent from the emitted JS. Adopters deploy silently broken code.
+
+Surfaced INDEPENDENTLY by dev-1-react (`createCard`/`moveCard`/`archiveCard`), dev-2-elixir (same names — also dropped), dev-4-pascal (same names — also dropped) in R25.
+
+- **Reproducer shape:** `server function foo(x) ! Err { const r = ?{...}.get(); if (r is not) fail .X; ?{...}.run() }` — body collapses to empty in emitted JS.
+- **Root cause hypothesis:** statement-boundary parser drops content after first `?{...}` token inside `server function` body. The 3× BS warning is the smoking gun.
+- **Spec reference:** SPEC §19 (server function bodies) + SPEC §13 (`?{}` query expressions).
+- **Current behavior:** exits 0; node --check passes (empty fn body is valid JS); emitted server-fn body returns `undefined`.
+- **Expected behavior:** server-fn body emits the full SQL + control-flow + fail/run sequence; compile-time signal if body would be empty.
+- **Suggested fix scope:** statement-boundary parser in `server function` context. Likely involves either `compiler/src/codegen/emit-server.ts` or the upstream statement-boundary detection that fires the BS warning. Confirm via independent reproducer first.
+- **Severity:** **BLOCKER** for any `?{}` SQL surface — affects every real-world CRUD-server-fn pattern.
+- **Cross-refs:** Bug 36 in `scrml-support/docs/gauntlets/gauntlet-r25-report.md` § "Compiler bugs surfaced".
+
+---
+
+### Bug 37 — arrow function in `<each in=...>` attribute truncates at codegen — `HIGH` (S136 R25; minimally reproduced)
+
+Inline arrow-function predicate inside an `<each>` `in=` attribute is severed at codegen. `<each in=@x.filter(c => c.foo == 1)>` emits `_scrml_reactive_get("x").filter(c =;` — the `=>` is severed, predicate body dropped, closing paren replaced with `;`. Compile exits 0; `node --check` FAILS with `SyntaxError: Unexpected token ';'`. Minimally reproduced by overseer-4 in R25.
+
+- **Reproducer (minimal):** `<each in=@x.filter(c => c.foo == 1)>` in any .scrml file; `/tmp/r25-overseer-each-arrow-repro.scrml` per the R25 report has the working repro.
+- **Spec reference:** SPEC §17.7 `<each in=expr>` — attribute-position expression should parse + emit per ordinary expression rules.
+- **Workaround (confirmed canonical):** hoist filter to a derived cell: `const <filtered> = @x.filter(c => ...)` then `<each in=@filtered>`. This is the canonical scrml shape per kickstarter §3.1 + §11.4 — but the compiler should refuse the inline form OR emit a diagnostic instead of silently producing invalid JS.
+- **Suggested fix scope:** `<each in=expr>` attribute-value emission path. Either accept the inline arrow OR emit `E-EACH-INLINE-ARROW` at parse-time.
+- **Cross-refs:** Bug 37 in `gauntlet-r25-report.md`.
+
+---
+
+### Bug 38 — `!{}` arm body codegen failure (R24 Bug 29 family, DEEPER) — `HIGH` (S136 R25; 4/4 devs)
+
+Bug 29's narrow `{ return }` case was RESOLVED in S136 commit `c7e81962`. R25 confirms the broader `!{}` arm-body codegen failure remains: multi-line arm bodies, single-line collapsed arm bodies, and the `const r = call() !{...}` "workaround" all FAIL to produce arm codegen per overseer verification in 4/4 devs. The `const r = ...` workaround suppresses E-ERROR-002 but does NOT cause the arm code to be emitted — runtime has zero error handling for the affected calls.
+
+- **Reproducer (multi-line):** `someCall() !{ | .Variant arg -> { @x = "value"; @y = 0 } | .Other -> { ... } }` — arm bodies do not appear in emitted JS. BS warnings fire ("statement boundary not detected") but compile exits 0.
+- **Reproducer (single-line):** `someCall() !{ | .Variant -> @x = 1 }` — same BS warning + missing arm code per overseer-3.
+- **Reproducer (const-workaround):** `const r = someCall() !{ | .X -> {...} | .Y -> {...} }` — suppresses E-ERROR-002 + emits resultVar binding but per overseer-2 + overseer-3 the arm bodies STILL do not emit.
+- **Root cause hypothesis:** parser-vs-codegen split — `!{` token kicks parser into "statement boundary not detected" mode regardless of arm-body shape. The S136 narrow fix patched the symptom for bare-`return` but not the underlying parser pathology.
+- **Spec reference:** SPEC §19.5 call-site `!{}`; PRIMER §6 canonical multi-line shape.
+- **Suggested fix scope:** investigate the parser path for `!{` token; possibly the same statement-boundary parser implicated in Bug 36. May share root with Bug 36 — investigate as a cluster.
+- **Composition:** Bug 29 (narrow) is RESOLVED; this entry is the broader case still open.
+- **Cross-refs:** Bug 38 in `gauntlet-r25-report.md`; R24 Bug 29 (narrow, RESOLVED `c7e81962`); R24-BUG-2 dispatch BRIEF.md at `docs/changes/r24-bug-2-handler-arm-return-codegen-2026-05-27/BRIEF.md`.
+
+---
+
+### Bug 39 — phantom enum-object → `el.textContent` wiring (no source backing) — `HIGH` (S136 R25; 2/4 devs independent)
+
+Emitted client.js contains `el.textContent = CreateError; el.textContent = MoveError; el.textContent = ArchiveError;` (or whatever enum-types are declared) on a single `[data-scrml-logic="_scrml_logic_N"]` span. No source expression backs this wiring. The compiler is generating display-update calls that reference the ENUM CONSTRUCTOR OBJECT (not a variant instance) as the textContent value.
+
+Reproduced INDEPENDENTLY by dev-1 (React) and dev-2 (Elixir). Same enum names appear in both because both devs declared `CreateError`/`MoveError`/`ArchiveError`; the pattern is "first 3 declared error-enum types get wired to phantom slot".
+
+- **DOM impact:** last-write-wins → DOM shows `[object Object]` text node where the phantom slot landed.
+- **Spec reference:** SPEC §6.2 reactive display + SPEC §18 enum codegen.
+- **Root cause hypothesis:** some auto-wiring pass is treating top-level enum type DECLARATIONS as if they were values to display. Possibly related to validity-surface auto-synth or to the `<errors of=>` element wiring.
+- **Suggested fix scope:** identify the auto-wiring pass; gate on "is the referenced symbol a value, not a type/enum-constructor."
+- **Cross-refs:** Bug 39 in `gauntlet-r25-report.md`.
+
+---
+
+### Bug 40 — `:`-shorthand inside `<each>` item body silently emits empty fragment — `HIGH` (S136 R25)
+
+`<each in=@list><span : @.field><empty>...</></each>` emits an item factory that returns an empty `documentFragment.firstChild` (always `null`). No `span` element, no text content. Confirmed for `<empty : "string literal">` (Svelte dev-3, overseer-3). LIKELY affects dev-1's "all 7 `<each>` item factory bodies are empty" finding (dev-1 also used `<li class="card" : @.title>` `:`-shorthand).
+
+- **Reproducer (confirmed minimal):** `<each in=@items><span : @.name></each>` — item factory is empty; renders nothing per item.
+- **Workaround:** use explicit element wrapping with `${...}` interpolation: `<li class="card">${@.title}</li>` (the non-shorthand form works correctly).
+- **Spec reference:** SPEC §4.14 / §4.18 `:`-shorthand body; SPEC §17.7 iteration.
+- **Root cause hypothesis:** `:`-shorthand body emission doesn't handle `<each>` item-factory context — the body is parsed but not wired into the item factory's return value. Free-text `<empty>...</>` body shape DOES emit correctly; isolates the bug to `:`-shorthand form inside `<each>`.
+- **Suggested fix scope:** `<each>` item-factory body emission + `:`-shorthand expansion composition.
+- **Cross-refs:** Bug 40 in `gauntlet-r25-report.md`.
+
+---
+
+### Bug 41 — `<schema>` block content leaks into HTML body as raw visible text — `HIGH` (S136 R25)
+
+dev-2-elixir's HTML output contains the raw text content of the `<schema>` block (`cards { ... } activity_log { ... }`) as visible body content. Schema content should produce only server-side DDL/migration artifacts; never appear in HTML.
+
+- **Reproducer:** dev-2-elixir.scrml + compile → HTML output (`gauntlet-r25/dist/dev-2-elixir.html`) contains the schema text.
+- **Spec reference:** SPEC §11 schema blocks; SPEC §39 schema + migrations.
+- **Current behavior:** `<schema>` block treated as render-tree content in some codegen path.
+- **Expected behavior:** `<schema>` content emits only to DDL/migration artifacts; HTML render-tree skips schema content entirely.
+- **Suggested fix scope:** HTML emitter — exclude `<schema>` (and probably `<channel>`, `<auth>`, etc. — full structural-element registry exclusion) from render-tree traversal.
+- **Cross-refs:** Bug 41 in `gauntlet-r25-report.md`.
 
 ---
 
@@ -307,6 +393,40 @@ When the BS tokenizer space-pads dot tokens (`@x is . All` vs the canonical `@x 
 
 ---
 
+### Bug 42 — `?{}` SQL in `server function*` SSE generator body not lowered (E-CG-006 misclassified) — `MED` (S136 R25)
+
+The compiler treats `server function*` (SSE generator) body as client-side context for `?{}` lowering. dev-1 + dev-2 emit raw `? { \`SELECT...\` } . all ( )` tokens (tokenized but not lowered). dev-4 emits `null` with the comment `// SQL-init for x — client cannot evaluate _scrml_sql (E-CG-006); use a server function`. The classification is wrong — SSE generator body runs server-side (it IS a `server function*`), so `?{}` should lower per server-fn semantics.
+
+- **Reproducer:** `server function* watchActivity() { while (true) { yield ?{`SELECT * FROM activity_log WHERE id > ${@cursor}`}.all() } }` — emits raw `?{...}` tokens or `null` + E-CG-006.
+- **Spec reference:** SPEC §37 SSE / `server function*`; SPEC §13 `?{}` query expressions.
+- **Current behavior:** SSE generator body treated as client context; `?{}` either un-lowered or rejected with E-CG-006.
+- **Expected behavior:** `server function*` body shares server-context lowering with `server function`; `?{}` lowers to runtime SQL invocation.
+- **Suggested fix scope:** server-context classification — `server function*` should join `server function` in the server-context set for codegen passes.
+- **Cross-refs:** Bug 42 in `gauntlet-r25-report.md`.
+
+---
+
+### Bug 43 — Linter scans HTML comment content — `DUPLICATE OF BUG 30 (S136 R24)` — `MED`
+
+R25 surfaced this independently (dev-3 / overseer-3). Already filed as Bug 30 in S136 R24 intake. No new entry needed; cross-reference for the R25 confirming evidence:
+
+- **R25 confirming evidence:** dev-3-svelte's friction report — 14 W-TAILWIND-UNRECOGNIZED-CLASS / W-LINT-007 / W-LINT-004 / W-LINT-014 fires were all on text inside `<!-- FRICTION REPORT -->` comment block; dev's "remove class attributes" workaround was a response to false signal.
+- **Cross-refs:** Bug 30 (S136 R24 entry; primary record); Bug 43 in `gauntlet-r25-report.md` (R25 confirming cross-dev evidence).
+
+---
+
+### Bug 44 — W-LINT-007 false-positive on `fallback={<markup/>}` (SPEC §19.6 canonical errorBoundary shape) — `MED` (S136 R25)
+
+SPEC §19.6.2 specifies `<errorBoundary fallback={<markup/>}>` as canonical (braces required for markup-valued attribute). W-LINT-007 ghost-pattern lint fires on this shape claiming "scrml uses `<Comp prop=val>`" — treating it as a JSX `{val}` braces-in-attribute pattern. The only-working `<errorBoundary>` shape is lint-flagged as an anti-pattern. Confirmed by dev-3-svelte, dev-4-pascal, and overseer-4.
+
+- **Reproducer:** `<errorBoundary fallback={<div>Something went wrong/}><Inner/></errorBoundary>` — fires W-LINT-007.
+- **Spec reference:** SPEC §19.6.2 (`<errorBoundary fallback={<markup/>}>` canonical form).
+- **Composition with R24 step-3b (deferred):** the canon-drift between PRIMER §6.8 `renders=.Fallback` + sibling and SPEC §19.6 `fallback={<markup/>}` is STILL UNRESOLVED. R25 confirmed that PRIMER form errors at attribute parse AND SPEC form fires W-LINT-007 false-positive — the only-working shape is lint-flagged as anti-pattern.
+- **Suggested fix scope:** narrow the `:`-prefixed-binding / `{val}`-in-attribute ghost-pattern lint to exclude SPEC-canonical markup-valued attributes. Linter pass file.
+- **Cross-refs:** Bug 44 in `gauntlet-r25-report.md`; R24 step-3b deferred direction call (PRIMER vs SPEC errorBoundary shape) — recommend resolving direction = SPEC form WITH Bug 44 fixed so it doesn't lint-flag the canonical shape.
+
+---
+
 ## §3 LOW — ergonomic / cosmetic
 
 ### Bug 4 — Bare `/` in markup-text body parses as element closer — `spec'd`
@@ -434,6 +554,36 @@ A Shape-2 compound state cell like `<form><title>= <input type="text"/></form>` 
 - **Expected behavior:** the markup init value is the bind-source; emit `_scrml_reactive_set("newTicketForm.title", "")` (or the appropriate init).
 - **Suggested fix scope:** codegen — Shape-2 compound init handler.
 - **Cross-refs:** R24-BUG-8 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### Bug 45 — `int` ghost type silently resolves to `asIs` (causes downstream `E-SCHEMAFOR-NO-SQL-MAPPING`) — `LOW` (S136 R25; 4/4 devs)
+
+`int` is used in struct field type position by kickstarter §6.1 examples (`age: int(>=18)`), PRIMER §6.5 example (`id: int`), AND the R25 BRIEF. ALL 4 R25 devs reached for `int`. Compiler's `BUILTIN_TYPES` only has `integer` and `number` — `int` falls through to `asIs` (any-type) silently, then `schemaFor(StructType)` breaks with a confusing downstream `E-SCHEMAFOR-NO-SQL-MAPPING: ... declared type (asIs) has no v1.0 SQL mapping`. The actual root cause ("unknown type name `int`") is not surfaced at the struct-field-type declaration site.
+
+The canon is wrong about `int`, OR the compiler should alias it to `integer`. Adopter signal is strong: 4/4 devs reached for it from canon-derived expectation.
+
+- **Reproducer:** `type Foo:struct = { id: int, count: int }` + `schemaFor(Foo)` → confusing E-SCHEMAFOR-NO-SQL-MAPPING.
+- **Spec reference:** SPEC §14 type-system primitives + §39 schema DDL mapping.
+- **Suggested fix scope (two options):**
+  - **(a)** Register `int` as alias for `integer` in `BUILTIN_TYPES` — matches canon's adopter-facing usage; minimal change.
+  - **(b)** Emit `E-UNKNOWN-TYPE-NAME` at struct-field-type position (fail fast) AND fix kickstarter + PRIMER + BRIEF to use `integer` consistently — pin canon, reject ambiguous shorthand.
+  - **PA-lean:** (a) — canon already uses `int`, adopter signal is 4/4 reach; aligning compiler to canon is the right answer per Rule 3.
+- **Cross-refs:** Bug 45 in `gauntlet-r25-report.md`.
+
+---
+
+### Bug 46 — `tableFor` attributes `sortable=` / `selectable=` not implemented (W-ATTR-001 forwarded as plain HTML) — `LOW` (S136 R25; 4/4 devs)
+
+The R25 BRIEF feature 8 references `<tableFor for=Card rows=@cards pick=[...] sortable= selectable=@selectedIds/>`. The `sortable=` and `selectable=` attributes fire `W-ATTR-001` ("not recognized on `<tableFor>`, forwarded as plain HTML attribute") — no semantic effect. The BRIEF specifies these attributes per SPEC §41.16 (tableFor spec), but the compiler hasn't shipped the wiring.
+
+- **Reproducer:** any `<tableFor for=T rows=@cells sortable=true selectable=@selected/>` — W-ATTR-001 ×2.
+- **Spec reference:** SPEC §41.16 (tableFor — sortable + selectable attribute surface).
+- **Suggested fix scope (two options):**
+  - **(a)** Ship the attributes (Landing N) — implement sort header rendering + selectable checkbox column + auto-synth `@<varName>.sortedBy` / `@<varName>.selected` cells.
+  - **(b)** Remove from BRIEF/SPEC examples until implemented.
+  - **PA-lean:** (a) — these are SPEC-specified flagship features for the L22 family; not shipping them is a real gap. ~v1.0 priority.
+- **Cross-refs:** Bug 46 in `gauntlet-r25-report.md`; SPEC §41.16.7 (sort), §41.16.8 (selection).
 
 ---
 
