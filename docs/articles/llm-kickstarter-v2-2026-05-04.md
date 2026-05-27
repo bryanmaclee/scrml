@@ -674,6 +674,95 @@ Static literals retain their constant-fold path (zero runtime overhead). Compute
 
 See SPEC §51.0.M for `<onTimeout>`; §51.0.R for `<onIdle>`; §51.12 for the timer runtime backbone; §51.12.3.1 for computed-delay; §51.0.M.1 for named timers.
 
+### 4.13 Type system flagship — meta blocks, type-as-argument, refinement predicates (§22 + §41 + §53)
+
+Three composable type-system surfaces that account for scrml's distinguishing capability story. Adopters who don't know they exist write JS-style or reach for npm packages that have scrml-native equivalents.
+
+#### `^{}` — the meta context (§22 + S114 Approach C)
+
+A `^{}` block is **compile-time-and-runtime metaprogramming territory**. Inside, you can introspect the scrml type graph, emit code, or read structured metadata about types. The meta surface is **closed at 12 primitives** (S114 Approach C ratification) — no JS-host escape; everything you write is scrml-native, traceable, and verifiable.
+
+```scrml
+${
+  ^{
+    // reflect(TypeName) returns the structural metadata for any scrml type at compile time:
+    const user_shape = reflect(User)
+    meta.emit("User has " + user_shape.fields.length + " fields")
+  }
+}
+```
+
+The 12 primitives include `reflect(TypeName)` (type introspection), `meta.emit(str)` (compile-time stdout — adopter-debuggable), `meta.emit.raw(str)` (codegen splice), `meta.interval` / `meta.timeout` (compile-time timers per S114), and a small set of structured-type accessors. `^{}` blocks are sandboxed — no DOM, no SQL, no I/O. Misuse fires `E-META-001` with a per-identifier hint.
+
+**Manifest gate** (§22.13). If you need to call into a JS host module from a `^{}` block — rare; the closed set covers most needs — declare it under `[capabilities] host-import` in `scrml.toml`. The gate is opt-in per-project; no implicit host access.
+
+74+ scrml sample + example files use `^{}`. It's the substrate for the type-as-argument family (next).
+
+#### The type-as-argument family — L22 (§41.13-§41.16)
+
+**The big idea:** you write the type once, and the compiler derives a form, a SQL schema, a table view, a structured parser — all from that one type definition. No code duplication; no two-source-of-truth drift. **L22 (S65 ratification)** locks "type-as-argument" as a first-class language primitive.
+
+Four shipped (or shipping) family members:
+
+```scrml
+type SignupForm:struct = {
+    email:    string,
+    password: string,
+    age:      int(>=18)
+}
+
+// 1. parseVariant — boundary-parse an unknown string into a typed variant
+${
+  const result = parseVariant(MyEnum, request.body.kind)   // → MyEnum | ParseError
+}
+
+// 2. formFor — type-driven form generation; FLAGSHIP (scrml.dev demo)
+<formFor SignupForm onsubmit=handleSignup/>
+  <!-- The compiler synthesizes: <email req>, <password req length(>=8)>, <age req>,
+       a submit button, the validity surface, the error-rendering elements,
+       and the bind:value plumbing. ONE LINE. -->
+</>
+
+// 3. schemaFor — type-driven SQL schema (DDL) generation
+${
+  ^{
+    const ddl = schemaFor(SignupForm)
+    meta.emit.raw(ddl)   // emits: CREATE TABLE signup_form (email text, password text, age integer check (age >= 18))
+  }
+}
+
+// 4. tableFor — type-driven admin-UI table for a record collection
+<tableFor SignupForm rows=@users editable={ age: false }/>
+```
+
+`parseVariant` shipped S65; `formFor` shipped S102; `schemaFor` shipped S104; `tableFor` shipped S105. All four are imported from `scrml:data`. Per-field customization (slot-based for `formFor`/`tableFor`, attribute-based for `schemaFor`) is documented in SPEC §41.13-§41.16.
+
+**Synonym-detection discipline.** Per L22 + the §53.14.4 canon, the family REPLACES rather than wraps existing tools (`zod`/`yup`/`prisma`/`drizzle` schema-bridges) — type-as-argument is the scrml-native shape. Adjacent npm-style wrappers are anti-pattern.
+
+#### Refinement-type predicates — value constraints in the type position (§53)
+
+scrml's type system accepts **predicates IN the type position** (not just structural-types). The shared-core 14 validator predicates (`req`, `length(>=N)`, `pattern(...)`, `eq(...)`, etc.) compose with type names directly:
+
+```scrml
+let percent: number(>=0 && <=100) = 50      // refinement-typed local
+let email:   string(pattern(EMAIL_RE)) = "" // pattern-constrained string
+<age req>: int(>=18) = 0                    // refinement-typed reactive cell
+```
+
+**Three loci** of "exists/required/constrained" — schema column (SQL DDL: `not null` / `check`), state validator (`req` / `length(>=2)`), refinement type (predicate form). Each fires in its layer's enforcement context — **NOT redundancy** — the same `length(>=2)` predicate in a `<schema>` column generates a `CHECK (length(name) >= 2)` SQL constraint; in a state cell, validates the user input reactively; in a refinement type, gates assignment statically. ONE vocabulary, three loci, three enforcement layers (L4 ratification).
+
+**SPARK three-zone semantics** (§53.6.1 / §53.6.2 — boundary + trusted + static zones). Briefly: predicates ONLY runtime-check at the **boundary zone** (where untrusted input enters: form submit, server-fn arg, JSON.parse result). Inside the **trusted zone** (after a predicate passed at the boundary), the type is statically narrowed; no re-check. The **static zone** is compile-time literal evaluation (`let x: number(>0) = 5` constant-folds the predicate check away). Adopters get runtime safety without the runtime cost of pervasive re-validation.
+
+```scrml
+server function createUser(email: string(pattern(EMAIL_RE))) {
+    // email is in the BOUNDARY zone here — runtime check happens at entry.
+    // Inside this body, email is in the TRUSTED zone — no re-checks.
+    ?{`INSERT INTO users (email) VALUES (${email})`}.run()
+}
+```
+
+See SPEC §22 for `^{}` meta context; §41.13-§41.16 for the L22 family; §53 for refinement-type predicates + SPARK zones.
+
 ---
 
 ## 5. The auto-await rule — your strongest instinct will be wrong

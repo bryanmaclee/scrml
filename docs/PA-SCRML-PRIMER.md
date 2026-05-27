@@ -1043,16 +1043,18 @@ Updated row for parseVariant (S65):
 
 **One-paragraph summary:** scrml admits scrml-native types (`:enum`, `:struct`) as positional arguments to a small, disciplined family of compile-time-special functions OUTSIDE `^{}` meta-blocks. The family is OPEN with bounded discipline; each member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition before entering spec or implementation. `reflect(TypeName)` in §22 meta-blocks is the existing precedent INSIDE meta; `parseVariant` (S65, ratified) is the FIRST general-position member.
 
-**Family members (shipped + planned):**
+**Family members (status as of S135):**
 
 | Member | Status | Sliver |
 |---|---|---|
 | `parseVariant(json, EnumType)` | **shipped** S65 (SPEC §41.13) | type-establishment for sum types — constructor selection from discriminator |
-| `serialize(value, EnumType)` | planned (~6-12mo) | symmetric to parseVariant; round-trip law |
-| `formFor(StructType)` | planned (FLAGSHIP — `scrml.dev` demo) | compile-time struct-walk → emits `<form>` markup tree |
-| `schemaFor(StructType)` | planned | emits `<schema>` SQL DDL from struct field predicates (§39+L4 vocabulary unification) |
-| `tableFor(StructType, rows)` | planned | auto-`<table>` from struct + rows; admin-UI lift |
+| `serialize(value, EnumType)` | STASHED S103 (§53.14.4 discipline filter) | symmetric to parseVariant; round-trip law — synonym-detection re-trigger pending |
+| `formFor(StructType)` | **shipped** S102-S103 (SPEC §41.14; FLAGSHIP — `scrml.dev` demo) | compile-time struct-walk → emits `<form>` markup tree + validity surface + submit handler wiring |
+| `schemaFor(StructType)` | **shipped** S104 (SPEC §41.15) | emits `<schema>` SQL DDL from struct field predicates (§39+L4 vocabulary unification); enum-lowering per OQ-SCH-12 |
+| `tableFor(StructType, rows)` | **shipped** S105 (SPEC §41.16) | auto-`<table>` from struct + rows; admin-UI lift; v1.next features (filtering / pagination / row-click / server-side) deferred |
 | `variantNames(EnumType)` / reflective metadata | planned | exposes variant lists as runtime values |
+
+**Flagship-treatment cross-ref (S135 cluster H catch-up, F-044).** The kickstarter §4.13 ships the adopter-facing flagship treatment of the L22 family (`parseVariant` / `formFor` / `schemaFor` / `tableFor` worked examples) + `^{}` meta context (F-035) + refinement-type predicates with SPARK zones (F-053) as ONE integrated section per the audit's recommendation. The PRIMER §13.6 table here is the per-member status reference; the kickstarter §4.13 is the on-ramp for adopters.
 
 **Authority chain for any new `Type.foo` request:**
 1. SPEC §53.14 — type-as-argument primitives subsection (family framing + discipline)
