@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
+# updated: 2026-05-27T04:14:32Z  commit: f6c98ed8
 
 ## Test Framework
 
@@ -11,15 +11,15 @@ Run all: `bun test compiler/tests/` (preceded by `pretest` sample compilation)
 Run single: `bun test compiler/tests/unit/<file>.test.js`
 Run by name: `bun test compiler/tests/<file>.test.js -t "<test name>"`
 
-## Volume (HEAD c2d3f7ae — S131)
+## Volume (HEAD f6c98ed8 — S135)
 
-780 .test.js/.test.ts files under `compiler/tests/` (was 757 at the prior watermark; +23 net). Major new-test clusters this delta: iteration (each-block), lifecycle annotation (3 landings), ~snapshot codegen fix, MCP-V0.D/E, native-parser M6.5/M6.7 D-class parity.
+801 .test.js/.test.ts files under `compiler/tests/` (was 780 at watermark 3a660c7c; +21 net since S134 close — 3 new unit files this delta + prior S135 commits). Major new-test clusters this delta: Q6-narrow reset × lifecycle (25 tests), lifecycle source-form follow-ups (17 tests), structural-in-logic-body E-STRUCTURAL-ELEMENT-MISPLACED (19 tests).
 
 ## Test Categories
 
 | Category | Glob | Count |
 |---|---|---|
-| Unit | `compiler/tests/unit/**` | 545 |
+| Unit | `compiler/tests/unit/**` | 566 |
 | Integration | `compiler/tests/integration/**` | 88 |
 | Conformance | `compiler/tests/conformance/**` | 105 |
 | Browser | `compiler/tests/browser/**` | 12 |
@@ -28,6 +28,14 @@ Run by name: `bun test compiler/tests/<file>.test.js -t "<test name>"`
 | Self-host | `compiler/tests/self-host/**` | 4 |
 | Top-level parser-conformance | `compiler/tests/*.test.js` | 10 |
 | E2E | `e2e/**` | Playwright (separate runner) |
+
+## S135 NEW Test Files
+
+| File | Tests | What it tests |
+|---|---|---|
+| `unit/lifecycle-shape1-reset.test.js` | 25 | Q6-narrow (§6.8.3) — `reset(@cell)` × lifecycle per-access state management: pre-type reset reverts to "pre" + fires E-TYPE-001 on subsequent post-transition access; post-type reset maintains/advances to "post"; cancel-then-apply ordering (§6.8.2/§6.8.3); `default=` composition; discrimination interaction. Uses direct-AST construction (bypasses parser tokenization) + `compileScrml` end-to-end. |
+| `unit/lifecycle-shape1-source-form.test.js` | 17 | Source-form Shape 1 variant-progression lifecycle: bare-dot `(.Draft to .Published)` + qualified-enum `(Article.Draft to Article.Published)` forms via `compileScrml`; validates Fix #1 (findTopLevelArrow whitespace tolerance) + Fix #3 (parseLifecycleReturnAnnotation qualified-enum stripping + diagnostic text); Fix #3 companion (TRANSITION_CALL_RE `@` prefix tolerance); regression-pin for presence-progression (already worked). |
+| `unit/structural-in-logic-body.test.js` | 19 | E-STRUCTURAL-ELEMENT-MISPLACED fire for `${...}` logic-body silent-swallow class: all 9 structural elements (`<schema>`, `<engine>`, `<channel>`, `<page>`, `<auth>`, `<errors>`, `<onTransition>`, `<onTimeout>`, `<onIdle>`); inner-fallback fire (nested logic body); negative regressions (HTML elements / reactive-decl / PascalCase component / self-closing var-ref / canonical placement); multi-fire case. Driver: `compileScrml` end-to-end. |
 
 ## S131 NEW Test Files — Iteration (`<each>`)
 
@@ -132,18 +140,21 @@ Browser tests are NOT in the pre-commit gate (run separately / in pre-push).
 | Path | Contents |
 |---|---|
 | `compiler/tests/fixtures/` | promote-match-canonical.scrml, promote-multi-file-app/, MCP-V0.E multi-page app fixture |
+| `compiler/tests/unit/__fixtures__/structural-in-logic-body/` | S135 fixture dir for structural-in-logic-body tests (dist output) |
 | `compiler/tests/helpers/` | expr.ts, extract-user-fns.js, mcp-sidecar-compile.js |
 | `compiler/tests/parser-conformance-within-node-allowlist.json` | within-node parity allowlist (rebased; M6.5/M6.7 D-class) |
 | `samples/compilation-tests/` | ~318 test-case directories driven by pretest (counted, not enumerated) |
 
 ## Pattern
 
-Tests use `bun:test` (`describe` / `test` / `expect`). Compiler tests drive `compileScrml()` from `compiler/src/api.js` and assert on `result.errors` / `result.warnings` / `result.outputs`. Diagnostic-stream partition rule (S92/S93): W-* / I-* + severity warning/info → `result.warnings`; tests asserting on W-/I- codes MUST use a cross-stream helper. `E-TYPE-001` + lifecycle/E-TYPE-LIFECYCLE-* + E-STATE-UNDECLARED + E-WRITE-NOT-IN-LOGIC-CONTEXT ARE errors → assert on `result.errors`; `W-EACH-*` + `W-LIFECYCLE-LEGACY-ARROW` are warnings → assert on `result.warnings`.
+Tests use `bun:test` (`describe` / `test` / `expect`). Compiler tests drive `compileScrml()` from `compiler/src/api.js` and assert on `result.errors` / `result.warnings` / `result.outputs`. Diagnostic-stream partition rule (S92/S93): W-* / I-* + severity warning/info → `result.warnings`; tests asserting on W-/I- codes MUST use a cross-stream helper. `E-TYPE-001` + lifecycle/E-TYPE-LIFECYCLE-* + `E-STRUCTURAL-ELEMENT-MISPLACED` + E-STATE-UNDECLARED + E-WRITE-NOT-IN-LOGIC-CONTEXT ARE errors → assert on `result.errors`; `W-EACH-*` + `W-LIFECYCLE-LEGACY-ARROW` are warnings → assert on `result.warnings`.
+
+S135 lifecycle-shape1-reset and lifecycle-shape1-source-form tests use a combination of direct-AST construction (bypasses parser to test tracker logic in isolation) and `compileScrml` end-to-end (source-form paths). `structural-in-logic-body.test.js` is `compileScrml`-only.
 
 Parser-conformance tests diff native-parser output against the Acorn oracle. The dual-pipeline canary diffs `nativeParseFile` FileAST against live `buildAST` FileAST. MCP tests drive `compileScrml` via `compileAndReadSidecars(source, tmpRoot)` and assert on emitted .json shapes; runtime-shim tests import the shim module directly, fake the runtime via `install({...})`, point `loadSidecars()` at a tmp dir, and `_resetForTests()` between cases.
 
 ## Tags
-#scrmlts #map #test #bun-test #parser-conformance #native-parser #m6-wave1 #m6-7-dclass #iteration #each #lifecycle #snapshot-fix #mcp-v0 #mcp-program-attr #v-kill #unit-cc #s131
+#scrmlts #map #test #bun-test #parser-conformance #native-parser #m6-wave1 #m6-7-dclass #iteration #each #lifecycle #lifecycle-reset-aware #structural-in-logic-body #snapshot-fix #mcp-v0 #mcp-program-attr #v-kill #unit-cc #s131 #s135
 
 ## Links
 - [primary.map.md](./primary.map.md)
