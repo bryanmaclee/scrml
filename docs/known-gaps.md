@@ -14,8 +14,8 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 4 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression; HELD 4/4 R25)** · **Bug 29 narrow `{ return }` arm RESOLVED S136 `c7e81962` (R24-BUG-2; +18 regression tests; broader case Bug 38 RESOLVED S137 `933d1ad3`)** · **Bug 36 `! ErrorType` bare-form parse-gap RESOLVED S136 `e1269844` (was CRITICAL R25; 3-site fix ast-builder + native-parser + 12-test regression; spec §41.14 bare-form ratification)** · **Bug 39 phantom enum→textContent wiring RESOLVED-AS-SIDE-EFFECT-OF-BUG-36 S136 `e1269844` (was HIGH R25; was a symptom of Bug 36's orphan-IDENT)** · **Bug 37 `<each in=@x.filter(c=>...)>` arrow truncation RESOLVED S137 `1ce963d0` (R25; ast-builder `_findEachOpenerEnd` paren/bracket-aware; +12 tests; Shape A — accept inline arrow)** · **Bug 38 `!{}` arm body codegen broader case RESOLVED S137 `933d1ad3` (R25; emit-logic.ts `emitArmAssign` extended with multi-stmt + single-stmt-side-effect branches; +18 tests; closes R24-Bug-29-family deeper shapes; codegen scope correct; FULL EMPIRICAL CLOSE via Bug 49 fix `076d53e5`)** · **Bug 40 `:`-shorthand inside `<each>` item body RESOLVED S137 `50d38095` (R25; SPEC §4.14 BS-level compliance gap; three-file fix block-splitter + ast-builder + emit-each; `<empty :>` sub-case closed same-root; +20 tests)** · **Bug 41 `<schema>` HTML body-text leak RESOLVED S137 `ebeba766` (R25; emit-html.ts `SERVER_ONLY_STATE_TYPES` exclusion for `schema`+`seeds`; +18 tests; sibling structural-elements verified clean upstream)** · **Bug 49 BS-level stmt-boundary `!{...}` content drop RESOLVED S137 `076d53e5` (R26-surfaced; UPSTREAM of Bug 38; tokenizer.ts `tryEmitSyntheticErrorEffectBlock` helper; closes both bare-call + const-binding shapes; +12 tests + PA-verified empirical R26 clean on all 4 R25 devs)** · **R24-BUG-4 `<match>` + `<each>` `</>` generic closer RESOLVED S138 `adc0a70f` (CLASS-LEVEL — closes both <match> AND <each> in one fix; block-splitter.js generic tag-stack scanner +479/-58L; +23 tests; PA-verified R26 dev-3-svelte clean E-CTX-001/003; SURFACED 2 NEW HIGH downstream Phase-3 codegen gaps Bug 52 + 53 previously MASKED by BS-level rejection)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 52 `<match on=.BareVariant>` codegen no bare-variant lowering (NEW S138 — surfaced by R24-BUG-4 R26; Phase 3 codegen gap)** · **Bug 53 `<match>` `:`-shorthand arm body emits raw markup as textContent (NEW S138 — surfaced by R24-BUG-4 R26; Phase 3 codegen gap)** |
-| MED | 7 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) · **Bug 42 `?{}` SQL in `server function*` SSE generator RESOLVED S137 `480aded4`** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path completeness RESOLVED S137 `5cb993c2`** · **Bug 30 + Bug 43 linter HTML comment opacity RESOLVED S137 `5199a435`** · **Bug 44 W-LINT-007 false-positive on `fallback={<markup/>}` RESOLVED S137 `98f82970`** · **Bug 31 `if`-as-expression in `!{}` result binding RESOLVED S137 `8f4f4ce3`** · **Bug 32 `@.` in tableFor column slot RESOLVED S137 `68bfb4a4` (PA hypothesis correct; +170/-3L `rewriteAtDot*` helpers in emit-table-for.ts; +13 tests; CLASS-CLOSE — closes Bug 31 agent's deferred dev-1 line-438 finding as SAME ROOT; PA-verified R26 clean orphan `@ .` count 1→0)** · **Bug 50 `<tableFor selectable=>` `onchange` raw-if-stmt-in-object-literal NOT-REPRODUCED S138 (closed; PA misobservation at S137; R26 against all 4 R25 devs at HEAD shows zero `_scrml_attr_onchange` patterns + `node --check` PASS; surface covered by Bug 46)** | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 51 Shape 2 decl auto-lift in `<program>` default-logic mode drops render-spec metadata (NEW S138 — surfaced by v0.6.2 cut README compile-gate; W-PROGRAM-REDUNDANT-LOGIC promises auto-lift; auto-lift drops `_cellKind="shape-2"` metadata; bare top-level Shape 2 decl → render-by-tag fires false E-CELL-NO-RENDER-SPEC)** |
+| HIGH | 4 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression; HELD 4/4 R25)** · **Bug 29 narrow `{ return }` arm RESOLVED S136 `c7e81962` (R24-BUG-2; +18 regression tests; broader case Bug 38 RESOLVED S137 `933d1ad3`)** · **Bug 36 `! ErrorType` bare-form parse-gap RESOLVED S136 `e1269844` (was CRITICAL R25; 3-site fix ast-builder + native-parser + 12-test regression; spec §41.14 bare-form ratification)** · **Bug 39 phantom enum→textContent wiring RESOLVED-AS-SIDE-EFFECT-OF-BUG-36 S136 `e1269844` (was HIGH R25; was a symptom of Bug 36's orphan-IDENT)** · **Bug 37 `<each in=@x.filter(c=>...)>` arrow truncation RESOLVED S137 `1ce963d0` (R25; ast-builder `_findEachOpenerEnd` paren/bracket-aware; +12 tests; Shape A — accept inline arrow)** · **Bug 38 `!{}` arm body codegen broader case RESOLVED S137 `933d1ad3` (R25; emit-logic.ts `emitArmAssign` extended with multi-stmt + single-stmt-side-effect branches; +18 tests; closes R24-Bug-29-family deeper shapes; codegen scope correct; FULL EMPIRICAL CLOSE via Bug 49 fix `076d53e5`)** · **Bug 40 `:`-shorthand inside `<each>` item body RESOLVED S137 `50d38095` (R25; SPEC §4.14 BS-level compliance gap; three-file fix block-splitter + ast-builder + emit-each; `<empty :>` sub-case closed same-root; +20 tests)** · **Bug 41 `<schema>` HTML body-text leak RESOLVED S137 `ebeba766` (R25; emit-html.ts `SERVER_ONLY_STATE_TYPES` exclusion for `schema`+`seeds`; +18 tests; sibling structural-elements verified clean upstream)** · **Bug 49 BS-level stmt-boundary `!{...}` content drop RESOLVED S137 `076d53e5` (R26-surfaced; UPSTREAM of Bug 38; tokenizer.ts `tryEmitSyntheticErrorEffectBlock` helper; closes both bare-call + const-binding shapes; +12 tests + PA-verified empirical R26 clean on all 4 R25 devs)** · **R24-BUG-4 `<match>` + `<each>` `</>` generic closer RESOLVED S138 `adc0a70f` (CLASS-LEVEL — closes both <match> AND <each> in one fix; block-splitter.js generic tag-stack scanner +479/-58L; +23 tests; PA-verified R26 dev-3-svelte clean E-CTX-001/003; SURFACED 2 NEW HIGH downstream Phase-3 codegen gaps Bug 52 + 53 previously MASKED by BS-level rejection)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 52 `<match on=.BareVariant>` codegen no bare-variant lowering RESOLVED S138 `a30d86d1` (PA-direct +18L emit-match.ts resolveOnExpr + 276L NEW regression test 8 tests; PA-verified R26 dev-3-svelte: `_dispatch("High")` post-fix, zero `.Variant` patterns)** · **Bug 53 `<match>` `:`-shorthand arm body emits raw markup as textContent (NEW S138 — surfaced by R24-BUG-4 R26; Phase 3 codegen gap)** · **Bug 50 `<tableFor>` synthetic onchange handler emits raw if-stmt inside object-literal property value RE-OPENED S138 (was MED NOT-REPRODUCED `3a482076`; reclassified HIGH after re-verification on dev-3-svelte R24 source — unmasked by R24-BUG-4 BS-closer fix `adc0a70f`; produces JS SyntaxError at line 512 of emitted dev-3-svelte.client.js; methodology lesson banked — R26 reverse-direction needs cross-source sweep not just named-source verification)** |
+| MED | 7 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) · **Bug 42 `?{}` SQL in `server function*` SSE generator RESOLVED S137 `480aded4`** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path completeness RESOLVED S137 `5cb993c2`** · **Bug 30 + Bug 43 linter HTML comment opacity RESOLVED S137 `5199a435`** · **Bug 44 W-LINT-007 false-positive on `fallback={<markup/>}` RESOLVED S137 `98f82970`** · **Bug 31 `if`-as-expression in `!{}` result binding RESOLVED S137 `8f4f4ce3`** · **Bug 32 `@.` in tableFor column slot RESOLVED S137 `68bfb4a4` (PA hypothesis correct; +170/-3L `rewriteAtDot*` helpers in emit-table-for.ts; +13 tests; CLASS-CLOSE — closes Bug 31 agent's deferred dev-1 line-438 finding as SAME ROOT; PA-verified R26 clean orphan `@ .` count 1→0)** · **Bug 50 `<tableFor>` synthetic onchange handler emits raw if-stmt inside object-literal NOT-REPRODUCED-THEN-RE-OPENED S138 (closure `3a482076` REVERSED — R26 cross-source sweep on dev-3-svelte R24 shows symptom DOES fire after R24-BUG-4 BS-closer unmask; reclassified HIGH; see HIGH row + Bug 50 detail entry)** | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 51 Shape 2 decl auto-lift in `<program>` default-logic mode drops render-spec metadata (NEW S138 — surfaced by v0.6.2 cut README compile-gate; W-PROGRAM-REDUNDANT-LOGIC promises auto-lift; auto-lift drops `_cellKind="shape-2"` metadata; bare top-level Shape 2 decl → render-by-tag fires false E-CELL-NO-RENDER-SPEC)** |
 | LOW | 16 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** · **Bug 45 `int` ghost type → asIs fallthrough → confusing E-SCHEMAFOR-NO-SQL-MAPPING (NEW S136 R25; 4/4 devs reached from canon)** · **Bug 46 tableFor `sortable=`/`selectable=` not implemented (NEW S136 R25; W-ATTR-001 forwarded as plain HTML)** · **Bug 48 latent paren/bracket-depth gap in sibling `<match>`/`<machine>`/`<engine>` opener finders (NEW S137; surfaced by Bug 37 fix; not adopter-fired today)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
@@ -354,17 +354,26 @@ The `:`-shorthand arm body (`<Idle>: <p>Idle</p>`) emits `el.textContent = <p>Id
 
 ---
 
-### Bug 52 — `<match for=Type on=.BareVariant>` codegen does not lower bare-variant (Phase 3 codegen gap) — `NEW S138 HIGH` (surfaced by R24-BUG-4 R26)
+### Bug 52 — `<match for=Type on=.BareVariant>` codegen does not lower bare-variant (Phase 3 codegen gap) — `RESOLVED S138 (commit a30d86d1)` (was HIGH; surfaced by R24-BUG-4 R26)
 
-`<match for=Priority on=.High>` emits `__scrml_match_match_NN_dispatch(.High)` literally — syntactically invalid JS (`.High` is scrml source syntax, not runtime JS). The bare-variant in the `on=` value should be lowered to its runtime form (e.g., a string tag `"High"` or a discriminator object `{tag:"High"}`).
+**Fix (S138 `a30d86d1`):** PA-direct surgical fix in `compiler/src/codegen/emit-match.ts:resolveOnExpr`. Added 5th branch (+18L) detecting `^\.[A-Z][A-Za-z0-9_$]*$` shape and lowering to `JSON.stringify(variantTag)`. Mirrors the canonical bare-variant lowering at `emit-expr.ts:emitIdent` lines 291-303 (unit variants store as bare string tags at runtime — `Phase.Idle === "Idle"`).
 
-**Surface:** match codegen — `on=` attribute value lowering in `compiler/src/codegen/emit-match.ts`.
+Dispatch helper's `_tag` extraction handles the string form directly: `_tag = (typeof _v === "object" ...) ? _v.variant : _v` → for string `"High"`, `_tag = _v = "High"` matches the `_tag === "High"` dispatch branch.
 
-- **Reproducer:** match block with bare-variant `on=` value (e.g., `<match for=Priority on=.High>`). The compile succeeds but emitted `__scrml_match_match_NN_dispatch(.High)` fails `node --check` with a parse error.
-- **Current behavior:** bare-variant in `on=` is propagated verbatim into the dispatch call.
-- **Expected behavior:** bare-variant lowered to its runtime representation per the existing variant-lowering pass.
-- **Suggested fix scope:** emit-match codegen — extend `on=` value handling to apply the existing variant-lowering rules (same pattern as bare-variant inference in arm tags, §18.0.3 + §14.10).
-- **Cross-refs:** R24-BUG-4 dispatch (the BS-level fix exposed this Phase 3 gap); `docs/changes/match-block-form-scoping/SCOPING.md` Phase 3 (emit-match codegen).
+**Regression test:** `compiler/tests/unit/match-bare-variant-on-r24-bug-52.test.js` (NEW; +276L; 8 tests across 8 sections): bare-variant `on=.High` lowers / emitted dispatcher passes JS syntax check / bare-variant inside `${.Med}` wrap / single-letter `on=.A` / mixed-case `on=.MyVariant` / regression `@cellRef` Shape A preserved / regression qualified `Priority.High` falls through / regression complex `${expr}` Shape B preserved.
+
+**R26 EMPIRICAL VERIFICATION** (PA dual-verify on dev-3-svelte R24, the original report source):
+- line 188: `__scrml_match_match_151_dispatch("High");` (was `_dispatch(.High)` pre-fix)
+- zero `_dispatch(.[A-Z]` patterns remain (Bug 52 symptom-grep empty)
+- `node --check` exit changed from JS-SyntaxError-on-`.High` to a different JS-SyntaxError on Bug 50's symptom (see Bug 50 re-opened below; Bug 52 itself is closed cleanly)
+
+**NB on shape-degeneracy:** constant `on=.Variant` always dispatches to one branch — adopters typically wouldn't write this deliberately. dev-3-svelte's `<match for=Priority on=.High>` was likely intended to be `on=@selectedPriority` (reactive cell ref). The compiler still must produce valid output per SPEC §18.0.1.
+
+**Methodology note:** PA-direct fit this shape well (~10 LOC surgical fix in one function; well-understood site with adjacent reference at emit-expr.ts; agent-dispatch overhead would have exceeded the fix size). All 8 regression tests + pre-commit gate green on first try.
+
+- **Cross-refs:** R24-BUG-4 dispatch surface (Bug 52 was masked by BS-level closer rejection until R24-BUG-4 `adc0a70f` closed Phase 5); emit-expr.ts:291-303 canonical bare-variant lowering; SPEC §14.10 bare-variant inference; SPEC §18.0.3 bare-variant in match arm patterns; SCOPING.md Phase 3 codegen.
+
+---
 
 ---
 
@@ -934,32 +943,53 @@ Wrapping the SAME Shape 2 decl explicitly in `${...}` compiles cleanly — the u
 
 ---
 
-### Bug 50 — `<tableFor selectable=>` `onchange` handler emits raw `if-stmt` inside object-literal — `NOT-REPRODUCED S138 (closed)` (was MED; filed S137)
+### Bug 50 — `<tableFor>` synthetic `onchange` handler emits raw `if-stmt` inside object-literal property value — `RE-OPENED S138 HIGH` (was MED; NOT-REPRODUCED S138 closure REVERSED)
 
-**S138 disposition — NOT-REPRODUCED, closed.** Per pa.md S138 R26 empirical-verification doctrine applied in reverse direction. R26 verification on current HEAD (`0a02e0d7`) against all 4 R25 dev sources:
+**S138 RE-OPEN.** Initial S138 closure at `3a482076` was wrong: I swept R25 devs (the bug entry's named source `dev-1-react.client.js`) and saw zero occurrences. Re-verification on dev-3-svelte R24 source (during PA R26 dual-verify of Bug 52) shows the symptom DOES reproduce. The Bug 50 report's described reproducer (`selectable=@selectedIds` reactive ref + `onchange={evt => ...}`) actually matches dev-3-svelte R24 line 239 (`<tableFor ... selectable=@selectedIds>`) — NOT dev-1-react R25 (which uses string `selectable="true"`).
 
-| Dev | client.js | `node --check` | `_scrml_attr_onchange` count | `if (evt` count |
-|---|---|---|---|---|
-| dev-1-react | 613L | PASS | 0 | 0 |
-| dev-2-elixir | 662L | PASS | 0 | 0 |
-| dev-3-svelte | 918L | PASS | 0 | 0 |
-| dev-4-pascal | 795L | PASS | 0 | 0 |
+**Methodology lesson banked** (extends pa.md S138 R26 bidirectional doctrine, reverse direction sub-rule): R26 reverse-direction verification MUST sweep CROSS-SOURCE, not just the bug's named-source. The bug entry's source attribution may be wrong, OR the symptom may have moved between sources, OR a sibling fix may unmask it on a different source. The R24-BUG-4 BS-closer fix at `adc0a70f` is exactly this — closing the BS gate unmasked Bug 50 on dev-3-svelte (which now compiles through to codegen where Bug 50 fires).
 
-ZERO occurrences of the reported emission shape across all four. Original archived `scrml-support/docs/gauntlets/gauntlet-r25/dist/dev-1-react.client.js` (S136 round) also has zero. No codegen-touching commits between `68bfb4a4` (Bug 50 filed) and `0a02e0d7` (current HEAD) per `git log -- compiler/src/codegen/ compiler/src/ast-builder.js compiler/src/tokenizer.ts`.
+**Empirical reproducer (re-verified S138 at HEAD `a30d86d1`):**
 
-Additionally, the bug report's described reproducer (`<tableFor for=Card rows=@cards selectable=@selectedIds ...>` with `onchange={evt => ...}`) does NOT match dev-1's actual source. Dev-1-react.scrml line 273 reads:
-
-```scrml
-<tableFor for=Card rows=@archivedCards pick=["title", "priority", "assignee", "completedAt"] sortable="true" selectable="true"/>
+```bash
+bun compiler/bin/scrml.js compile \
+  /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dev-3-svelte.scrml \
+  --output-dir /tmp/r26-bug-50-redux
+node --check /tmp/r26-bug-50-redux/dev-3-svelte.client.js
+# /tmp/r26-bug-50-redux/dev-3-svelte.client.js:512
+#     "_scrml_attr_onchange_28": if (evt !== null && evt !== undefined) {
+#                                ^^
+# SyntaxError: Unexpected token 'if'
 ```
 
-`selectable="true"` is a string attribute (W-ATTR-001 forwarded as plain HTML per Bug 46), NOT `selectable=@selectedIds` reactive ref. No `onchange={evt => ...}` arrow handler anywhere in dev-1's source.
+The emitted shape at line 511-518:
 
-**Most likely root:** PA misobservation at S137 — stale-dist read OR attribute-name confusion. The surface area this bug was attempting to describe is covered by **Bug 46** (`tableFor sortable=`/`selectable=` not implemented; LOW) — the attribute is forwarded as plain HTML, not synthesized into an onchange handler.
+```js
+const _scrml_change_handlers = {
+  "_scrml_attr_onchange_28": if (evt !== null && evt !== undefined) {
+    if (_scrml_reactive_get("selectedIds").length === _scrml_reactive_get("visibleTickets").length) {
+      _scrml_reactive_set("selectedIds", []);
+    } else {
+      _scrml_reactive_set("selectedIds", _scrml_reactive_get("visibleTickets").map(r => r.id));
+    }
+  },
+};
+```
 
-**Re-trigger:** if any future R26 / R27 verification empirically reproduces the `_scrml_attr_onchange_NN: if (evt !== null ...) { ... }` emission shape on a real adopter source, re-file as Bug 50' with the empirical reproducer attached.
+Object-literal property value is a raw `if`-stmt. JS doesn't allow statements in expression position; the handler body should be wrapped as a function expression (`function(evt) { ... }` or `(evt) => { ... }`).
 
-- **Cross-refs:** Bug 46 (tableFor selectable/sortable not implemented; LOW; the surface this gap describes); S138 R26 doctrine (`feedback_r26_empirical_verification.md` + pa.md S138 addendum) applied in reverse direction.
+**Source loci** in dev-3-svelte:
+
+- Line 237-243: `<tableFor for=Ticket rows=@visibleTickets selectable=@selectedIds pick=[...]>`
+- Line 246+: implicit synth onchange tied to selectable=
+
+The `selectable=@selectedIds` (reactive-ref form) triggers a synth onchange handler that the codegen emits with the raw `if` shape rather than wrapping as a function.
+
+**Surface:** likely an event-handler emission path that fires for tableFor's synth onchange but bypasses the function-wrapping step. Site candidates: `compiler/src/codegen/emit-table-for.ts` (the tableFor expander emitting selectable= wiring) OR `compiler/src/codegen/emit-event-wiring.ts` (the generic onchange/event-handler emitter — looking for the object-literal accumulation that misses the wrapping for synth handlers).
+
+**Cross-refs:** R24-BUG-4 dispatch (closing the BS gate unmasked this on dev-3-svelte); Bug 52 R26 dual-verify run (where I caught the symptom re-firing); my S138 NOT-REPRODUCED closure at `3a482076` (now superseded). pa.md S138 R26 doctrine (reverse direction sub-rule about cross-source sweep — added below in the doctrine bank).
+
+---
 
 ---
 
