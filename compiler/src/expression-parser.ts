@@ -883,16 +883,25 @@ function matchIsPredicateSuffix(s: string, start: number): IsPredicateSuffix | n
 
   // Qualified variant `Type.Variant` — match BEFORE bare `.Variant` so a
   // qualified form is preferred when it applies.
-  const typedVariantMatch = /^([A-Z][A-Za-z0-9_]*\.[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
+  //
+  // R24-BUG-35 (S137): the BS tokenizer space-pads dot tokens, so a source
+  // `is Status.Active` may arrive here as `is Status . Active`. Both forms
+  // must match identically (mirrors `rewriteIsOperator` in `codegen/rewrite.ts`
+  // which has carried `\s*` tolerance on the string-rewrite fallback path).
+  // The captured `variant` is normalized (interior whitespace stripped) so
+  // downstream consumers see the canonical no-space spelling.
+  const typedVariantMatch = /^([A-Z][A-Za-z0-9_]*\s*\.\s*[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
   if (typedVariantMatch) {
-    return { kind: "is-variant", consumeLen: typedVariantMatch[0].length, variant: typedVariantMatch[1] };
+    const variant = typedVariantMatch[1].replace(/\s+/g, "");
+    return { kind: "is-variant", consumeLen: typedVariantMatch[0].length, variant };
   }
 
-  // Bare-dot variant `.Variant` (whitespace between `.` and the variant name
-  // is NOT permitted in this position — `is .Variant` is a single-token tag).
-  const bareVariantMatch = /^(\.[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
+  // Bare-dot variant `.Variant` — `\s*` between `.` and the variant name
+  // tolerates the BS-tokenizer space-padded form `. Variant` (R24-BUG-35).
+  const bareVariantMatch = /^(\.\s*[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
   if (bareVariantMatch) {
-    return { kind: "is-variant", consumeLen: bareVariantMatch[0].length, variant: bareVariantMatch[1] };
+    const variant = bareVariantMatch[1].replace(/\s+/g, "");
+    return { kind: "is-variant", consumeLen: bareVariantMatch[0].length, variant };
   }
 
   return null;
