@@ -5,6 +5,7 @@ import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { buildBodyDG } from "../body-dg-builder.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -423,6 +424,39 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     }
   }
 
+  // S139 Bug 56 — fold in body-DG intra-statement edges (per SPEC §19.9.9.1).
+  // The module-level `depGraph` only carries cross-call `awaits` edges; it does
+  // NOT see local-scope `reads` deps (e.g. `const x = serverFn(); @y = x.field;`
+  // — stmt 1 reads `x` declared in stmt 0). Without the body-DG fold-in, both
+  // statements get grouped into a single Promise.all batch, and stmt 1's
+  // expression `x.field` is evaluated BEFORE the await destructures `x` →
+  // ReferenceError (TDZ) at runtime. The body-DG's `reads` / `writes` /
+  // `awaits` / `invalidates` edges all force ordering; `control-anchors` is
+  // a structural fence we skip here (the planner upstream already respects it).
+  // Reproducer: the original dashboard's refresh() emitted
+  // `Promise.all([readHead(), _scrml_reactive_set("head", sha.slice(0,8))])`
+  // where `sha` was the destructuring target of the await — broken pre-fix.
+  try {
+    const bodyDG = buildBodyDG(body as unknown as Parameters<typeof buildBodyDG>[0], {
+      server: [],
+      reactive: [],
+    });
+    for (const edge of bodyDG.edges) {
+      if (edge.kind === "control-anchors") continue;
+      // body-DG edges carry direct statement indices (numbers) per
+      // body-dg-builder.ts. Convention: `from` depends on `to` — `from` runs after.
+      if (edge.from >= 0 && edge.from < body.length &&
+          edge.to >= 0 && edge.to < body.length) {
+        depSets[edge.from].add(edge.to);
+      }
+    }
+  } catch {
+    // Defensive: if body-DG construction fails on an unexpected statement
+    // shape, fall back to module-DG-only behavior (pre-S139 baseline). The
+    // worst case is a missed parallelization opportunity, not a miscompile —
+    // the module-DG awaits loop above still catches cross-call deps.
+  }
+
   // S138 Bug 55 — certain stmt kinds emit MULTI-STATEMENT output that
   // CANNOT live inside a `Promise.all([...])` parallelization batch (a JS
   // array-literal element MUST be an expression, not a statement).
@@ -453,6 +487,23 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
            k === "return-stmt";
   }
 
+  // S139 Bug 56 (companion) — only let-decl / const-decl statements can safely
+  // become Promise.all entries. The decl path emits the INIT EXPR as the array
+  // entry (so the awaited result destructures into the LHS name). Non-decl
+  // statements (reactive writes, expr-stmts, etc.) fall to the else-branch
+  // at line 547-549, which shoves the WHOLE emitted code (e.g. the call
+  // `_scrml_reactive_set("a", asyncFn())`) into the array entry — but that
+  // call is evaluated synchronously when Promise.all builds the array,
+  // passing a Promise (not the resolved value) to _scrml_reactive_set. Symptom:
+  // adopter cell holds a Promise object instead of the awaited value. The
+  // dashboard's `@statuses = loadStatuses()` is the reproducer. Fix: only
+  // group decl-shape statements; non-decl statements always go single-stmt
+  // (sequential emit handles their await injection correctly).
+  function isDeclShapeStmt(stmt: ASTNode): boolean {
+    const k = (stmt as ASTNode).kind;
+    return k === "let-decl" || k === "const-decl";
+  }
+
   // Group independent statements (those with no inter-dependencies among the group)
   const visited = new Set<number>();
   let i = 0;
@@ -466,12 +517,18 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // S138 Bug 55 — if the seed stmt is statement-shape, the group stays
     // size-1 (single-stmt emission path).
     const seedIsStatementShape = isStatementShapeStmt(body[i] as ASTNode);
+    // S139 Bug 56 — if the seed stmt is not a decl, group stays size-1.
+    // See isDeclShapeStmt comment above for the rationale.
+    const seedIsNonDecl = !isDeclShapeStmt(body[i] as ASTNode);
 
     for (let j = i + 1; j < body.length; j++) {
       if (visited.has(j)) continue;
       // S138 Bug 55 — statement-shape stmts never join multi-stmt groups
       // (their statement-shape emission can't be an array literal element).
       if (seedIsStatementShape || isStatementShapeStmt(body[j] as ASTNode)) continue;
+      // S139 Bug 56 — non-decl stmts (reactive writes, expr-stmts) never join
+      // multi-stmt groups. Their emit shape isn't safe as a Promise.all entry.
+      if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) continue;
       // Check if j is independent of all current group members
       let independent = true;
       for (const gi of group) {

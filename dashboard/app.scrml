@@ -99,9 +99,12 @@ function readCurrentHead() {
     return ""
 }
 
-function loadStatuses() {
-    const state = readState()
-    const currentSha = readCurrentHead()
+// Pure client-side helper: build the per-row status objects from in-memory
+// state. Factored out so verify() can refresh from the post-mark state
+// directly without a re-fetch race (filesystem side-effects aren't tracked
+// by the CPS planner; cross-call sequencing the write before a re-fetch
+// requires either Bug 9 L3 transitive coloring OR no re-fetch at all).
+function statusesFrom(state, currentSha) {
     const out = []
     for (let ex of EXAMPLES) {
         const entry = state[ex.name]
@@ -124,6 +127,10 @@ function loadStatuses() {
     return out
 }
 
+function loadStatuses() {
+    return statusesFrom(readState(), readCurrentHead())
+}
+
 function markVerified(name) {
     const state = readState()
     const currentHead = readCurrentHead()
@@ -136,16 +143,34 @@ function markVerified(name) {
 
 // --- client-side actions --------------------------------------------
 
+// S139 const-decl pattern — per Bug 56 fix in the CPS scheduler, async-call
+// results must be bound to a local `const` (let-decl / const-decl path) for
+// the parallel-batched await to destructure into a resolved value. The prior
+// shape `@statuses = loadStatuses()` set the reactive cell to a Promise object
+// because the codegen single-stmt path doesn't yet auto-await on the RHS of a
+// reactive-write (the deferred Bug 9 L3 surface — auto-await on transitive
+// reactive-write RHS). Workaround: bind to a local first, then assign.
 function refresh() {
     const currentSha = readCurrentHead()
-    @head = currentSha == "" ? "" : currentSha.slice(0, 8)
-    @statuses = loadStatuses()
-    @loaded = true
+    const rows       = loadStatuses()
+    @head     = currentSha == "" ? "" : currentSha.slice(0, 8)
+    @statuses = rows
+    @loaded   = true
 }
 
+// S139 — inline-with-shared-state pattern. The body itself carries the server
+// calls so the CPS planner handles them (Bug 9 L3 transitive coloring is
+// deferred). Then refresh from the IN-MEMORY post-mark state via `statusesFrom`
+// — no re-fetch — to avoid the read-vs-write race where the body-DG can't see
+// the filesystem dep between writeState() and a follow-up readState().
 function verify(name) {
-    markVerified(name)
-    refresh()
+    const stateNow = readState()
+    const sha      = readCurrentHead()
+    stateNow[name] = { sha: sha, verified_at: new Date().toISOString() }
+    writeState(stateNow)
+    @head     = sha == "" ? "" : sha.slice(0, 8)
+    @statuses = statusesFrom(stateNow, sha)
+    @loaded   = true
 }
 
 #{
