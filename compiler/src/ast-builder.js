@@ -5494,6 +5494,45 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let lookAhead = 0;
       while (peek(lookAhead).kind === "COMMENT") lookAhead++;
       const next = peek(lookAhead);
+      // R24-Bug-31 (S139 / known-gaps Bug 31) — JS ASI for `return`. `return`
+      // is a JS-spec "restricted production": a line terminator between `return`
+      // and its expression triggers ASI (ECMA-262 §12.9). scrml inherits this:
+      // the canonical adopter shape is
+      //   if (@cell == 0) return
+      //   otherCall(...) !{ ... }
+      // — bare `return` on its own line followed by an unrelated statement on the
+      // next line. Without this guard, `collectExpr` greedily consumes the next
+      // statement as the return expression (the first iteration sees parts.length
+      // === 0, so all of collectExpr's BUG-ASI-NEWLINE / STMT_KEYWORD / BLOCK_REF
+      // boundary checks are gated off). When the consumed next-statement is a
+      // failable call (`call() !{...}`), the parent `parseRecursiveBody` then
+      // wraps the resulting return-stmt as a `guarded-expr.guardedNode`, and
+      // emit-logic's `case "guarded-expr"` emits
+      //   let _scrml_result_N = if (cond) { return fn(); };
+      // — `if` is a JS STATEMENT, not an expression, producing a SyntaxError.
+      // The fix: if the next non-comment token is on a LATER line than the
+      // `return` keyword, emit a bare return — exactly mirroring JS ASI.
+      //
+      // Token line is read off the `.span.line` shape (tokenizer.ts:106 — tokens
+      // here are post-tokenizer with `.span: { line, col, start, end }`, no flat
+      // `.line` property). The defensive `!= null` guards span absence; line=0
+      // is a valid first-line value so we use null-check, not truthy-check.
+      {
+        const _retLine = startTok?.span?.line;
+        const _nextLine = next?.span?.line;
+        if (
+          next && next.kind !== "EOF" &&
+          _nextLine != null && _retLine != null &&
+          _nextLine > _retLine
+        ) {
+          return {
+            id: ++counter.next,
+            kind: "return-stmt",
+            expr: "",
+            span: spanOf(startTok, startTok),
+          };
+        }
+      }
       const RETURN_DECL_KW = new Set(["const", "let", "type", "function", "fn"]);
       if (next && next.kind === "KEYWORD" && RETURN_DECL_KW.has(next.text)) {
         return {
@@ -9232,6 +9271,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let lookAhead = 0;
       while (peek(lookAhead).kind === "COMMENT") lookAhead++;
       const next = peek(lookAhead);
+      // R24-Bug-31 (S139 / known-gaps Bug 31) — parallel ASI guard for the
+      // parseLogicBody main-loop return handler. Same bug, same fix as the
+      // parseOneStatement variant above (~L5491). When `return` is followed by
+      // a newline-separated next token, ASI fires — emit a bare return so the
+      // next statement (which may carry a failable `!{...}`) parses as its own
+      // top-level node and is NOT silently absorbed as the return expression.
+      // Uses `.span.line` (tokenizer.ts:106 token shape; no flat `.line`).
+      {
+        const _retLine = startTok?.span?.line;
+        const _nextLine = next?.span?.line;
+        if (
+          next && next.kind !== "EOF" &&
+          _nextLine != null && _retLine != null &&
+          _nextLine > _retLine
+        ) {
+          nodes.push({
+            id: ++counter.next,
+            kind: "return-stmt",
+            expr: "",
+            span: spanOf(startTok, startTok),
+          });
+          continue;
+        }
+      }
       if (next && next.kind === "KEYWORD" && DECL_KW.has(next.text)) {
         nodes.push({
           id: ++counter.next,
