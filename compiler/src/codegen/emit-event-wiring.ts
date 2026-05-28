@@ -1,4 +1,4 @@
-import { rewriteReactiveRefs } from "./rewrite.js";
+import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { rewriteBlockBody, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitExprField } from "./emit-expr.ts";
 import {
@@ -398,10 +398,31 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // do not add an outer wrapper. Bug #6 (s83-a7): thread engine ctx into
         // the EmitExprContext so `.advance(.X)` calls inside the arrow body
         // dispatch to `_scrml_engine_advance` via the C13 detection arm.
-        handlerExpr = emitExprField(binding.handlerExprNode, binding.handlerExpr, {
-          mode: "client",
-          ...engineExprCtxExtras,
-        });
+        //
+        // S138 Bug 50 — emit-table-for's synth onchange uses `(evt) => { ... }`
+        // (and other synth paths may too). When `binding.handlerExprNode` is
+        // present, `emitExpr → emitLambda` handles it correctly. When it is
+        // NOT present (synth attribute path that builds raw expr strings
+        // without parsing through ast-builder), `emitExprField` falls through
+        // to `rewriteExprWithDerived` which fires Pass 1 `rewritePresenceGuard`.
+        // That pass treats `( ident ) => { body }` as a `given x => body`
+        // presence-guard and rewrites it to `if (x !== null && x !== undefined)
+        // { body }` — an if-STATEMENT that can't sit in object-literal property
+        // position (`_scrml_change_handlers[id] = if (...) {...}` → SyntaxError).
+        //
+        // Mirror emit-expr.ts:emitEscapeHatch (Bug C 6nz 2026-04-20) which
+        // documents this exact gotcha and uses `rewriteExprArrowBody` (which
+        // skips Pass 1) for ArrowFunctionExpression escape-hatches. Apply the
+        // same fix here for the fallback string path. Structured-node path
+        // (when handlerExprNode is set) keeps emitExprField → emitLambda.
+        if (binding.handlerExprNode) {
+          handlerExpr = emitExprField(binding.handlerExprNode, binding.handlerExpr, {
+            mode: "client",
+            ...engineExprCtxExtras,
+          });
+        } else {
+          handlerExpr = rewriteExprArrowBody(binding.handlerExpr, undefined);
+        }
       } else {
         // Case C: Plain expression or statement body. Rewrite and wrap.
         // Bug #6 (s83-a7): thread engineCtx — this is the canonical
