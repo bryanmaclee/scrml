@@ -167,7 +167,26 @@ scrmlTS HEAD `f8aac7db`, **+7 unpushed**: c4d5ef96 maps · 73162ef9 dispatch-art
 | MED bugs open | 7 (Bug 60 render-by-tag nested-compound DEFERRED) |
 | LOW bugs open | 12 |
 | Nominal (spec-ahead-of-impl) | 7 |
-| Dogfood messages | giti + 6NZ resume-dogfooding sent to inboxes at close (build=v0.6.7) |
+| Dogfood messages | giti + 6nz resume-dogfooding SENT to live inboxes at close (build=v0.6.7) |
+
+---
+
+## POST-WRAP EXECUTION (S140 — after the `a29fb250` wrap commit; captured in a follow-up commit)
+
+All done + verified:
+- **Push confirmed:** scrmlTS `main`→`a29fb250` + tag **`v0.6.7`** (release `18de30ba`) live on origin; pre-push full-suite gate passed; 0/0.
+- **scrml-support pushed:** `a7dd961` — pa.md outbox path fix (6NZ→6nz casing + bryan→bryan-maclee home).
+- **⚠️ Cross-repo misrouting FOUND + FIXED:** scrmlTS→6nz messages had been written to a caps `6NZ/` NON-git stray (pa.md outbox said `6NZ`); the live repo is **lowercase `6nz/`** (`bryanmaclee/6NZ.git`). **9 messages stranded since 2026-04** (incl. the Bug-V/Bug-11 RESOLVED notice the 6nz PA never got). Migrated all 9 → live `6nz/handOffs/incoming/` (originals preserved in the caps stray). pa.md corrected. **The caps `6NZ/` stray dir still exists** (not deleted; 9 originals + the structure) — eventual-cleanup candidate (low priority now that pa.md points to lowercase).
+- **Dogfood messages SENT** (live inboxes): `giti/handOffs/incoming/2026-05-29-0727-scrmlTS-to-giti-resume-dogfooding.md` + `6nz/handOffs/incoming/2026-05-29-0727-scrmlTS-to-6nz-resume-dogfooding.md` (the 6nz one acknowledges the 9 migrated notices + Bug-V RESOLVED). Build=v0.6.7; known-broken (Bug 54/60) do-not-report; target surfaces (giti: channels/SSE/auth/schema; 6nz: engines/lifecycle/list-churn/input-state).
+- **Master `needs: push` notice** written to `master/handOffs/incoming/` — giti + 6nz repos need commit+push (sibling inbox writes + the 9-file migration) for cross-machine sync. **PENDING master action.**
+- **Worktrees cleaned:** 5 agent worktrees removed (a339f6c8/a47bb67a/a647b42c/aaa1bc62 landed + a0744d0c crashed-v1 superseded); main only.
+- **6nz is already actively dogfooding** — their bug-v/w/s reports (playground-nine) came through scrmlTS inbox clean S139; "resume" is really a v0.6.7-status update for them.
+
+### Dangling for S141
+- **Master push of giti + 6nz** (cross-machine sync) — pending master action on the needs:push notice.
+- **Caps `6NZ/` stray dir cleanup** — 9 migrated originals + structure; safe to remove eventually (verify other machine doesn't use caps path first).
+- **outgoing-staged/ drafts** — committed (`a29fb250`) as the send record; the SENT copies are in the sibling inboxes.
+- Carry-forward (R27, Bug 54, Bug 60, the 3 coverage-gap runtime tests, `${@x/}` slot, gauntlet-s79 E-TYPE-025, errorBoundary, Bug 9 L3, heads-up doc cleanup) — see master-list §0.6 S140 block.
 
 ---
 
