@@ -2,7 +2,39 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-28 **v0.6.6 cut at S139**). Full suite **~22,055 pass / 0 fail / 219 skip / 1 todo across ~783 files** (+12 from v0.6.5 — Bug 51-C scanner regression-guard tests + flipped test). v0.6.6 = **Bug 51 FULLY RESOLVED** via Bug 51-C BS-layer gobble (new scanner `scanShape12DeclEnd()` scans whole Shape 2 decl span including markup RHS as single text block; mirrors compound-state-decl path). Shape 2 + render-by-tag now works end-to-end at every declaration position: file-top, inside `<program>` auto-lifted, and inside explicit `${...}` wrap. Canon-clear health: **GREEN**. HIGH=0 · MED=5 · LOW=12 · Nominal=7.
+Current baseline (2026-05-28 **S139 CLOSE — v0.6.6 cut**). Full suite **~22,055 pass / 0 fail / 219 skip / 1 todo across ~783 files** (+~30 across the session from v0.6.2 baseline 22,024). S139 = marathon session: 4 patch releases (v0.6.3 → v0.6.6) + Bug 11 (long-deferred HIGH) closed + Bug 56 (NEW CPS scheduler silent-miscompile class) + Bug 51 cluster fully closed (A+B+C across two release cuts) + dashboard restructured + corpus-coverage gap pattern identified + maps refresh (`27e14c66` → `1fed5588`, 83 commits absorbed). HIGH bugs reached **0** for the first time since the R24 gauntlet opened the cluster. Canon-clear health: **GREEN throughout** (uniquely clean session vs S136/S137 RED-YELLOW-GREEN transits). HIGH=0 · MED=6 · LOW=12 · Nominal=7.
+
+### 2026-05-28 (S139 CLOSE — 4 patch releases (v0.6.3-v0.6.6) + Bug 11 + Bug 56 NEW + Bug 51 cluster fully closed + dashboard restructure + maps refresh)
+
+Marathon session. Opened at v0.6.2 baseline post-S138-close (HEAD `988682f7`); closed at v0.6.6 (HEAD `1fed5588`) with HIGH bugs at 0, MED at 6, canon-clear GREEN throughout. 4 patch releases cut sequentially as bug clusters closed: v0.6.3 (S138 post-v0.6.2 bug bundle), v0.6.4 (Bug 11 sole-remaining-HIGH close), v0.6.5 (TWO silent-miscompile classes — Bug 56 + Bug 51-A/B), v0.6.6 (Bug 51-C; Bug 51 FULLY closed). 16 substantive commits (4 fix + 4 release + 4 doc-SHA backfill + 4 ride-along docs).
+
+**Bugs closed S139:**
+
+- **Bug 11 (6nz-V `class:NAME` on for-lift)** — long-deferred HIGH; filed S126; runtime fix at `f8a1f2ff` (un-pause tracking inside `_scrml_effect` + `_scrml_effect_static` so per-item effects registered during `_scrml_reconcile_list` properly subscribe to deps; CLASS-LEVEL — covers any nested `_scrml_effect`). +252L new regression test (9 tests across 3 sections); R26 empirical PASS on 6nz's exact reproducer. HIGH count 1 → 0.
+- **Bug 56 (CPS scheduler — TDZ + non-decl-in-Promise.all)** — NEW + RESOLVED same session at `3450f984`. TWO distinct silent-miscompile classes: (A) scheduler computed dep sets from ONLY module-level `awaits` edges; local-scope `reads` were invisible → `const x = serverFn(); @y = x.field;` grouped into Promise.all with TDZ at runtime. Fix: fold body-DG edges per SPEC §19.9.9.1. (B) Non-decl statements shoved into Promise.all entries → async call evaluated sync, passed Promise to `_scrml_reactive_set`. Fix: restrict multi-stmt groups to decl-shape only. +5 regression tests. Original dashboard's `refresh()` was empirically broken at runtime today; dashboard source restructured to const-decl pattern + factored pure `statusesFrom(state, sha)` helper.
+- **Bug 51 cluster fully closed across two release cuts.** Originally filed S138 as a MED auto-lift gap; S139 empirical investigation surfaced it's THREE distinct sub-bugs, none with adopter test coverage:
+  - **Bug 51-A (CE drops `_scope` from new FileAST)** — RESOLVED `5640148e`. `{...ast}` spread only copies enumerable; SYM attaches `_scope` non-enumerably. Post-CE the new AST had no `_scope` → EVERY adopter file with a Shape 2 use-site silently emitted the literal tag in HTML. Fix: CE re-attaches `_scope` via `defineProperty`; emit-html.ts shape-agnostic lookup.
+  - **Bug 51-B (Shape 2 empty-init produces empty-arg emit)** — RESOLVED `5640148e`. `init: ""` + `node.init ?? "null"` didn't fire on empty string. Fix: treat empty as missing-init sentinel → `null`.
+  - **Bug 51-C (auto-lift drops markup RHS at BS-layer)** — RESOLVED same session at `da4ffd1a`. New BS scanner `scanShape12DeclEnd()` scans whole Shape 2 decl span (LHS + `=` + markup RHS) and emits as single text block, mirroring compound-state-decl path. Shape 1 expression-RHS + Shape 3 multi-line `match{...}` derived return -1 → legacy per-char accumulation handles them (regression-guarded — two iteration failures caught by broader corpus during dev: Shape 3 `const`-prefix split + multi-line `match{...}` truncation). isComponent routing budget bumped 26 → 27 for the new write-side stamp.
+  - 8 total regression tests (Bug 51 end-to-end test suite): A canonical + multi-use; B valid-arg emit; C workaround + auto-lift now-passes + Shape 1 guard + Shape 3 multi-line guard.
+
+**4 patch releases:**
+
+- **v0.6.3** (`d62b1806`) — S138 post-v0.6.2 bug bundle: 5 HIGH (R24-BUG-4, Bug 9 L1+L2 paired with Bug 55, Bug 50 redux, Bug 52, Bug 53) + 4 LOW (33, 24, 23, 25) + pa.md S138 R26 doctrine bidirectional extension. Tag pushed.
+- **v0.6.4** (`69fb4bcb`) — Bug 11 close; HIGH count 1 → 0 (first time since R24 gauntlet opened the cluster). Tag pushed.
+- **v0.6.5** (`fc10cccb`) — TWO silent-miscompile classes closed: Bug 56 CPS scheduler + Bug 51-A/B Shape 2 + render-by-tag end-to-end. Methodology bank: `node --check`-clean ≠ correct. Tag pushed.
+- **v0.6.6** (`1fed5588`) — Bug 51-C auto-lift BS-gobble; Bug 51 FULLY closed end-to-end. Tag pushed.
+
+**Maps refresh (this wrap):** watermark `27e14c66` (S135 close) → `1fed5588` (post-v0.6.6), absorbing 83 commits of drift. 10 maps written: primary, structure, dependencies, schema, config, build, error, test, domain + non-compliance report. 9 maps skipped (api/state/events/auth/style/i18n/infra/migrations/jobs not applicable to a compiler library). 2 non-compliant heads-up docs flagged for cleanup sweep: `docs/heads-up/iteration-design-2026-05-25.md` + `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` (stale `status: in-progress` metadata; underlying features shipped).
+
+**Methodology banks (durable, see master-list.md §0.6 for full statements):**
+1. `node --check`-clean ≠ correct — shipped features need end-to-end adopter test coverage (not just AST-shape unit tests).
+2. `{...obj}` spread drops non-enumerable annotations — re-attach via `defineProperty` when CE creates new AST objects.
+3. Empirical-canary-applied-to-PA-classification meta-axis — PA classifications subject to "regression test passes but empirical fails" pattern (extends pa.md S138 R26 doctrine).
+4. Multi-iteration scanner fix pattern — broader corpus catches over-greedy/over-narrow scoping when adjacent shapes are well-covered.
+5. Patch-release cadence as bug-quality signal — 4 patch releases in one session is the v0.6.x arc operating correctly per S136 ratification.
+
+**Push state:** PUSHED at every release cut + after Bug 51-C/maps refresh follow-up. scrmlTS + scrml-support both 0/0 with origin at close.
 
 ### 2026-05-28 (S138 CLOSE — 10 bugs closed (5 HIGH + 4 LOW + 1 MED redux) + Bug 9 L1+L2 paired-fix close + v0.6.2 release + pa.md R26 doctrine bidirectional extension)
 
