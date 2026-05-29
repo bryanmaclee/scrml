@@ -1,21 +1,24 @@
-# scrmlTS — Session 141 (OPEN)
+# scrmlTS — Session 141 (CLOSE)
 
 **Date:** 2026-05-29
-**Previous:** `handOffs/hand-off-144.md` (S140 CLOSE — Bug-51-class audit + 4-HIGH fix wave + v0.6.7 cut + giti/6nz dogfood resume).
+**Previous:** `handOffs/hand-off-144.md` (S140 CLOSE — Bug-51-class audit + 4-HIGH fix wave + v0.6.7 cut).
 **Next-session pickup:** rotate THIS file → `handOffs/hand-off-145.md` at S142 OPEN.
 
-**S141 in one line (so far):** opened clean on v0.6.7; caught up; fixed the known-gaps Bug 61 staleness + refreshed maps (both user-authorized housekeeping); **R27 gauntlet (Expense Approval Workflow, all 5 personas) DISPATCHED** — 5 dev agents running in background.
+**S141 in one line:** opened clean on v0.6.7 → ran gauntlet **R27** (Expense-Approval, 5 personas): the S140 fix-wave (Bug 57/58/59/61) HELD 5/5; R27 surfaced a fresh batch of the compile-clean-but-invalid-JS class → **v0.6.8** fixed C1/C2/C5/C3; the **emitted-JS parse-gate invariant was ratified (A+D), built, and cut as v0.6.9** — its first run caught ~16 pre-existing invalid-JS artifacts in `examples/` (C10 HIGH / C11 MED). Bug 46 resolved; 2 heads-up docs → historical; known-gaps Bug-61 currency-fixed at OPEN. Both cuts pushed.
 
-**HEAD at OPEN:** `feab1207` (S140 post-wrap test-count addendum, on top of release v0.6.7 `18de30ba`).
-**HEAD scrml-support:** `dbb47c3` (unchanged) — NOTE: untracked gauntlet-r24/r25 files present (local-only, never committed; see open item).
-**pkg.json:** 0.6.7 (tag `v0.6.7` pushed at S140 close).
+**HEAD at CLOSE:** `130f347f` (release v0.6.9). **HEAD at OPEN was** `feab1207` (v0.6.7).
+**Tags pushed this session:** `v0.6.8` (`a4f79b2d`, R27 fix-wave C1/C2/C3/C5) + `v0.6.9` (`130f347f`, emitted-JS parse-gate).
+**HEAD scrml-support:** `2ec6480` (pushed — gauntlet-r27 BRIEF/5-devs/OVERSEER-REPORT/report + deep-dive doc + user-voice S141). **NOTE: r24/r25 gauntlet files STILL untracked** (carry-forward decision).
+**pkg.json:** 0.6.9.
 
-**Tests (carried from S140 CLOSE, not re-run this session):** full suite **22,097 pass / 0 fail / 219 skip / 1 todo across 828 files** (65,025 expect()); pre-commit subset 15,101/0/88/1; browser 248/0.
+**Tests at CLOSE:** full suite **22,121 pass / 0 fail / 219 skip** (~830 files; +13 from the gate tests over the v0.6.8 22,108 baseline; pre-push full-suite gate green at BOTH cuts).
 
-**S99 path-discipline counter:** 20 (carried).
-**Worktrees at OPEN:** main only (S140 cleaned 5 agent worktrees).
-**Inbox:** empty.
+**S99 path-discipline counter:** 20 (HELD — 2 worktree dispatches [fix-wave `ad9c089e` + gate `a477e98f`], zero leaks; dev-4 svelte crash was API-socket, not path-discipline).
+**Worktrees at CLOSE:** main only (cleaned fix-wave + gate worktrees + stale `ab53994a` leftover).
+**Inbox:** empty. **Outbox:** no due notices sent (S140 dogfood stands; v0.6.8/v0.6.9 not separately notified — default-OFF gate + internal bug-fixes; surface in next coordination if giti/6nz hit C1/C2/C5 shapes).
 **PA auto-memory:** 43 rule files.
+
+**Both repos 0/0 with origin at CLOSE.**
 
 ---
 
