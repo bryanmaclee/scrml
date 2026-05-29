@@ -1,5 +1,7 @@
 import { genVar } from "./var-counter.ts";
-import { emitStringFromTree } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { emitExprField } from "./emit-expr.ts";
+import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
 import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
@@ -17,6 +19,7 @@ interface AttrValue {
   value?: string;
   raw?: string;      // expr kind: raw expression string (e.g. "(@tool === \"select\")")
   refs?: string[];   // expr kind: reactive variable names referenced in the expression
+  exprNode?: unknown; // expr kind: pre-parsed ExprNode when the parser attached one (variant-aware lowering)
   [key: string]: unknown;
 }
 
@@ -551,11 +554,31 @@ export function emitBindings(ctx: CompileContext): string[] {
           }
         } else if (bAttr.value.kind === "expr") {
           // §5.5.2 form 3: class:active=(@tool === "select")
-          // Rewrite @var references to _scrml_reactive_get("var") calls.
-          // Subscribe to each reactive variable referenced in the expression.
+          // Lower the directive expression the SAME way `if=` / `${}` do —
+          // through the variant-aware ExprNode emitter (`emitExprField`), NOT
+          // the raw-string `rewriteReactiveRefs` shortcut. The shortcut only
+          // rewrites `@var` → `_scrml_reactive_get("var")` and leaves variant
+          // literals (`.Home`, `Step::Info`) + `==`/`!=` RAW, which emits
+          // invalid JS for `class:active=(@view == .Home)` (the gate's
+          // E-CODEGEN-INVALID-JS). `emitExprField` lowers `.Variant` to its
+          // string tag and `==`/`!=` to `_scrml_structural_eq(...)`, matching
+          // the `if=` markup path (emit-event-wiring.ts:804). Parse failures
+          // fall back to the prior raw-string rewrite (regression-preserving).
           const rawExpr = (bAttr.value.raw ?? "") as string;
           const exprRefs = (bAttr.value.refs ?? []) as string[];
-          const rewrittenExpr = rewriteReactiveRefs(rawExpr) as string;
+          let exprNode = (bAttr.value.exprNode ?? null) as ExprNode | null;
+          if (!exprNode && rawExpr) {
+            try {
+              exprNode = parseExprToNode(rawExpr, "<class-directive>", 0) as ExprNode | null;
+            } catch {
+              exprNode = null;
+            }
+          }
+          const rewrittenExpr = emitExprField(exprNode, rawExpr, {
+            mode: "client",
+            derivedNames: ctx.derivedNames,
+            synthCellKeys: ctx.synthCellKeys,
+          }) as string;
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);
           lines.push(`  const ${cElemId} = document.querySelector('${classSelector}');`);

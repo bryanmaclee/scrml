@@ -481,3 +481,38 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
     expect(clientJs).not.toContain("// if-chain:");
   });
 });
+
+// ---------------------------------------------------------------------------
+// gate-found-invalid-js-fix-wave (S141 follow-on): an if=/else-if= chain whose
+// branch conditions COMPARE against a variant literal (`@step == .Info` /
+// `@step == Step::Info`) must lower the variant + ==/!= through the variant-
+// aware emitter, NOT leave them RAW in the `_update_chain_*` cascade. Before
+// the fix the cascade used the raw-string rewriteReactiveRefs shortcut, which
+// left `.Info` / `Step::Info` + `==` verbatim -> E-CODEGEN-INVALID-JS.
+// (example 05-multi-step-form shipped invalid .client.js this way.)
+// ---------------------------------------------------------------------------
+
+describe("if-chain branch condition compares variant literal -> valid JS (gate fix-wave)", () => {
+  const acorn = require("acorn");
+
+  test("else-if=(@step == .Confirm) chain emits valid client.js (no raw `== .Confirm`)", () => {
+    const { clientJs } = compileFull(`<program>
+      \${
+        type Step = .Info | .Confirm
+        <step>: Step = .Info
+      }
+      <div class="wizard">
+        <p if=(@step == .Info)>info</p>
+        <p else-if=(@step == .Confirm)>confirm</p>
+        <p else>done</p>
+      </div>
+    </>`);
+    expect(clientJs.length).toBeGreaterThan(0);
+    expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+    // The chain cascade must use the structural-eq lowering, not the raw literal.
+    expect(clientJs).toContain("_update_chain_");
+    expect(clientJs).toContain("_scrml_structural_eq");
+    expect(clientJs).not.toContain("== .Confirm");
+    expect(clientJs).not.toContain("== .Info");
+  });
+});

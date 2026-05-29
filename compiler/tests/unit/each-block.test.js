@@ -129,9 +129,11 @@ describe("each-block §2 — canonical <each in=@cell as name>", () => {
     expect(errors).toEqual([]);
     // The factory closure uses 'contact' as the iter-var name.
     expect(clientJs).toMatch(/\(contact, _scrml_each_idx\) =>/);
-    // The key fn uses 'contact?.id != null ? contact.id : i' default
-    // (inference fallback when no typed .id field is provable).
-    expect(clientJs).toMatch(/contact\?\.id != null \? contact\.id : i/);
+    // The key fn uses 'contact?.id != null ? contact.id : _scrml_each_idx'
+    // default (inference fallback when no typed .id field is provable). The
+    // index param is the canonical internal name (gate fix-wave: avoids the
+    // `(i, i)` argument-name clash when an each-block aliases the item as `i`).
+    expect(clientJs).toMatch(/contact\?\.id != null \? contact\.id : _scrml_each_idx/);
   });
 
   test("body interpolation ${contact.name} resolves under the `as` binding", () => {
@@ -166,8 +168,9 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
     expect(errors).toEqual([]);
     expect(html).toMatch(/data-scrml-each-mount="each_\d+"/);
     expect(clientJs).toMatch(/Array\.from\(\{length: Number\(5\) \|\| 0\}/);
-    // Default key for of= form is the index itself (positional).
-    expect(clientJs).toMatch(/\(_scrml_each_item, i\) => i,/);
+    // Default key for of= form is the index itself (positional), named with the
+    // canonical internal index var (gate fix-wave clash-avoidance).
+    expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_idx,/);
   });
 
   test("of=@cell uses _scrml_reactive_get to resolve the count", () => {
@@ -200,6 +203,12 @@ describe("each-block §4 — canonical <each of=N as name>", () => {
     const { errors, clientJs } = compileToOutputs(src, "of-as");
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/\(i, _scrml_each_idx\) =>/);
+    // gate-found-invalid-js-fix-wave (S141): when the alias is `i`, the keyFn
+    // and item factory must NOT collapse to `(i, i) =>` (argument-name clash =
+    // invalid JS). Both params distinct + emit is acorn-parse-clean.
+    expect(clientJs).not.toMatch(/\(i, i\)\s*=>/);
+    const acorn = require("acorn");
+    expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
   });
 });
 
@@ -262,8 +271,9 @@ describe("each-block §6 — explicit key= override", () => {
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "key-explicit");
     expect(errors).toEqual([]);
-    // The keyFn body should be `row.uuid` (the explicit key=).
-    expect(clientJs).toMatch(/\(row, i\) => row\.uuid,/);
+    // The keyFn body should be `row.uuid` (the explicit key=); the index param
+    // is the canonical internal name (gate fix-wave clash-avoidance).
+    expect(clientJs).toMatch(/\(row, _scrml_each_idx\) => row\.uuid,/);
   });
 
   test("key=__index__ canonical suppress-sentinel → keyFn returns i", () => {
@@ -277,7 +287,7 @@ describe("each-block §6 — explicit key= override", () => {
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "key-index");
     expect(errors).toEqual([]);
-    expect(clientJs).toMatch(/\(_scrml_each_item, i\) => i,/);
+    expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_idx,/);
   });
 });
 

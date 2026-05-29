@@ -355,3 +355,45 @@ describe("tilde (~) Gap 5/6/7 — cross-gap interaction smoke", () => {
     expect(clientJs).toMatch(/const final = _scrml_tilde_\d+;/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// gate-found-invalid-js-fix-wave (S141 follow-on) — a server-fn call used as a
+// `~`-init inside an async client function must NOT emit `await let X = ...`.
+//
+// ROOT CAUSE (example 16-remote-data): the §32 tilde-init bare-expr
+// (`fetchContacts()`) lowers to `let _scrml_tilde_N = _scrml_fetch_*();` under
+// an active tildeContext. The CPS scheduler's single-statement await branch
+// (scheduling.ts) prepended `await` to the WHOLE statement -> `await let X = ...`
+// (invalid JS — the gate's E-CODEGEN-INVALID-JS). The await belongs on the
+// initializer, not the declaration; the fix injects it after the `=`.
+// ---------------------------------------------------------------------------
+
+describe("gate fix-wave: await on tilde-init server call lands on the initializer", () => {
+  const acorn = require("acorn");
+
+  test("`serverFn(); @x = .Ready(~)` inside a client fn emits `let _scrml_tilde_N = await ...`, valid JS", () => {
+    const src = `<program>
+  \${
+    type RD = .NotAsked | .Loading | .Ready(rows)
+    <state>: RD = .NotAsked
+    server function fetchRows() {
+      return ?{\`SELECT id FROM things\`}.all()
+    }
+    function load() {
+      @state = RD::Loading
+      fetchRows()
+      @state = RD::Ready(~)
+    }
+  }
+  <button onclick=load()>Load</button>
+</program>`;
+    const { clientJs, errors } = compileSource(src, "tilde-await-init.scrml");
+    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    expect(invalid).toHaveLength(0);
+    expect(clientJs.length).toBeGreaterThan(0);
+    // The malformed `await let` must NOT appear; the await must be on the init.
+    expect(clientJs).not.toContain("await let ");
+    expect(clientJs).toMatch(/let _scrml_tilde_\d+ = await /);
+    expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+  });
+});

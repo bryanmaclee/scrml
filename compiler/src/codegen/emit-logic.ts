@@ -3,7 +3,7 @@ import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -365,6 +365,45 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   }
   const rewritten = emitExprField(arm.handlerExpr, handler, _makeExprCtx({}));
   return rewritten.trim().endsWith(";") ? rewritten.trim() : rewritten.trim() + ";";
+}
+
+/**
+ * Emit the `const <local> = <resultVar>.data[...]` binding line(s) for a
+ * `!{}` failable arm (§19.4.3). The error envelope is
+ * `{ __scrml_error, type, variant, data }`.
+ *
+ * - Single binding (`::Variant(e)` / `::Variant e`): the whole `.data` value
+ *   binds to the one name — `const e = result.data;` (the established shape).
+ * - Multi-field binding (`::Thrown(message, name)` — HostError, used heavily
+ *   across stdlib): `.data` is a `{ field: value, ... }` object, so each
+ *   binding name maps POSITIONALLY to the variant's declared payload field
+ *   (`const message = result.data.message; const name = result.data.name;`),
+ *   mirroring emitVariantBindingPrelude. When the field schema is unknown
+ *   (e.g. an imported error type whose decl isn't in _variantFields), fall back
+ *   to positional `.data[i]` index access so the emit is still valid JS rather
+ *   than the pre-fix corrupted single-ident parse.
+ */
+function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string): string[] {
+  const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
+  if (names.length === 0) return [];
+  if (names.length === 1) {
+    return [`    const ${names[0]} = ${resultVar}.data;`];
+  }
+  const schema = getVariantFieldSchema(variantName);
+  const out: string[] = [];
+  for (let i = 0; i < names.length; i++) {
+    if (names[i] === "_") continue;
+    // `.data` is a field-keyed object for multi-field variants (the enum
+    // constructor + the fixed fail-expr both emit `data: { field: value }`).
+    // Resolve the field name positionally from the declared schema; when the
+    // schema is unknown (e.g. an imported error type whose decl isn't in this
+    // file's _variantFields), fall back to binding-name-as-field — the
+    // canonical usages name the binding to MATCH the declared field
+    // (`::Thrown(message, name)`), so `data.<bindingName>` is correct there.
+    const field = schema && i < schema.length ? schema[i] : names[i];
+    out.push(`    const ${names[i]} = ${resultVar}.data.${field};`);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2384,10 +2423,34 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const rawArgs: string = (node.args ?? "").trim();
       // M-7C-D-12 Track 3: when fail() carries no payload, emit `data: null`
       // (was `data: undefined` pre-S90) per §42.5/§42.8 canonical absence.
-      const args = rawArgs.length > 0
-        ? emitExprField(node.argsExpr, rawArgs, _makeExprCtx(opts))
-        : "null";
-      return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${args} };`;
+      //
+      // gate-found-invalid-js-fix-wave (S141): a MULTI-field payload
+      // (`fail HostError::Thrown(message, name)`) must emit `data` as a
+      // FIELD-KEYED OBJECT matching the enum CONSTRUCTOR's shape
+      // (emit-client.ts:emitEnumVariantObjects emits `data: { message, name }`),
+      // so the consuming `!{ ::Thrown(message, name) -> ... }` arm reads
+      // `result.data.message` / `result.data.name`. The pre-fix path emitted
+      // `data: arg0, arg1` (a bare comma list in object-value position) ->
+      // invalid JS (the gate's E-CODEGEN-INVALID-JS). A SINGLE-arg payload keeps
+      // the established raw-value shape (`data: value`), read whole by a
+      // single-name arm binding.
+      let data: string;
+      if (rawArgs.length === 0) {
+        data = "null";
+      } else {
+        const argParts = _splitTopLevelCommas(rawArgs);
+        if (argParts.length <= 1) {
+          data = emitExprField(node.argsExpr, rawArgs, _makeExprCtx(opts));
+        } else {
+          const schema = getVariantFieldSchema(variant);
+          const props = argParts.map((a, i) => {
+            const field = schema && i < schema.length ? schema[i] : `_${i}`;
+            return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
+          });
+          data = `{ ${props.join(", ")} }`;
+        }
+      }
+      return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} };`;
     }
 
     case "propagate-expr": {
@@ -2655,7 +2718,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (arm.pattern === "_") {
             lines.push(`  ${isFirst ? "" : "else "}{`);
             if (arm.binding && arm.binding !== "_") {
-              lines.push(`    const ${arm.binding} = ${resultVar}.data;`);
+              for (const l of emitGuardedArmBinding(arm.binding, "", resultVar)) lines.push(l);
             }
             for (const l of emitArmAssign(armCode)) lines.push(l);
             lines.push(`  }`);
@@ -2664,7 +2727,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              lines.push(`    const ${arm.binding} = ${resultVar}.data;`);
+              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
             }
             for (const l of emitArmAssign(armCode)) lines.push(l);
             lines.push(`  }`);

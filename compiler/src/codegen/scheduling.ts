@@ -607,7 +607,21 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
             const name = (stmt as ASTNode).name as string || genVar("tmp");
             lines.push(`const ${name} = await ${extractInitExpr(stmt as ASTNode)};`);
           } else {
-            lines.push(`await ${code.replace(/;$/, "")};`);
+            // gate-found-invalid-js-fix-wave (S141): a non-decl AST node whose
+            // EMITTED code is itself a `let`/`const` declaration — e.g. a §32
+            // tilde-init bare-expr (`fetchContacts()`) that emit-logic lowered to
+            // `let _scrml_tilde_N = _scrml_fetch_*();` under an active tildeContext.
+            // Prepending `await` to the whole statement yields `await let X = ...`
+            // (invalid JS — the gate's E-CODEGEN-INVALID-JS; example 16-remote-data
+            // shipped this). The await belongs on the INITIALIZER, not the decl, so
+            // inject it after the `=`.
+            const declAwaitMatch = code.match(/^(\s*(?:let|const)\s+[A-Za-z_$][\w$]*\s*=\s*)(.+?)(;?)$/s);
+            if (declAwaitMatch) {
+              const tail = declAwaitMatch[2].startsWith("await ") ? declAwaitMatch[2] : `await ${declAwaitMatch[2]}`;
+              lines.push(`${declAwaitMatch[1]}${tail}${declAwaitMatch[3]}`);
+            } else {
+              lines.push(`await ${code.replace(/;$/, "")};`);
+            }
           }
         } else {
           lines.push(code);

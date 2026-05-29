@@ -557,3 +557,68 @@ describe("class:name=!@var — negated reactive variable (fix-class-negation)", 
     expect(attr.value.raw).toBe("!@isLoading");
   });
 });
+
+// ---------------------------------------------------------------------------
+// gate-found-invalid-js-fix-wave (S141 follow-on): class:name= and else-if=
+// expressions that COMPARE against a VARIANT LITERAL must lower the variant
+// (.Variant / Type::Variant) + the ==/!= operator through the variant-aware
+// ExprNode emitter, NOT leave them RAW. Before the fix, the class: form-3
+// path + the else-if chain cascade used the raw-string rewriteReactiveRefs
+// shortcut, which left `.Home` / `Step::Info` and `==`/`!=` verbatim in the
+// emitted JS -> E-CODEGEN-INVALID-JS. Examples 05-multi-step-form (Step::Info)
+// and 21-navigation (.Home) shipped invalid .client.js as a result.
+// ---------------------------------------------------------------------------
+
+describe("variant-literal class: directive lowers to valid JS (gate fix-wave)", () => {
+  const acorn = require("acorn");
+  const assertValidJs = (src) => {
+    // Wrap fragments that are statements/comments into a parseable module.
+    expect(() => acorn.parse(src, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+  };
+
+  test("class:active=(@view == .Home) — leading-dot variant lowers to structural_eq + string tag (no raw `.Home`)", () => {
+    const node = makeMarkupNode(
+      "button",
+      [exprClassAttr("active", "(@view == .Home)", ["view"])],
+      [],
+      { selfClosing: false },
+    );
+    const wiring = genBindings(node);
+    // The EMITTED expression (not the leading `// class:...=...` comment line)
+    // must be valid JS — no bare `== .Home`.
+    expect(wiring).toContain("_scrml_structural_eq");
+    expect(wiring).toContain('"Home"');
+    // The classList.add/toggle lines (everything after the comment) must parse.
+    const codeLines = wiring.split("\n").filter((l) => !l.trim().startsWith("//"));
+    assertValidJs(codeLines.join("\n"));
+    // No dangling raw variant-literal comparison survived into code.
+    expect(codeLines.join("\n")).not.toContain("== .Home");
+  });
+
+  test("class:active=(@step == Step::Info) — qualified variant lowers to structural_eq + Step.Info (no raw `Step::Info`)", () => {
+    const node = makeMarkupNode(
+      "span",
+      [exprClassAttr("active", "(@step == Step::Info)", ["step"])],
+      [],
+      { selfClosing: false },
+    );
+    const wiring = genBindings(node);
+    expect(wiring).toContain("_scrml_structural_eq");
+    const codeLines = wiring.split("\n").filter((l) => !l.trim().startsWith("//"));
+    assertValidJs(codeLines.join("\n"));
+    expect(codeLines.join("\n")).not.toContain("Step::Info");
+  });
+
+  test("end-to-end: class:active=(@view == .Home) emits valid client.js via runCG", () => {
+    resetVarCounter();
+    const node = makeMarkupNode(
+      "button",
+      [exprClassAttr("active", "(@view == .Home)", ["view"])],
+      [],
+      { selfClosing: false },
+    );
+    const result = compile(node);
+    const out = result.outputs.get("/test/app.scrml");
+    expect(() => acorn.parse(out.clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+  });
+});

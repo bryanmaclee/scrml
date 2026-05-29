@@ -476,19 +476,20 @@ function resetLocalIdCounter(): void {
 function resolveKeyFnBody(
   node: EachBlockAstNode,
   iterVarName: string,
+  iterIdxName: string,
 ): string {
   // Explicit key= override.
   if (node.keyExprRaw) {
     const trimmed = node.keyExprRaw.trim();
-    if (trimmed === "__index__") return "i";
+    if (trimmed === "__index__") return iterIdxName;
     // Rewrite `@.field` and bare `as name` references inside the expr.
     const rewritten = rewriteContextualSigil(trimmed, iterVarName);
     return rewritten;
   }
   // of= form: default key is the index.
-  if (node.iterShape === "of") return "i";
-  // in= form: default-infer from `.id` (with runtime fallback to i).
-  return `(${iterVarName}?.id != null ? ${iterVarName}.id : i)`;
+  if (node.iterShape === "of") return iterIdxName;
+  // in= form: default-infer from `.id` (with runtime fallback to the index).
+  return `(${iterVarName}?.id != null ? ${iterVarName}.id : ${iterIdxName})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,11 +599,18 @@ export function emitEachBodyRenderForFile(
     }
 
     // Per-item template factory.
-    const keyFnBody = resolveKeyFnBody(node, iterVarName);
+    // gate-found-invalid-js-fix-wave (S141): the keyFn index param + the
+    // keyFn body's index reference MUST use the internal index name
+    // (`_scrml_each_idx`), NOT the literal `i`. When the each-block aliases the
+    // item/index as `i` (`<each of=N as i>`), `iterVarName === "i"`, so a keyFn
+    // signature of `(i, i) => i` is an "Argument name clash" (invalid JS — the
+    // gate's E-CODEGEN-INVALID-JS). Threading `iterIdxName` keeps both params
+    // distinct for any alias.
+    const keyFnBody = resolveKeyFnBody(node, iterVarName, iterIdxName);
     fnLines.push(`  _scrml_reconcile_list(`);
     fnLines.push(`    _mount,`);
     fnLines.push(`    _items,`);
-    fnLines.push(`    (${iterVarName}, i) => ${keyFnBody},`);
+    fnLines.push(`    (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
     fnLines.push(`    (${iterVarName}, ${iterIdxName}) => {`);
     fnLines.push(`      const _itemFrag = document.createDocumentFragment();`);
 

@@ -1,6 +1,7 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { rewriteBlockBody, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitExprField } from "./emit-expr.ts";
+import { parseExprToNode } from "../expression-parser.ts";
 import {
   maybeLowerCancelTimerCallRef,
   buildEngineBindingsMap,
@@ -618,12 +619,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // walk; non-delegable events use Approach A querySelectorAll + forEach.
   for (const [eventName, entries] of byEventType) {
     const domEvent = eventName.replace(/^on/, ""); // onclick → click
+    // gate-found-invalid-js-fix-wave (S141): the handler-registry / dispatch-map
+    // VARIABLE NAME is built from domEvent, which for a non-canonical event attr
+    // (`on:click` → domEvent ":click"; `else-if` → "...-...") would emit an
+    // invalid JS identifier (`const _scrml_:click_handlers = ...` → the gate's
+    // E-CODEGEN-INVALID-JS). Sanitize the identifier segment to [A-Za-z0-9_$]
+    // (the DOM event string passed to addEventListener + the data-attribute
+    // selector below still use the raw event name, which is legal there).
+    const idEvent = domEvent.replace(/[^A-Za-z0-9_$]/g, "_");
 
     if (DELEGABLE_EVENTS.has(domEvent)) {
       // -----------------------------------------------------------------------
       // Approach D path: handler registry + delegated document listener
       // -----------------------------------------------------------------------
-      const registryVarName = `_scrml_${domEvent}`;
+      const registryVarName = `_scrml_${idEvent}`;
 
       // Emit the handler registry object
       lines.push(`  const ${registryVarName} = {`);
@@ -645,7 +654,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // -----------------------------------------------------------------------
       // Approach A path: batch querySelectorAll + forEach per event type
       // -----------------------------------------------------------------------
-      const mapVarName = `_scrml_${domEvent}_handlers`;
+      const mapVarName = `_scrml_${idEvent}_handlers`;
 
       // Emit the handler dispatch map
       lines.push(`  const ${mapVarName} = {`);
@@ -1126,10 +1135,31 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       lines.push(`      let _next = null;`);
 
       // Condition cascade — same as pre-Phase-2g shape.
+      //
+      // Lower each branch condition through the variant-aware ExprNode emitter
+      // (`emitExprField`), NOT the raw-string `rewriteReactiveRefs` shortcut.
+      // The shortcut leaves variant literals (`.Home`, `Step::Info`) + `==`/`!=`
+      // RAW, which emits invalid JS for `else-if=(@step == Step::Info)` (the
+      // gate's E-CODEGEN-INVALID-JS). `emitExprField` lowers `.Variant` to its
+      // string tag and `==`/`!=` to `_scrml_structural_eq(...)`, matching the
+      // mount-toggle path at line ~804 above. Parse failures fall back to the
+      // prior raw-string rewrite (regression-preserving).
       for (const branch of condBranches) {
         let condCode: string;
         if (branch.condition?.raw) {
-          condCode = rewriteReactiveRefs(branch.condition.raw);
+          let condNode = (branch.condition.exprNode ?? null) as ExprNode | null;
+          if (!condNode) {
+            try {
+              condNode = parseExprToNode(branch.condition.raw, "<if-chain-branch>", 0) as ExprNode | null;
+            } catch {
+              condNode = null;
+            }
+          }
+          condCode = emitExprField(condNode, branch.condition.raw, {
+            mode: "client",
+            derivedNames: ctx.derivedNames,
+            synthCellKeys: ctx.synthCellKeys,
+          });
         } else if (branch.condition?.name) {
           const varName = branch.condition.name.replace(/^@/, "");
           condCode = `_scrml_reactive_get(${JSON.stringify(varName)})`;

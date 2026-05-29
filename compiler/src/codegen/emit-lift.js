@@ -838,6 +838,15 @@ export function emitCreateElementFromMarkup(node, lines) {
             // Phase 4d Step 8: ExprNode-only (bare-expr.expr deleted)
             if (logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
               const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), { mode: "client" }));
+              // gate-found-invalid-js-fix-wave (S141): a `${...}` interpolation whose
+              // expression lowers to the EMPTY string emits `String(() ?? "")` — invalid
+              // JS (`()` is empty parens, the gate's E-CODEGEN-INVALID-JS). This happens
+              // when a render-slot (`${render header()}`) is substituted away to nothing
+              // by the component-expander, leaving a `bare-expr` with an empty escape-hatch
+              // node (example 12-snippets-slots shipped invalid .client.js this way). An
+              // empty interpolation has no text to render, so SKIP the text-node append
+              // entirely rather than emit a malformed `String(() ?? "")`.
+              if (rewritten.trim() === "") continue;
               // GITI-019: parenthesize the source expr before the `?? ""` coalesce guard.
               // ES2020 forbids mixing `??` with a top-level `||`/`&&` operand without
               // explicit parens (e.g. `a || b ?? ""` is a SyntaxError). Wrapping the

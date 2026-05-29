@@ -377,8 +377,9 @@ describe("R25-Bug-40 §10 — key= inference with `:`-shorthand bodies", () => {
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "bug40-key-default");
     expect(errors).toEqual([]);
-    // Default key-fn inference: `item?.id != null ? item.id : i`.
-    expect(clientJs).toMatch(/_scrml_each_item\?\.id != null \? _scrml_each_item\.id : i/);
+    // Default key-fn inference: `item?.id != null ? item.id : _scrml_each_idx`
+    // (gate fix-wave: index param uses the canonical internal name).
+    expect(clientJs).toMatch(/_scrml_each_item\?\.id != null \? _scrml_each_item\.id : _scrml_each_idx/);
   });
 
   test("explicit `key=expr` still wins with `:`-shorthand body", () => {
@@ -392,8 +393,9 @@ describe("R25-Bug-40 §10 — key= inference with `:`-shorthand bodies", () => {
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "bug40-key-explicit");
     expect(errors).toEqual([]);
-    // Explicit key= rewrites @.email to iter-var.email.
-    expect(clientJs).toMatch(/\(_scrml_each_item, i\) => _scrml_each_item\.email/);
+    // Explicit key= rewrites @.email to iter-var.email; index param uses the
+    // canonical internal name (gate fix-wave clash-avoidance).
+    expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_item\.email/);
     // Body wired correctly.
     expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
   });

@@ -10817,14 +10817,27 @@ function parseErrorTokens(tokens, filePath) {
         i++;
       }
 
-      // Binding variable: bare ident, or `(ident)` tuple-style (§19.4.3 canonical)
+      // Binding variable: bare ident, or `(ident, ...)` tuple-style (§19.4.3
+      // canonical). A multi-field error variant binds ALL its payload fields
+      // positionally — e.g. `::Thrown(message, name)` (HostError, used heavily
+      // across stdlib). Consume EVERY comma-separated binding ident inside the
+      // parens; a single-ident-only parse left `, name ) -> ...` to leak into
+      // the handler -> invalid JS (the gate's E-CODEGEN-INVALID-JS).
       if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "(") {
         i++; // consume `(`
-        if (i < tokens.length && tokens[i].kind === "IDENT") {
-          binding = tokens[i].text;
-          i++;
+        const _bindNames = [];
+        while (i < tokens.length && !(tokens[i].kind === "PUNCT" && tokens[i].text === ")")) {
+          if (tokens[i].kind === "IDENT") {
+            _bindNames.push(tokens[i].text);
+            i++;
+          } else if (tokens[i].kind === "PUNCT" && tokens[i].text === ",") {
+            i++;
+          } else {
+            break; // malformed — stop before consuming the arrow/handler
+          }
         }
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ")") i++;
+        binding = _bindNames.join(", ");
       } else if (i < tokens.length && (tokens[i].kind === "IDENT")) {
         binding = tokens[i].text;
         i++;
@@ -10893,11 +10906,22 @@ function parseErrorTokens(tokens, filePath) {
       }
       if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "(") {
         i++;
-        if (i < tokens.length && tokens[i].kind === "IDENT") {
-          binding = tokens[i].text;
-          i++;
+        // Multi-field payload binding (e.g. `::Thrown(message, name)`): consume
+        // ALL comma-separated idents, not just the first (else the rest leaks
+        // into the handler -> invalid JS).
+        const _bindNames2 = [];
+        while (i < tokens.length && !(tokens[i].kind === "PUNCT" && tokens[i].text === ")")) {
+          if (tokens[i].kind === "IDENT") {
+            _bindNames2.push(tokens[i].text);
+            i++;
+          } else if (tokens[i].kind === "PUNCT" && tokens[i].text === ",") {
+            i++;
+          } else {
+            break;
+          }
         }
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ")") i++;
+        binding = _bindNames2.join(", ");
       } else if (i < tokens.length && tokens[i].kind === "IDENT") {
         binding = tokens[i].text;
         i++;
