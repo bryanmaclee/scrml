@@ -1,18 +1,18 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-05-29T07:47:36-06:00  commit: feab1207
+# updated: 2026-05-29T00:00:00-06:00  commit: 9ab7aa38
 
 ## Entry Points
 
 `compiler/src/cli.js` — primary CLI; routes compile / dev / build / serve / generate / migrate / promote / init subcommands; falls through to `compileScrml` for `.scrml` file args directly.
 `compiler/src/index.js` — legacy thin wrapper; parses args, calls `compileScrml()` from `api.js`; preserved for `bun run compiler/src/index.js` backward compat.
-`compiler/src/api.js` — programmatic API module; exports `compileScrml(options)` — the full pipeline orchestrator (BS→TAB→CE→NR→SYM→PA→RI→MC→TS→META→DG→BP→AG→RS→CG); also exports `scanDirectory`, `computeOutputBaseDir`, `bundleStdlibForRun`, `rewriteRelativeImportPaths`, `rewriteStdlibImports`.
+`compiler/src/api.js` — programmatic API module; exports `compileScrml(options)` — the full pipeline orchestrator (BS→TAB→CE→NR→SYM→PA→RI→MC→TS→META→DG→BP→AG→RS→CG); also exports `scanDirectory`, `computeOutputBaseDir`, `bundleStdlibForRun`, `rewriteRelativeImportPaths`, `rewriteStdlibImports`. Imports `validateEmittedArtifacts` from `./codegen/validate-emit.ts` (line 36); calls it at line 1919 when `validateEmit` option is true.
 `compiler/bin/scrml.js` — npm bin entry; delegates to `cli.js`.
 
 ## Directory Ownership
 
 `compiler/src/` — TypeScript + JS source for every pipeline stage, linters, validators, and the code generator
-`compiler/src/codegen/` — emit-* modules (one per language feature), IR types, `CompileContext`, `scheduling.ts`, `cps-batch-planner.ts` (Bug 9 L2), `body-dg-builder.ts` (Bug 56), `source-map.ts`, `route-splitter.ts`, `type-encoding.ts`, `mcp-descriptors.ts`, `reactive-deps.ts` (collectDerivedVarNames + collectSynthCellKeys)
+`compiler/src/codegen/` — emit-* modules (one per language feature), IR types, `CompileContext`, `scheduling.ts`, `cps-batch-planner.ts` (Bug 9 L2), `body-dg-builder.ts` (Bug 56), `source-map.ts`, `route-splitter.ts`, `type-encoding.ts`, `mcp-descriptors.ts`, `reactive-deps.ts` (collectDerivedVarNames + collectSynthCellKeys), `validate-emit.ts` (NEW S141 — emitted-JS in-process Acorn parse gate; emits E-CODEGEN-INVALID-JS)
 `compiler/src/commands/` — CLI subcommand handlers: compile.js, dev.js, build.js, serve.js, generate.js, migrate.js, promote.js, init.js
 `compiler/src/validators/` — post-CE validation passes: attribute-allowlist, attribute-interpolation, post-ce-invariant, lint-try-catch, lint-async-user-source, ast-walk
 `compiler/src/types/` — canonical TypeScript type definitions: `ast.ts` (complete AST node discriminated union), `reachability.ts`, `auth-graph.ts`
@@ -39,7 +39,7 @@
 node_modules, dist, build, .git, compiler/dist, compiler/native-parser/dist, compiler/self-host/dist, samples/compilation-tests/dist, handOffs
 
 ## Tags
-#scrmlts #map #structure #compiler #cli #pipeline #native-parser
+#scrmlts #map #structure #compiler #cli #pipeline #native-parser #validate-emit #v0.6.10
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-29T07:47:36-06:00  commit: feab1207
+# updated: 2026-05-29T00:00:00-06:00  commit: 9ab7aa38
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler tooling uses its own error taxonomy internally.
@@ -47,9 +47,12 @@ SPEC §34 is the authoritative error code source (~684 lines; 240+ codes). Key f
 | `W-*` | non-fatal warnings (route to `result.warnings`) |
 | `I-*` | info-level lints (route to `result.warnings`) |
 
-Notable codes and silent-miscompile closures since S135 watermark:
+Notable codes added or closed since S135 watermark:
+
 - `E-CPS-MULTIBATCH-REORDER` / `E-CPS-MULTIBATCH-MACHINE-CROSSING` — §34.1 §19.9.9 (S114 Ext 1)
 - `E-STORY-UNKNOWN` / `W-STORY-ON-TOP-LEVEL` — §58 Build Story (S118, Nominal section)
+- `E-CODEGEN-INVALID-JS` — **NEW S141** (`compiler/src/codegen/validate-emit.ts:94`); emitted-JS in-process parse gate (Approach A, ratified S141); fires when any final artifact (`.client.js` / `.server.js` / library `.js` / per-route chunk / runtime chunk) fails Acorn parse after codegen; aborts compile (exit 1) and writes no output artifacts; diagnostic names artifact path + byte/line/column + 60-char snippet; framed as compiler defect (adopter cannot fix emitted JS); wired in `api.js:1919` behind `validateEmit` option (default `false`; flag-gated per §2.2.1 carry-forward backlog); mirrors `E-META-EVAL-002` reparse-emitted precedent from §22.4; SPEC §34 + §2.2.1 — codegen-gate catalog entry
+- `E-CG-003` — **NEW S141** (`compiler/src/codegen/emit-control-flow.ts:1621`); hard error on no-arm-lowerable `<match>` expression; replaces the prior silent `/* match expression could not be compiled */` stub that produced invalid JS in expression position (R27 C2 class); emits a source-anchored CGError when an error channel is threaded, AND falls back to syntactically-valid `(undefined)` placeholder so the parse gate (E-CODEGEN-INVALID-JS) does not double-report a known-unlowerable site; SPEC §34 §47
 - Bug 9 L2 / Bug 55: `isStatementShapeStmt` guard in `scheduling.ts` prevents Promise.all shape errors (no new error code; silent miscompile class closed)
 - Bug 56: body-DG reads folded into scheduler dep sets (no new error code; TDZ silent miscompile class closed)
 - Bug 57 (S140): `case "each-block"` chunk-gate added to `emit-client.ts:detectRuntimeChunks` — `<each>` files shipped without `_scrml_reconcile_list` definition (ReferenceError on first render); no new error code; runtime crash class closed
@@ -81,7 +84,7 @@ No global Express error handler (compiler is a library / CLI tool, not a web ser
 Test suite uses `compileScrml()` result inspection, not try/catch patterns.
 
 ## Tags
-#scrmlts #map #error #diagnostics #compiler #pipeline #spec-34
+#scrmlts #map #error #diagnostics #compiler #pipeline #spec-34 #e-codegen-invalid-js #e-cg-003 #v0.6.10
 
 ## Links
 - [primary.map.md](./primary.map.md)
