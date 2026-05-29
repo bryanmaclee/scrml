@@ -135,6 +135,28 @@ describe("§1 schemaFor happy path", () => {
     const sfErrs = realErrors(result).filter(e => e.code && e.code.startsWith("E-SCHEMAFOR-"));
     expect(sfErrs).toEqual([]);
   });
+
+  // C3 (R27): bare `int` struct field is an alias of `integer` and must lower
+  // to an `integer` SQL column, NOT resolve to `asIs` (which previously fired
+  // E-SCHEMAFOR-NO-SQL-MAPPING). Mirrors the `bool`→`boolean` alias.
+  test("bare `int` struct field compiles cleanly + lowers to integer", () => {
+    const result = compile("happy/int-alias.scrml", `\${
+  import { schemaFor } from 'scrml:data'
+
+  type T:struct = {
+    id:   int
+    name: string
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    \${ schemaFor(T) }
+  </>
+</program>
+`);
+    const sfErrs = realErrors(result).filter(e => e.code && e.code.startsWith("E-SCHEMAFOR-"));
+    expect(sfErrs).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

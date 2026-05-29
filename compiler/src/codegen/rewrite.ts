@@ -852,7 +852,7 @@ function parseInlineMatchArm(text: string): InlineMatchArm | null {
   // to the single-variant regex below, which will fail to match alternation
   // and the arm is dropped — emitter handles the dropped-arm comment).
   const altMatch = text.match(
-    /^\.\s*([A-Z][A-Za-z0-9_]*)((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*)+)\s*(?:=>|:>)\s*([\s\S]+)$/,
+    /^\.\s*([A-Z][A-Za-z0-9_]*)((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*)+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
   );
   if (altMatch) {
     const first = altMatch[1];
@@ -869,28 +869,28 @@ function parseInlineMatchArm(text: string): InlineMatchArm | null {
     };
   }
 
-  const newVariantMatch = text.match(/^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*(\w+)\s*\))?\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newVariantMatch = text.match(/^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*(\w+)\s*\))?\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newVariantMatch) {
     return { kind: "variant", test: newVariantMatch[1], result: stripTrailingComma(newVariantMatch[3]) };
   }
 
-  const newDqMatch = text.match(/^"((?:[^"\\]|\\.)*)"\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newDqMatch = text.match(/^"((?:[^"\\]|\\.)*)"\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newDqMatch) {
     return { kind: "string", test: `"${newDqMatch[1]}"`, result: stripTrailingComma(newDqMatch[2]) };
   }
 
-  const newSqMatch = text.match(/^'((?:[^'\\]|\\.)*)'\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newSqMatch = text.match(/^'((?:[^'\\]|\\.)*)'\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newSqMatch) {
     return { kind: "string", test: `'${newSqMatch[1]}'`, result: stripTrailingComma(newSqMatch[2]) };
   }
 
   // §42: `not => expr` — absence arm in inline match
-  const notArmMatch = text.match(/^not\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const notArmMatch = text.match(/^not\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (notArmMatch) {
     return { kind: "not", test: null, result: stripTrailingComma(notArmMatch[1]) };
   }
 
-  const newWildcardMatch = text.match(/^else\s*(?:(?:=>|:>)\s*)?([\s\S]+)$/);
+  const newWildcardMatch = text.match(/^else\s*(?:(?:=>|:>|->)\s*)?([\s\S]+)$/);
   if (newWildcardMatch) {
     return { kind: "wildcard", test: null, result: stripTrailingComma(newWildcardMatch[1]) };
   }
@@ -920,13 +920,13 @@ function parseInlineMatchArm(text: string): InlineMatchArm | null {
   // the string-pipeline rewriteMatchExpr (used by the server-mode shim in
   // emit-expr.ts and by Pass 13 of the legacy rewrite pipeline) in parity
   // with the structured emitter.
-  const newUnderscoreWildcardMatch = text.match(/^_\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newUnderscoreWildcardMatch = text.match(/^_\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newUnderscoreWildcardMatch) {
     return { kind: "wildcard", test: null, result: stripTrailingComma(newUnderscoreWildcardMatch[1]) };
   }
 
   // §42 presence arm: (identifier) => expr — counterpart to `not => expr`
-  const presenceArmMatch = text.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const presenceArmMatch = text.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (presenceArmMatch) {
     return { kind: "wildcard", test: null, result: stripTrailingComma(presenceArmMatch[2]) };
   }
@@ -1213,7 +1213,12 @@ export function rewriteMatchExpr(expr: string): string {
   // Strip leading "partial " keyword from prefix (§18.18 partial match)
   const prefix = expr.slice(0, matchIdx).replace(/\bpartial\s+$/, "");
   const matchTarget = m[1].trim();
-  const armsStr = m[2].trim();
+  // C2 (R27): repair rejoin-spaced `- >` → `->` (the §18.2 arrow alias is
+  // tokenized as two PUNCT tokens and rejoined with a space in some loci).
+  // `->` is never a value-expression operator, so a global collapse is safe.
+  // Mirrors the structured emitter (emit-control-flow.ts splitMultiArmString
+  // call site) so both match-lowering paths accept `.Variant -> result`.
+  const armsStr = m[2].trim().replace(/-\s*>/g, "->");
 
   const armLines = splitInlineArms(armsStr);
   const arms: InlineMatchArm[] = [];

@@ -255,6 +255,30 @@ function emitOneValidatorBlock(validator: any, exprCtx: EmitExprContext): string
   // so a non-null fire-result FROM req or is some IS the short-circuit signal.
   const isShortCircuiter = (name === "req" || name === "is some");
 
+  // C1 (R27): the two-bound range form `length(>=N, <=M)` (SPEC §55.1 worked
+  // example) lowers to MULTIPLE relational-predicate args. The runtime
+  // `fireLength(value, relPred)` takes exactly ONE relPred, so each bound must
+  // fire independently — emit one `_scrml_validator_fire("length", value, {op,value})`
+  // block per relational comparator (AND-composed: every bound must pass).
+  // Previously these args were spliced into a single object literal / call,
+  // producing invalid JS (`{ op: ">=", value: 2 , <= 120 }`). `length` is the
+  // only universal-core predicate that admits a relational-predicate arg (and
+  // thus the multi-bound form); all others take a single positional arg.
+  if (name === "length" && argsExprs.length > 1) {
+    return argsExprs
+      .map((arg) => emitFireBlock(name, [arg], isShortCircuiter))
+      .join("\n");
+  }
+
+  return emitFireBlock(name, argsExprs, isShortCircuiter);
+}
+
+/**
+ * Emit one `{ const error = _scrml_validator_fire(...); ... }` block for a
+ * single fire of `name` against `value` with the given (already-lowered) arg
+ * expression strings.
+ */
+function emitFireBlock(name: string, argsExprs: string[], isShortCircuiter: boolean): string {
   const lines: string[] = [];
   lines.push(`{`);
   if (argsExprs.length === 0) {

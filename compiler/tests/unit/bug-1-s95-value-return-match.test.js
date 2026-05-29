@@ -250,6 +250,63 @@ describe("Bug 1 — rewriteMatchExpr (legacy string pipeline) parity for `_ =>`"
 // structured emitter) produces correct JS for the brief's reproducer.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// C2 (R27) — value-return match with `->` arms (the §18.2 canonical alias).
+// The `->` separator is tokenized as two PUNCT tokens (`-` `>`) and rejoined
+// with a space in default-logic mode (`.Idle - > "Idle"`). Previously the
+// arm-parser only accepted `=>` / `:>`, so `->` arms were dropped and
+// emitMatchExpr emitted a "could not be compiled" stub (invalid JS at exit-0).
+// Now `->` lowers IDENTICALLY to `=>` (SPEC §18.2: `->` is a legal alias;
+// canonical is `=>`).
+// ---------------------------------------------------------------------------
+
+describe("C2 (R27) — `->` value-return match arm alias", () => {
+  it("parseMatchArm accepts canonical `.Variant -> result`", () => {
+    const arm = parseMatchArm('.Idle -> "Idle"');
+    expect(arm).not.toBeNull();
+    expect(arm.kind).toBe("variant");
+    expect(arm.test).toBe("Idle");
+    expect(arm.result).toBe('"Idle"');
+  });
+
+  it("parseMatchArm repairs the rejoin-spaced `- >` arrow", () => {
+    const arm = parseMatchArm('. Idle - > "Idle"');
+    expect(arm).not.toBeNull();
+    expect(arm.kind).toBe("variant");
+    expect(arm.test).toBe("Idle");
+    expect(arm.result).toBe('"Idle"');
+  });
+
+  it("emitMatchExpr lowers `->` arms to a valid if/else IIFE (no stub)", () => {
+    const node = {
+      header: "phase",
+      body: [
+        { kind: "bare-expr", expr: '. Idle - > "Idle"' },
+        { kind: "bare-expr", expr: '. Busy - > "Busy"' },
+      ],
+    };
+    const result = emitMatchExpr(node);
+    expect(result).not.toContain("could not be compiled");
+    expect(result).toContain('if (_scrml_match_1 === "Idle") return "Idle"');
+    expect(result).toContain('else if (_scrml_match_1 === "Busy") return "Busy"');
+  });
+
+  it("`->` and `=>` arms emit identical bodies", () => {
+    const arrowNode = (sep) => ({
+      header: "phase",
+      body: [
+        { kind: "bare-expr", expr: `.Idle ${sep} "Idle"` },
+        { kind: "bare-expr", expr: `.Busy ${sep} "Busy"` },
+      ],
+    });
+    resetVarCounter();
+    const withArrow = emitMatchExpr(arrowNode("->"));
+    resetVarCounter();
+    const withFat = emitMatchExpr(arrowNode("=>"));
+    expect(withArrow).toBe(withFat);
+  });
+});
+
 describe("Bug 1 — end-to-end reproducer from brief", () => {
   let tmpDir;
 
@@ -306,6 +363,38 @@ describe("Bug 1 — end-to-end reproducer from brief", () => {
         "_scrml_reactive_get",
         "_scrml_reactive_set",
         "_scrml_init_set",
+        "document",
+        out.replace(/^\/\/ Requires:.*\n/, ""),
+      );
+    }).not.toThrow();
+  });
+
+  it("C2 (R27) — value-return `const <label> = match @phase { .Idle -> ... }` compiles to valid JS", () => {
+    const src = `<program>
+\${ type Phase:enum = { Idle, Busy } }
+<phase>: Phase = .Idle
+const <label> = match @phase {
+  .Idle -> "Idle"
+  .Busy -> "Busy"
+}
+<p>\${@label}</p>
+</program>
+`;
+    const { out } = compile(src);
+    // The silent-stub signature must be GONE.
+    expect(out).not.toContain("could not be compiled");
+    // The derived label must lower to the if/else IIFE (same as `=>`).
+    expect(out).toMatch(/if \(_scrml_match_\d+ === "Idle"\) return "Idle";/);
+    expect(out).toMatch(/else if \(_scrml_match_\d+ === "Busy"\) return "Busy";/);
+    // Output parses as JS (the bug was a SyntaxError: stray `;)`).
+    expect(() => {
+      new Function(
+        "_scrml_reactive_get",
+        "_scrml_reactive_set",
+        "_scrml_init_set",
+        "_scrml_derived_declare",
+        "_scrml_derived_subscribe",
+        "_scrml_derived_get",
         "document",
         out.replace(/^\/\/ Requires:.*\n/, ""),
       );

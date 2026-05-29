@@ -545,6 +545,28 @@ function logicInterpolationNode(exprRaw: string, span: unknown): unknown {
  * (`args: null`); otherwise the single raw-text slot becomes `args: [argsRaw]`
  * which decorate parses into a RelationalPredicateNode (length) / ExprNode.
  */
+/**
+ * Split a raw validator-arg string on TOP-LEVEL commas (commas not nested
+ * inside parens / brackets / braces). Mirrors `splitArgs` in ast-builder.js so
+ * the formFor synth path decomposes multi-slot call forms (`length(>=2, <=120)`,
+ * `oneOf([.A, .B])`) identically to the hand-authored Shape-2 B13 split.
+ * Brackets/braces increment depth so commas inside `oneOf([.A, .B])` stay
+ * within their single array slot.
+ */
+function splitTopLevelCommas(raw: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of raw) {
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; cur += ch; }
+    else if (ch === ")" || ch === "]" || ch === "}") { depth--; cur += ch; }
+    else if (ch === "," && depth === 0) { parts.push(cur.trim()); cur = ""; }
+    else { cur += ch; }
+  }
+  if (cur.trim().length > 0) parts.push(cur.trim());
+  return parts;
+}
+
 function toDecoratedValidatorEntries(validators: FormForValidator[], span: unknown): unknown[] {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { decorateValidatorsWithExprNodes } = require("../validator-arg-parser.ts") as {
@@ -553,7 +575,18 @@ function toDecoratedValidatorEntries(validators: FormForValidator[], span: unkno
   const filePath = (span as { file?: string } | undefined)?.file ?? "<formFor-synth>";
   const entries = validators.map((v) => ({
     name: v.name,
-    args: v.argsRaw === null || v.argsRaw === undefined ? null : [v.argsRaw],
+    // C1 (R27): split the raw paren-text on TOP-LEVEL commas so multi-slot
+    // call forms decompose into per-slot raw strings — mirroring the
+    // hand-authored Shape-2 B13 split in ast-builder.js. Without this, the
+    // two-bound range form `length(>=2, <=120)` reaches the decorator as a
+    // single slot (`[">=2, <=120"]`) and the second bound gets spliced raw
+    // into the comparator object literal → invalid JS. The decorator then
+    // parses slot 0 + each trailing relational-op slot as a separate
+    // RelationalPredicateNode (a trailing string-literal slot stays the
+    // §55.10 inline-override).
+    args: v.argsRaw === null || v.argsRaw === undefined
+      ? null
+      : splitTopLevelCommas(v.argsRaw),
     span,
   }));
   decorateValidatorsWithExprNodes(entries, filePath);

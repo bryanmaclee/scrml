@@ -57,6 +57,17 @@ const REL_OPS_BY_LENGTH = [
   ">", "<", "=",
 ] as const;
 
+/**
+ * True when `text` (after trim) begins with a relational operator from
+ * REL_OPS_BY_LENGTH. Used (C1, R27) to disambiguate a trailing `length(...)`
+ * slot: a relational-op-leading slot is a SECOND bound (`length(>=N, <=M)`);
+ * anything else is the §55.10 inline message override (a string literal).
+ */
+function startsWithRelationalOp(text: string): boolean {
+  const t = text.trimStart();
+  return REL_OPS_BY_LENGTH.some((op) => t.startsWith(op));
+}
+
 type RelOp = (typeof REL_OPS_BY_LENGTH)[number];
 
 /**
@@ -106,11 +117,21 @@ export function parseValidatorArg(
     return makeEscapeHatch(span, "EmptyValidatorArg", "");
   }
 
-  // Relational form is ONLY the leading slot of `length(...)`. Subsequent
-  // slots (slotIndex > 0) are inline-overrides per §55.10 — parsed as
-  // standard expressions (string literals expected).
-  if (RELATIONAL_PREDICATE_HOSTS.has(predicateName) && slotIndex === 0) {
-    return parseRelationalPredicate(trimmed, span, filePath, argOffset);
+  // Relational form on `length(...)`. The LEADING slot is always relational
+  // (`length(>=2)`). Trailing slots disambiguate by shape (C1, R27):
+  //   - a slot that STARTS WITH A RELATIONAL OPERATOR is a SECOND bound —
+  //     the canonical two-bound range form `length(>=N, <=M)` (SPEC §55.1
+  //     worked example line 20219; §55.4 schema worked example). Both bounds
+  //     are AND-composed (emit-validators fires one `length` block per bound).
+  //   - any other trailing slot is the Level-1 inline message override
+  //     (`length(>=2, "Name must be at least 2 chars")`, SPEC §55.10) — a
+  //     static string literal, parsed as a standard expression.
+  // The disambiguation is unambiguous: inline-override messages are always
+  // quoted string literals, never relational expressions.
+  if (RELATIONAL_PREDICATE_HOSTS.has(predicateName)) {
+    if (slotIndex === 0 || startsWithRelationalOp(trimmed)) {
+      return parseRelationalPredicate(trimmed, span, filePath, argOffset);
+    }
   }
 
   // Standard expression form. Delegates to the existing expression-parser.

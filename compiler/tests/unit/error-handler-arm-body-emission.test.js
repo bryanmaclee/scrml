@@ -492,3 +492,81 @@ describe("R25-Bug-38 §12: end-to-end — emitted function is node-parseable", (
     rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// C5 (R27): a `;` (or newline) INSIDE a STRING LITERAL in an `!{}` arm body
+// must NOT be treated as a statement separator. The arm-body statement
+// splitter (rewriteBlockBody in emit-control-flow.ts) was string-naive and
+// split `@msg = "write failed; rolled back"` mid-string into
+// `_scrml_reactive_set("msg", "write failed)` + orphaned `rolled back";`
+// (invalid JS at compile-exit-0). The splitter is now string-literal-aware
+// across double-quote, single-quote, and template-literal spans.
+// ---------------------------------------------------------------------------
+
+describe("C5 (R27): `;` inside a string literal in an `!{}` arm body", () => {
+  function compileSrc(src, baseName) {
+    const tmp = join(tmpdir(), `scrml-r27-c5-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(tmp, { recursive: true });
+    const srcFile = join(tmp, `${baseName}.scrml`);
+    writeFileSync(srcFile, src);
+    const outDir = join(tmp, "dist");
+    mkdirSync(outDir, { recursive: true });
+    const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
+    const clientJs = readFileSync(join(outDir, `${baseName}.client.js`), "utf8");
+    return { result, clientJs, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
+  }
+
+  test("double-quoted string with embedded `;` — value preserved, JS valid", () => {
+    const src = [
+      "<program>",
+      "${",
+      "  type E:enum = { Bad }",
+      '  <msg> = ""',
+      "  server function risky() ! E { fail E::Bad }",
+      "  function g() {",
+      "    risky() !{",
+      '      | ::Bad -> { @msg = "write failed; rolled back"; return }',
+      "    }",
+      "  }",
+      "}",
+      "<button onclick=g()>go</button>",
+      "<p>${@msg}</p>",
+      "</program>",
+    ].join("\n");
+    const { result, clientJs, cleanup } = compileSrc(src, "c5-double");
+    expect(result.errors).toHaveLength(0);
+    expect(clientJs).toContain('_scrml_reactive_set("msg", "write failed; rolled back")');
+    expect(clientJs).not.toContain('"write failed)');
+    expect(() => new Function(clientJs.replace(/^import .*$/gm, ""))).not.toThrow();
+    cleanup();
+  });
+
+  test("single-quote + template-literal strings with embedded `;` — preserved, multi-stmt split intact", () => {
+    const src = [
+      "<program>",
+      "${",
+      "  type E:enum = { Bad }",
+      '  <msg> = ""',
+      '  <other> = ""',
+      '  <tpl> = ""',
+      "  server function risky() ! E { fail E::Bad }",
+      "  function g() {",
+      "    risky() !{",
+      "      | ::Bad -> { @msg = 'single; quoted; semis'; @other = \"double; quote\"; @tpl = `templ; with; semi`; return }",
+      "    }",
+      "  }",
+      "}",
+      "<button onclick=g()>go</button>",
+      "<p>${@msg}</p><p>${@other}</p><p>${@tpl}</p>",
+      "</program>",
+    ].join("\n");
+    const { result, clientJs, cleanup } = compileSrc(src, "c5-multi");
+    expect(result.errors).toHaveLength(0);
+    expect(clientJs).toContain("single; quoted; semis");
+    expect(clientJs).toContain("double; quote");
+    expect(clientJs).toContain("templ; with; semi");
+    const setCount = (clientJs.match(/_scrml_reactive_set\("(?:msg|other|tpl)"/g) || []).length;
+    expect(setCount).toBeGreaterThanOrEqual(3);
+    cleanup();
+  });
+});

@@ -3799,6 +3799,51 @@ function checkValidator(
     });
     return;
   }
+  // C1 (R27): the relational-predicate host `length` admits the two-bound
+  // range form `length(>=N, <=M)` (SPEC §55.1 worked example) — every LEADING
+  // relational-predicate arg is a bound, AND-composed; an OPTIONAL trailing
+  // string-literal is the §55.10 inline override. So the legal shapes are:
+  //   length(>=N)                          1 bound
+  //   length(>=N, <=M)                     2 bounds
+  //   length(>=N, "msg")                   1 bound + override
+  //   length(>=N, <=M, "msg")              2 bounds + override
+  // Non-length `1+inline` predicates keep the strict 1-arg-+-optional-override
+  // shape below.
+  if (signature.args![0]!.kind === "relational-predicate") {
+    let i = 0;
+    while (i < args.length && (args[i] as any)?.kind === "relational-predicate") {
+      checkArgShape(args[i]!, signature.args![0]!, validator, cellName, errors, span);
+      i++;
+    }
+    // Any non-relational trailing slot must be a single inline-override.
+    const trailing = args.slice(i);
+    if (trailing.length > 1) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` accepts at most `
+          + `one trailing inline message override after the relational bound(s) `
+          + `(SPEC §55.10). Got ${trailing.length} trailing arguments.`,
+        span,
+        severity: "error",
+      });
+      return;
+    }
+    if (trailing.length === 1 && !isInlineMessageOverride(trailing[0])) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\`: the trailing `
+          + `argument must be either a relational bound (e.g. \`<=120\`, the two-bound `
+          + `range form per SPEC §55.1) or a static string literal inline message override `
+          + `(SPEC §55.10 / L12 Edge F). Dynamic expressions defeat i18n tooling extraction.`,
+        span,
+        severity: "error",
+      });
+    }
+    return;
+  }
+
   if (args.length > 2) {
     errors.push({
       code: "E-TYPE-031",
@@ -4755,6 +4800,46 @@ function extractInlineOverride(
   const lastSigIdx = signature.args.length - 1;
   const lastSlot = signature.args[lastSigIdx];
   if (!lastSlot || lastSlot.kind !== "inline-message-override") {
+    (validator as any).inlineOverride = null;
+    return;
+  }
+
+  // C1 (R27): for the relational-predicate host `length`, the two-bound range
+  // form (`length(>=N, <=M)`) supplies MORE relational args than the leading
+  // single-arg signature slot, with NO inline override. The inline-override is
+  // the LAST arg ONLY when it is a string literal; a trailing relational-
+  // predicate bound is NOT an override. Locate the override by the actual last
+  // arg's shape rather than by fixed signature index.
+  if (signature.args[0]!.kind === "relational-predicate") {
+    const lastArg = args[args.length - 1]!;
+    if ((lastArg as any)?.kind === "relational-predicate") {
+      // No inline override — all trailing args are bounds.
+      (validator as any).inlineOverride = null;
+      return;
+    }
+    const lit = stringLiteralValueOf(lastArg);
+    if (lit !== null) {
+      (validator as any).inlineOverride = lit;
+      return;
+    }
+    // A non-relational, non-string-literal trailing arg in an override slot —
+    // the arity check (checkValidatorArity) already fired E-TYPE-031 for this
+    // shape; mirror the dynamic-message diagnostic for parity with the
+    // non-relational path below.
+    const cellNameR = declNode.name ?? "<anonymous>";
+    const spanR: SYMDiagnostic["span"] = (validator as any).span
+      ?? declNode.span
+      ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    errors.push({
+      code: "E-VALIDATOR-INLINE-DYNAMIC",
+      message:
+        `E-VALIDATOR-INLINE-DYNAMIC: the inline message override on `
+        + `\`${validator.name}\` for cell \`${cellNameR}\` must be a static `
+        + `string literal (SPEC §55.10 / L12 Edge F — no expression `
+        + `interpolation; messages are statically extractable for i18n tooling).`,
+      span: spanR,
+      severity: "error",
+    });
     (validator as any).inlineOverride = null;
     return;
   }

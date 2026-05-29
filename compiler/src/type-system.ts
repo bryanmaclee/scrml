@@ -626,6 +626,7 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
   ["boolean",   tPrimitive("boolean")],
   ["bool",      tPrimitive("boolean")],  // alias
   ["integer",   tPrimitive("integer")],   // §53 base-type (maps to number at runtime)
+  ["int",       tPrimitive("integer")],   // alias of integer (mirrors bool→boolean; C3 R27 — bare `int` struct field previously resolved to asIs → E-SCHEMAFOR-NO-SQL-MAPPING)
   // S109 — date/timestamp as first-class primitive types for the
   // structural-walk L22 family (formFor / schemaFor / tableFor v1.next
   // item #5 per docs/changes/tableFor-impl/PROGRESS.md). Pre-S109

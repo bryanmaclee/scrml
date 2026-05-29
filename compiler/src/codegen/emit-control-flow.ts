@@ -852,7 +852,29 @@ export function parseBindingList(raw: string): PayloadBinding[] {
  *   9. 'string' -> expr           — old string literal (single-quoted)
  *  10. _ -> expr                  — old wildcard syntax
  */
-export function parseMatchArm(trimmed: string): MatchArm | null {
+/**
+ * C2 (R27): the `->` match-arm separator (a legal alias for `=>` per SPEC
+ * §18.2) is tokenized as TWO PUNCT tokens (`-` then `>`); when the block
+ * splitter rejoins arm text in default-logic mode it inserts a space, yielding
+ * `. Variant - > result`. The single-token arrows `=>` / `:>` survive rejoin
+ * intact, so only `->` needs repair. Collapse a rejoin-spaced `- >` back to the
+ * canonical `->` before arm parsing so the value-return match (and every other
+ * `->`-arm locus) lowers identically to its `=>` form rather than dropping the
+ * arm and emitting a "could not be compiled" stub.
+ *
+ * Scoped to the FIRST occurrence only (the arm separator is always the leading
+ * arrow); a `-` `>` adjacency inside the arm RESULT expression is not a valid
+ * scrml operator, so this is safe. String-literal contents are not scanned
+ * because the arm pattern + separator always precede the first string literal
+ * in an arm.
+ */
+export function normalizeMatchArmArrow(text: string): string {
+  return text.replace(/-\s*>/, "->");
+}
+
+export function parseMatchArm(rawTrimmed: string): MatchArm | null {
+  // C2 (R27): repair the rejoin-spaced `- >` arrow alias before pattern-match.
+  const trimmed = normalizeMatchArmArrow(rawTrimmed);
   // NEW Form 0 (§18 pipe-alternation): `.A | .B | .C => result` (or `:>`).
   // Tried BEFORE the single-variant regex so the alternation chain wins.
   // Alternation arms with payload bindings are NOT supported — the SPEC §51.3.2
@@ -860,7 +882,7 @@ export function parseMatchArm(trimmed: string): MatchArm | null {
   // codegen here only matches the unit-variant alternation form (no parens
   // anywhere in the LHS chain).
   const altMatch = trimmed.match(
-    /^\.\s*([A-Z][A-Za-z0-9_]*)((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*)+)\s*(?:=>|:>)\s*([\s\S]+)$/,
+    /^\.\s*([A-Z][A-Za-z0-9_]*)((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*)+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
   );
   if (altMatch) {
     const first = altMatch[1];
@@ -882,31 +904,31 @@ export function parseMatchArm(trimmed: string): MatchArm | null {
   // `:>` reads as "narrows to" — distinguishes from JS arrow function `=>`
   // binding-list: zero or more comma-separated bindings, optionally `field: local`
   // or `_` discard. No nested parens (variant bindings are identifier-level).
-  const newVariantMatch = trimmed.match(/^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*([^)]*?)\s*\))?\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newVariantMatch = trimmed.match(/^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*([^)]*?)\s*\))?\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newVariantMatch) {
     return { kind: "variant", test: newVariantMatch[1], binding: newVariantMatch[2] ?? null, result: newVariantMatch[3].trim() };
   }
 
   // NEW Form 3: "string" => expr (or :>)
-  const newDqStringMatch = trimmed.match(/^"((?:[^"\\]|\\.)*)"\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newDqStringMatch = trimmed.match(/^"((?:[^"\\]|\\.)*)"\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newDqStringMatch) {
     return { kind: "string", test: `"${newDqStringMatch[1]}"`, binding: null, result: newDqStringMatch[2].trim() };
   }
 
   // NEW Form 4: 'string' => expr (or :>)
-  const newSqStringMatch = trimmed.match(/^'((?:[^'\\]|\\.)*)'\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newSqStringMatch = trimmed.match(/^'((?:[^'\\]|\\.)*)'\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newSqStringMatch) {
     return { kind: "string", test: `'${newSqStringMatch[1]}'`, binding: null, result: newSqStringMatch[2].trim() };
   }
 
   // NEW Form 5a: not => expr (or :>) — absence arm (§42: `not` in match arms)
-  const notArmMatch = trimmed.match(/^not\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const notArmMatch = trimmed.match(/^not\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (notArmMatch) {
     return { kind: "not", test: null, binding: null, result: notArmMatch[1].trim() };
   }
 
   // NEW Form 5b: else => expr (or :>, or bare: else expr) — wildcard arm
-  const newWildcardMatch = trimmed.match(/^else\s*(?:(?:=>|:>)\s*)?([\s\S]+)$/);
+  const newWildcardMatch = trimmed.match(/^else\s*(?:(?:=>|:>|->)\s*)?([\s\S]+)$/);
   if (newWildcardMatch) {
     return { kind: "wildcard", test: null, binding: null, result: newWildcardMatch[1].trim() };
   }
@@ -941,14 +963,14 @@ export function parseMatchArm(trimmed: string): MatchArm | null {
   // residual paths where match arms arrive as raw strings (expression-position
   // `return match { ... }` → rawArms → emit-expr.ts bridge → bare-expr children
   // → parseMatchArm).
-  const newUnderscoreWildcardMatch = trimmed.match(/^_\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const newUnderscoreWildcardMatch = trimmed.match(/^_\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (newUnderscoreWildcardMatch) {
     return { kind: "wildcard", test: null, binding: null, result: newUnderscoreWildcardMatch[1].trim() };
   }
 
   // §42 presence arm: (identifier) => expr (or :>) — counterpart to `not => expr` in match
   // Acts as a wildcard/else arm with the variable bound to the matched value.
-  const presenceArmMatch = trimmed.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>)\s*([\s\S]+)$/);
+  const presenceArmMatch = trimmed.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>|->)\s*([\s\S]+)$/);
   if (presenceArmMatch) {
     return { kind: "wildcard", test: null, binding: presenceArmMatch[1], result: presenceArmMatch[2].trim() };
   }
@@ -1296,11 +1318,34 @@ export function rewriteBlockBody(
   machineBindings?: Map<string, MachineBindingInfo> | null,
   engineCtx?: EngineRewriteCtx | null,
 ): string {
+  // C5 (R27): split block-body statements on top-level `;` / newline, but the
+  // scanner MUST be STRING-LITERAL-AWARE — a `;` (or `\n`) INSIDE a `"..."` /
+  // `'...'` / `` `...` `` span is part of the string value, NOT a statement
+  // separator. Previously the splitter tracked only brace/paren/bracket depth,
+  // so `@msg = "write failed; rolled back"` split mid-string into
+  // `_scrml_reactive_set("msg", "write failed)` + orphaned `rolled back";`
+  // (invalid JS at compile-exit-0). Backslash escapes inside quoted strings are
+  // skipped; template literals (`` ` ``) are treated as opaque spans (any
+  // `${...}` interpolation inside is rare in arm bodies and a top-level `;`
+  // inside it is still string content, not a statement boundary).
   const stmts: string[] = [];
   let current = "";
   let depth = 0;
+  let strQuote: string | null = null; // active string delimiter: '"' | "'" | "`"
   for (let i = 0; i < content.length; i++) {
     const ch = content[i];
+    if (strQuote !== null) {
+      // Inside a string literal — copy verbatim, honoring backslash escapes.
+      if (ch === "\\") {
+        current += ch;
+        if (i + 1 < content.length) { current += content[i + 1]; i++; }
+        continue;
+      }
+      if (ch === strQuote) strQuote = null;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { strQuote = ch; current += ch; continue; }
     if (ch === "{" || ch === "(" || ch === "[") depth++;
     else if (ch === "}" || ch === ")" || ch === "]") depth--;
     else if ((ch === ";" || ch === "\n") && depth === 0) {
@@ -1542,7 +1587,12 @@ export function emitMatchExpr(node: any, opts?: any): string {
 
     // A single body child may contain all arms concatenated on one line.
     // Split into individual arm strings before parsing (BUG-R13-001).
-    const armStrings = splitMultiArmString(trimmed);
+    // C2 (R27): repair rejoin-spaced `- >` → `->` across the whole arm text
+    // BEFORE the splitter scans for arm-boundary arrows (the splitter's arrow
+    // lookahead matches a literal 2-char `->`; the spaced form would otherwise
+    // be invisible to it). `->` is never a value-expression operator in scrml,
+    // so a global collapse of `- >` is safe.
+    const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
     for (const armStr of armStrings) {
       const arm = parseMatchArm(armStr);
       if (arm) arms.push(arm);

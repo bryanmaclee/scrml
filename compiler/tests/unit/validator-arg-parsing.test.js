@@ -120,6 +120,25 @@ describe("A1b Step B9 — validator-arg ExprNode conversion (direct parser)", ()
     expect(node.value.name).toBe("@minLen");
   });
 
+  // C1 (R27) — two-bound range form `length(>=N, <=M)`. A trailing slot that
+  // STARTS WITH A RELATIONAL OPERATOR is a SECOND bound (relational-predicate),
+  // NOT a §55.10 inline-override. Previously slotIndex>0 was always parsed as
+  // an expression, producing a malformed comparator object at emit time.
+  test("§B9.1i: C1 — length(>=2, <=120) slot 1 (<=120) parses as relational-predicate", () => {
+    const node = parseValidatorArg("length", "<= 120", SPAN, "<probe>", 0, /*slotIndex*/ 1);
+    expect(node.kind).toBe("relational-predicate");
+    expect(node.op).toBe("<=");
+    expect(node.value.kind).toBe("lit");
+    expect(node.value.value).toBe(120);
+  });
+
+  test("§B9.1j: C1 — length trailing STRING slot stays inline-override (not relational)", () => {
+    const node = parseValidatorArg("length", '"Too short"', SPAN, "<probe>", 0, /*slotIndex*/ 1);
+    expect(node.kind).toBe("lit");
+    expect(node.litType).toBe("string");
+    expect(node.value).toBe("Too short");
+  });
+
   // §B9.2 — standard predicates
 
   test("§B9.2a: min(18) → lit (number) 18", () => {

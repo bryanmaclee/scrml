@@ -26,6 +26,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import vm from "node:vm";
 
 let TMP;
 
@@ -173,6 +174,38 @@ describe("§1 formFor happy path", () => {
     const js = getClientJs(result);
     expect(js).toContain(`signup.name.errors`);
     expect(js).toContain(`signup.email.errors`);
+  });
+
+  // C1 (R27): the two-bound range form `length(>=N, <=M)` on a formFor struct
+  // field previously emitted a malformed comparator object literal
+  // (`{ op: ">=", value: 2 , <= 120 }`) — invalid JS at compile-exit-0.
+  // Each bound must now fire as a separate `_scrml_validator_fire("length",...)`
+  // call (AND-composed) and the emitted client JS must parse cleanly.
+  test("C1 — two-bound length(>=N, <=M) formFor field emits valid JS (node-parseable)", () => {
+    const result = compile("happy/len2.scrml", `\${
+  import { formFor } from 'scrml:data'
+
+  type NewExpense:struct = {
+    merchant: string req length(>=2, <=120)
+    amount:   number req min(0.01)
+  }
+
+  server function onsub(values: NewExpense) ! string { return "ok" }
+}
+<program>
+  <formFor for=NewExpense onsubmit=onsub pick=["merchant", "amount"]/>
+</program>
+`);
+    expect(realErrors(result)).toEqual([]);
+    const js = getClientJs(result);
+    // No malformed splice — the second bound must NOT be raw text inside the
+    // comparator object.
+    expect(js).not.toContain(`, <= 120`);
+    // Two separate length fires, one per bound.
+    expect(js).toContain(`_scrml_validator_fire("length", value, { op: ">=", value: 2 })`);
+    expect(js).toContain(`_scrml_validator_fire("length", value, { op: "<=", value: 120 })`);
+    // The emitted client JS must be syntactically valid JavaScript.
+    expect(() => new vm.Script(js)).not.toThrow();
   });
 });
 
