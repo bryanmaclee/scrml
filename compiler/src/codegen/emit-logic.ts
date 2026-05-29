@@ -1968,7 +1968,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // "null" — replacing the prior "undefined" — because §42.5/§42.8 specify scrml
       // absence compiles to JS `null`. The downstream `initStr !== "null"` checks
       // below (predicateCheck zone guards) migrate in lockstep.
-      const initStr: string = node.init ?? "null";
+      //
+      // S139 Bug 51 fix — also treat `node.init === ""` as missing-init. The ast-
+      // builder sets `init: ""` and `initExpr: null` for Shape 2 markup-RHS decls
+      // (`<userName req length(>=2)> = <input/>` — see ast-builder.js:4169). Pre-
+      // fix, `??` doesn't fire on empty string, so initStr stayed `""` and the
+      // emit produced `_scrml_reactive_set("userName", )` with an empty argument
+      // (legal JS per ES2017 trailing-comma; runtime sets cell to `undefined`).
+      // Cell-type-specific Shape 2 init (`""` text / `false` checkbox / `0`
+      // number / `not` file) is deferred — the runtime bind:value effect updates
+      // the cell from the input's actual default on mount, so `null`-init is
+      // functionally correct for all bindable shapes.
+      let initStr: string = node.init ?? "null";
+      if (initStr === "" && !node.initExpr) initStr = "null";
       const ctx = opts.encodingCtx;
       const encodedName = ctx ? ctx.encode(_qualifiedName) : _qualifiedName;
       // Historically state-decl was treated as the initial declaration

@@ -573,7 +573,19 @@ export function generateHtml(
   // When the AST was constructed without SYM (raw test fixtures), fileScope is null
   // and render-by-tag detection is skipped — the legacy raw-tag emission path keeps
   // working for tests that bypass symbol-table population.
-  const fileScope: any = fileAST?._scope ?? null;
+  // S139 Bug 51 fix — the `fileAST` parameter passed by codegen runners is
+  // sometimes the FileAST itself and sometimes the {filePath, ast, errors}
+  // wrapper produced by TAB/CE. SYM attaches `_scope` non-enumerably to the
+  // INNER FileAST (symbol-table.ts:9521); if the wrapper is what we have,
+  // `fileAST._scope` is undefined. Mirror the shape-agnostic pattern used by
+  // collect.ts:getNodes — try the direct path first, fall back to the inner.
+  // Pre-fix: every adopter file compiled through TAB→CE→CG silently lost
+  // `_scope` (only unit tests calling runSYM directly + passing the result
+  // saw render-by-tag fire); Shape 2 cells + `<formFor>` use-sites left their
+  // tag literal in HTML and emitted `_scrml_reactive_set("name", )` (empty
+  // arg) — adopter-visible miscompile. See Bug 51 in known-gaps for the
+  // empirical reproducer + the corpus-coverage gap that masked it.
+  const fileScope: any = fileAST?._scope ?? fileAST?.ast?._scope ?? null;
   // A1c C16 — §53.7.1: map reactive var names to type annotations so bind:value
   // attributes can derive HTML validation attrs from refinement-type predicates.
   // Walk the AST top-level (mirrors emit-bindings.ts §53.7.2 path) — works whether

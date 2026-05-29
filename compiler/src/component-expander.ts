@@ -3422,6 +3422,26 @@ export function runCEFile(
     components: [], // component-def nodes are consumed by this stage
   };
 
+  // S139 Bug 51 fix — carry non-enumerable annotations forward to the new
+  // AST object. `{...ast}` above only copies ENUMERABLE properties, and SYM
+  // attaches `_scope` (symbol-table.ts:9521) as `enumerable: false`. Without
+  // explicit re-attachment, the post-CE AST has no `_scope`, and emit-html's
+  // `fileScope = fileAST?._scope ?? null` (emit-html.ts:576) becomes null —
+  // silently skipping render-by-tag expansion (`<userName/>` for a Shape 2
+  // cell) and producing an empty `_scrml_reactive_set("userName", )` init.
+  // The scope's `stateCells` map still points at the SAME decl nodes (which
+  // CE doesn't replace for state-decls), so the scope structure remains valid
+  // on the new AST — only the attachment edge needs preserving.
+  const oldScope = (ast as any)._scope;
+  if (oldScope) {
+    Object.defineProperty(updatedAst, "_scope", {
+      value: oldScope,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  }
+
   return { filePath, ast: updatedAst, errors: ceErrors };
 }
 
