@@ -6,6 +6,7 @@ import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
+import { rewriteCodeSegments } from "./code-segments.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
@@ -1412,9 +1413,21 @@ export function generateClientJs(ctx: CompileContext): string {
         `(?<!\\.\\s*)\\b(${alternation})\\b(?=\\s*[(;,}\\]\\n)]|$)`,
         "g",
       );
-      clientCode = clientCode.replace(
-        combinedRegex,
-        (_match, name: string) => fnNameMap.get(name) ?? _match,
+      // 6nz Bug Z (S144): the mangle is a raw-string regex pass with no
+      // string-literal awareness, so a declared name occurring INSIDE a
+      // `"..."` / `'...'` / backtick literal (or a comment) was rewritten —
+      // silently corrupting displayed content (e.g. the editor string
+      // `"handleKey(e)"` became `"_scrml_handleKey_3(e)"`). Fence the replace
+      // through rewriteCodeSegments (the shared string/regex/comment-aware
+      // splitter, code-segments.ts) so it applies ONLY to code segments;
+      // string literals, regex literals, and comments pass through verbatim.
+      // Real call sites in CODE position still mangle (the regex itself is
+      // preserved bit-for-bit — only its INPUT is now the code-only view).
+      clientCode = rewriteCodeSegments(clientCode, (codeSeg) =>
+        codeSeg.replace(
+          combinedRegex,
+          (_match, name: string) => fnNameMap.get(name) ?? _match,
+        ),
       );
     });
 
