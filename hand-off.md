@@ -16,10 +16,26 @@
 
 ---
 
+## 🔬 S146 EXECUTION LOG
+
+### Maps refresh (done)
+Full project-mapper cold-start → committed `46229a39` (watermark `9ab7aa38`→`948d3f2f`). non-compliance.report flags 12 deref-to-scrml-support candidates (cleanup parked — see carry-forward).
+
+### GITI-027B ratified A+D (done)
+Picked thread 3. Scope-locked against SPEC §40.9.5 — `<auth role>` is normatively a JS-mount/code-split gate NOT content-secrecy, with per-role HTML stripping consciously DEFERRED → 027B = lift-the-deferral, not a bug. Ran `scrml-deep-dive` (`giti-027b-per-role-ssr-content-stripping-2026-05-30.md`, scrml-support `54583dfa`; PA OQ-A4-E correction `987aa72`). Deep-dive recommended a 3-way debate; **user ratified directly: A (server-side omission) canonical-now + D (server-render-time gating runtime) ratified as a high-leverage-gated arc; B rejected; C killed.**
+- **A recipe PA-verified** against giti's exact repro: secret `owner-only-marker-12345` → `.server.js` ONLY (0 in html/client.js), exit-0, `node --check` clean both files. `/tmp/giti-027b-verify/`.
+- **Landed:** SPEC §40.9.5 amendment (this repo) + known-gaps §0 (Nominal 8→9) + master-list §0.6 + hand-off (this repo); user-voice S146 + design-insight 35 + deep-dive DISPOSITION banner (scrml-support).
+- **giti reply sent** → `giti/handOffs/incoming/2026-05-30-1727-scrmlTS-to-giti-027b-disposition-A-ratified-D-arc.md` (needs:action — adopt recipe + the server-authoritative-mutation half for write-controls; unblocks their Owner write-gate today). NOT committed in giti (sibling-repo protocol).
+- **NEW LOW candidate (needs-confirm):** block-form `<match on=@cell>` doesn't register `@cell` as a DG consumer → spurious `E-DG-002` (cosmetic; match wires correctly; observed in recipe-verify).
+
+---
+
 ## S146 priorities (CARRY-FORWARD from S145)
 1. **Match `:>`-canonical implementation arc** (ratified S145; design-insight 34; deep-dive `scrml-support/docs/deep-dives/match-arrow-colon-canonical-2026-05-30.md`). Lint (`W-MATCH-ARROW-LEGACY`, arm-context-scoped — deprecate `=>` as a *separator* while it stays valid as a lambda) + AST `bun scrml migrate --fix` rule (precise, NOT regex) + SPEC §18/§19/§34 amendment + docs migration (SPEC/PRIMER/kickstarter, `=>`-heavy) + `!{}` arms move in lockstep. **Zero codegen** — `:>`/`=>`/`->` already build identical AST + emit identical JS today (PA-verified S145).
 2. **`:`-shorthand-robustness fix** (NEW MED, S145). `:`-shorthand-state-body engine shapes (`<Nav rule=.Edit>: "nav"`) trip `E-STRUCTURAL-ELEMENT-MISPLACED` on the engine itself. **Confirmed PRE-EXISTING, NOT Bug-AB** (structural-placement check is pre-PASS-11; Bug-AB fix is PASS-11+). User: keep `:`-shorthand, make it robust. **Before fix dispatch:** clean-isolate the trigger (murky between `:`-shorthand-bodies vs surrounding cell decls vs engine-in-program) + confirm pre-existing on baseline `3b825808`. Repros were `/tmp/abShort.scrml` + `/tmp/abShort2.scrml` (gone — re-derive).
-3. **GITI-027B** per-role SSR content-stripping — design deliberation/deep-dive (giti blocked; they keep localdev+127.0.0.1 write-gate). `<auth role>` leaks HTML content even under `--emit-per-route` (only JS behavior is role-split). Part A (the warning) shipped S145.
+3. **GITI-027B** — ✅ **RATIFIED A+D (S146)** (design-insight 35; deep-dive `giti-027b-per-role-ssr-content-stripping-2026-05-30.md`). A (server-side omission) canonical-now + recipe-verified + **giti unblocked (reply sent)**. B rejected, C killed. SPEC §40.9.5 amended. **D (server-render-time gating runtime) ratified as a high-leverage-gated arc → NEW carry-forward priority 7 below.**
+
+   **7. D-runtime arc (NEW, S146)** — server-render-time role-gating runtime: the framework-owned per-role content gate for dynamic deployment targets. XL (moves scrml toward shipping an SSR server). Started "as immediately as is high leverage" (user). Spec-ahead-of-impl (Nominal); SPEC §40.9.5 records the direction; §58 build-target declaration is the A/D bridge (A = static-target answer, D = dynamic-target answer). Deep-dive is the design substrate. NOT started.
 4. **§51.0.H-C1 impl arc** (carried from S144) — SPEC §51.0.H amendment + `effect=`-on-opener (boot-only, init→initial= edge) + §34 `E-ENGINE-EFFECT-ON-DERIVED` + 3 edge-case rulings (errorBoundary scope over boot-effect throw; boot-effect ordering vs `<onIdle>` arming) + §51.0.R module-init linkage + codegen + README Stage-3 flagship fix (self-target → opener-`effect=`).
 5. **Tier-rung re-deep-dive** (carried from S144) — the S64 `tier-ladder-rungs-stability` rejection was corpus-ouroboros-driven (corpus-zero made decisive one session before Rule 2 ratified that pattern as forbidden). Re-evaluate on pure DX merits: corpus-zero discounted, Tier 0→1 jump-pain re-tested on current post-R24-R28 gauntlets, inherit the on-enter "design-for-witnessed-need" precedent. Probably its own session; sequence AFTER the on-enter (C1) arc lands.
 6. **Other carry-forward:** R28-1c/R28-1d MED needs-confirm · R28-8 (bare-variant into object-literal: extend §14.10 vs canon-fix §4.8) · within-node allowlist staleness hygiene · **native parser** needs the same brace-less-`continue`/`break` label fix as GITI-024 (close LIVE-vs-native divergence at M-swap; allowlist rebump tracks it until then) · native parser M2.4 + MK2 · fresh gauntlet R29 (vs v0.7.0+ baseline) · §36.6 input-state reactivity (S144 Bug-AC secondary, design call).
