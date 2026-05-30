@@ -281,9 +281,98 @@ function renderTemplateChildToJs(
     return;
   }
 
+  // R28-1b (S143) — block-form `<match>` that is a child of this each's body.
+  // SPEC §17.7.3 + §18.0.1. Pre-fix this fell through to the unhandled-kind
+  // comment (the per-item match was DROPPED) while a phantom module-scope
+  // dispatcher referenced the per-item iter var at top level (undefined).
+  //
+  // emit-match.ts emits the render fns + wire fns (item-agnostic, module-scope)
+  // and an ITEM-SCOPED dispatch fn `__scrml_match_match_<id>_dispatch(_mount, _v)`
+  // (no module-scope trigger; see emit-variant-guard.ts itemScopedDispatch).
+  // Here we render the match PER ITEM: create an item-local mount element,
+  // append it to the item fragment, and dispatch on THIS item's discriminant
+  // (`@.status` → `<iterVar>.status`, valid in the factory scope where the
+  // iter var IS bound). The each render fn re-runs on collection change
+  // (_scrml_effect_static), so every item re-dispatches against its current
+  // value.
+  if (child.kind === "match-block") {
+    const matchId = (child as any).id;
+    if (matchId == null) {
+      lines.push(`${indent}// each: match-block missing id; cannot render per-item`);
+      return;
+    }
+    // The item-scoped dispatch fn name mirrors emit-variant-guard.ts:
+    //   `_${renderFnPrefix}_${idPrefix}_dispatch` with renderFnPrefix
+    //   "_scrml_match" and idPrefix "match_<id>" → "__scrml_match_match_<id>_dispatch".
+    const dispatchFnName = `__scrml_match_match_${matchId}_dispatch`;
+    const mountAttr = "data-scrml-match-mount";
+    const idPrefix = `match_${matchId}`;
+    // Resolve the per-item discriminant expression from the match's `on=`.
+    const discriminant = resolveMatchDiscriminantForItem(child, iterVarName);
+    // Item-local mount element. Carries the same data-attr the module-scope
+    // form uses (debug parity); the dispatch fn ignores the attr (mount is
+    // passed in) but it makes the rendered DOM self-describing.
+    const mountVar = `_scrml_match_mount_${nextLocalId()}`;
+    lines.push(`${indent}const ${mountVar} = document.createElement("div");`);
+    lines.push(`${indent}${mountVar}.setAttribute(${JSON.stringify(mountAttr)}, ${JSON.stringify(idPrefix)});`);
+    lines.push(`${indent}${fragmentVar}.appendChild(${mountVar});`);
+    // Per-item dispatch. The dispatch fn tears down any prior wiring on the
+    // mount (per-mount dispose) and re-renders the arm for THIS item's value.
+    lines.push(`${indent}${dispatchFnName}(${mountVar}, ${discriminant});`);
+    return;
+  }
+
   // Other node kinds — defer to a runtime-error hint so adopters see the
   // missing case (rather than silent skip).
   lines.push(`${indent}// each: unhandled template child kind="${(child as any).kind}"`);
+}
+
+// ---------------------------------------------------------------------------
+// R28-1b — per-item match discriminant resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a block-form `<match on=...>`'s discriminant to a JS expression
+ * valid in the each per-item factory scope (where `iterVarName` is bound).
+ *
+ * Mirrors emit-match.ts:resolveOnExpr lowering, but produces an expression
+ * for INLINE per-item dispatch rather than a module-scope accessor:
+ *   - `on=@.field` / `on=@.`  → `<iterVar>.field` / `<iterVar>` (the common
+ *                               item-scoped form per SPEC §17.7.3 — `@.field`
+ *                               and the `as`-bound `alias.field` are aliases)
+ *   - `on=@cell`              → `_scrml_reactive_get("cell")` (item-independent
+ *                               but legal — a file-scope cell read inside the
+ *                               item factory; the each render fn re-runs on
+ *                               cell change via the existing dep edge)
+ *   - `on=${expr}` / other    → the inner/raw expression with `@.`/`@cell`
+ *                               rewrites applied (best-effort)
+ *
+ * The BS tokenizer space-pads `.` operators (`@.status` → `@ . status`); the
+ * rewrite tolerates surrounding whitespace.
+ */
+function resolveMatchDiscriminantForItem(matchBlock: any, iterVarName: string): string {
+  const raw = String(matchBlock?.onExprRaw ?? "").trim();
+  if (!raw) {
+    // No explicit on= (auto-implied engine). Per-item-match against an engine
+    // is not a meaningful shape inside an each; emit a defensive undefined so
+    // the dispatch is a no-op rather than invalid JS.
+    return "undefined";
+  }
+  // `${expr}` interpolation form — unwrap to the inner expression.
+  let expr = raw;
+  const dollarMatch = expr.match(/^\$\{([\s\S]*)\}$/);
+  if (dollarMatch) expr = dollarMatch[1].trim();
+  // The BS tokenizer space-pads `.` operators (`@.status` → `@ . status`).
+  // Normalize the contextual-sigil dot so `rewriteContextualSigil` (which
+  // matches `@.ident` without interior whitespace) lowers it. Conservative —
+  // only collapses whitespace immediately around a `@`-led dot.
+  expr = expr.replace(/@\s*\.\s*/g, "@.");
+  // Lower `@.field` / `@.` to the iter var (item-scoped sigil), then lower any
+  // remaining bare `@cell` to a reactive read. Order matters: `@.` first so
+  // `rewriteAtCellAccess` does not mis-consume the contextual sigil.
+  let out = rewriteContextualSigil(expr, iterVarName);
+  out = rewriteAtCellAccess(out);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

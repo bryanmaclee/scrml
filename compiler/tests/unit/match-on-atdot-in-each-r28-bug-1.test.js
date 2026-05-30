@@ -1,35 +1,36 @@
 /**
- * match-on-atdot-in-each-r28-bug-1.test.js — Bug R28-1 regression guard:
- * a block-form `<match for=T on=@.field>` nested inside an
- * `<each ... as alias>` body MUST lower the `@.` contextual iteration sigil
- * to the enclosing each's current-iteration variable in the dispatcher
- * call — IDENTICAL codegen to the author-written `on=alias.field` form
+ * match-on-atdot-in-each-r28-bug-1.test.js — Bug R28-1 + R28-1b regression guard.
+ *
+ * R28-1 (gate-fire closure): a block-form `<match for=T on=@.field>` nested
+ * inside an `<each ... as alias>` body MUST lower the `@.` contextual
+ * iteration sigil to the enclosing each's current-iteration variable —
+ * IDENTICAL codegen to the author-written `on=alias.field` form
  * (SPEC §17.7.3: "@.field and the as-bound name produce identical codegen").
+ * Pre-R28-1 the raw `@.` survived into the dispatcher invocation
+ * (`__scrml_match_match_NNN_dispatch(@.field)`) — invalid JS, gate-caught by
+ * E-CODEGEN-INVALID-JS (`Unexpected character '@'`).
  *
- * S143 surface — surfaced by gauntlet-R28 dev sources (dev-2-go,
- * dev-3-elixir, dev-5-pascal). Pre-fix: the raw `@.` survived into the
- * MODULE-scope dispatcher invocation
- * (`__scrml_match_match_NNN_dispatch(@.field)`) — invalid JS, gate-caught
- * by E-CODEGEN-INVALID-JS (`Unexpected character '@'`). The devs worked
- * around it by hand-writing `on=alias.field`.
+ * R28-1b (S143 — architectural closure): R28-1 lowered the sigil but the
+ * dispatch was still emitted at MODULE scope (`_scrml_effect(() =>
+ * dispatch(article.status))`), where `article` is the per-item factory param —
+ * UNDEFINED at module scope. R28-1b renders the block-form match PER ITEM
+ * inside the `<each>` factory:
+ *   - emit-match.ts emits an ITEM-SCOPED dispatch fn
+ *     `__scrml_match_match_<id>_dispatch(_mount, _v)` (mount passed in, NO
+ *     module-scope trigger) when the match-block's `enclosingEachIterVar` is
+ *     stamped (it sits inside an each).
+ *   - emit-each.ts (`renderTemplateChildToJs` match-block case) creates an
+ *     item-local mount element and calls the dispatch fn with the live
+ *     per-item discriminant (`@.status` -> `<iterVar>.status`) IN THE FACTORY
+ *     SCOPE where the iter var IS bound.
  *
- * Fix: `compiler/src/codegen/emit-match.ts`
- *   - `collectMatchBlocks` threads the enclosing each's iter var
- *     (`asName` or the synthetic `_scrml_each_item`) into every
- *     match-block it finds beneath an each's `templateChildren`.
- *   - `resolveOnExpr` lowers `@.field` -> `<iterVar>.field` and bare `@.`
- *     -> `<iterVar>` (helper `rewriteAtDotInOnExpr`, mirroring
- *     emit-table-for.ts:rewriteAtDotInExprText / Bug 32 and
- *     emit-each.ts:rewriteContextualSigil).
- *
- * NB (surfaced, separate pre-existing concern): the match dispatcher is
- * emitted at MODULE scope, not per-iteration inside the each render fn.
- * Referencing the loop var (via `@.` lowered here OR via the author-written
- * `alias.field`) produces a module-scope reference, not the live per-item
- * value. This is identical for BOTH forms; the SPEC-mandated invariant this
- * test guards is "identical codegen between @.field and alias.field", which
- * the fix achieves. The deeper per-item-match-inside-each runtime gap is
- * out of scope for R28-1 (gate-fire closure).
+ * Consequently the `@.` -> iter-var lowering invariant this suite guards now
+ * lives in the EACH consumer's per-item dispatch call (the `<iterVar>.field`
+ * argument), NOT in the match consumer's module-scope trigger (which no longer
+ * exists for match-in-each). The assertions below inspect the COMBINED
+ * match+each body-render output (mirroring the real emit-client.ts ordering:
+ * emitMatchBodyRenderForFile FIRST so `enclosingEachIterVar` is stamped, then
+ * emitEachBodyRenderForFile).
  *
  * The harness drives the REAL parse path (block-splitter + ast-builder),
  * NOT a synthesized AST — per R26: a synthetic AST can pass while the real
@@ -40,18 +41,20 @@
  *   §2  identical codegen: `on=@.status` === `on=article.status`
  *   §3  bare `@.` (no member) -> bare iter var
  *   §4  no `as`-alias -> synthetic `_scrml_each_item` iter var
- *   §5  emitted dispatcher passes JS syntax validity (no raw `@.`)
+ *   §5  emitted code passes JS syntax validity (no raw `@.`)
  *   §6  multi-match in same each (context-dependence) -> each lowers
  *   §7  nested `<each>` -> innermost iter var wins
  *   §8  match in `<empty>` body is NOT iter-scoped (no spurious lowering)
  *   §9  regression — match NOT inside any each: `@cell` Shape A unchanged
  *  §10  regression — match NOT inside any each: `@.` does not get rewritten
+ *  §11  R28-1b — match-in-each dispatch fn is ITEM-SCOPED (no module trigger)
  */
 
 import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { emitMatchBodyRenderForFile } from "../../src/codegen/emit-match.ts";
+import { emitEachBodyRenderForFile } from "../../src/codegen/emit-each.ts";
 
 function parse(src) {
   const bs = splitBlocks("/tmp/r28-1-test.scrml", src);
@@ -77,10 +80,39 @@ function makeCtx(fileAST) {
   };
 }
 
-function dispatchersOf(src) {
+// Just the match consumer's output (dispatch fns + module-scope dispatchers).
+function matchOutputOf(src) {
   const ast = parse(src);
   const out = emitMatchBodyRenderForFile(ast, makeCtx(ast));
-  return out.dispatchers.join("\n");
+  return [...out.renderFunctions, ...out.dispatchers].join("\n");
+}
+
+// COMBINED match+each output in real emit-client.ts order: match FIRST (stamps
+// enclosingEachIterVar), then each (renders the per-item dispatch call). The
+// per-item discriminant lowering (`@.field` -> `<iterVar>.field`) lives in the
+// each render fn body, so the each output is where R28-1's invariant surfaces.
+function combinedOf(src) {
+  const ast = parse(src);
+  const ctx = makeCtx(ast);
+  const matchOut = emitMatchBodyRenderForFile(ast, ctx);
+  const eachOut = emitEachBodyRenderForFile(ast, ctx);
+  return [
+    ...matchOut.renderFunctions,
+    ...matchOut.dispatchers,
+    ...eachOut.renderFunctions,
+    ...eachOut.dispatchers,
+  ].join("\n");
+}
+
+// Just the each consumer's render fns (where the per-item dispatch call lives).
+function eachRenderOf(src) {
+  const ast = parse(src);
+  const ctx = makeCtx(ast);
+  // Stamp enclosingEachIterVar via the match collector first, matching the
+  // real pipeline ordering (emit-client.ts runs match before each).
+  emitMatchBodyRenderForFile(ast, ctx);
+  const eachOut = emitEachBodyRenderForFile(ast, ctx);
+  return eachOut.renderFunctions.join("\n");
 }
 
 const TYPE_DECL = `\${
@@ -92,7 +124,7 @@ const TYPE_DECL = `\${
 // ---------------------------------------------------------------------------
 
 describe("§1: on=@.status inside <each as article> lowers to article.status", () => {
-  test("dispatcher receives `article.status`, NOT raw `@.status`", () => {
+  test("per-item dispatch call receives `article.status`, NOT raw `@.status`", () => {
     const src = `${TYPE_DECL}
 <each in=@articles as article>
   <match for=ArticleStatus on=@.status>
@@ -102,10 +134,11 @@ describe("§1: on=@.status inside <each as article> lowers to article.status", (
   </match>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toContain("_dispatch(article.status)");
-    // Pre-fix symptom (regression guard): no raw `@.` reaches the dispatch call.
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    // The per-item dispatch call lowers @.status to the iter var, in factory scope.
+    expect(each).toMatch(/_dispatch\([^,]+,\s*article\.status\)/);
+    // Regression guard: no raw `@.` reaches the dispatch call.
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
@@ -114,7 +147,7 @@ describe("§1: on=@.status inside <each as article> lowers to article.status", (
 // ---------------------------------------------------------------------------
 
 describe("§2: @.status form produces identical codegen to alias.status form", () => {
-  test("both dispatch on `article.status`", () => {
+  test("both lower to `article.status` in the per-item dispatch call", () => {
     const sigilSrc = `${TYPE_DECL}
 <each in=@articles as article>
   <match for=ArticleStatus on=@.status>
@@ -133,7 +166,7 @@ describe("§2: @.status form produces identical codegen to alias.status form", (
   </match>
 </each>
 `;
-    expect(dispatchersOf(sigilSrc)).toBe(dispatchersOf(aliasSrc));
+    expect(combinedOf(sigilSrc)).toBe(combinedOf(aliasSrc));
   });
 });
 
@@ -142,7 +175,7 @@ describe("§2: @.status form produces identical codegen to alias.status form", (
 // ---------------------------------------------------------------------------
 
 describe("§3: bare on=@. inside <each as st> lowers to the bare iter var", () => {
-  test("dispatcher receives `st`, NOT `@.`", () => {
+  test("per-item dispatch call receives `st`, NOT `@.`", () => {
     const src = `${TYPE_DECL}
 <each in=@statuses as st>
   <match for=ArticleStatus on=@.>
@@ -152,9 +185,9 @@ describe("§3: bare on=@. inside <each as st> lowers to the bare iter var", () =
   </match>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toMatch(/_dispatch\(st\)/);
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*st\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
@@ -163,7 +196,7 @@ describe("§3: bare on=@. inside <each as st> lowers to the bare iter var", () =
 // ---------------------------------------------------------------------------
 
 describe("§4: on=@.status inside <each> with NO alias uses synthetic iter var", () => {
-  test("dispatcher receives `_scrml_each_item.status`", () => {
+  test("per-item dispatch call receives `_scrml_each_item.status`", () => {
     const src = `${TYPE_DECL}
 <each in=@articles>
   <match for=ArticleStatus on=@.status>
@@ -173,18 +206,18 @@ describe("§4: on=@.status inside <each> with NO alias uses synthetic iter var",
   </match>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toContain("_dispatch(_scrml_each_item.status)");
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*_scrml_each_item\.status\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §5: emitted dispatcher is syntactically valid JS (no raw `@.`)
+// §5: emitted code is syntactically valid JS (no raw `@.`)
 // ---------------------------------------------------------------------------
 
-describe("§5: emitted dispatcher passes JS syntax check", () => {
-  test("the dispatcher invocation parses as valid JS", () => {
+describe("§5: emitted match+each body render passes JS syntax check", () => {
+  test("the combined body render parses as valid JS", () => {
     const src = `${TYPE_DECL}
 <each in=@articles as article>
   <match for=ArticleStatus on=@.status>
@@ -194,12 +227,15 @@ describe("§5: emitted dispatcher passes JS syntax check", () => {
   </match>
 </each>
 `;
-    const js = dispatchersOf(src);
+    const js = combinedOf(src);
     // Stub the runtime surface; if raw `@.` had leaked, new Function throws.
     const wrapped = `
       var _scrml_effect = function () {};
-      var article = { status: "Draft" };
-      ${js.replace(/let __scrml_match_match_\d+_dispose = null;/g, "")}
+      var _scrml_effect_static = function () {};
+      var _scrml_reactive_get = function () { return []; };
+      var _scrml_reconcile_list = function () {};
+      var document = { querySelector: function () { return null; }, createElement: function () { return {}; }, createDocumentFragment: function () { return {}; }, createTextNode: function () { return {}; } };
+      ${js}
     `;
     expect(() => new Function(wrapped)).not.toThrow();
   });
@@ -210,7 +246,7 @@ describe("§5: emitted dispatcher passes JS syntax check", () => {
 // ---------------------------------------------------------------------------
 
 describe("§6: two <match on=@.field> in one <each as a> each lower independently", () => {
-  test("both dispatchers use the iter var; neither leaks raw @.", () => {
+  test("both per-item dispatch calls use the iter var; neither leaks raw @.", () => {
     const src = `\${
   type ArticleStatus:enum = { Draft, Published }
   type Priority:enum = { Low, High }
@@ -226,10 +262,10 @@ describe("§6: two <match on=@.field> in one <each as a> each lower independentl
   </match>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toContain("_dispatch(a.status)");
-    expect(js).toContain("_dispatch(a.priority)");
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*a\.status\)/);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*a\.priority\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
@@ -250,10 +286,10 @@ describe("§7: nested <each> resolves @. to the innermost scope", () => {
   </each>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toContain("_dispatch(inner.status)");
-    expect(js).not.toContain("_dispatch(outer.status)");
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*inner\.status\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]+,\s*outer\.status\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
@@ -261,10 +297,7 @@ describe("§7: nested <each> resolves @. to the innermost scope", () => {
 // §8: an <empty> sub-element present alongside a template match does NOT
 //     disturb the template match's iter-var lowering. (Guards the walker's
 //     templateChildren-vs-emptyChild scope split: the iter var is threaded
-//     into templateChildren only.) NB — a match-block placed INSIDE the
-//     <empty> body is a separate, pre-existing non-collection case (the
-//     parser does not surface it as a match-block in either form); that is
-//     out of scope for R28-1 and is NOT asserted here.
+//     into templateChildren only.)
 // ---------------------------------------------------------------------------
 
 describe("§8: <empty> sub-element does not disturb template-match lowering", () => {
@@ -281,9 +314,9 @@ describe("§8: <empty> sub-element does not disturb template-match lowering", ()
   </empty>
 </each>
 `;
-    const js = dispatchersOf(src);
-    expect(js).toContain("_dispatch(article.status)");
-    expect(js).not.toMatch(/_dispatch\(@/);
+    const each = eachRenderOf(src);
+    expect(each).toMatch(/_dispatch\([^,]+,\s*article\.status\)/);
+    expect(each).not.toMatch(/_dispatch\([^,]*,\s*@/);
   });
 });
 
@@ -292,7 +325,7 @@ describe("§8: <empty> sub-element does not disturb template-match lowering", ()
 // ---------------------------------------------------------------------------
 
 describe("§9: regression — top-level match on @cell unchanged", () => {
-  test("on=@phase still uses _scrml_reactive_get (Shape A subscribe)", () => {
+  test("on=@phase still uses _scrml_reactive_get (Shape A subscribe) + module dispatch", () => {
     const src = `\${
   type Phase:enum = { Idle, Done }
   <phase>: Phase = .Idle
@@ -302,8 +335,10 @@ describe("§9: regression — top-level match on @cell unchanged", () => {
   <Done> : "d"
 </match>
 `;
-    const js = dispatchersOf(src);
+    const js = matchOutputOf(src);
     expect(js).toContain('_scrml_reactive_get("phase")');
+    // Top-level match keeps the module-scope subscribe trigger.
+    expect(js).toContain('_scrml_reactive_subscribe("phase"');
     expect(js).not.toMatch(/_dispatch\(@/);
   });
 });
@@ -322,11 +357,40 @@ describe("§10: regression — top-level @. is NOT lowered to a phantom iter var
   <Published> : "p"
 </match>
 `;
-    const js = dispatchersOf(src);
+    const js = matchOutputOf(src);
     // No enclosing each => no iter var stamped => no rewrite to `something.status`.
-    // (The @. outside an each is E-SYNTAX-064 territory upstream; codegen must
-    //  not invent a loop var.) The raw text passes through verbatim — it does
-    //  NOT become `<someVar>.status`.
     expect(js).not.toContain("_scrml_each_item.status");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11: R28-1b — a match-in-each dispatch fn is ITEM-SCOPED. The dispatch fn
+//      takes the mount element as a parameter (one mount per item) and there
+//      is NO module-scope trigger referencing the per-item iter var (the exact
+//      R28-1b defect). The render fns stay item-agnostic (reused per item).
+// ---------------------------------------------------------------------------
+
+describe("§11: R28-1b match-in-each dispatch is item-scoped (no module trigger)", () => {
+  test("dispatch fn takes (_mount, _v); no _scrml_effect(() => dispatch(iterVar))", () => {
+    const src = `${TYPE_DECL}
+<each in=@articles as article>
+  <match for=ArticleStatus on=@.status>
+    <Draft> : "d"
+    <InReview> : "r"
+    <Published> : "p"
+  </match>
+</each>
+`;
+    const ast = parse(src);
+    const ctx = makeCtx(ast);
+    const matchOut = emitMatchBodyRenderForFile(ast, ctx);
+    const matchJs = [...matchOut.renderFunctions, ...matchOut.dispatchers].join("\n");
+    // Item-scoped dispatch fn signature.
+    expect(matchJs).toMatch(/function __scrml_match_match_\d+_dispatch\(_mount, _v\)/);
+    // No module-scope trigger that would reference `article` (undefined at top level).
+    expect(matchJs).not.toMatch(/_scrml_effect\(\s*function\(\)\s*\{[\s\S]*article\.status/);
+    expect(matchJs).not.toMatch(/_dispatch\(article\.status\)/);
+    // Per-mount dispose isolation (sibling items must not share dispose state).
+    expect(matchJs).toContain("__scrml_match_dispose_match_");
   });
 });

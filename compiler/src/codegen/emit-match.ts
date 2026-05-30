@@ -778,6 +778,19 @@ export function emitMatchBodyRenderForFile(
     // catch-all `else` branch. When absent, `defaultArmTag` stays undefined
     // and the helper emits no default branch (pre-S109 behavior).
     const hasWildcard = arms.some((a) => a.tag === "_");
+    // R28-1b (S143) — block-form `<match>` that is a child of `<each>`. The
+    // walker stamped `enclosingEachIterVar` (the each's iter var, e.g.
+    // "article") on this match-block. In that case the match has ONE instance
+    // PER ITEM and its discriminant (`@.status` → `<iterVar>.status`) is only
+    // defined in the each per-item factory scope. Emit the dispatch fn in
+    // item-scoped mode: it takes the per-item mount element as a parameter and
+    // self-triggers NOTHING — emit-each.ts wires the per-item call inside the
+    // factory (where the iter var IS defined). Without this, the module-scope
+    // dispatcher fires `_scrml_effect(() => dispatch(article.status))` at top
+    // level where `article` is undefined (the R28-1b defect).
+    const isInEach =
+      typeof (matchBlock as MatchBlockAstNode).enclosingEachIterVar === "string" &&
+      ((matchBlock as MatchBlockAstNode).enclosingEachIterVar as string).length > 0;
     const out = emitVariantGuardedRender(
       () => onResolved.variantExprAccessor,
       arms,
@@ -792,6 +805,7 @@ export function emitMatchBodyRenderForFile(
         // "subscribe doesn't fire at init" gap.
         variantSubscribeName: onResolved.variantSubscribeName,
         ...(hasWildcard ? { defaultArmTag: "_" } : {}),
+        ...(isInEach ? { itemScopedDispatch: true } : {}),
       },
     );
     if (out.renderFunctionsJs) renderFunctions.push(out.renderFunctionsJs);

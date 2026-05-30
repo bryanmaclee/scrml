@@ -168,6 +168,13 @@ export interface VariantGuardOutput {
   mountElementHtml: string;
   renderFunctionsJs: string;
   dispatcherJs: string;
+  /**
+   * R28-1b (S143) — name of the item-scoped dispatch fn, populated ONLY when
+   * `opts.itemScopedDispatch` is true. The each consumer (emit-each.ts) calls
+   * `<itemDispatchFnName>(_itemMountEl, <iterVar>.<discriminant>)` per item.
+   * Undefined in the default (module-scope) dispatch mode.
+   */
+  itemDispatchFnName?: string;
 }
 
 /**
@@ -208,6 +215,35 @@ export interface VariantGuardOptions {
   renderFnPrefix?: string;
   variantSubscribeName?: string | null;
   defaultArmTag?: string;
+  /**
+   * R28-1b (S143) — item-scoped dispatch mode for a block-form `<match>`
+   * that is a child of an `<each>` body. SPEC §17.7.3 + §18.0.1.
+   *
+   * Module-scope dispatch (the default) assumes ONE mount per match-block:
+   * the dispatcher does `document.querySelector('[<mountAttr>="<idPrefix>"]')`
+   * (which finds only the FIRST matching element) and triggers itself via a
+   * module-scope `_scrml_effect`/`_scrml_reactive_subscribe`/DOMContentLoaded
+   * block keyed on the `on=` expression. That shape is structurally wrong
+   * inside an `<each>`: there is one match instance PER ITEM, and the `on=`
+   * discriminant (`@.status` → `<iterVar>.status`) is only defined in the
+   * each per-item factory scope, not at module scope.
+   *
+   * When `itemScopedDispatch` is true the helper instead emits:
+   *   - render fns + wire fns UNCHANGED (they are item-agnostic — pure static
+   *     HTML per arm + per-`_root` re-wire — so each item reuses them);
+   *   - a dispatch fn that takes `(_mount, _v)` — the mount element is passed
+   *     IN (the each factory creates one mount per `<li>`), no querySelector;
+   *   - per-MOUNT dispose isolation: prior dispose is read from / stored on
+   *     `_mount.__scrml_match_dispose` so sibling items do not clobber each
+   *     other's arm wiring (a module-scope `let ..._dispose` would be shared
+   *     across every item — last-write-wins, wrong);
+   *   - NO module-scope trigger. The each per-item factory calls the dispatch
+   *     fn once per item with the live per-item discriminant, and the each
+   *     render fn re-runs (via `_scrml_effect_static`) on collection change,
+   *     re-dispatching every item. The dispatch fn name is returned in
+   *     `itemDispatchFnName` so emit-each can wire the per-item call.
+   */
+  itemScopedDispatch?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -747,22 +783,47 @@ export function emitVariantGuardedRender(
   //     reactive bindings. Reserved for future match-block-form consumer
   //     when `on=` is a non-cell expression.
   const subscribeName = opts.variantSubscribeName ?? null;
-  const disposeVar = `_${renderFnPrefix}_${idPrefix}_dispose`;
+  // R28-1b (S143) — item-scoped dispatch (block-form match inside <each>).
+  // In this mode the dispatcher takes the mount element as a parameter (one
+  // mount per item, created by the each factory) and isolates dispose state
+  // per-mount (sibling items must not share a module-scope dispose handle).
+  const itemScoped = opts.itemScopedDispatch === true;
+  // Per-mount dispose key — stored on the mount element so each `<li>`'s match
+  // keeps its own wiring dispose. Keyed by idPrefix so distinct match-blocks
+  // on the same mount element (none today, but defensive) don't collide.
+  const itemDisposeKey = `__scrml_match_dispose_${idPrefix}`;
+  // In module-scope mode the dispose handle is a module-scope `let`. In
+  // item-scoped mode it is a per-mount property so the teardown / re-wire
+  // lines below ("if (<disposeVar>) ..." + "<disposeVar> = wireFn(...)")
+  // operate on THIS item's dispose, not a shared one. Both forms are valid
+  // assignment targets, so the downstream emission is identical.
+  const disposeVar = (opts.itemScopedDispatch === true)
+    ? `_mount[${JSON.stringify(itemDisposeKey)}]`
+    : `_${renderFnPrefix}_${idPrefix}_dispose`;
   const dispatchFnName = `_${renderFnPrefix}_${idPrefix}_dispatch`;
   const dispatcherLines: string[] = [];
 
-  // Phase A10 (S78, 2026-05-10) — module-scope dispose handle for the
-  // currently-mounted arm. Holds the dispose fn returned by the arm's
-  // wire function. null when no arm is currently wired (initial state, or
-  // after teardown without re-render).
-  dispatcherLines.push(`let ${disposeVar} = null;`);
+  if (!itemScoped) {
+    // Phase A10 (S78, 2026-05-10) — module-scope dispose handle for the
+    // currently-mounted arm. Holds the dispose fn returned by the arm's
+    // wire function. null when no arm is currently wired (initial state, or
+    // after teardown without re-render).
+    dispatcherLines.push(`let ${disposeVar} = null;`);
+  }
 
   // The dispatcher body is factored into a named function so it can be
   // invoked from BOTH the variant-change subscriber AND the
-  // DOMContentLoaded initial-fire block below.
-  dispatcherLines.push(`function ${dispatchFnName}(_v) {`);
-  dispatcherLines.push(`  const _mount = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
-  dispatcherLines.push(`  if (!_mount) return;`);
+  // DOMContentLoaded initial-fire block below. In item-scoped mode it takes
+  // the per-item mount element as a parameter instead of querying for the
+  // single module-scope mount.
+  if (itemScoped) {
+    dispatcherLines.push(`function ${dispatchFnName}(_mount, _v) {`);
+    dispatcherLines.push(`  if (!_mount) return;`);
+  } else {
+    dispatcherLines.push(`function ${dispatchFnName}(_v) {`);
+    dispatcherLines.push(`  const _mount = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
+    dispatcherLines.push(`  if (!_mount) return;`);
+  }
   // Variant tag extraction. Unit variants live as bare string tags ("Idle");
   // payload-bearing variants live as `{ variant: "X", data: { fieldName: val } }`
   // tagged-objects per SPEC §51.3.2 / emit-client.ts:emitEnumVariantObjects.
@@ -872,16 +933,26 @@ export function emitVariantGuardedRender(
   // block-form `<_>`) or add an arm with the appropriate tag.
   dispatcherLines.push(`}`);
 
-  // Subscribe to variant changes — fires on set, not at init.
-  if (subscribeName !== null) {
-    // Shape A — subscribe-only, fires on set, not at init.
-    dispatcherLines.push(`_scrml_reactive_subscribe(${JSON.stringify(subscribeName)}, ${dispatchFnName});`);
-  } else {
-    // Shape B — effect, fires at init too. Tracks deps via runtime
-    // _scrml_effect_stack on the variantExprAccessor() read.
-    dispatcherLines.push(`_scrml_effect(function() {`);
-    dispatcherLines.push(`  ${dispatchFnName}(${variantExprAccessor()});`);
-    dispatcherLines.push(`});`);
+  // R28-1b (S143) — item-scoped mode emits NO module-scope trigger. The each
+  // per-item factory calls `<dispatchFnName>(_itemMountEl, <iterVar>.<disc>)`
+  // once per item with the live per-item discriminant, and the each render fn
+  // re-runs (via `_scrml_effect_static`) on collection change, re-dispatching
+  // every item against its current value. A module-scope `_scrml_effect` /
+  // `_scrml_reactive_subscribe` / DOMContentLoaded block keyed on the `on=`
+  // expression would reference the per-item iter var at module scope (where it
+  // is undefined) — the exact defect this fix removes.
+  if (!itemScoped) {
+    // Subscribe to variant changes — fires on set, not at init.
+    if (subscribeName !== null) {
+      // Shape A — subscribe-only, fires on set, not at init.
+      dispatcherLines.push(`_scrml_reactive_subscribe(${JSON.stringify(subscribeName)}, ${dispatchFnName});`);
+    } else {
+      // Shape B — effect, fires at init too. Tracks deps via runtime
+      // _scrml_effect_stack on the variantExprAccessor() read.
+      dispatcherLines.push(`_scrml_effect(function() {`);
+      dispatcherLines.push(`  ${dispatchFnName}(${variantExprAccessor()});`);
+      dispatcherLines.push(`});`);
+    }
   }
 
   // Phase A10 (S78, 2026-05-10) — initial-fire at DOMContentLoaded so the
@@ -892,7 +963,9 @@ export function emitVariantGuardedRender(
   // fires at init so the DOMContentLoaded block is redundant for it but
   // harmless (the `if (${disposeVar}) dispose()` branch tears down the
   // first wire, then re-wires fresh — same result).
-  if (subscribeName !== null) {
+  // Item-scoped mode has no module-init DOMContentLoaded fire either — the
+  // each factory dispatches every item explicitly at create/reconcile time.
+  if (!itemScoped && subscribeName !== null) {
     dispatcherLines.push(`document.addEventListener('DOMContentLoaded', function() {`);
     dispatcherLines.push(`  ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)}));`);
     dispatcherLines.push(`});`);
@@ -911,6 +984,7 @@ export function emitVariantGuardedRender(
     mountElementHtml,
     renderFunctionsJs: combinedRenderFns,
     dispatcherJs,
+    ...(itemScoped ? { itemDispatchFnName: dispatchFnName } : {}),
   };
 }
 
