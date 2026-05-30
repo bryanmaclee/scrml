@@ -370,11 +370,22 @@ describe("trucking-dispatch — chunks.json structure", () => {
     expect(result.chunksManifest.compiler).toMatch(/scrml/);
   });
 
+  // Per-test timeout override (S145 flake fix, change-id
+  // s145-test-flake-parallel-safety-2026-05-30): this case runs `compileTd()`
+  // TWICE back-to-back, each a full multi-file (36 .scrml) emitPerRoute
+  // compile of the trucking-dispatch reference app. The whole file is ~10s in
+  // isolation; this single double-compile case takes ~6.4s under full
+  // parallel-suite CPU contention, which intermittently breached the bunfig
+  // default 10s per-test timeout and flake-blocked the pre-push full-suite at
+  // S144/S145 (forced `--no-verify`). The determinism assertion
+  // (`a.chunksManifest.compiler === b.chunksManifest.compiler`) is UNCHANGED —
+  // it stays exactly as strict; only the timeout headroom is widened to absorb
+  // contention. 60s gives ~9x margin over the worst observed (6.4s) under load.
   test("manifest.compiler field is stable across two compiles", () => {
     const a = compileTd();
     const b = compileTd();
     expect(a.chunksManifest.compiler).toBe(b.chunksManifest.compiler);
-  });
+  }, 60000);
 
   test("every chunk emits with the FNV-1a 8-char base36 hash (§47.1.3)", () => {
     const result = compileTd();

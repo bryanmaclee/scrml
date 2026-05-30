@@ -485,6 +485,19 @@ describe("Bootstrap: compiler compiles compiler", () => {
     }
   });
 
+  // Per-test timeout override (S145 flake fix, change-id
+  // s145-test-flake-parallel-safety-2026-05-30): each bootstrap case runs
+  // TWO full library-mode self-compiles of a self-hosted compiler-stage
+  // `.scrml` source — `ast.scrml` is the largest and takes ~5s in isolation
+  // but ~28s under full parallel-suite CPU contention (and `ts.scrml` ~11s).
+  // The bunfig default 10s per-test timeout is exceeded ONLY under that
+  // parallel load, which is what flake-blocked the pre-push full-suite at
+  // S144/S145 (forced `--no-verify`). The assertion (self-hosted == standard
+  // library JS, byte-identical) is UNCHANGED — the parity check stays exactly
+  // as strict; only the timeout headroom is widened to absorb contention.
+  // 120s gives ~4x margin over the worst observed (28.6s) under load.
+  const BOOTSTRAP_TIMEOUT_MS = 120000;
+
   for (const { name, path } of bootstrapFiles) {
     test(`bootstrap: ${name} — self-hosted output matches standard`, async () => {
       if (!selfHostModules) return; // skip if modules not built
@@ -497,7 +510,7 @@ describe("Bootstrap: compiler compiles compiler", () => {
       const shJs = sh.outputs?.values()?.next()?.value?.libraryJs ?? "";
 
       expect(shJs).toBe(stdJs);
-    });
+    }, BOOTSTRAP_TIMEOUT_MS);
   }
 });
 
