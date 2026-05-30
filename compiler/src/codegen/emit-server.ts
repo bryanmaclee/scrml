@@ -764,8 +764,19 @@ export function generateServerJs(
       lines.push(`      try {`);
       lines.push(`        async function* _scrml_gen() {`);
 
+      // S144 (GITI-021 + GITI-022): SSE server-fn* body — shared per-function
+      // opts so a `let`/`const` in an outer statement is visible to a nested
+      // reassignment (declaredNames Set), mirroring the CSRF/non-CSRF handler
+      // paths. SSE generators are not channel-owned, so channelOwnedCells stays
+      // null here.
+      const _serverFnOptsSSE = {
+        boundary: "server" as const,
+        declaredNames: new Set<string>(fnParamNames),
+        insideFunctionBody: true,
+      };
+
       for (const stmt of body) {
-        const code = emitLogicNode(stmt, { boundary: "server" });
+        const code = emitLogicNode(stmt, _serverFnOptsSSE);
         if (code) {
           for (const line of code.split("\n")) {
             lines.push(`          ${line}`);
@@ -1083,6 +1094,25 @@ export function generateServerJs(
       // contains the LHS cell name.
       const _channelOwnedCells = _ownerChannel ? channelCellMap.get(_ownerChannel) ?? null : null;
 
+      // S144 (GITI-021 + GITI-022): a single per-function emit-logic opts object,
+      // reused across every statement of this server-fn body so a `let`/`const`
+      // declared in an outer statement is visible (via the shared `declaredNames`
+      // Set) to a reassignment nested inside an if/for/while body. Without the
+      // shared Set, each statement got fresh opts and a nested `label = expr`
+      // reassignment of an already-declared `label` mis-lowered to `const label =
+      // expr` (shadow / redeclare). Seed with the param names so a param
+      // reassignment is also recognized as a rebind, and set
+      // `insideFunctionBody: true` (mirrors the S34 client fix in
+      // emit-functions.ts) so nested `@cell =` reassignments don't leak a
+      // `_scrml_init_set` sidecar. `boundary` + `channelOwnedCells` thread the
+      // GITI-020 broadcast-wire lowering through nested blocks.
+      const _serverFnOpts = {
+        boundary: "server" as const,
+        channelOwnedCells: _channelOwnedCells,
+        declaredNames: new Set<string>(paramNames),
+        insideFunctionBody: true,
+      };
+
       const body: any[] = fnNode.body ?? [];
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
       // loop — for a multi-batch route it carries THIS batch's index set; for
@@ -1113,7 +1143,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
+            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
             if (code) {
               for (const line of code.split("\n")) {
                 lines.push(`    ${line}`);
@@ -1129,7 +1159,7 @@ export function generateServerJs(
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`    return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
-            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
+            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOpts));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
               lines.push(`    return ${returnExpr};`);
@@ -1138,7 +1168,7 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
-          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
+          const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`    ${line}`);
@@ -1235,6 +1265,15 @@ export function generateServerJs(
       // server arm lowers channel-cell writes to broadcast frames.
       const _channelOwnedCellsNonCsrf = _ownerChannelNonCsrf ? channelCellMap.get(_ownerChannelNonCsrf) ?? null : null;
 
+      // S144 (GITI-021 + GITI-022): per-function shared emit-logic opts —
+      // mirror of the CSRF path above (see comment there).
+      const _serverFnOptsNonCsrf = {
+        boundary: "server" as const,
+        channelOwnedCells: _channelOwnedCellsNonCsrf,
+        declaredNames: new Set<string>(paramNames),
+        insideFunctionBody: true,
+      };
+
       const body: any[] = fnNode.body ?? [];
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
       // loop (mirror of the CSRF path above).
@@ -1295,7 +1334,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
+            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
             if (code) {
               for (const line of code.split("\n")) {
                 lines.push(`    ${line}`);
@@ -1311,7 +1350,7 @@ export function generateServerJs(
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`    return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
-            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
+            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOptsNonCsrf));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
               lines.push(`    return ${returnExpr};`);
@@ -1320,7 +1359,7 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
-          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
+          const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);

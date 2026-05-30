@@ -127,6 +127,22 @@ interface IfOpts {
    * canonical declaration-time init thunk).
    */
   insideFunctionBody?: boolean;
+  /**
+   * S144 (GITI-020) — emission boundary, threaded so a channel-cell write
+   * `@cell = expr` nested inside an if/else body on the SERVER boundary reaches
+   * the broadcast-wire lowering arm in emit-logic (which gates on
+   * `boundary === "server"`). Without this, the nested-body opts default to
+   * client mode and the write mis-lowers to `_scrml_reactive_set` (undefined in
+   * the emitted `.server.js`).
+   */
+  boundary?: "client" | "server";
+  /**
+   * S144 (GITI-020) — channel-owned cell set, threaded alongside `boundary` so
+   * the nested-body broadcast-wire arm can confirm the LHS bare name is a
+   * channel-declared cell. Sibling to `boundary`; both must reach the nested
+   * body for the broadcast lowering to fire.
+   */
+  channelOwnedCells?: Set<string> | null;
 }
 
 // §51.5 — Machine binding info for transition guard emission in rewriteBlockBody
@@ -244,6 +260,10 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
     synthCellKeys: opts.synthCellKeys,
     declaredNames: opts.declaredNames,
     insideFunctionBody: opts.insideFunctionBody,
+    // S144 (GITI-020): thread boundary + channelOwnedCells so a nested
+    // `@cell = expr` on the server boundary reaches the broadcast-wire arm.
+    boundary: opts.boundary,
+    channelOwnedCells: opts.channelOwnedCells,
   };
 
   if (hasFragmentedLiftBody(consequent)) {
@@ -290,7 +310,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
  */
 export function emitForStmt(
   node: any,
-  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null },
+  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null },
 ): string {
   const lines: string[] = [];
   // A5 (2026-05-17) — `node.variable` may be a structured DestructurePattern.
@@ -324,7 +344,7 @@ export function emitForStmt(
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody } as any)) {
+      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -450,7 +470,7 @@ export function emitForStmt(
       lines.push(`  ${liftCode}`);
     }
   } else {
-    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody } as any)) {
+    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
       lines.push(`  ${code}`);
     }
   }
@@ -640,7 +660,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server" }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -655,7 +675,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -669,7 +689,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server" }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
@@ -677,7 +697,7 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);

@@ -2335,7 +2335,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // inside if/else body sees outer lets (Bug B + F).
       // C5: thread insideFunctionBody too so nested state-decls don't leak
       // _scrml_init_set sidecars when we're inside a function body.
-      return emitIfStmt(node, { derivedNames: opts.derivedNames, synthCellKeys: opts.synthCellKeys, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody });
+      return emitIfStmt(node, { derivedNames: opts.derivedNames, synthCellKeys: opts.synthCellKeys, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
 
     case "for-stmt":
       // §32 array accumulator: when tilde context is active, switch to array-mode before
@@ -2345,7 +2345,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       // S96 Issue C — thread fnBodyRegistry so emitForStmt's reactive-iterable
       // predicate can detect transitive @-refs through fn-call iterables.
-      return emitForStmt(node, { dbVar: opts.dbVar, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, fnBodyRegistry: opts.fnBodyRegistry });
+      return emitForStmt(node, { dbVar: opts.dbVar, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, fnBodyRegistry: opts.fnBodyRegistry, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
 
     case "while-stmt":
       // §32 array accumulator: same pattern as for-stmt above.
@@ -2355,12 +2355,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
 
     case "break-stmt":
       return emitBreakStmt(node);
