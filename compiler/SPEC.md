@@ -6968,6 +6968,24 @@ The compiler inserts `await` automatically per §13.
 - A server function returning `not` on some paths and `T` on others has inferred return type `T | not`. The client must handle the `not` case.
 - The developer SHALL NOT write `JSON.stringify`, `JSON.parse`, or `fetch` to consume server function return values. These are compiler responsibilities.
 
+### 12.6 Library-mode Emission
+
+**Added:** 2026-05-30 (S145). Source: docs/changes/library-mode-suppress-body-escalated-server-js-2026-05-30/. Grounding: §12.3, §13.4, §21.5, §44.7.1.
+
+§12.1-§12.5 describe route inference from the application (browser) emission model: every server-escalated function pairs a generated route handler with a client-side fetch caller. Under `--mode library` (§21.5) there is no client and nothing fetches a generated route, so the §12.3 infrastructure bundle (route handler + client fetch call + event/reactive trigger + ser/deser) is not emittable as a whole — emitting the route-handler member ALONE is an artifact §12.3 never describes in isolation. This subsection conditions emission on the compile mode and on WHY a function escalated.
+
+**Normative statements:**
+
+- In `--mode library`, a function whose server escalation is due SOLELY to body content — i.e. its escalation reasons (§12.2) are ALL server-only-resource reasons (Trigger 1, a server-only resource / server-only stdlib import per the `SERVER_ONLY_SCRML_MODULES` set; or Trigger 3, a `?{}` SQL context) and it carries NO explicit `route=` / method declaration — SHALL emit as a plain server-side exported binding in the library JS module. For such a function the compiler SHALL NOT generate the §12.3 HTTP route-handler / client fetch-stub bundle. With no client and no wire caller, the fetch-call and event/reactive-trigger members of that bundle are inapplicable; this is the same structural case as §13.4, where a server-escalated callee with no client/wire caller generates no separate HTTP route. The function's sole output is its exported binding, consistent with §21.5 (a library file's output is "a JS module with the exported bindings as its sole output").
+
+- In `--mode library`, a function escalated by an EXPLICIT `server` annotation (§12.2 Trigger 4 — the explicit-annotation reason; the `server` keyword is DEPRECATED per Insight 26 but its presence is still an explicit endpoint declaration), or carrying an explicit `route=` / method declaration, SHALL RETAIN the §12.3 route-handler emission. This preserves the host `mount(server)` use case (Insight 22) — a library that deliberately exposes page-route / endpoint handlers for a host to mount. A function escalated by a protected-field-access reason (§12.2 Trigger 2) is NOT a pure body-content escalation and likewise RETAINS the route-handler emission.
+
+- Application (browser) mode emission is UNCHANGED. Every server-escalated function continues to emit the full §12.3 bundle in browser mode.
+
+- This subsection is silent-correct behavior: suppressing an unreachable, never-fetched route handler is not a developer-observable error or warning, and the compiler SHALL NOT emit a diagnostic for it. (The library-module cross-file "server route generation" lifecycle is itself a staged, not-yet-fully-realized capability per §44.7.1; this subsection does not violate any fixed emission mandate.)
+
+> **Implementation note (non-normative).** The suppression is gated, additionally, on the function emitting cleanly as a plain export in the library JS today. A body-content-escalated function whose body carries a top-level server-only node (inline `?{}` / transaction) does not yet emit cleanly as a plain library export (that case is the staged pure-fn-library lifecycle of §44.7.1 / §21.5.1; cf. E-SQL-009) and retains its current behavior — suppressing its handler would strand it with neither a working export nor an endpoint. The clean import-escalated shape — a plain `export function` importing e.g. `scrml:fs` — is the case this subsection suppresses.
+
 ---
 
 ## 13. Async Model
@@ -13906,6 +13924,12 @@ blocks (no markup, no CSS) is a **pure-type file**. The compiler SHALL:
 
 Pure-type files are identified by the absence of any markup or CSS content after
 the preprocessor pass. No pragma or special declaration is required.
+
+In `--mode library`, a function escalated to the server PURELY by body content
+(§12.2 Trigger 1/3) is emitted as a plain exported binding here — the §12.3
+HTTP route-handler / client fetch-stub bundle is NOT generated for it, per §12.6
+(Library-mode Emission). An exported function escalated by an explicit `server`
+annotation or explicit `route=` retains its route handler.
 
 #### 21.5.1 Modifier-Carrying Exports — `export server function` / `export pure function`
 

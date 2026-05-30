@@ -28,11 +28,21 @@
  * The client `.js` path was always correct (it re-emits source faithfully);
  * the defect was reachable only via the server-split body re-serialization.
  *
- * NOTE on trigger shape: we use plain `export function` + `scrml:fs` (the
- * committed-sidecar shape). `export server function` would additionally trip
- * the gate on the CLIENT `.js`, which emits the `server function` keyword
- * verbatim — a SEPARATE, out-of-scope defect — so we avoid it here to keep the
- * gate exercising ONLY the boundary defect under test.
+ * Test structure (two tiers):
+ *  - AST-level (tests 1+2): assert the parser produces `label: null` directly
+ *    from buildAST(splitBlocks(...)). This is the AUTHORITATIVE guard — the bug
+ *    is in the parser, so this is mode/escalation-agnostic and where the fix
+ *    actually lives.
+ *  - End-to-end (tests 3+4+5): compile with the --validate-emit gate ON and
+ *    assert a valid re-serialized `.server.js`. These use BROWSER mode with a
+ *    `<program>` + a called `server function`, because S145 SPEC §12.6
+ *    (library-mode emission) now SUPPRESSES the `.server.js` for a function
+ *    escalated PURELY by body content (the original library-mode `export
+ *    function` + `scrml:fs` sidecar shape) — so that shape emits no `.server.js`
+ *    to assert against. An explicit `server function` in an app `<program>`
+ *    RETAINS the route handler (§12.6), exercising the same re-serialization
+ *    path the GITI-024 fix protects. (The library-mode suppression of the
+ *    original shape is covered by library-mode-suppress-body-escalated-server-js.test.js.)
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -56,7 +66,7 @@ function compileWithGate(name, source) {
   const result = compileScrml({
     inputFiles: [filePath],
     outputDir: outDir,
-    mode: "library",
+    mode: "browser",
     write: true,
     validateEmit: true,
     log: () => {},
@@ -115,18 +125,65 @@ const BREAK_SRC = [
   '}',
 ].join("\n");
 
-const RETURN_SRC = [
+// Browser-mode `<program>` shapes for the end-to-end emit tests: an explicit
+// `server function` (route handler RETAINED under §12.6) called from a client
+// handler, so a `.server.js` with the re-serialized body IS emitted (the path
+// the GITI-024 fix protects). Body content mirrors the bare-block SRC above.
+const CONTINUE_PROG = [
+  '<program>',
   '${',
-  '  import { readFileSync } from "scrml:fs"',
-  '  export function pick(path) {',
+  '  server function readLines(path) {',
   '    const out = []',
-  '    for (const line of readFileSync(path, "utf8").split("\\n")) {',
+  '    for (const line of path.split("\\n")) {',
+  '      if (line == "skip") continue',
+  '      out.push(line)',
+  '    }',
+  '    return out',
+  '  }',
+  '  function go() { @rows = readLines("a\\nskip\\nb") }',
+  '}',
+  '<rows> = []',
+  '<button onclick=go()>go</button>',
+  '<p>${@rows.length}</p>',
+  '</program>',
+].join("\n");
+
+const BREAK_PROG = [
+  '<program>',
+  '${',
+  '  server function firstFew(path) {',
+  '    const out = []',
+  '    for (const line of path.split("\\n")) {',
+  '      if (line == "stop") break',
+  '      out.push(line)',
+  '    }',
+  '    return out',
+  '  }',
+  '  function go() { @rows = firstFew("a\\nstop\\nb") }',
+  '}',
+  '<rows> = []',
+  '<button onclick=go()>go</button>',
+  '<p>${@rows.length}</p>',
+  '</program>',
+].join("\n");
+
+const RETURN_PROG = [
+  '<program>',
+  '${',
+  '  server function pick(path) {',
+  '    const out = []',
+  '    for (const line of path.split("\\n")) {',
   '      if (line == "hit") return line',
   '      out.push(line)',
   '    }',
   '    return ""',
   '  }',
+  '  function go() { @hit = pick("a\\nhit\\nb") }',
   '}',
+  '<hit> = ""',
+  '<button onclick=go()>go</button>',
+  '<p>${@hit}</p>',
+  '</program>',
 ].join("\n");
 
 function findKind(ast, kind) {
@@ -160,7 +217,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
 
   // --- End-to-end emit assertions (gate ON + node --check) ----------------
   test("continue: gate-clean compile + valid emitted .server.js", () => {
-    const { errors, serverJs } = compileWithGate("readLines", CONTINUE_SRC);
+    const { errors, serverJs } = compileWithGate("readLines", CONTINUE_PROG);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
     expect(errors).toEqual([]);
     expect(serverJs).not.toContain("continue out");
@@ -169,7 +226,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
   });
 
   test("break: gate-clean compile + valid emitted .server.js", () => {
-    const { errors, serverJs } = compileWithGate("firstFew", BREAK_SRC);
+    const { errors, serverJs } = compileWithGate("firstFew", BREAK_PROG);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
     expect(errors).toEqual([]);
     expect(serverJs).not.toContain("break out");
@@ -178,7 +235,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
   });
 
   test("return: gate-clean compile + valid emitted .server.js", () => {
-    const { errors, serverJs } = compileWithGate("pick", RETURN_SRC);
+    const { errors, serverJs } = compileWithGate("pick", RETURN_PROG);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
     expect(errors).toEqual([]);
     expect(nodeCheckOk(serverJs)).toEqual({ ok: true, err: "" });

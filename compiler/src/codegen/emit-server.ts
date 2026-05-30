@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar } from "./var-counter.ts";
 import { routePath } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -273,6 +273,47 @@ export function collectDbScopes(
 }
 
 /**
+ * §12.6 (Library-mode emission) discriminator.
+ *
+ * Returns true iff a server-boundary function was escalated PURELY by body
+ * content and therefore SHALL NOT emit a §12.3 HTTP-handler wrapper in
+ * `--mode library`:
+ *
+ *   1. It has at least one escalation reason and EVERY reason is
+ *      `kind:"server-only-resource"` (§12.2 Triggers 1/3 — a server-only
+ *      import or `?{}` SQL). An `explicit-annotation` reason (explicit
+ *      `server`) or a `protected-field-access` reason makes this false → the
+ *      wrapper is retained.
+ *   2. It carries NO explicit `route=` / `method=` (explicitRoute /
+ *      explicitMethod are null) — an explicit route is an explicit endpoint
+ *      declaration and retains the wrapper.
+ *   3. SCOPE GUARD: the function body contains no TOP-LEVEL server-only node
+ *      (inline `?{}` / transaction-block / server-context meta — the
+ *      `isServerOnlyNode` set). Such a body does NOT emit cleanly as a plain
+ *      library export today (separate staged lifecycle — W5a/W5b / E-CG-006),
+ *      so suppressing its wrapper would strand it with neither a working
+ *      export nor an endpoint. We leave those cases unchanged (out of scope).
+ *
+ * The import-escalated shape (a plain `export function` importing e.g.
+ * `scrml:fs`) satisfies all three and is suppressed; it already emits a clean
+ * `export function` in the library `.js`.
+ */
+function isBodyOnlyEscalation(route: any, fnNode: any): boolean {
+  const reasons: Array<{ kind?: string }> = Array.isArray(route?.escalationReasons)
+    ? route.escalationReasons
+    : [];
+  if (reasons.length === 0) return false;
+  if (!reasons.every((r) => r && r.kind === "server-only-resource")) return false;
+  if (route?.explicitRoute != null || route?.explicitMethod != null) return false;
+
+  // Scope guard: no top-level server-only node in the function body.
+  const body: any[] = Array.isArray(fnNode?.body) ? fnNode.body : [];
+  if (body.some((stmt) => isServerOnlyNode(stmt))) return false;
+
+  return true;
+}
+
+/**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
  */
@@ -284,6 +325,7 @@ export function generateServerJs(
   middlewareConfigLegacy?: any | null,
   batchPlan?: any,
   batchPlannerErrors?: Array<{ code: string; message: string; span?: any }>,
+  modeLegacy?: "browser" | "library",
 ): string {
   // Support both new (ctx) and legacy (fileAST, routeMap, errors, authMW, mwConfig) signatures
   let fileAST: any;
@@ -309,6 +351,12 @@ export function generateServerJs(
   }
   const filePath: string = fileAST.filePath;
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
+
+  // §12.6 (Library-mode emission) — effective compile mode. Read from the
+  // ctx when the new signature is used, else the trailing legacy positional
+  // param; defaults to "browser" so every legacy positional call site (and all
+  // browser-mode compiles) behave exactly as before.
+  const effectiveMode: "browser" | "library" = ctxForCache?.mode ?? modeLegacy ?? "browser";
 
   // S95 Bug 2 — set up the variant-fields registry for the rewriter so that
   // `.Variant(args)` payload-bearing constructor calls in server-fn bodies
@@ -341,6 +389,37 @@ export function generateServerJs(
     const fnNodeId = `${filePath}::${fnNode.span.start}`;
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
+
+    // §12.6 (Library-mode emission). In `--mode library` there is no client
+    // and nothing fetches a generated route, so the §12.3 infrastructure
+    // bundle (route handler + client fetch call + event/reactive trigger +
+    // ser/deser) is inapplicable as a whole. For a function escalated PURELY
+    // by body content — escalationReasons all `kind:"server-only-resource"`
+    // (§12.2 Triggers 1/3: a server-only import or `?{}` SQL) and NO explicit
+    // `route=`/`method=` — the compiler SHALL NOT emit the HTTP-handler
+    // wrapper; the function is exported as a plain server-side binding by the
+    // library `.js` instead (consistent with §13.4: an escalated callee with
+    // no wire caller generates no separate HTTP route, and §21.5: a library
+    // file's sole output is its exported bindings).
+    //
+    // An EXPLICIT `export server function` / explicit `route=` (escalation
+    // reasons include `kind:"explicit-annotation"`, or explicitRoute/Method is
+    // set) RETAINS the wrapper — it preserves the host `mount(server)` /
+    // page-route-library use case (Insight 22). A `protected-field-access`
+    // reason also retains the wrapper (not a pure body-content escalation).
+    //
+    // SCOPE GUARD: this suppression is only safe when the function ALSO emits
+    // cleanly as a plain export in the library `.js`. The import-escalated
+    // shape (a plain `export function` importing e.g. `scrml:fs`) does. A
+    // function whose body carries a top-level server-only node (inline `?{}` /
+    // transaction) does NOT emit cleanly today (separate staged lifecycle —
+    // W5a/W5b / E-CG-006 territory); suppressing its wrapper would leave it
+    // with neither a working export nor an endpoint. We therefore additionally
+    // require the function body to contain no top-level server-only node, so
+    // such cases keep their current behavior (out of scope).
+    if (effectiveMode === "library" && isBodyOnlyEscalation(route, fnNode)) {
+      continue;
+    }
 
     if (!route.generatedRouteName) {
       errors.push(new CGError(

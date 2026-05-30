@@ -598,7 +598,7 @@ export function runCG(input: CgInput): CgOutput {
     // Generate server JS — emitted in both browser and library mode.
     // ---------------------------------------------------------------------------
     let serverJs: string | null = codegenStage("emit-server", () =>
-      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors)
+      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode)
     ) || null;
 
     // ---------------------------------------------------------------------------
