@@ -239,6 +239,37 @@ export interface LogicBinding {
    * Absent on top-level / program-scope bindings.
    */
   engineArm?: string;
+
+  /**
+   * errorBoundary (SPEC §19.6 + §19.6.8) — boundary-context fields.
+   *
+   * Set when this logic binding's `${...}` interpolation sits inside an
+   * `<errorBoundary>` subtree. emit-event-wiring.ts consumes these to emit the
+   * markup-context error dispatch + the C-hybrid host-JS backstop instead of a
+   * plain `el.textContent = expr` write:
+   *
+   *   - boundaryId             — the boundary's stable id (the
+   *                              `data-scrml-error-boundary` attr value). Used
+   *                              for diagnostics / logging context (§19.6.8 B5).
+   *   - boundaryFallbackExpr   — JS string expression for the boundary's
+   *                              `fallback=` markup HTML (from
+   *                              emitBoundaryMarkupExpr). "" when no `fallback`.
+   *   - boundaryVariantRenders — map of error-variant name -> JS string
+   *                              expression for that variant's `renders` markup
+   *                              HTML (§19.2). The typed path (§19.6.3) prefers a
+   *                              variant's own renders over the fallback. Each
+   *                              expression references `_eb_result.data` for
+   *                              payload-field substitution.
+   *   - boundaryHasFallback    — whether the boundary declares a `fallback=`.
+   *                              When false and no variant renders matches, the
+   *                              error re-propagates (§19.6.8 B3) — at runtime
+   *                              the backstop re-throws so an enclosing
+   *                              boundary's backstop catches it.
+   */
+  boundaryId?: string;
+  boundaryFallbackExpr?: string;
+  boundaryVariantRenders?: Record<string, string>;
+  boundaryHasFallback?: boolean;
 }
 
 export class BindingRegistry {

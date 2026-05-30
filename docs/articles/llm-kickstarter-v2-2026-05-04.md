@@ -1001,24 +1001,22 @@ ${
 
 Variants are exhaustive — missing one fires `E-FAIL-NOT-EXHAUSTIVE`. Variants surface in the engine's enum as states (the errors-as-states pattern from §11.5 loading recipe).
 
-**(2) `<errorBoundary>` for render-time fallback (§19.11).** When an error escapes the body subtree at render time — e.g., a server fn throws inside a deeply-nested component, or a derived expression fails on bad upstream data — `<errorBoundary>` catches it:
+**(2) `<errorBoundary>` for render-context error catch (§19.6).** When a `!`-function call sits in markup context — e.g., a `${loadDashboard()}` interpolation, or a derived expression that fails on bad upstream data — `<errorBoundary>` catches the error variant and displays a fallback. It is the markup-context counterpart to `!{}`:
 
 ```scrml
-<errorBoundary renders=.Fallback>
-    <Dashboard/>
-    <RecentActivity/>
-    <ChatPanel/>
-</errorBoundary>
+type DashError:enum = {
+    Empty
+        renders <div class="empty">Nothing to show yet.</>
+    Unauthorized
+}
 
-<errorBoundary.Fallback>
-    <div class="error">
-        Couldn't load this section. The error has been logged.
-        <button onclick=${@_boundary.retry()}>Try again</>
-    </div>
+<errorBoundary fallback={<div class="error">Couldn't load this section. The error has been logged.</>}>
+    ${loadDashboard()}
+    ${loadActivity()}
 </>
 ```
 
-`renders=.Fallback` names which auto-synthesized variant to render when an error propagates from the body. Boundaries nest — errors bubble UP until caught. The boundary does NOT swallow the error; it's routed to scrml's logging surface for diagnosis. `@_boundary.retry()` is an auto-synthesized control to re-mount the body subtree (re-runs the failing path with fresh state).
+A caught error variant displays via its OWN `renders` clause (§19.2) when it has one — `Empty` renders its own `<div class="empty">…</>`, with payload fields in scope. A variant WITHOUT a `renders` clause (e.g. `Unauthorized`) falls through to the boundary's `fallback={<markup/>}` (priority: variant `renders` > boundary `fallback`, §19.6.5). The compiler statically verifies every reachable variant is displayable (E-ERROR-005, §19.6.6) — a variant with neither `renders` nor a covering `fallback` is a compile error. Boundaries nest — an inner boundary catches before an outer (inner-catches-first, §19.6.4). The compiler ALSO emits a host-JS backstop (§19.6.8) so an unexpected NON-`!` throw during render degrades to `fallback` too. The boundary does NOT swallow the error; it's routed to scrml's logging surface for diagnosis. (The backstop is compiler-emitted host-JS, NOT a scrml-source try/catch — §19.9.8 stands.)
 
 **Implicit per-handler transactions (§19.10.5).** Inside an `!{}` handler arm, any SQL writes the arm performs are wrapped in an implicit transaction. If the arm fails (re-throws OR a downstream `!{}` doesn't catch), the writes ROLL BACK automatically. Atomic-rollback semantics without `BEGIN`/`COMMIT` ceremony — the canonical safety property. To opt-OUT (commit-on-error), annotate the handler arm with `@nosql-tx`.
 

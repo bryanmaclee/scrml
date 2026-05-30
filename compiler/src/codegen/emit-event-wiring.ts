@@ -982,6 +982,96 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
       }
 
+      // ---------------------------------------------------------------------
+      // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch.
+      //
+      // A `${...}` interpolation inside an `<errorBoundary>` subtree gets a
+      // catch wrapper instead of a bare textContent write. Two paths fire here:
+      //
+      //   1. TYPED `!`-error (§19.6.3, PRIMARY) — the expr value is the scrml
+      //      error envelope `{ __scrml_error, type, variant, data }`. Dispatch
+      //      on `.variant`: the variant's own `renders` markup wins, else the
+      //      boundary's `fallback=`, else (neither) re-propagate (§19.6.8 B3).
+      //
+      //   2. HOST-JS BACKSTOP (§19.6.8, C-hybrid) — the render is wrapped in a
+      //      host-JS try/catch so a NON-`!` throw degrades to `fallback=` +
+      //      loud log. Compiler-emitted host-JS — NOT scrml source try/catch
+      //      (§19.9.8 unaffected). No silent swallow (§19.6.8 B5): logs loudly,
+      //      and re-throws when there is no fallback so an enclosing boundary's
+      //      backstop catches it (inner-catches-first, §19.6.4).
+      //
+      // Reactive deps (if any) re-run the same render under `_scrml_effect` so
+      // a later reactive change re-evaluates the catch + dispatch.
+      // ---------------------------------------------------------------------
+      if (binding.boundaryId) {
+        const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+        let ebExpr = rewrittenExpr;
+        if (encodingCtx && encodingCtx.enabled) {
+          for (const ref of varRefs) {
+            const encoded = encodingCtx.encode(ref);
+            if (encoded !== ref) {
+              ebExpr = ebExpr.split(`_scrml_reactive_get("${ref}")`).join(`_scrml_reactive_get(${JSON.stringify(encoded)})`);
+            }
+          }
+        }
+        const bId = JSON.stringify(binding.boundaryId);
+        const fallbackExpr = binding.boundaryFallbackExpr ?? '""';
+        const hasFallback = binding.boundaryHasFallback === true;
+        const variantRenders = binding.boundaryVariantRenders ?? {};
+        const isAsync = exprUsesServerFn(expr, serverFnNames);
+        const renderFn = `_eb_render_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+
+        lines.push(`  {`);
+        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+        lines.push(`    if (el) {`);
+        lines.push(`      ${isAsync ? "async " : ""}function ${renderFn}() {`);
+        lines.push(`        let _eb_result;`);
+        lines.push(`        try {`);
+        lines.push(`          _eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
+        lines.push(`        } catch (_eb_err) {`);
+        lines.push(`          _scrml_error_boundary_log(${bId}, _eb_err);`);
+        if (hasFallback) {
+          lines.push(`          el.innerHTML = (${fallbackExpr});`);
+          lines.push(`          return;`);
+        } else {
+          lines.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
+        }
+        lines.push(`        }`);
+        // Typed !-error dispatch (§19.6.3).
+        lines.push(`        if (_eb_result && typeof _eb_result === "object" && _eb_result.__scrml_error) {`);
+        lines.push(`          _scrml_error_boundary_log(${bId}, _eb_result);`);
+        const variantNames = Object.keys(variantRenders);
+        if (variantNames.length > 0) {
+          lines.push(`          switch (_eb_result.variant) {`);
+          for (const vName of variantNames) {
+            lines.push(`            case ${JSON.stringify(vName)}: el.innerHTML = (${variantRenders[vName]}); return;`);
+          }
+          lines.push(`          }`);
+        }
+        if (hasFallback) {
+          lines.push(`          el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
+          lines.push(`          return;`);
+        } else {
+          lines.push(`          throw _scrml_error_boundary_uncaught(_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
+        }
+        lines.push(`        }`);
+        // Success — plain text render.
+        lines.push(`        el.textContent = _eb_result;`);
+        lines.push(`      }`);
+        // Initial render. When async, the IIFE awaits; reactive re-run wraps in effect.
+        if (isAsync) {
+          lines.push(`      ${renderFn}();`);
+        } else {
+          lines.push(`      ${renderFn}();`);
+        }
+        if (varRefs.length > 0) {
+          lines.push(`      _scrml_effect(function() { ${renderFn}(); });`);
+        }
+        lines.push(`    }`);
+        lines.push(`  }`);
+        continue;
+      }
+
       // GITI-005: `${serverFn()}` in markup needs async wiring — the call
       // returns a Promise; without await, textContent becomes "[object
       // Promise]" and the reactive-refs path below never fires (expression

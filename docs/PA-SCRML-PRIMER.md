@@ -162,20 +162,22 @@ Pattern:
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
-**`<errorBoundary>` for render-fallback (§19.11; S135 cluster J catch-up, F-032).** When an `!{}` handler can't recover at the call site — or when a sub-component throws an uncaught error during render — `<errorBoundary>` provides the render-fallback. It scopes to its body subtree:
+**`<errorBoundary>` for render-context error catch (§19.6).** When a `!`-function call sits in markup context — or when a sub-component throws an uncaught host error during render — `<errorBoundary>` catches it. It is the markup-context counterpart to `match` / `!{}` in logic context, and scopes to its body subtree:
 
 ```scrml
-<errorBoundary renders=.Fallback>
-    <UserList users=@users/>
-    <ContactList contacts=@contacts/>
-</errorBoundary>
+type LoadError:enum = {
+    NotFound(id: string)
+        renders <div class="err">Item ${id} not found</>
+    Timeout
+}
 
-<errorBoundary.Fallback>
-    Something went wrong loading this section. <button onclick=reset>Try again</>
+<errorBoundary fallback={<div>Something went wrong loading this section.</>}>
+    ${loadUser(42)}
+    ${loadContacts()}
 </>
 ```
 
-`renders=.Fallback` names which variant of the boundary's enum to render when an error escapes the body subtree. The boundary's enum is auto-synthesized (variants: `.Ok` for normal render, `.Fallback` for error). Multiple boundaries can nest — error propagates UP until a boundary catches it. The boundary does NOT swallow the error; the diagnostic + stack trace are routed to scrml's logging surface.
+A caught error variant is displayed via its OWN `renders` clause (§19.2) when it has one — e.g. `NotFound` renders its own `<div class="err">…</>` with the payload `${id}` in scope. A variant WITHOUT a `renders` clause falls through to the boundary's `fallback={<markup/>}` attribute (priority: variant `renders` > boundary `fallback`, §19.6.5). The compiler statically verifies (E-ERROR-005, §19.6.6) that every error variant reachable inside the boundary is displayable — neither `renders` nor `fallback` covering a variant is a compile error. Boundaries nest — an inner boundary catches before an outer (inner-catches-first, §19.6.4). In addition to the typed `!`-error path, the compiler emits a host-JS backstop (§19.6.8 C-hybrid) so an unexpected NON-`!` throw during render also degrades to `fallback` — the boundary does NOT swallow the error; the diagnostic + stack trace are routed to scrml's logging surface. (The backstop is compiler-emitted host-JS, NOT a scrml-source try/catch — §19.9.8 is unaffected.)
 
 **Implicit per-handler transactions (§19.10.5).** Inside an `!{}` handler arm, scrml wraps the SQL writes the arm performs in an implicit transaction. If the handler arm fails (re-throws OR a downstream `!{}` doesn't catch), the SQL writes ROLL BACK automatically. This is the canonical safety property — adopters get atomic-rollback semantics without `BEGIN`/`COMMIT` ceremony. Per-handler-tx is opt-OUT (annotation `@nosql-tx` on the handler arm) for the rare case you want to commit-on-error.
 

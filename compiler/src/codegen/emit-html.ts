@@ -21,6 +21,12 @@ import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts"
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
 import { buildReactiveTypeMap } from "./emit-bindings.ts";
+// errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
+// `collectEnumRenders` builds the file's variant -> renders-markup map;
+// `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
+// markup to a runtime HTML expression. emit-event-wiring.ts consumes the
+// boundary fields these stamp onto each logic binding.
+import { collectEnumRenders, compileBoundaryMarkup, emitBoundaryMarkupExpr } from "./emit-error-boundary.ts";
 
 // Supported bind: attribute names per SPEC §5.4
 const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "selected", "files", "group"]);
@@ -592,6 +598,40 @@ export function generateHtml(
   // or not SYM populated _scope, so test fixtures without scope still get attrs.
   const reactiveTypeMap: Map<string, string> = fileAST ? buildReactiveTypeMap(fileAST) : new Map();
 
+  // errorBoundary (SPEC §19.6) — per-file variant -> renders-markup map, built
+  // once. Keyed by enum type name; each entry maps variant name -> raw renders
+  // markup. Empty when the file declares no enum with a `renders` clause.
+  const enumRenders = fileAST ? collectEnumRenders(fileAST) : new Map();
+
+  // The active <errorBoundary> nesting stack. The innermost boundary (top of
+  // stack) is the one a `${...}` interpolation's logic binding is stamped with;
+  // inner-catches-first nesting (§19.6.4) falls out of the runtime backstop's
+  // try/catch nesting, which mirrors this lexical stack.
+  interface ActiveBoundary {
+    boundaryId: string;
+    fallbackExpr: string;        // JS string expr for the fallback HTML ("" if none)
+    hasFallback: boolean;
+    variantRenders: Record<string, string>; // variant name -> JS string expr (refs _eb_result.data)
+  }
+  const boundaryStack: ActiveBoundary[] = [];
+
+  // Build the full variant -> renders JS-expr map ONCE (every enum's renders,
+  // flattened by variant name). A boundary's catchable variants are not known
+  // statically here, so we offer ALL declared renders; the runtime dispatch
+  // matches on the actual `result.variant`. Field substitution references
+  // `_eb_result.data` (the error envelope's payload object).
+  const allVariantRenderExprs: Record<string, string> = (() => {
+    const out: Record<string, string> = {};
+    for (const info of enumRenders.values()) {
+      for (const [variant, rawMarkup] of info.renders) {
+        const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
+        const payloadFields = info.variantFields.get(variant);
+        out[variant] = emitBoundaryMarkupExpr(tpl, "_eb_result.data", payloadFields);
+      }
+    }
+    return out;
+  })();
+
   function emitNode(node: any): void {
     if (!node || typeof node !== "object") return;
 
@@ -748,11 +788,49 @@ export function generateHtml(
       const isVoid: boolean = VOID_ELEMENTS.has(tag);
 
       if (tag === "errorBoundary" || tag === "errorboundary") {
+        // SPEC §19.6 — markup-context error catch. The boundary wraps a subtree
+        // in which `!`-function calls may produce error variants; those are
+        // routed (§19.6.3/§19.6.5) to the variant's own `renders` markup or, if
+        // absent, the boundary's `fallback=` markup. A C-hybrid host-JS backstop
+        // (§19.6.8) additionally degrades non-`!` throws to the fallback.
         const boundaryId = genVar("error_boundary");
+
+        // Resolve the `fallback={<markup/>}` attribute into a runtime HTML expr.
+        const fallbackAttr = attrs.find((a: any) => a.name === "fallback");
+        let fallbackExpr = '""';
+        let hasFallback = false;
+        if (fallbackAttr && fallbackAttr.value) {
+          const fv: any = fallbackAttr.value;
+          // The attr value is an `expr` wrapper whose `raw` holds the markup
+          // source (e.g. `<div>Something went wrong</>`), or an escape-hatch
+          // node carrying the same in `.raw`.
+          const rawMarkup: string =
+            (typeof fv.raw === "string" ? fv.raw : undefined) ??
+            (fv.exprNode && typeof fv.exprNode.raw === "string" ? fv.exprNode.raw : "") ?? "";
+          if (rawMarkup.trim() !== "") {
+            const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
+            fallbackExpr = emitBoundaryMarkupExpr(tpl, "_eb_result && _eb_result.data");
+            hasFallback = true;
+          }
+        }
+
+        // The data-attr carries the boundary id only — the fallback HTML +
+        // variant renders are emitted into the JS wiring (emit-event-wiring.ts),
+        // NOT inlined into the static HTML, so server-only markup never leaks
+        // and the static page stays minimal.
         parts.push(`<div data-scrml-error-boundary="${boundaryId}">`);
+
+        boundaryStack.push({
+          boundaryId,
+          fallbackExpr,
+          hasFallback,
+          variantRenders: allVariantRenderExprs,
+        });
         for (const child of children) {
           emitNode(child);
         }
+        boundaryStack.pop();
+
         parts.push("</div>");
         return;
       }
@@ -1836,7 +1914,20 @@ export function generateHtml(
             const reactiveRefs = fnBodyRegistry
               ? extractReactiveDepsTransitive(exprStr, reactiveVarNames, fnBodyRegistry)
               : extractReactiveDeps(exprStr, reactiveVarNames);
-            registry.addLogicBinding({ placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs });
+            // errorBoundary (§19.6) — when this `${...}` interpolation sits in a
+            // boundary subtree, stamp the innermost boundary's catch context so
+            // emit-event-wiring.ts emits the typed-error dispatch + the C-hybrid
+            // host-JS backstop (§19.6.8) instead of a bare textContent write.
+            const eb = boundaryStack.length > 0 ? boundaryStack[boundaryStack.length - 1] : null;
+            registry.addLogicBinding(eb
+              ? {
+                  placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs,
+                  boundaryId: eb.boundaryId,
+                  boundaryFallbackExpr: eb.fallbackExpr,
+                  boundaryHasFallback: eb.hasFallback,
+                  boundaryVariantRenders: eb.variantRenders,
+                }
+              : { placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs });
           }
         }
       }

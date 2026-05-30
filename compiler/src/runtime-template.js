@@ -2090,6 +2090,55 @@ class ConflictError extends _ScrmlError {
 }
 
 // ---------------------------------------------------------------------------
+// §19.6 / §19.6.8 — errorBoundary runtime support.
+//
+// The compiler emits the per-binding catch + variant-dispatch inline (see
+// emit-event-wiring.ts); this helper provides the loud, non-swallowing logging
+// the §19.6.8 B5 backstop requires. It NEVER throws and NEVER hides the error —
+// it only reports. The decision to render fallback / re-propagate is made by
+// the emitted dispatch, not here.
+// ---------------------------------------------------------------------------
+
+function _scrml_error_boundary_log(boundaryId, err) {
+  if (typeof console === "undefined") return;
+  // A typed scrml '!'-error envelope { __scrml_error, type, variant, data } vs.
+  // a host throw — report both shapes loudly with the boundary id for context.
+  if (err && typeof err === "object" && err.__scrml_error) {
+    if (typeof console.error === "function") {
+      console.error(
+        "[scrml errorBoundary " + boundaryId + "] caught error variant " +
+        (err.type || "Error") + "::" + (err.variant || "?"),
+        err,
+      );
+    }
+  } else {
+    if (typeof console.error === "function") {
+      console.error(
+        "[scrml errorBoundary " + boundaryId + "] caught non-! runtime error (host backstop, §19.6.8)",
+        err,
+      );
+    }
+  }
+}
+
+// §19.6.8 B3 — wrap an uncaught typed error variant (no 'renders', no
+// 'fallback') into a host Error so the throw propagates to the nearest
+// enclosing boundary's host-JS backstop (inner-catches-first, §19.6.4). The
+// wrapped Error carries the original envelope on '.scrmlError' so a debugger /
+// log sees the variant. E-ERROR-005 (§19.6.6) makes this path statically
+// unreachable for well-typed code; it exists only as the runtime tail of the
+// C-hybrid model when an enclosing boundary CAN render the variant.
+function _scrml_error_boundary_uncaught(envelope) {
+  var msg = "scrml errorBoundary: error variant " +
+    ((envelope && envelope.type) || "Error") + "::" +
+    ((envelope && envelope.variant) || "?") +
+    " has no 'renders' clause and the boundary has no 'fallback' (propagating, §19.6.8 B3)";
+  var e = new Error(msg);
+  e.scrmlError = envelope;
+  return e;
+}
+
+// ---------------------------------------------------------------------------
 // §35.1 Global input state registry — maps user-supplied id → state object
 // ---------------------------------------------------------------------------
 

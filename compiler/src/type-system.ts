@@ -1234,7 +1234,24 @@ function parseEnumBody(
   // variants — silently fine when nothing read the enum's variant list,
   // but visible as "Known variants: (none)" the moment the bare-variant
   // inference walker tried to validate `.V` against the enum.
-  const lines = splitTopLevel(variantsSection, ["\n", ",", "|"]);
+  const rawLines = splitTopLevel(variantsSection, ["\n", ",", "|"]);
+
+  // The canonical §19.2 shape places a variant's `renders` clause on the line
+  // AFTER the variant name. The top-level split above orphans that continuation
+  // (it begins with `renders ` and matches no variant-name regex). Re-join each
+  // bare `renders <markup>` continuation onto its preceding variant so the
+  // variant's renders markup is preserved (without this merge, every
+  // newline-separated `renders` clause was silently dropped and E-ERROR-005
+  // would mis-fire on a variant that DOES carry a renders clause).
+  const lines: string[] = [];
+  for (const part of rawLines) {
+    const t = part.trim();
+    if (t.startsWith("renders ") && lines.length > 0) {
+      lines[lines.length - 1] = lines[lines.length - 1].trim() + " " + t;
+    } else {
+      lines.push(part);
+    }
+  }
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -4605,6 +4622,20 @@ function annotateNodes(
     );
   }
 
+  // errorBoundary (SPEC §19.6) — markup-context catch-scope depth. Incremented
+  // while visitNode descends into an `<errorBoundary>` subtree, decremented on
+  // exit. A `!`-function call reached at depth > 0 is "contained" per §19.4.3
+  // item 4 — the boundary satisfies the error-handling requirement, so
+  // E-ERROR-002 / W-CPS-NEEDS-FAILABLE are suppressed there (§19.6.6: the
+  // boundary catches the variant in markup; E-ERROR-005 instead governs whether
+  // the variant is renderable). Mirrors the `__inGuardedContext` suppression.
+  let errorBoundaryDepth = 0;
+  // Parallel stack of each active boundary's `fallback=` presence (true when the
+  // boundary declares a fallback). E-ERROR-005 (§19.6.6) uses the innermost
+  // entry: a reachable error variant with no `renders` clause is a compile error
+  // only when the boundary also lacks a `fallback`.
+  const errorBoundaryFallbackStack: boolean[] = [];
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown();
 
@@ -4687,6 +4718,17 @@ function annotateNodes(
         // Visit children.
         // §18.18 E-TYPE-081: Check for `partial match` in logic children (markup interpolation context).
         // A ${ partial match ... } block inside markup silently drops unmatched variants.
+        // errorBoundary (§19.6) — entering an `<errorBoundary>` subtree raises the
+        // catch-scope depth so `!`-calls inside it suppress E-ERROR-002 (the
+        // boundary contains them per §19.4.3 item 4).
+        const _ebTag = (n.tag ?? (n as Record<string, unknown>).tagName ?? n.name) as string | undefined;
+        const _isErrorBoundary = n.kind === "markup" && (_ebTag === "errorBoundary" || _ebTag === "errorboundary");
+        if (_isErrorBoundary) {
+          errorBoundaryDepth++;
+          const _ebAttrs = (n.attrs ?? (n as Record<string, unknown>).attributes) as ASTNodeLike[] | undefined;
+          const _hasFallback = Array.isArray(_ebAttrs) && _ebAttrs.some((a) => a && (a as ASTNodeLike).name === "fallback");
+          errorBoundaryFallbackStack.push(_hasFallback === true);
+        }
         const children = n.children as ASTNodeLike[] | undefined;
         if (Array.isArray(children)) {
           for (const child of children) {
@@ -4713,6 +4755,10 @@ function annotateNodes(
             }
             visitNode(child);
           }
+        }
+        if (_isErrorBoundary) {
+          errorBoundaryDepth--;
+          errorBoundaryFallbackStack.pop();
         }
         resolvedType = { kind: "html-element", tag: (n.name as string) ?? "unknown", attrs: {} };
         break;
@@ -5740,7 +5786,13 @@ function annotateNodes(
         );
         const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true;
         const enclosingFnCanFail = (n as Record<string, unknown>).__enclosingFnCanFail === true;
-        if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded) {
+        // errorBoundary (§19.6 / §19.4.3 item 4) — a `!`-call reached inside an
+        // `<errorBoundary>` subtree is contained by the boundary; the markup
+        // catch satisfies the handling requirement. Suppress E-ERROR-002 /
+        // W-CPS-NEEDS-FAILABLE; E-ERROR-005 (§19.6.6) instead governs whether
+        // the boundary can render the variant.
+        const inErrorBoundary = errorBoundaryDepth > 0;
+        if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
           if (fnCpsImplicitFailable.has(bareCallee)) {
             if (!enclosingFnCanFail) {
               errors.push(new TSError(
@@ -5765,6 +5817,38 @@ function annotateNodes(
               `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
               n.span as Span,
             ));
+          }
+        }
+
+        // E-ERROR-005 (§19.6.6) — static exhaustiveness for markup-context
+        // `!`-calls inside an `<errorBoundary>`. Every error variant the call
+        // can produce MUST be displayable: either the variant carries a
+        // `renders` clause (§19.2) or the innermost boundary declares a
+        // `fallback=`. A variant with neither is a compile error — at runtime
+        // it would re-propagate (§19.6.8 B3) with nothing to render.
+        if (bareCallee && inErrorBoundary && fnCanFail.has(bareCallee) && !inGuarded) {
+          const hasFallback = errorBoundaryFallbackStack.length > 0
+            && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
+          if (!hasFallback) {
+            const errTypeName = fnErrorTypes.get(bareCallee);
+            const errType = errTypeName ? typeRegistry.get(errTypeName) : undefined;
+            if (errType && errType.kind === "enum" && Array.isArray(errType.variants)) {
+              for (const v of errType.variants) {
+                // A variant with no `renders` clause and no boundary `fallback`
+                // is unrenderable inside this boundary.
+                if (!v.renders) {
+                  const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
+                  errors.push(new TSError(
+                    "E-ERROR-005",
+                    `E-ERROR-005: Error variant '${errTypeName}::${v.name}' may occur inside ` +
+                    `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
+                    `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
+                    `'fallback' attribute to the boundary.`,
+                    n.span as Span,
+                  ));
+                }
+              }
+            }
           }
         }
         break;

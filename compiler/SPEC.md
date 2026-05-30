@@ -12334,6 +12334,29 @@ The pathological multi-batch case — batch N depends on batch K's durable write
 
 A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `< errorBoundary>` catches the error variant" is provided in §19.9.5.
 
+#### 19.6.8 Runtime Backstop for Non-`!` Errors (C-Hybrid)
+
+**Added:** 2026-05-29 (S142 errorBoundary build; C-hybrid catch-scope ratification).
+
+The typed `!`-error model of §19.6.3 is the **PRIMARY** documented behavior of `< errorBoundary>`. The static-exhaustiveness guarantee of §19.6.6 (E-ERROR-005) stands UNCHANGED: every error variant reachable inside a boundary SHALL be covered by a `renders` clause or the boundary's `fallback` attribute, verified at compile time.
+
+In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree render — and the execution of any reactive effects that subtree registers — inside a host-JS try/catch **backstop**. The backstop provides defense-in-depth (Pillar 6 — bullet-proof apps) so that an unexpected host or runtime error that the typed `!`-path does NOT model degrades gracefully to the boundary's `fallback`, rather than corrupting the surrounding page.
+
+**B1 — Precedence.** A typed `!`-error variant produced by a `!`-function call in the subtree is routed per §19.6.3 / §19.6.5: the variant's own `renders` clause first, then the boundary's `fallback`. The backstop catches ONLY throws the typed path does NOT — non-`!` host/runtime errors (e.g. a thrown `TypeError` from a host API, a malformed-data exception in a derived expression). The typed path and the backstop are disjoint by construction: a value flowing through the `!`-error envelope is never a host throw, and a host throw is never a typed `!`-error value.
+
+**B2 — Backstop catch.** A non-`!` error thrown during the subtree's render or effect execution SHALL be caught by the nearest enclosing boundary's backstop and SHALL cause that boundary's `fallback` markup to be displayed in place of the subtree's output. Content rendered by sibling subtrees OUTSIDE the boundary SHALL be unaffected (§19.6.4 — the catch is scoped to the boundary subtree).
+
+**B3 — No `fallback`, propagate.** If a non-`!` error is caught by the backstop but the catching boundary has NO `fallback` attribute, the error SHALL propagate to the next enclosing `< errorBoundary>` (§19.6.4 nesting — inner-catches-first). If there is no enclosing boundary, the error SHALL propagate to the host. The backstop SHALL NOT silently discard an error it cannot display.
+
+**B4 — Compiler-emitted, not source try/catch.** The backstop is COMPILER-EMITTED host-JS. It is NOT a scrml-source `try`/`catch`. The no-`try`/`catch` standing rule (§19.9.8) is unaffected: `try`/`catch`/`throw` remain absent from scrml source. The backstop is invisible at the source level — it is a runtime sibling of the compile-time emitted-JS parse gate (§2.2.1) and the bootstrap guards (e.g. the localStorage availability guard), all of which are compiler-provided host-JS the author never writes.
+
+**B5 — No silent swallow; loud in dev.** The backstop SHALL NOT silently swallow an error it displays via `fallback`. The caught error's diagnostic message and stack trace SHALL be routed to scrml's logging surface (loud in development). The backstop is defense-in-depth, NOT a substitute for typed `!`-coverage: E-ERROR-005 static exhaustiveness (§19.6.6) is STILL required, and the backstop's existence SHALL NOT relax it.
+
+**B6 — Nesting parity.** The backstop respects the §19.6.4 nesting model identically to the typed path: an inner boundary's backstop catches a non-`!` throw from the inner subtree before any outer boundary's backstop sees it. Inner `fallback` is used first; only a re-propagated error (B3) reaches an outer backstop.
+
+**Cross-references.** §2.2.1 (emitted-JS parse gate — the compile-time sibling of this runtime backstop); §19.6.3 / §19.6.5 (typed `!`-error precedence — the PRIMARY path the backstop layers under); §19.6.6 (E-ERROR-005 static exhaustiveness — UNCHANGED); §19.9.8 (no `async`/`await`; no `try`/`catch` in scrml source — the backstop is compiler-emitted, so this rule is unaffected); Pillar 6 (bullet-proof apps). No new §34 diagnostic code is introduced: E-ERROR-005 already exists in §34 (catalog row, §19.6.3 reference); the backstop is a runtime mechanism, not a new compile-time diagnostic.
+
+
 ---
 
 ### 19.7 Exhaustive Matching
