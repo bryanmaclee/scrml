@@ -1036,3 +1036,90 @@ describe("shadow DB — file missing but CREATE TABLE in ?{} blocks", () => {
     expect(usersTable.clientSchema.map(c => c.name)).toContain("email");
   });
 });
+
+// ---------------------------------------------------------------------------
+// R28-4 — CREATE TABLE in a ?{} block NESTED below the top level
+// ---------------------------------------------------------------------------
+//
+// Regression: `extractCreateTableStatements` previously recursed ONLY into
+// `node.children`, so a `?{ CREATE TABLE … }` sitting under a `body` field —
+// a top-level `${ … }` logic block's `body`, or a `function`/`fn` decl's `body`
+// — was invisible to the shadow-DB scanner. E-PA-002 then fired spuriously
+// while its own message told the adopter to "add a CREATE TABLE statement in a
+// `?{}` block" (which they HAD done). The scanner now walks every child-bearing
+// field. (R28-4, S147 — gauntlet R28; PA-confirmed reproduces; fixed PA-direct.)
+
+describe("R28-4 — shadow DB finds CREATE TABLE nested below top level", () => {
+  let dir;
+  beforeAll(() => { dir = makeTempDir(); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  test("CREATE TABLE inside a top-level `${...}` logic block body is found (no E-PA-002)", () => {
+    const srcFile = join(dir, "nested-logic.scrml");
+    const sqlNode = makeSqlNode(
+      srcFile,
+      "CREATE TABLE widgets (id INTEGER PRIMARY KEY, secret TEXT NOT NULL)",
+    );
+    // The ?{} sql node lives under a `logic` node's `body`, NOT directly in
+    // the file `nodes[]` and NOT under `children` — the exact shape the old
+    // children-only walker missed.
+    const logicNode = {
+      id: 500, kind: "logic", body: [sqlNode],
+      span: { file: srcFile, start: 1000, end: 1100, line: 2, col: 1 },
+    };
+    const ast = makeDbFileAST(srcFile, {
+      src: "nonexistent-r284a.db",
+      tables: "widgets",
+      protect: "secret",
+    }, 0, [logicNode]);
+
+    const { protectAnalysis, errors } = runPA({ files: [ast] });
+    expect(errors.some(e => e.code === "E-PA-002")).toBe(false);
+    expect(errors).toHaveLength(0);
+    expect(protectAnalysis.views.size).toBe(1);
+  });
+
+  test("CREATE TABLE inside a function-decl body (nested in a logic block) is found (no E-PA-002)", () => {
+    const srcFile = join(dir, "nested-fn.scrml");
+    const sqlNode = makeSqlNode(
+      srcFile,
+      "CREATE TABLE widgets (id INTEGER PRIMARY KEY, secret TEXT NOT NULL)",
+    );
+    const fnNode = {
+      id: 501, kind: "function-decl", name: "setup", body: [sqlNode],
+      span: { file: srcFile, start: 1000, end: 1200, line: 2, col: 1 },
+    };
+    const logicNode = {
+      id: 502, kind: "logic", body: [fnNode],
+      span: { file: srcFile, start: 990, end: 1210, line: 2, col: 1 },
+    };
+    const ast = makeDbFileAST(srcFile, {
+      src: "nonexistent-r284b.db",
+      tables: "widgets",
+      protect: "secret",
+    }, 0, [logicNode]);
+
+    const { protectAnalysis, errors } = runPA({ files: [ast] });
+    expect(errors.some(e => e.code === "E-PA-002")).toBe(false);
+    expect(errors).toHaveLength(0);
+    expect(protectAnalysis.views.size).toBe(1);
+  });
+
+  test("GUARD: genuinely-missing CREATE TABLE still fires E-PA-002 (no over-credit)", () => {
+    const srcFile = join(dir, "nested-guard.scrml");
+    // A logic block whose body has NO CREATE TABLE for `widgets`.
+    const logicNode = {
+      id: 503, kind: "logic", body: [makeSqlNode(srcFile, "SELECT 1")],
+      span: { file: srcFile, start: 1000, end: 1100, line: 2, col: 1 },
+    };
+    const ast = makeDbFileAST(srcFile, {
+      src: "nonexistent-r284c.db",
+      tables: "widgets",
+      protect: "secret",
+    }, 0, [logicNode]);
+
+    const { protectAnalysis, errors } = runPA({ files: [ast] });
+    expect(errors.some(e => e.code === "E-PA-002")).toBe(true);
+    expect(protectAnalysis.views.size).toBe(0);
+  });
+});

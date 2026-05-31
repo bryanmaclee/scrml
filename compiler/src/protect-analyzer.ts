@@ -403,31 +403,43 @@ const CREATE_TABLE_RE =
  */
 function extractCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
   const result = new Map<string, string>();
-  for (const node of nodes) {
-    if (!node) continue;
-    if (node.kind === "sql") {
-      const query = (node as unknown as { query: string }).query;
-      if (typeof query === "string") {
-        // Reset lastIndex before each exec to avoid stateful regex issues.
-        CREATE_TABLE_RE.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = CREATE_TABLE_RE.exec(query)) !== null) {
-          const tableName = m[1].toLowerCase();
-          // Store the full match (the entire CREATE TABLE ... (...) substring).
-          result.set(tableName, m[0]);
-        }
+
+  // Generic depth-first walk over the AST. A `?{}` SQL node (`kind === "sql"`)
+  // can appear in MANY positions — not only as a markup `children` entry, but
+  // under `body` (a top-level `${...}` logic block's `body`, a `function`/`fn`
+  // declaration's `body`), `consequent` / `alternate` (`if`), `arms` (`match`),
+  // and so on. The prior recursion descended ONLY `children`, so a CREATE TABLE
+  // written in a startup `?{}` block inside a function — or even a bare
+  // top-level `${ ?{ CREATE TABLE … } }` — was invisible to the scanner, and
+  // E-PA-002 fired spuriously while the diagnostic's own message told the
+  // adopter to "add a CREATE TABLE statement in a `?{}` block" (R28-4).
+  //
+  // We therefore visit every enumerable child-bearing field, skipping `span`
+  // and `_`-prefixed annotation / back-reference fields (`_scope`, `_record`,
+  // etc., which can introduce cycles) and capping depth defensively.
+  const visit = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    if (node.kind === "sql" && typeof node.query === "string") {
+      // Reset lastIndex before each exec to avoid stateful regex issues.
+      CREATE_TABLE_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = CREATE_TABLE_RE.exec(node.query as string)) !== null) {
+        // Store the full match (the entire CREATE TABLE ... (...) substring).
+        result.set(m[1].toLowerCase(), m[0]);
       }
     }
-    // Recurse into children.
-    if ("children" in node && Array.isArray((node as unknown as { children: ASTNode[] }).children)) {
-      const children = (node as unknown as { children: ASTNode[] }).children;
-      if (children.length > 0) {
-        for (const [k, v] of extractCreateTableStatements(children)) {
-          result.set(k, v);
-        }
-      }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      visit(node[key], depth + 1);
     }
-  }
+  };
+
+  visit(nodes, 0);
   return result;
 }
 
