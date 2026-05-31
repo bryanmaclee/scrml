@@ -10724,10 +10724,11 @@ Per HU-1 Q3 RE-RATIFICATION, `<each>` introduces NO new body-shorthand mechanism
 ## 18. Pattern Matching and Enums
 
 > **Alias note:** Throughout §18, both canonical and alias syntax forms are valid. The
-> canonical forms are `.VariantName` (enum variant), `=>` (match arm separator), and `else`
-> (default arm). The aliases `::VariantName`, `->`, and `_` are equally valid. Examples in
-> this section may use either form. The compiler preference setting controls which form the
-> formatter normalizes to.
+> canonical forms are `.VariantName` (enum variant), `:>` (match arm separator), and `else`
+> (default arm). The aliases `::VariantName` and `_` are equally valid; `=>` and `->` are
+> DEPRECATED arm-separator aliases (surface `W-MATCH-ARROW-LEGACY`, §34, during the deprecation
+> window — all three forms still parse + emit identically). Examples in this section may use
+> either form. (S145 — `match-arrow-colon-canonical`.)
 
 **Revised:** 2026-03-27 — complete rewrite resolving all 11 blocking issues from
 docs/reviews/language/spec-review-§18-TS-C-gate-2026-03-27.md. E-EXHAUST-001 retired;
@@ -10951,7 +10952,7 @@ error from the compiler. `match` is the only exhaustiveness-enforced branch form
 
 ```
 match-expr      ::= 'match' expression '{' match-arm+ '}'
-match-arm       ::= arm-pattern ('=>' | '->') arm-body
+match-arm       ::= arm-pattern (':>' | '=>' | '->') arm-body
 arm-pattern     ::= variant-pattern | wildcard-arm | is-pattern
 variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?
                   | TypeName ('.' | '::') VariantName ('(' binding-list ')')?
@@ -10964,15 +10965,20 @@ block-body      ::= '{' statement* expression? '}'
 ```
 
 Note: `variant-pattern` accepts both `.` (canonical) and `::` (alias) notation (S37-AM-001).
-`wildcard-arm` accepts both `else` (canonical) and `_` (alias) (S37-AM-003). Match arm
-separators accept both `=>` (canonical) and `->` (alias). `is-pattern` defined in §18.17.
-The compiler preference setting controls which forms the formatter normalizes to.
+`wildcard-arm` accepts both `else` (canonical) and `_` (alias) (S37-AM-003). The match arm
+separator is `:>` (canonical); `=>` and `->` are deprecated aliases accepted during the
+deprecation window (surfacing `W-MATCH-ARROW-LEGACY`, §34). `is-pattern` defined in §18.17.
 
 **Normative statements:**
 
-- A match arm separator SHALL be `=>` (canonical) or `->` (alias). Both forms are accepted.
-  The canonical form is `=>`. The compiler preference setting controls which form the formatter
-  normalizes to.
+- A match arm separator SHALL be `:>` (canonical). `=>` and `->` are deprecated aliases:
+  accepted during the deprecation window and surfacing `W-MATCH-ARROW-LEGACY` (§34); promoted
+  to an error after the window. All three forms parse, build, and emit identically — `:>` is
+  live end-to-end. New code SHALL use `:>`; existing samples MAY migrate via `bun scrml migrate
+  --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph).
+  The `!{}` error-handler arm separators (§19) follow this rule in lockstep — they share the
+  arm-arrow parser rule. (S145 ratification — `match-arrow-colon-canonical` deep-dive; user-voice
+  S145; supersedes the prior "`=>` canonical / `->` alias / formatter-normalizes" rule.)
 - Match arms SHALL be juxtaposed (`match-arm+`) and written one per line (newline-separated).
   There is NO comma separator between arms — the arm body's terminating expression / `block-body`
   ends the arm; the next `arm-pattern` begins the next arm. A `,` following an arm body is invalid
@@ -12075,10 +12081,12 @@ Compiles. The function handles only the variants it cares about.
 ## 19. Error Handling (Revised)
 
 > **Alias note:** Throughout §19, both canonical and alias syntax forms are valid. The
-> canonical forms are `.VariantName` (enum variant), `=>` (match arm separator), and `else`
-> (default arm). The aliases `::VariantName`, `->`, and `_` are equally valid. Examples in
-> this section may use either form. The compiler preference setting controls which form the
-> formatter normalizes to.
+> canonical forms are `.VariantName` (enum variant), `:>` (handler/match arm separator), and `else`
+> (default arm). The aliases `::VariantName` and `_` are equally valid; `=>` and `->` are
+> DEPRECATED arm-separator aliases (surface `W-MATCH-ARROW-LEGACY`, §34, during the deprecation
+> window — all three forms still parse + emit identically). The `!{}` error-handler arms share
+> the match arm-arrow rule (lockstep). Examples in this section may use either form. (S145 —
+> `match-arrow-colon-canonical`.)
 
 ### 19.1 Overview
 
@@ -16348,7 +16356,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
-| E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `=>`/`->`-introduced arm boundary — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A => x, .B => y` → `.A => x` / `.B => y` on separate lines). Replaces the generic E-CODEGEN-INVALID-JS that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
+| E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-JS that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
+| W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
 | W-MATCH-VALUE-UNUSED | §48.11 | The last statement of a plain `function` (unconstrained, no `pure`/`fn`, no return-type annotation) is a value-producing `match` whose value is NOT returned (no `return`) and is therefore discarded — the function falls through to `undefined` (a plain `function` has NO implicit return per §48.11 / §7.3). This is spec-correct fall-through, but the silently-discarded value is almost always a mistake. Resolution: add `return` before the `match`, or change the declaration to `fn` / a return-typed `function` (which carry tail-expression implicit return). Does NOT fire for `return match`, `fn`/return-typed functions, a side-effect-only (block-arm) match, or a match that is not the last statement. (Catalog addition S144 Cluster D — Bug AA; emitted by CG at `compiler/src/codegen/emit-functions.ts`.) | Warning |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
