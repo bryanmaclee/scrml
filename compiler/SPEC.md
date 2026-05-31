@@ -16358,6 +16358,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-JS that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
+| W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-MATCH-VALUE-UNUSED | §48.11 | The last statement of a plain `function` (unconstrained, no `pure`/`fn`, no return-type annotation) is a value-producing `match` whose value is NOT returned (no `return`) and is therefore discarded — the function falls through to `undefined` (a plain `function` has NO implicit return per §48.11 / §7.3). This is spec-correct fall-through, but the silently-discarded value is almost always a mistake. Resolution: add `return` before the `match`, or change the declaration to `fn` / a return-typed `function` (which carry tail-expression implicit return). Does NOT fire for `return match`, `fn`/return-typed functions, a side-effect-only (block-arm) match, or a match that is not the last statement. (Catalog addition S144 Cluster D — Bug AA; emitted by CG at `compiler/src/codegen/emit-functions.ts`.) | Warning |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
@@ -20797,17 +20798,19 @@ ${ if (@name is some) { displayName(@name) } }
 **Syntax:**
 
 ```
-given-guard       ::= 'given' identifier-list '=>' block
+given-guard       ::= 'given' identifier-list (':>' | '=>') block
 identifier-list   ::= identifier ( ',' identifier )*
 ```
 
 The `given` keyword is the presence guard for `T | not` variables. It replaces the previously documented `(x) =>` form. The old form `(x) =>` is removed from the language. Any source file using `(x) =>` as a presence guard SHALL be a compile error (E-SYNTAX-043).
 
+**Separator — `:>` canonical, `=>` deprecated alias (S148, extension of the §18.2 arm-separator canon).** The guard separator SHALL be `:>` — the same "maps-to" separator as a match arm (§18.2) and an `!{}` handler arm (§19). The legacy `=>` form is a DEPRECATED alias recognised during the deprecation window: it parses and resolves identically, and surfaces the info-level lint `W-GIVEN-ARROW-LEGACY` (§34 — the standalone-`given` sibling of `W-MATCH-ARROW-LEGACY`; scoped to the `given`-guard separator only, so the JS arrow-function `=>` is untouched). `bun scrml migrate --fix` rewrites the deprecated separator (AST-driven). End-of-window timing promotes `W-GIVEN-ARROW-LEGACY` → a reserved `E-GIVEN-ARROW-LEGACY`. Rationale: a standalone `given x :> body` reads consistently with the in-`match` `given`-arm (which already uses `:>` per §18.2), and disambiguates the guard from a bare `x => body` lambda (the `=>` glyph stays the lambda glyph). (Insight 33 deferred this from the S145 match+`!{}` scope; ratified S148 via user AskUserQuestion.)
+
 **Single-variable form:**
 
 ```scrml
 ${
-    given x => {
+    given x :> {
         // x is narrowed from T | not to T inside this block
         use(x)
     }
@@ -20818,7 +20821,7 @@ ${
 
 ```scrml
 ${
-    given x, y => {
+    given x, y :> {
         // x is narrowed from T1 | not to T1
         // y is narrowed from T2 | not to T2
         // body executes only when ALL listed variables are present
