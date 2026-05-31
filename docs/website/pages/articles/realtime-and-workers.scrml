@@ -57,23 +57,23 @@
         <p class="text-slate-700 leading-relaxed my-4">
             A
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>
-            block (SPEC §38) declares state that's synchronized in real time across connected clients. It sits at file level &mdash; a sibling of
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
-            not a child &mdash; and its body uses the same V5-strict declarations the rest of the language uses.
+            block (SPEC §38) declares state that's synchronized in real time across connected clients. It lives inside the entry-file
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
+            (a sibling of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> declarations, per the v0.3 §38.1 placement), and its body uses the same V5-strict declarations the rest of the language uses.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;channel name="cursors"&gt;
-  &lt;positions&gt; = []      // synced across all connected clients
-&lt;/&gt;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;
 
-&lt;program&gt;
+  &lt;channel name="cursors"&gt;
+    &lt;positions&gt; = []      // synced across all connected clients
+  &lt;/&gt;
 
   function moveCursor(x, y) &#123;
     @positions = [...@positions.filter(p =&gt; p.uid != @user.id), &#123; uid: @user.id, x, y &#125;]
   &#125;
 
   &lt;svg onmousemove=moveCursor(event.clientX, event.clientY)&gt;
-    ${ @positions.forEach(p =&gt; lift &lt;circle cx=${p.x} cy=${p.y} r="5"/&gt;) }
+    ${ for (p of @positions) &#123; lift &lt;circle cx=${p.x} cy=${p.y} r="5"/&gt; &#125; }
   &lt;/svg&gt;
 
 &lt;/program&gt;</code></pre>

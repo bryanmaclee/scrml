@@ -65,14 +65,17 @@
             automatically.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>server function addContact(name, email)
-    runs:  ?&#123;`INSERT INTO contacts (name, email) VALUES (...)`&#125;.run()
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>server function addContact(name, email) &#123;
+  ?&#123;`INSERT INTO contacts (name, email) VALUES (...)`&#125;.run()
+&#125;
 
-server function loadContacts()
-    returns: lift ?&#123;`SELECT id, name, email FROM contacts`&#125;.all()
+server function loadContacts() &#123;
+  return ?&#123;`SELECT id, name, email FROM contacts`&#125;.all()
+&#125;
 
-server function deleteContact(id)
-    runs:  ?&#123;`DELETE FROM contacts WHERE id = ...`&#125;.run()</code></pre>
+server function deleteContact(id) &#123;
+  ?&#123;`DELETE FROM contacts WHERE id = ...`&#125;.run()
+&#125;</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-4">
             The full runnable example lives at
