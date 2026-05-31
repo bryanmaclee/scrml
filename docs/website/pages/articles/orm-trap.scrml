@@ -145,38 +145,6 @@ ${
             <li>Companion drafts in this batch: <a href="/articles/components-are-states" class="text-blue-700 hover:text-blue-900 underline">Components are states</a>, <a href="/articles/mutability-contracts" class="text-blue-700 hover:text-blue-900 underline">Mutability contracts</a>, <a href="/articles/css-without-build-step" class="text-blue-700 hover:text-blue-900 underline">CSS without a build step</a>, <a href="/articles/realtime-and-workers" class="text-blue-700 hover:text-blue-900 underline">Realtime and workers as syntax</a>.</li>
             <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
-        <p class="text-slate-700 leading-relaxed my-4">&lt;!--</p>
-
-        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Internal verification trail (private — agent-only, not for publish)</h2>
-
-        <p class="text-slate-700 leading-relaxed my-4">This block is an HTML comment so it does not render on dev.to.</p>
-        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li>Bio: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;user-bio.md</code> (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).</li>
-            <li>Private draft &#47; verification log: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;articles&#47;orm-trap-draft-2026-04-29.md</code>.</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">why-programming-f&#111;r-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md</code> (overview).</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver-boundary-disappears-devto-2026-04-28.md</code> (sister piece on the wire seam).</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lsp-and-giti-advantages-devto-2026-04-28.md</code> (E-PA-007 quick-fix prior framing).</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">npm-myth-devto-2026-04-28.md</code> (ORM-replaced-by-language line item).</li>
-            <li>Agent: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;.claude&#47;agents&#47;scrml-voice-author.md</code> (article mode, gate cleared per project memory bio-baked 2026-04-28).</li>
-            <li>SPEC: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;compiler&#47;SPEC.md</code> (§8, §11, §39, §44 cited; error codes E-PA-001&#47;004&#47;006&#47;007, E-SQL-002&#47;003&#47;004&#47;006).</li>
-            <li>LSP source: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;lsp&#47;l4.js</code> (Levenshtein quick-fix for E-PA-007, lines 21-30).</li>
-            <li>PA source: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;compiler&#47;src&#47;protect-analyzer.ts</code> (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fullSchema</code> field at line 81; constructor lines 795-800).</li>
-        </ul>
-        <p class="text-slate-700 leading-relaxed my-4"><strong>Spec validation summary:</strong></p>
-        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?{}</code> SQL block syntax current (§8 line 4361+; §44 line 14636+).</li>
-            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db src tables&gt;</code> block syntax (§11.5; §44.2 driver resolution).</li>
-            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code> block syntax with worked example (§39.1 line 13620; §39.2 lines 13640-13670).</li>
-            <li>✅ Schema introspection field path verified against compiler source (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect-analyzer.ts:81, 795-800</code>).</li>
-            <li>✅ E-PA-007 LSP L4 Levenshtein quick-fix shipped (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lsp&#47;l4.js:21-30</code>).</li>
-            <li>✅ E-SQL-002&#47;003&#47;004&#47;006 codes accurate against §8 error table (lines 4722-4728) and §44.7 (lines 14685-14688).</li>
-            <li>✅ §44 Bun.SQL migration normative (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.prepare()</code> removed → E-SQL-006; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.get()</code>&#47;<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.all()</code>&#47;<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.run()</code> semantics).</li>
-            <li>✅ Bound-parameter mandatory, no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sql.raw()</code> (§44.5 line 14675; §8.1 line 4380).</li>
-            <li>⚠️ E-PA-007 is <strong>specifically</strong> for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code> field-name validation, NOT general SELECT-clause column-name typos. Article wording soft-framed: column-completion is an LSP feature, E-PA-007 is <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code> validation, no claim that arbitrary SELECT-column typos are caught at compile time. Spec does not currently normatively guarantee schema-driven SELECT-column validation; that's plausible-future-work.</li>
-            <li>⚠️ Did NOT claim "the SELECT result is auto-typed from the schema" — spec only normatively documents <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.get()</code> returns <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Row | n&#111;t</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.all()</code> returns <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Row[]</code>; full schema-driven row-shape typing across call sites is not normative. Soft-pass.</li>
-        </ul>
-        <p class="text-slate-700 leading-relaxed my-4"><strong>Forbidden territory check (bio §6):</strong> all clear. React hobble-through disclosure used in opener (bio-attested voice-scrmlTS:3600). Framework-fatigue narrative avoided (article is structural, not autobiographical-recovery). Honest concession in §"What is still real" preserves the bio's "user is not anti-everything" stance. The "twenty compiler attempts" reference is bio-attested (voice-archive:1565). No fabricated motivation, no consensus claims, no Pascal&#47;Python&#47;Go&#47;Rust experience claims. Em-dash purge complete (0 in body). Typo&#47;contraction protocol applied.</p>
-        <p class="text-slate-700 leading-relaxed my-4">--&gt;</p>
 
     </article>
 
