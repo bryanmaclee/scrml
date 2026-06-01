@@ -299,6 +299,44 @@ describe("build-source-map — B1 use-site provenance resolver", () => {
     expect(countRows.some((r) => r.sourceLine === 1)).toBe(false);
   });
 
+  // Honest-synthetic validation (srcmap-attr-expr-relative-span fix). Some
+  // upstream parse paths record a WRONG source byte offset for a use site: an
+  // if/while/interpolation re-parsed with base offset 0 lands fragment-relative
+  // (byte 2/13 -> the opening comment line); some node shapes record a wrong
+  // ABSOLUTE offset (-> a mid-file line). The resolver must DROP any named mark
+  // whose offset resolves to a line that does not contain the identifier — a
+  // faked mapping is worse than none.
+  it("DROPS a named mapping whose offset resolves to a line NOT containing the identifier", () => {
+    // Byte 2 of `source` is on line 0 (`<title>Counter</title>`), which does NOT
+    // contain the lowercase identifier `count` — a confidently-wrong position.
+    const badMark = formatSrcmapMark({ start: 2 }, "count");
+    const marked = [
+      "function _scrml_increment_9() {",
+      `  ${badMark}_scrml_reactive_get("count");`,
+      "}",
+    ].join("\n");
+    const { builder } = buildSourceMap(marked, "app.scrml", source, nodes);
+    const rows = decode(builder.generate("app.client.js"));
+    // The wrong mark contributed NO named source mapping (it was dropped).
+    expect(rows.some((r) => r.name === "count")).toBe(false);
+    // The generated line falls back to synthetic rather than a wrong source pos.
+    const map = JSON.parse(builder.generate("app.client.js"));
+    expect((map.x_scrml_kinds || []).includes("source")).toBe(false);
+  });
+
+  it("KEEPS a named mapping whose offset resolves to a line that DOES contain the identifier", () => {
+    // Contrast with the drop above: a CORRECT offset (line 4 holds `@count`) maps.
+    const goodMark = formatSrcmapMark({ start: useReadByte }, "count");
+    const marked = [
+      "function _scrml_increment_9() {",
+      `  ${goodMark}_scrml_reactive_get("count");`,
+      "}",
+    ].join("\n");
+    const { builder } = buildSourceMap(marked, "app.scrml", source, nodes);
+    const rows = decode(builder.generate("app.client.js"));
+    expect(rows.some((r) => r.name === "count" && r.sourceLine === 4)).toBe(true);
+  });
+
   it("places the mapping at the GENERATED column the fragment occupies", () => {
     const marked = markedUseSite();
     const { builder, cleanedJs } = buildSourceMap(marked, "app.scrml", source, nodes);

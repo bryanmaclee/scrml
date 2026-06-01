@@ -169,6 +169,8 @@ export function buildSourceMap(
   const outputIndex = new LineIndex(cleanedJs);
   // The authoritative source byte-offset -> line/col bridge (the encoder's own).
   const sourceIndex = new LineIndex(sourceContent);
+  // Source lines, for the honest-synthetic validation in the mapping loop below.
+  const sourceLines = sourceContent.split("\n");
 
   // 2. Locate every use-site marker in the ORIGINAL (marker-bearing) JS, in
   //    source order. Each marker annotates the fragment immediately after it.
@@ -203,6 +205,30 @@ export function buildSourceMap(
     // LineIndex.locate returns 0-based line/column).
     const srcPos = sourceIndex.locate(hit.sourceByteOffset);
     const name = hit.name.length > 0 ? hit.name : undefined;
+
+    // Honest-synthetic validation. A use-site mark's recorded source byte offset
+    // must resolve to a line that ACTUALLY CONTAINS the bound identifier. Some
+    // upstream parse paths emit a wrong byte offset for the use site: an
+    // `if`/`while` condition or `${...}` interpolation re-parsed with base offset
+    // 0 records a FRAGMENT-RELATIVE offset (the read lands at byte 2 / 13 → the
+    // file's opening comment line), and certain node shapes (object-literal props,
+    // worker/channel `if=` reads, reactive assigns) record a wrong ABSOLUTE offset
+    // (→ a mid-file line that doesn't hold the name). A mapping that points at a
+    // line NOT mentioning the identifier is a confidently-wrong author position —
+    // a LIE, and a faked mapping is worse than none. Drop it: skip the named
+    // mapping (and leave gen.line for the synthetic fallback below) rather than
+    // ship the wrong position. Line-granularity check by design — a right-line /
+    // wrong-column mark is kept (devtools still jumps to the correct line); only
+    // wrong-LINE marks are dropped. INTERIM: the complete fix threads the real
+    // absolute base offset through the offset-0 parse sites so these reads gain
+    // CORRECT provenance (queued as the srcmap-offset-threading arc; see hand-off
+    // + known-gaps). Until then this guarantees the map never lies about the line.
+    if (name !== undefined) {
+      const srcLine = sourceLines[srcPos.line];
+      if (srcLine === undefined || !srcLine.includes(name)) {
+        continue;
+      }
+    }
 
     builder.addSourceMapping(gen.line, gen.column, srcPos.line, srcPos.column, name);
     mappedLines.add(gen.line);
