@@ -1552,6 +1552,174 @@ function isReactiveStatement(node: LogicStatement): boolean {
 }
 
 /**
+ * inline-sql-in-branch-cps (2026-06-01): the statement KINDS whose nested
+ * bodies must be scanned for a server-only trigger. An inline `?{}` SQL (or
+ * any other server-only resource) buried inside a conditional branch / match
+ * arm / loop body is a server-call boundary exactly as a top-level `?{}` is
+ * (SPEC §12.2 Trigger 1/3; §19.9.9.1 tier table — `server` = "own `?{}` SQL
+ * ... or other server-only resource"). The function-level escalation walker
+ * `walkBodyForTriggers` already recurses into these bodies (its generic
+ * array-recursion fallback), which is why a nested `?{}` escalates the WHOLE
+ * function. The CPS body-split classifier (`analyzeCPSEligibility` →
+ * `isServerTriggerStatement`) did NOT mirror that recursion, so the
+ * control-flow statement was mis-tiered as client and emitted into the client
+ * wrapper raw (E-CG-006 / E-CODEGEN-INVALID-JS) or the whole function escalated
+ * and a following `@cell` write tripped E-RI-002. This set + the recursive
+ * helper below close that asymmetry so the control-flow statement is classified
+ * server-tier and routed through the same CPS split a server-fn call in that
+ * position already gets.
+ */
+const CONTROL_FLOW_TRIGGER_KINDS = new Set([
+  "if-stmt",
+  "if-expr",
+  "for-stmt",
+  "for-expr",
+  "while-stmt",
+  "switch-stmt",
+  "match-stmt",
+  "match-expr",
+  "try-stmt",
+]);
+
+/**
+ * Recursively scan a control-flow statement's NESTED statements for a
+ * server-only trigger (an inline `?{}` SQL, a `?{...}.method()` sqlNode
+ * attachment, a server-only resource string, a protected-field access, or a
+ * call to a server-escalated / server-imported function).
+ *
+ * The recursion discipline mirrors `walkBodyForTriggers` (route-inference.ts):
+ *   - DOES descend into nested control-flow bodies (an `if` inside a `match`
+ *     arm, a `?{}` two branches deep, etc.).
+ *   - Does NOT descend into nested `function-decl` bodies — those are separate
+ *     analysis entries with their own classification.
+ *
+ * Returns `true` on the FIRST nested server trigger found.
+ */
+function controlFlowContainsServerTrigger(
+  node: LogicStatement | ASTNode,
+  protectedFields: Set<string>,
+  stateBlockIdByField: Map<string, string>,
+  functionIndex: Map<string, FunctionIndexEntry[]>,
+  analysisMap: Map<string, AnalysisRecord>,
+  resolvedServerFnIds: Set<string>,
+  importedServerFnNames: Set<string>,
+  importedServerNamespaces: Set<string>,
+): boolean {
+  if (!node || typeof node !== "object") return false;
+  const kind = (node as any).kind;
+
+  // Do not cross into nested function bodies — separate analysis entries.
+  if (kind === "function-decl") return false;
+
+  // Helper: server-only-resource / namespace / protected-field / server-fn-call
+  // detection on a raw expression string (mirrors walkBodyForTriggers).
+  const stringHasServerTrigger = (expr: string): boolean => {
+    if (!expr) return false;
+    if (detectServerOnlyResource(expr) !== null) return true;
+    if (importedServerNamespaces.size > 0) {
+      for (const name of importedServerNamespaces) {
+        const re = new RegExp(`\\b${escapeRegex(name)}\\.[A-Za-z_$]`);
+        if (re.test(expr)) return true;
+      }
+    }
+    for (const fieldName of protectedFields) {
+      if (bareExprAccessesField(expr, fieldName)) return true;
+    }
+    return false;
+  };
+  const calleeHasServerTrigger = (
+    n: any,
+    field: "expr" | "init",
+  ): boolean => {
+    for (const calleeName of extractCalleesFromNode(n, field)) {
+      const calleeEntries = functionIndex.get(calleeName);
+      if (calleeEntries) {
+        for (const { fnNodeId } of calleeEntries) {
+          if (resolvedServerFnIds.has(fnNodeId)) return true;
+        }
+      }
+      if (importedServerFnNames.has(calleeName)) return true;
+    }
+    return false;
+  };
+
+  // A structured `?{}` SQL node anywhere in the nested body is a server trigger.
+  if (kind === "sql") return true;
+
+  // The `?{...}.method()` attachment form (let/const/state/return/lift carry a
+  // structured `sqlNode` while the string surface is the placeholder sentinel).
+  if ((node as any).sqlNode && (node as any).sqlNode.kind === "sql") return true;
+
+  if (kind === "bare-expr") {
+    // Use the RAW `.expr` string — for a match-arm bare-expr the structured
+    // `exprNode` is only the arm pattern literal (e.g. `"add"`); the inline
+    // `?{}` lives in the raw arm text under `.expr`.
+    const expr =
+      typeof (node as any).expr === "string" && /\?\{/.test((node as any).expr)
+        ? (node as any).expr
+        : ((node as any).exprNode
+            ? emitStringFromTree((node as any).exprNode)
+            : ((node as any).expr ?? ""));
+    if (stringHasServerTrigger(expr)) return true;
+    if (calleeHasServerTrigger(node, "expr")) return true;
+  }
+
+  if (kind === "let-decl" || kind === "const-decl" || kind === "tilde-decl" || kind === "state-decl") {
+    const init = (node as any).initExpr
+      ? emitStringFromTree((node as any).initExpr)
+      : (typeof (node as any).init === "string" ? (node as any).init : "");
+    if (stringHasServerTrigger(init)) return true;
+    for (const fieldName of protectedFields) {
+      if (declDestructuresField(init, fieldName)) return true;
+    }
+    if (calleeHasServerTrigger(node, "init")) return true;
+  }
+
+  if (kind === "return-stmt" || kind === "throw-stmt" || kind === "propagate-expr") {
+    const expr = (node as any).exprNode
+      ? emitStringFromTree((node as any).exprNode)
+      : (typeof (node as any).expr === "string" ? (node as any).expr : "");
+    if (stringHasServerTrigger(expr)) return true;
+    if (calleeHasServerTrigger(node, "expr")) return true;
+  }
+
+  // Recurse into every array-valued child field (consequent / alternate /
+  // body / arms / catch / finally bodies, etc.). guarded-expr carries its
+  // wrapped node + arm bodies as object/array fields handled here.
+  if (kind === "guarded-expr") {
+    const wrapped = (node as any).guardedNode;
+    if (wrapped && typeof wrapped === "object") {
+      if (controlFlowContainsServerTrigger(wrapped, protectedFields, stateBlockIdByField, functionIndex, analysisMap, resolvedServerFnIds, importedServerFnNames, importedServerNamespaces)) return true;
+    }
+  }
+  for (const key of Object.keys(node as any)) {
+    if (key === "span" || key === "id") continue;
+    const val = (node as any)[key];
+    if (Array.isArray(val)) {
+      for (const child of val) {
+        if (child && typeof child === "object" && typeof (child as any).kind === "string") {
+          if (controlFlowContainsServerTrigger(child, protectedFields, stateBlockIdByField, functionIndex, analysisMap, resolvedServerFnIds, importedServerFnNames, importedServerNamespaces)) return true;
+        }
+      }
+    } else if (val && typeof val === "object" && typeof (val as any).kind === "string") {
+      // Object-valued child node (e.g. try-stmt's catchNode/finallyNode wrap
+      // a `body` array under a plain object; their bodies are reached via the
+      // array recursion when we descend into the wrapper object's fields).
+      if (controlFlowContainsServerTrigger(val, protectedFields, stateBlockIdByField, functionIndex, analysisMap, resolvedServerFnIds, importedServerFnNames, importedServerNamespaces)) return true;
+    } else if (val && typeof val === "object" && Array.isArray((val as any).body)) {
+      // try-stmt catchNode / finallyNode: `{ header, body }` plain objects with
+      // no `kind` discriminant. Walk their `body` array.
+      for (const child of (val as any).body) {
+        if (child && typeof child === "object" && typeof (child as any).kind === "string") {
+          if (controlFlowContainsServerTrigger(child, protectedFields, stateBlockIdByField, functionIndex, analysisMap, resolvedServerFnIds, importedServerFnNames, importedServerNamespaces)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Check if a single statement node contains a server-only trigger.
  */
 function isServerTriggerStatement(
@@ -1639,6 +1807,36 @@ function isServerTriggerStatement(
   // A state-decl like `@data = serverCall()` is CPS-eligible.
   // The only truly ineligible case is when a bare-expr contains BOTH
   // a reactive @-assignment AND server access in the same expression string.
+
+  // inline-sql-in-branch-cps (2026-06-01): a control-flow statement (if / match
+  // / for / while / switch / try) whose NESTED body contains an inline `?{}`
+  // SQL (or any other server-only resource) is itself a server-call boundary —
+  // the same boundary a top-level `?{}` statement is. Without this the CPS
+  // body-split classifier mis-tiered such a control-flow statement as client,
+  // emitting the nested `?{}` into the client wrapper raw (E-CG-006 /
+  // E-CODEGEN-INVALID-JS) or letting whole-function escalation strand a
+  // following `@cell` write under E-RI-002. Classifying it server-tier routes
+  // the whole statement through the existing CPS split (server stub emits the
+  // control-flow + nested SQL; the surrounding `@`-writes stay client as the
+  // continuation) — the identical path a server-fn call in an arm already uses.
+  // SPEC §12.2 Trigger 1/3; §19.9.9.1 tier table; the `control-anchors` edge
+  // (§19.9.9.1) already fences a control-flow statement as a server batch.
+  if (CONTROL_FLOW_TRIGGER_KINDS.has(node.kind)) {
+    if (
+      controlFlowContainsServerTrigger(
+        node,
+        protectedFields,
+        stateBlockIdByField,
+        functionIndex,
+        analysisMap,
+        resolvedServerFnIds,
+        importedServerFnNames,
+        importedServerNamespaces,
+      )
+    ) {
+      return true;
+    }
+  }
 
   return false;
 }

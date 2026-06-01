@@ -1383,6 +1383,13 @@ export function rewriteBlockBody(
   content: string,
   machineBindings?: Map<string, MachineBindingInfo> | null,
   engineCtx?: EngineRewriteCtx | null,
+  // inline-sql-in-branch-cps (2026-06-01): emit-mode for nested `@cell` reads.
+  // When "server" (a match arm lowered inside a server batch — see
+  // emitMatchExpr / emit-server.ts CPS stub path), `@cell` references resolve
+  // to `_scrml_body["cell"]` (the marshalled request payload) rather than the
+  // client-only `_scrml_reactive_get("cell")`. Defaults to "client" so every
+  // existing caller (event wiring, variant guards) is unaffected.
+  mode: "client" | "server" = "client",
 ): string {
   // C5 (R27): split block-body statements on top-level `;` / newline, but the
   // scanner MUST be STRING-LITERAL-AWARE — a `;` (or `\n`) INSIDE a `"..."` /
@@ -1432,7 +1439,7 @@ export function rewriteBlockBody(
   // path. When engineCtx.exprCtxExtras is null/undefined, the spread is a
   // no-op and we get the same behaviour as the original `{ mode: "client" }`.
   const exprCtx: EmitExprContext = {
-    mode: "client",
+    mode,
     ...(engineCtx?.exprCtxExtras ?? {}),
   };
 
@@ -1597,8 +1604,15 @@ export function emitMatchExpr(node: any, opts?: any): string {
   } : null;
   // Enrich the EmitExprContext used to lower arm results so `.advance(.X)`
   // calls inside inline-arm RHS reach the C13 detection arm in emit-expr.ts.
+  // inline-sql-in-branch-cps (2026-06-01): when this match-stmt is being
+  // emitted INSIDE a server batch (CPS body-split — emit-server.ts stub path),
+  // `opts.boundary === "server"`. In that mode arm-body `@cell` reads must
+  // resolve to the marshalled request payload `_scrml_body["cell"]`, and a
+  // nested `?{}` lowers to `await _scrml_sql...`, which requires the wrapping
+  // IIFE to be `async` + `await`ed (the enclosing server handler IIFE is async).
+  const _matchMode: "client" | "server" = opts?.boundary === "server" ? "server" : "client";
   const _matchCtx: EmitExprContext = {
-    mode: "client",
+    mode: _matchMode,
     ...(engineCtx?.exprCtxExtras ?? {}),
   };
   const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
@@ -1701,7 +1715,12 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
   const iifeLines: string[] = [];
-  iifeLines.push(`(function() {`);
+  // inline-sql-in-branch-cps (2026-06-01): a server-batch match-stmt may emit
+  // `await` (nested `?{}` SQL) in its arm bodies; the IIFE must therefore be
+  // `async` and `await`ed. The enclosing server-handler IIFE is itself async,
+  // so an awaited inner async IIFE is well-formed. Client mode keeps the plain
+  // synchronous IIFE (no `await` ever appears in client arm bodies).
+  iifeLines.push(_matchMode === "server" ? `await (async function() {` : `(function() {`);
   iifeLines.push(`  const ${tmpVar} = ${header};`);
   if (needsTagNormalization) {
     iifeLines.push(
@@ -1764,7 +1783,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     const emitResult = isBlockBody
       ? (() => {
           const inner = arm.result.trim().slice(1, -1).trim();
-          return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner, null, engineCtx)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
+          return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner, null, engineCtx, _matchMode)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
         })()
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
