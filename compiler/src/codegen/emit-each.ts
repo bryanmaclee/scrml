@@ -37,6 +37,47 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import type { EngineRewriteCtx } from "./emit-control-flow.ts";
+
+// ---------------------------------------------------------------------------
+// Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
+// AND message plane) and `@engine = .X` direct-write inside a Tier-1 `<each>`
+// per-item event handler.
+//
+// The per-item event-handler emission (renderTemplateAttrToJs case (2)) used
+// to route the handler value through `rewriteIterValueExpr` ONLY — iter-scope
+// lowering with NO engine awareness. So `@phase.advance(.Active)` and
+// `@phase = .Active` survived RAW into the emitted handler body → invalid JS
+// (`E-CODEGEN-INVALID-JS: Unexpected character '@'`).
+//
+// This carrier threads the file's engine codegen context (built once in
+// emitEachBodyRenderForFile from `ctx.fileAST`, mirroring emit-event-wiring.ts)
+// down to the per-item handler emitter so engine transitions lower through the
+// SAME canonical machinery the non-each path uses:
+//   - `.advance(.X)` (call)   → parseExprToNode → emitExprField(C13 arm) →
+//                               `_scrml_engine_advance(...)` (state plane) /
+//                               `_scrml_engine_dispatch_message(...)` (message plane)
+//   - `@engine = .X` (assign) → rewriteBlockBody(engineRewriteCtx) →
+//                               `_scrml_engine_direct_set(...)`
+// (`emitAssign` has NO engine-binding interception, so the assign form MUST
+// take the rewriteBlockBody path — same split emit-event-wiring.ts uses.)
+//
+// Composition with iter-scope: the two rewrites target DISJOINT `@`-forms —
+// `@.field` / `as`-name are iter-locals (lowered to `col`/`col.field` BEFORE
+// the engine pass via rewriteContextualSigil), while `@engineVar` is a
+// file-scope engine var (preserved through rewriteContextualSigil, which only
+// matches `@.`). `@cell` reactive reads are left for emit-expr / rewriteBlockBody
+// to lower (`_scrml_reactive_get`). When the file declares no engines the
+// carrier is null and the handler path is byte-identical to pre-fix.
+// ---------------------------------------------------------------------------
+interface EachEngineCtx {
+  /** For the assign form (`@engine = .X`) — rewriteBlockBody write-guard ctx. */
+  engineRewriteCtx: EngineRewriteCtx | null;
+  /** For the advance form (`@engine.advance(.X)`) — EmitExprContext spread. */
+  engineExprCtxExtras: Record<string, unknown>;
+  /** Bare engine var names — cheap gate before parse / write-guard routing. */
+  engineVarNames: Set<string> | null;
+}
 
 // ---------------------------------------------------------------------------
 // AST shape (each-block) — mirrors ast-builder.js dispatch output
@@ -197,6 +238,7 @@ function renderTemplateChildToJs(
   fragmentVar: string,
   lines: string[],
   indent: string,
+  engineCtx: EachEngineCtx | null = null,
 ): void {
   if (!child || typeof child !== "object") return;
 
@@ -257,7 +299,7 @@ function renderTemplateChildToJs(
     // (same re-dispatch model the per-item match-block already uses).
     const attrs: any[] = (child as any).attributes ?? (child as any).attrs ?? [];
     for (const attr of attrs) {
-      renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent);
+      renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx);
     }
 
     if (isShorthand && shorthandExpr !== null) {
@@ -271,7 +313,7 @@ function renderTemplateChildToJs(
       const innerFragVar = `_scrml_frag_${nextLocalId()}`;
       lines.push(`${indent}const ${innerFragVar} = document.createDocumentFragment();`);
       for (const grand of (child as any).children) {
-        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent);
+        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx);
       }
       lines.push(`${indent}${elVar}.appendChild(${innerFragVar});`);
     }
@@ -424,7 +466,7 @@ function renderTemplateChildToJs(
     // list build, not the whole outer factory — an arrow-IIFE provides the
     // local function frame the `return` needs.
     lines.push(`${indent}(() => {`);
-    for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `)) {
+    for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
       lines.push(l);
     }
     lines.push(`${indent}})();`);
@@ -458,6 +500,25 @@ function rewriteIterValueExpr(text: string, iterVarName: string): string {
   expr = rewriteContextualSigil(expr, iterVarName);
   expr = rewriteAtCellAccess(expr);
   return expr;
+}
+
+/**
+ * Bug 62 (S156) — iter-scope-ONLY lowering, used to pre-rewrite an engine
+ * handler expression BEFORE handing it to the engine-aware structured path
+ * (parseExprToNode + emitExprField / rewriteBlockBody).
+ *
+ * Lowers the iter-local `@`-forms (`@.field` → `col.field`, `@.` → `col`) and
+ * collapses the BS-padded sigil-dot, but deliberately does NOT run
+ * `rewriteAtCellAccess`: the bare `@cell` / `@engineVar` forms MUST survive
+ * here so (a) the engine var sigil is intact for C13 detection and (b) emit-expr
+ * / rewriteBlockBody can lower `@cell` reads to `_scrml_reactive_get(...)`
+ * downstream. (rewriteIterValueExpr eagerly rewrites `@cell` → `_scrml_reactive_get`,
+ * which would clobber `@engineVar` before the engine pass could see it.)
+ */
+function rewriteIterScopeOnly(text: string, iterVarName: string): string {
+  if (!text || typeof text !== "string") return text;
+  const expr = text.replace(/@\s*\.\s*/g, "@.");
+  return rewriteContextualSigil(expr, iterVarName);
 }
 
 /**
@@ -502,6 +563,7 @@ function renderTemplateAttrToJs(
   elVar: string,
   lines: string[],
   indent: string,
+  engineCtx: EachEngineCtx | null = null,
 ): void {
   if (!attr || typeof attr !== "object") return;
   const aName = String(attr.name ?? "");
@@ -542,16 +604,35 @@ function renderTemplateAttrToJs(
     let handlerBody: string;
     if (valKind === "call-ref") {
       const fnName = String(val.name ?? "");
-      handlerBody = `${fnName}(${serializeCallArgs(val, iterVarName)});`;
+      // Bug 62 (S156) — engine `.advance(.X)` (e.g. `onclick=@phase.advance(.Active)`)
+      // parses as a call-ref `{ name:"@phase.advance", args:[".Active"] }`. Reconstruct
+      // the call text with iter-scope-lowered args and try the engine path; if it is
+      // a recognised engine transition, lower it through the canonical C13 machinery
+      // (`_scrml_engine_advance` / `_scrml_engine_dispatch_message`). Otherwise the
+      // existing plain-call emission stands (no regression to `onclick=fn(@.id)`).
+      const callText = `${fnName}(${serializeCallArgs(val, iterVarName)})`;
+      const engineLowered = engineCtx ? emitEngineHandlerBody(callText, engineCtx) : null;
+      handlerBody = engineLowered !== null
+        ? `${engineLowered};`
+        : `${fnName}(${serializeCallArgs(val, iterVarName)});`;
     } else if (valKind === "expr") {
-      // `${...}` form — could be an arrow/lambda or a call expression. Emit
-      // the rewritten expression and invoke it if it is a function reference;
-      // for a bare call expression the rewrite already produces a statement.
-      const body = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
-      handlerBody = `${body};`;
+      // `${...}` form — could be an arrow/lambda or a call/assign expression.
+      // Bug 62 (S156) — engine direct-write `${@phase = .Active}` (AssignExpr) and
+      // engine advance `${@phase.advance(.Active)}` (CallExpr) lower through the
+      // canonical write-guard / C13 machinery. The engine path receives the
+      // iter-scope-prelowered text (so any `@.field` / `as`-name in args resolves
+      // to the factory binding while `@engineVar` survives for engine detection).
+      const preLowered = rewriteIterScopeOnly(String(val.raw ?? ""), iterVarName);
+      const engineLowered = engineCtx ? emitEngineHandlerBody(preLowered, engineCtx) : null;
+      if (engineLowered !== null) {
+        handlerBody = `${engineLowered};`;
+      } else {
+        const body = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+        handlerBody = `${body};`;
+      }
     } else if (valKind === "variable-ref") {
       // `onclick=@handler` — reference a reactive/handler cell. Rewrite then
-      // invoke with the event.
+      // invoke with the event. (Not an engine transition — bare cell handler.)
       const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
       handlerBody = `${ref}(event);`;
     } else {
@@ -788,6 +869,7 @@ function renderEmptyChildToJs(
   fragmentVar: string,
   lines: string[],
   indent: string,
+  engineCtx: EachEngineCtx | null = null,
 ): void {
   if (!emptyChild || typeof emptyChild !== "object") return;
   // R25-Bug-40 — SPEC §17.7.4 admits `<empty : "literal">` `:`-shorthand
@@ -810,7 +892,7 @@ function renderEmptyChildToJs(
   // (empty-state can reference outer @cells but those use bare `@cell`
   // syntax, not contextual sigils).
   for (const grand of children) {
-    renderTemplateChildToJs(grand, "/* no iter scope in <empty> */", "", fragmentVar, lines, "  ");
+    renderTemplateChildToJs(grand, "/* no iter scope in <empty> */", "", fragmentVar, lines, "  ", engineCtx);
   }
 }
 
@@ -931,6 +1013,7 @@ function emitEachReconcileLines(
   mountVar: string,
   itemsVar: string,
   indent: string,
+  engineCtx: EachEngineCtx | null = null,
 ): string[] {
   const lines: string[] = [];
   const lengthRef = `${itemsVar}.length`;
@@ -941,7 +1024,7 @@ function emitEachReconcileLines(
     lines.push(`${indent}  ${mountVar}.replaceChildren();`);
     lines.push(`${indent}  const _emptyFrag = document.createDocumentFragment();`);
     const emptyLines: string[] = [];
-    renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, `${indent}  `);
+    renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, `${indent}  `, engineCtx);
     for (const l of emptyLines) lines.push(l);
     lines.push(`${indent}  ${mountVar}.appendChild(_emptyFrag);`);
     lines.push(`${indent}  return;`);
@@ -977,7 +1060,7 @@ function emitEachReconcileLines(
   // Walk template children — produce DOM-build JS.
   const templateLines: string[] = [];
   for (const child of node.templateChildren) {
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `);
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx);
   }
   for (const l of templateLines) lines.push(l);
 
@@ -987,12 +1070,168 @@ function emitEachReconcileLines(
   return lines;
 }
 
+/**
+ * Bug 62 (S156) — build the per-file engine codegen context for `<each>`
+ * per-item event-handler engine-transition lowering. Mirrors the context
+ * construction in emit-event-wiring.ts (the canonical non-each path) so the
+ * each handler routes `.advance(.X)` / `@engine = .X` through the IDENTICAL
+ * machinery (no duplicated `.advance` lowering).
+ *
+ * Tree-shake: when the file declares no `<engine>`, `buildEngineBindingsMap`
+ * returns null and every collect* helper returns an empty Set, so this returns
+ * null and the handler path is byte-identical to the pre-fix emission.
+ *
+ * The collect* inputs MUST come from the SAME processed `fileAST` the codegen
+ * stage feeds emit-event-wiring (engine vars are registered by the name
+ * resolver upstream; a raw buildAST AST yields an empty engineVarNames set).
+ */
+function buildEachEngineCtx(fileAST: any): EachEngineCtx | null {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const eng = require("./emit-engine.ts") as {
+    buildEngineBindingsMap: (a: unknown) => Map<string, unknown> | null;
+    collectEngineVarNames: (a: unknown) => Set<string>;
+    collectEnginesWithHooks: (a: unknown) => Set<string>;
+    collectEnginesWithOnTimeout: (a: unknown) => Set<string>;
+    collectEnginesWithIdleWatchdog: (a: unknown) => Set<string>;
+    collectEnginesWithInternalRules: (a: unknown) => Set<string>;
+    collectEnginesWithHistory: (a: unknown) => Set<string>;
+    collectEnginesWithMessageArms: (a: unknown) => Set<string>;
+    collectEngineMessageVariants: (a: unknown) => Map<string, Set<string>>;
+  };
+
+  const engineBindings = eng.buildEngineBindingsMap(fileAST);
+  const engineVarNames = eng.collectEngineVarNames(fileAST);
+  // No engines in this file — null carrier, byte-identical pre-fix emission.
+  if ((engineBindings == null || engineBindings.size === 0) && engineVarNames.size === 0) {
+    return null;
+  }
+
+  const enginesWithHooks = eng.collectEnginesWithHooks(fileAST);
+  const enginesWithOnTimeout = eng.collectEnginesWithOnTimeout(fileAST);
+  const enginesWithIdleWatchdog = eng.collectEnginesWithIdleWatchdog(fileAST);
+  const enginesWithInternalRules = eng.collectEnginesWithInternalRules(fileAST);
+  const enginesWithHistory = eng.collectEnginesWithHistory(fileAST);
+  // §51.0.S (message-plane routing) — same inputs the non-each path threads.
+  const enginesWithMessageArms = eng.collectEnginesWithMessageArms(fileAST);
+  const engineMessageVariants = eng.collectEngineMessageVariants(fileAST);
+
+  const exprCtxExtras = {
+    engineVarNames: engineVarNames.size > 0 ? engineVarNames : null,
+    enginesWithHooks: enginesWithHooks.size > 0 ? enginesWithHooks : null,
+    enginesWithOnTimeout: enginesWithOnTimeout.size > 0 ? enginesWithOnTimeout : null,
+    enginesWithIdleWatchdog: enginesWithIdleWatchdog.size > 0 ? enginesWithIdleWatchdog : null,
+    enginesWithInternalRules: enginesWithInternalRules.size > 0 ? enginesWithInternalRules : null,
+    enginesWithHistory: enginesWithHistory.size > 0 ? enginesWithHistory : null,
+    enginesWithMessageArms: enginesWithMessageArms.size > 0 ? enginesWithMessageArms : null,
+    engineMessageVariants: engineMessageVariants.size > 0 ? engineMessageVariants : null,
+    engineBindings: engineBindings,
+  };
+
+  const engineRewriteCtx: EngineRewriteCtx = {
+    engineBindings: engineBindings as EngineRewriteCtx["engineBindings"],
+    exprCtxExtras: exprCtxExtras as EngineRewriteCtx["exprCtxExtras"],
+  };
+
+  return {
+    engineRewriteCtx,
+    engineExprCtxExtras: exprCtxExtras as Record<string, unknown>,
+    engineVarNames: engineVarNames.size > 0 ? engineVarNames : null,
+  };
+}
+
+/**
+ * Bug 62 (S156) — emit the engine-transition body for one `<each>` per-item
+ * event handler when the (iter-scope-prelowered) handler text references an
+ * engine var. Returns the lowered JS statement (NO trailing `;`), or null when
+ * the handler is NOT an engine transition (caller keeps the existing
+ * `rewriteIterValueExpr` path — no regression to non-engine handlers).
+ *
+ * `preRewritten` is the handler expression text with iter-scope already lowered
+ * (`@.field` → `col.field`, `as`-name passthrough) and the BS-padded sigil-dot
+ * collapsed; only `@engineVar` / `@cell` `@`-forms remain.
+ *
+ * Two engine shapes (mirrors emit-event-wiring.ts:412-486):
+ *   - `@engine.advance(.X)` (CallExpr) → emitExprField(C13 arm) → state/message plane.
+ *   - `@engine = .X` (AssignExpr)      → rewriteBlockBody(engineRewriteCtx) → write-guard.
+ */
+function emitEngineHandlerBody(preRewritten: string, engineCtx: EachEngineCtx): string | null {
+  const engineVarNames = engineCtx.engineVarNames;
+  if (!engineVarNames || engineVarNames.size === 0) return null;
+
+  // Cheap gate: the handler must reference at least one bare engine var as
+  // `@<engineVar>` (word-boundary so `@phaseX` does not match engine `phase`).
+  let referencesEngineVar = false;
+  for (const v of engineVarNames) {
+    const re = new RegExp("@" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9_$])");
+    if (re.test(preRewritten)) { referencesEngineVar = true; break; }
+  }
+  if (!referencesEngineVar) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseExprToNode } = require("../expression-parser.ts") as {
+    parseExprToNode: (raw: string, filePath: string, offset: number) => any;
+  };
+  let node: any;
+  try {
+    node = parseExprToNode(preRewritten, "", 0);
+  } catch {
+    return null; // unparseable — let the existing path emit (and the parse-gate report).
+  }
+  if (!node || typeof node !== "object") return null;
+
+  // --- Assign form: `@engine = .X` (AssignExpr targeting an engine var) ------
+  // emitAssign has NO engine-binding interception, so route through
+  // rewriteBlockBody (the write-guard path) exactly as the non-each path does.
+  if (
+    node.kind === "assign" &&
+    node.target && node.target.kind === "ident" &&
+    typeof node.target.name === "string" && node.target.name.startsWith("@") &&
+    engineVarNames.has(node.target.name.slice(1))
+  ) {
+    if (engineCtx.engineRewriteCtx == null) return null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { rewriteBlockBody } = require("./emit-control-flow.ts") as {
+      rewriteBlockBody: (body: string, derived: unknown, engineCtx: EngineRewriteCtx | null) => string;
+    };
+    return rewriteBlockBody(preRewritten, null, engineCtx.engineRewriteCtx);
+  }
+
+  // --- Advance form: `@engine.advance(.X)` (CallExpr, C13 §51.0.G shape) ------
+  if (
+    node.kind === "call" &&
+    node.callee && node.callee.kind === "member" && !node.callee.optional &&
+    node.callee.property === "advance" &&
+    node.callee.object && node.callee.object.kind === "ident" &&
+    typeof node.callee.object.name === "string" && node.callee.object.name.startsWith("@") &&
+    engineVarNames.has(node.callee.object.name.slice(1))
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitExprField } = require("./emit-expr.ts") as {
+      emitExprField: (n: any, fallback: string, ctx: Record<string, unknown>) => string;
+    };
+    return emitExprField(node, preRewritten, { mode: "client", ...engineCtx.engineExprCtxExtras });
+  }
+
+  // References an engine var but is neither a recognised advance nor an
+  // engine-var assignment (e.g. `@engine.foo` read inside a larger expression).
+  // Defer to the existing path.
+  return null;
+}
+
 export function emitEachBodyRenderForFile(
   fileAST: any,
   ctx: CompileContext,
 ): { renderFunctions: string[]; dispatchers: string[] } {
   const renderFunctions: string[] = [];
   const dispatchers: string[] = [];
+
+  // Bug 62 (S156) — build the engine codegen context ONCE for this file so
+  // per-item event handlers carrying engine transitions (`@engine.advance(.X)`
+  // / `@engine = .X`) lower through the canonical machinery. Null when the file
+  // declares no engines (tree-shaken — handler emission is byte-identical to
+  // pre-fix in that case). Built from the SAME `ctx.fileAST` the codegen stage
+  // feeds emit-event-wiring (the non-each path).
+  const engineCtx = buildEachEngineCtx(ctx.fileAST ?? fileAST);
 
   const eachBlocks = collectEachBlocks(fileAST);
   for (const node of eachBlocks) {
@@ -1060,7 +1299,7 @@ export function emitEachBodyRenderForFile(
     fnLines.push(`  if (!_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).
-    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_mount", "_items", "  ")) {
+    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_mount", "_items", "  ", engineCtx)) {
       fnLines.push(l);
     }
     fnLines.push(`}`);
