@@ -56,6 +56,20 @@ interface EachBlockAstNode {
   bodyRaw: string;
   span: any;
   openerHadSpaceAfterLt?: boolean;
+  /**
+   * R28-1b-analogue (each-in-enclosing-scope, S153) — set by collectEachBlocks
+   * when this each-block is nested inside ANOTHER each's per-item template
+   * (templateChildren). A nested each's iteration source (e.g. `g.items`) and
+   * its `@.`-body reference the OUTER each's iter var, which is bound ONLY inside
+   * the outer per-item factory — never at module scope. So a nested each gets NO
+   * module-scope render fn / dispatcher (emitEachBodyRenderForFile skips it); it
+   * is emitted ENTIRELY INLINE inside the outer factory by renderTemplateChildToJs's
+   * each-block branch. (Distinct from the match case, whose render fns ARE
+   * item-agnostic and CAN stay module-scope — only the trigger is suppressed.)
+   */
+  isNested?: boolean;
+  /** The OUTER each's iter var name (set alongside isNested). */
+  enclosingEachIterVar?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,34 +85,56 @@ interface EachBlockAstNode {
 export function collectEachBlocks(fileAST: any): EachBlockAstNode[] {
   const found: EachBlockAstNode[] = [];
   const seen = new WeakSet<object>();
-  function walk(node: any): void {
+  // `enclosingEachIterVar` carries the OUTER each's iter var when the walk is
+  // currently INSIDE another each's per-item template (templateChildren). It is
+  // null at file scope and inside an <empty> body (not iter-scoped). When an
+  // each-block is reached with a non-null enclosing iter var, it is NESTED:
+  // emitEachBodyRenderForFile must NOT emit a module-scope render fn for it
+  // (its source + @. reference the outer iter var, bound only in the outer
+  // factory). renderTemplateChildToJs's each-block branch emits it inline.
+  function walk(node: any, enclosingEachIterVar: string | null): void {
     if (!node || typeof node !== "object") return;
     if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (const n of node) walk(n);
+      for (const n of node) walk(n, enclosingEachIterVar);
       return;
     }
     if (node.kind === "each-block") {
+      // Stamp nesting state (idempotent across re-walks). A non-null enclosing
+      // iter var means this each lives inside another each's per-item template.
+      (node as EachBlockAstNode).enclosingEachIterVar = enclosingEachIterVar;
+      (node as EachBlockAstNode).isNested =
+        typeof enclosingEachIterVar === "string" && enclosingEachIterVar.length > 0;
       found.push(node as EachBlockAstNode);
-      // Recurse into bodyChildren / templateChildren so nested each-blocks
-      // inside per-item template surface too. <empty> sub-element can't
-      // legally contain a nested each — but recurse anyway for resilience.
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren);
-      if (Array.isArray(node.templateChildren)) walk(node.templateChildren);
-      if (node.emptyChild) walk(node.emptyChild);
+      // Entering THIS each's per-item template establishes a NEW iter scope: any
+      // each nested in templateChildren is iter-scoped to THIS each's iter var
+      // (asName override or the synthetic default — mirrors emit-each.ts
+      // iterVarName resolution + collectMatchBlocks at emit-match.ts:132).
+      const innerIterVar =
+        (typeof node.asName === "string" && node.asName.length > 0)
+          ? node.asName
+          : "_scrml_each_item";
+      if (Array.isArray(node.templateChildren)) walk(node.templateChildren, innerIterVar);
+      // <empty> body is NOT iter-scoped (renders when the collection is empty,
+      // outside any per-item context) — descend with a null enclosing iter var.
+      if (node.emptyChild) walk(node.emptyChild, null);
+      // bodyChildren shares node refs with templateChildren (now seen-guarded);
+      // descend with the OUTER enclosing var for any node reachable only here.
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, enclosingEachIterVar);
       return;
     }
     // Recurse into known container fields. Mirror engine-decl + match-block
-    // descent shape.
+    // descent shape. Arm bodies / if-bodies / engine bodies are NOT a new
+    // iteration scope, so the enclosing each iter var carries through unchanged.
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren"]) {
-      if (Array.isArray((node as any)[key])) walk((node as any)[key]);
+      if (Array.isArray((node as any)[key])) walk((node as any)[key], enclosingEachIterVar);
     }
   }
   // Accept BOTH `fileAST.nodes` (test shape) AND `fileAST.ast.nodes`
   // (pipeline shape) — mirrors collectMatchBlocks pattern at
   // emit-match.ts:118.
-  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST);
+  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST, null);
   return found;
 }
 
@@ -324,6 +360,74 @@ function renderTemplateChildToJs(
     // Per-item dispatch. The dispatch fn tears down any prior wiring on the
     // mount (per-mount dispose) and re-renders the arm for THIS item's value.
     lines.push(`${indent}${dispatchFnName}(${mountVar}, ${discriminant});`);
+    return;
+  }
+
+  // each-in-enclosing-scope (S153) — a NESTED `<each>` that is a child of THIS
+  // each's per-item template. SPEC §17.X + primer §6.3 (`as` alias pattern).
+  //
+  // The inner each's iteration source (e.g. `g.items`) and its `@.`-body
+  // reference the OUTER each's iter var (`iterVarName` here), which is bound ONLY
+  // inside this factory closure — never at module scope. So (unlike a top-level
+  // each) the inner each gets NO module-scope render fn; collectEachBlocks marked
+  // it `isNested` and emitEachBodyRenderForFile skipped it. We emit it ENTIRELY
+  // INLINE here: create an item-local mount element, append it to the item
+  // fragment, resolve the inner source IN THIS SCOPE (outer iter var bound), and
+  // emit the inner reconcile via the SAME `emitEachReconcileLines` helper the
+  // module-scope path uses. The inner factory's `@.` resolves to the INNER iter
+  // var (innermost scope wins — emitEachReconcileLines passes the inner iter var
+  // down to renderTemplateChildToJs). The outer factory re-runs per outer-
+  // collection change (the outer each's `_scrml_effect_static`), so the inner
+  // list re-renders for each outer item.
+  //
+  // Mirrors the R28-1b `<match>`-in-`<each>` precedent above (item-local mount +
+  // inline per-item dispatch), adapted to an each whose render is non-item-
+  // agnostic (the inner source depends on the outer iter var).
+  if (child.kind === "each-block") {
+    const innerNode = child as EachBlockAstNode;
+    // Tree-shake: empty inner each (no template + no empty) renders nothing.
+    if ((!Array.isArray(innerNode.templateChildren) || innerNode.templateChildren.length === 0) && !innerNode.emptyChild) {
+      return;
+    }
+    // Resolve the inner iteration source IN THE OUTER FACTORY SCOPE. `iterVarName`
+    // here is the OUTER each's iter var (the closure param), so `@.field` in the
+    // inner source lowers to `<outerIterVar>.field` and a bare alias (`g.items`)
+    // passes through unchanged. `@cell` → `_scrml_reactive_get("cell")`.
+    let innerItemsExpr: string;
+    if (innerNode.iterShape === "in") {
+      innerItemsExpr = rewriteIterValueExpr(innerNode.inExprRaw ?? "[]", iterVarName);
+    } else if (innerNode.iterShape === "of") {
+      const ofResolved = rewriteIterValueExpr(innerNode.ofExprRaw ?? "0", iterVarName);
+      innerItemsExpr = `Array.from({length: Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
+    } else {
+      lines.push(`${indent}// each: nested each iter shape unresolved (neither in= nor of=); skipping`);
+      return;
+    }
+    // The inner each's iter var is its OWN `as` alias or the synthetic default —
+    // distinct from the outer iter var so the inner factory's `@.` binds to the
+    // inner item. (Mirrors emitEachBodyRenderForFile iterVarName resolution.)
+    const innerIterVar = (typeof innerNode.asName === "string" && innerNode.asName.length > 0)
+      ? innerNode.asName
+      : "_scrml_each_item";
+    const innerIdxName = "_scrml_each_idx";
+    // Item-local mount for the inner list. Carries the debug data-attr the
+    // module-scope form uses (self-describing DOM); the inline reconcile writes
+    // directly into it.
+    const innerMountVar = `_scrml_each_mount_${nextLocalId()}`;
+    const innerItemsVar = `_scrml_each_items_${nextLocalId()}`;
+    lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
+    lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${innerNode.id}");`);
+    lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
+    lines.push(`${indent}const ${innerItemsVar} = ${innerItemsExpr};`);
+    // Inline empty-guard + reconcile. Wrap in a block so the empty-guard's
+    // `return` (from emitEachReconcileLines) short-circuits ONLY the inner
+    // list build, not the whole outer factory — an arrow-IIFE provides the
+    // local function frame the `return` needs.
+    lines.push(`${indent}(() => {`);
+    for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `)) {
+      lines.push(l);
+    }
+    lines.push(`${indent}})();`);
     return;
   }
 
@@ -805,6 +909,84 @@ function resolveKeyFnBody(
  *
  * Tree-shake: when the each-block has no template + no empty, skip emission.
  */
+/**
+ * Emit the empty-guard + `_scrml_reconcile_list(...)` call for one each-block,
+ * given the JS var names that hold the resolved mount element + items array,
+ * and the indentation to prefix each line with.
+ *
+ * Shared by TWO call sites so the reconcile shape stays in lockstep:
+ *   1. emitEachBodyRenderForFile — module-scope render fn (mountVar="_mount",
+ *      itemsVar="_items", indent="  ").
+ *   2. renderTemplateChildToJs's each-block branch (nested each) — inline inside
+ *      the OUTER each's per-item factory (mountVar/itemsVar are item-local vars,
+ *      deeper indent). There is no module-scope render fn for a nested each, so
+ *      the empty-guard re-render is part of the outer factory's per-item build.
+ *
+ * `lengthRef` is the expression for "is the collection empty" (`<itemsVar>.length`).
+ */
+function emitEachReconcileLines(
+  node: EachBlockAstNode,
+  iterVarName: string,
+  iterIdxName: string,
+  mountVar: string,
+  itemsVar: string,
+  indent: string,
+): string[] {
+  const lines: string[] = [];
+  const lengthRef = `${itemsVar}.length`;
+
+  // Empty-state path (when `<empty>` sub-element is present).
+  if (node.emptyChild) {
+    lines.push(`${indent}if (!${itemsVar} || ${lengthRef} === 0) {`);
+    lines.push(`${indent}  ${mountVar}.replaceChildren();`);
+    lines.push(`${indent}  const _emptyFrag = document.createDocumentFragment();`);
+    const emptyLines: string[] = [];
+    renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, `${indent}  `);
+    for (const l of emptyLines) lines.push(l);
+    lines.push(`${indent}  ${mountVar}.appendChild(_emptyFrag);`);
+    lines.push(`${indent}  return;`);
+    lines.push(`${indent}}`);
+  } else {
+    // No `<empty>` block: still guard against an undefined / not-yet-initialized
+    // collection. For the module-scope path the source cell may not have run its
+    // `_scrml_reactive_set` yet (cell-init order); for the nested path the outer
+    // item's field may be undefined. Render empty in that case (re-runs later for
+    // the module-scope path via the effect subscription; for the nested path the
+    // outer factory re-runs per outer-collection change).
+    lines.push(`${indent}if (!${itemsVar}) {`);
+    lines.push(`${indent}  ${mountVar}.replaceChildren();`);
+    lines.push(`${indent}  return;`);
+    lines.push(`${indent}}`);
+  }
+
+  // Per-item template factory.
+  // gate-found-invalid-js-fix-wave (S141): the keyFn index param + the keyFn
+  // body's index reference MUST use the internal index name (`_scrml_each_idx`),
+  // NOT the literal `i`. When the each-block aliases the item/index as `i`
+  // (`<each of=N as i>`), `iterVarName === "i"`, so a keyFn signature of
+  // `(i, i) => i` is an "Argument name clash" (invalid JS). Threading
+  // `iterIdxName` keeps both params distinct for any alias.
+  const keyFnBody = resolveKeyFnBody(node, iterVarName, iterIdxName);
+  lines.push(`${indent}_scrml_reconcile_list(`);
+  lines.push(`${indent}  ${mountVar},`);
+  lines.push(`${indent}  ${itemsVar},`);
+  lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
+  lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => {`);
+  lines.push(`${indent}    const _itemFrag = document.createDocumentFragment();`);
+
+  // Walk template children — produce DOM-build JS.
+  const templateLines: string[] = [];
+  for (const child of node.templateChildren) {
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `);
+  }
+  for (const l of templateLines) lines.push(l);
+
+  lines.push(`${indent}    return _itemFrag.firstChild;`);
+  lines.push(`${indent}  }`);
+  lines.push(`${indent});`);
+  return lines;
+}
+
 export function emitEachBodyRenderForFile(
   fileAST: any,
   ctx: CompileContext,
@@ -816,6 +998,16 @@ export function emitEachBodyRenderForFile(
   for (const node of eachBlocks) {
     // Tree-shake (rare): empty block.
     if ((!Array.isArray(node.templateChildren) || node.templateChildren.length === 0) && !node.emptyChild) {
+      continue;
+    }
+    // each-in-enclosing-scope (S153): a NESTED each (inside another each's
+    // per-item template) gets NO module-scope render fn / dispatcher — its
+    // iteration source + `@.` reference the OUTER each's iter var, bound only
+    // inside the outer per-item factory. renderTemplateChildToJs's each-block
+    // branch emits it INLINE there. Emitting a module-scope render fn here would
+    // produce `const _items = <outerIterVar>.field;` at top level (the outer var
+    // is undefined → ReferenceError) — the exact defect this fix closes.
+    if (node.isNested) {
       continue;
     }
 
@@ -840,12 +1032,10 @@ export function emitEachBodyRenderForFile(
     // Reading `_items` first establishes the dep edge unconditionally; we query the
     // mount AFTER and bail (dep already tracked) if it is not yet in the DOM.
     let itemsExpr: string;
-    let lengthRef: string;
     if (node.iterShape === "in") {
       const inExpr = node.inExprRaw ?? "[]";
       // Rewrite `@cell` to `_scrml_reactive_get("cell")` for V5-strict reactivity.
       itemsExpr = rewriteAtCellAccess(inExpr);
-      lengthRef = "_items.length";
     } else if (node.iterShape === "of") {
       const ofExpr = node.ofExprRaw ?? "0";
       // The expression may be a literal (`10`) or a cell (`@daysLeft`).
@@ -853,7 +1043,6 @@ export function emitEachBodyRenderForFile(
       const ofExprResolved = rewriteAtCellAccess(ofExpr);
       // Generate an integer range [0, 1, ..., N-1] via Array.from.
       itemsExpr = `Array.from({length: Number(${ofExprResolved}) || 0}, (_v, _i) => _i)`;
-      lengthRef = "_items.length";
     } else {
       // Both / neither — surface at PASS / TS time; emit a no-op here.
       fnLines.push(`  // each: iter shape unresolved (neither in= nor of=); skipping render`);
@@ -870,60 +1059,10 @@ export function emitEachBodyRenderForFile(
     fnLines.push(`  const _mount = document.querySelector('[data-scrml-each-mount="each_${node.id}"]');`);
     fnLines.push(`  if (!_mount) return;`);
 
-    // Empty-state path (when `<empty>` sub-element is present).
-    if (node.emptyChild) {
-      fnLines.push(`  if (!_items || ${lengthRef} === 0) {`);
-      fnLines.push(`    _mount.replaceChildren();`);
-      fnLines.push(`    const _emptyFrag = document.createDocumentFragment();`);
-      const emptyLines: string[] = [];
-      renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, "    ");
-      for (const l of emptyLines) fnLines.push(l);
-      fnLines.push(`    _mount.appendChild(_emptyFrag);`);
-      fnLines.push(`    return;`);
-      fnLines.push(`  }`);
+    // Empty-guard + per-item reconcile (shared with the nested-each inline path).
+    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_mount", "_items", "  ")) {
+      fnLines.push(l);
     }
-    else {
-      // No `<empty>` block: still guard against an undefined / not-yet-initialized
-      // collection. The each render fn runs once synchronously at module-init
-      // (`_scrml_each_render_NN()` dispatcher); if the source cell is declared in
-      // the SAME file its `_scrml_reactive_set(...)` runs LATER in module-init, so
-      // `_scrml_reactive_get(name)` returns undefined on this first call. Without
-      // this guard the bare `_scrml_reconcile_list(_mount, undefined, ...)` below
-      // throws `TypeError: ...newItems.length` (HIGH runtime crash: compile-clean,
-      // runtime-dead). Render empty for now; the `_scrml_effect_static` subscription
-      // below re-runs this fn once the cell-init `_scrml_reactive_set` fires.
-      fnLines.push(`  if (!_items) {`);
-      fnLines.push(`    _mount.replaceChildren();`);
-      fnLines.push(`    return;`);
-      fnLines.push(`  }`);
-    }
-
-    // Per-item template factory.
-    // gate-found-invalid-js-fix-wave (S141): the keyFn index param + the
-    // keyFn body's index reference MUST use the internal index name
-    // (`_scrml_each_idx`), NOT the literal `i`. When the each-block aliases the
-    // item/index as `i` (`<each of=N as i>`), `iterVarName === "i"`, so a keyFn
-    // signature of `(i, i) => i` is an "Argument name clash" (invalid JS — the
-    // gate's E-CODEGEN-INVALID-JS). Threading `iterIdxName` keeps both params
-    // distinct for any alias.
-    const keyFnBody = resolveKeyFnBody(node, iterVarName, iterIdxName);
-    fnLines.push(`  _scrml_reconcile_list(`);
-    fnLines.push(`    _mount,`);
-    fnLines.push(`    _items,`);
-    fnLines.push(`    (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
-    fnLines.push(`    (${iterVarName}, ${iterIdxName}) => {`);
-    fnLines.push(`      const _itemFrag = document.createDocumentFragment();`);
-
-    // Walk template children — produce DOM-build JS.
-    const templateLines: string[] = [];
-    for (const child of node.templateChildren) {
-      renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, "      ");
-    }
-    for (const l of templateLines) fnLines.push(l);
-
-    fnLines.push(`      return _itemFrag.firstChild;`);
-    fnLines.push(`    }`);
-    fnLines.push(`  );`);
     fnLines.push(`}`);
 
     renderFunctions.push(fnLines.join("\n"));

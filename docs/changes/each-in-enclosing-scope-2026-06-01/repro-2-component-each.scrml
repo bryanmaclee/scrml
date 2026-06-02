@@ -1,0 +1,10 @@
+<program>
+type Todo:struct = { id: string, name: string }
+const TodoList = <ul props={ items: Todo[] }>
+  <each in=items key=@.id>
+    <li>${@.name}</li>
+  </each>
+</ul>
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+<TodoList items=@todos />
+</program>

@@ -1,0 +1,10 @@
+<program>
+type Todo:struct = { id: string, name: string }
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+<show>: boolean = true
+<ul if=@show>
+  <each in=@todos key=@.id>
+    <li>${@.name}</li>
+  </each>
+</ul>
+</program>

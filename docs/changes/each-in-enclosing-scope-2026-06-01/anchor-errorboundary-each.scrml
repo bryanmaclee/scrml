@@ -1,0 +1,11 @@
+<program>
+type Todo:struct = { id: string, name: string }
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+<errorBoundary fallback={<div>oops</div>}>
+  <ul>
+    <each in=@todos key=@.id>
+      <li>${@.name}</li>
+    </each>
+  </ul>
+</errorBoundary>
+</program>

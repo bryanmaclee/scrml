@@ -533,6 +533,21 @@ function normalizeTokenizedRaw(raw: string): string {
   s = s.replace(/\(\s+/g, "(");
   s = s.replace(/\s+\)/g, ")");
 
+  // each-in-enclosing-scope (S153) — collapse the tokenized contextual sigil
+  //   `@ . ident` → `@.ident` (and bare `@ .` → `@.`). The logic tokenizer
+  //   space-pads the `.` member operator, so a component body's `<each key=@.id>`
+  //   round-trips as `@ . id`. The each-block codegen's `rewriteContextualSigil`
+  //   matches only `@.ident` (no interior whitespace) — the space-padded form
+  //   leaks the raw `@ . id` into the emitted keyFn (invalid JS). Collapse here
+  //   so the re-parsed each-block carries a clean `@.id` keyExprRaw, matching the
+  //   top-level (non-component) each path.
+  //
+  //   Specificity: a real source `@.id` has no interior whitespace; this rewrite
+  //   touches ONLY the tokenized re-emission shape (same argument as the `< / >`
+  //   and `$ {` collapses above). The optional-whitespace pattern handles both
+  //   `@ . id` and `@.id` (idempotent).
+  s = s.replace(/@\s*\.\s*([A-Za-z_$])/g, "@.$1");
+
   return s;
 }
 
@@ -807,6 +822,21 @@ function sourceNeedsLiveFallback(source: string): boolean {
   // the interp is escaped, but escape-in-template is not a CE expansion
   // pattern in practice.
   if (/`[^`]*\$\{/.test(source)) {
+    return true;
+  }
+  // (3) each-in-enclosing-scope (S153) — `<each>` / `<match>` structural block.
+  //   The native parser does NOT promote `<each>` / `<match>` to the structural
+  //   `each-block` / `match-block` AST nodes — it leaves them as generic
+  //   `[markup] tag=each` (verified empirically). The legacy BS+TAB path DOES
+  //   promote them (block-splitter STRUCTURAL_RAW_BODY_ELEMENTS → ast-builder
+  //   each-block / match-block dispatch). When a component body contains an
+  //   `<each>` / `<match>`, routing its re-parse through the native path drops
+  //   the structural promotion → the iteration never renders + `@.` leaks
+  //   (E-SCOPE-001 on `key=@.id`, bare `.name` in the body → E-CODEGEN-INVALID-JS).
+  //   Route to the legacy path so the structural node survives re-parse. This is
+  //   the same divergence-guard mechanism as (1)/(2): a false positive merely
+  //   takes the slower (correct) path; here it is a true positive.
+  if (/<\s*(?:each|match)\b/.test(source)) {
     return true;
   }
   return false;
@@ -1937,6 +1967,39 @@ function substituteProps(
     return cloned as unknown as ASTNode;
   }
 
+  // each-in-enclosing-scope (S153) — each-block / match-block structural nodes.
+  //   The generic "Other node kinds" fallthrough below recurses into ARRAY
+  //   fields (templateChildren / bodyChildren / arms) but does NOT substitute
+  //   props in the structural STRING fields (each: inExprRaw / ofExprRaw /
+  //   keyExprRaw / asName; match: onExprRaw). Without this, a component-body
+  //   `<each in=items key=@.id>` keeps `inExprRaw="items"` (the bare PROP name)
+  //   after expansion → codegen emits `const _items = items;` (items undefined
+  //   at module scope). Substitute the prop into those string fields here, then
+  //   fall through to the generic array-recursion for the child node lists.
+  if (cloned.kind === "each-block" || cloned.kind === "match-block") {
+    for (const field of ["inExprRaw", "ofExprRaw", "keyExprRaw", "asName", "onExprRaw"]) {
+      const cur = cloned[field];
+      if (typeof cur === "string" && cur.length > 0) {
+        const sub = substitutePropsInRawExpr(cur, props);
+        if (sub !== cur) cloned[field] = sub;
+      }
+    }
+    // Recurse into the structural child node lists + the optional <empty> child.
+    for (const key of ["templateChildren", "bodyChildren", "arms"]) {
+      if (Array.isArray(cloned[key])) {
+        cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
+          item && typeof item === "object" && (item as Record<string, unknown>).kind
+            ? substituteProps(item as ASTNode, props, propExprMap)
+            : item,
+        );
+      }
+    }
+    if (cloned.emptyChild && typeof cloned.emptyChild === "object" && (cloned.emptyChild as Record<string, unknown>).kind) {
+      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap);
+    }
+    return cloned as unknown as ASTNode;
+  }
+
   // Other node kinds: recurse into any array fields that look like node lists
   for (const key of Object.keys(cloned)) {
     if (key === "span" || key === "id") continue;
@@ -1951,6 +2014,35 @@ function substituteProps(
   }
 
   return cloned as unknown as ASTNode;
+}
+
+/**
+ * each-in-enclosing-scope (S153) — substitute prop references inside a structural
+ * raw-expression string (an each-block's `in=`/`of=`/`key=`/`as=` value, or a
+ * match-block's `on=` value).
+ *
+ * `props` maps prop-name → caller value (e.g. `items` → `@todos`). We replace
+ * each prop name appearing as a STANDALONE leading identifier with its caller
+ * value, so `items` → `@todos` and `items.foo` → `@todos.foo`, but NOT:
+ *   - a member-access tail (`x.items` keeps `.items` — `items` there is a field),
+ *   - the contextual sigil member (`@.items` keeps `.items`),
+ *   - a substring of a longer identifier (`myitems` is untouched).
+ *
+ * The negative-lookbehind on `.`/word-char + word-boundary trailing edge gives
+ * exactly that. Conservative — when no prop matches, the string is returned as-is.
+ */
+function substitutePropsInRawExpr(raw: string, props: Map<string, string>): string {
+  if (!raw || props.size === 0) return raw;
+  let out = raw;
+  for (const [name, value] of props.entries()) {
+    if (!name) continue;
+    // Match `name` as a standalone leading identifier: not preceded by `.` or a
+    // word char (so `@.name` / `x.name` / `myname` are excluded), and followed by
+    // a non-ident char or end (so the full identifier is `name`, not `nameX`).
+    const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`, "g");
+    out = out.replace(re, (_m, pre) => `${pre}${value}`);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

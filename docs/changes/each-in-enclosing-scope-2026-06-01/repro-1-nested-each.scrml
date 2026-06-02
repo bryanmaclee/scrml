@@ -1,0 +1,14 @@
+<program>
+type Item:struct = { id: string, name: string }
+type Group:struct = { id: string, items: Item[] }
+<groups>: Group[] = [
+  { id: "g1", items: [{ id: "a", name: "alpha" }, { id: "b", name: "beta" }] }
+]
+<ul>
+  <each in=@groups as g key=g.id>
+    <each in=g.items key=@.id>
+      <li>${@.name}</li>
+    </each>
+  </each>
+</ul>
+</program>

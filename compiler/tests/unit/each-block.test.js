@@ -326,27 +326,37 @@ describe("each-block §7 — §4.14 :-shorthand body (Q3 RE-RATIFICATION)", () =
 // ---------------------------------------------------------------------------
 
 describe("each-block §8 — nested iteration", () => {
-  test("outer `as` binding is accessible inside inner template", () => {
+  test("inner each over an outer-alias member resolves in the outer factory scope (each-in-enclosing-scope, S153)", () => {
+    // The inner each iterates `group.items` — `group` is the OUTER each's `as`
+    // alias, bound ONLY inside the outer per-item factory. Pre-fix the inner each
+    // was lifted to a MODULE-SCOPE render fn reading `const _items = group.items;`
+    // (group undefined → runtime ReferenceError) AND was dropped from the outer
+    // factory (unhandled-kind comment). Post-fix the inner each is emitted INLINE
+    // inside the outer factory (item-local mount + inline reconcile, source valid).
     const src = `<program>
-<groups> = []
+type Item:struct = { id: string, name: string }
+type Group:struct = { id: string, items: Item[] }
+<groups>: Group[] = []
 
-<each in=@groups as group>
-    <ul>
-        <each in=@items as item>
-            <li>group + item</li>
-        </each>
-    </ul>
+<each in=@groups as group key=group.id>
+    <each in=group.items key=@.id>
+        <li>\${@.name}</li>
+    </each>
 </each>
 
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "nested");
-    // The test only verifies the AST + codegen handle the nested shape
-    // without crashing; the `@items` outer reference is a separate
-    // (undeclared) symbol so we accept E-DG-002 / E-SCOPE-001 on `items`
-    // (synthetic test). The shape we care about is that two
-    // `_scrml_each_render_*` functions are emitted.
-    const renderCount = (clientJs.match(/function _scrml_each_render_\d+\(\)/g) || []).length;
-    expect(renderCount).toBeGreaterThanOrEqual(2);
+    expect(errors).toEqual([]);
+    // Exactly ONE module-scope each render fn (the OUTER each). The inner each is
+    // inline — it gets no module-scope render fn of its own (the old phantom).
+    const renderCount = (clientJs.match(/^function _scrml_each_render_\d+\(\)/gm) || []).length;
+    expect(renderCount).toBe(1);
+    // The inner source is read INSIDE the outer factory (after its `(group, ...)`
+    // opener) — NOT at module scope. No unhandled-kind drop comment.
+    expect(clientJs).toContain("= group.items;");
+    expect(clientJs).not.toContain('each: unhandled template child kind="each-block"');
+    // The inner reconcile + inner item-local mount are present inline.
+    expect(clientJs).toContain('.setAttribute("data-scrml-each-mount", "each_');
   });
 });
 
