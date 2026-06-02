@@ -7,7 +7,7 @@
  * servers can all drive compilation without spawning a subprocess.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync, copyFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync } from "fs";
 import { resolve, extname, dirname, basename, join, relative } from "path";
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
@@ -83,18 +83,40 @@ const STDLIB_RUNTIME_DIR = resolve(dirname(__apiFile), "..", "runtime", "stdlib"
  * @param {string} dirPath — directory to scan
  * @returns {string[]} — array of absolute .scrml file paths, sorted
  */
+// Directory names that never hold routable `.scrml` source — package deps and
+// build output. Descending into them on a `scrml dev <dir>` causes a
+// compile-storm; when a dependency is `bun link`ed, an unbounded walk through a
+// symlinked sibling repo. Dot-dirs (`.git`, `.claude`, …) are skipped wholesale
+// (see the dot-prefix guard in walk()).
+const SCAN_SKIP_DIRS = new Set(["node_modules", "dist"]);
+
 export function scanDirectory(dirPath) {
   const results = [];
   const absDir = resolve(dirPath);
 
   function walk(dir) {
-    const entries = readdirSync(dir);
+    let entries;
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
     for (const entry of entries) {
+      // Skip dot-entries (.git, .claude, dotfiles) and known non-source dirs.
+      if (entry.startsWith(".") || SCAN_SKIP_DIRS.has(entry)) continue;
       const fullPath = join(dir, entry);
-      const stat = statSync(fullPath);
+      let stat;
+      try {
+        // lstatSync (NOT statSync): a symlinked directory is seen as a symlink,
+        // not a directory, so we never follow it into a `bun link`ed dependency
+        // tree (the scandir-storm bug, reported by scrml-site S154).
+        stat = lstatSync(fullPath);
+      } catch {
+        continue;
+      }
       if (stat.isDirectory()) {
         walk(fullPath);
-      } else if (entry.endsWith(".scrml")) {
+      } else if (stat.isFile() && entry.endsWith(".scrml")) {
         results.push(fullPath);
       }
     }

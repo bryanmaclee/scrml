@@ -14,8 +14,8 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
-import { join, resolve } from "path";
+import { mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from "fs";
+import { join, resolve, sep } from "path";
 import { compileScrml, scanDirectory } from "../../src/api.js";
 
 // ---------------------------------------------------------------------------
@@ -168,6 +168,44 @@ describe("scanDirectory", () => {
     mkdirSync(emptyDir, { recursive: true });
     const files = scanDirectory(emptyDir);
     expect(files).toEqual([]);
+  });
+
+  // scandir-storm fix (reported by scrml-site, S154): `scrml dev <dir>` walked
+  // node_modules / .git / dist and followed `bun link`ed symlinked dep trees,
+  // producing a compile-storm. scanDirectory must skip those.
+  test("skips node_modules, dist, and dot-dirs", () => {
+    for (const skip of ["node_modules", "dist", ".git", ".claude"]) {
+      const d = join(FIXTURE_DIR, skip);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, "decoy.scrml"), 'p "should not be found"\n');
+    }
+    const files = scanDirectory(FIXTURE_DIR);
+    expect(files.some(f => f.includes("node_modules"))).toBe(false);
+    expect(files.some(f => f.includes(`${sep}dist${sep}`))).toBe(false);
+    expect(files.some(f => f.includes(`${sep}.git${sep}`))).toBe(false);
+    expect(files.some(f => f.includes(`${sep}.claude${sep}`))).toBe(false);
+    // Real source still found.
+    expect(files.some(f => f.endsWith("hello.scrml"))).toBe(true);
+  });
+
+  test("does not follow symlinked directories", () => {
+    // A symlinked dir (mimics a `bun link`ed dep) must not be descended. The
+    // real target lives OUTSIDE the scanned dir, so the only path to its
+    // .scrml is via the symlink — finding it would prove the symlink was
+    // followed.
+    const realExternal = join(FIXTURE_DIR, "..", "api-test-external");
+    mkdirSync(realExternal, { recursive: true });
+    writeFileSync(join(realExternal, "external.scrml"), 'p "external"\n');
+    const linkPath = join(FIXTURE_DIR, "linked");
+    try {
+      symlinkSync(resolve(realExternal), linkPath, "dir");
+    } catch {
+      // Some platforms/CI forbid symlink creation without privilege; the
+      // assertion below still holds trivially (no symlink → nothing followed).
+    }
+    const files = scanDirectory(FIXTURE_DIR);
+    expect(files.some(f => f.includes("external.scrml"))).toBe(false);
+    rmSync(realExternal, { recursive: true, force: true });
   });
 });
 
