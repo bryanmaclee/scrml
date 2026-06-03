@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-02T03:40:05-06:00  commit: c665714c
+# updated: 2026-06-02T21:33:23-06:00  commit: 57edc794
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -13,7 +13,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 - All other codes → result.errors (fatal, CLI exits 1)
 - Cross-stream helper required when asserting on W-*/I-* codes in tests (see diagnostic-stream-partition memory note)
 
-## Error Code Families (374+ distinct codes in compiler source)
+## Error Code Families (379+ distinct codes in compiler source)
 
 | Family | Count | Description |
 |--------|-------|-------------|
@@ -27,7 +27,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-CLOSURE-* | 2 | Closure scope errors |
 | E-CODEGEN-INVALID-JS | 1 | Emitted-JS parse-gate invariant (default-ON, S142): emitted JS fails `node --check`. S153 closed two false-fire classes: `<each>` w/ `@.` sigil in a block-form `<match>` arm (3429b385) + `<each>` in a component body (e6870f25) — both previously leaked unscoped `.name` / `@ . id` into emitted JS |
 | E-COMPONENT-* | ~15 | Component definition/usage errors |
-| E-CONTRACT-* | 4 | Server-fn contract errors |
+| E-CONTRACT-* | 4 | Server-fn contract errors: E-CONTRACT-001 (static literal fails predicate), E-CONTRACT-001-RT (runtime boundary), E-CONTRACT-002 (named shape not in registry; also: enum-subset error marker at decl-site, S156), E-CONTRACT-003 (predicate refs external reactive var) |
 | E-CPS-* | 6 | CPS async planner errors (idempotency, multibatch reorder/machine-crossing) |
 | E-CTRL-* | 6 | Control flow errors |
 | E-CTX-* | 2 | Context errors (E-CTX-001: unclosed block; E-CTX-003: shorthand confusion) |
@@ -35,8 +35,12 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-DERIVED-* | 7 | Derived-value errors (circular-dep, engine-no-initial/rules/write, value-mutate) |
 | E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts] |
 | E-EACH-ITER-SHAPE | 1 | Each iteration shape errors: missing-or-both `of`/`in` attrs [ast-builder.js] |
-| E-ENGINE-* | ~20 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block) |
-| E-ENGINE-STATE-CHILD-MISSING | 1 | Engine state-child closer un-findable. S153 (c89c1cb1) closed the `:`-shorthand-child false-fire class: a `<tag : expr>` child inside an engine arm pushed a phantom unbalanced opener onto `lowerDepth` that absorbed the state-child `</>`. Fixed via attr-aware `isColonShorthandOpener` in all 3 closer-finders [engine-statechild-parser.ts] |
+| E-ENGINE-* | ~20 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block); +4 NEW S154-S155 codes (see Key New Codes below) |
+| E-ENGINE-ACCEPTS-NOT-ENUM | 1 | **(S154-S155 NEW)** `<engine for=T accepts=MsgType>` — `MsgType` is not a declared `:enum` type (or is absent from typeDecls). Fired at SYM PASS 11 in symbol-table.ts [symbol-table.ts:5939] |
+| E-ENGINE-MSG-WITHOUT-ACCEPTS | 1 | **(S155 NEW)** A state-child declares a message arm (`\| .V :>`) but the engine opener has no `accepts=` attribute. Fired at PASS 20 [symbol-table.ts:6512] |
+| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | 1 | **(S155 NEW)** A state-child has message arms but the set does not cover all `accepts=` enum variants and carries no wildcard `\| _ :>` arm. Fired at PASS 20 [symbol-table.ts:6543] |
+| E-ENGINE-MSG-UNKNOWN | 1 | **(S155 NEW)** `.advance(.X)` targets a variant in NEITHER the state-transition plane NOR the message-dispatch plane [type-system.ts:8322] |
+| E-ENGINE-STATE-CHILD-MISSING | 1 | Engine state-child closer un-findable. S153 (c89c1cb1) closed the `:`-shorthand-child false-fire class [engine-statechild-parser.ts] |
 | E-ERRORS-* | 2 | `<errors>` element validation (E-ERRORS-001, E-ERRORS-002) |
 | E-EXPR-* | 30 | Native-parser expression grammar codes (§34.1) |
 | E-FORMFOR-* | 8 | formFor type validation errors |
@@ -45,16 +49,17 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-INPUT-* | 5 | Input element errors |
 | E-LIFECYCLE-* | ~12 | Lifecycle hook errors |
 | E-LIN-* | 2 | Linear-type errors |
-| E-MATCH-* | ~6 | Pattern match errors (E-MATCH-ARM-SEPARATOR: stray-comma arm separator §18.2) |
+| E-MATCH-* | ~7 | Pattern match errors (E-MATCH-ARM-SEPARATOR: stray-comma arm separator §18.2; E-MATCH-SUBSET-DEAD-ARM: see below) |
+| E-MATCH-SUBSET-DEAD-ARM | 1 | **(S156 (d)-A NEW)** A match arm names a variant excluded by the matched cell's `oneOf`/`notIn` enum-subset refinement — the arm can never be reached. Fired by both type-system.ts (full type-resolution, both match loci) and symbol-table.ts PASS 20 (string-based block-form pass, constructor-form + member-access, batch 4) [type-system.ts:9602; symbol-table.ts:10883] |
 | E-META-* | 7 | Meta check/eval errors |
 | E-MW-* | ~6 | Middleware errors |
 | E-NAME-* | 1 | Name collision with reserved identifier |
-| E-PA-* | ~7 | protect-analyzer errors — E-PA-002 false-positive fix: `extractCreateTableStatements` now generic cycle-safe deep-walk; finds CREATE TABLE in `body`/`?{}` under fn-decl bodies + top-level `${}` logic blocks [protect-analyzer.ts] |
+| E-PA-* | ~7 | protect-analyzer errors — E-PA-002 false-positive fix: `extractCreateTableStatements` now generic cycle-safe deep-walk [protect-analyzer.ts] |
 | E-PARSEVARIANT-* | ~3 | parseVariant API errors |
 | E-REPLAY-* | 3 | Engine replay errors |
 | E-RESET-* | 1 | Reset target errors |
 | E-RI-* | ~3 | Route inference errors |
-| E-SCOPE-001 | 1 | Identifier out of scope (e.g. `key=@.id` outside an each item scope). S153 (e6870f25) closed the `<each>`-in-component-body false-fire: `substituteProps` now covers each-block string fields so `@.id` resolves in the component-expanded body |
+| E-SCOPE-001 | 1 | Identifier out of scope. S153 (e6870f25) closed the `<each>`-in-component-body false-fire class |
 | E-SQL-* | ~8 | SQL context errors |
 | E-STMT-* | 43 | Native-parser statement grammar codes (§34.1) |
 | E-SWITCH-FORBIDDEN | 1 | `switch` keyword in scrml source |
@@ -90,12 +95,21 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | I-MATCH-PROMOTABLE | 1 | Info: match eligible for engine promotion (§56) |
 | I-PARSER-NATIVE-SHADOW | 1 | Info: native parser shadows live-pipeline result |
 
-## Key New / Changed Codes Since Watermark 09f74bee (S148-S153)
+## Key New / Changed Codes Since Watermark c665714c (S154-S156)
 
-- E-DECL-NEEDS-INITIALIZER — S152 §6.2 Shape 4; fires when a non-array typed-cell decl has no RHS initializer; message includes the correct `<name>: T = ...` form as correction hint [ast-builder.js:4236]
-- W-EACH-PROMOTABLE — S130 HU-1; info-level; `${ for (let x of @cell) { lift ... } }` is promotable to `<each>` tier-1 form; fired in Stage 6.4c lint pass [lint-w-each-promotable.js:205]
-- W-EACH-KEY-001 — S130 HU-1; info-level; `<each in=@cell>` items have no inferable `.id` key; fired in Stage 6.4d lint pass [lint-w-each-key.js:210]
-- NO new error codes in S153 — the sweep CLOSED false-fire classes on three existing codes (E-CODEGEN-INVALID-JS, E-ENGINE-STATE-CHILD-MISSING, E-SCOPE-001); see Fix Notes below
+### S154 — #14 event-payload-transition (parser batch 1)
+No new diagnostics; existing codes extended. `accepts=MsgType` is recorded verbatim on the AST; the typer batch 2 (S155) owns the resolution diagnostic.
+
+### S155 — #14 event-payload-transition (typer batch 2 + codegen batch 3)
+- **E-ENGINE-ACCEPTS-NOT-ENUM** — `accepts=MsgType` resolves to an unknown or non-`:enum` type. SYM PASS 11, symbol-table.ts. Fatal.
+- **E-ENGINE-MSG-WITHOUT-ACCEPTS** — state-child has message arms but engine has no `accepts=`. SYM PASS 20, symbol-table.ts. Fatal.
+- **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** — message-arm set does not cover all `accepts=` enum variants and has no wildcard. SYM PASS 20, symbol-table.ts. Fatal.
+- **E-ENGINE-MSG-UNKNOWN** — `.advance(.X)` variant is in neither the state-transition plane nor the message-dispatch plane. type-system.ts. Fatal.
+
+### S156 — Bug 62 + (d)-A enum-subset (4 batches)
+- **E-MATCH-SUBSET-DEAD-ARM** — dead arm inside a `<match>` on a subset-refined cell. Batch 2: type-system.ts (type-resolution path, both match loci). Batch 4: symbol-table.ts PASS 20 (string-based path, constructor-form + member-access). Both fire independently when the matched cell's type has `subsetVariants`. Fatal.
+- **E-CONTRACT-002** (extended use) — enum-subset refinement error markers (range form, empty list, malformed entries) lower to E-CONTRACT-002 at declaration time via `checkEnumSubsetErrorMarkers()` in type-system.ts. Reuses the contract family rather than introducing a dedicated code.
+- Bug 62 fix: NO new error code. The root cause was silent wrong-JS generation (`.advance(.X)` lowered without engine-ctx → stale JS); the fix is in emit-each.ts codegen path, not diagnostic emission.
 
 ## Fix Notes
 
@@ -141,17 +155,13 @@ match arms are raw text (`armsRaw`); `emit-match` re-parsed via `nativeParseFile
 native parser) → rendered inline with `@.` unscoped (`.name` leak). Fix: each-bearing arms re-parse
 via `splitBlocks`+`buildAST`; `restampEachBlockIds` namespaces ids; lifted each-blocks attach to
 `matchBlock.bodyChildren` so `collectEachBlocks` emits the render fn with the `@.` rewrite;
-`__scrmlCachedArms` memoizes across the two passes. The S152 #1 "covers block-form match" claim was
-aspirational (hook wired but each-in-match never compiled) — now real.
+`__scrmlCachedArms` memoizes across the two passes.
 
 **`:`-shorthand child inside an engine arm breaks state-child parsing (c89c1cb1, was
 E-ENGINE-STATE-CHILD-MISSING)** — a §4.14 `:`-shorthand child (`<li : @.name>`) inside an engine
-state-child broke closer-pairing (valid at top-level; only broke in an engine arm). The 3
-closer-finders in `engine-statechild-parser.ts` pushed non-void lowercase openers onto `lowerDepth`;
-a `:`-shorthand opener has no closer → the phantom unbalanced opener absorbed the state-child `</>`.
-Fix: attr-aware `isColonShorthandOpener` (whitespace-preceded depth-0 non-string `:`; tracks
-string/paren/brace/bracket/`${}` so `bind:`/`on:`/`style="x:y"`/`${a?b:c}` aren't mis-detected)
-wired into all 3 finders, mirroring the void/self-close exclusions.
+state-child broke closer-pairing. Fix: attr-aware `isColonShorthandOpener` (whitespace-preceded
+depth-0 non-string `:`; tracks string/paren/brace/bracket/`${}` so `bind:`/`on:`/`style="x:y"`/
+`${a?b:c}` aren't mis-detected) wired into all 3 finders, mirroring the void/self-close exclusions.
 
 **`<each>` over an enclosing-scope binding (e6870f25, was E-SCOPE-001 / E-CODEGEN-INVALID-JS)** —
 two bugs, one root (file-scope each emission can't see enclosing scope): (A) nested `<each>` (the
@@ -160,6 +170,41 @@ ReferenceError; fix = inline emission in the outer factory via shared `emitEachR
 (B) `<each>` in a component body — `@.id` E-SCOPE-001 + `.name` leak; 3 roots in
 `component-expander.ts` (native parser doesn't promote each/match → legacy `splitBlocks`+`buildAST`
 re-parse fallback; `substituteProps` missed each-block string fields; tokenized `@ . id` collapse).
+
+### Bug 62 — `<each>` engine-ctx threading (S156)
+`emit-each.ts` — per-item event handlers in `<each>` templates that contained `.advance(.X)` or
+`@engine = .X` were lowered WITHOUT engine awareness: `rewriteBlockBody` had no reference to the
+file's engine metadata (the `EngineRewriteCtx`) so the call resolved to `undefined(...)` → silent
+wrong JS. Fix: `buildEachEngineCtx(fileAST)` is called ONCE at the top of `emitEachBodyRenderForFile`,
+collects all file-scope engines with message arms + their message-variant sets, builds a minimal
+`EachEngineCtx` carrying the engine var names, a spread of `emitExprField` context extras, and the
+`engineRewriteCtx`. This ctx is threaded through all `renderTemplateAttrToJs` / `renderTemplateChildToJs`
+/ `emitEachReconcileLines` calls; `emitEngineHandlerBody(preRewritten, ctx)` intercepts (A) call-ref
+`.advance(.X)` forms and (B) assign-ref `@engine = .X` forms and routes both to the correct plane.
+**Bug 65 (next arc):** the identical gap exists at `emit-lift.js` (~line 529) — that file has no
+engine-ctx threading; emit-each.ts is the exact template to mirror.
+
+### (d)-A enum-subset refinement (S156, 4 batches)
+**Batch 1 (type-system.ts):** `parseEnumSubsetRefinement()` calls the shared `parseEnumSubsetAnnotation()`
+from `enum-subset-refinement.ts`; `makeEnumSubsetPredicatedType()` materializes a `PredicatedType` with
+`subsetVariants: Set<string>` (already complemented for `notIn`). Error markers (range form, empty set,
+malformed entries) are deferred as `predicate.kind === "error"` and lowered to E-CONTRACT-002 at
+declaration-site validation.
+
+**Batch 2 (symbol-table.ts PASS 20 + type-system.ts match exhaustiveness):** Both match exhaustiveness
+loci (block-form `<match>` in PASS 20; constructor-form + member-access in type-system.ts) now narrow
+to the `subsetVariants` set instead of the full base-enum set. Arms naming excluded variants →
+`E-MATCH-SUBSET-DEAD-ARM`; arms naming in-subset variants are required for exhaustiveness.
+
+**Batch 3 (emit-predicates.ts + emit-schema-for.ts):** `predicateToJsExpr()` handles `kind: "variant-set"`:
+emits `(["A","B"].includes(valueExpr))`; `classifyFieldForSql()` handles `predicated` type with
+`subsetVariants`: emits `{ kind: "bare-enum", ..., enumSubset: true }` so the DDL walker emits
+`CHECK (col IN ('Admin','Editor'))` in base-enum declaration order.
+
+**Batch 4 (symbol-table.ts PASS 20 reach — constructor-form + member-access):** E-MATCH-SUBSET-DEAD-ARM
+enforcement extended to the constructor-form match path and member-access match path in PASS 20,
+so both `<match on=@role>` block-form AND inline `match @role { .Admin => ... }` patterns enforce
+the subset. Closes Bug 66 (both loci must agree per §18.8.1 / §18.0.1).
 
 ## Error Handling Patterns
 - All compile errors returned as CGError[] in result.errors or result.warnings
@@ -174,7 +219,7 @@ errorBoundary compile support: `compiler/src/codegen/emit-error-boundary.ts` (32
 fallback markup + per-variant renders; paired with host-JS try/catch backstop (§19.6.8 C-hybrid).
 
 ## Tags
-#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #W-EACH #each-in-dynamic-context #source-map #s152 #s153
+#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #E-ENGINE-ACCEPTS-NOT-ENUM #E-ENGINE-MSG #E-MATCH-SUBSET-DEAD-ARM #W-EACH #each-in-dynamic-context #source-map #enum-subset #message-dispatch #bug62 #s152 #s153 #s154 #s155 #s156
 
 ## Links
 - [primary.map.md](./primary.map.md)
