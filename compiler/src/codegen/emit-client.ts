@@ -2358,9 +2358,20 @@ function getAllVariantInfo(decl: TypeDecl): VariantInfo[] {
         }
       }
       if (fb.trim()) pieces.push(fb);
-      for (const p of pieces) {
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i];
         const colonIdx = p.indexOf(":");
-        if (colonIdx === -1) continue;
+        if (colonIdx === -1) {
+          // Bug 68 — positional payload field (a bare type expr, no field
+          // name, e.g. `Ok(int)`). Synthesize the index-based key `_<i>`,
+          // mirroring type-system.ts parseEnumBody + emit-logic.ts so the
+          // raw-fallback path agrees with the structured `decl.variants`
+          // path. Without this, a positionally-declared payload variant lost
+          // its payload field here (it became a fieldNames:[] "empty payload"
+          // entry) and the constructor / schemaFor classification dropped it.
+          if (p.trim()) fieldNames.push(`_${i}`);
+          continue;
+        }
         const fname = p.slice(0, colonIdx).trim();
         if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(fname)) fieldNames.push(fname);
       }

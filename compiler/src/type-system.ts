@@ -1368,11 +1368,29 @@ function parseEnumBody(
       const payload = new Map<string, ResolvedType>();
 
       if (payloadStr) {
-        // Split payload fields on commas at depth-0.
+        // Split payload fields on commas at depth-0. A field part is EITHER
+        // named (`field: type`, §14.4) OR positional (a bare type expr, e.g.
+        // `Ok(int)` — the §34 / §41.15 E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1
+        // canonical exemplar). Positional fields carry NO declared name, so we
+        // synthesize a stable index-based key `_<i>` (mirrors the established
+        // positional convention at emit-logic.ts:`schema[i] ?? \`_${i}\``).
+        // Without this, a positional payload materialized to a size-0 Map and
+        // the variant was misclassified as a bare-variant enum — Bug 68 (it
+        // escaped the payload-enum SQL rejection AND dropped the constructor
+        // payload). Positional bindings (§18.7) resolve by index against this
+        // key list, so the synthetic names never surface to the adopter.
         const fieldParts = splitTopLevel(payloadStr, [","]);
-        for (const fp of fieldParts) {
+        for (let i = 0; i < fieldParts.length; i++) {
+          const fp = fieldParts[i];
           const colonIdx = fp.indexOf(":");
-          if (colonIdx === -1) continue;
+          if (colonIdx === -1) {
+            // Positional field — bare type expression, no field name.
+            const typeExpr = fp.trim();
+            if (typeExpr) {
+              payload.set(`_${i}`, resolveTypeExpr(typeExpr, typeRegistry));
+            }
+            continue;
+          }
           const fieldName = fp.slice(0, colonIdx).trim();
           const typeExpr = fp.slice(colonIdx + 1).trim();
           if (fieldName) {
