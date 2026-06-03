@@ -1070,6 +1070,191 @@ function emitEachReconcileLines(
   return lines;
 }
 
+// ---------------------------------------------------------------------------
+// Bug 72 (S158) — nested `<each>` inside Tier-0 `${for…lift}` lifted markup.
+//
+// A `<each>` that appears as a CHILD of lifted markup
+// (`lift <tr><each in=row.cells><td>${@.}</td></each></tr>`) arrives at codegen
+// as a GENERIC `markup` node (`tag="each"`), NOT a structural `each-block`: the
+// each-block transform lives in `buildAST`/`buildBlock` (fired only for the BS
+// STRUCTURAL_RAW_BODY_ELEMENTS), while lift markup is parsed by `parseLiftTag`
+// (ast-builder.js), which produces generic markup recursively and never
+// promotes `<each>`. So emit-lift.js's `emitCreateElementFromMarkup` used to
+// render the `<each>` as a LITERAL `<each>` DOM element and its `${@.}` body
+// reached the bare-expr text-node path with NO iter-scope rewrite — the inner
+// sigil leaked RAW (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-JS.
+//
+// The inner `@.` is LEGITIMATE per SPEC §17.7.3 ("Nested `<each>` scopes resolve
+// `@.` to the INNERMOST scope's current value") — this holds in ANY markup
+// context, including markup lifted from a Tier-0 `for` loop (§17.4). So
+// E-SYNTAX-064 correctly does NOT fire; the gap is purely codegen lowering.
+//
+// FIX (the each-nesting analog of the Bug 65 / 63fcba72 engine-ctx gap — reuse
+// the SHARED machinery, no fork): convert the generic markup `<each>` to the
+// each-block shape from its STRUCTURED attrs+children (no raw re-parse needed —
+// `parseLiftTag` already produced structured attrs + a walkable child tree),
+// then emit it INLINE via the SAME `emitEachReconcileLines` helper the
+// renderTemplateChildToJs nested-each branch uses. The enclosing scope var is
+// the Tier-0 `for`-loop variable (a plain closure-bound JS var), so the inner
+// source (`row.cells`) resolves in that scope and the inner `@.` lowers to the
+// inner each's iter var (`as`-alias or `_scrml_each_item`).
+// ---------------------------------------------------------------------------
+
+/**
+ * Bug 72 (S158) — extract the raw iteration-source / `as` / `key` strings from
+ * a markup `<each>` attribute's structured value. `parseLiftTag` builds the
+ * value as a `variable-ref` (`{name}`), an `expr` (`{raw}`), or a
+ * `string-literal` (`{value}`); fall back to `.raw`/`.name`/`.value` in that
+ * order. Returns null when no usable text is present.
+ */
+function eachAttrRawText(attrVal: any): string | null {
+  if (attrVal == null) return null;
+  if (typeof attrVal === "string") return attrVal.trim() || null;
+  const kind = attrVal.kind;
+  if (kind === "variable-ref" && typeof attrVal.name === "string") return attrVal.name.trim() || null;
+  if (kind === "expr" && typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
+  if (kind === "string-literal" && typeof attrVal.value === "string") return attrVal.value.trim() || null;
+  if (typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
+  if (typeof attrVal.name === "string") return attrVal.name.trim() || null;
+  if (typeof attrVal.value === "string") return attrVal.value.trim() || null;
+  return null;
+}
+
+/**
+ * Bug 72 (S158) — convert a generic markup `<each>` node (from `parseLiftTag`,
+ * carrying structured `attrs` + `children`) into the structural `each-block`
+ * shape the shared each-render machinery consumes. Mirrors the field set the
+ * ast-builder `buildBlock` each-block dispatch produces (§17.7), but reads from
+ * the already-structured attrs/children rather than re-splitting raw text.
+ *
+ * The `as name` form lives either as an `as` attribute OR (when `parseLiftTag`
+ * keeps it inline) as a bareword in the header; markup attrs from lift already
+ * split `in=`/`of=`/`as`/`key=`, so we read them by name.
+ *
+ * Returns null when the node is not a usable `<each>` (no `in=`/`of=` source).
+ */
+export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | null {
+  if (!markupNode || typeof markupNode !== "object") return null;
+  const tag = String(markupNode.tag ?? markupNode.tagName ?? markupNode.name ?? "");
+  if (tag !== "each") return null;
+
+  const attrs: any[] = markupNode.attributes ?? markupNode.attrs ?? [];
+  let inExprRaw: string | null = null;
+  let ofExprRaw: string | null = null;
+  let asName: string | null = null;
+  let keyExprRaw: string | null = null;
+  for (const attr of attrs) {
+    if (!attr || typeof attr.name !== "string") continue;
+    const n = attr.name;
+    if (n === "in") inExprRaw = eachAttrRawText(attr.value);
+    else if (n === "of") ofExprRaw = eachAttrRawText(attr.value);
+    else if (n === "key") keyExprRaw = eachAttrRawText(attr.value);
+    else if (n === "as") asName = eachAttrRawText(attr.value);
+  }
+
+  let iterShape: "in" | "of" | null = null;
+  if (inExprRaw && !ofExprRaw) iterShape = "in";
+  else if (ofExprRaw && !inExprRaw) iterShape = "of";
+  else if (inExprRaw && ofExprRaw) iterShape = "in"; // tie-break to in= (mirror ast-builder)
+  if (iterShape === null) return null; // no iteration source — not renderable.
+
+  // Split children into the per-item template + the optional <empty> sub-element
+  // (mirror ast-builder: first markup child tag="empty" is the empty branch).
+  const children: any[] = Array.isArray(markupNode.children) ? markupNode.children : [];
+  let emptyChild: any | null = null;
+  const templateChildren: any[] = [];
+  for (const child of children) {
+    if (!child) continue;
+    // Skip whitespace-only text children (lift markup keeps formatting text).
+    if (child.kind === "text") {
+      const t = String(child.value ?? child.text ?? "");
+      if (!t.trim()) continue;
+    }
+    const childTag = child.kind === "markup" ? String(child.tag ?? child.name ?? "") : "";
+    if (childTag === "empty" && emptyChild === null) {
+      emptyChild = child;
+    } else {
+      templateChildren.push(child);
+    }
+  }
+
+  return {
+    id: typeof markupNode.id === "number" ? markupNode.id : nextLocalId(),
+    kind: "each-block",
+    iterShape,
+    inExprRaw,
+    ofExprRaw,
+    asName,
+    keyExprRaw,
+    bodyChildren: children,
+    templateChildren,
+    emptyChild,
+    bodyRaw: "",
+    span: markupNode.span ?? null,
+  };
+}
+
+/**
+ * Bug 72 (S158) — emit a nested `<each>` (given as a generic markup node from
+ * lifted Tier-0 markup) INLINE into `fragmentVar`, resolving its iteration
+ * source in the enclosing `for`-loop scope (`enclosingScopeVar`). Reuses the
+ * SAME `emitEachReconcileLines` helper as the Tier-1 nested-each branch — the
+ * inner `@.` lowers to the inner each's iter var (innermost-scope-wins per
+ * §17.7.3), the inner source (`row.cells`) resolves against the for-loop var.
+ *
+ * Returns true when the node was a usable `<each>` and was emitted; false when
+ * it was not an `<each>` (caller keeps its existing literal-markup emission).
+ */
+export function emitNestedEachFromMarkup(
+  markupNode: any,
+  enclosingScopeVar: string,
+  fragmentVar: string,
+  indent: string = "",
+  engineCtx: EachEngineCtx | null = null,
+): string[] | null {
+  const eachBlock = eachBlockFromMarkupNode(markupNode);
+  if (!eachBlock) return null;
+  // Tree-shake: empty inner each (no template + no <empty>) renders nothing.
+  if ((!Array.isArray(eachBlock.templateChildren) || eachBlock.templateChildren.length === 0) && !eachBlock.emptyChild) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  // Resolve the inner iteration source IN THE ENCLOSING (for-loop) SCOPE.
+  // `enclosingScopeVar` is the for-loop variable (a plain closure-bound JS var),
+  // so a bare reference (`row.cells`) passes through unchanged and a `@.field`
+  // form (when the lift is itself inside another each) lowers to that var.
+  let innerItemsExpr: string;
+  if (eachBlock.iterShape === "in") {
+    innerItemsExpr = rewriteIterValueExpr(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
+  } else {
+    const ofResolved = rewriteIterValueExpr(eachBlock.ofExprRaw ?? "0", enclosingScopeVar);
+    innerItemsExpr = `Array.from({length: Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
+  }
+
+  // The inner each's iter var is its OWN `as` alias or the synthetic default —
+  // distinct from the enclosing scope var so the inner `@.` binds to the inner
+  // item (mirrors emitEachBodyRenderForFile / the Tier-1 nested-each branch).
+  const innerIterVar = (typeof eachBlock.asName === "string" && eachBlock.asName.length > 0)
+    ? eachBlock.asName
+    : "_scrml_each_item";
+  const innerIdxName = "_scrml_each_idx";
+  const innerMountVar = `_scrml_each_mount_${nextLocalId()}`;
+  const innerItemsVar = `_scrml_each_items_${nextLocalId()}`;
+  lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
+  lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${eachBlock.id}");`);
+  lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
+  lines.push(`${indent}const ${innerItemsVar} = ${innerItemsExpr};`);
+  // Inline empty-guard + reconcile (arrow-IIFE so the empty-guard `return`
+  // short-circuits only the inner list build — same shape as the Tier-1 branch).
+  lines.push(`${indent}(() => {`);
+  for (const l of emitEachReconcileLines(eachBlock, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
+    lines.push(l);
+  }
+  lines.push(`${indent}})();`);
+  return lines;
+}
+
 /**
  * Bug 62 (S156) — build the per-file engine codegen context for `<each>`
  * per-item event-handler engine-transition lowering. Mirrors the context

@@ -1,0 +1,9 @@
+type Row:struct = { id: string, cells: string[] }
+
+<rows>: Row[] = []
+
+<table><tbody>
+  <each in=@rows as row>
+    <tr><each in=row.cells><td>${@.}</td></each></tr>
+  </each>
+</tbody></table>

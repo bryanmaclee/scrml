@@ -169,6 +169,14 @@ interface IfOpts {
   enginesWithMessageArms?: Set<string> | null;
   engineMessageVariants?: Map<string, Set<string>> | null;
   machineBindings?: Map<string, MachineBindingInfo> | null;
+  /**
+   * Bug 72 (S158) — enclosing `for`-loop variable name, threaded so a nested
+   * `<each>` inside an `if`/`else` body that sits inside a lifted `for` lowers
+   * its inner `@.` to the inner each's iter var (§17.7.3 innermost-scope rule).
+   * Reaches the consolidated-lift calls below. null = no enclosing for →
+   * byte-identical pre-fix emission.
+   */
+  scopeVar?: string | null;
 }
 
 // §51.5 — Machine binding info for transition guard emission in rewriteBlockBody
@@ -311,7 +319,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
   };
 
   if (hasFragmentedLiftBody(consequent)) {
-    const liftCode = emitConsolidatedLift(consequent);
+    const liftCode = emitConsolidatedLift(consequent, { scopeVar: opts.scopeVar ?? null });
     if (liftCode) lines.push(`  ${liftCode}`);
   } else {
     for (const code of emitLogicBody(consequent, bodyOpts)) {
@@ -325,7 +333,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
 
     if (hasFragmentedLiftBody(alternate)) {
       lines.push(`else {`);
-      const liftCode = emitConsolidatedLift(alternate);
+      const liftCode = emitConsolidatedLift(alternate, { scopeVar: opts.scopeVar ?? null });
       if (liftCode) lines.push(`  ${liftCode}`);
       lines.push(`}`);
     } else {
@@ -453,7 +461,7 @@ export function emitForStmt(
 
     if (hasFragmentedLiftBody(body)) {
       // Pass continueBehavior:"return" so continue-stmts in pre-statements emit `return;`
-      const liftCode = emitConsolidatedLift(body, { directReturn: true, continueBehavior: "return", engineCtx: _liftEngineCtx });
+      const liftCode = emitConsolidatedLift(body, { directReturn: true, continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName });
       if (liftCode) {
         for (const line of liftCode.split("\n")) {
           lines.push(`  ${line}`);
@@ -464,7 +472,7 @@ export function emitForStmt(
       lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
       for (const child of body) {
         if (child && child.kind === "lift-expr") {
-          const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx: _liftEngineCtx });
+          const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx: _liftEngineCtx, scopeVar: varName });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -474,7 +482,7 @@ export function emitForStmt(
           // LIFT-5 fix: if-stmt that may contain lift-expr children must route
           // those inner lifts to tmpContainerVar instead of the global ambient
           // _scrml_lift_target (which is null when the reconciler calls this factory).
-          const code = emitIfStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx });
+          const code = emitIfStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -524,7 +532,7 @@ export function emitForStmt(
   const body: any[] = node.body ?? [];
 
   if (hasFragmentedLiftBody(body)) {
-    const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx });
+    const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx, scopeVar: varName });
     if (liftCode) {
       lines.push(`  ${liftCode}`);
     }

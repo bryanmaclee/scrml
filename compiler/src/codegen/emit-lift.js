@@ -120,6 +120,53 @@ function tryLowerLiftEngineHandler(rawHandlerText, engineCtx) {
 }
 
 // ---------------------------------------------------------------------------
+// Bug 72 (S158) — nested `<each>` inside Tier-0 `${for…lift}` lifted markup.
+//
+// A `<each>` that is a CHILD of lifted markup arrives at codegen as a GENERIC
+// `markup` node (`tag="each"`), NOT a structural `each-block`: `parseLiftTag`
+// (ast-builder.js) produces generic markup recursively and never promotes
+// `<each>` (the each-block transform lives only in the BS-structural buildBlock
+// path). Pre-fix, `emitCreateElementFromMarkup` rendered the `<each>` as a
+// LITERAL `<each>` DOM element and its `${@.}` body reached the bare-expr
+// text-node path with NO iter-scope rewrite — the inner sigil leaked RAW
+// (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-JS.
+//
+// FIX (the each-nesting analog of the Bug 65 / 63fcba72 engine-ctx gap — reuse
+// the SHARED emit-each machinery, no fork): route the `<each>` markup child
+// through emit-each's `emitNestedEachFromMarkup`, which converts it to the
+// each-block shape and emits it INLINE via the SAME `emitEachReconcileLines`
+// helper the Tier-1 nested-each branch uses. The enclosing-scope var is the
+// Tier-0 `for`-loop variable (threaded down as `scopeVar`), so the inner source
+// (`row.cells`) resolves in that scope and the inner `@.` lowers to the inner
+// each's iter var (innermost-scope-wins per SPEC §17.7.3 — legal in any markup
+// context incl. lifted markup per §17.4; E-SYNTAX-064 correctly does NOT fire).
+//
+// `scopeVar` is null at the top markup level (no enclosing `for`); a nested
+// `<each>` there is malformed markup the caller still renders literally (no
+// regression). emit-each is loaded via `require()` to stay init-order safe
+// (mirrors the engine-handler helper above).
+// ---------------------------------------------------------------------------
+
+/**
+ * Lower a nested `<each>` markup child to inline reconcile JS via the SHARED
+ * emit-each machinery. Returns the emitted JS lines, or null when the node is
+ * NOT a usable `<each>` (caller keeps its existing literal-markup emission).
+ *
+ * @param {object} eachMarkupNode — the generic `{kind:"markup", tag:"each"}` node.
+ * @param {string|null} scopeVar — the enclosing `for`-loop variable name.
+ * @param {string} fragmentVar — the element/fragment to append the inner list to.
+ * @param {object|null} engineCtx — the EachEngineCtx carrier (null = no engines).
+ * @returns {string[]|null}
+ */
+function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx) {
+  if (!scopeVar || typeof scopeVar !== "string") return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const each = require("./emit-each.ts");
+  if (!each || typeof each.emitNestedEachFromMarkup !== "function") return null;
+  return each.emitNestedEachFromMarkup(eachMarkupNode, scopeVar, fragmentVar, "", engineCtx);
+}
+
+// ---------------------------------------------------------------------------
 // Render keyword rewriter (§16.6)
 // ---------------------------------------------------------------------------
 
@@ -732,7 +779,7 @@ function emitSetContent(elVar, parts) {
  * @param {string[]} lines — accumulator for JS lines
  * @returns {string} — the variable name of the created element
  */
-export function emitCreateElementFromMarkup(node, lines, engineCtx = null) {
+export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scopeVar = null) {
   const tag = node.tag ?? node.tagName ?? "div";
   const attrs = node.attributes ?? node.attrs ?? [];
   const children = node.children ?? [];
@@ -966,7 +1013,20 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null) {
           lines.push(`${elVar}.appendChild(document.createTextNode(${JSON.stringify(text)}));`);
         }
       } else if (child.kind === "markup") {
-        const childVar = emitCreateElementFromMarkup(child, lines, engineCtx);
+        // Bug 72 (S158) — a nested `<each>` child: route through the SHARED
+        // emit-each machinery (inner `@.` lowers to the inner iter var) instead
+        // of rendering a literal `<each>` element with a raw-`@.` body. Falls
+        // through to the generic recurse when not a usable each (scopeVar null
+        // at top level, or no in=/of= source).
+        const childTag = child.tag ?? child.tagName ?? child.name ?? "";
+        if (childTag === "each") {
+          const eachLines = tryEmitNestedLiftEach(child, scopeVar, elVar, engineCtx);
+          if (eachLines !== null) {
+            for (const l of eachLines) lines.push(l);
+            continue;
+          }
+        }
+        const childVar = emitCreateElementFromMarkup(child, lines, engineCtx, scopeVar);
         lines.push(`${elVar}.appendChild(${childVar});`);
       } else if (child.kind === "logic") {
         // Logic block in markup — dispatch each body node by kind:
@@ -1367,7 +1427,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     for (const child of body) {
       if (!child) continue;
       if (child.kind === 'lift-expr') {
-        const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx });
+        const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx, scopeVar: varName });
         if (code) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
@@ -1377,7 +1437,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
       } else if (child.kind === 'if-stmt') {
-        const code = emitIfStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return" });
+        const code = emitIfStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return", scopeVar: varName });
         if (code) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
@@ -1405,7 +1465,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     if (!child) continue;
     if (child.kind === 'lift-expr') {
       // Route inner lift to the container element — NOT to _scrml_lift() globally
-      const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx });
+      const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: varName });
       if (code) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
@@ -1416,7 +1476,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
     } else if (child.kind === 'if-stmt') {
-      const code = emitIfStmtWithContainer(child, containerElVar, opts);
+      const code = emitIfStmtWithContainer(child, containerElVar, { ...opts, scopeVar: varName });
       if (code) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
@@ -1461,7 +1521,7 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
     for (const child of arr) {
       if (!child) continue;
       if (child.kind === 'lift-expr') {
-        const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx });
+        const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: opts.scopeVar ?? null });
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else if (child.kind === 'for-stmt') {
         const code = emitForStmtWithContainer(child, containerElVar, opts);
@@ -1517,6 +1577,12 @@ export function emitConsolidatedLift(body, opts = {}) {
   // Bug 65 (S157) — engine codegen ctx for lifted engine-transition handlers
   // (null = engine-free file → tree-shaken, byte-identical pre-fix emission).
   const engineCtx = opts.engineCtx ?? null;
+  // Bug 72 (S158) — enclosing `for`-loop variable threaded down so a nested
+  // `<each>` inside the lifted markup lowers its inner `@.` to the inner each's
+  // iter var (§17.7.3 innermost-scope rule). null = no enclosing for (top-level
+  // lift) → byte-identical pre-fix emission; the markup walker treats a `<each>`
+  // child as a generic element when scopeVar is null.
+  const scopeVar = opts.scopeVar ?? null;
 
   // Pre-statements (before the lift)
   const preStatements = [];
@@ -1533,7 +1599,7 @@ export function emitConsolidatedLift(body, opts = {}) {
     const liftExpr = firstLift.expr;
     if (liftExpr.kind === "markup" && liftExpr.node) {
       const lines = [];
-      const rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx);
+      const rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx, scopeVar);
       const factoryBody = lines.join("\n    ");
       let factoryCode;
       if (directReturn) {
@@ -1724,7 +1790,7 @@ export function emitConsolidatedLift(body, opts = {}) {
         for (const logicChild of child.body) {
           if (!logicChild) continue;
           if (logicChild.kind === "lift-expr") {
-            const code = emitLiftExpr(logicChild, { containerVar: parent });
+            const code = emitLiftExpr(logicChild, { containerVar: parent, scopeVar });
             if (code) lines.push(code);
           } else if (logicChild.kind === "for-stmt" && parent) {
             // FIX (b2-nested-lift): route inner for-loop's lift-exprs to the current
@@ -1970,12 +2036,17 @@ export function emitLiftExpr(node, opts = {}) {
   const containerVar = opts.containerVar ?? null;
   // Bug 65 (S157) — engine codegen ctx for lifted engine-transition handlers.
   const engineCtx = opts.engineCtx ?? null;
+  // Bug 72 (S158) — the enclosing `for`-loop variable (threaded from
+  // emitForStmtWithContainer); enables a nested `<each>` in the lifted markup
+  // to resolve its iteration source against the for-loop scope. Null at the top
+  // markup level (no enclosing for) — a nested each there falls back to literal.
+  const scopeVar = opts.scopeVar ?? null;
   const liftExpr = node.expr;
 
   if (liftExpr.kind === "markup" && liftExpr.node) {
     // Full markup AST node — walk recursively and emit createElement chains
     const lines = [];
-    const rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx);
+    const rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx, scopeVar);
     const factoryBody = lines.join("\n  ");
     if (containerVar) {
       return `${containerVar}.appendChild((() => {\n  ${factoryBody}\n  return ${rootVar};\n})());`;

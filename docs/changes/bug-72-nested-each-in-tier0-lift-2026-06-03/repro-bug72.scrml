@@ -1,0 +1,11 @@
+type Row:struct = { id: string, cells: string[] }
+
+<rows>: Row[] = []
+
+<table>
+  <tbody>
+    ${ for (row of @rows) {
+      lift <tr><each in=row.cells><td>${@.}</td></each></tr>
+    } }
+  </tbody>
+</table>

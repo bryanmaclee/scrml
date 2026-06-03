@@ -3524,6 +3524,59 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         span: valSpan,
       };
     }
+    // Bug 72 (S158) — bare `@`-sigil attribute value (the `<each>`-contextual
+    // iteration sigil). The tokenizer emits `@` as a standalone PUNCT token, so
+    // `<td title=@.>` lands here as `PUNCT "@"` — NOT covered by the
+    // IDENT/KEYWORD/AT_IDENT branch above. Pre-fix this fell through to the
+    // final `return null`, which forced `parseLiftTag` to bail the ENTIRE tag
+    // parse and re-route the whole lift through the string-fallback path
+    // ({kind:"expr"}). That string path renders a nested `<each>` as a literal
+    // element and leaks the inner `@.` raw into the emitted JS
+    // (E-CODEGEN-INVALID-JS). Collecting the `@`-sigil expression here keeps the
+    // lift on the structured `{kind:"markup"}` path, where the shared each
+    // machinery lowers the inner `@.` to the inner each's iter var (§17.7.3).
+    // Mirrors the paren-branch below: collect the balanced `@...` token run
+    // (member chain `@.field.sub` + any call args) and return an `expr` value.
+    if (t.kind === "PUNCT" && t.text === "@") {
+      const parts = [];
+      const startValTok = t;
+      let depth = 0;
+      while (true) {
+        const ct = peek();
+        if (ct.kind === "EOF") break;
+        if (depth === 0) {
+          if (ct.kind === "PUNCT" && (ct.text === ">" || ct.text === "/")) break;
+        }
+        if (ct.kind === "PUNCT" && (ct.text === "(" || ct.text === "[")) depth++;
+        if (ct.kind === "PUNCT" && (ct.text === ")" || ct.text === "]")) {
+          if (depth === 0) break;
+          depth--;
+        }
+        // Next-attribute boundary: same heuristic as the IDENT branch — a new
+        // IDENT/KEYWORD at depth 0 following a value-ending token (and not a
+        // property access via `.`) starts the next attribute.
+        if (depth === 0 && parts.length > 0) {
+          const lastPart = parts[parts.length - 1];
+          const endsValue = /[\w)\]"']$/.test(lastPart);
+          const startsAttr = (ct.kind === "IDENT" || ct.kind === "KEYWORD") && peek(1)?.text === "=";
+          if (endsValue && startsAttr) break;
+          if (endsValue && (ct.kind === "IDENT" || ct.kind === "KEYWORD")) {
+            if (lastPart !== ".") break;
+          }
+        }
+        _pushAttrToken(parts, ct);
+        consume();
+      }
+      const raw = _joinPreservingWordBoundary(parts);
+      const valSpan = tokenSpan(startValTok, filePath);
+      return {
+        kind: "expr",
+        raw,
+        refs: [],
+        exprNode: safeParseExprToNode(raw, valSpan?.start ?? 0),
+        span: valSpan,
+      };
+    }
     // LIFT-1 fix: paren-wrapped expression attribute value — e.g. class:editing=(@x == item.id)
     //
     // When an attribute value starts with `(`, it is a parenthesized expression. The
