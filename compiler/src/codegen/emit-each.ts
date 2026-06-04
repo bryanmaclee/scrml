@@ -38,6 +38,7 @@
 
 import type { CompileContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
+import { emitStringFromTree } from "../expression-parser.ts";
 
 // ---------------------------------------------------------------------------
 // Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
@@ -340,9 +341,25 @@ function renderTemplateChildToJs(
       // but are less common in iteration body context. For Landing 1
       // baseline, route bare-expr through; other shapes get a hint.
       if (stmt.kind === "bare-expr") {
-        // `expr` is the tokenizer-rejoined text — strip the extra spaces
-        // around `.` operators introduced by the tokenizer for readability.
-        inner = String(stmt.expr ?? "").replace(/\s*\.\s*/g, ".");
+        // ExprNode-preference contract (mirrors emit-html.ts:1888 + the
+        // `makeBareExpr` bridge comment in native-parser/translate-stmt.ts:
+        // "codegen prefers exprNode"). The legacy ast-builder populates a
+        // non-empty `expr` (tokenizer-rejoined text) AND an `exprNode`; the
+        // native A1 bridge deliberately sets `expr: ""` and carries the live
+        // expression in `exprNode` only. Prefer the non-empty `expr` when
+        // present so the LEGACY path stays byte-identical; else fall back to
+        // `emitStringFromTree(exprNode)` for the native shape.
+        //
+        // Uniformly apply the dot-normalization to the resolved string in
+        // BOTH branches: the legacy `expr` text carries tokenizer spaces
+        // around `.`, and `emitStringFromTree` re-emits the contextual sigil
+        // `@.` as `@ .` (a space). `rewriteContextualSigil` only matches the
+        // un-spaced `@.`, so collapsing `/\s*\.\s*/` → "." is required for
+        // both the legacy `${@.}` form AND the native exprNode-derived form.
+        const _exprText = stmt.expr
+          ? String(stmt.expr)
+          : (stmt.exprNode ? emitStringFromTree(stmt.exprNode) : "");
+        inner = _exprText.replace(/\s*\.\s*/g, ".");
       } else if (typeof stmt.raw === "string") {
         inner = stmt.raw;
       } else {

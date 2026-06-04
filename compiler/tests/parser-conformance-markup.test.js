@@ -1363,18 +1363,22 @@ describe("MK2.1 tagKindFor — the four-way opener classification", () => {
 // MK2.1 §17 — the structural-element registry (SPEC §4.15 / §24.4).
 // =============================================================================
 describe("MK2.1 structural-element registry — the SPEC §4.15/§24.4 set", () => {
-    test("the registry contains exactly the 7 SPEC-normative structural elements", () => {
-        // SPEC §4.15 + §24.4 register exactly these 7. (`channel` / `auth`
-        // are NOT in those normative registry tables — see the
-        // tag-frame.js STRUCTURAL-ELEMENT REGISTRY note.)
+    test("the registry contains exactly the 8 structural elements", () => {
+        // SPEC §4.15 + §24.4 register engine/errors/match/onIdle/onTimeout/
+        // onTransition/page; `each` is the 8th — normatively structural per
+        // §17.7 / §18.5.6 (S130 HU-1), added to the native registry at S162
+        // (#2f each-promotion). The §4.15/§24.4 table enumerations still omit
+        // `each` (a SPEC-registry gap — tracked follow-up; see the tag-frame.js
+        // STRUCTURAL-ELEMENT REGISTRY note). `channel` / `auth` are NOT in the
+        // registry.
         expect(Object.keys(STRUCTURAL_ELEMENTS).sort()).toEqual([
-            "engine", "errors", "match", "onIdle", "onTimeout",
+            "each", "engine", "errors", "match", "onIdle", "onTimeout",
             "onTransition", "page",
         ]);
     });
 
     test("isStructuralElementName recognizes each registered element", () => {
-        for (const name of ["engine", "match", "errors", "onTransition",
+        for (const name of ["each", "engine", "match", "errors", "onTransition",
                              "onTimeout", "onIdle", "page"]) {
             expect(isStructuralElementName(name)).toBe(true);
         }

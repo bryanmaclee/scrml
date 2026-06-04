@@ -480,3 +480,78 @@ describe("native-each §11 — :let= directive attr is not a shorthand body", ()
     expect(span.shorthandBodyRaw).toBe("@label");
   });
 });
+
+// ===========================================================================
+// §10 — per-item `${expr}` text interpolation (#2f completion, codegen)
+//
+// emit-each.ts's logic-child path read only `stmt.expr`. The native A1 bridge
+// (`makeBareExpr`, translate-stmt.js) deliberately sets `expr: ""` and carries
+// the live expression in `exprNode` ("codegen prefers exprNode"). So a per-item
+// bare-body `${...}` text node was SILENTLY DROPPED under native — it hit the
+// "each: empty logic interpolation skipped" path. The fix makes emit-each.ts
+// honor the same exprNode-preference contract emit-html.ts uses
+// (`exprNode ? emitStringFromTree(exprNode) : expr`). These tests assert the
+// per-item text is now PRESENT under native and matches the default pipeline.
+// ===========================================================================
+
+describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)", () => {
+  test("named-alias `${item.name}` per-item text is emitted (was dropped)", () => {
+    const src = `<program>
+<users> = [{ id: 1, name: "Ann" }, { id: 2, name: "Bob" }]
+<ul>
+<each in=@users as item>
+<li>${"$"}{item.name}</li>
+</each>
+</ul>
+</program>`;
+    const native = compileWith(src, "scrml-native", "interp-named");
+    expect(native.errors).toHaveLength(0);
+    // The per-item text node is now present — NOT the skip comment.
+    expect(native.clientJs).not.toContain("each: empty logic interpolation skipped");
+    expect(native.clientJs).toContain("String(item.name)");
+    // A live text node + reconcile resolve, just like the default pipeline.
+    expect(native.clientJs).toContain("createTextNode");
+    expect(native.clientJs).toContain("_scrml_resolve_item");
+  });
+
+  test("native named-alias interpolation matches the default pipeline byte-for-byte (mod id offsets)", () => {
+    const src = `<program>
+<rows> = [{ id: 7, x: "a" }, { id: 9, x: "b" }]
+<ul>
+<each in=@rows as item key=@.id>
+<li>${"$"}{item.x}</li>
+</each>
+</ul>
+</program>`;
+    const native = compileWith(src, "scrml-native", "interp-key-native");
+    const def = compileWith(src, null, "interp-key-default");
+    expect(native.errors).toHaveLength(0);
+    expect(def.errors).toHaveLength(0);
+    // Both carry the per-item interpolation text node now.
+    expect(native.clientJs).toContain("String(item.x)");
+    expect(def.clientJs).toContain("String(item.x)");
+    // Normalize the numeric local-id suffixes (`_4`, `_tn_6`, …) so the only
+    // remaining difference is id ordering, then assert structural identity.
+    const norm = (s) => s.replace(/_\d+\b/g, "_N");
+    expect(norm(native.clientJs)).toBe(norm(def.clientJs));
+  });
+
+  test("legacy (default-parser) per-item interpolation is unchanged — `${item.name}` still emitted", () => {
+    // Guard: the fix prefers the non-empty `expr` (legacy) so the default
+    // pipeline path stays byte-identical. This asserts the legacy path still
+    // emits the text node (it always did) — a regression here would mean the
+    // exprNode fallback clobbered the populated-`expr` branch.
+    const src = `<program>
+<users> = [{ id: 1, name: "Ann" }]
+<ul>
+<each in=@users as item>
+<li>${"$"}{item.name}</li>
+</each>
+</ul>
+</program>`;
+    const def = compileWith(src, null, "interp-legacy");
+    expect(def.errors).toHaveLength(0);
+    expect(def.clientJs).not.toContain("each: empty logic interpolation skipped");
+    expect(def.clientJs).toContain("String(item.name)");
+  });
+});
