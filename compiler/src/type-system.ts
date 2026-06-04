@@ -4983,6 +4983,68 @@ function annotateNodes(
       // Markup element
       // ------------------------------------------------------------------
       case "markup": {
+        // S159 — SPEC §4.14 / §34 E-COLON-SHORTHAND-ON-VOID (S154 ruling (a)).
+        // A VOID HTML element has no content model, so a `:`-shorthand body
+        // (`<input : @val>`, `<br : x>`, SVG geometry `<rect : x>`, …) has no
+        // body to render the expression into and is REJECTED. The §24 element
+        // registry's `isVoid` flag is the single source of truth (shared with
+        // HTML-validity checks — no separate void list). A void element binds a
+        // value through an ATTRIBUTE (`<input bind:value=@x/>`), not a body.
+        // This is the ONLY handling for a void `:`-shorthand: the ast-builder
+        // synthesis (R1) excludes void elements, so they carry an empty body —
+        // the guard is fatal (E-* → result.errors) before any empty-body render.
+        if (n.closerForm === "shorthand") {
+          const _voidShape = getElementShape((n.tag as string) ?? (n.name as string) ?? "");
+          if (_voidShape !== null && _voidShape.isVoid === true) {
+            const _voidTag = (n.tag as string) ?? (n.name as string) ?? "";
+            const _voidSpan = (n.span as Span | undefined) ?? {
+              file: filePath, start: 0, end: 0, line: 1, col: 1,
+            };
+            errors.push(new TSError(
+              "E-COLON-SHORTHAND-ON-VOID",
+              `E-COLON-SHORTHAND-ON-VOID: the void HTML element \`<${_voidTag}>\` ` +
+              `cannot take a \`:\`-shorthand body (\`<${_voidTag} : expr>\`). A void ` +
+              `element has no content model, so there is no body to render the ` +
+              `expression into. Bind the value through an ATTRIBUTE instead — e.g. ` +
+              `\`<${_voidTag} bind:value=@x/>\` — not a \`:\`-shorthand body ` +
+              `(SPEC §4.14 / §34).`,
+              _voidSpan as Span,
+            ));
+          }
+        }
+
+        // S159 — SPEC §17.7.3 / §34 E-SYNTAX-064 (S154 ruling (a), R3).
+        // A `:`-shorthand body that references the `@.` contextual iteration
+        // sigil (`<li : @.name>`) is the §17.7 `<each>` per-item form — owned
+        // by emit-each, which reads `shorthandBodyRaw` directly and ignores the
+        // node's children (so the ast-builder synthesis intentionally skips it).
+        // INSIDE an `<each>` body `@.` is legal (emit-each rewrites it to the
+        // iteration variable at codegen). OUTSIDE any `<each>` body scope `@.`
+        // has no referent and SHALL fire E-SYNTAX-064 — the shorthand-body
+        // sibling of the Bug-70 (S157) attribute-value + lift-embedded fire
+        // sites below. Without this, a bare `<li : @.name>` outside each
+        // silently drops the body (the `@.` never becomes an attribute or a
+        // synthesized child, so neither Bug-70 fire site sees it).
+        if (
+          !inEachBodyScope() &&
+          n.closerForm === "shorthand" &&
+          typeof (n as { shorthandBodyRaw?: unknown }).shorthandBodyRaw === "string"
+        ) {
+          const _shBody = (n as { shorthandBodyRaw: string }).shorthandBodyRaw;
+          if (/@\s*\./.test(_shBody)) {
+            const _shSpan = (n.span as Span | undefined) ?? {
+              file: filePath, start: 0, end: 0, line: 1, col: 1,
+            };
+            for (const tok of markupSubtreeAtDotTokens(_shBody)) {
+              errors.push(new TSError(
+                "E-SYNTAX-064",
+                atDotEachOnlyMessage(tok),
+                _shSpan as Span,
+              ));
+            }
+          }
+        }
+
         // Visit attributes for identifier resolution.
         const attrs = n.attrs as ASTNodeLike[] | undefined;
         if (Array.isArray(attrs)) {

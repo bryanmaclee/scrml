@@ -48,6 +48,7 @@ import { parseExprToNode, forEachResetExprInExprNode } from "./expression-parser
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 
 import { existsSync, statSync } from "fs";
@@ -12056,6 +12057,111 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const children = block.children.map(child =>
         buildBlock(child, filePath, "markup", counter, errors)
       ).filter(Boolean);
+
+      // S159 — SPEC §4.14 HTML-element `:`-shorthand content-model rule
+      // (S154 design ruling (a)). For a NON-VOID lowercase HTML element that
+      // carries a `:`-shorthand body (`<span : @label>`), the body expression
+      // IS the element's single-expression body — byte-identical to the
+      // bare-body form `<span>${@label}</span>`. We realize that equivalence
+      // by SYNTHESIZING the body child(ren) here (Approach (a) AST-synthesis),
+      // so the existing emit-html (iterates children) + dependency-graph
+      // (recurses children, clearing the prior E-DG-002 false-fire) + type
+      // system all handle it with NO emit-side change.
+      //
+      // The synthesis re-parses a reconstructed `<tag>BODY</tag>` raw source
+      // through the SAME block-splitter + buildBlock path the explicit
+      // bare-body form takes — guaranteeing byte-identity rather than
+      // hand-crafting an AST node whose shape could drift.
+      //
+      // Scope (R1/R3/R5):
+      //   - Lowercase HTML elements ONLY (`getElementShape(tag) !== null`).
+      //   - NON-void (`!getElementShape(tag).isVoid`); void elements are
+      //     rejected by the type-system E-COLON-SHORTHAND-ON-VOID guard and
+      //     get NO synthesis.
+      //   - NOT a component (`block.isComponent !== true`) — component
+      //     `:`-shorthand is a separate concern (§4.15), left untouched.
+      //   - NOT a `@.`-contextual-sigil body — `<li : @.name>` is the §17.7
+      //     `<each>` per-item form, OWNED by emit-each (which reads
+      //     `shorthandBodyRaw` directly + ignores children). Synthesizing here
+      //     would put a child the iteration-scope rewriter doesn't expect, and
+      //     a bare `@.` outside any `<each>` must still surface E-SYNTAX-064.
+      //
+      // Body interpretation follows §4.18 code-default-body grammar:
+      //   - An EXPRESSION body (`@label`, `someFn()`, member access) ->
+      //     interpolated form `${expr}` so `<span : @label>` renders the
+      //     VALUE (`<span>${@label}</span>`), NOT the literal characters.
+      //   - A DISPLAY-TEXT-LITERAL body (`"Static item"`, §4.18.3) -> the
+      //     UNQUOTED content as display text (quotes stripped per §4.18.3;
+      //     a `"..."` literal may carry one `${...}` interpolation inside,
+      //     §4.18.4, which the synthesized free-text body handles).
+      if (
+        block.closerForm === "shorthand" &&
+        typeof shorthandBodyRaw === "string" &&
+        shorthandBodyRaw.length > 0 &&
+        block.isComponent !== true &&
+        children.length === 0
+      ) {
+        const _shape = getElementShape(block.name || "");
+        const _isNonVoidHtml = _shape !== null && _shape.isVoid !== true;
+        // `@.` contextual-sigil body — owned by emit-each (R3). Detect the
+        // `@.` token (the iteration sigil) anywhere in the body; skip synthesis
+        // so the each/lift path keeps ownership and the outside-each misuse
+        // still reaches E-SYNTAX-064.
+        const _referencesContextualSigil = /(^|[^@\w.])@\./.test(" " + shorthandBodyRaw);
+        if (_isNonVoidHtml && !_referencesContextualSigil) {
+          // Distinguish a `"..."` display-text literal (§4.18.3) from an
+          // expression body. A display-text literal is `"..."` (mirrors the
+          // engine-state-child / match-arm `:`-shorthand literal detection).
+          const _trimmed = shorthandBodyRaw.trim();
+          const _isDisplayLiteral =
+            _trimmed.length >= 2 &&
+            _trimmed.charAt(0) === '"' &&
+            _trimmed.charAt(_trimmed.length - 1) === '"';
+          let _synthBodySrc;
+          if (_isDisplayLiteral) {
+            // Strip the surrounding quotes (§4.18.3 — the literal's CONTENT is
+            // the display text). Unescape the three display-text escapes
+            // (`\"` -> `"`, `\\` -> `\`, `\${` -> `${`) so the free-text body
+            // carries the intended characters. An interior `${...}` is a
+            // genuine interpolation (§4.18.4) and is preserved verbatim.
+            const _inner = _trimmed.slice(1, -1)
+              .replace(/\\\$\{/g, "${")
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, "\\");
+            _synthBodySrc = _inner;
+          } else {
+            // Expression body — interpolated form so the VALUE renders
+            // (byte-identical to `<tag>${expr}</tag>`).
+            _synthBodySrc = "${" + shorthandBodyRaw + "}";
+          }
+          // Re-parse `<tag>BODY</tag>` through the SAME parse path the explicit
+          // bare-body form takes, then lift the produced markup block's
+          // children onto this node. `_synthErrors` is discarded — any
+          // diagnostic the synthesized body would raise is raised identically
+          // by the equivalent explicit bare-body form, which is the canonical
+          // diagnostic locus (avoids double-firing for the shorthand sugar).
+          try {
+            const _synthSrc = "<" + block.name + ">" + _synthBodySrc + "</" + block.name + ">";
+            const _synthBs = _splitBlocksForP2Form1(filePath, _synthSrc);
+            const _synthErrors = [];
+            const _synthBlocks = (_synthBs && Array.isArray(_synthBs.blocks)) ? _synthBs.blocks : [];
+            const _synthMarkup = _synthBlocks.find(
+              (b) => b && b.type === "markup" && b.name === block.name,
+            );
+            if (_synthMarkup && Array.isArray(_synthMarkup.children)) {
+              for (const _synthChild of _synthMarkup.children) {
+                const _childNode = buildBlock(_synthChild, filePath, "markup", counter, _synthErrors);
+                if (_childNode) children.push(_childNode);
+              }
+            }
+          } catch (_e) {
+            // Defensive: a synthesis failure must never block AST building.
+            // The unsynthesized node degrades to the pre-S159 empty-body
+            // behavior — survivable, and surfaced by tests if it ever fires.
+          }
+        }
+      }
+
 
       return {
         id: ++counter.next,

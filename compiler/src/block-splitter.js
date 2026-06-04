@@ -2548,20 +2548,14 @@ export function splitBlocks(filePath, source) {
         const isComp = isComponentName(tagName);
         const { selfClosing, shorthand, shorthandColonAttrOff } = scanAttributes();
         const lowerTagName = tagName.toLowerCase();
-        if (selfClosing || VOID_ELEMENTS.has(lowerTagName)) {
-          // Self-closing ('/>') or HTML void element - emit as leaf block, no context push
-          targetChildren().push({
-            type: "markup",
-            raw: source.slice(curPos, pos),
-            span: { start: curPos, end: pos, line: curLine, col: curCol },
-            depth: depth(),
-            children: [],
-            name: tagName,
-            closerForm: "self-closing",
-            isComponent: isComp,
-            openerHadSpaceAfterLt: false,
-          });
-        } else if (shorthand) {
+        // R4a (S159 — S154 ruling (a)): a GENUINE `:`-shorthand body has NO
+        // closer (`<span : @label>` — no `/>`). A self-closing opener that also
+        // tripped the shorthand scanner (e.g. `<column :let={...}/>`, where the
+        // `:let` directive prefix looks colon-introduced) is NOT a `:`-shorthand
+        // body — `selfClosing` wins. Gate the shorthand branch on `!selfClosing`
+        // so only a true bodied shorthand (incl. `<br : x>` / `<input : @val>`,
+        // which then reach the void-reject guard) takes this path.
+        if (shorthand && !selfClosing) {
           // R25-Bug-40 — SPEC §4.14 `:`-shorthand body: the opener carries
           // its single-expression body inside the opener (between the `:`
           // and `>`); there is NO closer. Emit as a leaf block (analogous
@@ -2591,6 +2585,28 @@ export function splitBlocks(filePath, source) {
             isComponent: isComp,
             openerHadSpaceAfterLt: false,
             shorthandColonOff,
+          });
+        } else if (selfClosing || VOID_ELEMENTS.has(lowerTagName)) {
+          // Self-closing ('/>') or HTML void element - emit as leaf block, no context push.
+          // R4a (S159 — S154 ruling (a)): this branch now follows the `shorthand`
+          // branch above, so a void element that carries a `:`-shorthand body
+          // (`<br : x>`, `<input : @val>`) is recognized as closerForm:"shorthand"
+          // (reaching the type-system E-COLON-SHORTHAND-ON-VOID guard) rather than
+          // being silently mis-classified self-closing with its body swallowed.
+          // SAFE: `<input/>` / `<input type="text"/>` are selfClosing (no shorthand
+          // marker) and `<input>` (no shorthand, not selfClosing) still void
+          // short-circuits here — only `<void : expr>` (the rejected case) is
+          // re-routed.
+          targetChildren().push({
+            type: "markup",
+            raw: source.slice(curPos, pos),
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            children: [],
+            name: tagName,
+            closerForm: "self-closing",
+            isComponent: isComp,
+            openerHadSpaceAfterLt: false,
           });
         } else if (!isComp && STRUCTURAL_RAW_BODY_ELEMENTS.has(lowerTagName)) {
           // S107 Phase 2 — SPEC §18.0.1 match block-form structural raw-body.
