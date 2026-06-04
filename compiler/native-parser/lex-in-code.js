@@ -348,6 +348,33 @@ export function dispatchInCode(cursor, ctx) {
         return true;
     }
 
+    // @. contextual sigil -> ScrmlAt carrying the `.`-prefixed chain (#2f).
+    // `@.` is the §each contextual iteration-value sigil: bare `@.` is the
+    // current item/index; `@.field` / `@.a.b` is a dotted member path on it.
+    // We consume `@.` PLUS the optional dotted-ident chain as ONE token so the
+    // trailing `.field` does NOT fall to the BareVariant production below; the
+    // ScrmlAt `name` carries everything AFTER the `@` (`.field` / `.` / `.a.b`),
+    // and the translate-expr AtCell arm prepends `@` to yield ident{name:"@.field"}.
+    // The leading `.` distinguishes this from the `@ident` reactive-ref form.
+    if (c0 === "@" && peekChar(cursor, 1) === ".") {
+        advance(cursor, 1); // skip @
+        advance(cursor, 1); // skip .
+        // Optional dotted-ident chain: ident ("." ident)*. Bare `@.` (no
+        // ident-start after the `.`) is the count-form — name is just ".".
+        if (isIdentStart(peekCharCode(cursor, 0))) {
+            scanIdentifier(cursor);
+            while (peekChar(cursor, 0) === "." && isIdentStart(peekCharCode(cursor, 1))) {
+                advance(cursor, 1); // skip the chaining "."
+                scanIdentifier(cursor);
+            }
+        }
+        const fullSpan = makeSpan(startPos, cursor.pos, startLine, startCol);
+        const raw = cursor.source.substring(startPos, cursor.pos);
+        // raw === "@.<chain>"; name === everything after the "@" (the ".<chain>").
+        ctx.tokens.push(makeToken(TokenKind.ScrmlAt, raw, fullSpan, { name: raw.substring(1) }));
+        return true;
+    }
+
     // @ident -> ScrmlAt
     if (c0 === "@" && isIdentStart(peekCharCode(cursor, 1))) {
         advance(cursor, 1);
