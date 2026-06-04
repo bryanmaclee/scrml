@@ -15,8 +15,11 @@ The §"Task-Shape Routing" section names which additional maps to consult. Your 
 helpers" table in `structure.map.md` (the three walkers + their call sites, line-confirmed against
 HEAD ef5713df).
 
-Map currency: maps reflect HEAD `ef5713df` as of `2026-06-04`. This is the commit your worktree
-branches from — maps are CURRENT. No staleness adjustment needed.
+Map currency: the refreshed maps live at main commit `ef5713df` (2026-06-04). **Your worktree
+branches from the SESSION-START commit `9f01f6cd` (S112 — NOT live HEAD), so until you run the
+merge-startup step (Startup Verification 4b below) your worktree has the OLDER maps.** After the
+ff-merge, `.claude/maps/` is current — `structure.map.md` will contain the "Bare-variant inference
+helpers" table. Read the maps AFTER the merge.
 
 Feedback: in your final report include either:
 - "Maps consulted: [list]; load-bearing finding: <one sentence>"
@@ -36,7 +39,14 @@ this as incident-prevention.
    the S90 CWD-routing failure. Save the output as `$WORKTREE_ROOT`.
 2. `git rev-parse --show-toplevel` MUST equal `$WORKTREE_ROOT`.
 3. `git status --short` — confirm clean.
-4. `git rev-parse HEAD` — note it; your base. (Should be `ef5713df` or a descendant.)
+4. `git rev-parse HEAD` — note it; your base. **The harness branches worktrees from the
+   SESSION-START commit `9f01f6cd`, NOT live HEAD (S112), so your base is STALE.**
+4b. **S112 FIX — pick up this session's commits BEFORE doing anything else:** run
+   `git -C "$WORKTREE_ROOT" merge --ff-only main`. This fast-forwards your worktree branch to the
+   live main tip (linear history), pulling in the refreshed `.claude/maps/` + this BRIEF's change-id
+   dir. It MUST fast-forward cleanly. If it does NOT (non-ff / divergence reported), STOP and report.
+   Confirm after: `git -C "$WORKTREE_ROOT" log --oneline -1` shows a `docs(s161)` commit, and
+   `grep -c "Bare-variant inference helpers" "$WORKTREE_ROOT/.claude/maps/structure.map.md"` is ≥1.
 5. `bun install` (worktrees don't inherit node_modules).
 6. `bun run pretest` (populates `samples/compilation-tests/dist/` for browser tests).
 7. Baseline: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`
