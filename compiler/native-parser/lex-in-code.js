@@ -481,8 +481,33 @@ export function dispatchInCode(cursor, ctx) {
     // and flips LexMode back to InCode). On division, fall through to
     // the punctuation block below.
     if (c0 === "/") {
-        const lastKind = ctx.tokens.length > 0 ? ctx.tokens[ctx.tokens.length - 1].kind : null;
-        if (regexAllowedAfter(lastKind)) {
+        const lastTok = ctx.tokens.length > 0 ? ctx.tokens[ctx.tokens.length - 1] : null;
+        const lastKind = lastTok !== null ? lastTok.kind : null;
+        // Markup close-tag carve-out (markup-as-value, §4.18.2). The native
+        // lexer tokenizes the WHOLE `${...}` code body eagerly — INCLUDING the
+        // bytes of an inline markup VALUE (`lift <li>x</li>` / `const <x> =
+        // <tag>...</tag>`). Inside such a value the `/` of a `</tag>` closer
+        // immediately follows the `<` (LessThan) of the closer with NO gap.
+        // regexAllowedAfter(LessThan) is true (a regex MAY follow a `<`
+        // comparison), so without this guard the `/` would open a RUNAWAY
+        // RegexLit that swallows the closer AND the rest of the body to EOF —
+        // destroying the token stream the JS-layer cursor must resync onto
+        // after parseMarkupValue re-parses the element via the markup engine
+        // (parse-expr.js advancePastSourcePos). Recognizing the `</` SOURCE-
+        // ADJACENT close-tag sequence as division keeps the markup-value
+        // interior as short walkable tokens. A genuine JS `a < /re/` regex
+        // ALWAYS has a gap (`<` then whitespace then `/`) so its `<` is NOT
+        // source-adjacent to the `/` — the adjacency test leaves it untouched.
+        // (The default pipeline never hits this: block-splitter carves the
+        // markup-value region out BEFORE Acorn JS-lexes — Acorn would itself
+        // error "Unterminated regular expression" on `x</li>`.)
+        const isCloseTagSlash =
+            lastTok !== null &&
+            lastKind === TokenKind.LessThan &&
+            lastTok.span !== undefined &&
+            lastTok.span !== null &&
+            lastTok.span.end === startPos;
+        if (regexAllowedAfter(lastKind) && isCloseTagSlash === false) {
             setMode(ctx, LexMode.InRegexBody);
             dispatchInRegexBody(cursor, ctx);
             return true;

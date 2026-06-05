@@ -1,0 +1,4 @@
+<program>
+<cols>: string[] = []
+<ul>${ for (let col of @cols) { lift <li class="cell">${col}</li>; } }</ul>
+</program>

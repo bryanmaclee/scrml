@@ -2191,7 +2191,20 @@ export function parseMarkupValue(ctx) {
                 // start lies BEFORE closeEnd in the source.
                 advancePastSourcePos(cursor, closeEnd);
                 const span = makeSpan(ltSpan.start, closeEnd, ltSpan.line, ltSpan.col);
-                return makeMarkupValue(trace.ctx.nodes.slice(0, 1), span);
+                const mvNode = makeMarkupValue(trace.ctx.nodes.slice(0, 1), span);
+                // Carry the markup-value's SLICE SOURCE onto the node so the
+                // M6.2a bridge (translate-stmt.js translateMarkupValueToLiveNode)
+                // can recover Text / Comment child content by slicing. The
+                // child blocks carry SLICE-LOCAL spans (shiftMarkupBlockSpan
+                // shifts only the TOP block to absolute; children stay 0-based
+                // at the `<`), and `sliceTail` is `ctx.source.substring(slice
+                // Start)` — also 0-based at the `<` — so sliceSpan(sliceTail,
+                // childSpan) yields the verbatim child text. Without this the
+                // bridge passes source="" and every Text child renders empty
+                // (the `x` in `lift <li>x</li>` was silently dropped).
+                mvNode.sliceSource = sliceTail;
+                mvNode.sliceLocalCloseEnd = sliceCloseEnd;
+                return mvNode;
             }
         }
         // No close found — fall through to the token-range capture path

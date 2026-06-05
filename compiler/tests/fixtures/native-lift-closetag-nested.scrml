@@ -1,0 +1,4 @@
+<program>
+<xs>: string[] = []
+<ul>${ for (let c of @xs) { lift <li><span>x</span></li>; } }</ul>
+</program>

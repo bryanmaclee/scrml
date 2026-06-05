@@ -546,15 +546,21 @@ function translateMarkupValueToLiveNode(markupValue, counter) {
             span: spanOrZero(markupValue.span),
         };
     }
-    return synthLiveMarkupNodeFromBlock(block, counter);
+    // The markup-value's SLICE SOURCE (parse-expr.js attaches it on the source-
+    // available path). Child Text / Comment blocks carry SLICE-LOCAL spans
+    // (0-based at the `<` opener), so slicing this source at a child span
+    // recovers the verbatim child text. Absent (source-unavailable / older
+    // call shape) -> "" (the pre-existing empty-text behavior, unchanged).
+    const sliceSource = typeof markupValue.sliceSource === "string" ? markupValue.sliceSource : "";
+    return synthLiveMarkupNodeFromBlock(block, counter, sliceSource);
 }
 
 // synthLiveMarkupNodeFromBlock — calculation (mutually-recursive helper for
 // translateMarkupValueToLiveNode). Build a live MarkupNode from one native
 // Markup block; recurse on children.
-function synthLiveMarkupNodeFromBlock(block, counter) {
+function synthLiveMarkupNodeFromBlock(block, counter, sliceSource) {
     const tag = typeof block.name === "string" ? block.name : "";
-    const children = synthLiveChildren(block.children, counter);
+    const children = synthLiveChildren(block.children, counter, sliceSource);
     const closerForm = (block.closerForm !== undefined && block.closerForm !== null)
         ? block.closerForm
         : "";
@@ -594,7 +600,7 @@ function synthLiveMarkupNodeFromBlock(block, counter) {
 // at L2275) loads the helper at FIRST CALL, by which time both modules
 // have finished their top-level eval.
 let _mapBlocksToNodesCached = null;
-function mapBlocksToNodesViaLazyRequire(blocks, counter, errors) {
+function mapBlocksToNodesViaLazyRequire(blocks, counter, errors, source) {
     if (_mapBlocksToNodesCached === null) {
         try {
             // eslint-disable-next-line global-require
@@ -611,13 +617,17 @@ function mapBlocksToNodesViaLazyRequire(blocks, counter, errors) {
     // sliceSpan) fall back to an empty string verbatim — acceptable for
     // a markup-as-value subtree where Text/Comment children are rare and
     // the live consumers walk Markup children only.
-    return _mapBlocksToNodesCached(blocks, counter, "", errors);
+    // Thread the markup-value slice source so Text / Comment child content
+    // recovers via sliceSpan (parse-file.js synthTextNode). Slice-local child
+    // spans are 0-based at the `<` opener, matching the slice source. Empty
+    // string when unavailable (the pre-existing crash-free empty-text path).
+    return _mapBlocksToNodesCached(blocks, counter, typeof source === "string" ? source : "", errors);
 }
 
-function synthLiveChildren(blocks, counter) {
+function synthLiveChildren(blocks, counter, sliceSource) {
     if (Array.isArray(blocks) === false) return [];
     const errors = [];
-    const live = mapBlocksToNodesViaLazyRequire(blocks, counter, errors);
+    const live = mapBlocksToNodesViaLazyRequire(blocks, counter, errors, sliceSource);
     if (live !== null) return live;
     // Defensive fallback when the lazy-require fails (should never happen
     // outside genuine module-resolution breakage): recurse Markup children
@@ -627,7 +637,7 @@ function synthLiveChildren(blocks, counter) {
     for (const child of blocks) {
         if (child === undefined || child === null) continue;
         if (child.kind === "Markup") {
-            out.push(synthLiveMarkupNodeFromBlock(child, counter));
+            out.push(synthLiveMarkupNodeFromBlock(child, counter, sliceSource));
         } else {
             out.push(child);
         }
