@@ -224,7 +224,7 @@ function leadingTagName(expr) {
  * and other module-level helpers that need ExprNode but lack access to the
  * closure-scoped safeParseExprToNode inside parseLogicBody.
  */
-function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
+export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
   if (!expr || typeof expr !== "string" || !expr.trim()) return undefined;
   if (shouldSkipExprParse(expr)) {
     return { kind: "escape-hatch", span: { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + expr.length, line: 1, col: 1 }, nativeKind: "SkippedExpr", raw: expr };

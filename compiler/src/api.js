@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
 import { nativeParseFile } from "../native-parser/parse-file.js";
+import { populateNativeAttrValueExprNodes } from "./native-walker/attrvalue-exprnode-walker.ts";
 import { computePGOFlags } from "./compute-pgo-flags.ts";
 import { computeProgramConfig } from "./compute-program-config.ts";
 import { runCE } from "./component-expander.ts";
@@ -922,9 +923,30 @@ export function compileScrml(options = {}) {
   //     from the paired `bsResult` (`bsResult.filePath`) + `sourceByFile`.
   const useNativeParser = parser === "scrml-native";
   const _buildAST = useNativeParser
-    ? (bsResult) => nativeParseFile(
-        bsResult.filePath,
-        sourceByFile.get(bsResult.filePath) ?? "")
+    ? (bsResult) => {
+        // M5-swap — native attr-value `exprNode` population. `nativeParseFile`
+        // builds markup attr values (`onclick=`/`if=`/`bind:`/props) WITHOUT the
+        // `exprNode` field that codegen (emit-html.ts -> emit-event-wiring /
+        // emit-control-flow / emit-bindings / ...) consumes; the LIVE path sets
+        // it inline in ast-builder.js parseAttributes via safeParseExprToNodeGlobal.
+        // Native-parser modules cannot import the live acorn-backed parser (it
+        // would invert the self-host layering), so the population runs HERE on
+        // the assembled native FileAST, reusing the SAME safeParseExprToNodeGlobal
+        // with the SAME `(raw, span.start)` pairing the live path uses -> the
+        // emitted ExprNode is byte-identical to live's. Parse diagnostics
+        // (E-SQL-008 / E-RESET-NO-ARG) land in `result.errors` so `collectErrors`
+        // picks them up exactly as the live path does. Native-path-ONLY; the
+        // default pipeline is untouched.
+        const result = nativeParseFile(
+          bsResult.filePath,
+          sourceByFile.get(bsResult.filePath) ?? "");
+        if (result && result.ast) {
+          if (Array.isArray(result.errors) === false) result.errors = [];
+          populateNativeAttrValueExprNodes(
+            result.ast, result.filePath || bsResult.filePath, result.errors);
+        }
+        return result;
+      }
     : selfHostModules?.buildAST
       ? (bsResult) => selfHostModules.buildAST(bsResult)
       : (bsResult) => buildAST(bsResult, selfHostModules?.tokenizer ?? null);

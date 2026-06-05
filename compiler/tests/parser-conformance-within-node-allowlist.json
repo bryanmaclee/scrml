@@ -145,7 +145,7 @@
     "FIELD-SHAPE": 28,
     "KIND-NAME": 8,
     "MISSING-FIELD": 67,
-    "SPAN-COORD": 193
+    "SPAN-COORD": 194
   },
   "examples/09-error-handling.scrml": {
     "COUNT-LENGTH": 3,
@@ -225,7 +225,7 @@
     "FIELD-SHAPE": 24,
     "KIND-NAME": 9,
     "MISSING-FIELD": 87,
-    "SPAN-COORD": 98
+    "SPAN-COORD": 100
   },
   "examples/19-lin-token.scrml": {
     "COUNT-LENGTH": 5,
@@ -465,7 +465,7 @@
   },
   "examples/23-trucking-dispatch/pages/dispatch/customers.scrml": {
     "COUNT-LENGTH": 11,
-    "EXTRA-FIELD": 54,
+    "EXTRA-FIELD": 55,
     "FIELD-SHAPE": 53,
     "KIND-NAME": 15,
     "MISSING-FIELD": 143,
@@ -485,7 +485,7 @@
     "FIELD-SHAPE": 197,
     "KIND-NAME": 30,
     "MISSING-FIELD": 386,
-    "SPAN-COORD": 904
+    "SPAN-COORD": 918
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-new.scrml": {
     "COUNT-LENGTH": 13,
@@ -493,7 +493,7 @@
     "FIELD-SHAPE": 125,
     "KIND-NAME": 29,
     "MISSING-FIELD": 315,
-    "SPAN-COORD": 527
+    "SPAN-COORD": 545
   },
   "examples/23-trucking-dispatch/pages/driver/home.scrml": {
     "COUNT-LENGTH": 9,
@@ -1375,7 +1375,7 @@
     "FIELD-SHAPE": 80,
     "KIND-NAME": 21,
     "MISSING-FIELD": 249,
-    "SPAN-COORD": 510
+    "SPAN-COORD": 524
   },
   "samples/compilation-tests/gauntlet-r10-go-contacts.scrml": {
     "COUNT-LENGTH": 9,
@@ -1407,7 +1407,7 @@
     "FIELD-SHAPE": 151,
     "KIND-NAME": 54,
     "MISSING-FIELD": 552,
-    "SPAN-COORD": 740
+    "SPAN-COORD": 742
   },
   "samples/compilation-tests/gauntlet-r10-react-wizard.scrml": {
     "COUNT-LENGTH": 5,
@@ -1423,7 +1423,7 @@
     "FIELD-SHAPE": 70,
     "KIND-NAME": 17,
     "MISSING-FIELD": 204,
-    "SPAN-COORD": 374
+    "SPAN-COORD": 376
   },
   "samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml": {
     "COUNT-LENGTH": 2,
@@ -1447,7 +1447,7 @@
     "FIELD-SHAPE": 27,
     "KIND-NAME": 7,
     "MISSING-FIELD": 93,
-    "SPAN-COORD": 120
+    "SPAN-COORD": 127
   },
   "samples/compilation-tests/gauntlet-r10-vue-datatable.scrml": {
     "COUNT-LENGTH": 16,
@@ -1455,7 +1455,7 @@
     "FIELD-SHAPE": 100,
     "KIND-NAME": 34,
     "MISSING-FIELD": 346,
-    "SPAN-COORD": 309
+    "SPAN-COORD": 318
   },
   "samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml": {
     "COUNT-LENGTH": 3,
@@ -4095,7 +4095,7 @@
     "EXTRA-FIELD": 3,
     "FIELD-SHAPE": 2,
     "MISSING-FIELD": 4,
-    "SPAN-COORD": 18
+    "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-inline-markup-045.scrml": {
     "EXTRA-FIELD": 3,
@@ -4107,7 +4107,7 @@
     "EXTRA-FIELD": 3,
     "FIELD-SHAPE": 2,
     "MISSING-FIELD": 4,
-    "SPAN-COORD": 21
+    "SPAN-COORD": 23
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-nested-047.scrml": {
     "EXTRA-FIELD": 4,
@@ -5247,7 +5247,7 @@
     "FIELD-SHAPE": 10,
     "KIND-NAME": 3,
     "MISSING-FIELD": 34,
-    "SPAN-COORD": 43
+    "SPAN-COORD": 47
   },
   "samples/compilation-tests/modern-004-canary-pattern.scrml": {
     "COUNT-LENGTH": 1,
@@ -5269,7 +5269,7 @@
     "FIELD-SHAPE": 11,
     "KIND-NAME": 5,
     "MISSING-FIELD": 38,
-    "SPAN-COORD": 102
+    "SPAN-COORD": 104
   },
   "samples/compilation-tests/multi-meta-source-order.scrml": {
     "EXTRA-FIELD": 5,
@@ -6210,7 +6210,7 @@
     "FIELD-SHAPE": 15,
     "KIND-NAME": 5,
     "MISSING-FIELD": 48,
-    "SPAN-COORD": 102
+    "SPAN-COORD": 116
   },
   "samples/gauntlet-r19/react-dev.scrml": {
     "COUNT-LENGTH": 1,
@@ -6233,7 +6233,7 @@
     "FIELD-SHAPE": 23,
     "KIND-NAME": 8,
     "MISSING-FIELD": 77,
-    "SPAN-COORD": 132
+    "SPAN-COORD": 134
   },
   "samples/gauntlet-r19/vue-dev.scrml": {
     "COUNT-LENGTH": 1,
@@ -6257,7 +6257,7 @@
     "FIELD-SHAPE": 62,
     "KIND-NAME": 40,
     "MISSING-FIELD": 359,
-    "SPAN-COORD": 228
+    "SPAN-COORD": 229
   },
   "samples/kanban-r11.scrml": {
     "COUNT-LENGTH": 6,
@@ -6337,7 +6337,7 @@
     "FIELD-SHAPE": 29,
     "KIND-NAME": 13,
     "MISSING-FIELD": 140,
-    "SPAN-COORD": 190
+    "SPAN-COORD": 192
   },
   "samples/user-profile.scrml": {
     "EXTRA-FIELD": 52,

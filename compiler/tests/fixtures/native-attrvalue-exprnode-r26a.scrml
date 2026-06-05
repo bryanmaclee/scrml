@@ -1,0 +1,34 @@
+<!-- R26 (A) isolated fixture — native attr-value exprNode/argExprNodes population.
+     Exercises the two parsed-expr-field shapes codegen consumes off markup attr
+     values, both of which DEFAULT-compile clean but native-failed pre-fix
+     (string-fallback emitted raw `@` -> E-CODEGEN-INVALID-JS):
+       - call-ref handler:  onclick=@counter.advance(.Inc)  (argExprNodes path)
+       - if= expr:          if=(@count > 0)                 (exprNode path)
+     A non-each, plain-handler program so the only variable is the attr-value
+     field population (not per-item reactivity / each-ctx threading). -->
+<program title="exprNode R26A">
+${
+  type Counter:enum = { Idle, Counting }
+  type CtrMsg:enum  = { Inc, Reset }
+}
+
+<count> = 0
+
+<engine for=Counter initial=.Idle accepts=CtrMsg>
+  <Idle rule=.Counting>
+    | .Inc   :> { @count = @count + 1; .Counting }
+    | _      :> @counter
+  </>
+  <Counting rule=.Idle>
+    | .Inc   :> { @count = @count + 1; .Counting }
+    | .Reset :> { @count = 0; .Idle }
+    | _      :> @counter
+  </>
+</>
+
+<div class="panel">
+  <button onclick=@counter.advance(.Inc)>tick</button>
+  <button onclick=@counter.advance(.Reset)>reset</button>
+  <span if=(@count > 0)>count is positive</span>
+</div>
+</program>

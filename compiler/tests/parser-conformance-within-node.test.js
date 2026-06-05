@@ -58,6 +58,7 @@ import {
 import { splitBlocks } from "../src/block-splitter.js";
 import { buildAST } from "../src/ast-builder.js";
 import { nativeParseFile } from "../native-parser/parse-file.js";
+import { populateNativeAttrValueExprNodes } from "../src/native-walker/attrvalue-exprnode-walker.ts";
 
 // ALLOWLIST_PATH — the per-fixture baseline residual map. Land-shape:
 //   { "examples/14-mario-state-machine.scrml": { "KIND-NAME": 33, ... }, ... }
@@ -88,6 +89,17 @@ function runBothPipelines(filePath, source) {
   try {
     const r = nativeParseFile(filePath, source);
     native = r.ast;
+    // Mirror the live PIPELINE: api.js runs populateNativeAttrValueExprNodes on
+    // the native FileAST right after nativeParseFile (the live BS+TAB path
+    // populates exprNode/argExprNodes INLINE in ast-builder.js parseAttributes).
+    // The canary must compare what the pipeline actually feeds codegen, so the
+    // pass runs here too. It REDUCES MISSING-FIELD (native now carries the
+    // parsed-expr fields it lacked); any residual SPAN-COORD/EXTRA-FIELD is a
+    // PRE-EXISTING native value.span / extra-key divergence the classifier now
+    // reaches once exprNode is no longer a short-circuiting MISSING-FIELD — the
+    // exprNode SUBTREE itself is byte-identical to live (same parseExprToNode +
+    // same (raw, span.start) pairing; deep span-diff = 0).
+    if (native) populateNativeAttrValueExprNodes(native, filePath, r.errors);
   } catch (_e) {
     nativeCrashed = true;
   }
