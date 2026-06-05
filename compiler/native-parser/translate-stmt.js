@@ -91,6 +91,7 @@
 // =============================================================================
 
 import { StmtKind } from "./ast-stmt.js";
+import { ExprKind } from "./ast-expr.js";
 import { translateExpr } from "./translate-expr.js";
 
 // =============================================================================
@@ -1351,6 +1352,231 @@ function makeDoWhileStmt(stmt, counter, label) {
     return node;
 }
 
+// =============================================================================
+// for-header `iterable` STRING synthesis (native parity-bridge)
+// -----------------------------------------------------------------------------
+// The LIVE for-stmt node (ast-builder.js L5724-5832) carries — in ADDITION to
+// the on-contract `variable` / `iterExpr` / `cStyleParts` — a runtime-only
+// `iterable` STRING field: the verbatim for-header iterable text the tokenizer
+// collected (for-of: `iterExpr.trim()`, INCLUDING any trailing `key <expr>`
+// clause per §17.4b; C-style: the space-joined `( init ; cond ; update )` token
+// run). The native parser produces structured Expr nodes but DOES NOT attach
+// this string, so `promote --each` (promote.js:1229 reads `forStmt.iterable`)
+// sees `undefined` and skips every site under the parser-flip. This re-builds
+// the live string shape from the RAW native for-stmt fields so the promote
+// tooling-consumer reads a `parseForHeader`-compatible string.
+//
+// `serializeNativeExprToText` is a TARGETED serializer for the for-header
+// iterable shapes (cell-ref / member / call / array-literal / count-loop
+// comparison). It returns `null` for any shape it cannot faithfully render; the
+// caller then omits `iterable` (a no-worse outcome than today's `undefined`),
+// and the iterable is treated as non-promotable — matching the LIVE
+// "iterable is not an @cell reference" SKIP outcome rather than a miscompile.
+function serializeNativeExprToText(node) {
+    if (node === undefined || node === null || typeof node !== "object") {
+        return null;
+    }
+    switch (node.kind) {
+        case ExprKind.AtCell:
+            // `@cell` — the native `name` omits the `@` sigil; the LIVE iterable
+            // string carries it (the cell-ref form `iterableIsCellRef` matches).
+            return "@" + node.name;
+        case ExprKind.Ident:
+            return node.name;
+        case ExprKind.NumberLit:
+        case ExprKind.StringLit:
+        case ExprKind.RegexLit:
+            // `raw` is the verbatim source text (incl. quotes / delimiters).
+            return (node.raw === undefined || node.raw === null) ? null : String(node.raw);
+        case ExprKind.BoolLit:
+            return node.value === true ? "true" : "false";
+        case ExprKind.NotValue:
+            return "not";
+        case ExprKind.This:
+            return "this";
+        case ExprKind.Member: {
+            const obj = serializeNativeExprToText(node.object);
+            if (obj === null) return null;
+            if (node.computed === true) {
+                const prop = serializeNativeExprToText(node.property);
+                if (prop === null) return null;
+                // Live tokenized form: `obj [ prop ]` (each token space-joined).
+                return obj + " [ " + prop + " ]";
+            }
+            // dotted member — `property` is an Ident node OR a bare name string.
+            const propName = (node.property && typeof node.property === "object")
+                ? node.property.name
+                : node.property;
+            if (propName === undefined || propName === null) return null;
+            // Live tokenized form: `obj . prop` (the `.` is its own token,
+            // space-joined). `parseForHeader` re-collapses ` . ` -> `.`.
+            return obj + (node.optional === true ? " ?. " : " . ") + propName;
+        }
+        case ExprKind.Call: {
+            const callee = serializeNativeExprToText(node.callee);
+            if (callee === null) return null;
+            const args = serializeNativeArgList(node.args);
+            if (args === null) return null;
+            // Live tokenized form: `callee ( args )` — the `(` / `)` are tokens.
+            // An empty arg list renders `callee ( )` (matching `getItems ( )`).
+            const inner = args === "" ? "" : args + " ";
+            return callee + (node.optional === true ? " ?. ( " : " ( ") + inner + ")";
+        }
+        case ExprKind.Array: {
+            const els = Array.isArray(node.elements) ? node.elements : [];
+            const parts = [];
+            for (const el of els) {
+                if (el === undefined || el === null) { parts.push(""); continue; }
+                if (el.kind === "Hole") { parts.push(""); continue; }
+                const inner = el.expression !== undefined ? el.expression : el;
+                const txt = serializeNativeExprToText(inner);
+                if (txt === null) return null;
+                parts.push(el.kind === "Spread" ? "... " + txt : txt);
+            }
+            // Live tokenized form: `[ e1 , e2 , e3 ]` (`[`/`]`/`,` are tokens).
+            return parts.length === 0 ? "[ ]" : "[ " + parts.join(" , ") + " ]";
+        }
+        case ExprKind.Paren: {
+            const inner = serializeNativeExprToText(node.expression);
+            if (inner === null) return null;
+            return "( " + inner + " )";
+        }
+        case ExprKind.Binary:
+        case ExprKind.Logical: {
+            const l = serializeNativeExprToText(node.left);
+            const r = serializeNativeExprToText(node.right);
+            if (l === null || r === null) return null;
+            return l + " " + node.op + " " + r;
+        }
+        case ExprKind.Unary: {
+            const operand = serializeNativeExprToText(node.operand);
+            if (operand === null) return null;
+            // Live tokenized form: prefix `op operand`, postfix `operand op`.
+            return node.prefix === false ? operand + " " + node.op : node.op + " " + operand;
+        }
+        case ExprKind.Update: {
+            const operand = serializeNativeExprToText(node.operand);
+            if (operand === null) return null;
+            // Live tokenized form: `i ++` / `++ i` (the `++`/`--` is one token,
+            // space-joined to the operand).
+            return node.prefix === true ? node.op + " " + operand : operand + " " + node.op;
+        }
+        default:
+            // Any shape outside the for-header iterable catalog (Arrow bodies,
+            // objects, templates, etc.) — render as non-serializable. The caller
+            // omits `iterable`; the site is then a non-promotable SKIP.
+            return null;
+    }
+}
+
+// serializeNativeArgList — render a native call-argument list to source text.
+// Returns `null` if any argument is not faithfully serializable.
+function serializeNativeArgList(args) {
+    if (!Array.isArray(args)) return "";
+    const parts = [];
+    for (const a of args) {
+        if (a === undefined || a === null) return null;
+        if (a.kind === ExprKind.Arrow) {
+            const arrow = serializeNativeArrow(a);
+            if (arrow === null) return null;
+            parts.push(arrow);
+            continue;
+        }
+        const inner = a.kind === "Spread" ? a.argument : a;
+        const txt = serializeNativeExprToText(inner);
+        if (txt === null) return null;
+        parts.push(a.kind === "Spread" ? "... " + txt : txt);
+    }
+    // Live tokenized form: args separated by ` , ` (the `,` is its own token).
+    return parts.join(" , ");
+}
+
+// serializeNativeArrow — render an arrow function head + best-effort body to
+// source text. A single-expression body (the `@tasks.filter(x => x.done)` case)
+// serializes faithfully; a block body is not promotable-iterable shaped, so the
+// arrow returns `null` (the enclosing call is then non-serializable -> SKIP).
+function serializeNativeArrow(node) {
+    const params = Array.isArray(node.params) ? node.params : [];
+    const paramParts = [];
+    for (const p of params) {
+        const name = (p && typeof p === "object") ? p.name : p;
+        if (name === undefined || name === null) return null;
+        paramParts.push(name);
+    }
+    // Live tokenized form: single param bare (`x`), multi-param parenthesized
+    // (`( a , b )`) with `(`/`)`/`,` as space-joined tokens.
+    const head = (paramParts.length === 1)
+        ? paramParts[0]
+        : (paramParts.length === 0 ? "( )" : "( " + paramParts.join(" , ") + " )");
+    // The native arrow `body` is an Expr (concise) or a Stmt[] (block). Only a
+    // concise single-expression body is iterable-promotable-shaped.
+    if (Array.isArray(node.body)) return null;
+    const body = serializeNativeExprToText(node.body);
+    if (body === null) return null;
+    return head + " => " + body;
+}
+
+// synthForOfIterableString — re-build the LIVE for-of `iterable` STRING from the
+// RAW native ForOf/ForIn `right` Expr (the iterable) plus an optional `key`
+// clause. The LIVE iterable string is `iterExpr.trim()` and (per §17.4b) carries
+// any trailing ` key <expr>` clause inline — `promote.js parseForHeader`
+// re-extracts the key from the tail. Returns `null` when the iterable is not
+// serializable (the caller omits `iterable`; site SKIPs, matching LIVE).
+function synthForOfIterableString(stmt) {
+    const right = stmt.right;
+    const base = serializeNativeExprToText(right);
+    if (base === null) return null;
+    // §17.4b key clause — the native for-header parser attaches `keyExpr` (a
+    // native Expr) when a `key <expr>` clause follows the iterable. The LIVE
+    // string carries it inline as ` key <expr-text>`.
+    if (stmt.keyExpr !== undefined && stmt.keyExpr !== null) {
+        const keyText = serializeNativeExprToText(stmt.keyExpr);
+        if (keyText !== null) {
+            return base + " key " + keyText;
+        }
+    }
+    return base;
+}
+
+// synthCStyleIterableString — re-build the LIVE C-style `iterable` STRING from
+// the RAW native For `init` / `test` / `update` clauses. The LIVE form is the
+// space-joined token run `( init ; cond ; update )` (ast-builder.js L5759), and
+// `promote.js parseForHeader` (L850) matches the count-loop shape
+// `( let i = 0 ; i < N ; i++ )` against it. Returns `null` for any clause that
+// is not serializable (the caller omits `iterable`; site SKIPs).
+function synthCStyleIterableString(stmt) {
+    const initText = serializeForInitClause(stmt.init);
+    const condText = serializeNativeExprToText(stmt.test);
+    const updateText = serializeNativeExprToText(stmt.update);
+    if (initText === null || condText === null || updateText === null) {
+        return null;
+    }
+    return "( " + initText + " ; " + condText + " ; " + updateText + " )";
+}
+
+// serializeForInitClause — the C-style init is a native VarDecl Stmt
+// (`let i = 0`) OR an Expr. Render the declaration form to `let <target> =
+// <init>` (the shape `parseForHeader`'s count-loop regex matches); an Expr init
+// renders via the expression serializer.
+function serializeForInitClause(init) {
+    if (init === undefined || init === null) return "";
+    if (init.kind === StmtKind.VarDecl) {
+        const decls = Array.isArray(init.declarations) ? init.declarations : [];
+        if (decls.length !== 1) return null;
+        const d = decls[0];
+        const target = (d.target && typeof d.target === "object") ? d.target.name : d.target;
+        if (target === undefined || target === null) return null;
+        const declKw = (init.declKind === undefined || init.declKind === null) ? "let" : init.declKind;
+        if (d.init === undefined || d.init === null) {
+            return declKw + " " + target;
+        }
+        const initVal = serializeNativeExprToText(d.init);
+        if (initVal === null) return null;
+        return declKw + " " + target + " = " + initVal;
+    }
+    return serializeNativeExprToText(init);
+}
+
 // makeForStmtCStyle — native `For{init,test,update,body}` (the C-style
 // three-clause form) -> live `for-stmt` with `variable: null` and the
 // `cStyleParts` triple (ast.ts:994). The native `init` is a `VarDecl` Stmt OR
@@ -1378,6 +1604,13 @@ function makeForStmtCStyle(stmt, counter, label) {
         },
         span: spanOrZero(stmt.span),
     };
+    // Native parity-bridge — attach the LIVE runtime-only `iterable` STRING (the
+    // `( init ; cond ; update )` token-run) so `promote --each` reads it. Omit
+    // the field when not faithfully serializable (a non-promotable SKIP).
+    const iterableText = synthCStyleIterableString(stmt);
+    if (iterableText !== null) {
+        node.iterable = iterableText;
+    }
     if (label !== null && label !== undefined) {
         node.label = label;
     }
@@ -1420,6 +1653,13 @@ function makeForStmtInOf(stmt, counter, label) {
         forKind: (stmt.kind === StmtKind.ForIn) ? "in" : "of",
         span: spanOrZero(stmt.span),
     };
+    // Native parity-bridge — attach the LIVE runtime-only `iterable` STRING (the
+    // iterable text after `of`/`in`, incl. any trailing §17.4b `key <expr>`) so
+    // `promote --each` reads it. Omit when not serializable (non-promotable SKIP).
+    const iterableText = synthForOfIterableString(stmt);
+    if (iterableText !== null) {
+        node.iterable = iterableText;
+    }
     if (label !== null && label !== undefined) {
         node.label = label;
     }

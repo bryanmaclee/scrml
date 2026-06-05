@@ -232,24 +232,28 @@ export function makeDoWhile(body, test, span) {
 // makeFor — a C-style three-clause `for (init; test; update) body` loop. Each
 // of `init` / `test` / `update` is `null` when its clause is empty. `init` is
 // a VarDecl Stmt or an Expr; `test` / `update` are Exprs; `body` is a Stmt.
-export function makeFor(init, test, update, body, span) {
-    return { kind: StmtKind.For, init, test, update, body, span };
+// `elseBody` is the §17.4a empty-state `else` block Stmt (`for (...) { } else
+// { }`), or `null` when absent.
+export function makeFor(init, test, update, body, span, elseBody) {
+    return { kind: StmtKind.For, init, test, update, body, span, elseBody: elseBody === undefined ? null : elseBody };
 }
 
 // makeForIn — a `for (left in right) body` loop. `left` is a VarDecl Stmt
 // (`for (let k in o)`) or an assignment-target Expr (`for (k in o)`); `right`
-// is the iterated-object Expr; `body` is a Stmt.
-export function makeForIn(left, right, body, span) {
-    return { kind: StmtKind.ForIn, left, right, body, span };
+// is the iterated-object Expr; `body` is a Stmt. `keyExpr` is the §17.4b
+// keyed-reconciliation key expression (`... key x.id`), or `null` when absent.
+export function makeForIn(left, right, body, span, keyExpr, elseBody) {
+    return { kind: StmtKind.ForIn, left, right, body, span, keyExpr: keyExpr === undefined ? null : keyExpr, elseBody: elseBody === undefined ? null : elseBody };
 }
 
 // makeForOf — a `for (left of right) body` loop. `left` / `right` / `body` as
 // for ForIn. `isAwait` is true for `for await (left of right)` — an M3.2
 // extension of the DD §D3 ForOf shape, mirroring Acorn's ForOfStatement
 // `await: boolean`. The body's `async` context itself is M3.3's territory;
-// M3.2 only recognizes the `await` keyword in the `for` head.
-export function makeForOf(left, right, body, isAwait, span) {
-    return { kind: StmtKind.ForOf, left, right, body, isAwait, span };
+// M3.2 only recognizes the `await` keyword in the `for` head. `keyExpr` is the
+// §17.4b keyed-reconciliation key expression (`... key x.id`), or `null`.
+export function makeForOf(left, right, body, isAwait, span, keyExpr, elseBody) {
+    return { kind: StmtKind.ForOf, left, right, body, isAwait, span, keyExpr: keyExpr === undefined ? null : keyExpr, elseBody: elseBody === undefined ? null : elseBody };
 }
 
 // makeReturn — a `return argument` statement. `argument` is an Expr, or

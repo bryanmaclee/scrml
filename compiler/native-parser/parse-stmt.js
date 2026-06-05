@@ -1306,6 +1306,25 @@ export function parseFor(ctx) {
     return finishForCStyle(ctx, kw, isAwait, initNode);
 }
 
+// parseForElseBody — §17.4a empty-state `else` block on a `for`/lift loop
+// (`for (let x of @items) { ... } else { ... }`). The `else` block renders when
+// the collection is empty (length 0 or `not`). This is a scrml for-statement
+// extension absent from ECMAScript: a `for` body MAY be directly followed by an
+// `else`. Recognized here ONLY when an `else` keyword directly follows the for
+// body — which is unambiguous because `for` is the only loop with this clause
+// and a `for` body never legitimately abuts a stray `else`. When present, the
+// `else` is consumed and its block body returned (preventing the spurious
+// E-STMT-STRAY-ELSE the dangling `else` otherwise fired — a native↔live gap);
+// when absent, returns `null`.
+function parseForElseBody(ctx) {
+    const cursor = ctx.cursor;
+    if (currentKind(cursor) !== TokenKind.KwElse) {
+        return null;
+    }
+    advance(cursor);   // consume `else`
+    return parseStatement(ctx);
+}
+
 // finishForInOf — the cursor sits AT the `in` / `of` keyword. `initNode` is
 // the parsed head (a VarDecl when initIsDecl, else an expression / binding).
 function finishForInOf(ctx, kw, isAwait, initNode, initIsDecl, sepKind) {
@@ -1346,14 +1365,33 @@ function finishForInOf(ctx, kw, isAwait, initNode, initIsDecl, sepKind) {
     const right = (sepKind === TokenKind.KwOf) ? parseAssignmentExpr(ctx) : parseExpression(ctx);
     exitMode(ctx, priorM);
 
+    // §17.4b — keyed-reconciliation `key <expr>` clause in the loop header
+    // (`for (let x of @items key x.id) { lift ... }`). `key` is a CONTEXTUAL
+    // keyword: it is recognized here ONLY when it directly follows the iterable,
+    // before the closing `)`. Elsewhere `key` is an ordinary identifier. The LIVE
+    // tokenizer-based for-header collects this clause into the `iterable` STRING;
+    // the native AST parser captures it as a structured `keyExpr` Expr (the
+    // translate-stmt for-stmt builder re-serializes it back inline for the
+    // promote tooling-consumer). Without this clause the native parser fired
+    // E-STMT-EXPECT-RPAREN on the `key` token (a native↔live parity gap).
+    let keyExpr = null;
+    if (currentKind(cursor) === TokenKind.Ident && current(cursor).name === "key") {
+        advance(cursor);   // consume `key`
+        const priorKM = enterMode(ctx, ParseMode.InExpression);
+        keyExpr = parseAssignmentExpr(ctx);
+        exitMode(ctx, priorKM);
+    }
+
     expectRParen(ctx, "for");
     const body = parseStatement(ctx);
+    const elseBody = parseForElseBody(ctx);   // §17.4a empty-state block
 
-    const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col);
+    const endNode = (elseBody === null || elseBody === undefined) ? body : elseBody;
+    const span = makeSpan(kw.span.start, nodeEnd(endNode), kw.span.line, kw.span.col);
     if (sepKind === TokenKind.KwIn) {
-        return makeForIn(left, right, body, span);
+        return makeForIn(left, right, body, span, keyExpr, elseBody);
     }
-    return makeForOf(left, right, body, isAwait, span);
+    return makeForOf(left, right, body, isAwait, span, keyExpr, elseBody);
 }
 
 // finishForCStyle — the cursor sits AT the `;` that ends the init clause (or
@@ -1398,9 +1436,11 @@ function finishForCStyle(ctx, kw, isAwait, initNode) {
 
     expectRParen(ctx, "for");
     const body = parseStatement(ctx);
+    const elseBody = parseForElseBody(ctx);   // §17.4a empty-state block
 
-    const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col);
-    return makeFor(initNode, test, update, body, span);
+    const endNode = (elseBody === null || elseBody === undefined) ? body : elseBody;
+    const span = makeSpan(kw.span.start, nodeEnd(endNode), kw.span.line, kw.span.col);
+    return makeFor(initNode, test, update, body, span, elseBody);
 }
 
 // =============================================================================

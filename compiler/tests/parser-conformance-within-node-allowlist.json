@@ -81,7 +81,7 @@
   },
   "compiler/self-host/ts.scrml": {
     "COUNT-LENGTH": 35,
-    "EXTRA-FIELD": 325,
+    "EXTRA-FIELD": 329,
     "FIELD-SHAPE": 264,
     "KIND-NAME": 81,
     "MISSING-FIELD": 571,
@@ -2367,11 +2367,12 @@
     "SPAN-COORD": 18
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml": {
-    "EXTRA-FIELD": 7,
-    "FIELD-SHAPE": 7,
+    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 11,
+    "FIELD-SHAPE": 4,
     "KIND-NAME": 1,
-    "MISSING-FIELD": 9,
-    "SPAN-COORD": 13
+    "MISSING-FIELD": 5,
+    "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-in-jsobj-053.scrml": {
     "EXTRA-FIELD": 4,
@@ -2380,11 +2381,11 @@
     "SPAN-COORD": 15
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml": {
-    "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 8,
-    "FIELD-SHAPE": 4,
+    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 5,
+    "FIELD-SHAPE": 3,
     "KIND-NAME": 1,
-    "MISSING-FIELD": 4,
+    "MISSING-FIELD": 5,
     "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml": {
@@ -6244,12 +6245,12 @@
     "SPAN-COORD": 87
   },
   "samples/gauntlet-s19-phase4/nested-comments.scrml": {
-    "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 36,
-    "FIELD-SHAPE": 27,
-    "KIND-NAME": 13,
-    "MISSING-FIELD": 85,
-    "SPAN-COORD": 124
+    "COUNT-LENGTH": 6,
+    "EXTRA-FIELD": 46,
+    "FIELD-SHAPE": 28,
+    "KIND-NAME": 14,
+    "MISSING-FIELD": 99,
+    "SPAN-COORD": 133
   },
   "samples/htmx-debate-dashboard.scrml": {
     "COUNT-LENGTH": 2,
@@ -6356,7 +6357,7 @@
   },
   "stdlib/auth/jwt.scrml": {
     "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 60,
+    "EXTRA-FIELD": 61,
     "FIELD-SHAPE": 20,
     "KIND-NAME": 11,
     "MISSING-FIELD": 56,
@@ -6571,7 +6572,7 @@
   },
   "stdlib/data/transform.scrml": {
     "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 105,
+    "EXTRA-FIELD": 106,
     "FIELD-SHAPE": 73,
     "KIND-NAME": 26,
     "MISSING-FIELD": 367,
@@ -6610,11 +6611,11 @@
     "SPAN-COORD": 10
   },
   "stdlib/http/index.scrml": {
-    "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 121,
+    "COUNT-LENGTH": 3,
+    "EXTRA-FIELD": 122,
     "FIELD-SHAPE": 92,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 352,
+    "MISSING-FIELD": 350,
     "SPAN-COORD": 239
   },
   "stdlib/mcp/index.scrml": {
@@ -6707,7 +6708,7 @@
   },
   "stdlib/router/index.scrml": {
     "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 68,
+    "EXTRA-FIELD": 69,
     "FIELD-SHAPE": 26,
     "KIND-NAME": 11,
     "MISSING-FIELD": 124,
