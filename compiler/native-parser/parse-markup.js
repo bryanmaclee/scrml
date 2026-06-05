@@ -2155,9 +2155,11 @@ export function braceIsInStringLiteral(cursor) {
 // text run genuinely opens with a `<x> =` shape.
 
 // BARE_DECL_RE — the canonical bare-declaration keyword set. A VERBATIM copy
-// of ast-builder.js's `BARE_DECL_RE` (L335) — the live oracle's recognition
-// set. If the live regex changes, this copy must change in lockstep.
-const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn\s+\w|function\s+\w|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
+// of ast-builder.js's `BARE_DECL_RE` (L399) — the live oracle's recognition
+// set, including the R25-Bug-42 (S138) generator-admitting `[*\s]` form
+// (`server function*` / `fn*` / `function*`). If the live regex
+// changes, this copy must change in lockstep (re-synced this session).
+const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)[*\s]|type\s+\w|fn[*\s]\w?|function[*\s]\w?|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
 
 // TOPLEVEL_STATE_DECL_RE — VERBATIM copy of ast-builder.js L369. A text run
 // opening with a `<Ident ...>` then `=` / `:` / a nested `<Ident` (a Variant C

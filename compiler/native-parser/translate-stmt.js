@@ -223,6 +223,20 @@ function appendTranslatedStmt(out, stmt, counter) {
                     return;
                 }
             }
+            // `yield <arg>` at statement position. The native parser models
+            // `yield` as an EXPRESSION (ExprKind.Yield, parse-expr.js makeYield);
+            // the live union models it as a `yield-stmt` LogicStatement
+            // (ast-builder.js yield handler ~L9843). The default `makeBareExpr`
+            // path discards the structure (the Yield escape-hatch in
+            // translate-expr.js renders the argument as an empty `;`), dropping
+            // ALL yields. Un-wrap to `makeYieldStmt` here — mirroring the
+            // Lift/Fail/Propagate/GuardedExpr/Sql un-wraps above — so the
+            // structured sqlNode / exprNode reaches codegen's emit-logic
+            // `case "yield-stmt"` (SPEC §37 SSE `server function*`; §13).
+            if (e && e.kind === "Yield") {
+                out.push(makeYieldStmt(e, stmt.span, counter));
+                return;
+            }
             out.push(makeBareExpr(e, stmt.span, counter));
             return;
         }
@@ -1692,6 +1706,40 @@ function makeReturnStmt(stmt, counter) {
             return node;
         }
         node.exprNode = translateExpr(stmt.argument);
+    }
+    return node;
+}
+
+// makeYieldStmt — native `Yield{argument}` -> live `yield-stmt`. MIRRORS
+// makeReturnStmt: a bare `yield` has `argument: null` -> live `expr: ""`
+// (the live bare-yield shape, ast-builder.js L9851). When `argument` is a
+// chained `?{...}.all()/.get()/.run()` it attaches a structured `sqlNode` and
+// OMITS `exprNode` (ast-builder.js L9867); codegen emit-logic `case
+// "yield-stmt"` recurses into `node.sqlNode` (kind "sql") for the
+// server-boundary tagged-template form (and emits the defensive `yield null;`
+// guard on the client boundary). A non-SQL argument bridges to a LIVE
+// lowercase `ExprNode` via translateExpr (the general `yield <expr>` path,
+// ast-builder.js L9879). NOTE: `yield*` delegation is not yet a distinct
+// live kind here; `delegate` rides through the argument like the plain form.
+function makeYieldStmt(stmt, span, counter) {
+    const node = {
+        id: stampId(counter),
+        kind: "yield-stmt",
+        expr: "",
+        span: spanOrZero(span),
+    };
+    const argument = stmt.argument;
+    if (argument !== undefined && argument !== null) {
+        // `yield ?{...}.all()` — chained-SQL form attaches a structured
+        // sqlNode and OMITS exprNode (the inner sql node is id-stamped from
+        // the SAME counter, child-after-parent here — matching makeReturnStmt).
+        const chainedSql = reconstructChainedSql(argument, argument.span, counter);
+        if (chainedSql !== null) {
+            node.sqlNode = chainedSql;
+            return node;
+        }
+        // General `yield <expr>` — bridge to a live lowercase ExprNode.
+        node.exprNode = translateExpr(argument);
     }
     return node;
 }
