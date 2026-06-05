@@ -193,7 +193,22 @@ FEATURE-stale (S162 finding — whole machinery missing vs the `.js`, not mere p
 ### S162 SPEC registry catch-up (e5b673dc)
 - compiler/SPEC.md + compiler/SPEC-INDEX.md — §4.15 / §24.4 register `<each>` as a structural element (reserved-name list + attr-catalog), aligning the SPEC with the long-standing implementation and the S162 native promotion.
 
-### Native-Parser File Table (S162) — F1+ swap-grind orientation
+## Key S163 Source Changes (B1 reset-expr + F1 engine-substrate silent-miscompile CLOSED)
+
+### S163 B1 — native `reset(@cell)` → live `reset-expr` node (6ad8ca13)
+- `compiler/native-parser/translate-expr.js` — intercepts a bare-`reset`-callee CallExpr → builds the live `reset-expr` node (3 §6.8.2 shapes: 0-arg target is a §42 `not` literal; `@cell`; `@a.b.c` multi-level compound-nav). NOT the `LOGIC_SCOPE_GLOBAL_ALLOWLIST` allowlist shortcut (S139 trap). R26: native emits `_scrml_reset("coins")` byte-identical to default. +7 tests. Deferred: malformed-reset diagnostic surfacing under native (produces the node with the E-RESET-NO-ARG field but doesn't run the ast-builder surfacer; no parity regression).
+
+### S163 F1 — engine-substrate silent-miscompile CLOSED (a41df176, the headline; ~40L)
+**The bug:** native silently DROPPED the entire §51.0 engine substrate (transition table, `_scrml_engine_direct_set` rule-validation, var-init, mount/body-render) across ALL engine files — compiled clean, emitted `<engine>` as a dumb `_scrml_reactive_set` cell. **Root cause = a `machineDecls` TWO-INSTANCE object-identity defect:** native synthesized TWO `engine-decl` objects — a `nodes` copy via `parse-file.js synthEngineNode` AND a SEPARATE `machineDecls` copy via `collect-hoisted.js synthEngineDecl`. SYM stamped `_record`/`engineMeta` on the `nodes` copy ONLY; codegen `collectC12EngineDecls` reads `machineDecls`-FIRST → un-stamped → `isC12EngineDecl` false → substrate dropped. (Live shares ONE instance: `ast-builder.js:13616 machineDecls.push(node)`. `<match>` was fine — `collectMatchBlocks` walks nodes-only.)
+- `compiler/native-parser/parse-file.js` — native now derives `machineDecls` from the mapped `nodes` instances via NEW `collectMachineDeclsFromNodes` (single shared instance, matching live); `bodyChildren` mapped to AST nodes so nested engines are structural + reachable.
+- `compiler/native-parser/collect-hoisted.js` — `synthEngineDecl` REMOVED; `collect-hoisted.js` no longer synthesizes engines (the second-instance source).
+- **PA-independent R26:** engine-modern-001 (7/7 `_scrml_engine_`, 4/4 transitions, 3/3 direct_set) + engine-009 nested (30/30) BYTE-IDENTICAL native==default; all 6 swept engine sub-features (basic/hierarchy/onTimeout/onIdle/history/effects) recover. mario's marioState substrate recovers; its residual is the SEPARATE PowerUp payload-enum bug (next).
+- **§4.18 ruling (S163):** native's `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7) on bare display text in code-default arm bodies is SPEC-CORRECT, NOT spurious — native enforces, LIVE stays lenient (doomed M6); corpus migration deferred.
+
+### S164 flip re-measure
+- **674 flip-failures** (down from ~790 S162, 1,150 S161; engine-substrate + B1 killed ~116). ~8 environmental → ~666 genuine across 181 files / ~6 families. **NEXT: B2 (§51.0.S message-arm).**
+
+### Native-Parser File Table (S162) — swap-grind orientation
 
 The native parser is `compiler/native-parser/` (38 `.js` files; paired `.scrml` mirrors are
 FEATURE-stale — fix the `.js`). Key files by role + the swap-family each owns:
@@ -205,9 +220,11 @@ FEATURE-stale — fix the `.js`). Key files by role + the swap-family each owns:
 | `parse-markup.js` | 2916 | markup body parser; MK3.3 display-text detection; `classifyTagFrame`; emits `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7) | **F1** markup-classification half |
 | `tag-frame.js` | 2402 | TagKind classification; `STRUCTURAL_ELEMENTS`; `tagKindFor`; void-element registry | F1, F7 (structural-misplaced gating) |
 | `translate-stmt.js` | 1686 | native-AST → live-shape statement translation | — |
-| `parse-file.js` | 1600 | top-level file parser; block→ASTNode mapping (`mapOneBlock`); `isEachBlock`/`synthEachBlockNode` + `isMatchBlock`/`synthMatchBlockNode` structural promotion (S162) | each/match promotion |
-| `translate-expr.js` | 1050 | native-AST → live-shape expression translation; AtCell `@.` arm | — |
-| `collect-hoisted.js` | 856 | hoisted-declaration collection pass | — |
+| `parse-file.js` | 1600+ | top-level file parser; block→ASTNode mapping (`mapOneBlock`); each/match structural promotion (S162); **`collectMachineDeclsFromNodes` engine-substrate single-instance share + `synthEngineNode` `bodyChildren`→AST mapping (S163)** | each/match promotion; engine substrate (CLOSED S163) |
+| `translate-expr.js` | 1050+ | native-AST → live-shape expression translation; AtCell `@.` arm; **bare-`reset`-callee → live `reset-expr` node (B1, S163)** | B1 reset-expr (DONE S163) |
+| `collect-hoisted.js` | ~830 | hoisted-declaration collection pass; **`synthEngineDecl` REMOVED S163 (was the engine second-instance source)** | — |
+| `synthEngineDecl` (in native engine synth path) | — | builds the engine-decl from `<engine>` openers; **has ZERO `accepts=` handling (acceptsType undefined vs live null) + no openerEffect read** | **B2 (§51.0.S message-arm — THE NEXT DISPATCH)**; `effect=` opener gap |
+| `native-walker/engine-statechild-walker.ts:516` | — | walks engine state-children into `EngineStateChildEntry`; **hard-codes `messageArms: []`** | **B2 (§51.0.S message-arm)** |
 | `lex-in-code.js` | 842 | code-default lexer; `@.` contextual-sigil branch (S162 unit C) + `@ident` | — |
 | `display-text-literal.js` | 640 | display-text literal scanner; emits `E-UNQUOTED-DISPLAY-TEXT` | F1 (spurious-fire surface) |
 | `ast-stmt.js` | 601 | native statement AST node constructors | — |
@@ -218,17 +235,20 @@ FEATURE-stale — fix the `.js`). Key files by role + the swap-family each owns:
 | `token.js` / `token-cursor.js` / `cursor.js` | 273 / 102 / 59 | token + cursor primitives | — |
 | `ast-expr.js` | 478 | native expression AST node constructors | — |
 | `body-mode.js` | 227 | body-mode dispatch (code/markup/sql/css) | — |
-| `parse-state-body.js` | **235** | **engine/db/schema state-child classification** (`tagKindFor`, `ENGINE_FORM_KEYWORDS`, `isStateBlock` exclusion) | **F1 (THE NEXT DISPATCH)** — engine state-child arm-body parse |
+| `parse-state-body.js` | 235 | engine/db/schema state-child classification (`tagKindFor`, `ENGINE_FORM_KEYWORDS`, `isStateBlock` exclusion) | F1 markup-classification (engine-substrate drop was the dominant F1 cause — CLOSED S163 via parse-file.js, not here) |
 | `parse-sql-body.js` | 182 | SQL body parser (`?{}` server-fn SQL) | F2 (drops SQL body in top-level server fns) |
 | `parse-mode.js` / `lex-mode.js` / `parse-ctx.js` | 114 / 34 / 124 | mode + parse-context state | — |
 
-**F1 locus (the NEXT dispatch — engine arm-body parse, ~168 failures, L):** native fires a spurious
-`E-UNQUOTED-DISPLAY-TEXT` on `<engine>` state-child arm bodies and then DROPS the whole engine (plus
-any each-in-arm). Two cooperating files: `parse-state-body.js` (state-child classification —
-`tagKindFor` / `ENGINE_FORM_KEYWORDS` engine exclusion) and the markup-classification path in
-`parse-markup.js` (MK3.3 display-text detection at parse-markup.js:1094+, `E-UNQUOTED-DISPLAY-TEXT`
-fire) + `display-text-literal.js`. The F1 fix must stop the markup classifier from treating an engine
-arm body as a code-default body where bare prose is an error.
+**B2 locus (the NEXT dispatch — §51.0.S engine message-arm, ~20 failures, L-subset):** native
+`synthEngineDecl` has ZERO `accepts=MsgType` opener-attr handling (acceptsType undefined vs live null)
+and `native-walker/engine-statechild-walker.ts:516` hard-codes `messageArms: []` — so `(state × message)`
+arms are dropped and `accepts=`-bearing engines mis-fire `E-ENGINE-ACCEPTS-NOT-ENUM` (4) / `E-ENGINE-MSG-UNKNOWN`
+(3). **The LIVE pattern to mirror is `engine-statechild-parser.ts parseMessageArms()`** (landed S154/S155 #14 —
+`accepts=MsgType` capture + `(state × message)` arm recognition → `EngineStateChildEntry.messageArms`; SPEC
+§51.0.S + §51.0.G.1 + §51.0.B `accepts=` row). Affects `engine-message-dispatch-s6.scrml` + the conf/browser
+`engine-message-dispatch-s155` tests. **F1 engine-substrate (the ~168 dominant cause) is CLOSED S163** — see
+"Key S163 Source Changes" above; the residual `E-UNQUOTED-DISPLAY-TEXT` §4.18.7 fire is SPEC-CORRECT (native
+enforces, live lenient), NOT a native bug.
 
 ## Ignored / Generated Paths
 node_modules/, compiler/node_modules/, dist/, compiler/dist/, compiler/native-parser/dist/,
@@ -236,7 +256,7 @@ compiler/self-host/dist/, stdlib/*/dist/, .git/, handOffs/,
 benchmarks/todomvc-react/, benchmarks/todomvc-vue/, benchmarks/todomvc-svelte/
 
 ## Tags
-#scrmlts #map #structure #compiler #cli #bun #engine-graph #source-map #each #each-in-dynamic-context #match #engine-statechild #cross-file-modules #enum-subset #message-dispatch #s154 #s155 #s156 #s157 #s158 #s159 #s160 #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #r28-8 #per-item-reactivity #live-keyed #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #bare-variant-inference #native-parser #native-parser-swap #each-promotion #match-promotion #flip-failure-families #f1-engine-arm-body #s161 #s162
+#scrmlts #map #structure #compiler #cli #bun #engine-graph #source-map #each #each-in-dynamic-context #match #engine-statechild #cross-file-modules #enum-subset #message-dispatch #s154 #s155 #s156 #s157 #s158 #s159 #s160 #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #r28-8 #per-item-reactivity #live-keyed #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #bare-variant-inference #native-parser #native-parser-swap #each-promotion #match-promotion #flip-failure-families #f1-engine-substrate-closed #b2-message-arm-next #engine-substrate-fix #b1-reset-expr #s161 #s162 #s163 #s164
 
 ## Links
 - [primary.map.md](./primary.map.md)

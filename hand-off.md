@@ -1,64 +1,60 @@
-# scrmlTS — Session 163 (CLOSE)
+# scrmlTS — Session 164 (OPEN)
 
 **Date:** 2026-06-04
-**Previous:** `handOffs/hand-off-167.md` (= S162 CLOSE).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-168.md` at next OPEN.
-**Profile:** opened **A (FULL)** ("read pa.md and start session"; default A). Full session-start completed.
+**Previous:** `handOffs/hand-off-168.md` (= S163 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-169.md` at next OPEN.
+**Profile:** opened **A (FULL)** ("read pa.md and start session"; default A). Full session-start completed (pa.md full + PRIMER full + SPEC-INDEX full + master-list §0 + hand-off + user-voice S153→S163 tail + git sync + inbox + hook check).
 
 ---
 
-## 🏁 S163 CLOSE — F1 engine arm-body OPENED: §51.0 engine-substrate SILENT-MISCOMPILE found + FIXED (the dominant native-swap miscompile, CLOSED) + B1 reset-expr + §4.18 ruling · WRAP + PUSH
+## 🟢 S164 OPEN — caught up; native-parser-swap arc warm. NEXT OPENER: flip re-measure (quantify the ~790 drop post engine-substrate fix), then B2 / PowerUp enum / effect=.
 
-F1 (the native-parser-swap dominant family) opened via two survey-STOPs that REFRAMED it twice. **(1)** B1 native `reset`→`reset-expr` landed. **(2)** §4.18 ruling banked (native canonical enforcer, live lenient). **(3)** The headline: native silently DROPPED the entire §51.0 engine substrate across ALL engine files (compiles clean, emits engine as a dumb reactive cell) — root-caused to a `machineDecls` **two-instance object-identity defect**, fixed in ~40 lines. All swept engine sub-features (basic/hierarchy/onTimeout/onIdle/history/effects) now emit BYTE-IDENTICAL native==default. **NEXT-SESSION OPENER: flip re-measure (quantify the ~790 drop), then B2 (§51.0.S message-arm) / PowerUp-enum bug / effect= opener.**
+### Repo state at OPEN
+- **scrmlTS:** HEAD `f11db672` (S163 wrap), `origin/main` **0/0** (clean, synced). Working tree clean (only the S164 hand-off rotation staged).
+- **scrml-support:** **0/0** (clean, synced).
+- **Inbox:** EMPTY (`handOffs/incoming/` has no unread `.md`).
+- **Hooks:** config B (local-rich — `.git/hooks/` has pre-commit + post-commit + pre-push). Leave as-is.
+- **Version:** on top of **v0.7.0** (pkg.json unchanged; S163 was a parity-closer + bug-fix session, no tag).
+- **Tests at last close (S163):** full `bun run test` **22,998 pass / 0 fail / 220 skip / 1 todo / 907 files**. Within-node parity 1005/0.
 
-### Sync / repo state at CLOSE
-- **scrmlTS:** **8 PA commits this session** + the wrap commit. PUSHED this wrap → origin (authorized). Branch-coherence held every commit (0/N, N==PA-authored).
-  - `452a212b` session-start (rotate hand-off-167 + fresh) · `c3303adc` maps refresh → 452a212b (S162 native arc + F1 orientation) · `dace3f5b` F1 survey-STOP findings · `6ad8ca13` **B1 reset→reset-expr** · `e6782917` F1 REFRAME finding (engine-substrate drop) · `c9a458f9` engine-substrate root-cause survey + fix brief · `a41df176` **engine-substrate instance-share fix** · `8600c936` within-node rebump (7 benign SPAN-COORD residuals).
-- **scrml-support:** S163 user-voice append (§4.18 ruling + session-flow) — committed + pushed this wrap.
-- **Tests at close:** full `bun run test` **22,998 pass / 0 fail / 220 skip / 1 todo / 907 files** (23,219 ran; +12 from S162's 22,986 = +7 B1 translate-expr-bridge + +5 native-engine-substrate-instance-share). Within-node parity 1005/0 (NET-IMPROVED: allowlist tolerance −2883 vs S162 net; 1001 keys unchanged). **NB:** the full suite first ran 7-FAIL — all 7 were the within-node parity test (excluded from the pre-commit subset) going SPAN-COORD-over-budget on 7 fixtures from the B1+engine-substrate span shifts; PA residual-preserving rebump `8600c936` (SPAN-COORD allow→raw, benign class) → 0 fail. Pre-push gate confirmed.
-- **Worktrees:** main only (B1 `agent-a25fe207...` + engine-substrate `agent-aaf3e8fbe1...` both file-delta-landed + cleaned at wrap). **Inbox:** EMPTY at open + close.
-- **Version:** on top of **v0.7.0** (pkg.json unchanged; no tag — parity-closer + bug-fix work).
-- **Maps:** STALE again — refreshed to `c3303adc` mid-session (the S162 arc), but HEAD moved to `a41df176` (B1 + engine-substrate landings past the watermark). **The maps' "F1 = arm-body E-UNQUOTED-DISPLAY-TEXT" framing is INACCURATE** (the true dominant cause was the `machineDecls` two-instance identity defect — see SURVEY). Refresh + correct the F1 framing next session.
-- **Hooks:** config B. Both fix agents (B1 + engine-substrate) briefly used `--no-verify` on a docs commit, self-reverted, re-committed through the gate — the prohibition HELD both times (recurring agent reflex; brief reinforces it). Pre-push gate ran clean.
+### Where we are — the strategic line (ratified S161 direction-a)
+The **native-parser swap** is the #1 strategic line: finish the native parser → flip `--parser=scrml-native` to default → delete BS+Acorn+BPP at M6. Realistically a **v0.8 multi-session target**. Rationale is self-describing / one-front-end / fragility-class-elimination — NOT "shrink the bug backlog" (most recent bug effort is POST-parse codegen/type-system the swap reduces none of). **The Phase-A default-flip itself is a STANDING USER DECISION** (STOPped+reverted once at `404fc619`); PA dispatches PARITY-CLOSERS feeding the eventual user-authorized flip, never "the flip" itself.
 
-### F1 RESOLUTION — what landed + what the surveys found
-**The hand-off (S162) framed F1 as "engine arm-body parse, ~168, spurious E-UNQUOTED + DROPS engine." Two survey-STOPs reframed it twice:**
+**Flip-failure trajectory:** 1,150 (S161) → ~790 / 199 files (S162) → **674 (S164 re-measure, this session).** The S163 engine-substrate fix + B1 killed **~116 (−15%)**. Of 674: ~6 environmental ECONNREFUSED + 2 within-node SPAN-COORD → **~666 genuine across 181 files / ~6 families.** Honest read: real drop but NOT the hoped "steep" — most silently-miscompiling engine files compiled *clean* before, so they only failed the runtime-asserting flip-tests; the substrate fix's value is correctness, not headcount. **Remaining family signatures:** `E-CODEGEN-INVALID-JS` (18) · `E-TYPE-063` (15)+`E-VARIANT-AMBIGUOUS` (4) native bare-variant resolution · `E-TYPE-001/-020` (14/14) lifecycle/exhaustiveness · **B2 §51.0.S** `E-ENGINE-ACCEPTS-NOT-ENUM` (4)+`E-ENGINE-MSG-UNKNOWN` (3)+engine-message-dispatch conf/browser (~20) · `E-MATCH-NOT-EXHAUSTIVE` (7)+`E-MATCH-SUBSET-DEAD-ARM` (4) · F2 SQL-in-server-fn (~29 by file) · L22 promote-each/table-for/form-for (~55 by file).
 
-1. **Survey #1 (`dace3f5b`)** said "F1 narrow — 24/35 engine files compile clean → 2 ruling + 2 bugs + 7 mis-attributed." **That was the S139 trap at the survey level** — it measured fatal-error-absence, not output. (See FINDING below.)
-2. **B1 (`6ad8ca13`) — native `reset(@cell)` → `reset-expr`.** Native emitted `reset` as a plain CallExpr → spurious E-SCOPE-001 + (latent) broken codegen. Fix: `translate-expr.js` intercepts bare-`reset`-callee → builds the live `reset-expr` node (3 §6.8.2 shapes; 0-arg target is a §42 `not` literal). NOT the allowlist shortcut (S139 trap). R26: native emits `_scrml_reset("coins")` byte-identical to default. +7 tests. (Survey-corrected: `25-triage-board` is `examples/` not `samples/` and has NO `reset`; `cleanup`/`upload` are statement-layer, native handles clean.)
-3. **§4.18 ruling (banked, user-voice S163):** native = canonical §4.18.7 enforcer; LIVE stays lenient (unwired; doomed at M6); corpus bare-text→`"..."` migration = deferred swap-prep backlog. F8-precedent continuation.
-4. **F1 REFRAME (`e6782917`, `FINDING-engine-substrate-drop.md`):** PA byte-compare during B1 R26 found native **silently drops the entire §51.0 engine substrate** (transition table, `_scrml_engine_direct_set` rule-validation, var-init, mount/body-render) across ALL engine files — emits engine as a dumb `_scrml_reactive_set` cell. The "clean" 24 files silently miscompile. **The ~168 is largely REAL** (the flip-test's runtime assertions catch the silent drop). B1 merely UNMASKED it on mario (S138 sibling-fix-unmask).
-5. **Engine-substrate root cause + fix (`a41df176`):** survey #2 (`SURVEY.md`) root-caused it to a **two-instance object-identity defect** — native synthesized TWO `engine-decl` objects (nodes copy via `parse-file.js synthEngineNode`; a SEPARATE machineDecls copy via `collect-hoisted.js synthEngineDecl`). SYM stamps `_record`/`engineMeta` on the nodes copy ONLY; codegen `collectC12EngineDecls` reads `machineDecls`-FIRST → un-stamped → `isC12EngineDecl` false → substrate dropped. Live shares ONE instance (`ast-builder.js:13616 machineDecls.push(node)`). `<match>` was fine (`collectMatchBlocks` walks nodes-only). **Fix (S, ~40L):** native derives `machineDecls` from the mapped `nodes` instances (`collectMachineDeclsFromNodes`); `collect-hoisted.js` no longer synthesizes engines; `bodyChildren` mapped to AST nodes so nested engines are structural + reachable. **PA-independent R26:** engine-modern-001 (7/7 `_scrml_engine_`, 4/4 transitions, 3/3 direct_set) + engine-009 nested (30/30) BYTE-IDENTICAL native==default; all 6 swept files recover. mario's marioState substrate recovers (3 transitions present); its residual is the SEPARATE PowerUp bug.
+### IN-FLIGHT THIS SESSION (S164)
+1. **Flip re-measure — DONE** (674; method: throwaway detached worktree at `f11db672`, `api.js:630 null→"scrml-native"`, `bun install`+`pretest`+`bun test compiler/tests/`; worktree removed, main untouched, branch coherence 0/0). Log at `/tmp/flip-remeasure-s164.log`.
+2. **Maps refresh — DONE** (PA-direct, surgical → watermark `f11db672`; F1 corrected to CLOSED; B2 flagged THE NEXT DISPATCH; 674 landed across primary/domain/structure).
+3. **B2 — §51.0.S message-arm — DISPATCHING.** Native `synthEngineDecl` has ZERO `accepts=` handling (acceptsType undefined vs live null); `native-walker/engine-statechild-walker.ts:516` hard-codes `messageArms: []`. Mirror live `parseMessageArms()` in `engine-statechild-parser.ts` (S154/S155 #14). Clears `engine-message-dispatch` conf/browser + the `E-ENGINE-ACCEPTS-*`/`E-ENGINE-MSG-*` cluster.
 
-### Briefs archived (S136): `docs/changes/native-reset-builtin-b1-2026-06-04/` · `native-engine-arm-body-f1-survey-2026-06-04/` (BRIEF + SURVEY + FINDING-engine-substrate-drop) · `native-engine-substrate-bridge-survey-2026-06-04/` (BRIEF + SURVEY) · `native-engine-machinedecls-instance-share-2026-06-04/` (BRIEF + progress).
+### REMAINING WORKLIST (after B2)
+- **mario PowerUp enum-with-constructor-params truncation under native** (NEW S163) — native captures only `["Mushroom"]` (drops Flower/Feather), mis-emits `PowerUp.Flower(3)` as `"Flower"(3)`, match-arm positional-bind fails. SEPARATE from engine-substrate (a payload-bearing-enum native gap; mario residual = 133 diff-lines). Triage + scope.
+- **`effect=` opener (§51.0.H Form 3 openerEffect)** — native `synthEngineDecl` has no openerEffect read. Small separate gap.
+- F2 SQL `?{}`-in-server-fn (~58) · F4 formFor expansion (~32) · F5 `const @name` derived-decl (~20) · F6/F9 fn param/export-fn-body (~16) · F7 missing diagnostics (~15). F8 stdlib `await import()` = stdlib-migration task (not native).
 
----
-
-## OPEN QUESTIONS / DESIGN CALLS
-1. **Phase-A default-flip is a STANDING USER DECISION** (STOPped+reverted once at `404fc619`). PA dispatches PARITY-CLOSERS feeding the eventual user-authorized flip — never "the flip" itself.
-2. **v0.7 → v0.8 placement** — the swap is a v0.8 target. The S163 engine-substrate fix is a big chunk of the ~790; re-measure to re-baseline.
+### OPEN QUESTIONS / DESIGN CALLS
+1. **Phase-A default-flip = STANDING USER DECISION** (see above). PA never dispatches "the flip."
+2. **v0.7 → v0.8 placement** — the swap is a v0.8 target; the engine-substrate fix is a big chunk of the ~790; re-measure to re-baseline.
 3. **M6.5 emit-logic path-(a) shims vs path-(b)** — needs ratification BEFORE that dispatch. Not on the current critical path.
 
-## CARRY-FORWARD (F1 follow-ups + backlog)
-- **NEXT-SESSION OPENER: flip re-measure** — `compiler/src/api.js:630` `parser = null` → `parser = "scrml-native"` in a throwaway `git worktree`, `bun install && bun run pretest && bun test compiler/tests/`. Control = 0 fail. The engine-substrate fix should drop the ~790 STEEPLY (engines were a big chunk). Re-baselines the swap-grind + v0.8 placement.
-- **B2 (§51.0.S accepts message-arm parser, L-subset of engines)** — native `synthEngineDecl` has ZERO `accepts=` handling (acceptsType undefined vs live null); `native-walker/engine-statechild-walker.ts:516` hard-codes `messageArms: []`. Separate dispatch (native accepts-attr read + arm recognition). Affects `engine-message-dispatch-s6.scrml`.
-- **`effect=` opener (§51.0.H Form 3 openerEffect)** — native `synthEngineDecl` has no openerEffect read. Small separate gap.
-- **NEW — mario PowerUp enum-with-constructor-params truncation under native** — native captures only `["Mushroom"]` (drops Flower/Feather), mis-emits `PowerUp.Flower(3)` as `"Flower"(3)`, match-arm positional-bind fails. SEPARATE from engine-substrate (a payload-bearing-enum native gap). The mario residual (133 diff-lines). Triage + scope next session.
+### CARRY-FORWARD (F1 follow-ups + backlog)
 - **B1 deferred:** malformed-reset diagnostic surfacing under native (native produces the reset-expr with the E-RESET-NO-ARG diagnostic field but doesn't run the ast-builder surfacer; no parity REGRESSION — native==default behavior).
-- **§4.18 corpus migration** (bare display text → `"..."` literals, engine/match arms + `:`-shorthand) — deferred swap-prep backlog per the S163 ruling.
-- **Maps:** refresh to HEAD + CORRECT the "F1 = arm-body E-UNQUOTED" framing (true dominant cause = machineDecls two-instance identity; recorded in no map yet — survey flagged).
-- **Per-feature engine parity** — the S163 sweep verified basic/hierarchy/onTimeout/onIdle/history/effects recover byte-identical. derived engines + the deeper sub-features still want their own positive flip-tests before claiming full parity.
+- **§4.18 corpus migration** (bare display text → `"..."` literals, engine/match arms + `:`-shorthand) — deferred swap-prep backlog per the S163 §4.18 ruling (native enforces, live stays lenient until M6 deletes it).
+- **F8 stdlib migration** (`await import()` in `^{}` → off `await`; native is the strict no-`await` enforcer per S162 ruling) — migration backlog, its own task.
+- **Maps:** STALE. Refreshed to `c3303adc` mid-S163 (the S162 arc), but HEAD moved to `a41df176`+ (B1 + engine-substrate landings past the watermark). **The maps' "F1 = arm-body E-UNQUOTED-DISPLAY-TEXT" framing is INACCURATE** (true dominant cause = `machineDecls` two-instance identity defect). Refresh to HEAD + CORRECT the F1 framing before the next native-parser dispatch (maps were load-bearing every batch in S155/S163 — the legacy-BS+TAB vs native parser-path fork).
+- **Per-feature engine parity** — S163 verified basic/hierarchy/onTimeout/onIdle/history/effects recover byte-identical. Derived engines + deeper sub-features still want their own positive flip-tests before claiming full parity.
+- **native `.scrml` mirrors are FEATURE-stale** (S162 finding) — not just predicate-drift; whole machinery missing vs the `.js`. S115 lockstep is MOOT for native fixes until a re-sync (brief the conditional form, not a rigid mandate). Also: `is given`/`is not given` predicate-drift 22 occ/6 files (LOW).
 - **Bug backlog (MED 9):** Bug 1 Tailwind · V-kill READ-side · MCP V0 deferrals · Generator policy · L19 multi-statement-handler · A5 freeze-extension · R28-1d (NOT-REPRODUCED) · C6 · Bug 14 MCP-partial.
-- **LOW backlog** (incl. the S162 `.scrml`-mirror feature-staleness, native is-pattern-arm, native if-as-expr; + `is given`/`is not given` predicate-drift 22 occ/6 files).
+- **LOW backlog** (incl. S162 `.scrml`-mirror feature-staleness, native is-pattern-arm, native if-as-expr; + `is given`/`is not given` predicate-drift).
 - **S154 carry:** body-split/CPS debt (Ext 2/3) · per= per-instance engines (DD) · self-tree-shaking compiler build-story DD-candidate · self-demo scrml.dev F1/F2 debate · 6NZ caps stray.
 
 ## pa.md directives in force
-- Rules R1–R5. `---` delimiter (S152). Profile A/B (S156). `full wrap`/88% floor (S139). Largest-ratified-target / autonomous / park-on-input / surface-on-real-failure-or-design-ruling.
-- Dispatch discipline ALL held: S88 isolation (both fixes) · F4 startup-verify · S112 merge-startup · S99/S126 Bash-edit + no-`cd` (S100 hook active) · S136 BRIEF.md (all dispatches) · S138 R26/dual-verify (PA-independent EVERY landing) · S147 branch-leak coherence (every commit, 0/N held). `--no-verify` forbidden (held — agents self-reverted 2× on docs).
-- **CWD discipline (S159/S90):** `cd <main>` / `pwd` checks before every worktree dispatch + main-side write; no slips.
-- **Survey-STOP gate (S158):** the user's chosen pattern — twice prevented over-commit (reframed F1; shrank the L-arc to S).
-- **Methodology bank (S163):** native-parser-swap parity surveys MUST byte-compare native-vs-default EMIT, not check fatal-error-absence (the S139 trap at survey level — survey #1 fell for it).
-- Canonical dev-agent `scrml-js-codegen-engineer` (both fixes). Reconnaissance/triage + surveys via `general-purpose` (read-only). project-mapper (non-isolated) for the maps refresh — crashed post-write (work intact, watermarks bumped); PA verified + committed with explicit `.claude/maps/` pathspec.
+- Rules R1–R5. `---` delimiter (S152). Profile A/B (S156). `full wrap`/88% floor (S139). Standing-autonomy grant available on user say-so (review→land→push→R26→wrap, surface only on real failure / design ruling).
+- Dispatch discipline: S88 isolation explicit · F4 startup-verify · S112 merge-startup · S99/S126 Bash-edit + no-`cd` (S100 hook active) · S136 BRIEF.md archival · S138 R26/dual-verify (PA-independent EVERY landing) · S147 branch-leak coherence (every commit, 0/N). `--no-verify` forbidden (recurring agent reflex — brief reinforces; held every time).
+- **CWD discipline (S159/S90):** `cd <main>` / `pwd` checks before every worktree dispatch + main-side write post-dispatch.
+- **Survey-STOP gate (S158/S163):** the user's chosen pattern; twice prevented over-commit in S163.
+- **Methodology bank (S163):** native-parser-swap parity surveys MUST byte-compare native-vs-default EMIT, not check fatal-error-absence (the S139 trap at survey level).
+- Canonical dev-agent `scrml-js-codegen-engineer`. Reconnaissance/triage + surveys via `general-purpose` (read-only). project-mapper (non-isolated) for maps refresh — commit with explicit `.claude/maps/` pathspec (it shares main's index; S119).
 
 ## Tags
-#session-163 #profile-a-full-start #F1-opened #engine-substrate-silent-miscompile-CLOSED #machineDecls-two-instance-identity #B1-reset-expr #4.18-ruling-live-lenient #F1-reframed-twice #survey-stop-gate #s139-trap-at-survey-level #wrap #pushed #high-0
+#session-164 #open #profile-a-full-start #native-parser-swap-arc #flip-re-measure-opener #engine-substrate-fixed-S163 #v0.8-target #high-0
