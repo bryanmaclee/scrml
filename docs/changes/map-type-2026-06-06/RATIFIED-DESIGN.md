@@ -51,6 +51,8 @@ const have = @fareByLane.has("DAL-001")          // -> bool (present-with-not de
 | M8 | `==` | structural, order-independent (§45) — even for `@ordered` maps `==` ignores order |
 | M9 | SERIALIZATION | lossless codec (the map round-trips §57 wire / SQL / equality; raw JS Map rejected — `JSON.stringify` drops it) |
 
+**S169 amendment — iteration surface (user ruling, AskUserQuestion).** M7's iteration rides the SHIPPED §17.7 `<each in=@m.entries() as e>` opener — NOT a `(k, v) in` tuple-opener (rejected: conflicts with the attribute-only §17.7 `<each>`; scrml has no tuple type, §59.7 avoids pair-lists). `.entries()` → `[{key: KeyT, value: ValT}]` value-native structs (`e.key`/`e.value`); `.keys()` → `[KeyT]`; `.values()` → `[ValT]`; optional `as (k, v)` binds the two fields positionally (§14.11). SPEC §59.8 amended to match (S169). See user-voice S169.
+
 ## v1 scope-cuts (decide-on-purpose, documented)
 
 - **Map-as-key:** NOT in v1. `[K: V]` keys are "any §45-comparable EXCEPT another map." Unordered-by-default (M7) keeps the door open to add later without breaking `==` (an `@ordered` map could never be a key — ordered `==` is order-sensitive, breaks hash-consistency). Document explicitly.

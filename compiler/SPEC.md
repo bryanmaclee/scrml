@@ -31703,18 +31703,30 @@ const inner = @feeByLaneByCarrier["ACME"] ?? [:]          // read inner (or empt
 
 ### 59.8 Iteration — unordered by default + loud
 
-`.keys()`, `.values()`, `.entries()` each return a **value-native array** (a real scrml array, not a host iterator), composing with `<each>` and every array operation:
+`.keys()`, `.values()`, `.entries()` each return a **value-native array** (a real scrml array, not a host iterator), composing with `<each>` and every array operation. `.keys()` is `[KeyT]`, `.values()` is `[ValT]`, and **`.entries()` is `[{ key: KeyT, value: ValT }]`** — an array of two-field **entry structs** (scrml has no tuple type, §59.7; the entry is a struct, the language's product type). Iteration uses the ordinary §17.7 `<each in= … as name>` opener — there is **no map-specific `<each>` grammar** (S169 ruling: the `(k, v) in` tuple-opener that earlier drafts showed was rejected — it conflicts with the attribute-only §17.7 opener and would require a tuple type the language does not have):
 
 ```scrml
-<each (k, v) in @fareByLane.entries()> … </each>              // UNSPECIFIED order
-<each (k, v) in @fareByLane.entries().sorted()> … </each>     // .sorted() = cheap explicit stabilizer
+<each in=@fareByLane.entries() as e>          // UNSPECIFIED order; e is { key, value }
+    <li>${e.key}: ${e.value}</li>
+</each>
+<each in=@fareByLane.entries().sorted() as e> // .sorted() = cheap explicit stabilizer
+    <li>${e.key}: ${e.value}</li>
+</each>
+```
+
+An optional **positional `as (k, v)` destructuring** binds the entry struct's two fields to two locals (`k` ← `.key`, `v` ← `.value`) by §14.11 predefined-shape positional binding — a terseness sugar over `as e` + `e.key`/`e.value`, NOT a tuple (the iterated value remains the `{ key, value }` struct):
+
+```scrml
+<each in=@fareByLane.entries() as (k, v)>     // k = e.key, v = e.value
+    <li>${k}: ${v}</li>
+</each>
 ```
 
 - **Iteration order is UNSPECIFIED by default, and the language says so loudly** — the spec, the docs, and (phase-c) a lint nudge make non-determinism explicit, avoiding the silent "small maps look ordered" cliff that bites Clojure adopters. Code that needs order asks for it.
 - **Positional correspondence.** For one map value, `.keys()`, `.values()`, and `.entries()` SHALL share **one consistent ordering** within that observation — `.keys()[i]` is the key of the entry whose value is `.values()[i]` and whose pair is `.entries()[i]`. The ordering itself is unspecified (unless `@ordered` or `.sorted()` is applied), but the three views agree positionally.
 - `.sorted()` / `.sortedBy(fn)` return an order-stabilized entries array (the cheap, explicit way to get determinism).
 - The `@ordered` affix (§59.2) opts a map into **insertion-order** iteration. It **visibly costs more** (the runtime tracks insertion order) and is the deliberate opt-in for order-significant maps.
-- `<each (k, v) in @m.entries()>` destructures entry pairs; alternatively iterate `.keys()` / `.values()` directly.
+- Iterate `.entries()` for key+value (`as e` → `e.key`/`e.value`, or the `as (k, v)` destructure above); iterate `.keys()` / `.values()` directly when only one view is needed.
 - The `W-MAP-ITERATION-ORDER` code (§59.11) is **Info-level**: it partitions into `result.warnings` (non-fatal), per the §34 info-level diagnostic-stream convention — never into `result.errors`.
 
 ### 59.9 Equality — structural, order-independent
