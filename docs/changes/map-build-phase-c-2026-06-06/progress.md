@@ -1,17 +1,46 @@
-# map-build phase-c — SPEC §42.3.1 union-`not` normalization
+# D1 — type-system: MapType + recognition + key-check + E-MAP-BRACKET-WRITE gate
 
-## 2026-06-06 — startup + scope lock
-- DONE: startup verification clean — worktree /home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a9c3075095363301a, branch worktree-agent-a9c3075095363301a, tree clean, bun install + pretest OK.
-- DONE: read SPEC §42.3.1 IN FULL (line 21130-21142). Normative: flatten nested unions + dedup `not` to exactly one; `(T|not)|not` -> `T|not` idempotent.
-- DONE: traced `tUnion` (type-system.ts:593) — 4 call sites, all internal; only resolveTypeExpr:1841 passes variable-length members. Today `tUnion` always wraps (1-member -> 1-member union node). Preserve that.
-- DONE: confirmed canary recognizers: emit-schema-for.ts `nullableUnionBase` (:355, exported) + emit-table-for.ts `nullableUnionBaseForCell` (:670) via exported `classifyFieldForCell` (:577). BOTH require `members.length === 2` with EXACTLY one `not`. A nested/3-member un-normalized union would NOT fire -> column silently non-nullable. Normalization MUST collapse to exactly [T, not].
-- NEXT: implement normalizeUnion + wire into tUnion; commit.
+Worktree: /home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a4ee551ea0ba4e873
+Branch: worktree-agent-a4ee551ea0ba4e873
 
-## 2026-06-06 — implementation + verification COMPLETE
-- DONE: normalizeUnion() added (type-system.ts:593), wired into tUnion. Commit 593e9a1d. Flatten nested unions (one-level splice is complete since every constructed union is already normalized) + dedup `not` to one. Non-`not` members untouched (no reorder/dedup). Pre-commit gate green.
-- DONE: canary test compiler/tests/unit/union-not-normalization.test.js — 17 tests, all pass. Commit 18372b76. Covers: dedup-not programmatic, flatten nested (idempotent re-optionalize), SCOPE guard (order preserved, non-not NOT deduped), text-path resolveTypeExpr `string | not | not`, BLAST-RADIUS schemaFor.nullableUnionBase + tableFor.classifyFieldForCell on canonical + re-optionalized [string, not].
-- DONE: .members-consumer grep — ONLY emit-schema-for.ts:358 + emit-table-for.ts:673 assume arity (`length !== 2`); BOTH protected (normalization collapses to exactly [T, not]). ZERO `members[0]`/`members[1]` index consumers. 24 total `.members` reads, all others iterate (some/find/filter/map/for-of) — shape-agnostic + order-independent. type-encoding.ts (212/583) maps recursively; canonical unions encode identically (idempotency only changes the previously-uncleanly-constructible re-optionalized case, in the correct direction).
-- DONE: empirical smoke — phase1-type-union-via-pipe-010.scrml (`type StringOrNot = string | not`) + phase2-given-single-087.scrml (`let : T | not` cell) both compile NO new errors (only pre-existing W-PROGRAM-*/W-GIVEN-ARROW-LEGACY/ghost-pattern lints, all union-unrelated); emitted client.js + runtime node --check clean.
-- DONE: full suite `bun run test` = 23108 pass / 0 fail / 220 skip / 1 todo / 917 files (+17 = my new tests, +1 file). ZERO regressions vs 23091 baseline.
-- DONE: within-node parity 1005/0 unchanged (NESTED-SHAPE:0, COUNT-LENGTH:984 histogram unchanged — typer change can't shift parser corpus).
-- STATUS: COMPLETE. No blockers, no deferred items.
+## 2026-06-06 startup
+- merge main: "Already up to date" (base already had D0 normalizeUnion + §59.8). normalizeUnion count=1.
+- bun install OK; bun run pretest OK.
+
+## @ordered / reactive-@ probe (DONE — piece 3 verification)
+- Lexer reads `@ordered` after `]` as a SINGLE `AT_IDENT` token (the §6 reactive-sigil token form).
+- BUT collectTypeAnnotation (ast-builder.js ~3815) does NOT treat post-`]` `@ordered` as a boundary;
+  it appends it after `]` with no space. typeAnnotation string the typer receives is `"[string:Money]@ordered"`.
+- VERDICT: NO ast-builder fix needed. resolveTypeExpr's map branch must strip a trailing `@ordered`
+  and set ordered:true. The leading `@` is part of the affix spelling, not reactive-@.
+- ResolvedType is NOT mirrored in compiler/src/types/ast.ts (the `kind:"array"` there is ArrayExpr,
+  an ExprNode). So no ast.ts ResolvedType change is needed.
+
+## Steps — ALL DONE
+- [x] Piece 1: MapType interface + ResolvedType union member + tMap ctor (f8c1f176)
+- [x] Piece 2+3: resolveTypeExpr [K:V] recognizer (findMapEntryColon, depth-1/ternary-excluded) + @ordered strip (2791b919)
+- [x] Piece 4+5: formatTypeForDiagnostic map arm + key-comparability check + isFunctionField asIs sidecar (ae6493a1)
+- [x] Piece 6: E-MAP-BRACKET-WRITE gate + surface map type to state-decl scope binding (81167707)
+- [x] Tests: 35 typer-unit tests (2fee736d)
+
+## Load-bearing findings during implementation
+- ResolvedType is NOT mirrored in compiler/src/types/ast.ts (no ast.ts change needed).
+- struct fn-fields resolve to `asIs` (NOT a `function` kind) in the type registry; the resolver
+  deliberately keeps them asIs (R28-8 warns against changing the resolver root). To surface the
+  function-specific E-EQ-003 (not the general E-MAP-KEY-NOT-COMPARABLE), added an additive
+  `isFunctionField` sidecar to AsIsType (R28-8 `bareVariantBase` precedent), stamped in both
+  parseStructBody + the inline-struct branch when the raw clause is function-shaped.
+- The S168-widened heterogeneous path: a literal index `@m[0]` AND a string-literal key `@m["DAL"]`
+  BOTH produce a STRING path segment (`["0"]` / `["DAL"]`) — INDISTINGUISHABLE from a dotted
+  deep-set `@m.field` (`["field"]`). Only a COMPUTED index `@m[@k]` produces `[{index}]`. For a MAP
+  receiver this is fine: a map has NO struct fields, so ANY reactive-nested-assign on a map cell is a
+  forbidden indexed-write regardless of path-segment form. The gate does NOT discriminate the
+  segment shape for a map receiver (it does NOT require `{index}`); it fires on any path.
+- A map-typed STATE-decl bound `asIs` to the scope (the state-decl surfacing allowlist was
+  enum|union|struct|array). Added `map` to that allowlist so the bracket-write gate sees rt.kind==="map".
+  (let-decl already surfaced map via `kind !== "asIs"`.)
+
+## DEFERRED (per brief — v1 design defaults, NOT implemented)
+- `@m[k]` bracket-READ type-flow (no `case "index"` map arm typing `@m[k]` as `V|not`).
+- Deep-nesting E-MAP-BRACKET-WRITE (`@outer[k1][k2]=v`) — v1 shallow receiver check only.
+

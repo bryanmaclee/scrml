@@ -216,6 +216,21 @@ interface ArrayType {
   element: ResolvedType;
 }
 
+// §59 — Value-native map type. `[KeyT: ValT]` (and `[KeyT: ValT]@ordered`).
+// A map associates runtime-value keys with values (the collection scrml structs
+// cannot express — struct keys are fixed at declaration; map keys are values).
+// `key` is constrained to §45-comparable types (§59.4 — checked at decl-binding
+// sites, NOT here); `value` is unconstrained (it may itself be a map). `ordered`
+// records the `@ordered` postfix affix (§59.2/§59.8 — insertion-order iteration
+// at a stated cost). A map is a VALUE, not an object with identity (§45.6):
+// two maps with the same entries are `==` (§59.9).
+interface MapType {
+  kind: "map";
+  key: ResolvedType;
+  value: ResolvedType;
+  ordered: boolean;
+}
+
 interface UnionType {
   kind: "union";
   members: ResolvedType[];
@@ -234,6 +249,15 @@ interface AsIsType {
   // WITHOUT changing the `asIs` kind every other `structType.fields` consumer
   // reads (formFor / schemaFor / tableFor / type-encoding stay byte-identical).
   bareVariantBase?: ResolvedType;
+  // §59.4 / §45.2 — set when a struct field's annotation was unambiguously
+  // FUNCTION-SHAPED (`fn(...)` / `(...) => ...`) but the resolver lowered it to
+  // `asIs` (the type system has no function-kind for inline struct fields). A
+  // map KEY containing such a field is rejected with the function-specific
+  // `E-EQ-003` (rather than the general `E-MAP-KEY-NOT-COMPARABLE`). Additive
+  // sidecar — does NOT change the `asIs` kind any other consumer reads (mirrors
+  // the `bareVariantBase` R28-8 precedent). The CANONICAL absence-of-equality
+  // signal for functions (§45.2 — functions have no structural equality).
+  isFunctionField?: boolean;
 }
 
 interface UnknownType {
@@ -359,6 +383,7 @@ type ResolvedType =
   | StructType
   | EnumType
   | ArrayType
+  | MapType
   | UnionType
   | AsIsType
   | UnknownType
@@ -588,6 +613,14 @@ function tEnum(name: string, variants: VariantDef[], transitionRules: Transition
 
 function tArray(element: ResolvedType): ArrayType {
   return { kind: "array", element };
+}
+
+// §59 — Value-native map constructor. `key`/`value` are resolved element types;
+// `ordered` is the `@ordered` postfix-affix flag (§59.2). Key comparability
+// (§59.4) is NOT enforced here — `resolveTypeExpr` is error-free; the
+// decl-binding sites run `checkMapKeyComparability` against the span+errors.
+function tMap(key: ResolvedType, value: ResolvedType, ordered: boolean): MapType {
+  return { kind: "map", key, value, ordered };
 }
 
 /**
@@ -1261,6 +1294,13 @@ function parseStructBody(raw: string, typeRegistry: Map<string, ResolvedType>): 
     // (resolveTypeExpr splits the top-level `|` first), so the asIs member
     // ALSO gets the sidecar; the walker substitutes it inside the union too.
     annotateBareVariantBaseFromRawClause(resolvedField, typeExpr, typeRegistry);
+    // §59.4 — stamp the function-field sidecar so a map key whose struct contains
+    // a function field surfaces the function-specific E-EQ-003. (The resolver
+    // lowered `onTick: fn()` to `asIs`; the raw clause is the only function-ness
+    // signal that survives.)
+    if (resolvedField.kind === "asIs" && isFunctionShapedAnnotation(typeExpr)) {
+      (resolvedField as AsIsType).isFunctionField = true;
+    }
     fields.set(fieldName, resolvedField);
   }
 
@@ -1840,6 +1880,272 @@ function maybeRejectEnumSubsetMarker(
 }
 
 // ---------------------------------------------------------------------------
+// §45.2 — Function-shape recognizer (for the asIs `isFunctionField` sidecar)
+// ---------------------------------------------------------------------------
+
+/**
+ * §45.2 — Is a (raw) type-expression annotation unambiguously FUNCTION-SHAPED?
+ *   - `fn(...)` / `fn (...)`              — explicit fn type
+ *   - `(...) => ...`                       — arrow type annotation
+ * Used to stamp the `asIs.isFunctionField` sidecar so a map key containing a
+ * function field surfaces the function-specific `E-EQ-003` (§59.4) — the type
+ * system has no resolved function-kind for inline struct fields, so the raw
+ * clause is the only place the function-ness survives.
+ */
+function isFunctionShapedAnnotation(raw: string): boolean {
+  if (typeof raw !== "string") return false;
+  const s = raw.trim();
+  if (/^fn\s*\(/.test(s)) return true;          // `fn(...)`
+  if (/^\([^)]*\)\s*=>/.test(s)) return true;  // `(...) => ...`
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// §59.4 / §45.2 — Map key comparability
+// ---------------------------------------------------------------------------
+
+/**
+ * §45.2 — Deep structural comparability of a resolved type.
+ *
+ * Returns true iff `==` is structurally derivable for the type (§45.2):
+ *   - primitives (number/string/boolean/integer)   — always comparable
+ *   - structs    — comparable iff ALL fields are comparable (deep, recursive)
+ *   - enums      — comparable iff every variant payload field is comparable
+ *   - arrays     — comparable iff the element type is comparable
+ *   - maps       — comparable as VALUES (§59.9), but a map may NOT be a map KEY
+ *                  (§59.4) — that exclusion is handled by `classifyMapKey`, not
+ *                  here; as a value/element a map IS comparable
+ *   - unions     — comparable iff every member is comparable
+ *   - predicated — comparable iff the underlying base is comparable
+ *
+ * NOT comparable: functions (§45.2 — no structural equality), `not` standing
+ * alone, `asIs`/`unknown` (the type was not resolved), and any type reachable
+ * to one of those. A `&Name`-style recursive struct terminates because the type
+ * registry stores the SAME object instance — the `seen` set short-circuits it.
+ */
+function isComparableType(t: ResolvedType, seen: Set<ResolvedType> = new Set()): boolean {
+  if (!t || typeof t !== "object") return false;
+  if (seen.has(t)) return true; // recursive type — already being validated above
+  seen.add(t);
+  switch (t.kind) {
+    case "primitive":
+      return true;
+    case "struct": {
+      for (const field of (t as StructType).fields.values()) {
+        if (!isComparableType(field, seen)) return false;
+      }
+      return true;
+    }
+    case "enum": {
+      for (const variant of (t as EnumType).variants) {
+        if (!variant.payload) continue;
+        for (const payloadField of variant.payload.values()) {
+          if (!isComparableType(payloadField, seen)) return false;
+        }
+      }
+      return true;
+    }
+    case "array":
+      return isComparableType((t as ArrayType).element, seen);
+    case "map":
+      // A map is a comparable VALUE (§59.9). The map-as-KEY exclusion (§59.4)
+      // is enforced separately in `classifyMapKey`.
+      return isComparableType((t as MapType).key, seen) &&
+             isComparableType((t as MapType).value, seen);
+    case "union": {
+      for (const member of (t as UnionType).members) {
+        // `not` members are fine inside a comparable union (the union read-type
+        // composes with absence machinery); they are not the comparison ground.
+        if (member.kind === "not") continue;
+        if (!isComparableType(member, seen)) return false;
+      }
+      return true;
+    }
+    case "predicated":
+      return true; // refined primitive/enum base — base is comparable
+    case "not":
+      // `not` alone is not a comparison ground (`x == not` is E-EQ-002).
+      return false;
+    case "function":
+    case "asIs":
+    case "unknown":
+      return false;
+    default:
+      return false;
+  }
+}
+
+/**
+ * §45.2 — Does a type CONTAIN a function field anywhere reachable (deep)?
+ *
+ * The principled replacement for the gauntlet's crude
+ * `structBodyHasFunctionField` regex (which the survey flagged as too weak).
+ * Walks structs / enums / arrays / maps / unions / predicated bases via the
+ * resolved type registry. Used to discriminate the function-key case
+ * (`E-EQ-003`) from the general non-comparable case (`E-MAP-KEY-NOT-COMPARABLE`).
+ */
+function typeContainsFunctionField(t: ResolvedType, seen: Set<ResolvedType> = new Set()): boolean {
+  if (!t || typeof t !== "object") return false;
+  if (seen.has(t)) return false;
+  seen.add(t);
+  if (t.kind === "asIs" && (t as AsIsType).isFunctionField) return true;
+  switch (t.kind) {
+    case "function":
+      return true;
+    case "struct": {
+      for (const field of (t as StructType).fields.values()) {
+        if (typeContainsFunctionField(field, seen)) return true;
+      }
+      return false;
+    }
+    case "enum": {
+      for (const variant of (t as EnumType).variants) {
+        if (!variant.payload) continue;
+        for (const payloadField of variant.payload.values()) {
+          if (typeContainsFunctionField(payloadField, seen)) return true;
+        }
+      }
+      return false;
+    }
+    case "array":
+      return typeContainsFunctionField((t as ArrayType).element, seen);
+    case "map":
+      return typeContainsFunctionField((t as MapType).key, seen) ||
+             typeContainsFunctionField((t as MapType).value, seen);
+    case "union": {
+      for (const member of (t as UnionType).members) {
+        if (typeContainsFunctionField(member, seen)) return true;
+      }
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
+type MapKeyVerdict = "ok" | "function" | "is-map" | "not-comparable";
+
+/**
+ * §59.4 — Classify a map KEY type. (Precedence matters: the §59.4 codes are
+ * listed most-specific first.)
+ *   - key is itself a map (or @ordered map)          -> "is-map"      (E-MAP-KEY-IS-MAP)
+ *   - key contains a function field (deep)           -> "function"    (E-EQ-003, reused)
+ *   - key is otherwise not §45-comparable            -> "not-comparable" (E-MAP-KEY-NOT-COMPARABLE)
+ *   - key is comparable (primitive/struct/enum/array)-> "ok"
+ */
+function classifyMapKey(key: ResolvedType): MapKeyVerdict {
+  if (key.kind === "map") return "is-map";
+  if (typeContainsFunctionField(key)) return "function";
+  if (!isComparableType(key)) return "not-comparable";
+  return "ok";
+}
+
+/**
+ * §59.4 — Walk a resolved annotation type for any embedded `MapType` and fire
+ * the appropriate key-comparability diagnostic on each map's KEY. Runs at the
+ * decl-binding sites (which carry a span + the errors array); `resolveTypeExpr`
+ * is intentionally error-free.
+ *
+ * Maps may be nested (array-of-maps, struct-field-map, map-VALUE-map), so this
+ * descends through array element / union member / struct field / map value as
+ * well as the map's own key. The map-VALUE side may itself be a map — that is
+ * legal (§59.4: only the KEY type is constrained) — but its key is still
+ * checked.
+ */
+function checkMapKeyComparability(
+  t: ResolvedType,
+  span: Span,
+  errors: TSError[],
+  seen: Set<ResolvedType> = new Set(),
+): void {
+  if (!t || typeof t !== "object" || seen.has(t)) return;
+  seen.add(t);
+  if (t.kind === "map") {
+    const mt = t as MapType;
+    const verdict = classifyMapKey(mt.key);
+    const keyDesc = formatTypeForDiagnostic(mt.key);
+    if (verdict === "is-map") {
+      errors.push(new TSError(
+        "E-MAP-KEY-IS-MAP",
+        `E-MAP-KEY-IS-MAP: a map cannot be used as a map key (key type \`${keyDesc}\`). ` +
+        `A map key must be a §45-comparable non-map value (§59.4). An \`@ordered\` map's ` +
+        `equality is order-sensitive, which would break the key hash-consistency keystone (§59.5); ` +
+        `map-as-key is out for v1 (§59.12). Use a primitive, struct, or enum key.`,
+        span,
+      ));
+    } else if (verdict === "function") {
+      errors.push(new TSError(
+        "E-EQ-003",
+        `E-EQ-003: map key type \`${keyDesc}\` contains a function-typed field, and functions have no ` +
+        `structural equality (§45.2), so the key cannot be compared. A map key must be §45-comparable (§59.4). ` +
+        `Remove the function field from the key type, or key the map by a comparable identifier instead.`,
+        span,
+      ));
+    } else if (verdict === "not-comparable") {
+      errors.push(new TSError(
+        "E-MAP-KEY-NOT-COMPARABLE",
+        `E-MAP-KEY-NOT-COMPARABLE: map key type \`${keyDesc}\` is not §45-comparable (§59.4). ` +
+        `A map key must be a primitive (number/string/boolean), a struct whose fields are all comparable, ` +
+        `or an enum — so two structurally-equal keys are the same key. Choose a comparable key type.`,
+        span,
+      ));
+    }
+    // The map VALUE may itself be a map (legal) — descend so a nested map's key
+    // is also checked.
+    checkMapKeyComparability(mt.value, span, errors, seen);
+    return;
+  }
+  if (t.kind === "array") {
+    checkMapKeyComparability((t as ArrayType).element, span, errors, seen);
+    return;
+  }
+  if (t.kind === "union") {
+    for (const member of (t as UnionType).members) checkMapKeyComparability(member, span, errors, seen);
+    return;
+  }
+  if (t.kind === "struct") {
+    for (const field of (t as StructType).fields.values()) checkMapKeyComparability(field, span, errors, seen);
+    return;
+  }
+}
+
+/**
+ * §59.3 — Map-type disambiguation. Given the INNER body of a `[ ... ]` type
+ * annotation (the bracket already stripped), find the **depth-1 entry-colon**
+ * that marks a map type, returning its index in `inner` or -1 if there is none.
+ *
+ * A map type is `[KeyT: ValT]`: a bracket containing a depth-1 `:` that is NOT
+ * the alternative-separator of a ternary — i.e. a depth-1 `:` not preceded, at
+ * the same bracket-depth, by an unmatched `?`. Colons nested deeper (inside a
+ * struct-literal value, a nested map, a refinement label, etc.) do NOT count;
+ * the alternative-colon of a depth-1 ternary does NOT count.
+ *
+ * This mirrors the §59.3 normative disambiguation rule. `[]` arrays end in `[]`
+ * (no internal colon) so the array branch wins for arrays before this helper is
+ * ever consulted; this only fires on a genuine internal-depth-1-colon bracket.
+ *
+ * Returns the index of the first qualifying depth-1 entry-colon, or -1.
+ */
+function findMapEntryColon(inner: string): number {
+  let depth = 0;          // bracket/brace/paren nesting depth within `inner`
+  let pendingTernary = 0; // unmatched `?` count at depth 0 (the current level)
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (depth !== 0) continue;
+    if (ch === "?") { pendingTernary++; continue; }
+    if (ch === ":") {
+      // A depth-1 colon. If an unmatched `?` precedes it at this depth, it is
+      // the ternary alternative-separator — consume the pending `?` and skip.
+      if (pendingTernary > 0) { pendingTernary--; continue; }
+      return i;
+    }
+  }
+  return -1;
+}
+
+// ---------------------------------------------------------------------------
 // Type expression resolver
 // ---------------------------------------------------------------------------
 
@@ -1951,6 +2257,38 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
     return tArray(resolveTypeExpr(elementExpr, typeRegistry));
   }
 
+  // §59.2/§59.3 — Value-native map type: `[KeyT: ValT]` (optionally suffixed
+  // `@ordered`, §59.8). Slotted AFTER the `[]` array branch (so `T[]` wins for
+  // arrays — it ends in `[]` with no internal colon) and BEFORE the
+  // unresolvable fallthrough. A bracketed type is a MAP iff its inner body holds
+  // a depth-1 entry-colon that is not a ternary alternative-separator
+  // (§59.3 disambiguation, via `findMapEntryColon`).
+  //
+  // The leading `@` of a trailing `@ordered` is part of the AFFIX SPELLING on
+  // the type, NOT the §6 reactive-`@`-sigil (§59.2). `collectTypeAnnotation`
+  // carries it through verbatim after the `]`; strip it here and set ordered.
+  {
+    let mapBody = trimmed;
+    let ordered = false;
+    if (mapBody.endsWith("@ordered")) {
+      mapBody = mapBody.slice(0, -"@ordered".length).trim();
+      ordered = true;
+    }
+    if (mapBody.startsWith("[") && mapBody.endsWith("]")) {
+      const inner = mapBody.slice(1, -1);
+      const colonIdx = findMapEntryColon(inner);
+      if (colonIdx >= 0) {
+        const keyExpr = inner.slice(0, colonIdx).trim();
+        const valExpr = inner.slice(colonIdx + 1).trim();
+        return tMap(
+          resolveTypeExpr(keyExpr, typeRegistry),
+          resolveTypeExpr(valExpr, typeRegistry),
+          ordered,
+        );
+      }
+    }
+  }
+
   // §14.9 — snippet type kind
   if (trimmed === "snippet") return tSnippet(null, false);
   if (trimmed === "snippet?") return tSnippet(null, true);
@@ -2000,7 +2338,12 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
           allFieldsParsedCleanly = false;
           break;
         }
-        fields.set(fieldName, resolveTypeExpr(fieldTypeExpr, typeRegistry));
+        const inlineField = resolveTypeExpr(fieldTypeExpr, typeRegistry);
+        // §59.4 — function-field sidecar (same as parseStructBody) for inline structs.
+        if (inlineField.kind === "asIs" && isFunctionShapedAnnotation(fieldTypeExpr)) {
+          (inlineField as AsIsType).isFunctionField = true;
+        }
+        fields.set(fieldName, inlineField);
       }
       if (allFieldsParsedCleanly && fields.size > 0) {
         // Anonymous struct — use a literal name marker so equality / labeling
@@ -2904,6 +3247,12 @@ function formatTypeForDiagnostic(t: ResolvedType | null | undefined): string {
     case "struct":    return (t as StructType).name;
     case "enum":      return (t as EnumType).name;
     case "array":     return formatTypeForDiagnostic((t as ArrayType).element) + "[]";
+    case "map": {
+      // §59.2 — `[Key: Value]`, suffixed `@ordered` when the map is order-aware.
+      const mt = t as MapType;
+      return "[" + formatTypeForDiagnostic(mt.key) + ": " + formatTypeForDiagnostic(mt.value) + "]" +
+        (mt.ordered ? "@ordered" : "");
+    }
     case "union":     return (t as UnionType).members.map(formatTypeForDiagnostic).join(" | ");
     default:          return t.kind;
   }
@@ -5855,6 +6204,13 @@ function annotateNodes(
             const stateHit = stateTypeRegistry.get(bare);
             if (stateHit) letAnnoType = stateHit;
           }
+          // §59.4 — map key comparability. Fire on any embedded MapType's key
+          // (E-EQ-003 function-key / E-MAP-KEY-IS-MAP / E-MAP-KEY-NOT-COMPARABLE).
+          // `resolveTypeExpr` is error-free; this decl-binding site has span+errors.
+          {
+            const letMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkMapKeyComparability(letAnnoType, letMapSpan, errors);
+          }
           if (letAnnoType.kind === "predicated") {
             resolvedType = letAnnoType;
             const letDeclSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -6119,6 +6475,13 @@ function annotateNodes(
             const stateHit = stateTypeRegistry.get(reactAnnot.trim());
             if (stateHit) reactAnnoType = stateHit;
           }
+          // §59.4 — map key comparability (same check as let-decl). Fired once
+          // here on the fully-resolved annotation type; the later `reactAnnoType2`
+          // re-resolve (asIs-recovery path) reuses this same shape, so no double-fire.
+          {
+            const reactMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkMapKeyComparability(reactAnnoType, reactMapSpan, errors);
+          }
           if (reactAnnoType.kind === "predicated") {
             resolvedType = reactAnnoType;
             const reactDeclSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -6162,7 +6525,11 @@ function annotateNodes(
         // `resolvedType = asIs` and the walker can't navigate.
         if (reactAnnot && resolvedType.kind === "asIs") {
           const reactAnnoType2 = resolveTypeExpr(reactAnnot, typeRegistry);
-          if (reactAnnoType2 && (reactAnnoType2.kind === "enum" || reactAnnoType2.kind === "union" || reactAnnoType2.kind === "struct" || reactAnnoType2.kind === "array")) {
+          // §59 — also surface `map` types: a map-typed state-decl must bind its
+          // MapType to the scope so the E-MAP-BRACKET-WRITE gate (the
+          // `reactive-nested-assign` case) can see `rt.kind === "map"` on the
+          // receiver cell.
+          if (reactAnnoType2 && (reactAnnoType2.kind === "enum" || reactAnnoType2.kind === "union" || reactAnnoType2.kind === "struct" || reactAnnoType2.kind === "array" || reactAnnoType2.kind === "map")) {
             resolvedType = reactAnnoType2;
           } else if (stateTypeRegistry) {
             const stateHit = stateTypeRegistry.get(reactAnnot.trim());
@@ -7303,6 +7670,45 @@ function annotateNodes(
                   ));
                 }
               }
+            }
+          }
+        }
+        // §59.7 — E-MAP-BRACKET-WRITE. A bracket-write whose receiver cell is
+        // map-typed (`@m[k] = v`) is an ERROR: writes to a map are method-native
+        // (`.insert(k, v)`), and the cycles-prereq COW path (`_scrml_deep_set`,
+        // scrmlTS `8d9db4e1`) is array/object-shaped — applied to a map cell it
+        // would corrupt the map's internal representation. This typer-fatal gate
+        // fires BEFORE the COW lowering (emit-logic.ts), so codegen never sees a
+        // map bracket-write — no codegen change is needed.
+        //
+        // v1 SHALLOW receiver check: the TOP-LEVEL receiver cell is map-typed.
+        // A map has NO struct fields, so ANY `reactive-nested-assign` on a map
+        // cell is a forbidden indexed-write — whether the path segment is a
+        // string-literal key (`@m["DAL"]=v` → path `["DAL"]`), a numeric-literal
+        // index (`@m[0]=v` → path `["0"]`), or a computed index (`@m[@k]=v` →
+        // path `[{index}]`). The S168-widened heterogeneous path shape (string
+        // field | `{ index }`) does NOT need to be discriminated here: for a map
+        // receiver, every form is an `E-MAP-BRACKET-WRITE`. (For non-map
+        // receivers a string segment can be a legitimate dotted deep-set, which
+        // is exactly why the discrimination matters elsewhere — but not here.)
+        // Deep nesting (`@outer[k1][k2] = v`) is DEFERRED (the receiver lookup is
+        // the OUTER cell; the inner-map-ness is a VALUE type invisible here — the
+        // outer write still fires if the outer cell is itself a map).
+        {
+          const mapTarget = (n as Record<string, unknown>).target as string | undefined;
+          const mapPath = (n as Record<string, unknown>).path as Array<string | { index?: unknown }> | undefined;
+          if (mapTarget && Array.isArray(mapPath) && mapPath.length > 0) {
+            const mapEntry = scopeChain.lookup(mapTarget);
+            const mapRt = mapEntry?.resolvedType;
+            if (mapRt && mapRt.kind === "map") {
+              errors.push(new TSError(
+                "E-MAP-BRACKET-WRITE",
+                `E-MAP-BRACKET-WRITE: cannot write to map cell \`@${mapTarget}\` by index — ` +
+                `\`@${mapTarget}[k] = v\` is not valid (§59.7). Map writes are method-native and ` +
+                `reassignment-canonical: use \`@${mapTarget} = @${mapTarget}.insert(k, v)\` instead. ` +
+                `(Bracket READS \`@${mapTarget}[k]\` are fine — read is bracket, write is method.)`,
+                rnaSpan,
+              ));
             }
           }
         }
@@ -17752,6 +18158,7 @@ export {
   tStruct,
   tEnum,
   tArray,
+  tMap,
   tUnion,
   tAsIs,
   tUnknown,
@@ -17786,4 +18193,10 @@ export {
   // validateDerivedMachines already exported at its definition (§51.9)
   // §48.x fn body checker — exported for I-FN-PROMOTABLE lint probe (§56.9)
   checkFnBodyProhibitions,
+  // §59 — value-native map helpers (exported for D1 typer-unit tests)
+  findMapEntryColon,
+  isComparableType,
+  typeContainsFunctionField,
+  classifyMapKey,
+  checkMapKeyComparability,
 };
