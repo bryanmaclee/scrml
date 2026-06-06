@@ -103,6 +103,14 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
   "_sourceText",              // raw source slice — pipeline-specific
   "_source",                  // legacy alias
   "_nativeEngineBlock",       // M6.6.b.2 walker escape hatch (native-only)
+  "bodyStart",                // native LogicEscape/Meta bodyText host-start —
+                              // a native-parser-internal raw-slice coordinate
+                              // helper (parse-markup.js) the LIVE block tree
+                              // has no analogue for. A retained channelDecls
+                              // raw LogicEscape child surfaces it into the
+                              // FileAST; it is pipeline-internal metadata, NOT
+                              // a semantic divergence (native-cross-file-export
+                              // ROOT-2).
 ]);
 
 // ---------------------------------------------------------------------------

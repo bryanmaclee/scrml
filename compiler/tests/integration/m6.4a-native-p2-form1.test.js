@@ -155,3 +155,62 @@ describe("M6.4a §A3 — non-Form-1 cross-file export still works", () => {
     expect(errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §B — EMITTED-OUTPUT regression for the native cross-file `export const Name =
+//      <markup>` raw-slice fix (change-id native-cross-file-export-2026-06-05,
+//      ROOT-2).
+//
+//   ROOT-2 (collect-hoisted.js synthExportDecl) — the `export const Name =
+//     <markup>` raw slice anchored `block.span.start` (the `$` opener char)
+//     instead of the bodyText host-start, so for a `${...}` LogicEscape the
+//     `hi <= blockText.length` guard failed and `raw` fell back to "". The
+//     cross-file CE registry then had no markup to expand, firing
+//     E-COMPONENT-020/035 and emitting an EMPTY component at the use site.
+//
+// This asserts the EMITTED bytes, not just the error count — the §A blocks
+// guard against E-COMPONENT-035; §B guards that the markup actually reaches the
+// output (the S140/S152 emit-vs-error blind-spot).
+//
+// NOTE: the sibling ROOT-1 (exported FUNCTION body reaching codegen) was
+// deferred to PA — its emitted-output fix is correct but it surfaces a large
+// within-node parity divergence (the native-parser deferred-deep-shift design
+// + a FunctionDecl-parity gap). See docs/changes/native-cross-file-export-
+// 2026-06-05/progress.md.
+// ---------------------------------------------------------------------------
+
+describe("§B — native cross-file export EMITTED-OUTPUT regression", () => {
+  function outFor(result, suffix) {
+    if (!result.outputs) return undefined;
+    for (const [filePath, out] of result.outputs) {
+      if (filePath.endsWith(suffix)) return out;
+    }
+    return undefined;
+  }
+
+  test("ROOT-2: `export const Badge = <markup>` in ${...} expands at the cross-file use site", () => {
+    const compPath = fx("b1/comp.scrml",
+      "${\n" +
+      "  export const Badge = <span class=\"x-badge\">badge-text</>\n" +
+      "}\n",
+    );
+    const appPath = fx("b1/app.scrml",
+      "<program>\n" +
+      "${ import { Badge } from './comp.scrml' }\n" +
+      "<div><Badge/></div>\n" +
+      "</program>\n",
+    );
+    const result = compileNative([appPath, compPath]);
+    // No cross-file component-resolution failure (the pre-fix surface).
+    const componentErrors = (result.errors || []).filter(
+      e => e.code === "E-COMPONENT-020" || e.code === "E-COMPONENT-035");
+    expect(componentErrors).toEqual([]);
+    // The Badge markup must actually expand into the consumer HTML — pre-fix
+    // the registry held an EMPTY component (raw="") so the use site rendered
+    // nothing.
+    const appOut = outFor(result, "b1/app.scrml");
+    expect(appOut).toBeDefined();
+    expect(appOut.html).toContain("x-badge");
+    expect(appOut.html).toContain("badge-text");
+  });
+});

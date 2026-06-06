@@ -554,6 +554,13 @@ export function emitContextBlock(ctx, frame, endPos, cursor) {
         if (sourceSlice !== null && bodyEnd >= bodyStart) {
             const bodyText = sourceSlice.substring(bodyStart, bodyEnd);
             block.bodyText = bodyText;
+            // ROOT-2 — `block.span.start` points at the opener `$` (frame.openSpan.start),
+            // but `bodyText` begins at `frame.openSpan.end` (one byte past the `${`).
+            // Stamp the bodyText host-start so the hoist-side raw slicers
+            // (collect-hoisted.js synthExportDecl) anchor a HOST-absolute child
+            // Stmt span to a bodyText offset by subtracting `bodyStart`, NOT
+            // `blockSpan.start` (which would over-shift LEFT by the opener length).
+            block.bodyStart = bodyStart;
             block.body = parseLogicBodyBestEffort(bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
         }
     }
@@ -613,6 +620,9 @@ export function emitContextBlock(ctx, frame, endPos, cursor) {
         const sourceSlice = cursorSourceFromCtx(ctx);
         if (sourceSlice !== null && bodyEnd >= bodyStart) {
             block.bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+            // ROOT-2 — bodyText host-start = frame.openSpan.end (past the `^{`),
+            // NOT block.span.start. See the InLogicEscape branch note.
+            block.bodyStart = bodyStart;
             block.body = parseLogicBodyBestEffort(
                 block.bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
         } else {
@@ -2251,6 +2261,7 @@ function synthLiftedLogicBlock(textBlock, source, ctx) {
         ? span.col : 1;
     const anchorStart = (span !== undefined && span !== null && typeof span.start === "number")
         ? span.start : 0;
+    block.bodyStart = anchorStart;
     block.body = parseLogicBodyBestEffort(bodyText, ctx, anchorStart, anchorLine, anchorCol);
     block._synthetic = true;
     return block;
@@ -2284,6 +2295,7 @@ function synthPairedLogicBlock(bodyText, span, ctx) {
         ? span.col : 1;
     const anchorStart = (span !== undefined && span !== null && typeof span.start === "number")
         ? span.start : 0;
+    block.bodyStart = anchorStart;
     block.body = parseLogicBodyBestEffort(bodyText, ctx, anchorStart, anchorLine, anchorCol);
     block._synthetic = true;
     return block;

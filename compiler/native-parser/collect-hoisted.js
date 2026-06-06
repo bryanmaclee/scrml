@@ -151,7 +151,8 @@ export function collectHoisted(blocks, idGen, source) {
                 // parsed Stmt[] body; the walker filters it. `topLevel` true —
                 // the LogicEscape body is the direct statement list.
                 if (Array.isArray(block.body)) {
-                    walkStmts(block.body, block.bodyText, block.span, true);
+                    walkStmts(block.body, block.bodyText, block.span, true,
+                        block.bodyStart);
                 }
             } else if (block.kind === "Meta") {
                 // F8 (S115) — Meta blocks now carry a parsed `body` Stmt[].
@@ -160,7 +161,8 @@ export function collectHoisted(blocks, idGen, source) {
                 // shape as a LogicEscape body — scan it the same way.
                 // `topLevel` true — the Meta body is the direct statement list.
                 if (Array.isArray(block.body)) {
-                    walkStmts(block.body, block.bodyText, block.span, true);
+                    walkStmts(block.body, block.bodyText, block.span, true,
+                        block.bodyStart);
                 }
             }
             // "Sql" / "Css" / "ErrorEffect" / "Test" / "ForeignCode" / "Text"
@@ -190,7 +192,7 @@ export function collectHoisted(blocks, idGen, source) {
     // inside a FunctionDecl body, so `walkStmts` must NOT hoist an `Import`
     // discovered by the FunctionDecl / Block recursion — only a `topLevel`
     // import lands in `FileAST.imports`.
-    function walkStmts(stmtList, blockText, blockSpan, topLevel) {
+    function walkStmts(stmtList, blockText, blockSpan, topLevel, bodyStart) {
         for (const stmt of stmtList) {
             if (stmt === undefined || stmt === null) continue;
 
@@ -249,7 +251,7 @@ export function collectHoisted(blocks, idGen, source) {
                 // `export const NAME =` prefix and recover the component
                 // markup body — this is the LIVE oracle's path-b shape that
                 // mirrors how the desugared Form 1 / Form 2 reaches CE.
-                exports.push(synthExportDecl(stmt, stampId, blockText, blockSpan));
+                exports.push(synthExportDecl(stmt, stampId, blockText, blockSpan, bodyStart));
                 // A3 — `export type Name : kind = {...}` is an Export Stmt
                 // whose `declaration` is a TypeDecl. The live pipeline pushes
                 // BOTH a type-decl AND the export-decl (ast-builder.js:7297 —
@@ -270,17 +272,17 @@ export function collectHoisted(blocks, idGen, source) {
                 // declaration whose name starts uppercase, with a markup
                 // initializer (component-def.raw is the template). Scan each
                 // declarator.
-                collectComponentDefs(stmt, blockText, blockSpan, stampId);
+                collectComponentDefs(stmt, blockText, blockSpan, stampId, bodyStart);
             } else if (stmt.kind === StmtKind.FunctionDecl) {
                 // live walkBodyNodes recurses `function-decl` bodies for the
                 // structural-reach kinds — but NOT for imports (`topLevel`
                 // false: a nested import is illegal placement, not hoisted).
                 if (Array.isArray(stmt.body)) {
-                    walkStmts(stmt.body, blockText, blockSpan, false);
+                    walkStmts(stmt.body, blockText, blockSpan, false, bodyStart);
                 }
             } else if (stmt.kind === StmtKind.Block) {
                 if (Array.isArray(stmt.body)) {
-                    walkStmts(stmt.body, blockText, blockSpan, false);
+                    walkStmts(stmt.body, blockText, blockSpan, false, bodyStart);
                 }
             }
         }
@@ -291,7 +293,7 @@ export function collectHoisted(blocks, idGen, source) {
     // a plain identifier with an UPPERCASE initial char, initialized to a
     // `MarkupValue` expression. A lowercase-initial `const` is an ordinary
     // variable — NOT a component (live ast-builder gate).
-    function collectComponentDefs(varDecl, blockText, blockSpan, stamp) {
+    function collectComponentDefs(varDecl, blockText, blockSpan, stamp, bodyStart) {
         // Only `const` declarations are component definitions.
         if (varDecl.declKind !== "const") return;
         if (Array.isArray(varDecl.declarations) === false) return;
@@ -311,7 +313,7 @@ export function collectHoisted(blocks, idGen, source) {
             if (init === undefined || init === null) continue;
             if (init.kind !== "MarkupValue") continue;
 
-            components.push(synthComponentDef(name, init, blockText, blockSpan, stamp));
+            components.push(synthComponentDef(name, init, blockText, blockSpan, stamp, bodyStart));
         }
     }
 
@@ -549,7 +551,7 @@ function synthImportDecl(stmt, stamp) {
 // raw-stripping can recover the markup body. Without this, the cross-file
 // Form-1 fix's synthesized export-decl never registered, and `<X1Badge/>`
 // use-sites raised E-COMPONENT-035 in CE.
-function synthExportDecl(stmt, stamp, blockText, blockSpan) {
+function synthExportDecl(stmt, stamp, blockText, blockSpan, bodyStart) {
     let exportedName = null;
     let exportKind = null;
     const reExportSource = (stmt.source === undefined || stmt.source === null)
@@ -601,20 +603,40 @@ function synthExportDecl(stmt, stamp, blockText, blockSpan) {
     }
 
     // Slice the export's raw source from the enclosing bodyText. The native
-    // Stmt's span is in HOST coordinates; bodyText is the LogicEscape /
-    // Meta bodyText (host-coordinate slice that starts at blockSpan.start).
+    // Stmt's span is in HOST coordinates; the child-span -> bodyText-offset
+    // mapping subtracts the bodyText HOST-START — the anchor `parseLogicBody
+    // BestEffort` shifted the body Stmt spans against (parse-markup.js
+    // `bodyAbsStart`). For a real `${...}` / `^{...}` block that anchor is
+    // `frame.openSpan.end` (the byte past the opener), stamped onto the block
+    // as `bodyStart` — DISTINCT from `block.span.start`, which points at the
+    // opener `$` / `^` char. Subtracting `blockSpan.start` (the prior code)
+    // over-shifted the slice LEFT by the opener length (e.g. `${` = 2), so the
+    // upper bound overshot `blockText.length` by exactly that, the `hi <= len`
+    // guard failed, and `raw` fell back to "" — leaving cross-file CE's path-b
+    // with no markup to expand (E-COMPONENT-020/035). This is the same off-by-
+    // opener-len defect M6.7-C1 fixed in `synthComponentDef`.
+    //
+    // For synthesized lifted / paired logic blocks (`synthLiftedLogicBlock` /
+    // `synthPairedLogicBlock`) the body anchor IS `span.start`, so
+    // `bodyStart === blockSpan.start` and the file-top path is byte-unchanged.
+    // The `blockSpan.start` fallback (when `bodyStart` is absent) preserves
+    // that path even if a future body-attach site forgets to stamp `bodyStart`.
+    //
     // CE's path-b strip-prefix logic (component-expander.ts L2962-2978)
     // expects the raw to include the literal `export const NAME = <markup>`
     // form so it can prepend `export const ${name} =` and indexOf-strip.
     let raw = "";
+    const sliceBase = (typeof bodyStart === "number")
+        ? bodyStart
+        : (blockSpan !== undefined && blockSpan !== null
+            && typeof blockSpan.start === "number" ? blockSpan.start : null);
     if (typeof blockText === "string"
         && stmt.span !== undefined && stmt.span !== null
         && typeof stmt.span.start === "number"
         && typeof stmt.span.end === "number"
-        && blockSpan !== undefined && blockSpan !== null
-        && typeof blockSpan.start === "number") {
-        const lo = stmt.span.start - blockSpan.start;
-        const hi = stmt.span.end - blockSpan.start;
+        && sliceBase !== null) {
+        const lo = stmt.span.start - sliceBase;
+        const hi = stmt.span.end - sliceBase;
         if (lo >= 0 && hi <= blockText.length && lo <= hi) {
             raw = blockText.slice(lo, hi);
         }
@@ -683,7 +705,13 @@ function synthTypeDecl(stmt, stamp, fromExport) {
 // token-joined raw-FORM difference is reconciled downstream by CE's
 // `normalizeTokenizedRaw`, which is idempotent on already-canonical markup — so
 // both pipelines' `raw` re-parse to the same registry entry.)
-function synthComponentDef(name, init, blockText, blockSpan, stamp) {
+function synthComponentDef(name, init, blockText, blockSpan, stamp, bodyStart) {
+    // `bodyStart` is threaded for symmetry with `synthExportDecl` but is
+    // intentionally UNUSED here — `init.span` is already bodyText-RELATIVE (it
+    // is an index INTO `bodyText`, not a host-absolute span), so no slice-base
+    // subtraction is needed. (See `synthExportDecl`, whose `stmt.span` is
+    // host-absolute and therefore DOES need the `bodyStart` slice base.)
+    void bodyStart;
     // M6.7-C1: the native `MarkupValue.init.span` is bodyText-RELATIVE — an
     // index INTO the enclosing LogicEscape/Meta `bodyText`, NOT a host-absolute
     // source offset. (Verified across logic-escape, multi-line, and meta blocks:
