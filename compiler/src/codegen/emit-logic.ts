@@ -3013,8 +3013,48 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
     case "reactive-nested-assign": {
       const ctx = opts.encodingCtx;
-      const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
-      const target = JSON.stringify(encodedTarget);
+      const exprCtx = _makeExprCtx(opts);
+      // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
+      const value = emitExprField(node.valueExpr, node.value ?? "null", exprCtx);
+
+      // Bug B (structural-compound deep-set mistarget). When the receiver cell
+      // is a Variant C structural compound parent (`<a> <ref>="" </>`), the
+      // parent `a` is emitted as a `_scrml_derived_declare` composite that
+      // recomputes from its backing leaf cells (`a.ref`). Writing the composite
+      // would be silently clobbered by the next recompute. `reactive-deps.ts:
+      // stampCompoundDeepSetTargets` (run once per file at runCG) stamps the
+      // TRUE write destination: `_deepSetLeafKey` = the deepest statically-
+      // resolvable backing leaf key along the path, `_deepSetResidualPath` =
+      // the path segments PAST that leaf. SPEC §6.3.2 (line 2229):
+      // `@formRes.name = "Alice"` writes to the field's backing storage.
+      const leafKey = (node as any)._deepSetLeafKey as string | undefined;
+      if (typeof leafKey === "string" && leafKey.length > 0) {
+        const encodedLeaf = ctx ? ctx.encode(leafKey) : leafKey;
+        const leaf = JSON.stringify(encodedLeaf);
+        const residual: any[] = Array.isArray((node as any)._deepSetResidualPath)
+          ? (node as any)._deepSetResidualPath
+          : [];
+        if (residual.length === 0) {
+          // Single-segment field write (`@a.ref = v` over a flat-value leaf):
+          // a plain write to the backing leaf cell. The composite `a`
+          // re-derives on its next read.
+          return `_scrml_reactive_set(${leaf}, ${value});`;
+        }
+        // The leaf holds a deeper plain object (`@a.cfg.deep = v` where `a.cfg`
+        // is the backing leaf) or the remainder is a computed index. COW the
+        // residual path into the LEAF cell's value (same heterogeneous segment
+        // shape as below).
+        const residualParts = residual.map((seg: any) =>
+          (seg !== null && typeof seg === "object")
+            ? emitExprField(seg.index, seg.raw ?? "null", exprCtx)
+            : JSON.stringify(seg),
+        );
+        const residualPath = `[${residualParts.join(", ")}]`;
+        return `_scrml_reactive_set(${leaf}, _scrml_deep_set(_scrml_reactive_get(${leaf}), ${residualPath}, ${value}));`;
+      }
+
+      // Default (FLAT object cell, or non-compound receiver): write the cell
+      // value via COW deep-set on the full path.
       // cycles-prereq (S168 COW-all): the path is a heterogeneous segment list.
       // A STRING segment (dotted `.field` OR a bare-literal bracket index that
       // the parser already lowered to a string, e.g. "0" / "DAL") emits as a
@@ -3024,7 +3064,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // e.g. `[_scrml_reactive_get("sel")]`. The clone-then-set inside
       // `_scrml_deep_set` breaks any self-reference into a stale (acyclic)
       // snapshot, so even `@arr[0] = @arr` produces no live cycle.
-      const exprCtx = _makeExprCtx(opts);
+      const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
+      const target = JSON.stringify(encodedTarget);
       const segments: any[] = node.path ?? [];
       const pathParts = segments.map((seg: any) =>
         (seg !== null && typeof seg === "object")
@@ -3032,8 +3073,6 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           : JSON.stringify(seg),
       );
       const path = `[${pathParts.join(", ")}]`;
-      // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
-      const value = emitExprField(node.valueExpr, node.value ?? "null", exprCtx);
       return `_scrml_reactive_set(${target}, _scrml_deep_set(_scrml_reactive_get(${target}), ${path}, ${value}));`;
     }
 

@@ -118,7 +118,13 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
     );
   });
 
-  test("mixed dotted + bracket `@obj.field[0] = 5` → string segments [field, 0]", () => {
+  test("mixed dotted + bracket `@obj.field[0] = 5` on a STRUCTURAL COMPOUND → retargets the backing leaf `obj.field` (Bug B)", () => {
+    // `<obj> <field> = [1,2] </>` is a Variant C structural compound: `obj` is a
+    // DERIVED composite, `obj.field` is the backing leaf. Per SPEC §6.3.2 the
+    // field write must target the backing storage. Bug B fix: retarget to the
+    // leaf `obj.field` and COW the bracket index `[0]` into its value. (Pre-fix
+    // this asserted `_scrml_reactive_set("obj", _scrml_deep_set(... ["field","0"]))`,
+    // which wrote the composite and was clobbered by the derived recompute.)
     const { errors, clientJs } = compile([
       "<obj>",
       "    <field> = [1, 2]",
@@ -128,8 +134,9 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setMix");
     expect(body).toContain(
-      '_scrml_reactive_set("obj", _scrml_deep_set(_scrml_reactive_get("obj"), ["field", "0"], 5));',
+      '_scrml_reactive_set("obj.field", _scrml_deep_set(_scrml_reactive_get("obj.field"), ["0"], 5));',
     );
+    expect(body).not.toMatch(/_scrml_reactive_set\("obj",\s*_scrml_deep_set/);
   });
 
   test("bracket READ `let x = @arr[@sel]` reconstructs verbatim — NOT COW'd", () => {
@@ -155,12 +162,18 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "multi");
     expect(body).toBeTruthy();
-    // three deep_set calls, in source order.
+    // `a` is a FLAT array → cell-targeted COW deep-set (unchanged). `b` is a
+    // STRUCTURAL COMPOUND (`<b> <k> = 0 </>`) → the field write `@b.k = 20`
+    // retargets the backing leaf `b.k` with a plain reactive_set (Bug B fix;
+    // pre-fix this asserted a deep-set against the composite `b`). All three
+    // writes survive in source order.
     const idxA0 = body.indexOf('_scrml_deep_set(_scrml_reactive_get("a"), ["0"], 10)');
-    const idxBk = body.indexOf('_scrml_deep_set(_scrml_reactive_get("b"), ["k"], 20)');
+    const idxBk = body.indexOf('_scrml_reactive_set("b.k", 20)');
     const idxA1 = body.indexOf('_scrml_deep_set(_scrml_reactive_get("a"), ["1"], 30)');
     expect(idxA0).toBeGreaterThanOrEqual(0);
     expect(idxBk).toBeGreaterThan(idxA0);
     expect(idxA1).toBeGreaterThan(idxBk);
+    // The compound field write must NOT target the composite `b`.
+    expect(body).not.toMatch(/_scrml_reactive_set\("b",\s*_scrml_deep_set/);
   });
 });

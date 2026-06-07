@@ -62,11 +62,19 @@ function multiBody(clientJs) {
 
 // Build a single-file program whose `multi()` body is the given statement list.
 // `deep` = `@a.ref = "<val>"` ; `scalar` = `@c = <n>` ; `arr` = `@arr.push(<n>)`.
+//
+// FORM NOTE: `<a>` is a FLAT object cell `{ ref: "" }`, NOT a structural compound
+// (`<a> <ref>="" </>`). This test's concern is the S167 STATEMENT-SURVIVAL fix
+// (a deep-set / array-mutation at body position 2+ must not be swallowed by the
+// preceding statement's collectExpr-RHS) — orthogonal to the cell's storage
+// shape. A flat object cell keeps the canonical
+// `_scrml_deep_set(_scrml_reactive_get("a"), ["ref"], v)` shape these rows
+// assert. (A STRUCTURAL COMPOUND would correctly retarget the backing leaf
+// `a.ref` per Bug B / SPEC §6.3.2 — covered by structural-compound-deepset.test.js
+// — which is a different emit shape and would mask the survival concern here.)
 function program(bodyLines) {
   return [
-    "<a>",
-    '    <ref> = ""',
-    "</>",
+    '<a> = { ref: "" }',
     "<c> = 0",
     "<arr> = []",
     "function multi() {",

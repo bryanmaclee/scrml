@@ -1,0 +1,12 @@
+<a>
+    <ref> = ""
+</>
+<c> = 0
+function multi() {
+    @c = 1
+    @a.ref = "p"
+    @c = 2
+    @a.ref = "q"
+}
+<button onclick=multi()>go</button>
+<p>${@c} ${@a.ref}</p>

@@ -603,6 +603,207 @@ export function collectSynthCellKeys(fileAST: Record<string, unknown>): Set<stri
 }
 
 // ---------------------------------------------------------------------------
+// collectCompoundLeafTargets + stampCompoundDeepSetTargets (Bug B)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bug B (structural-compound deep-set mistarget). A field write on a Variant C
+ * structural compound — `@a.ref = "p"` where `<a> <ref>="" </>` — must update
+ * the field's BACKING LEAF cell (`a.ref`), NOT the compound parent (`a`).
+ *
+ * The compound parent `a` is emitted as a `_scrml_derived_declare("a", () =>
+ * ({ ref: _scrml_reactive_get("a.ref") }))` composite that RECOMPUTES from the
+ * leaf on every read (see emit-logic.ts state-decl compound-parent arm, where
+ * each leaf registers at `${qualifiedName}.${childName}`). Writing the composite
+ * via `_scrml_reactive_set("a", _scrml_deep_set(...))` is silently clobbered by
+ * the next recompute — a lost mutation (SPEC §6.3.2 line 2229: `@formRes.name =
+ * "Alice"` writes to 'name').
+ *
+ * This collector returns the two sets a deep-set retarget needs:
+ *   - `parentNames`: every compound-parent qualified name (top-level + nested)
+ *     — the gate. A deep-set is retargeted ONLY when its `target` is one of
+ *     these. A FLAT-object cell (`<a> = { ref: "" }`) is NOT a compound parent,
+ *     so `@a.ref = v` keeps the correct `_scrml_deep_set` on the cell value.
+ *   - `leafKeys`: every BACKING leaf cell key — the qualified path of each
+ *     field child that gets a real `_scrml_reactive_set` storage. Used to find
+ *     the deepest STATICALLY-resolvable backing leaf along a write path.
+ *
+ * The compound-parent predicate + qualified-path recursion MIRROR
+ * `collectSynthCellKeys` (and emit-logic.ts's compound-parent arm) EXACTLY so
+ * the leaf-key naming has zero drift from what emit-logic DECLARES.
+ */
+export function collectCompoundLeafTargets(
+  fileAST: Record<string, unknown>,
+): { leafKeys: Set<string>; parentNames: Set<string> } {
+  const leafKeys = new Set<string>();
+  const parentNames = new Set<string>();
+  const nodes = getNodes(fileAST);
+
+  const isCompoundParent = (node: any): boolean =>
+    node?._cellKind === "compound-parent" || Array.isArray(node?.children);
+
+  // A field child registers a BACKING leaf cell (a real `_scrml_reactive_set`
+  // storage) when it is a state-decl that is NOT itself a compound parent
+  // (those recurse) — markup-typed and `const`-derived children are also
+  // derived composites with no plain backing storage, so they are NOT
+  // retarget destinations for a value write.
+  const isBackingLeafChild = (c: any): boolean => {
+    if (!c || typeof c !== "object") return false;
+    if (c.kind !== "state-decl") return false;
+    if (isCompoundParent(c)) return false;
+    if (c._cellKind === "markup-typed") return false;
+    if (c.shape === "derived" && c.isConst === true) return false;
+    return true;
+  };
+
+  // Record a compound parent at qualified name `q`: register `q` as a parent,
+  // each backing-leaf child at `q.<child>`, and recurse into nested compounds.
+  const addCompound = (node: any, q: string): void => {
+    parentNames.add(q);
+    const children: any[] = Array.isArray(node?.children) ? node.children : [];
+    for (const child of children) {
+      if (!child || typeof child !== "object") continue;
+      const childName: string = child.name;
+      if (!childName) continue;
+      const childQ = `${q}.${childName}`;
+      if (isCompoundParent(child)) {
+        // A nested compound is ALSO a backing path target at its own leaves;
+        // recurse to register its parent name + its children's leaves.
+        addCompound(child, childQ);
+      } else if (isBackingLeafChild(child)) {
+        leafKeys.add(childQ);
+      }
+    }
+  };
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as ASTNode;
+      if (n.kind === "state-decl" && isCompoundParent(n) && n.name) {
+        addCompound(n, n.name as string);
+        // addCompound already walked this compound's children (incl. nested
+        // compounds) — do NOT also `visit` them as top-level decls.
+        continue;
+      }
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body as unknown[]);
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+      if (n.kind === "match-stmt" && Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
+        if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+        if ((n as any).catchNode && Array.isArray((n as any).catchNode.body)) visit((n as any).catchNode.body as unknown[]);
+        if (Array.isArray((n as any).finallyBody)) visit((n as any).finallyBody as unknown[]);
+      }
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return { leafKeys, parentNames };
+}
+
+/**
+ * Bug B — stamp every `reactive-nested-assign` node whose `target` is a
+ * structural-compound parent with its TRUE write destination:
+ *   - `_deepSetLeafKey`: the deepest STATICALLY-resolvable backing leaf cell
+ *     key along the write path (e.g. `a.ref`, `a.b.ref`, or `a.cfg` when the
+ *     remainder is a plain-object nav `@a.cfg.deep`).
+ *   - `_deepSetResidualPath`: the path segments PAST that leaf (the heterogeneous
+ *     `string | { index }` shape preserved verbatim, S168). Empty → a plain
+ *     `_scrml_reactive_set(leaf, value)`. Non-empty → a `_scrml_deep_set` of the
+ *     remainder INTO the leaf cell's value.
+ *
+ * Resolution walks the STATIC string prefix of `path` (stopping at the first
+ * computed `{ index }` segment, which cannot join into a leaf key), building
+ * candidate keys `target.path[0]`, `target.path[0].path[1]`, … and selecting
+ * the DEEPEST candidate present in `leafKeys`. A computed-index segment in the
+ * remainder rides into `_deepSetResidualPath` and is deep-set verbatim.
+ *
+ * Nodes whose `target` is a FLAT cell (not in `parentNames`) are left UNSTAMPED —
+ * emit-logic keeps the existing cell-targeted `_scrml_deep_set`, so flat-object
+ * field writes (`<a> = { ref: "" }`; `@a.ref = v`) do NOT regress.
+ *
+ * Stamping is in-place on the shared AST nodes (mirrors SYM `_cellKind`/`_record`)
+ * so emit-logic reads `node._deepSetLeafKey` regardless of which opts path the
+ * statement reaches the emitter through. The walk recurses into FUNCTION bodies
+ * (where the reproducer's deep-sets live) in addition to the structural bodies
+ * `collectSynthCellKeys` covers.
+ */
+export function stampCompoundDeepSetTargets(fileAST: Record<string, unknown>): void {
+  const { leafKeys, parentNames } = collectCompoundLeafTargets(fileAST);
+  if (parentNames.size === 0) return; // no compound parents → nothing to retarget
+  const nodes = getNodes(fileAST);
+  const seen = new WeakSet<object>();
+
+  const stampNode = (n: any): void => {
+    const target = n.target;
+    if (typeof target !== "string" || !parentNames.has(target)) return;
+    const path: Array<string | { index?: unknown }> = Array.isArray(n.path) ? n.path : [];
+    if (path.length === 0) return;
+    // Walk the static string prefix, deepest-leaf wins.
+    let bestKey: string | null = null;
+    let bestLen = 0; // number of leading path segments consumed by bestKey
+    let acc = target;
+    for (let i = 0; i < path.length; i++) {
+      const seg = path[i];
+      if (typeof seg !== "string") break; // computed { index } — cannot extend the leaf key
+      acc = `${acc}.${seg}`;
+      if (leafKeys.has(acc)) {
+        bestKey = acc;
+        bestLen = i + 1;
+      }
+    }
+    if (bestKey === null) return; // no backing leaf on the static prefix — leave to existing path
+    n._deepSetLeafKey = bestKey;
+    n._deepSetResidualPath = path.slice(bestLen);
+  };
+
+  const walk = (nodeList: unknown[]): void => {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      const n = node as any;
+      if (n.kind === "reactive-nested-assign") {
+        stampNode(n);
+        // leaf node — no statement-body recursion (valueExpr is an ExprNode,
+        // not a statement list).
+        continue;
+      }
+      if (Array.isArray(n.body)) walk(n.body as unknown[]);
+      if (Array.isArray(n.children)) walk(n.children as unknown[]);
+      if (Array.isArray(n.consequent)) walk(n.consequent as unknown[]);
+      if (Array.isArray(n.alternate)) walk(n.alternate as unknown[]);
+      if (Array.isArray(n.bodyChildren)) walk(n.bodyChildren as unknown[]);
+      if (Array.isArray(n.arms)) {
+        for (const arm of n.arms) {
+          if (arm && Array.isArray(arm.body)) walk(arm.body as unknown[]);
+        }
+      }
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) walk(n.body as unknown[]);
+      if (n.kind === "try-stmt") {
+        if (Array.isArray(n.body)) walk(n.body as unknown[]);
+        if (n.catchNode && Array.isArray(n.catchNode.body)) walk(n.catchNode.body as unknown[]);
+        if (Array.isArray(n.finallyBody)) walk(n.finallyBody as unknown[]);
+      }
+      if (n.expr && n.expr.node && typeof n.expr.node === "object") {
+        walk([n.expr.node] as unknown[]);
+      }
+    }
+  };
+
+  walk(nodes as unknown[]);
+}
+
+// ---------------------------------------------------------------------------
 // ExprNode-aware reactive ref detection (Phase 4d)
 // ---------------------------------------------------------------------------
 

@@ -66,7 +66,7 @@ import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectSynthCellKeys } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
@@ -730,6 +730,14 @@ export function runCG(input: CgInput): CgOutput {
     const filePath = (fileAST as any).filePath as string;
     const analysis = fileAnalyses.get(filePath);
     const nodes: object[] = analysis ? (analysis as any).nodes : [];
+
+    // Bug B (structural-compound deep-set mistarget): stamp each
+    // `reactive-nested-assign` whose target is a Variant C structural
+    // compound parent with its TRUE write destination (the backing LEAF
+    // cell key + residual path), so emit-logic writes `a.ref` not the
+    // derived composite `a` (SPEC §6.3.2). In-place on the shared AST
+    // nodes; no-op when the file has no compound parents.
+    stampCompoundDeepSetTargets(fileAST as Record<string, unknown>);
 
     // Check for unknown types in nodeTypes
     if ((fileAST as any).nodeTypes) {
