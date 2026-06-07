@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-06T20:45:00Z  commit: 40679720
+# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher

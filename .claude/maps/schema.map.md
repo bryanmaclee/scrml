@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-06T20:45:00Z  commit: 40679720
+# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (1983L+, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).

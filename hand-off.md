@@ -1,56 +1,76 @@
-# scrmlTS — Session 169 (CLOSE)
+# scrmlTS — Session 170 (CLOSE)
 
 **Date:** 2026-06-06
-**Previous:** `handOffs/hand-off-173.md` (= S168 CLOSE).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-174.md` at next OPEN.
-**Profile:** opened **A (FULL)** ("read pa.md"; default A). Autonomous land+push grant for the arc (S164-style) granted mid-session.
+**Previous:** `handOffs/hand-off-174.md` (= S169 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-175.md` at next OPEN.
+**Profile:** opened **A (FULL)** ("pa.md"; default A — no profile signal given).
+**AUTONOMOUS LAND+PUSH GRANT (S164/S169-style), session-scoped — granted S170.** For both in-flight arcs (Bug B + set-algebra) and any follow-on this session: review (S67 file-delta) → land → push (pre-commit + pre-push gates ARE the independent re-verify) → S147 branch-leak coherence + S138 independent R26/verify → reconcile docs. **Surface ONLY on real failure or at a milestone/checkpoint.** Grant does NOT carry to next session.
 
-## 🏁 S169 CLOSE — VALUE-NATIVE MAP (§59) BUILT END-TO-END — phase c COMPLETE (D0–D4 + D2b + D2c + currency, all PUSHED) · `wrap`
+## 🏁 S170 CLOSE — Bug B (HIGH) closed · `set` ratified-deferred + helpers shipped · native-parser swap-grind 605→~508 (Wave 1+2) · `wrap and push`
 
-Opened on **"start the map arc phase c"** → 4-parallel infra survey (→ `SURVEY-SYNTHESIS.md`) → grounded decomposition → the `<each ... as e>` iteration ruling (S169) → built the §59 map type **end-to-end on the default pipeline + native-parser parity + the sugar**. The value-native map is now in main. Also: copied the language-inspiration audit into scrmlTS (separate user request).
+**Date:** 2026-06-07. **Next-session pickup:** rotate THIS file → `handOffs/hand-off-175.md`.
 
-### SYNC / REPO STATE AT CLOSE
-- **scrmlTS:** HEAD = the S169 wrap commit(s) atop **`40679720`** (D2b). **PUSHED this wrap** (incl. maps + §59 banner currency).
-- **scrml-support:** user-voice S169 (iteration ruling + close addendum). **PUSHED this wrap.**
-- **Version:** v0.7.0 (no tag — §59 was Nominal, now Implemented; reactivity/compiler-internal; no cross-repo notice — maps newly available but ZERO adopter demand yet, surface in a future dogfood).
-- **Tests:** **23,330 pass / 0 fail / 220 skip / 1 todo** (~928 files) — **+239 across the arc** (S168 baseline 23,091). within-node **1006/0** (+1: the re-added `map-001-fare-by-lane.scrml` parity sample, allowlisted).
-- **known-gaps:** HIGH **1** (Bug B — structural-compound deep-set mistarget, codegen, OPEN, unchanged) · MED **9** · LOW **18** (+2 S169 D4-surfaced: inline-handler `onclick=${@m=@m.insert()}` RHS not lowered + `@ordered`-literal-init unordered).
-- **Maps:** refreshed for the §59-impl (project-mapper `a1e8cdc7c55de5324` — the schema/error/domain headers were stale saying §59 SPEC-ahead/no-impl). Watermark advanced. **[verify at the maps-commit step.]**
-- **Worktrees:** **main ONLY** (all 7 dispatch worktrees cleaned at wrap). **Inbox:** empty. **Hooks:** Config B.
+Full Profile-A session-start. Directions: **"start the set deep-dive, and bug B"** → **"continue with native parser work. autonomous workflow"** (+ `/effort` ultracode) → **"wrap and push."** Everything pushed under the autonomous land+push grant. **HEAD `cc69c62d`** (63106225 → `72aa6836` Bug B → `df08f282` set-algebra → `5a346faa` native-wave-1 → `cc69c62d` native-wave-2 → wrap commit). origin in sync (coherence 0/0 at each landing). **Worktrees: main only** (all dispatch + re-measure worktrees cleaned). **known-gaps: HIGH 0 · MED 9 · LOW 18.** **Tests: full suite 23,405 / 0 fail** (Bug B +9, set-algebra +16, native-wave-1 +24, native-wave-2 +5). v0.7.0, no cut.
 
-### THE MAP ARC — what landed (all PUSHED, each S67 file-delta + S138 verify)
-| Piece | Commit | What |
-|---|---|---|
-| D0 | `2ad329ba` | §42.3.1 union-`not` normalization (`normalizeUnion` in `tUnion`; dedup-`not`-only; canary on the `[T,not]` recognizers). +17 |
-| §59.8 | `cb5a8e71` | iteration ruling amendment (rides `<each ... as e>`, `.entries()`→`[{key,value}]` structs; `(k,v) in` tuple-opener rejected) |
-| D1 | `fbb3c208` | type-system: `MapType`+`tMap`+`resolveTypeExpr [K:V]` recognition (`findMapEntryColon`) + `@ordered` + key-comparability (`isComparableType`/`classifyMapKey` → E-EQ-003/E-MAP-KEY-IS-MAP/E-MAP-KEY-NOT-COMPARABLE) + E-MAP-BRACKET-WRITE gate. +35. Additive `isFunctionField` sidecar (R28-8 precedent). |
-| D2a | `5beb1f55` | legacy parser: `preprocessMapLiterals` scanner + `MapLitExpr`/`MapEntry` node + unmask + E-MAP-LITERAL-MALFORMED/W-MAP-STRUCT-KEY-LITERAL/W-MAP-DUPLICATE-LITERAL-KEY. +24 |
-| D3 | `c7bcecf1` | runtime: `_scrml_fnv1a`+`_scrml_value_canonical` (§59.5 hasher) + tagged `{__scrml_map}` structure + 14-method surface + lossless §57-codec + order-indep map-`==` in `_scrml_structural_eq` + `'map'` chunk. +59 **[NUL-byte in its test caught + stripped — see process]** |
-| D4 | `18c61c99` | codegen capstone: `collectMapVarNames`/`fileHasMapUsage` + `mapVarNames` threaded → emit-expr map-lit/read/method/`.size` lowering + chunk-trigger + `W-MAP-ITERATION-ORDER`. **END-TO-END R26 PASS.** +60 |
-| §59 currency | `8963ae52` | banner Nominal→Implemented + §59.10 `@ordered`-wire clarification + §6.2 cross-ref + known-gaps +2 |
-| D2c | `19712a07` | `<each in=@m.entries() as (k,v)>` destructure sugar (both paths + codegen). R26 PASS byte-identical. +17 |
-| D2b | `40679720` | native-parser map literal parity (token-level; cleaner than D2a's unmask). +22 + the parity sample. |
+**Native-parser swap (strategic #1):** re-triaged to **605 native-only flip-failures** (default BS+Acorn fully green 0-fail; native opt-in `--parser=scrml-native`), 6 fan-out surveys, **Wave 1 → 525, Wave 2 → ~508**, ZERO true regressions. Native parity-closers SHADOW-ONLY (default output byte-unchanged → no tag, no cross-repo notice). **Wave-3 candidates** (next session): D-class-residual 17, SCOPE roots 23, exprText qualified-enum whitespace-strip (W sub-gap), code-position match-block-promotion for render arms, engine-write-guard routing for match-as-statement over an engine cell, FIX-4 export-`<cell>` (needs a SPEC ruling), engine bare-display-text (§4.18 corpus-migration per S163, DESIGN-gated). NEW native tokenizer bug to file: single-word bare-display-text silent-drop (Wave-2 agent surfaced).
 
-### §59 DESIGN DISPOSITIONS RATIFIED/RESOLVED THIS SESSION
-1. **Iteration form (S169 user ruling, user-voice S169):** `<each in=@m.entries() as e>` + `e.key`/`e.value`; `.entries()`→`[{key:KeyT, value:ValT}]` structs; optional `as (k,v)` positional sugar (§14.11). The `(k,v) in` tuple-opener REJECTED (no tuple type).
-2. **§59.10 @ordered-wire (PA-ratified, spec-consistent):** the codec is bit-stable (canonical key order); an `@ordered` map's insertion order is NOT wire-preserved — "lossless" = `==`-preserving (§59.9 decouples order from value-identity); the two are mutually exclusive for `@ordered`. §59.10 clarified.
-3. **struct-key literal codegen = emit-if-trivial** (the runtime hashes any §45-key; W-MAP-STRUCT-KEY-LITERAL is advisory, not a hard defer).
+**Cross-repo:** scrml-support committed + pushed at wrap (user-voice S170 + the set deep-dive doc). **scrml-support sync 0/0.** Inbox empty; no outbound notices due. **Maps:** refreshed for the S170 landings (project-mapper → watermark advanced to `cc69c62d`).
 
-### OPEN / NEXT (S169 → next arc)
-1. **D5 = a separate next arc (user chose wrap):** (a) **`set` — UNRATIFIED design.** §59.12 deferred it; S166 flagged it as the "thinner warrant — maybe not needed" (array + `scrml:data` helpers may cover it; the user's "baby with the bathwater" doubt). Wants a deep-dive/debate (no-batch-ratify) on warrant + shape (first-class `set` vs derived-from-map [map-keyed-to-self] vs `scrml:data` array helpers vs drop). (b) **self-host migration** — 130 `new Map`/`new Set` → value-native map; P3 bridge; NOT a v1 blocker.
-2. **Carry-forward gaps (all LOW/deferred):** inline-handler `onclick=${@m=@m.insert()}` RHS not lowered (fix = thread `mapVarNames` into `rewrite.ts`); `@ordered`-literal-init unordered (documented v1 limit); native bracket-write→COW promotion (orthogonal native parity); native `[string:int]` type-annotation whitespace normalization (orthogonal); **§6.2 Shape-4 canonical-empty-for-map UNVERIFIED** (does a no-RHS `<m>: [K:V]` decl resolve to `[:]`? D1 didn't explicitly cover it — adopters write `= [:]` for now).
-3. Bug B (HIGH, structural-compound deep-set mistarget at `emit-logic.ts:3003`) — unchanged, queued.
+### STREAM 1 — `set` deep-dive: DONE + RATIFIED + helper-impl dispatched
+- Deep-dive COMPLETE: `../scrml-support/docs/deep-dives/set-warrant-and-shape-2026-06-06.md` (flipped to `status: current` + RATIFIED banner). Verdict: THIN convenience; zero adopter demand (0× `new Set`/`.has`/`unique`/set-algebra across 948 files); familiarity-bias CONFIRMED.
+- **RATIFIED S170 (user AskUserQuestion):** "Defer type, ship helpers." NO `set` type (B2 `set[K]`-over-map on the SHELF as reversible upgrade); ship value-correct `union`/`intersection`/`difference` (+`member`) in `scrml:data`; fix `unique` struct-unsafety (`data.js:118` `[...new Set]` = JS-ref dedup, latent bug); document `[K:bool]`-map + array set-idioms in PRIMER §10. Recorded: user-voice S170.
+- **STREAM 1b — set-algebra helpers: ✅ LANDED + PUSHED `df08f282`** (agent a061adc58f45dfb9a, branch tip 98a14ade → S67 file-delta, 7 files disjoint from the Bug B sibling). `scrml:data` gains value-correct `union`/`intersection`/`difference` (+`member`); `unique` no-key struct-unsafety FIXED; `.scrml`↔`.js` lockstep; SPEC §59.12 reconciled; PRIMER §10 catalog + Set-idioms block. +16 unit tests; full suite **23346 pass / 0 fail**. PA-independent-verified (16/16). pre-commit + pre-push GREEN; coherence 0/0; worktree cleaned.
+  - **Value-canonical codec REPLICATED** (`_data_value_canonical` in `compiler/runtime/stdlib/data.js`), not reused — because data.js bundles standalone (server module) where the runtime-template global `_scrml_value_canonical` is absent. Agent cross-checked byte-identical over 21 cases. **LOW follow-up (DRY risk):** two copies of the §59.5 codec now exist; if §47.1.4 changes, BOTH must update. Not a correctness bug today; a shared-module consolidation is the eventual cleanup (blocked by stdlib bundling constraints). Logged here; file in known-gaps at next touch.
+  - `unique` struct-unsafety (the deep-dive side-bug) closed WITHIN this arc — no separate known-gaps entry needed.
 
-### PROCESS NOTES (durable for the next PA)
-- **Autonomous land+push grant held end-to-end** (review→file-delta→independent-verify→push per dispatch; surfaced only on the iteration ruling + the milestone/D5 checkpoints). The pre-commit + pre-push gates ARE the independent re-verify in main.
-- **2 background-agent stalls recovered (S149 class):** D2 watchdog-stall mid-scanner → SPLIT D2 into D2a (legacy, focused) + D2b (native) + D2c (sugar) to shrink per-agent scope; D3 socket-death mid-startup → re-dispatched fresh. Both lost ZERO landed work (incremental commits + the dead-worktree inspection).
-- **★ NUL-byte catch (S138 independent-verify earned its keep):** D3's test file carried a stray NUL byte → git flagged it binary → the full-suite DISCOVERY silently SKIPPED 59 tests (the agent's "23,143" baseline was the tell vs +59). Caught pre-landing via the "Bin"-flag + count-mismatch; stripped → integrated (23,226). **Lesson: NUL-check new test files on landing (now in the file-delta defensive step).**
-- CWD slipped into worktrees post-dispatch ~3× (S159) — caught each time via the reset-before-main-op reflex; no damage.
-- 3 agents used `--no-verify` on docs-only WIP commits + self-corrected; the PA file-delta re-gates the content regardless.
+### STREAM 2 — Bug B fix: ✅ LANDED + PUSHED `72aa6836` (HIGH 1→0)
+- `scrml-js-codegen-engineer` (worktree, agent a5b98933a2d8305d3, branch tip fd21d7e1) → S67 file-delta landed by PA at **`72aa6836`**, pre-commit + pre-push gates GREEN, **pushed** (origin 63106225→72aa6836), S147 coherence 0/0, worktree + branch cleaned.
+- Fix shape (A): `reactive-deps.ts:stampCompoundDeepSetTargets` (+201L, once-per-file at runCG) stamps `_deepSetLeafKey`/`_deepSetResidualPath`; `emit-logic.ts` retargets the structural-compound deep-set to the backing leaf (`a.ref`); FLAT cells unchanged. +9 tests (5 unit + 4 happy-dom). Tests 16140→16145, 0 fail.
+- **PA-independent-R26-verified** (emits `_scrml_reactive_set("a.ref",…)`, node --check clean; flat/nested/computed all correct).
+- **Rule-4 finding (verified legit + landed):** 2 prior tests LOCKED the mistarget as expected output (cow-bracket-write-emit S168 ×2 + deepset-write-loss-position S167) — corrected to the SPEC §6.3.2 leaf shape (the S167 one moved to a flat-cell fixture to isolate its statement-survival intent). Pre-commit caught them; PA reviewed the diffs as SPEC-faithful before landing.
+- **known-gaps RECONCILED** in the same commit: §0 HIGH 1→0; the stale Bug-A attribution corrected (Bug A multi-statement RESOLVED S167 `75431e9e` + Bug B structural-compound RESOLVED S170 close the S166 HIGH); Bug B §1 RESOLVED entry added.
+- Deferred (not introduced here): deep-nesting through an inner-map value cell `@outer[k1][k2]` = the same S168 E-MAP-BRACKET-WRITE-note case.
 
-## pa.md directives in force
+### SYNC / REPO STATE AT OPEN
+- **scrmlTS:** HEAD = `63106225` (S169 maps-refresh wrap). origin/main 0/0 (in sync). Tree clean.
+- **scrml-support:** origin/main 0/0 (in sync). Tree clean.
+- **Hooks:** Config B (pre-commit + post-commit + pre-push all present). **Inbox:** empty.
+- **Maps:** current for source — watermark `40679720` (last source landing); HEAD's 2 extra commits are S169 wrap docs (maps refresh + master-list/changelog/§59 currency). No refresh needed at open.
+- **Worktrees:** main ONLY (S169 cleaned all 7 dispatch worktrees).
+- **Version:** v0.7.0. **Tests (S169 close):** 23,330 pass / 0 fail / 220 skip / 1 todo (~928 files); within-node 1006/0.
+
+### STATE INHERITED FROM S169 CLOSE
+- **Value-native map (§59) BUILT END-TO-END** — phase c COMPLETE (D0–D4 + D2b native parity + D2c destructure sugar + currency). All pushed. §59 flipped Nominal→Implemented.
+- **known-gaps:** HIGH **1** (Bug B — structural-compound deep-set mistarget, codegen, `emit-logic.ts:3003`, OPEN) · MED **9** · LOW **18**.
+
+### OPEN / CANDIDATE NEXT WORK (from S169 hand-off §"OPEN / NEXT")
+1. **D5 = separate next arc (the S169-deferred map follow-on):**
+   - **(a) `set` — UNRATIFIED design.** §59.12 deferred it; S166 flagged "thinner warrant — maybe not needed" (array + `scrml:data` helpers may cover; the user's "baby with the bathwater" doubt). Wants a **deep-dive/debate** on warrant + shape (first-class `set` vs derived-from-map vs `scrml:data` array helpers vs drop). Honors `feedback_no_batch_ratify_foundational_axioms` (one-axis-at-a-time, capability-map before ratify).
+   - **(b) self-host migration** — ~130 `new Map`/`new Set` → value-native map; P3 bridge; NOT a v1 blocker.
+2. **Bug B (HIGH)** — structural-compound deep-set targets the derived composite not the leaf cell → clobbered. Queued, unchanged. `emit-logic.ts:3003`.
+3. **Carry-forward gaps (all LOW/deferred):** inline-handler `onclick=${@m=@m.insert()}` RHS not lowered (fix = thread `mapVarNames` into `rewrite.ts`); `@ordered`-literal-init unordered (documented v1 limit); native bracket-write→COW promotion; native `[string:int]` type-annotation whitespace normalization; **§6.2 Shape-4 canonical-empty-for-map UNVERIFIED** (does no-RHS `<m>: [K:V]` resolve to `[:]`? — adopters write `= [:]` for now).
+4. **Native-parser swap arc** (strategic #1 line per S161) — the MD-ladder → M5-flip → M6-retirement. Last flip re-measure (S162): ~790 failures across ~6 parser-families. Standing USER decision; realistically a v0.8 multi-session target.
+
+### STREAM 3 — native-parser swap: re-triage DONE + fix Wave 1 in flight (autonomous workflow)
+- User direction: **"continue with native parser work. autonomous workflow."** + **`/effort` → ultracode** (workflow-default + adversarial verify, this session). Strategic #1 line (S161 direction-a).
+- **RE-TRIAGE WORKFLOW `wf_fcf9da39-782` COMPLETE** (`.wf-native-retriage.js`): measure (throwaway-worktree flip, full per-file crash-isolated suite) + fan-out 6 root-cause surveys. **Result: 605 native-only flip-failures on HEAD df08f282 (default BS+Acorn = 0 fail / 23338 pass — all 605 native-attributable; down ~23% from S162's ~790). SPAN-COORD ≈ 0 (1/605) — residual is real semantic, no tolerance policy needed.** Full survey detail in the workflow output; buckets (failCount): MISSING-FIELD emit-shape 261 · engine-statechild 116 · D-class-parse-gap 64 · SCOPE-falsepos 60 · TYPE-MATCH 56 · FIELD-SHAPE-other 21 · legacy-stage-probe(test-only) 14 · each-match-promotion 11 (down from dominating!) · map-§59 1. Surveys CORRECTED several measure hypotheses (the "import-from high-yield" was a phantom; real D-lever = `@`-declarator binding).
+- **Reality that de-risks:** native is OPT-IN; native-parser source edits CANNOT regress the green default pipeline (pre-push gate protects it). Parallel native fixing is safe.
+- **FIX WAVE 1 — ✅ LANDED + PUSHED `5a346faa`** (combined commit, all 3 groups; pre-commit + pre-push full-suite+gauntlet GREEN; coherence 0/0; 3 worktrees cleaned):
+  - **P** (parse-stmt.js, branch 07991f4f): `on mount`/`on dismount` (~52+cascade) + `const @name` derived-state-decl (~40; brief's parseBindingIdent approach was WRONG → agent rerouted to parseConstAtStateDecl, byte-identical). **FIX 3 arrow-shorthand = CORRECT STOP** (invalid scrml; live REJECTS it; survey was empirically wrong). **FIX 4 export `<cell>` = DEFERRED** (needs SPEC ruling; live silently drops it).
+  - **T** (translate-stmt.js, branch 15b13766): deepset/array-mutation node-synth (emits live node kinds → routes through Bug-B-fixed emit-logic, byte-identical) + destructured-param structuring + typeAnnotation 1-liner. +24 tests.
+  - **W** (src/native-walker/exprtext-backfill-walker.ts + api.js, branch a7494b56): exprNode→text backfill walker. INERTNESS VERIFIED (295/297 byte-identical emit; the 2 deltas = a net-positive latent-`const token;`-miscompile fix).
+  - **within-node allowlist surgically rebaselined for combined P+T** (34 over-budget files → current; PARSE-FAILURE:0/NESTED-SHAPE:0; benign parity-churn; W is within-node-inert — test doesn't run the api.js walker). Done PA-direct via a throwaway regen mirroring the test pipeline.
+- **RE-MEASURE DONE** (`wf_0b5e015b-ee2`): **605 → 525 native-only flip-fails (−80), ZERO true regressions** (no new codes/shapes; PARSE-FAILURE:0/NESTED-SHAPE:0; no native crash). Targeted buckets shrank as designed: D-class 64→17 (−47, on-mount/dismount + const-@ closed), SCOPE 60→23 (−37), TYPE-MATCH 56→41 (−15, W walker activated lifecycle/enum under native). The +35 MISSING-FIELD (261→296) + +4 legacy-probe are classifier catch-all DRIFT not regressions (proven: the E-CTX-001 files predate Wave 1, `git show 5a346faa` shows none touched). Autonomous loop (re-triage→fix→land→re-measure) validated end-to-end.
+- **W residual sub-gap (banked, LOW):** the exprText backfill stamps qualified-enum as `.Article . Draft` (spaced) where the type-system regex expects `.Draft` — a whitespace-strip gap in emitStringFromTree's native stamp; TYPE-MATCH residual. Follow-up.
+- **FIX WAVE 2 — IN FLIGHT** (`adfbdbc41fd7881dd`, `native-blockstub-verbatim-body-2026-06-07`, parse-expr.js + translate-expr.js; BRIEF.md archived): the **Mario fix** — native `reconstructArmBody` returns literal `"{}"` dropping match-arm block-body statements (the dominant ~1463-file form; Mario click fires but doesn't transition). One foundation (parseBlockStub stamps `verbatim` source slice) + 2 consumers (reconstructArmBody + translateLambdaBody for callback bodies). RISKIEST fix (each/match-adjacent M6.7-STOP class) → isolated single dispatch + statement-survival flip canary + R26 (MUSHROOM Small→Big) + surgical within-node reconcile. Targets the E-CODEGEN-INVALID-JS arm-body-drop subset of engine-statechild(107)+match. **OUT of scope:** engine bare display-text (E-UNQUOTED = §4.18 corpus-migration S163; single-word silent-drop = separate tokenizer bug to file).
+- **On Wave-2 completion:** land (file-delta + within-node re-verify + pre-push) + re-measure. **PA NOTE: assess context before the Wave-2 landing — if tight, land + wrap; this session has landed Bug B + set-arc + native-wave-1 (4 pushes). Wave 3 candidates = the residual D-class parse-gaps (17), the remaining SCOPE roots (23), the W whitespace-strip sub-gap, FIX-4 export-`<cell>` SPEC ruling.**
+- **WAVE 2 (deferred, isolated):** the Mario fix — match-arm BLOCK-BODY recover (native `reconstructArmBody` returns literal `"{}"` → drops arm statements; ~70 fails, most user-visible) + lambda block-body (1B). BOTH need BlockStub verbatim-source (couples parse-expr + translate-expr → conflicts with Wave-1 Group P) AND are each/match-adjacent (higher risk) → isolated dispatch AFTER Wave-1 re-measure, with careful verify. NOT-A-BUG/deferred: E-UNQUOTED §4.18 corpus-migration (S163 ruling) · SPA/E-DG-002 lint-lift (M6 post-parse-bypass design) · legacy-stage-probe (test-only) · struct-constructor grammar CASE-3 (separate feature dispatch).
+- Phase-A default-flip itself stays a standing USER decision (realistically v0.8 multi-session).
+
+### pa.md directives in force
 - Rules R1–R5. `---` delimiter. Profile A/B. `full wrap`/88% floor. wrap 6c maps refresh.
-- Dispatch: S88 isolation · F4 · S112 merge-startup · S99/S126 Bash-edit+no-`cd` (S100 hook) · S136 BRIEF.md · S138 R26/independent-verify · S147 coherence · S164 bg-commit-race. `feedback_no_batch_ratify_foundational_axioms` (the set-design fork honors this).
+- Dispatch: S88 isolation · F4 startup-verify · S112 merge-startup · S99/S126 Bash-edit+no-`cd` (S100 hook) · S136 BRIEF.md · S138 R26/independent-verify · S147 branch-leak coherence · S164 bg-commit-race · S169 NUL-byte-check on new test files.
+- `feedback_no_batch_ratify_foundational_axioms` (the `set` fork honors this).
 
 ## Tags
-#session-169 #profile-a-full-start #map-build-arc-COMPLETE #value-native-maps-shipped #s169-iteration-ruling #nul-byte-catch #stall-recovery #d5-set-deferred #wrap
+#session-170 #profile-a-full-start #open #awaiting-direction
