@@ -12,6 +12,18 @@ The trackable per-sub-step decomposition of the charter-B M-ladder. This is the 
 of the (now-superseded) quoted-text `IMPLEMENTATION-ROADMAP.md` — the single artifact
 the PA tracks the multi-quarter native-parser arc against.
 
+> ## ⚠ CURRENT STATUS — S170 (2026-06-07): swap-grind in progress — ~508 flip-failures
+>
+> **Supersedes the S161 numbers below (1,150 flip / "#2f next") — those are STALE.** Live state:
+> - **#2f each/match/colon-shorthand structural-promotion: DONE** (S162 — native `<each>`/`<match>` now promote to control-flow structural nodes; the S161 "~70% / 804" dominant unit is closed).
+> - **Flip-failure trajectory:** 1,150 (S161) → ~790 (S162, post-#2f) → **605 (S166 re-triage)** → 525 (S170 Wave 1) → **~508 (S170 Wave 2)**, ZERO true regressions. Default BS+Acorn stays 0-fail / byte-unchanged (shadow-only).
+> - **Current buckets (S170 re-triage):** MISSING-FIELD emit-shape ~296 (dominant) · engine-statechild ~116 (Wave 2 closed the Mario arm-body subset) · FIELD-SHAPE-other ~21 · each-match-promotion ~11 (residual) · legacy-stage-probe ~14-18 (test-only, clears as upstream closes).
+> - **Wave-3 candidates (ready):** D-class parse-gaps ~17 · SCOPE false-pos ~23 · TYPE-MATCH ~41 (incl. exprText qualified-enum whitespace-strip). **Design/SPEC-gated (need a USER ruling, NOT native fixes):** FIX-4 export-`<cell>` · §4.18 bare→quoted display-text corpus migration (~11). **New bug to file:** native tokenizer single-word bare-display-text silent-drop.
+> - **The path to the actual flip** is the MD-ladder bridge → real M5 pipeline swap → M6 (delete BS+Acorn+BPP). The §5 progress tracker MD.1-MD.5 labels never executed under those names (work landed as M6.5.b.x / M6.6.b.x / M6.7-Dx).
+> - **The Phase-A default-flip itself remains a STANDING USER DECISION** (~v0.8 target). Authoritative current-state source between roadmap refreshes: `scrmlTS/hand-off.md` + the S170 wrap entry.
+>
+> _(The S161 block below is retained for its locus pointers, fixture list, SPAN-COORD-TOLERATE policy, and swap-gate authority cross-ref — but its 1,150 / #2f-next framing is superseded by the above.)_
+>
 > ## ⚠ CURRENT STATUS — S161 (2026-06-04): ARC RESUMED — direction (a) ratified
 >
 > **The §0.6 "Status at S112 OPEN" + the §5 progress tracker below are STALE (S112 / S114).** Do NOT trust them for current state. The arc actually ran M6.5 / M6.6 / M6.7 (S119–S136) — entirely absent from §5 — then PARKED at S136 (last native-parser commit `e1269844`). Resumed S161.
