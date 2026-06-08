@@ -65,6 +65,8 @@ import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog } from "./log-loc.ts";
+import { setLogProductionStrip, setLogShadowedInFile } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements } from "./collect.ts";
@@ -115,6 +117,13 @@ export interface CgInput {
   mode?: "browser" | "library";
   /** When true, generate bun:test output from ~{} test blocks. */
   testMode?: boolean;
+  /**
+   * §20.6 (F4=A) — production build flag. When true, the location-transparent
+   * `log()` builtin strips to ZERO bytes (the dev-only convenience is removed
+   * from release artefacts; mirrors `test-bind`'s 0-byte production guarantee,
+   * §19.12.7). Default false (development — log() is active).
+   */
+  production?: boolean;
   /**
    * §51.13 — When true, generate auto-property-tests for every non-derived
    * machine declaration. Independent of testMode. Output lands on
@@ -432,8 +441,18 @@ export function runCG(input: CgInput): CgOutput {
     emitPerRoute = false,
     chunkSizeBudgetBytes,
     debugPerf = false,
+    // §20.6 (F4=A) — production strip toggle for the log() builtin. When
+    // true, log() lowers to ZERO bytes (the dev convenience strips out of
+    // release artefacts; mirrors the test-bind 0-byte production guarantee,
+    // §19.12.7). Threaded into EmitLogicOpts.production -> EmitExprContext.
+    production = false,
     log = console.log,
   } = input;
+
+  // §20.6 — fresh per-compile log() file:line source registry.
+  resetLogLoc();
+  // §20.6 (F4=A) — set the compile-wide log() production-strip flag.
+  setLogProductionStrip(production);
 
   // Resolve encoding configuration (§47)
   const encodingOpts = typeof encodingInput === "object"
@@ -560,6 +579,12 @@ export function runCG(input: CgInput): CgOutput {
 
   for (const fileAST of files) {
     const filePath = (fileAST as any).filePath as string;
+    // §20.6 — register this file's source so the log() lowering can resolve
+    // an author-visible file:line from the call node's byte offset.
+    registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
+    // §20.6 (shadowing) — a file-level `function log` shadows the builtin
+    // across this whole file; the log() lowering then yields + lints.
+    setLogShadowedInFile(fileDeclaresLog(fileAST));
     const nodes: any[] = (fileAST as any).ast?.nodes ?? (fileAST as any).nodes ?? [];
 
     interface WorkerDef {
@@ -728,6 +753,11 @@ export function runCG(input: CgInput): CgOutput {
   // Process each file
   for (const fileAST of files) {
     const filePath = (fileAST as any).filePath as string;
+    // §20.6 — register this file's source for log() file:line resolution.
+    registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
+    // §20.6 (shadowing) — a file-level `function log` shadows the builtin
+    // across this whole file; the log() lowering then yields + lints.
+    setLogShadowedInFile(fileDeclaresLog(fileAST));
     const analysis = fileAnalyses.get(filePath);
     const nodes: object[] = analysis ? (analysis as any).nodes : [];
 

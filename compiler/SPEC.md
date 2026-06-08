@@ -12568,7 +12568,7 @@ In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree re
 
 **B4 — Compiler-emitted, not source try/catch.** The backstop is COMPILER-EMITTED host-JS. It is NOT a scrml-source `try`/`catch`. The no-`try`/`catch` standing rule (§19.9.8) is unaffected: `try`/`catch`/`throw` remain absent from scrml source. The backstop is invisible at the source level — it is a runtime sibling of the compile-time emitted-JS parse gate (§2.2.1) and the bootstrap guards (e.g. the localStorage availability guard), all of which are compiler-provided host-JS the author never writes.
 
-**B5 — No silent swallow; loud in dev.** The backstop SHALL NOT silently swallow an error it displays via `fallback`. The caught error's diagnostic message and stack trace SHALL be routed to scrml's logging surface (loud in development). The backstop is defense-in-depth, NOT a substitute for typed `!`-coverage: E-ERROR-005 static exhaustiveness (§19.6.6) is STILL required, and the backstop's existence SHALL NOT relax it.
+**B5 — No silent swallow; loud in dev.** The backstop SHALL NOT silently swallow an error it displays via `fallback`. The caught error's diagnostic message and stack trace SHALL be routed to scrml's logging surface (loud in development; the adopter-callable backing for this surface is the `log()` builtin, §20.6). The backstop is defense-in-depth, NOT a substitute for typed `!`-coverage: E-ERROR-005 static exhaustiveness (§19.6.6) is STILL required, and the backstop's existence SHALL NOT relax it.
 
 **B6 — Nesting parity.** The backstop respects the §19.6.4 nesting model identically to the typed path: an inner boundary's backstop catches a non-`!` throw from the inner subtree before any outer boundary's backstop sees it. Inner `fallback` is used first; only a re-propagated error (B3) reaches an outer backstop.
 
@@ -13824,6 +13824,88 @@ Error E-SCOPE-012: `session` is not available in client-side functions. Add the
 | E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) | Error |
 | E-SCOPE-011 | Access to an undeclared route parameter name | Error |
 | E-SCOPE-012 | `session` accessed inside a non-server-escalated function | Error |
+
+---
+
+### 20.6 `log()` Built-in (Location-Transparent Logging)
+
+**Added:** S174 (ratified S173 — deep-dive `log-location-transparency-2026-06-07.md`, forks F1–F6 + levels + shadowing). `log()` is the adopter-callable backing for **scrml's logging surface** — the surface two prior normative SHALLs already name (§19.6.8 B5 errorBoundary host-JS backstop; §51.0.H boot-effect non-`!` host throw). Before this section those promises named a surface that had no adopter API; `log()` honors them.
+
+`log(...args)` is a compiler-managed, **location-transparent** built-in for diagnostic logging. It is the printf-debugging primitive for a language whose Pillar 4 (one file type) and Pillar 3 (compiler-inferred server/client split) together delete the file-path cue that ordinary isomorphic frameworks rely on to tell a developer *which side* a log came from. Because the compiler statically knows the server/client side of every line (§12.4 route analysis runs before code generation), `log()` can tag every line with its **compiler-certain** side — a guarantee no runtime-sniffed logger can make.
+
+`log()` is the exact sibling of `navigate()` (§20.1): both are compiler-rewritten builtins lowered at code-generation from placement knowledge, not stdlib value-calls. (A `scrml:log` stdlib namespace could not see placement — an import is just a value emitted into one bundle — so location-transparency is achievable *only* as a builtin. See deep-dive F5.)
+
+#### 20.6.1 Signature and Semantics
+
+```scrml
+log(...args)
+```
+
+- `log()` accepts zero or more argument expressions of any type.
+- `log()` is valid inside any function body, event-handler, lifecycle arm, or logic context (`${...}`), on either side. It has no return value usable in an expression (it is a statement-position diagnostic; its emitted call evaluates to `not`).
+- Each argument is rendered **value-faithfully** via the canonical value-render discipline of §20.6.4 — NOT host `JSON.stringify` (which renders structs, enums, maps, and markup-as-value poorly and historically threw on cycles). Value cycles are forbidden by construction (§59.5; values are acyclic and immutable), so the render always terminates.
+
+#### 20.6.2 Origin Tag
+
+Every `log()` emission carries a compiler-injected **origin tag** of the form:
+
+```
+[server|client] <rendered args> (file:line)
+```
+
+- The **side** (`server` / `client`) is **compiler-certain**: it is the server/client classification of the statement at the `log()` call site, taken from the Route Inference placement (§12.4). For a body-split (CPS) function (§19.6.7), the side is per-statement — a `log()` in a server batch tags `[server]`, a `log()` in an adjacent client-interleaved statement tags `[client]`. This per-statement accuracy is the central guarantee and the property no competing isomorphic logger provides.
+- The **`file:line`** is derived from the call node's source position. `file` is the authoring `.scrml` path; `line` is the 1-based source line of the call.
+
+The tag format is the established isomorphic-tooling shape (Next.js `[browser] msg (app/page.tsx:8:17)`; Vite `(client) … src/main.ts:20:8`); scrml's novelty is that the side is compiler-known rather than runtime-detected.
+
+#### 20.6.3 Development-mode unified view
+
+In development, `log()` surfaces in a **single unified view** regardless of which side the code runs on:
+
+- A **server**-side `log()` prints to the dev terminal (where the developer runs `scrml dev`).
+- A **client**-side `log()` in development forwards its tagged payload to the dev server (a `POST /_scrml/log` endpoint on the existing `scrml dev` server) AND keeps the browser-console output, so the same line is visible in the terminal too.
+
+The result is **terminal-as-the-single-view** (deep-dive F2 v1). The further north-star — mirroring server logs *into the browser* over the existing dev SSE channel (§38) so BOTH directions land in ONE origin-tagged stream regardless of placement — is the STATED design intent (F2=C) and is a follow-on; the SSE channel makes the server→browser leg cheap to complete. v1 ships the terminal view; the browser-mirror leg is out of v1 scope.
+
+#### 20.6.4 Value rendering
+
+`log(<value>)` renders each argument with a deterministic, **value-faithful** render:
+
+- Primitives render readably (`"hello"` as `hello`, numbers/booleans literally, absence as `not`).
+- Structs, enums, arrays, and value-native maps (§59) render with their field/variant/entry structure visible (NOT `[object Object]`).
+- **Markup-as-value** (Pillar 1) renders to a readable element summary rather than an opaque object.
+- The render shares the §47.1.4 / §59.5 canonical discipline (struct fields alpha-sorted; enums as `tag(payload…)`; arrays element-ordered) for determinism, but is a **human-readable** projection — it is NOT the hash-input canonical string used for map-key identity. Two §45-structurally-equal values render identically.
+
+#### 20.6.5 Production behavior — strip to zero bytes
+
+In a production build, `log()` is **stripped to 0 bytes** (deep-dive F4=A). The lowering emits nothing; the production bundle contains no `_scrml_log` reference and no argument-evaluation residue from the `log()` call. This mirrors the `test-bind` clean-strip precedent (§19.12.7: the production binary is bit-identical to a compilation that contained no such surface).
+
+A **production leveled/structured logging surface** (debug/info/warn/error retention, structured-JSON server logs, sampling, correlation IDs) is a **separate, deferred feature** — explicitly NOT specified here. The dev `log()` is a development convenience that strips in production; it SHALL NOT be entangled with a production logging surface. (Deep-dive F4 + the unanimous prior-art caution that dev forwarding is OFF/stripped in production.)
+
+#### 20.6.6 Levels
+
+v1 is `log()` only — there are no level methods (`log.info` / `log.warn` / `log.error`). Because §20.6.5 strips ALL `log()` in production, dev-only levels would be pure sugar; a leveled API belongs to the deferred production-logging feature, where keep-warn/error-in-prod granularity actually matters. (Deep-dive Open-Q4.)
+
+#### 20.6.7 Shadowing — a user-declared `log` wins
+
+A user-declared `function log` (or any in-scope binding named `log`) **wins**: the builtin steps aside and the call is emitted as an ordinary call to the user's `log`. The compiler SHALL emit an info-level lint **`W-LOG-SHADOWED`** at the shadowing declaration's use so the author knows the location-transparent builtin is not active for that name. (Deep-dive Open-Q3.)
+
+This guarantees zero disruption to existing source that declared a local `log` (the canonical no-op debugging stub) — such code keeps compiling, each shadowed call emitting the info-lint; the author can adopt the builtin by removing the local declaration at leisure. `log` is NOT a reserved identifier — declaring `function log` is legal (it is the shadowing case), not `E-RESERVED-IDENTIFIER`.
+
+`W-LOG-SHADOWED` is reserved for promotion to an error code `E-LOG-SHADOWED` at the end of the deprecation window once the existing shadowing declarations migrate.
+
+#### 20.6.8 Normative Statements (Logging)
+
+- `log(...args)` SHALL be a compiler-managed built-in, lowered at code generation (the `navigate()` rewrite shape, §20.1) — NOT a stdlib import.
+- The compiler SHALL tag every `log()` emission with the compiler-certain side (`server` / `client`) of the call site's statement, taken from Route Inference placement (§12.4), and with the call's `file:line`.
+- For a body-split (CPS) function, the side SHALL be determined per-statement: a `log()` placed in a server batch SHALL tag `[server]`; a `log()` in a client-interleaved statement SHALL tag `[client]`.
+- In development, a server-side `log()` SHALL surface in the dev terminal; a client-side `log()` SHALL forward its tagged payload to the dev server for terminal display AND retain browser-console output.
+- In a production build, `log()` SHALL emit zero bytes; the production bundle SHALL contain no `_scrml_log` reference.
+- `log()` SHALL render each argument value-faithfully (§20.6.4), not via host `JSON.stringify`.
+- A user-declared in-scope binding named `log` SHALL win over the builtin; the compiler SHALL emit info-level `W-LOG-SHADOWED` rather than rewriting the call. `log` SHALL NOT be a reserved identifier.
+
+**Cross-references:** §20.1 (`navigate()` — the location-transparent builtin precedent) · §12.4 (route analysis before codegen — the side-knowledge source) · §19.6.8 B5 + §51.0.H (the two outstanding "scrml's logging surface" promises this builtin backs) · §47.1.4 / §59.5 (canonical value discipline reused for deterministic rendering) · §19.12.7 / `test-bind` (the clean prod-strip precedent) · §38 (dev SSE channel — the later server→browser mirror leg).
+
 
 ---
 
@@ -16340,6 +16422,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
 | W-TYPE-FN-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). The type system carries no resolved function-kind for struct fields, so such a field resolves to an opaque `asIs` value and its function shape is not type-checked. Whether function-typed struct fields are a first-class supported feature is an open question (deferred); the lint surfaces the construct without deciding it. The lint does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). Partitions into `result.warnings` (non-fatal). (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Info/Warning |
+| W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
@@ -24904,7 +24987,7 @@ transition**, co-located with the engine declaration exactly as Elm co-locates
   OWN `!{}` handler into the engine's error variant (the errors-as-states lift — the
   `::Network msg :> { @phase = .ErrorState(msg) }` arm above is the canonical shape). A
   non-`!` host throw that escapes the boot effect routes to the §19.6.8 host-JS backstop
-  (logged loudly to scrml's logging surface), NOT to an enclosing boundary's `fallback=`.
+  (logged loudly to scrml's logging surface — the adopter-callable backing for which is the `log()` builtin, §20.6), NOT to an enclosing boundary's `fallback=`.
 - **(ii) Ordering vs `<onIdle>` (§51.0.R).** Both touch module-init. Order: the engine
   variant cell initializes into `initial=`; the `<onIdle>` watchdog arms (module-init =
   the "first event", full duration — §51.0.R); THEN the opener `effect=` fires. The boot

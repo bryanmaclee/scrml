@@ -456,6 +456,30 @@ function buildServeConfig(opts, serveDir) {
         return createSseResponse();
       }
 
+      // §20.6 (F2=B) — client log() forwarding endpoint. In development the
+      // compiled client `_scrml_log` POSTs each tagged client-side log here so
+      // the developer sees ONE unified view in the terminal (terminal-as-the-
+      // single-view): server `log()` already prints to this terminal, and now
+      // client `log()` does too. Payload: { side:"client", loc, msg }. The
+      // print mirrors the runtime line format `[client] <msg> (loc)`. Fire-and-
+      // forget on the client side; this handler never blocks the page.
+      if (pathname === "/_scrml/log" && req.method.toUpperCase() === "POST") {
+        try {
+          const payload = await req.json();
+          const side = (payload && typeof payload.side === "string") ? payload.side : "client";
+          const msg = (payload && typeof payload.msg === "string") ? payload.msg : "";
+          const loc = (payload && typeof payload.loc === "string") ? payload.loc : "";
+          const locSuffix = loc ? ` (${loc})` : "";
+          console.log(`[${side}] ${msg}${locSuffix}`);
+        } catch {
+          // Malformed payload — ignore (a dev convenience must never 500 a page).
+        }
+        return new Response(null, {
+          status: 204,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      }
+
       // ------------------------------------------------------------------
       // Route dispatch — check registered server routes BEFORE static files.
       //

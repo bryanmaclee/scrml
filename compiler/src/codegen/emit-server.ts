@@ -12,6 +12,7 @@ import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
+import { SERVER_LOG_HELPER } from "./log-loc.ts";
 
 /**
  * S79 audit fix C.1 — parse `<program idempotency-ttl="...">` raw value into
@@ -1758,6 +1759,21 @@ export function generateServerJs(
       finalEmitted = SERVER_WIRE_ENCODER_HELPER + finalEmitted;
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_WIRE_ENCODER_HELPER + finalEmitted.slice(headerEndIdx);
+    }
+  }
+
+  // §20.6 — log() server helper inlining. A SERVER-side log() lowers to a
+  // `_scrml_log(side, loc, ...args)` call (the client runtime is never
+  // imported here). Inline the helper at the post-header boundary so it is
+  // hoisted above every route that references it. Mirrors the structural-eq
+  // + wire-encoder inlining above; gated purely on the emitted call (a
+  // production-stripped or all-client-log build emits no `_scrml_log(` here).
+  if (finalEmitted.includes("_scrml_log(")) {
+    const headerEndIdx = finalEmitted.indexOf("\n\n");
+    if (headerEndIdx === -1) {
+      finalEmitted = SERVER_LOG_HELPER + finalEmitted;
+    } else {
+      finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_LOG_HELPER + finalEmitted.slice(headerEndIdx);
     }
   }
 

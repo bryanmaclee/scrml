@@ -1708,6 +1708,20 @@ export function generateClientJs(ctx: CompileContext): string {
   // `n . lines` in record literal values because the emitter outputs
   // spaces around `.`, so the fixed-width `(?<!\.)` lookbehind saw a
   // space instead of a dot. Extended to variable-length `(?<!\.\s*)`.
+  // §20.6 — POST-EMIT `log` chunk gate. The location-transparent log()
+  // builtin lowers to a `_scrml_log(...)` call ONLY when it actually fired
+  // (not shadowed by a user `log`, not production-stripped). Scanning the
+  // emitted body for the helper call is the exact, leak-proof signal: a
+  // shadowed or stripped build emits no `_scrml_log(` and so omits the chunk
+  // (the prod bundle then carries zero _scrml_log bytes — F4=A). The runtime
+  // placeholder slot is still empty here, so this scans only emitted code.
+  for (const _ln of lines) {
+    if (typeof _ln === "string" && _ln.includes("_scrml_log(")) {
+      ctx.usedRuntimeChunks.add("log");
+      break;
+    }
+  }
+
   // PGO P3.B (S102) — splice the assembled runtime into the placeholder slot
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now

@@ -3903,7 +3903,7 @@ function _scrml_value_canonical(v) {
     return mout + "}";
   }
   // Enum: _tag + alpha-sorted payload fields (§59.5 "tag(payload...)").
-  if (v && v._tag !== undefined) {
+  if (v && typeof v._tag !== "undefined") {
     var tag = String(v._tag);
     var eout = "E" + tag.length + ":" + tag + "(";
     var eKeys = Object.keys(v).filter(function (k) { return k !== "_tag"; }).sort();
@@ -4187,6 +4187,114 @@ function _scrml_map_decode(x) {
     }
   }
   return m;
+}
+
+// §20.6 log() location-transparent logging runtime (chunk: 'log')
+//
+// The compiler lowers a log(...args) call to _scrml_log(side, loc, ...args)
+// where side is the compiler-certain "server"/"client" classification of the
+// call site and loc is the author "basename:line". This helper mirrors the
+// _scrml_error_boundary_log discipline: it guards typeof console, NEVER
+// throws, and only reports. In PRODUCTION the call is stripped at codegen
+// (F4=A) so this helper is never emitted into a release bundle.
+//
+// Output line: "[side] <rendered args> (loc)".
+//   - server log() prints to the dev terminal (this runs in the server bundle).
+//   - client log() keeps the browser-console output AND forwards the tagged
+//     payload to the dev server (POST /_scrml/log) for the terminal-as-single-
+//     view (F2=B) — fire-and-forget, never blocking, never throwing.
+
+// _scrml_log_render(v) — a READABLE, value-faithful render of a scrml value
+// (§20.6.4). NOT _scrml_value_canonical (that is a hash-input machine string)
+// and NOT JSON.stringify (renders structs/markup poorly, historically threw on
+// cycles). Values are acyclic + immutable by construction (§59.5); a depth +
+// seen guard is defensive only.
+function _scrml_log_render(v, depth, seen) {
+  if (typeof depth === "undefined") depth = 0;
+  if (typeof seen === "undefined") seen = [];
+  // not / null / undefined -> the absence token (§42; both map to not).
+  if (v === null || typeof v === "undefined") return "not";
+  var t = typeof v;
+  if (t === "string") return v;                 // bare text (a log reads it)
+  if (t === "number" || t === "boolean") return String(v);
+  if (t === "function") return "<fn>";
+  if (depth > 8) return "...";                  // defensive depth cap
+  if (v && typeof v === "object") {
+    if (seen.indexOf(v) !== -1) return "<cycle>"; // defensive (values acyclic)
+    seen = seen.concat([v]);
+  }
+  // Markup-as-value (Pillar 1) — render a readable element summary, not [object].
+  if (v && typeof v === "object" && (v.__scrml_markup === true || v.__scrml_el || (typeof v.tag === "string" && (typeof v.children !== "undefined" || typeof v.attrs !== "undefined" || typeof v.attributes !== "undefined")))) {
+    var mtag = v.tag || v.__scrml_el || "markup";
+    return "<" + String(mtag) + " …/>";
+  }
+  // Value-native map (§59) — readable { k: v, ... } over entries.
+  if (v && v.__scrml_map === true) {
+    var mkeys = Object.keys(v.entries);
+    var mparts = [];
+    for (var mi = 0; mi < mkeys.length; mi++) {
+      var ent = v.entries[mkeys[mi]];
+      mparts.push(_scrml_log_render(ent.k, depth + 1, seen) + ": " + _scrml_log_render(ent.v, depth + 1, seen));
+    }
+    return "{" + mparts.join(", ") + "}";
+  }
+  // Array -> [e0, e1, ...].
+  if (Array.isArray(v)) {
+    var aparts = [];
+    for (var ai = 0; ai < v.length; ai++) aparts.push(_scrml_log_render(v[ai], depth + 1, seen));
+    return "[" + aparts.join(", ") + "]";
+  }
+  // Enum -> Tag or Tag(field: value, ...) (alpha-sorted payload, §59.5 shape).
+  if (v && typeof v._tag !== "undefined") {
+    var tag = String(v._tag);
+    var eKeys = Object.keys(v).filter(function (k) { return k !== "_tag"; }).sort();
+    if (eKeys.length === 0) return tag;
+    var eparts = [];
+    for (var ei = 0; ei < eKeys.length; ei++) {
+      eparts.push(eKeys[ei] + ": " + _scrml_log_render(v[eKeys[ei]], depth + 1, seen));
+    }
+    return tag + "(" + eparts.join(", ") + ")";
+  }
+  // Struct / plain object -> { field: value, ... } (alpha-sorted, §47.1.4 shape).
+  var sKeys = Object.keys(v).sort();
+  var sparts = [];
+  for (var si = 0; si < sKeys.length; si++) {
+    sparts.push(sKeys[si] + ": " + _scrml_log_render(v[sKeys[si]], depth + 1, seen));
+  }
+  return "{" + sparts.join(", ") + "}";
+}
+
+function _scrml_log(side, loc) {
+  // Collect + render the variadic value args (args 2..n).
+  var rendered = [];
+  for (var i = 2; i < arguments.length; i++) {
+    var piece;
+    try { piece = _scrml_log_render(arguments[i]); }
+    catch (e) { piece = "<unrenderable>"; }       // NEVER throw out of log()
+    rendered.push(piece);
+  }
+  var body = rendered.join(" ");
+  var locSuffix = (typeof loc === "string" && loc.length > 0) ? " (" + loc + ")" : "";
+  var line = "[" + String(side) + "] " + body + locSuffix;
+
+  // Always emit to the local console (server -> terminal; client -> devtools).
+  if (typeof console !== "undefined" && typeof console.log === "function") {
+    try { console.log(line); } catch (e) { /* never throw */ }
+  }
+
+  // Client side (dev only — log() is stripped in production): forward the tagged
+  // payload to the dev server's terminal so the developer sees ONE unified view
+  // (F2=B terminal-as-single-view). Fire-and-forget; failures are swallowed.
+  if (side === "client" && typeof window !== "undefined" && typeof fetch === "function") {
+    try {
+      fetch("/_scrml/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ side: "client", loc: (typeof loc === "string" ? loc : ""), msg: body }),
+        keepalive: true,
+      }).catch(function () { /* dev server absent / offline — ignore */ });
+    } catch (e) { /* never throw */ }
+  }
 }
 
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_HOST_CHUNK}`;

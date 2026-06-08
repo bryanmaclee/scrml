@@ -3411,6 +3411,57 @@ function checkFunctionTypedStructFields(
   walkNodes(topNodes);
 }
 
+// ---------------------------------------------------------------------------
+// §20.6.7 / W-LOG-SHADOWED — log() builtin shadowing nudge
+// ---------------------------------------------------------------------------
+
+/**
+ * §20.6.7 — A user-declared `function log` / `fn log` (the canonical no-op
+ * debugging stub) WINS over the location-transparent `log()` builtin (§20.6):
+ * the builtin steps aside and `log(...)` is emitted as an ordinary call to the
+ * user function (no [server|client] origin tag, no dev forwarding). Rather than
+ * let that happen silently, fire an info-level `W-LOG-SHADOWED` at the
+ * declaration so the author knows the builtin is inactive for that name.
+ *
+ * The W- prefix routes to `result.warnings` (non-fatal). Reserved for promotion
+ * to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. `log`
+ * is NOT a reserved identifier — declaring `function log` is legal (this lint,
+ * not E-RESERVED-IDENTIFIER). Fires once per declaration.
+ */
+function checkLogShadowing(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const FN_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
+  const seen = new WeakSet<object>();
+  function walk(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (FN_KINDS.has(n.kind as string) && n.name === "log") {
+      const span = ((n.span as Span | undefined) ?? fileSpan);
+      errors.push(new TSError(
+        "W-LOG-SHADOWED",
+        "W-LOG-SHADOWED: this `log` declaration shadows the location-transparent " +
+        "`log()` builtin (§20.6). Calls to `log(...)` resolve to THIS function " +
+        "and carry no [server|client] origin tag and no dev unified-view " +
+        "forwarding. Remove this declaration to adopt the builtin. (`log` is not " +
+        "a reserved identifier; this is an info-level nudge, not an error.)",
+        span,
+        "info",
+      ));
+    }
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  for (const node of topNodes) walk(node);
+}
+
 /**
  * Format a ResolvedType for a diagnostic message (compact human label).
  * Used by E-TYPE-001 lifecycle messages so adopters see the actual pre/post
@@ -4705,6 +4756,14 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // SURVEY for follow-up).
   "broadcast",
   "disconnect",
+  // §20.6 — log() location-transparent logging builtin. Lowered at codegen
+  // (emit-expr.ts) to _scrml_log(side, loc, ...args). Allowlisted here so a
+  // bare `log(...)` call (no user-declared `function log`) does NOT fire
+  // E-SCOPE-001. When a user DOES declare `log` in scope, that binding wins
+  // (shadowing) and emit-expr fires the info-level W-LOG-SHADOWED + emits a
+  // plain call rather than the builtin lowering. `log` is NOT a reserved
+  // keyword (so `function log` stays legal — it is the shadowing case).
+  "log",
 ]);
 
 /**
@@ -14760,6 +14819,9 @@ function processFile(
       ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
       ?? [];
     checkFunctionTypedStructFields(typeDecls, fnFieldTopNodes, errors, fileSpan);
+    // §20.6.7 / W-LOG-SHADOWED — a user-declared `function log` / `fn log`
+    // shadows the location-transparent log() builtin; info-level nudge.
+    checkLogShadowing(fnFieldTopNodes, errors, fileSpan);
   }
 
   // TS-B Step 1.2: Seed type registry with imported types from dependency files (§21.3).

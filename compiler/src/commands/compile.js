@@ -97,6 +97,10 @@ function parseArgs(args) {
   let emitReachability = false;
   let emitEngineGraph = false;
   let emitPerRoute = false;
+  // §20.6 (F4=A) — `--production` strips the location-transparent log()
+  // builtin to 0 bytes (the dev-only convenience is removed from release
+  // artefacts). Default false (development — log() active).
+  let production = false;
   // Q-OPEN-5 — `--chunk-size-budget=<bytes>` CLI flag value. When
   // undefined, compileScrml / runCG / emitPerRouteChunks all fall back
   // to the route-splitter default (CHUNK_LARGE_SOFT_BUDGET_BYTES =
@@ -163,6 +167,9 @@ function parseArgs(args) {
       emitReachability = true;
     } else if (arg === "--emit-engine-graph") {
       emitEngineGraph = true;
+    } else if (arg === "--production" || arg === "--prod") {
+      // §20.6 (F4=A) — production strip for the log() builtin.
+      production = true;
     } else if (arg === "--emit-per-route") {
       // S91 A-4.1 — opt-in per-route artifact splitter (SPEC §40.9.7).
       // Default-off during A-4 wave development per OQ-A4-F; default-on
@@ -269,7 +276,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +406,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -420,6 +427,8 @@ function runOnce(opts, selfHostModules = null) {
       embedRuntime,
       mode,
       emitMachineTests,
+      // §20.6 (F4=A) — production strip for the log() builtin.
+      production,
       // S91 A-4.1 — opt-in per-route artifact splitter; emits chunk
       // files + chunks.json when set.
       emitPerRoute,

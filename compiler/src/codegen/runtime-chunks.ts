@@ -135,6 +135,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'messages',
   'engine',
   'map',
+  'log',
   // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
   // via _scrml_stdlib.<name>. Activated per-file by detectRuntimeChunks when
   // the source file imports from the matching `scrml:<name>` specifier.
@@ -226,6 +227,13 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // (the helpers would not be in the assembled runtime). _scrml_structural_eq's
   // map == branch lives in the always-or-equality-gated `equality` chunk, not here.
   map:            "§59 Value-Native Maps runtime (chunk: 'map')",
+  // §20.6 — location-transparent log() builtin runtime. Gates `_scrml_log`
+  // + the readable value-faithful renderer `_scrml_log_render`. Activated by
+  // a POST-EMIT scan (emit-client.ts / emit-server.ts) when the emitted JS
+  // actually contains a `_scrml_log(` call — so a SHADOWED `log` (no builtin
+  // lowering) and a PRODUCTION-stripped build (log() -> 0 bytes) both omit
+  // the chunk, keeping the prod bundle free of any _scrml_log reference.
+  log:            "§20.6 log() location-transparent logging runtime (chunk: 'log')",
 
   // Function definition markers — 'function _name' starts at a line boundary.
   // Previous chunk ends after the preceding function/IIFE closing brace.

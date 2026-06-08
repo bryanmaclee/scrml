@@ -237,7 +237,13 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 28 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 29 chunks", () => {
+    // 29 chunks post-§20.6 (S174 log-builtin): 'log' chunk added for the
+    // location-transparent log() builtin runtime (_scrml_log + _scrml_log_render).
+    // Activated by a POST-EMIT scan (emit-client.ts) when the emitted JS contains
+    // a `_scrml_log(` call — a shadowed or production-stripped build emits none and
+    // omits the chunk (so the prod bundle carries zero _scrml_log bytes, F4=A).
+    //
     // 28 chunks post-§59 (S169 map-arc phase-c D3): 'map' chunk added for the
     // §59 value-native map runtime (_scrml_fnv1a + _scrml_value_canonical +
     // _scrml_map_*). Activated per-compile-unit by detectRuntimeChunks when a
@@ -275,6 +281,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(28);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(29);
   });
 });

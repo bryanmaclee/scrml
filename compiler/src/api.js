@@ -577,6 +577,14 @@ export function compileScrml(options = {}) {
      */
     testMode = false,
     /**
+     * §20.6 (F4=A) — production build flag. When true, the location-
+     * transparent `log()` builtin (§20.6) strips to ZERO bytes (the dev-only
+     * convenience is removed from release artefacts; mirrors `test-bind`'s
+     * 0-byte production guarantee, §19.12.7). Threaded to runCG. Default
+     * false (development — `log()` is active).
+     */
+    production = false,
+    /**
      * S91 A-4.1 — Opt-in flag for the per-route artifact splitter
      * (SPEC §40.9.7). When TRUE, runCG produces per-(EP, role, tier)
      * chunk descriptors AND a chunks.json manifest; the api.js write
@@ -1920,6 +1928,8 @@ export function compileScrml(options = {}) {
     // for each file containing `~{}` test blocks; written to `<base>.test.js`
     // in the write-output section below.
     testMode,
+    // §20.6 (F4=A) — production strip flag for the log() builtin.
+    production,
     // C15 — pass MOD's exportRegistry so codegen can identify cross-file
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.

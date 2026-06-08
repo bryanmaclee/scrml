@@ -115,6 +115,15 @@ export interface EmitLogicOpts {
   continueBehavior?: "continue" | "return";
   /** Track names declared by let-decl/const-decl so tilde-decl can detect reassignment. */
   declaredNames?: Set<string>;
+  /**
+   * §20.6 — the source span of the STATEMENT currently being emitted, set by
+   * `emitLogicNode` before it descends into expression emission. The log()
+   * lowering reads it as the AUTHOR `file:line` source: a `log(...)` call
+   * node's OWN span loses its byte offset through the codegen re-parse
+   * (`span.start === 0` not-set sentinel), but the enclosing statement node
+   * carries the real offset. Threaded to EmitExprContext.stmtSpan.
+   */
+  currentStmtSpan?: { file?: string; start?: number; line?: number } | null;
   /** §51.5: Machine binding map for transition guard emission. Keyed by reactive var name. */
   machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null;
   /**
@@ -689,6 +698,12 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // line 975); the ExprNode-level engine-write detection in `emitAssign`
     // is the missing complement that closes the expression-context gap.
     engineBindings: opts.engineBindings ?? null,
+    // §20.6 (shadowing) — forward declared local names so emit-expr can
+    // detect a user-declared `log` in scope (the builtin yields + fires
+    // W-LOG-SHADOWED) vs. the bare builtin call (lowered to _scrml_log).
+    declaredNames: opts.declaredNames ?? null,
+    // §20.6 — forward the current statement span for log() file:line.
+    stmtSpan: opts.currentStmtSpan ?? null,
   };
 }
 
@@ -1345,6 +1360,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
   if (!node || typeof node !== "object") return "";
 
   opts = _ensureBoundary(opts, "emitLogicNode");
+
+  // §20.6 — remember this statement's real source span so the log()
+  // lowering can resolve file:line (the call node's own span loses its
+  // byte offset through the codegen re-parse; the statement node keeps it).
+  if (node.span && typeof node.span.start === "number" && node.span.start > 0) {
+    opts = { ...opts, currentStmtSpan: node.span };
+  }
 
   // §4.12.6: Inherit dbVar from node annotation if not already set in opts
   if (!opts.dbVar && node._dbVar) {

@@ -43,6 +43,37 @@ import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.t
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
+import { resolveLogLoc } from "./log-loc.ts";
+
+// ---------------------------------------------------------------------------
+// §20.6 (F4=A) — production strip toggle for the log() builtin.
+//
+// A compile-WIDE constant (not per-file / per-context), so it rides a
+// module-level flag set once-per-compile by runCG (mirrors the
+// `provenanceEnabled` gate in srcmap-provenance.ts). When true, a `log(...)`
+// call lowers to ZERO bytes (the dev-only convenience is stripped from
+// release artefacts). Default false (development — log() is active).
+// ---------------------------------------------------------------------------
+let _logProductionStrip = false;
+
+/** Set the compile-wide production strip flag for the log() builtin (runCG). */
+export function setLogProductionStrip(on: boolean): void {
+  _logProductionStrip = !!on;
+}
+
+// §20.6 (shadowing, Open-Q3) — PER-FILE flag: does the current file declare
+// a `function log` / `fn log`? Such a declaration shadows the builtin across
+// the whole file (file-scope functions are in scope everywhere). Set per-file
+// by runCG (via fileDeclaresLog). A LOCAL `let log` / param is handled
+// scope-precisely via EmitExprContext.declaredNames; this covers the
+// file-level function-decl that declaredNames does not carry.
+let _logShadowedInFile = false;
+
+/** Set the per-file log() shadowing flag (a file-level `function log`). */
+export function setLogShadowedInFile(on: boolean): void {
+  _logShadowedInFile = !!on;
+}
+
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -190,6 +221,23 @@ export interface EmitExprContext {
    * (the expression falls through to ordinary array/index/member/call emission).
    */
   mapVarNames?: Set<string> | null;
+  /**
+   * §20.6 (shadowing, Open-Q3) — names declared in the current scope
+   * (function params, let/const locals, function-decls). When the set
+   * contains "log", a user-declared `log` is in scope and WINS over the
+   * location-transparent builtin: `emitCall` emits an ordinary call and
+   * fires the info-level W-LOG-SHADOWED lint instead of the `_scrml_log`
+   * lowering. Forwarded from `EmitLogicOpts.declaredNames` via `_makeExprCtx`.
+   */
+  declaredNames?: Set<string> | null;
+  /**
+   * §20.6 — the enclosing STATEMENT's source span, forwarded from
+   * `EmitLogicOpts.currentStmtSpan`. The log() lowering reads it for the
+   * author `file:line` because a re-parsed `log(...)` call node carries a
+   * not-set span (`start === 0`) while the statement node keeps the real
+   * byte offset. Preferred over `node.span` only when the latter is not set.
+   */
+  stmtSpan?: { file?: string; start?: number; line?: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1560,6 +1608,55 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // render() → client-side component render
   if (node.callee.kind === "ident" && node.callee.name === "render") {
     return `_scrml_render(${args})`;
+  }
+
+  // §20.6 — log() location-transparent logging builtin.
+  //
+  // Lowers `log(...args)` to `_scrml_log(side, loc, ...args)` where:
+  //   - `side` ("server"|"client") is the COMPILER-CERTAIN side of this call
+  //     site, taken from `ctx.mode` (the emit context already carries the
+  //     server/client classification — server-batch bodies emit with
+  //     mode:"server", client wrappers/handlers with mode:"client", so the
+  //     tag is per-statement-accurate including inside CPS-split functions).
+  //   - `loc` ("basename:line") is resolved at COMPILE time from the call
+  //     node's byte offset (`node.span.start`) against the file source
+  //     (log-loc.ts) — the node's own `span.line` is NOT reliable (re-parse
+  //     stamps line:1), the byte offset is.
+  // Shadowing (Open-Q3): a user-declared `log` in scope WINS — emit an
+  // ordinary call + fire info-level W-LOG-SHADOWED; the builtin steps aside.
+  // Production (F4=A): when the compile-wide strip flag is set, lower to a
+  // harmless no-op expression so the release bundle carries NO `_scrml_log`
+  // reference and no argument-evaluation residue (mirrors test-bind 0-byte).
+  if (node.callee.kind === "ident" && node.callee.name === "log") {
+    const userDeclaredLog = _logShadowedInFile || !!(ctx.declaredNames && ctx.declaredNames.has("log"));
+    if (userDeclaredLog) {
+      // A user binding named `log` shadows the builtin — emit a plain call to
+      // it (the builtin steps aside). The info-level W-LOG-SHADOWED diagnostic
+      // is fired at the SHADOWING DECLARATION by the type pass
+      // (`checkLogShadowing` in type-system.ts), which has the wired diagnostic
+      // stream — codegen's EmitExprContext.errors is not reliably populated, so
+      // the lint lives there, not here. This branch only suppresses the builtin
+      // lowering so the user's `log` is called verbatim.
+      const call0 = node.optional ? "?.(" : "(";
+      return `${callee}${call0}${args})`;
+    }
+    if (_logProductionStrip) {
+      // Strip to 0 bytes of log infrastructure: a no-op expression that is
+      // valid in statement AND expression position and drops the args (no
+      // arg side-effects leak; no `_scrml_log` reference).
+      return "(void 0)";
+    }
+    const side = ctx.mode === "server" ? "server" : "client";
+    // The call node's own span loses its byte offset through the codegen
+    // re-parse (start === 0 = not-set); the enclosing statement span
+    // (ctx.stmtSpan) keeps the real offset, so prefer it for file:line.
+    const nodeStartSet = node.span && typeof node.span.start === "number" && node.span.start > 0;
+    const locSpan = nodeStartSet ? node.span : (ctx.stmtSpan ?? node.span);
+    const loc = resolveLogLoc(locSpan);
+    const tagArgs = `${JSON.stringify(side)}, ${JSON.stringify(loc)}`;
+    return args.length > 0
+      ? `_scrml_log(${tagArgs}, ${args})`
+      : `_scrml_log(${tagArgs})`;
   }
 
   const call = node.optional ? "?.(" : "(";
