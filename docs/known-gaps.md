@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 9 |
-| LOW | 18 |
+| MED | 11 |
+| LOW | 20 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -32,8 +32,25 @@
 > framing-corrected Bug 10) is excluded — these are the four entries a human silently discounts (Bug 54 deferred,
 > Bug 69 non-gap, Bug 10 nominal, Bug 19-forensic). **The §R28/§R27 cluster tables DO contribute to the headline
 > count** (their OPEN rows — C4/C6/R28-C2 MED, R28-7b/R28-2b/C8 LOW — are real live gaps), so each cluster row
-> carries an inline `@gap` token in its final cell. This basis reproduces the canonical S170 hand-count
-> HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly.
+> carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
+> HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
+> above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S174 — gaps filed S174 (2026-06-08)
+
+### G-SQL-ROW-TYPE — typed SQL query rows are SPEC-mandated (§14.8.7) but the compiler discards the type — `NEW S174; MED; build queued`
+SPEC §14.8.7 (`SPEC.md:7926`) mandates: a `?{ SELECT id,email FROM users }` produces a value whose type is a struct of the selected columns. The compiler instead hard-codes `tAsIs()` at `type-system.ts:7305` (the `case "sql"`), discarding the row type it could derive from (SELECT projection ∧ generated table types). Symptom: every DB-row prop in `23-trucking-dispatch` is `asIs` (was `any`). Two BLIND DDs (`typed-sql-row-2026-06-08.md` + `typed-sql-rows-structless-app-2026-06-08.md`) converged: build in two tranches — (1) spec-debt: implement §14.8.7 (needs a SELECT-projection parser; the column-type half exists) + close the filed P1 `F-SCHEMA-001` (feed `<schema>` DDL as a 3rd ColumnDef source into the §14.8 generator); (2) one scoped ratification: the cross-file prop boundary (a writable, file-crossing projection-row type reverses §14.8's nominal-isolation wall §14.8.1/.4/.7). NOT an L22 member (type-OUT-of-query); debate-not-warranted. <!-- @gap id=g-sql-row-type sev=MED status=open -->
+
+### G-UNKNOWN-TYPE-LEAK — an unrecognized type-name (not `any`) silently resolves to `asIs` instead of erroring — `NEW S174; MED; must-follow-soon` (the user's "2")
+After S174 enforced `E-TYPE-ANY-FORBIDDEN` for the literal `any` token, an arbitrary UNDEFINED type name still leaks: `type Bar:struct = { a: Frobnicate }` compiles with zero diagnostic (`resolveTypeExpr` unknown-type fall-through → `asIs`/`tUnknown`). Same seam as the `any` reject (`type-system.ts` type resolution) but must fire only on TRULY-undefined types (after full resolution; care re: forward-refs + cross-file types). User-committed near-term follow-on ("2 must-follow-soon"). <!-- @gap id=g-unknown-type-leak sev=MED status=open -->
+
+### G-COMPONENT-001-COVERAGE — `W-COMPONENT-001` (function-typed prop nudge) is vestigial — `NEW S174; LOW`
+Surfaced by the function-boundary recon: in `23-trucking-dispatch` callback props are typed `asIs` (was `any`) to dodge the warning, AND `isFunctionType` (`component-expander.ts:304-306`) matches only `=>`/`(`-prefix signatures + the check doesn't fire on the `props={...}` path (`component-expander.ts:1040`). So the "props are warned" half of the passed-vs-stored rule (a function may be PASSED/warned, never STORED/error) is currently a no-op. Diagnostic-coverage bug, not a design question — a fix also raises "should `asIs`-dodging be detected." <!-- @gap id=g-component-001-coverage sev=LOW status=open -->
+
+### G-ROUTE-ARG-FN — no symmetric non-serializable-ARGUMENT-type gate — `NEW S174; LOW`
+`E-ROUTE-003` (§12.5) gates non-serializable RETURN types (recursive into struct fields). There is NO symmetric ARGUMENT-direction gate: a function passed INTO a server-escalated fn (incl. a function-typed struct field, once 4A's `FunctionType` is wired) may silently drop/stringify rather than error. Fork-4-INDEPENDENT (hits bare function args too). File as a separate `E-ROUTE` arg-direction amendment; do NOT bundle with the 4A landing. <!-- @gap id=g-route-arg-fn sev=LOW status=open -->
 
 ---
 

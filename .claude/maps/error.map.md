@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-07T21:10:00Z  commit: 642950a2
+# updated: 2026-06-08T17:30:00Z  commit: f0b3cb04
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -13,7 +13,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 - All other codes → result.errors (fatal, CLI exits 1)
 - Cross-stream helper required when asserting on W-*/I-* codes in tests (see diagnostic-stream-partition memory note)
 
-## Error Code Families (384+ codes in compiler source; +7 §59 value-native map codes IMPLEMENTED S169 + 2 NEW S173 (E-EXPORT-001 §21.2, W-TYPE-FN-FIELD §14.3) — fire sites live end-to-end)
+## Error Code Families (386+ codes in compiler source; +7 §59 value-native map codes IMPLEMENTED S169 + 2 S173 (E-EXPORT-001 §21.2, W-TYPE-FN-FIELD §14.3) + 2 NEW S174 (W-LOG-SHADOWED §20.6.7, E-TYPE-ANY-FORBIDDEN §14.1.1) — fire sites live end-to-end)
 
 | Family | Count | Description |
 |--------|-------|-------------|
@@ -75,6 +75,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-TEST-* | 6 | Test block errors (E-TEST-001..006) |
 | E-TIMEOUT-* | 2 | Engine timeout errors |
 | E-TYPE-* | ~20 | Type system errors (E-TYPE-001 dormancy fix for object-literal lifecycle, S151 C4); **E-TYPE-063** used by Bug 63 (S157) for invalid `.advance(.V)` variant at markup handler-attr position; **S160**: E-TYPE-001 message extended with synthesis note when lifecycle was implied by a no-RHS typed decl (§14.12.3) |
+| E-TYPE-ANY-FORBIDDEN | 1 | **(S174 NEW — SPEC §14.1.1 / §34)** The literal type-token `any` appears in a type-annotation position (struct/error field type, state-cell `typeAnnotation`, `fn`/`function` parameter or return type). `any` is not a scrml type — there is no `any` (S174 user hard line; TypeScript's type-checking opt-out has no scrml equivalent). The sanctioned untyped escape hatch is `asIs` — a deliberate, named, greppable opt-out (analogous to TS `unknown`, NOT `any`). Today `any` falls through `resolveTypeExpr`'s unresolvable path to `asIs`/`unknown` with NO diagnostic — silently masquerading as the sanctioned `asIs`; this catches the LITERAL `any` atom BEFORE that collapse. `any`-token-SPECIFIC via `typeTextMentionsAnyToken` (splits the raw type string on non-identifier chars, tests for a bare `any` atom) — catches `any`/`any[]`/`any \| not`/`[string: any]`/`{ payload: any }`; does NOT mis-fire on a NAME merely containing the substring (`Company`, `manyThings`, a param literally named `any`). An arbitrary undefined type name (`Frobnicate`) that ALSO resolves silently to `asIs` is a SEPARATE broader leak (deferred follow-on). Fired by `checkAnyTypeForbidden` [type-system.ts:3531], wired at the type pass [type-system.ts:15010]. Fatal. |
 | E-USE-* | ~5 | `use` declaration errors |
 | E-VALIDATOR-* | ~5 | Validator circular-dep / inline-dynamic |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | 1 | Write attempt outside logic context |
@@ -92,6 +93,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | W-EQ-* | 1 | Equality warnings |
 | W-LIFECYCLE-* | 5 | Lifecycle warnings |
 | W-LINT-001..024 | 24 | Ghost-pattern lint warnings [lint-ghost-patterns.js] |
+| W-LOG-SHADOWED | 1 | **(S174 NEW — SPEC §20.6.7, Info)** A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and `log(...)` is emitted as an ordinary call to the user's `log` — the `[server\|client]`/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Severity `info` → result.warnings (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. Fired at the shadowing DECLARATION by `checkLogShadowing` [type-system.ts:3431], wired at the type pass [type-system.ts:15006]; emit-expr.ts independently suppresses the builtin lowering (`_logShadowedInFile` via `fileDeclaresLog`). |
 | W-MAP-DUPLICATE-LITERAL-KEY | 1 | **(S169 IMPLEMENTED — SPEC §59.3/§59.11, Info)** A map literal has two depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Info → result.warnings. Fired by both literal scanners [expression-parser.ts:~1485 / native-parser/parse-expr.js:~3619]. |
 | W-MAP-ITERATION-ORDER | 1 | **(S169 IMPLEMENTED — SPEC §59.8/§59.11, Info)** A non-`@ordered` map is iterated (`<each in=@m.keys()/.values()/.entries()>`) without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Info → result.warnings. Fired by `runWMapIterationOrder` [lint-w-map-iteration-order.js:~149], wired at api.js. |
 | W-MAP-STRUCT-KEY-LITERAL | 1 | **(S169 IMPLEMENTED — SPEC §59.3/§59.11, Info)** A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys (parse-accepted, codegen-deferred). Info. Fired by both literal scanners [expression-parser.ts:~1475 / native-parser/parse-expr.js:~3608]. |
@@ -101,7 +103,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | W-STDLIB-* | 2 | stdlib shim/compiler-deferred warnings |
 | W-TAILWIND-* | 2 | Tailwind class warnings |
 | W-TRY-CATCH-IN-SCRML-SOURCE | 1 | try/catch used in scrml source |
-| W-TYPE-FN-FIELD | 1 | **(S173 NEW — SPEC §14.3, Info)** A struct field is declared with a FUNCTION type (`f: fn() -> T` etc.). The compiler currently resolves a function-typed struct field as an opaque `asIs` value — its function shape is not type-checked, and whether function-typed struct fields are a first-class supported feature is an open question (deferred). Info-level nudge (severity `warning` → W- prefix → result.warnings, non-fatal). Lifecycle fields are excluded so they never mis-fire (`isFunctionTypeAnnotation` is deliberately conservative). Fired by `checkFunctionTypedStructFields` walk [type-system.ts:3320], wired at the markup/type pass [type-system.ts:14762]. |
+| W-TYPE-FN-FIELD | 1 | **(S173 NEW — SPEC §14.3, Info)** A struct field is declared with a FUNCTION type (`f: fn() -> T` etc.). The compiler currently resolves a function-typed struct field as an opaque `asIs` value — its function shape is not type-checked, and whether function-typed struct fields are a first-class supported feature is an open question (deferred). Info-level nudge (severity `warning` → W- prefix → result.warnings, non-fatal). Lifecycle fields are excluded so they never mis-fire (`isFunctionTypeAnnotation` is deliberately conservative). Fired by `checkFunctionTypedStructFields` walk [type-system.ts:3310], wired at the markup/type pass [type-system.ts:15003]. |
 | I-ASYNC-USER-SOURCE | 1 | Info: async pattern in user source |
 | I-AUTH-REDIRECT-UNRESOLVED | 1 | Info: auth redirect target unresolved |
 | I-FN-PROMOTABLE | 1 | Info: function eligible for promotion |
@@ -169,8 +171,16 @@ parser, D2c `<each as (k,v)>` sugar, D3 runtime, D4 codegen.
 
 ### S173 — two new diagnostics (additive, zero-codegen)
 
-- **W-TYPE-FN-FIELD** (NEW, Info, §14.3) — function-typed struct field nudge. A struct field declared with a function type now surfaces an info-level diagnostic instead of being silently resolved as opaque `asIs`. Severity `warning` (W- prefix → result.warnings, non-fatal, CLI exits 0). Predicate `isFunctionTypeAnnotation` [type-system.ts:1927] is deliberately conservative so a lifecycle field never mis-fires; the walk `checkFunctionTypedStructFields` [type-system.ts:3310] fires one diagnostic per function-typed field (recurses into array-element / nested inline-struct field types). Wired at the markup/type pass [type-system.ts:14762]. Whether function-typed struct fields are a first-class feature is an open question (deferred).
+- **W-TYPE-FN-FIELD** (NEW, Info, §14.3) — function-typed struct field nudge. A struct field declared with a function type now surfaces an info-level diagnostic instead of being silently resolved as opaque `asIs`. Severity `warning` (W- prefix → result.warnings, non-fatal, CLI exits 0). Predicate `isFunctionTypeAnnotation` [type-system.ts:1927] is deliberately conservative so a lifecycle field never mis-fires; the walk `checkFunctionTypedStructFields` [type-system.ts:3310] fires one diagnostic per function-typed field (recurses into array-element / nested inline-struct field types). Wired at the markup/type pass [type-system.ts:15003]. Whether function-typed struct fields are a first-class feature is an open question (deferred).
 - **E-EXPORT-001** (NEW, Error, §21.2) — reactive state-cell export discriminator. Exporting a plain (Shape-1) OR derived reactive state cell is now a fatal error; previously the export was swallowed silently (no export in emitted JS; cross-file import resolved to garbage). The check is keyed on the `kind:"state-decl"` binding (NOT name-case), so `export const Greeting` (component-as-const), `export <channel>`, and exported engines stay legal. SHARED MOD-stage check — runs for both pipelines (legacy ast-builder + native collect-hoisted both feed `file.ast.exports`). `collectStateCellNames` [module-resolver.js:97] + `exportedLocalNames` [module-resolver.js:136] + the check in `buildImportGraph` [module-resolver.js:295-313]. Fix-it: export a function returning the value, a `const` of its current value, or wrap the cell in a component and export that (wrapping-component idiom).
+
+### S174 — log() location-transparent builtin (§20.6) + `any`-reject hard line (§14.1.1)
+
+Two additive diagnostics. Both are decl-site/use-site scans in type-system.ts wired alongside the
+S173 `checkFunctionTypedStructFields` walk (lines 15003/15006/15010).
+
+- **W-LOG-SHADOWED** (NEW, Info, §20.6.7 — `916b8bb3`) — a user-declared in-scope binding named `log` shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside; `log(...)` lowers to an ordinary call to the user's `log` (no `[server|client]`/`file:line` origin tag, no dev unified-view forwarding). `log` is NOT a reserved identifier — `function log(...)` (the canonical no-op debugging stub) is legal; this is a lint, not `E-RESERVED-IDENTIFIER`. Fired at the SHADOWING DECLARATION by `checkLogShadowing` [type-system.ts:3431] (`FN_KINDS` = function-decl/fn-decl/function/fn with `name === "log"`), wired at the type pass [type-system.ts:15006]. The lint lives in the type pass (which has the wired diagnostic stream) — codegen's `EmitExprContext.errors` is not reliably populated; emit-expr.ts independently suppresses the builtin lowering via `_logShadowedInFile` (set from `fileDeclaresLog(fileAST)` in log-loc.ts, toggled at index.ts:587/760). Severity `info` → result.warnings (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window.
+- **E-TYPE-ANY-FORBIDDEN** (NEW, Error, §14.1.1 — `f0b3cb04`) — the literal type-token `any` in a type-annotation position. `any` is not a scrml type — there is no `any` (S174 user hard line). The sanctioned untyped escape hatch is `asIs` (named, greppable, analogous to TS `unknown`). The recognizer `typeTextMentionsAnyToken` [type-system.ts:3489] splits the raw type string on non-identifier chars and tests for a bare `any` atom — catches `any`/`any[]`/`any | not`/`[string: any]`/`{ payload: any }` while NOT mis-firing on a NAME containing the substring (`Company`, `manyThings`, a param literally named `any`). Positions scanned: struct/error decl field types (`decl.raw`), cell `typeAnnotation` strings (incl. inline-struct/array/map/union members), fn-decl `params[]` types + return-type. `checkAnyTypeForbidden` [type-system.ts:3531] de-dupes by `start:end:where:typeText`, span-bearing decl-site scan; mirrors `checkFunctionTypedStructFields`/`checkMapKeyComparability` shape (`resolveTypeExpr` is span-free/error-free so the scan runs over RAW type text). Wired at the type pass [type-system.ts:15010]. `any`-token-SPECIFIC — an arbitrary undefined type name (`Frobnicate`) that ALSO resolves silently to `asIs` is a SEPARATE broader leak (deferred follow-on arc). Corpus migration: ~23 `any`→`asIs` sites in examples/23-trucking-dispatch + samples + stdlib/http rode the same wrap. Fatal.
 
 ## Fix Notes
 
@@ -186,6 +196,14 @@ scans them via `findSrcmapMarks()`, resolves to real source positions, and strip
 `stripSrcmapMarks()` before output.
 S150 (line-lie close): honest-synthetic validation — synthetic mappings validated at resolution
 time; map entries that cannot resolve to a real source line are marked synthetic in the output.
+
+### log() location resolution (S174 — `916b8bb3`)
+`log-loc.ts` `resolveLogLoc(span)` → "basename:line": the `log()` call node's own `span.line` is
+UNRELIABLE (codegen re-parse stamps `line:1`), so the line is computed from the node's byte OFFSET
+(`span.start`) against a `LineIndex` built once-per-file from the source registered via
+`registerFileSource(filePath, source)`. emit-expr.ts prefers `node.span` when its `start > 0`, else
+falls back to `ctx.stmtSpan` (the enclosing statement span keeps the real offset through re-parse).
+`resetLogLoc()` clears the per-compile source/index cache at runCG start.
 
 ### Inline ?{} SQL CPS-split (S152)
 `emit-control-flow.ts` — inline `?{}` SQL inside a conditional branch was not being CPS-split;
@@ -412,9 +430,12 @@ No client-level JS error boundaries in the compiler itself.
 The emitted scrml app gets `errorBoundary` support via `emit-error-boundary.ts` (§19.6).
 errorBoundary compile support: `compiler/src/codegen/emit-error-boundary.ts` (320L) — extracts
 fallback markup + per-variant renders; paired with host-JS try/catch backstop (§19.6.8 C-hybrid).
+The backstop routes caught diagnostics to scrml's logging surface — the adopter-callable backing for
+which is the `log()` builtin (§20.6, S174); it is defense-in-depth, NOT a substitute for typed
+`!`-coverage (E-ERROR-005 static exhaustiveness still required).
 
 ## Tags
-#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #E-ENGINE-ACCEPTS-NOT-ENUM #E-ENGINE-MSG #E-MATCH-SUBSET-DEAD-ARM #E-SYNTAX-064 #E-COLON-SHORTHAND-ON-VOID #W-COLON-SHORTHAND-LEGACY-PLACEMENT #E-REFINEMENT-NO-DEFAULT #W-EACH #each-in-dynamic-context #source-map #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #per-item-reactivity #shape4-no-rhs #s152 #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #s167 #s168 #s169 #s170 #colon-shorthand-html #colon-shorthand-canonical #value-native-maps #e-map-bracket-write #bug-b-structural-compound-deepset #set-algebra #native-parser-parity #E-VARIANT-AMBIGUOUS #E-CONTRACT-001
+#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #E-ENGINE-ACCEPTS-NOT-ENUM #E-ENGINE-MSG #E-MATCH-SUBSET-DEAD-ARM #E-SYNTAX-064 #E-COLON-SHORTHAND-ON-VOID #W-COLON-SHORTHAND-LEGACY-PLACEMENT #E-REFINEMENT-NO-DEFAULT #W-EACH #each-in-dynamic-context #source-map #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #per-item-reactivity #shape4-no-rhs #s152 #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #s167 #s168 #s169 #s170 #colon-shorthand-html #colon-shorthand-canonical #value-native-maps #e-map-bracket-write #bug-b-structural-compound-deepset #set-algebra #native-parser-parity #E-VARIANT-AMBIGUOUS #E-CONTRACT-001 #s173 #e-export-001 #w-type-fn-field #s174 #w-log-shadowed #e-type-any-forbidden #log-builtin #no-any-hard-line #log-loc #production-strip
 
 ## Links
 - [primary.map.md](./primary.map.md)

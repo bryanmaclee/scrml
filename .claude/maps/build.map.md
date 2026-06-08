@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-06-07T21:10:00Z  commit: 642950a2
+# updated: 2026-06-08T17:30:00Z  commit: f0b3cb04
 
 ## Development Commands (package.json scripts)
 
@@ -18,6 +18,14 @@
 | bun run e2e:ui | Run Playwright tests with UI mode |
 | bun run e2e:docs | Run Playwright docs tests |
 | bun run e2e:install | Install Playwright browser binaries (chromium, firefox, webkit) |
+
+## `scrml compile` Flags (compiler/src/commands/compile.js)
+
+| Flag | What it does |
+|------|-------------|
+| --emit-engine-graph | Writes `<base>.engine-graph.json` sidecar per engine (S149) |
+| --parser=scrml-native | Opt-in native parser (default `null` = legacy BS+Acorn); STRICTLY OPT-IN — see structure.map.md "Native-Parser File Table" |
+| **--production / --prod** | **(S174 NEW — §20.6.5 F4=A)** Production build flag. Strips ALL `log()` builtin calls to 0 bytes (`(void 0)` no-op lowering — the emitted bundle carries NO `_scrml_log` reference and no argument-eval residue; mirrors the test-bind 0-byte clean-strip §19.12.7). Sets `production:true` [compile.js:170/172], threaded into the compile opts [compile.js:279/409/431] and on to `compileScrml(... { production })` [api.js:586/1931]. Default false (non-production builds emit the location-transparent `log()` runtime). |
 
 ## Build & Release
 
@@ -42,7 +50,7 @@ Location: scripts/git-hooks/ (installed via git hooks config)
 Behavior: runs the full test suite; blocks commits on failures.
 
 ## Tags
-#scrmlts #map #build #bun #scripts #precommit
+#scrmlts #map #build #bun #scripts #precommit #s174 #production-flag #log-strip #compile-flags
 
 ## Links
 - [primary.map.md](./primary.map.md)

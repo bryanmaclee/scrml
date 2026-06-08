@@ -1,12 +1,20 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
+# updated: 2026-06-08T17:30:00Z  commit: f0b3cb04
 
-Authoritative AST type source: `compiler/src/types/ast.ts` (1983L+, TypeScript).
+Authoritative AST type source: `compiler/src/types/ast.ts` (~2054L, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
-Type-system internals: `compiler/src/type-system.ts` (17436L — internal interfaces, not exported).
+Type-system internals: `compiler/src/type-system.ts` (~18216L — internal interfaces, not exported).
 Symbol-table exports: `compiler/src/symbol-table.ts` (11280L — `MessageArmEntry`, `PayloadBinding`, `EngineStateChildEntry`).
 Enum-subset shared recognizer: `compiler/src/enum-subset-refinement.ts` (143L — `EnumSubsetParse`, `parseEnumSubsetAnnotation`).
+
+> **S174 — no new AST shapes.** The location-transparent `log()` builtin (§20.6) + the `any`-reject
+> hard line (`E-TYPE-ANY-FORBIDDEN`, §14.1.1) add NO new FileAST node types. `log(...)` is recognized
+> at codegen by callee-name (`emit-expr.ts`, an `IdentExpr`-callee `CallExpr` named `log`); the two new
+> diagnostics (`W-LOG-SHADOWED`, `E-TYPE-ANY-FORBIDDEN`) are decl-site/use-site scans over EXISTING
+> nodes (function-decl `name === "log"`; raw `typeAnnotation`/field-type strings). The only S174 type is
+> the codegen-internal `LogLocSpan` interface in `log-loc.ts` (`{ filePath?, start?, line? }`) — a
+> resolver input, not a FileAST shape. Likewise S173 (`E-EXPORT-001`, `W-TYPE-FN-FIELD`) added no shapes.
 
 ---
 
@@ -57,9 +65,11 @@ kind: "lin-decl"; name: string; typeAnnotation?: string; init: ExprNode
 ### ReactiveDeclNode extends BaseNode
 kind: "reactive-decl"; name: string; typeAnnotation?: string; init?: ExprNode; renderSpec?: RenderSpecNode; ... +12 more fields
 **S157 Bug 71 addition:** `matchExpr?: any` — structural match-expr side-field for derived `const <x> = match @cell { ... }` reactive cells; set by ast-builder.js dual-parse hook; used by the typer's exhaustiveness pass (`checkMatchDiagnostics`); ignored by codegen (the `init`/`initExpr` reactive emit path is unchanged).
+**S168 cycles-prereq:** the sibling `ReactiveNestedAssignNode.path` was widened `string[]` → `(string | { index?: ExprNode; raw?: string })[]` for computed bracket-index COW path segments (ast.ts:769); **S170 Bug B** stamps the codegen-internal `_deepSetLeafKey`/`_deepSetResidualPath` on `ReactiveNestedAssignNode` (not declared in ast.ts — stamped by reactive-deps.ts at runCG).
 
 ### FunctionDeclNode extends BaseNode
 kind: "function-decl"; name: string; params: FunctionParam[]; returnType?: string; body: LogicStatement[]; modifier: "fn"|"server"|"pure"|"function"|null; errorType?: string; ... +5 more fields
+**S174 note:** a function-decl with `name === "log"` is the shadow target for `W-LOG-SHADOWED` (`checkLogShadowing` matches `FN_KINDS` = function-decl/fn-decl/function/fn). No new field — the check reads the existing `kind`/`name`.
 
 ### ComponentDefNode extends BaseNode
 kind: "component-def"; name: string; props: TypedAttrDecl[]; body: ASTNode[]
@@ -67,9 +77,11 @@ kind: "component-def"; name: string; props: TypedAttrDecl[]; body: ASTNode[]
 ### EngineDeclNode extends BaseNode
 kind: "engine-decl"; name: string; stateChildren: ASTNode[]; initial?: string; derived?: ExprNode; ... +8 more fields
 **S154 addition:** `acceptsType?: string | null` — raw enum-type identifier from `accepts=MsgType` engine-opener attribute (§51.0.S.2.2); recorded verbatim by parser (batch 1); resolved by SYM PASS 11 typer (batch 2); non-resolution fires `E-ENGINE-ACCEPTS-NOT-ENUM`.
+**S172 addition:** `inlineMatchArmArrows?: { glyph, srcOffset }[]` — per-arm separator-glyph stamp for the `derived=match` raw-text body (no structured arm nodes); consumed by W-MATCH-ARROW-LEGACY + `migrate --fix`.
 
 ### TypeDeclNode extends BaseNode
 kind: "type-decl"; name: string; typeKind: "struct"|"enum"|"alias"; body: string
+**S173/S174 note:** the raw `body` field-clause text is the scan input for `W-TYPE-FN-FIELD` (S173, function-typed fields → `checkFunctionTypedStructFields`) and `E-TYPE-ANY-FORBIDDEN` (S174, `any`-token fields → `checkAnyTypeForbidden` `scanStructBodyRaw`). Both are raw-text scans; neither adds a field.
 
 ### ChannelDeclNode extends MarkupNode
 kind: "markup"; tag: "channel"; name: string; isExported: boolean; ... extends MarkupNode
@@ -79,6 +91,7 @@ kind: "import-decl"; specifiers: ImportSpecifier[]; source: string; importKind: 
 
 ### ExportDeclNode extends BaseNode
 kind: "export-decl"; raw: string; exportedName: string|null; exportKind: string|null; reExportSource: string|null; isPure?: boolean; isServer?: boolean
+**S173 note:** `E-EXPORT-001` rejects an export naming a reactive STATE CELL — the MOD-stage check cross-references `file.ast.exports` (these nodes) against `collectStateCellNames(fileAST)` (`kind:"state-decl"` bindings) in module-resolver.js `buildImportGraph`. No new field.
 
 ### FileAST
 filePath: string; nodes: ASTNode[]; imports: ImportDeclNode[]; exports: ExportDeclNode[]; components: ComponentDefNode[]; typeDecls: TypeDeclNode[]; channelDecls: ChannelDeclNode[]; ... +8 more fields
@@ -118,6 +131,7 @@ Key expression shapes:
 - FailExprNode: kind: "fail-expr"; enumType: string; variant: string; data?: ExprNode
 - MapLitExpr: kind: "map-lit"; span; entries: MapEntry[]; diagnostics?: {code,message}[]  (§59.3 value-native map literal `[k: v, …]` / `[:]` empty; S169) [ast.ts:1925]
 - MapEntry: key: ExprNode; value: ExprNode  (one `key: value` pair; source order; last-wins on dup) [ast.ts:1898]
+- CallExpr named `log`: NOT a distinct node — an `IdentExpr`-callee `CallExpr` whose `callee.name === "log"`; emit-expr.ts (~L1630) recognizes it for the §20.6 `log()` builtin lowering (S174). No new union member.
 
 ---
 
@@ -140,6 +154,11 @@ cases: TestCase[]; binds: TestBindDecl[]
 
 ### TestBindDecl  [compiler/src/codegen/ir.ts:171]
 name: string; serverFnName: string; span: Span
+
+### LogLocSpan  [compiler/src/codegen/log-loc.ts:32 — NEW S174, codegen-internal]
+filePath?: string; start?: number; line?: number — input to `resolveLogLoc(span)` (→ "basename:line").
+A resolver helper type for the `log()` builtin's compile-time `file:line` origin tag; NOT a FileAST node.
+The byte `start` offset is authoritative (the call node's `span.line` is unreliable post-re-parse).
 
 ---
 
@@ -173,6 +192,12 @@ views: Map<string, DBTypeViews>
 ResolvedType (union): PrimitiveType | StructType | EnumType | ArrayType | UnionType | AsIsType |
   UnknownType | NotType | SnippetType | StateType | ErrorType | HtmlElementType |
   CssClassType | FunctionType | MetaSpliceType | RefBindingType | PredicatedType | MachineType | MapType
+
+> **S174 `any` note:** there is NO `AnyType` member in `ResolvedType` — `any` is not a scrml type. An
+> `any`-token annotation currently falls through `resolveTypeExpr`'s unresolvable path to `AsIsType`/
+> `UnknownType` silently; `checkAnyTypeForbidden` (type-system.ts:3531) catches the LITERAL `any` token
+> BEFORE that collapse via a raw-text scan (`typeTextMentionsAnyToken`, :3489) and fires
+> `E-TYPE-ANY-FORBIDDEN`. The sanctioned escape hatch is `AsIsType` (the named `asIs` opt-out).
 
 ### MapType  [compiler/src/type-system.ts:227]
 kind: "map"; key: ResolvedType; value: ResolvedType; ordered: boolean
@@ -250,7 +275,7 @@ Whitespace-tolerant parser for `"EnumName oneOf([.A,.B])"` / `"notIn([.C])"` ann
 ---
 
 ## Tags
-#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #each-reconcile-ctx #each-engine-ctx #s154 #s155 #s156 #s157 #s158 #s159 #s169 #s170 #value-native-maps #map-type #map-lit #bug64 #bug71 #bug73 #r28-1c
+#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #each-reconcile-ctx #each-engine-ctx #s154 #s155 #s156 #s157 #s158 #s159 #s169 #s170 #value-native-maps #map-type #map-lit #bug64 #bug71 #bug73 #r28-1c #s172 #s173 #s174 #log-loc #logloc-span #no-any-hard-line #no-anytype #export-decl
 
 ## Links
 - [primary.map.md](./primary.map.md)

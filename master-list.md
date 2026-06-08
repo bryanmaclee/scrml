@@ -85,6 +85,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `9e306082` — wrap(s173): hand-off CLOSE + changelog S173 + master-list + 6c maps refresh (e05dbb17->642950a2) — **pushed**
 - `9e607bad` — wrap(s172): hand-off CLOSE + master-list §0.6 + changelog S172 + 6c maps refresh (cc69c62d→e05dbb17) — **pushed**
 - `170424f3` — wrap(s171): orientation + doc-currency + 3 DDs (DD3 ratified) — no code change — **pushed**
 - `9b65d386` — wrap(s170): hand-off CLOSE + master-list + changelog + maps refresh (cc69c62d) — **pushed**
@@ -92,7 +93,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `40aa63ca` — wrap(s168): hand-off CLOSE + master-list + changelog + maps refresh (map-arc Phase a+b + inspiration audit) — **pushed**
 - `5af79ee7` — docs(s167): WRAP — JS-host-boundary DD + value-native map type debate-ratified + Bug B filed — **pushed**
 - `e0269548` — docs(s166): WRAP — data-model axiom arc (deep-dive + debate + ratifications) + 2 native fixes + HIGH bug filed — **pushed**
-- `e947c924` — docs(s165): WRAP — native-parser-swap grind, 4 clean families landed (flip 509→451, −58) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

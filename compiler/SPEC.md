@@ -7772,8 +7772,8 @@ string to a scrml type according to the following rules.
 | `TEXT`, `CHAR`, `CLOB`, `VARCHAR`           | `string`    |
 | `REAL`, `FLOA`, `DOUB`                      | `number`    |
 | `BLOB`                                      | `bytes`     |
-| `NULL`                                      | `any`       |
-| (empty string / absent)                     | `any`       |
+| `NULL`                                      | `asIs`       |
+| (empty string / absent)                     | `asIs`       |
 
 **Affinity matching:** SQLite uses type affinity rules — a declared type of `VARCHAR(255)`
 has TEXT affinity. TS SHALL apply SQLite's own five-class affinity algorithm to map any
@@ -7783,14 +7783,14 @@ declared type string that does not appear in the primary mapping table:
    `number`.
 2. Otherwise, if the declared type contains `CHAR`, `CLOB`, or `TEXT`, the scrml type is
    `string`.
-3. Otherwise, if the declared type contains `BLOB` or is empty, the scrml type is `any`.
+3. Otherwise, if the declared type contains `BLOB` or is empty, the scrml type is `asIs`.
 4. Otherwise, if the declared type contains `REAL`, `FLOA`, or `DOUB`, the scrml type is
    `number`.
 5. Otherwise, the scrml type is `number` (SQLite NUMERIC affinity default).
 
 If after applying affinity matching the scrml type still cannot be determined — for example,
 because the `sqlType` string contains characters that prevent any substring match — the TS
-stage SHALL emit E-TYPE-051 and treat the column type as `any` to allow compilation to
+stage SHALL emit E-TYPE-051 and treat the column type as `asIs` to allow compilation to
 continue.
 
 **Nullability:** If `ColumnDef.nullable` is `true`, the scrml type for that field is
@@ -7843,7 +7843,7 @@ during type resolution. Developer code references the type by its single generat
 | E-TYPE-050 | Two or more tables in `tables=` (or a table name and a user-declared type) produce the same    | Error    |
 |            | generated type name after applying the PascalCase algorithm of §14.8.2.                        |          |
 | E-TYPE-051 | A `ColumnDef.sqlType` string cannot be mapped to any scrml type after exhausting the affinity  | Warning  |
-|            | algorithm of §14.8.3. The column is typed `any` and compilation continues.                     |          |
+|            | algorithm of §14.8.3. The column is typed `asIs` and compilation continues.                     |          |
 
 **E-TYPE-050 detail:** This error fires in two distinct cases:
 - Two tables in the same `< db>` block resolve to the same PascalCase name (e.g., both `user`
@@ -7853,7 +7853,7 @@ during type resolution. Developer code references the type by its single generat
 
 **E-TYPE-051 detail:** Unrecognized SQLite types are a warning, not an error, because SQLite
 allows arbitrary type strings and the affinity algorithm handles most real-world cases. The
-warning informs the developer that a column will be typed `any` and may lose static safety.
+warning informs the developer that a column will be typed `asIs` and may lose static safety.
 The compiler SHOULD include the offending `sqlType` string and the table/column name in the
 warning message.
 
