@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
+# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (1983L+, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
@@ -97,7 +97,7 @@ Match arm nodes (`match-arm-inline`, `match-arm-block`) and `!{}`-handler arm ob
 
 | Field | Type | Description |
 |-------|------|-------------|
-| armArrow | `":>"` \| `"=>"` \| `"->"` \| undefined | The arm separator glyph as written in source; set by `matchArrowGlyphAt()` at parse time; used by W-MATCH-ARROW-LEGACY emission in type-system.ts and by `rewriteMatchArmArrows()` in migrate.js |
+| armArrow | `":>"` \| `"=>"` \| `"->"` \| undefined | The arm separator glyph as written in source; set by `matchArrowGlyphAt()` at parse time; used by W-MATCH-ARROW-LEGACY emission in type-system.ts and by `rewriteMatchArmArrows()` in migrate.js. **Sibling raw-text stamp (S172):** the `derived=match` engine-decl locus has NO structured arm nodes (body is raw text), so its arm glyphs ride on `engine-decl.inlineMatchArmArrows[]` — `{ glyph, srcOffset }` per arm, stamped by ast-builder.js `scanInlineMatchArmArrows()` (~L1726), consumed by the SAME W-MATCH-ARROW-LEGACY lint + `migrate --fix` |
 
 `->` arms are now STRUCTURED (were bare-expr). `->` stays as two PUNCT tokens at the lexer
 level to protect the `fn ... -> ReturnType` return-arrow path.

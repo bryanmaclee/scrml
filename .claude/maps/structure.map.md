@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
+# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -47,7 +47,7 @@ docs/heads-up/  — design-ratification decision logs (spec-consolidation, itera
 docs/audits/  — historical audit artifacts and findings trackers
 docs/articles/  — dev.to articles and outreach content
 docs/website-viewer/  — C1 self-demo scrml app (viewer shell + real provenance, S151); app.scrml + pages/ + components/ + data/
-scripts/  — maintenance scripts: regen-spec-index.ts, compile-test-samples.sh, git-hooks/
+scripts/  — maintenance + state tooling: regen-spec-index.ts, compile-test-samples.sh, git-hooks/, state.ts (DD3 project-state tool, S172 — see build.map.md)
 editors/  — editor extension stubs (VS Code etc.)
 scratch/  — throwaway working files
 

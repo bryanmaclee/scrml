@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
+# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive web
 language compiled by this TypeScript/JS toolchain running on Bun. The compiler converts `.scrml`
@@ -68,7 +68,7 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 | native-parser | scrml-native replacement for BS+TAB; `compiler/native-parser/` (38 `.js` files + FEATURE-stale `.scrml` mirrors); STRICTLY OPT-IN `--parser=scrml-native` (default output UNCHANGED, fully green / 0-fail). The ACTIVE strategic line: drive to default → delete legacy BS+Acorn at M6 (direction-a, ratified S161; v0.8 target). **S162: the S153 "does NOT promote each/match" HARD precondition is CLOSED.** **S164-S165: §51.0.S message-arm, exprNode population, F2-match, promote-each, R1 typed-`@cell`, server-fn-star LANDED → flip 674→451.** **S170 re-measured 605 native-only flip-failures on df08f282 + landed fix-wave-1 (`5a346faa`: `on mount`/`on dismount` desugar, `const @name` derived-decl [F5], deepset/array-mutation node-synth, destructured-param structuring, var-decl typeAnnotation thread, exprText-backfill walker) + fix-wave-2 (`cc69c62d`: BlockStub `verbatim` match-arm/lambda body recovery — the Mario fix, +17) → ~508 native-only flip-failures.** Remaining flip-failures are a reduced family set — see "Native-Parser Swap Orientation" below |
 | library mode | Compile mode that emits ES module exports JS + server JS without HTML/runtime (SPEC §12.6); `emit-library.ts`; suppresses `.server.js` for body-content-escalated fns |
 | arm separator `:>` | Canonical match / `!{}`-handler / `given`-guard arm separator (SPEC §18.2 / §34, S147-S148); `=>` and `->` are deprecated aliases; all three parse, build, and emit identically during the deprecation window |
-| W-MATCH-ARROW-LEGACY | Info-level diagnostic emitted at every match arm or `!{}`-handler arm using a deprecated `=>` or `->` separator; suggests `bun scrml migrate --fix` for AST-driven rewrite |
+| W-MATCH-ARROW-LEGACY | Info-level diagnostic emitted at every match arm, `!{}`-handler arm, OR `<engine ... derived=match @VAR { ... }>` engine-decl arm using a deprecated `=>` or `->` separator; suggests `bun scrml migrate --fix` for AST-driven rewrite. **S172 (ratified S171): the §51.0.J derived-engine `derived=match` locus joined the deprecation** — its body is captured as RAW TEXT (no structured arm nodes), so ast-builder.js `scanInlineMatchArmArrows()` (~L1726) stamps `engine-decl.inlineMatchArmArrows[]` (`{glyph, srcOffset}` per arm); the lint fires from type-system.ts (~L7931) and `migrate --fix` consumes the same stamp (migrate.js ~L268) |
 | per-file watcher | `commands/dev.js` (S152): Bun `fs.watch` per-file (not recursive-dir) to avoid inotify exhaustion; degrades gracefully on ENOSPC limit |
 | enum-subset refinement (§53.15.1) | `Role oneOf([.Admin,.Editor])` / `Role notIn([.Guest])` type annotation form (S156 (d)-A); parsed by shared `parseEnumSubsetAnnotation()` in `enum-subset-refinement.ts`; materialized as `PredicatedType` with `subsetVariants: Set<string>` (already complemented for `notIn`) in type-system.ts; three consumers: (1) match exhaustiveness narrowed to subset variants (§18.8.1 / §18.0.1); (2) `["A","B"].includes(v)` boundary check codegen in emit-predicates.ts; (3) `CHECK IN` subset in schemaFor emit-schema-for.ts. Range form `.A .. .B` is explicitly forbidden (reintroduces SPARK RPP02 union-evolution hazard) |
 | `E-MATCH-SUBSET-DEAD-ARM` | Dead arm diagnostic (S156 (d)-A): a `<match>` arm names a variant outside the declared subset — it can never be reached. Emitted by both type-system.ts (full type-resolution pass) and symbol-table.ts PASS 20 (string-based exhaustiveness pass via shared recognizer) |
@@ -101,7 +101,7 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 
 ## Domain Events / Diagnostic Codes (key runtime lifecycle)
 W-AUTH-CONTENT-NOT-GATED — emitted when `<auth role>` is used without content gating (GITI-027A)
-W-MATCH-ARROW-LEGACY — emitted (info-level) at every match / `!{}`-handler arm using deprecated `=>` or `->` separator (S147, SPEC §18.2 / §34)
+W-MATCH-ARROW-LEGACY — emitted (info-level) at every match / `!{}`-handler arm AND `derived=match` engine-decl arm using deprecated `=>` or `->` separator (S147 + S172 derived-engine locus, SPEC §18.2 / §34 / §51.0.J)
 W-EACH-PROMOTABLE — emitted (info-level) at `${ for (let x of @cell) { lift ... } }` sites eligible for `<each>` promotion (S130 HU-1, Stage 6.4c)
 W-EACH-KEY-001 — emitted (info-level) at `<each in=@cell>` sites where items have no inferable `.id` key (S130 HU-1, Stage 6.4d)
 E-DECL-NEEDS-INITIALIZER — emitted at non-array typed-decl with no RHS (S152 §6.2 Shape 4)

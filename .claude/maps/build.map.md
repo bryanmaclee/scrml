@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
 
 ## Development Commands (package.json scripts)
 
@@ -31,6 +31,7 @@
 | scripts/rebuild-self-host-dist.ts | Rebuilds self-host compiler dist |
 | scripts/bundle-size-benchmark.js | Measures emitted bundle sizes |
 | scripts/perf-regression-check.ts | Runs timing regression check against perf baseline |
+| scripts/state.ts | **DD3 project-state tool (S172, NEW +329).** `bun scripts/state.ts` prints state-at-HEAD: gap counts by severity (from `docs/known-gaps.md` `@gap` tokens), bun-test subset pass/skip/fail, version, inventory, last-N `wrap(s…)` anchors, maps-staleness. `--write` regenerates in-repo `@generated:*` sections (today: known-gaps §0 `\| Severity \| Open \|` table). `--check` is the currency gate — exit 1 on stale `@generated`; maps-staleness is WARN-only. This is the wrap step 6d generator. |
 
 ## CI/CD Pipeline
 No .github/workflows/ directory detected — no automated CI/CD configured.

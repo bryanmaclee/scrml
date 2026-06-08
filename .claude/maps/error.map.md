@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
+# updated: 2026-06-07T19:30:00Z  commit: e05dbb17
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -94,7 +94,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | W-MAP-DUPLICATE-LITERAL-KEY | 1 | **(S169 IMPLEMENTED — SPEC §59.3/§59.11, Info)** A map literal has two depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Info → result.warnings. Fired by both literal scanners [expression-parser.ts:~1485 / native-parser/parse-expr.js:~3619]. |
 | W-MAP-ITERATION-ORDER | 1 | **(S169 IMPLEMENTED — SPEC §59.8/§59.11, Info)** A non-`@ordered` map is iterated (`<each in=@m.keys()/.values()/.entries()>`) without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Info → result.warnings. Fired by `runWMapIterationOrder` [lint-w-map-iteration-order.js:~149], wired at api.js. |
 | W-MAP-STRUCT-KEY-LITERAL | 1 | **(S169 IMPLEMENTED — SPEC §59.3/§59.11, Info)** A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys (parse-accepted, codegen-deferred). Info. Fired by both literal scanners [expression-parser.ts:~1475 / native-parser/parse-expr.js:~3608]. |
-| W-MATCH-* | 6 | Match warnings — W-MATCH-ARROW-LEGACY (S147): info-level, arm-context-scoped; W-MATCH-RULE-INERT; W-MATCH-VALUE-UNUSED |
+| W-MATCH-* | 6 | Match warnings — W-MATCH-ARROW-LEGACY (S147): info-level, arm-context-scoped; **S172 (ratified S171): extended to the `derived=match` engine-decl arm locus (§51.0.J) — fires from type-system.ts ~L7931 via the raw-text `inlineMatchArmArrows[]` stamp**; W-MATCH-RULE-INERT; W-MATCH-VALUE-UNUSED |
 | W-PROGRAM-* | 4 | Program-level warnings |
 | W-PURE-REDUNDANT | 1 | Redundant `pure` modifier |
 | W-STDLIB-* | 2 | stdlib shim/compiler-deferred warnings |
