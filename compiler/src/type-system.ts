@@ -609,6 +609,139 @@ function tStruct(name: string, fields: Map<string, ResolvedType>): StructType {
   return { kind: "struct", name, fields };
 }
 
+// §14.8.8 (S175 — typed-SQL-row Tranche 2) — the compiler-internal name stamped
+// on a SQL projection-row struct by `resolveSqlRowType` (Tranche 1). `<sql-row>`
+// is NOT a user-typeable identifier (the `<`/`>` cannot appear in a type name),
+// so it is a safe, greppable PROVENANCE marker. The bounded structural
+// width-subtyping rule (§14.8.8) applies ONLY when the SOURCE is a struct
+// carrying this name (or an array of such). Every OTHER struct-to-struct path
+// stays NOMINAL (§14.8.1). This narrowness IS the design — it keeps the
+// primitive sharp (the rule does not leak into general struct assignment).
+const SQL_ROW_TYPE_NAME = "<sql-row>";
+
+/** A struct that originated from a SQL projection row (Tranche-1 provenance). */
+function isSqlProjectionRowStruct(t: ResolvedType | null | undefined): t is StructType {
+  return !!t && t.kind === "struct" && (t as StructType).name === SQL_ROW_TYPE_NAME;
+}
+
+/**
+ * Unwrap a value type down to the SQL-projection-row struct it carries, if any.
+ *
+ * Tranche 1 wraps the row per the chained method: `.all()`/bare → `Row[]`,
+ * `.get()` → `Row | not`. A consumer prop receives the per-ITEM row (the
+ * developer iterates `Row[]` or unwraps the optional), so the width-subtyping
+ * check resolves the element / non-`not` member down to the bare row struct.
+ *
+ * Returns the row StructType, or null when the type is not (or does not carry)
+ * a SQL-projection row. CONSERVATIVE: only the array-element and union-minus-not
+ * shapes Tranche 1 actually produces are unwrapped — nothing else.
+ */
+function unwrapSqlProjectionRow(t: ResolvedType | null | undefined): StructType | null {
+  if (!t) return null;
+  if (isSqlProjectionRowStruct(t)) return t as StructType;
+  if (t.kind === "array") return unwrapSqlProjectionRow((t as ArrayType).element);
+  if (t.kind === "union") {
+    // `Row | not` — pick the single non-`not` member if it is a sql-row struct.
+    for (const m of (t as UnionType).members) {
+      if (m.kind === "not") continue;
+      const row = unwrapSqlProjectionRow(m);
+      if (row) return row;
+    }
+  }
+  return null;
+}
+
+/**
+ * §14.8.8 — One width-subtyping violation: a contract field the SQL-projection
+ * row fails to satisfy (absent, or present-but-type-incompatible).
+ */
+interface WidthSubtypeViolation {
+  field: string;
+  reason: "missing" | "incompatible";
+  /** The contract's declared type for this field (for the diagnostic). */
+  targetType: ResolvedType;
+  /** The row's actual type for this field, when present (incompatible case). */
+  sourceType?: ResolvedType;
+}
+
+/**
+ * §14.8.8 (S175 — Shape C) — is a SQL-projection row `S` WIDTH-SUBTYPE-assignable
+ * to a developer-declared `:struct` contract `T`?
+ *
+ * RULE: for EVERY field `f: Tf` in `T`, `S` must have a field `f` whose type is
+ * assignable to `Tf`. EXTRA fields in `S` are ALLOWED (width-subtyping — the
+ * row may carry columns the contract does not name). Returns the list of
+ * violations (empty ⇒ assignable).
+ *
+ * BOUNDED: this is the ONLY structural-subtyping path in the type system. The
+ * caller MUST have already confirmed `S` is a SQL-projection row
+ * (`isSqlProjectionRowStruct`) and `T` is a developer-declared `:struct`
+ * contract. General struct assignment is NOMINAL (§14.8.1) and does NOT route
+ * through here.
+ *
+ * Field-type assignability is deliberately CONSERVATIVE (this is not a general
+ * subtyping lattice):
+ *   - `asIs` on EITHER side is assignable (the row degraded that column
+ *     gracefully per Tranche 1; or the contract opted out with the named
+ *     escape hatch). No false positive on a degraded column.
+ *   - a primitive is assignable to the SAME-named primitive.
+ *   - a union target `Tf` accepts the source iff the source is assignable to
+ *     ANY member (covers `string | not` optional contract fields).
+ *   - anything else compares by structural kind-equality via `fieldTypeEquals`
+ *     (no deep structural subtyping — keeps the rule sharp).
+ */
+function checkSqlRowWidthSubtype(
+  source: StructType,
+  target: StructType,
+): WidthSubtypeViolation[] {
+  const violations: WidthSubtypeViolation[] = [];
+  for (const [fname, ftype] of target.fields) {
+    const srcType = source.fields.get(fname);
+    if (srcType === undefined) {
+      violations.push({ field: fname, reason: "missing", targetType: ftype });
+      continue;
+    }
+    if (!fieldTypeAssignable(srcType, ftype)) {
+      violations.push({ field: fname, reason: "incompatible", targetType: ftype, sourceType: srcType });
+    }
+  }
+  return violations;
+}
+
+/**
+ * §14.8.8 — conservative per-field assignability for the width-subtyping rule.
+ * NOT a general subtyping relation; only the shapes a SQL-row field and a
+ * `:struct` contract field actually take.
+ */
+function fieldTypeAssignable(src: ResolvedType, target: ResolvedType): boolean {
+  // `asIs` / `unknown` on either side — assignable (graceful-degrade column, or
+  // a contract that opted out with the named escape hatch).
+  if (src.kind === "asIs" || src.kind === "unknown") return true;
+  if (target.kind === "asIs" || target.kind === "unknown") return true;
+  // Optional / union contract field — assignable iff src matches any member.
+  if (target.kind === "union") {
+    return (target as UnionType).members.some((m) => fieldTypeAssignable(src, m));
+  }
+  // `not` target accepts only `not` source.
+  if (target.kind === "not") return src.kind === "not";
+  return fieldTypeEquals(src, target);
+}
+
+/**
+ * §14.8.8 — shallow structural kind-equality for two field types. Primitives
+ * compare by name; structs/enums by nominal name; arrays by element equality;
+ * everything else by `kind`. NO deep structural subtyping.
+ */
+function fieldTypeEquals(a: ResolvedType, b: ResolvedType): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "primitive") return (a as PrimitiveType).name === (b as PrimitiveType).name;
+  if (a.kind === "struct") return (a as StructType).name === (b as StructType).name;
+  if (a.kind === "enum") return (a as EnumType).name === (b as EnumType).name;
+  if (a.kind === "array") return fieldTypeEquals((a as ArrayType).element, (b as ArrayType).element);
+  // predicated / map / state / etc — same-kind is sufficient for the bounded rule.
+  return true;
+}
+
 function tEnum(name: string, variants: VariantDef[], transitionRules: TransitionRule[] | null = null): EnumType {
   return { kind: "enum", name, variants, transitionRules };
 }
@@ -4990,6 +5123,11 @@ function checkLogicExprIdents(
   knownFnNames?: Set<string>,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
+  // §14.8.8 (T2a) — validate struct-typed member access (E-TYPE-004) at every
+  // expression site this ident-walker already covers (bare-expr, lift-expr,
+  // conditions, return, props, attr-value interpolations, …). Gated on a
+  // genuine struct-typed binding — no-op for the `asIs` default.
+  checkRowFieldAccessInExpr(exprNode, span, scopeChain, errors);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -5592,6 +5730,42 @@ function annotateNodes(
     return tArray(rowStruct);
   }
 
+  // ------------------------------------------------------------------------
+  // §14.8.8 (S175 — typed-SQL-row Tranche 2, T2a) — loop-binding row-element
+  // typing. A `for (let x of COLL)` / `<each in=COLL as x>` over a value typed
+  // `Row[]` (an array of a Tranche-1 SQL-projection-row struct) binds the
+  // iteration variable `x` to the row STRUCT — so `x.id` types `number` and
+  // `x.bogus` fires E-TYPE-004 via `checkStructFieldAccess` (wired below).
+  //
+  // BOUNDED (the design): the iteration variable is bound to a non-`asIs` type
+  // ONLY when the collection's resolved type is a SQL-projection-row array.
+  // For every OTHER collection the binding stays `asIs` — preserving today's
+  // permissive bare-iteration field access (Tranche 1 deliberately left bare-row
+  // access un-enforced). This is the SQL-row provenance gate.
+  //
+  // `iterableRaw` is the raw text after `of=`/`in=` (`@loadRows`, `rows`,
+  // `data.loadRows`, ...). We resolve only the SIMPLE leading-ident form
+  // (`name` / `@name`) against the scope chain — a member-access / call
+  // collection (`data.loadRows`, `getRows()`) is conservatively `asIs` (its
+  // element type is not reachable without expression-type inference, which is
+  // out of scope for this bounded rule). Returns the row struct, or null.
+  function resolveIterableRowElement(iterableRaw: unknown): StructType | null {
+    if (typeof iterableRaw !== "string") return null;
+    const trimmed = iterableRaw.trim();
+    // Accept a bare ident or an `@`-prefixed reactive ident, nothing else.
+    const m = /^(@?[A-Za-z_$][A-Za-z0-9_$]*)$/.exec(trimmed);
+    if (!m) return null;
+    const entry = scopeChain.lookup(m[1]);
+    if (!entry || !entry.resolvedType) return null;
+    const elem = unwrapSqlProjectionRow(entry.resolvedType);
+    // Only an ARRAY of sql-rows yields a per-item row binding for iteration.
+    // (`unwrapSqlProjectionRow` also unwraps the `.get()` optional; for
+    // iteration we require the array form specifically.)
+    if (entry.resolvedType.kind === "array" && elem) return elem;
+    return null;
+  }
+
+
   // Build a map of function name -> errorType for exhaustive !{} checking (§19.7).
   // Also builds fnCanFail (all failable functions) and fnAllDeclared (all function names)
   // for E-ERROR-002 and E-ERROR-004 checks.
@@ -6080,6 +6254,25 @@ function annotateNodes(
       // Markup element
       // ------------------------------------------------------------------
       case "markup": {
+        // §14.8.8 (S175 — typed-SQL-row Tranche 2, T2b) — cross-file typed-prop
+        // contract check. CE stamps `__propContractChecks` onto an expanded
+        // component node for each prop declared with a named `:struct` contract.
+        // Resolve the contract type (a `:struct` in the file's typeRegistry,
+        // imports merged) + the prop VALUE's type; when the value is a
+        // SQL-projection row (Tranche-1 provenance), run the BOUNDED
+        // width-subtyping check and fire E-SQL-ROW-CONTRACT-MISMATCH per
+        // unsatisfied contract field. General struct-to-struct assignment is
+        // NOMINAL and never routes here (the value must be a `<sql-row>` struct).
+        {
+          const contractChecks = (n as Record<string, unknown>).__propContractChecks as
+            | Array<{ propName: string; contractType: string; valueExprNode: unknown; span: Span }>
+            | undefined;
+          if (Array.isArray(contractChecks)) {
+            for (const chk of contractChecks) {
+              checkPropContract(chk, scopeChain, typeRegistry, errors, filePath);
+            }
+          }
+        }
         // S159 — SPEC §4.14 / §34 E-COLON-SHORTHAND-ON-VOID (S154 ruling (a)).
         // A VOID HTML element has no content model, so a `:`-shorthand body
         // (`<input : @val>`, `<br : x>`, SVG geometry `<rect : x>`, …) has no
@@ -8360,7 +8553,12 @@ function annotateNodes(
         // DestructurePattern (A5 2026-05-17), OR null for C-style headers.
         const forVar = (n as Record<string, unknown>).variable;
         if (typeof forVar === "string" && forVar.length > 0) {
-          scopeChain.bind(forVar, { kind: "variable", resolvedType: tAsIs() });
+          // §14.8.8 (T2a) — when the iterated collection is a SQL-projection
+          // `Row[]`, bind `forVar` to the row STRUCT (so `forVar.id` types and
+          // `forVar.bogus` → E-TYPE-004). Bounded to sql-row provenance; every
+          // other collection keeps the permissive `asIs` binding.
+          const _forRow = resolveIterableRowElement((n as Record<string, unknown>).iterable);
+          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs() });
         } else if (isDestructurePattern(forVar)) {
           // A5 — structural destructuring walk. Each bound name enters scope
           // as a plain `asIs` variable (same semantics as A1's regex extractor).
@@ -8456,7 +8654,11 @@ function annotateNodes(
         scopeChain.push(`each:${nodeKey(n)}`);
         const asName = (n as Record<string, unknown>).asName;
         if (typeof asName === "string" && asName.length > 0) {
-          scopeChain.bind(asName, { kind: "variable", resolvedType: tAsIs() });
+          // §14.8.8 (T2a) — `<each in=@rows as x>` over a SQL-projection `Row[]`
+          // binds `x` to the row STRUCT (parity with the for-of path above).
+          // Bounded to sql-row provenance; otherwise `asIs`.
+          const _eachRow = resolveIterableRowElement((n as Record<string, unknown>).inExprRaw);
+          scopeChain.bind(asName, { kind: "variable", resolvedType: _eachRow ?? tAsIs() });
         }
         // §59.8 / §14.11 (S169) — the 2-name positional destructure
         // `as (k, v)` on a `<each in=@m.entries()>` opener binds two locals
@@ -8937,6 +9139,143 @@ function checkNotReturn(returnType: ResolvedType, fnName: string): string | null
 // ---------------------------------------------------------------------------
 // Struct field access checker (E-TYPE-004)
 // ---------------------------------------------------------------------------
+
+/**
+ * §14.8.8 (S175 — typed-SQL-row Tranche 2, T2a) — ExprNode member-access field
+ * validation. Walks an ExprNode tree; for every `member(object=ident, property)`
+ * whose `object` ident is bound to a STRUCT type in scope, validates `property`
+ * against the struct's fields and fires E-TYPE-004 on an unknown field.
+ *
+ * This is the LIVE wire-in of struct-field-access checking (the string-based
+ * `checkStructFieldAccess` below was dormant — exported + unit-tested but never
+ * called in the pipeline). It is GATED on a genuine struct-typed binding: a
+ * loop variable bound to a SQL-projection row (T2a binds it via
+ * `resolveIterableRowElement`), or any other struct-typed local. A binding
+ * typed `asIs` (the un-contracted default) produces NO check, preserving
+ * Tranche-1's deliberately permissive bare-row field access (§14.8.7).
+ *
+ * CONSERVATIVE: only the first member hop is checked (`a.b` where `a` is a
+ * struct-typed ident). Deeper chains (`a.b.c`) check `a.b` but do not thread
+ * `a.b`'s result type — no general expression-type inference (out of scope for
+ * this bounded rule). `@`-reactive and `_`-prefixed bases are skipped (validated
+ * elsewhere / runtime-helper convention).
+ */
+function checkRowFieldAccessInExpr(
+  exprNode: unknown,
+  span: Span,
+  scopeChain: ScopeChain,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    const n = node as Record<string, unknown>;
+    if (n.kind === "member" && typeof n.property === "string") {
+      const obj = n.object as Record<string, unknown> | undefined;
+      if (obj && obj.kind === "ident" && typeof obj.name === "string"
+          && !obj.name.startsWith("@") && !obj.name.startsWith("_")
+          && !obj.name.startsWith(".")) {
+        const entry = scopeChain.lookup(obj.name);
+        const t = entry?.resolvedType;
+        if (t && t.kind === "struct") {
+          const struct = t as StructType;
+          if (!struct.fields.has(n.property as string)) {
+            const avail = [...struct.fields.keys()];
+            const label = struct.name === SQL_ROW_TYPE_NAME
+              ? "SQL projection row"
+              : `Struct type \`${struct.name}\``;
+            errors.push(new TSError(
+              "E-TYPE-004",
+              `E-TYPE-004: ${label} does not have a field named \`${n.property as string}\`. ` +
+              `Available fields: ${avail.length ? avail.join(", ") : "(none)"}.`,
+              span,
+            ));
+          }
+        }
+      }
+    }
+    // Descend into every child ExprNode-ish value so nested member accesses
+    // (call args, ternary branches, binary operands, template interpolations,
+    // object-literal values, …) are all visited.
+    for (const key of Object.keys(n)) {
+      const v = n[key];
+      if (Array.isArray(v)) {
+        for (const el of v) walk(el);
+      } else if (v && typeof v === "object" && typeof (v as Record<string, unknown>).kind === "string") {
+        walk(v);
+      }
+    }
+  };
+  walk(exprNode);
+}
+
+/**
+ * §14.8.8 (S175 — typed-SQL-row Tranche 2, T2b) — cross-file typed-prop
+ * contract check. Given one `__propContractChecks` descriptor (recorded by CE
+ * at a component instantiation), resolve:
+ *   1. the prop VALUE's type — only the simple ident / `@`-ident shape is
+ *      resolved against the scope chain (a member-access / call value is not
+ *      reachable without general expr-type inference; conservatively skipped).
+ *   2. the contract TYPE — the named `:struct` looked up in the file's
+ *      typeRegistry (imports merged in api.js seeding).
+ *
+ * The BOUNDED width-subtyping rule applies iff the value resolves to a
+ * SQL-projection row (Tranche-1 `<sql-row>` provenance) AND the contract is a
+ * declared `:struct`. On a width-subtype failure, fire one
+ * E-SQL-ROW-CONTRACT-MISMATCH per unsatisfied field. Any other shape
+ * (value not a sql-row, contract not a struct) is a NO-OP — general struct
+ * assignment stays nominal and is not checked here.
+ */
+function checkPropContract(
+  chk: { propName: string; contractType: string; valueExprNode: unknown; span: Span },
+  scopeChain: ScopeChain,
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+  filePath: string,
+): void {
+  // Resolve the contract: a named `:struct` in the type registry.
+  const contract = typeRegistry.get(chk.contractType);
+  if (!contract || contract.kind !== "struct") return; // Not a struct contract — no-op.
+
+  // Resolve the prop VALUE's type — only the simple ident / reactive-ident shape.
+  const v = chk.valueExprNode as { kind?: string; name?: string } | undefined;
+  if (!v || v.kind !== "ident" || typeof v.name !== "string") return;
+  if (v.name.startsWith(".") || v.name === "~") return;
+  const entry = scopeChain.lookup(v.name);
+  if (!entry || !entry.resolvedType) return;
+
+  // The value must carry a SQL-projection row (the bounded source). The caller
+  // passes the per-ITEM row, so unwrap a `Row[]` element / `Row | not` member.
+  const row = unwrapSqlProjectionRow(entry.resolvedType);
+  if (!row) return; // Not a sql-row — bounded rule does not apply (no-op, nominal).
+
+  const violations = checkSqlRowWidthSubtype(row, contract as StructType);
+  const span = chk.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  for (const v0 of violations) {
+    if (v0.reason === "missing") {
+      errors.push(new TSError(
+        "E-SQL-ROW-CONTRACT-MISMATCH",
+        `E-SQL-ROW-CONTRACT-MISMATCH: the SQL projection row passed to prop \`${chk.propName}\` ` +
+        `does not satisfy the \`:struct\` contract \`${(contract as StructType).name}\`: ` +
+        `the contract requires field \`${v0.field}\` (${formatTypeForDiagnostic(v0.targetType)}), ` +
+        `but the row does not project it. Add \`${v0.field}\` to the SELECT, or remove it from the ` +
+        `\`${(contract as StructType).name}\` contract (SPEC §14.8.8).`,
+        span,
+      ));
+    } else {
+      errors.push(new TSError(
+        "E-SQL-ROW-CONTRACT-MISMATCH",
+        `E-SQL-ROW-CONTRACT-MISMATCH: the SQL projection row passed to prop \`${chk.propName}\` ` +
+        `does not satisfy the \`:struct\` contract \`${(contract as StructType).name}\`: ` +
+        `field \`${v0.field}\` is ${v0.sourceType ? formatTypeForDiagnostic(v0.sourceType) : "incompatible"} ` +
+        `in the row but the contract declares it ${formatTypeForDiagnostic(v0.targetType)} (SPEC §14.8.8).`,
+        span,
+      ));
+    }
+  }
+}
 
 /**
  * Check member access expressions in a bare-expr string against the type
@@ -18814,6 +19153,13 @@ export {
   parseEnumBody,
   resolveTypeExpr,
   checkStructFieldAccess,
+  // §14.8.8 (S175 — typed-SQL-row Tranche 2) bounded width-subtyping exports.
+  checkSqlRowWidthSubtype,
+  isSqlProjectionRowStruct,
+  unwrapSqlProjectionRow,
+  checkPropContract,
+  checkRowFieldAccessInExpr,
+  SQL_ROW_TYPE_NAME,
   checkLifecycleFieldAccess,
   buildFnReturnLifecycleMap,
   checkLifecycleBindingAccess,

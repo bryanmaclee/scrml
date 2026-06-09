@@ -2409,6 +2409,44 @@ function expandComponentNode(
     resolveSnippetIfConditions(finalChildren, optionalSnippetNames, slottedGroups, parametricSnippets);
   }
 
+  // §14.8.8 (S175 — typed-SQL-row Tranche 2, T2b) — cross-file typed-prop
+  // contract metadata. For each prop declared with a developer-authored
+  // `:struct`-NAMED type (e.g. `props={ load: LoadCardRow }`) where the caller
+  // passed a value expression, record a CHECK descriptor carrying the contract
+  // TYPE NAME + the caller's value ExprNode + the call-site span. CE has the
+  // contract type STRING and the value ExprNode, but NOT resolved types; the TS
+  // stage (which resolves the value's type + the imported `:struct`) reads this
+  // sidecar in the `markup` case and runs the BOUNDED width-subtyping check
+  // (firing E-SQL-ROW-CONTRACT-MISMATCH when a SQL-projection-row value fails to
+  // width-subtype into the contract). Codegen ignores `__propContractChecks`.
+  //
+  // Bounded recording: only props whose declared type is a single bare
+  // identifier (a candidate named `:struct` — `LoadCardRow`) are recorded.
+  // Primitive / snippet / function / `asIs` / optional-`?` prop types are NOT
+  // contract checks (a primitive prop is value-passed, not a row contract). The
+  // TS side further gates on the value actually being a SQL-projection row, so a
+  // recorded non-row value simply no-ops.
+  const __propContractChecks: Array<{ propName: string; contractType: string; valueExprNode: ExprNode; span: Span }> = [];
+  for (const decl of (def.propsDecl ?? []) as PropDecl[]) {
+    if (!decl || !decl.name) continue;
+    if (decl.isSnippet) continue;                       // §14.9 snippet prop — not a row contract.
+    if (decl.bindable) continue;                        // bind: prop — primitive, §15.11.1.
+    const typeStr = typeof decl.type === "string" ? decl.type.trim() : "";
+    // A candidate `:struct` contract is a single bare PascalCase-ish identifier.
+    // Primitives (string/number/boolean), `asIs`, function types (`=>`),
+    // unions, arrays, and inline object types are NOT named-struct contracts.
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(typeStr)) continue;
+    if (typeStr === "Snippet") continue;
+    const valueExpr = propExprMap.get(decl.name);
+    if (!valueExpr) continue;
+    __propContractChecks.push({
+      propName: decl.name,
+      contractType: typeStr,
+      valueExprNode: valueExpr,
+      span: node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    });
+  }
+
   // Assign a new ID to the primary expanded node
   const expandedNode = {
     ...expanded,
@@ -2419,6 +2457,7 @@ function expandComponentNode(
     isComponent: false,
     _expandedFrom: componentName,
     ...(_bindProps.length > 0 ? { _bindProps } : {}),
+    ...(__propContractChecks.length > 0 ? { __propContractChecks } : {}),
   } as MarkupNode;
 
   // Expand secondary root nodes: prop substitution only, no attr/class/children merging

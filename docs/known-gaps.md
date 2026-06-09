@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 11 |
+| MED | 12 |
 | LOW | 21 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -58,6 +58,9 @@ Surfaced by the function-boundary recon: in `23-trucking-dispatch` callback prop
 
 ### G-SERVER-KEYWORD-DRIFT — the deprecated `server` keyword pervades the canon (spec/primer/kickstarter/corpus) — `NEW S175; LOW; migration-backlog`
 The `server` function/`@var` modifier is DEPRECATED — `route-inference.ts:3054` fires `W-DEPRECATED-SERVER-MODIFIER` ("The 'server' keyword is deprecated; remove from new code"). Placement is compiler-INFERRED via Route Inference (§12.2 Trigger 1: every `?{}`-bearing function auto-escalates to server; `route-inference.ts:344/358`). Yet `server function` still pervades the canon: **207× SPEC.md, 31× kickstarter, 7× PRIMER, 12 flagship-corpus files.** User S175 (verbatim): *"there is no explicite server function, server as a keyword was deprecated long ago, but it keeps showing up."* Surfaced when the typed-SQL-row Tranche-1 agent keyed SQL-row view-selection on `isServer === true` (the deprecated keyword, set only by `ast-builder.js` `scan.server`) — a wrong-shaped reliance (stripped pre-landing; view-selection deferred to a data-flow/return-boundary follow-on). Migration backlog: scrub `server function`→`function` across spec/primer/kickstarter/examples — the `isServer` machinery + `W-DEPRECATED-SERVER-MODIFIER` already exist, so this is corpus/doc currency, NOT a compiler change. Per `feedback_stated_intent_vs_corpus_migration`: user-voice states normative intent verbatim → corpus contradiction = migration, not open question. <!-- @gap id=g-server-keyword-drift sev=LOW status=open -->
+
+### G-SQL-ROW-TYPEFLOW — the typed SQL row is laundered before reaching cross-file consumers (the "Tranche 3" connecting middle) — `NEW S175; MED; the end-to-end gate for typed-SQL-rows`
+The typed-SQL-row arc (`g-sql-row-type`) is a 3-link chain; T1 (type the `?{}` result, landed `45bea7c5`) + T2 (the prop-contract width-subtyping mechanism + SPEC §14.8.8 + `E-SQL-ROW-CONTRACT-MISMATCH`, landed S175) built the two ENDPOINTS, but the CONNECTING MIDDLE is missing: the flagship's real data-flow LAUNDERS the row type at 3 points so neither T2a (typed prop access) nor T2b (contract check) fires on `23-trucking-dispatch` — **(i)** struct-return drops the field's `Row[]` type (`return { loadRows: rows }`, `board.scrml:69`); **(ii)** the row lands in an `asIs` state cell (`<loadRows> = []`, `:73`) so `for (let l of @loadRows)` gives `l: asIs`; **(iii)** a `?{}.all()` inside a markup `${}` block isn't row-typed (T1 wired only function-body decls + the `case "sql"`). T3 = thread the row type through **struct-return field-type propagation + state-cell SQL-row decls + markup-block `?{}` typing**. Until T3, T2's mechanism is unit-proven (18 tests) but no-ops on the flagship — the canary doctrine exactly (unit-green / empirical-flagship still `asIs`). The flagship `LoadCard` dogfood (`load: LoadCardRow`) was REVERTED at the T2 landing (don't ship an unenforced contract); re-applies with T3. Connects §14.8 / §12 (struct-return) / §6 (state cells). <!-- @gap id=g-sql-row-typeflow sev=MED status=open -->
 
 ---
 

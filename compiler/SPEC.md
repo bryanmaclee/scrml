@@ -7467,6 +7467,12 @@ type user:struct = {
 - `[KeyT: ValT]` — value-native **map** type (with an optional `@ordered` postfix affix). The bracketed `key-type : value-type` form registers as a concrete type (not a generic — scrml has no type parameters). The full key/value/iteration/equality/serialization rules live in §59 (Value-Native Maps); the key type SHALL itself be comparable (§59.4).
 - A field whose type is a **function type** (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is currently resolved as an opaque `asIs` value — the type system carries no resolved function-kind for struct fields, so the function shape is not type-checked. Such a field surfaces the info-level lint `W-TYPE-FN-FIELD` (§34, partitions to `result.warnings`). Whether function-typed struct fields are a first-class supported feature is an OPEN question (deferred); the lint surfaces the construct without deciding it. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type; only the param-paren-then-arrow shape `(...) -> RetType` (which does not end in `)`) is a function type.
 
+**Structs are assigned NOMINALLY.** Two structs with identical fields but different declared
+names are distinct types and are not interchangeable. The single, bounded exception is a SQL
+**projection row** width-subtyping into a declared `:struct` used as a component prop contract
+(§14.8.8) — that exception applies *only* to a `<sql-row>` source and a `:struct` prop target,
+and does not generalise struct assignment to structural. See §14.8.8 and §15.11.
+
 #### 14.3.1 Optional Struct Fields
 
 A struct field may be declared with a default value of `not`, making it optional at construction time:
@@ -7938,7 +7944,8 @@ view selection):**
   to that table's generated type while `SELECT *` over a JOIN, a CTE, a `UNION`, or a
   subquery-in-FROM degrades the whole row to `asIs`. Every degradation emits an info-level
   `W-SQL-ROW-UNTYPED` lint naming the untyped column(s). The cross-file structural-width
-  contract into a declared `:struct` prop (Tranche 2) is a separate, later addition.
+  contract into a declared `:struct` prop (Tranche 2, "Shape C") is specified in §14.8.8
+  (ratified S175).
 
   The read-site row is typed from the §14.8 generated (full) table type. The full/client
   view discrimination (§14.8.4) and the projection-side `E-PROTECT-001` are **DEFERRED**:
@@ -7951,6 +7958,76 @@ view selection):**
   types. Two `< db>` blocks that both list `users` in `tables=` produce two independent
   `Users` types with nominal distinctness. They are not the same type even if the underlying
   schemas are identical.
+
+#### 14.8.8 Cross-file projection-row contracts via structural width-subtyping
+
+**Added:** 2026-06-08 (S175) — ratifies the typed-SQL-row Tranche 2 ("Shape C") design.
+
+§14.8.1 establishes that generated table types are **nominal**, and §14.8.4/§14.8.7 wall
+them inside the `< db>` block ("do not exist in source text" / "SHALL NOT be accessible
+outside the `< db>` block" / "MAY NOT redeclare"). Those walls remain the default. This
+subsection carves out a **single, bounded exception**: a consumer component MAY declare a
+plain `:struct` (§14.3) as a **prop contract**, and a SQL **projection row** (the Tranche-1
+typed `?{ SELECT ... }` row of §14.8.7) **structurally width-subtypes** into that contract.
+
+**The width-subtyping rule.** A source type `S` is *width-subtype-assignable* to a declared
+`:struct` target `T` iff: for **every** field `f: Tf` in `T`, `S` has a field `f` whose type
+is assignable to `Tf`. **EXTRA fields in `S` are allowed** — the row MAY project columns the
+contract does not name. This is one-directional (the contract is a lower bound on the row's
+shape).
+
+**Boundedness (this narrowness IS the design — it keeps the primitive sharp).** The rule
+applies **ONLY** when:
+1. the SOURCE is a SQL-projection-row type (a Tranche-1 `?{ SELECT ... }` row, or its
+   per-item element after the consumer iterates a `Row[]` / unwraps a `Row | not`), **and**
+2. the TARGET is a developer-declared `:struct` used as a prop / annotation contract.
+
+General struct-to-struct assignment stays **NOMINAL** (§14.8.1) and does NOT route through
+this rule. A plain user struct whose fields happen to coincide with a row's columns is NOT
+width-subtype-assignable to anything — only a projection row is. Field-type assignability is
+conservative: an `asIs` field on either side is assignable (a graceful-degraded column per
+§14.8.7, or a contract field that opted out via the named `asIs` escape hatch); a primitive
+is assignable to the same-named primitive; a union target accepts a source assignable to any
+member (covering optional `T | not` contract fields).
+
+**Two halves.**
+- *Typed access (T2a).* When a consumer binds a projection row to an iteration variable
+  (`for (let r of rows)` / `<each in=rows as r>` over a `Row[]`), `r` is typed as the row
+  struct: `r.<projected-column>` resolves to that column's type, and `r.<unknown>` is
+  **E-TYPE-004** (§34). A binding NOT typed as a projection row (the un-contracted default)
+  performs no field check — Tranche-1's permissive bare-row access (§14.8.7) is preserved.
+- *Contract check (T2b).* When a projection-row value is passed to a component prop whose
+  declared type is a named `:struct` contract, the row is checked against the contract by the
+  width-subtyping rule. A row that fails — missing a contracted field, or projecting it with
+  an incompatible type — is **E-SQL-ROW-CONTRACT-MISMATCH** (§34, Error), one diagnostic per
+  unsatisfied field.
+
+**Worked example.** A `LoadCard` component declares the columns it reads as a contract:
+```scrml
+type LoadCardRow:struct = {
+    id: number, status: string,
+    origin_city: string, origin_state: string,
+    destination_city: string, destination_state: string,
+    commodity: string, weight_lbs: number,
+    pickup_at: string, rate_dollars: number,
+}
+export const LoadCard = <a props={ load: LoadCardRow, customerName?: string } ...>
+    ... ${load.origin_city}, ${load.origin_state} ...
+</>
+```
+A board page's `SELECT l.id, ..., l.status, c.name AS customer_name FROM loads l LEFT JOIN
+customers c ...` projects a 13-column row that carries **all ten** `LoadCardRow` fields (plus
+`customer_id`, `deliver_by`, `customer_name`), so it width-subtypes in — no diagnostic. A page
+whose SELECT omits, say, `rate_dollars` would fire `E-SQL-ROW-CONTRACT-MISMATCH` naming
+`rate_dollars` + `LoadCardRow`. Inside the component, `load.id` is typed `number` and
+`load.bogus` is `E-TYPE-004`.
+
+**Interaction with the nominal wall.** This exception does NOT make the generated table types
+themselves visible outside the `< db>` block, nor does it let developer code redeclare a
+generated type — §14.8.4/§14.8.7 are unchanged for the *generated* types. It governs only the
+direction *projection-row → developer-declared `:struct`*. The `:struct` contract is an
+ordinary user type (§14.3) that crosses files like any other (import/export). See §14.3 and
+§15.11 for the consumer-side prop declaration.
 
 ### 14.9 The `snippet` Type Kind
 
@@ -8799,6 +8876,17 @@ State projection is the scrml-native mechanism for complex structured communicat
 a parent and a component. The parent instantiates a state type, passes the instance as a
 regular prop, and the component reads and writes fields on it. The parent reacts via the
 existing reactive dependency system — no new wiring required.
+
+> **Typed read-only data props (the SQL-projection-row contract, §14.8.8).** When a parent
+> passes a SQL **projection row** (a Tranche-1 typed `?{ SELECT ... }` row) to a component for
+> *read-only display*, the component MAY declare the prop's type as a plain `:struct` (§14.3)
+> naming exactly the columns it reads — `props={ load: LoadCardRow }`. The projection row
+> **structurally width-subtypes** into that `:struct` contract (the row may carry extra
+> columns), so a single `:struct` contract is satisfied by any SELECT that projects at least
+> those columns with assignable types. A row that fails the contract fires
+> `E-SQL-ROW-CONTRACT-MISMATCH` (§34); inside the component, field access on the prop is typed
+> (unknown field → `E-TYPE-004`). This is a **read-only** display contract — for two-way
+> structured communication use a state-projection instance (below), not a row. See §14.8.8.
 
 Communication IS state, not events. The component does not call a function or dispatch an
 event; it mutates a shared state instance. The parent's reactive rendering observes field
@@ -16514,6 +16602,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PA-007 | §11.3 | `protect=` field name matches no table column | Error |
 | E-PROTECT-001 | §11.3.2 | Protected field accessed on client type | Error |
 | W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `< db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
+| E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |
 | E-PROTECT-002 | §11.3.3 | Code accessing protected field may run client-side | Error |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
