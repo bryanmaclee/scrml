@@ -1072,6 +1072,31 @@ export function splitBlocks(filePath, source) {
     return { attrRaw, selfClosing, shorthand, shorthandColonAttrOff };
   }
 
+  // R25-Bug-74 (S177) — distinguish a GENUINE `:`-shorthand body (`<span :@thing>`,
+  // `<Idle : startGame()>`) from a `:name=` DIRECTIVE attribute (`<column :let={...}>`)
+  // that merely tripped the whitespace-preceded-`:` shorthand scanner. Both set
+  // `shorthand=true`; only the genuine body is subject to the §4.14:987 closer-
+  // presence override (E-CLOSER-001). The directive form is `:` followed (after
+  // optional whitespace) by an identifier and then (after optional whitespace) by
+  // `=` — i.e. a `name=value` attribute introduced by the leading `:` (mirrors the
+  // native tag-frame `:name=` exclusion + emit-each's directive guard). Anything
+  // else after the `:` is a single-expression body. `colonOff` is the offset of the
+  // `:` within `attrRaw` (the value scanAttributes returned as `shorthandColonAttrOff`).
+  function isGenuineShorthandBodyNotDirective(attrRaw, colonOff) {
+    if (typeof attrRaw !== "string" || typeof colonOff !== "number" || colonOff < 0) {
+      // No reliable colon offset — be conservative; treat as genuine so the
+      // closer-presence override still fires (the caller already confirmed a
+      // shorthand body was recognized).
+      return true;
+    }
+    // Body text after the `:` introducer, with the trailing `/>` (or `>`) stripped.
+    let body = attrRaw.slice(colonOff + 1);
+    body = body.replace(/\/?>\s*$/, "");
+    // `:name=` directive shape: optional ws, identifier, optional ws, `=`.
+    const directive = /^\s*[A-Za-z_][A-Za-z0-9_-]*\s*=/.test(body);
+    return !directive;
+  }
+
   // ---------------------------------------------------------------------------
   // Phase A1a Step 11.0d — top-level state-decl signal peek
   //
@@ -2546,7 +2571,7 @@ export function splitBlocks(filePath, source) {
         }
 
         const isComp = isComponentName(tagName);
-        const { selfClosing, shorthand, shorthandColonAttrOff } = scanAttributes();
+        const { attrRaw: openerAttrRaw, selfClosing, shorthand, shorthandColonAttrOff } = scanAttributes();
         const lowerTagName = tagName.toLowerCase();
         // R4a (S159 — S154 ruling (a)): a GENUINE `:`-shorthand body has NO
         // closer (`<span : @label>` — no `/>`). A self-closing opener that also
@@ -2555,7 +2580,44 @@ export function splitBlocks(filePath, source) {
         // body — `selfClosing` wins. Gate the shorthand branch on `!selfClosing`
         // so only a true bodied shorthand (incl. `<br : x>` / `<input : @val>`,
         // which then reach the void-reject guard) takes this path.
-        if (shorthand && !selfClosing) {
+        // R25-Bug-74 (S177) — SPEC §4.14:987 closer-presence override: a tag
+        // that uses a `:`-shorthand body MUST NOT carry any closer (`</>`, `/`,
+        // or `/>`). When BOTH a `:`-shorthand body AND a `/>` self-closing
+        // terminator are present (`<span :@thing/>`), that is `E-CLOSER-001`
+        // ("closer present on `:`-shorthand body — choose one form"). Without
+        // this guard the `else if (selfClosing || VOID_ELEMENTS...)` branch
+        // below wins (since `!selfClosing` is false) and SILENTLY swallows the
+        // shorthand body, mis-emitting a bogus self-closing leaf and false-firing
+        // W-DG-002 on the dropped cell. This must NOT regress the `:let={...}/>`
+        // directive-prefix case (the comment block above): `:let=` (and any
+        // `:name=` directive attribute) tripped the shorthand scanner because it
+        // is whitespace-preceded `:`, but it is a directive ATTRIBUTE, not a
+        // single-expression shorthand body — that case keeps `selfClosing`
+        // winning (no E-CLOSER-001) and falls through to the self-closing branch.
+        if (shorthand && selfClosing &&
+            isGenuineShorthandBodyNotDirective(openerAttrRaw, shorthandColonAttrOff)) {
+          errors.push(new BSError(
+            "E-CLOSER-001",
+            `<${tagName}> uses a \`:\`-shorthand body but also has a closer (\`/>\`). ` +
+            `A \`:\`-shorthand body has NO closer — choose one form: write ` +
+            `\`<${tagName} : expr>\` (shorthand, no closer) OR \`<${tagName}>...</>\` ` +
+            `(bare-body with a closer) OR \`<${tagName} attrs/>\` (self-closing, no body).`,
+            { start: curPos, end: pos, line: curLine, col: curCol }
+          ));
+          // Recovery: emit the leaf as a self-closing markup so downstream stages
+          // get a usable shape (the diagnostic is already fatal — exit 1).
+          targetChildren().push({
+            type: "markup",
+            raw: source.slice(curPos, pos),
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            children: [],
+            name: tagName,
+            closerForm: "self-closing",
+            isComponent: isComp,
+            openerHadSpaceAfterLt: false,
+          });
+        } else if (shorthand && !selfClosing) {
           // R25-Bug-40 — SPEC §4.14 `:`-shorthand body: the opener carries
           // its single-expression body inside the opener (between the `:`
           // and `>`); there is NO closer. Emit as a leaf block (analogous
@@ -2895,7 +2957,21 @@ export function splitBlocks(filePath, source) {
         let look = pos + 1;
         while (look < len && /\s/.test(source[look])) look++;
         const nextNonWs = look < len ? source[look] : "";
-        const looksLikeCloser = nextNonWs === "" || nextNonWs === "<";
+        // S177 bug-4 — refine the legacy bare-`/`-closer heuristic. A bare `/`
+        // looks like a legacy closer attempt only when it stands WHERE a closer
+        // would go: at EOF, or immediately before a NEW OPENER (`<name` — the
+        // writer used `/` to close and then started a sibling/child). It is NOT
+        // a closer attempt when the very next non-ws token is a REAL CLOSE TAG
+        // (`</...` — `</>` or `</tag>`): a real closer is already present, so the
+        // `/` is unambiguously literal markup text (a trailing path slash, a
+        // standalone `… defined /</>`). Previously ANY following `<` fired,
+        // false-positiving the literal-`/`-before-close-tag case (`<li>… /</>`).
+        // The CONF-015 canonical contract is the EOF case (`<p>hello/`,
+        // `<div>content/`), which still fires; only the slash-before-close-tag
+        // over-fire is suppressed.
+        const nextIsCloseTag = nextNonWs === "<" && source[look + 1] === "/";
+        const looksLikeCloser =
+          nextNonWs === "" || (nextNonWs === "<" && !nextIsCloseTag);
         if (looksLikeCloser) {
           errors.push(new BSError(
             "E-SYNTAX-050",

@@ -476,11 +476,33 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // `_scrml_reactive_get("X")++` → `_scrml_reactive_set("X", _scrml_reactive_get("X") + 1)`.
         // Without this exclusion, `emitUnary` emits the raw `getter()++`
         // which is invalid JS (can't increment a function-call return value).
-        const exprNode = binding.handlerExprNode as { kind?: string } | undefined;
-        if (exprNode && exprNode.kind !== "assign" && exprNode.kind !== "lambda" && exprNode.kind !== "unary") {
+        const exprNode = binding.handlerExprNode as { kind?: string; target?: { kind?: string; name?: string } } | undefined;
+        // S177 s169-map-inline-insert — an INLINE map-method assign
+        // (`onclick=${@m = @m.insert(k, v)}` where `m` is a value-native map) MUST
+        // route through emitExprField, NOT the string `rewriteBlockBody` path. The
+        // string path re-emits the assign RHS VERBATIM (rewrite.ts
+        // rewriteReactiveAssign), so `@m.insert(...)` becomes a bare
+        // `_scrml_reactive_get("m").insert(...)` — but the runtime map is a plain
+        // `{ entries, ordered, order }` with NO `.insert` method (insert is the
+        // free fn `_scrml_map_insert(m, k, v)`), a TypeError at click. emitAssign
+        // (emit-expr.ts) lowers the RHS through emitExpr with ctx.mapVarNames so
+        // `@m.insert(...)` -> `_scrml_map_insert(_scrml_reactive_get("m"), ...)` —
+        // byte-identical to the named-fn handler path. The NON-map `assign`
+        // exclusion stays (engine `@phase = .X` writes keep the rewriteBlockBody
+        // engine-assign-regex arm); only a map-var assign is re-routed.
+        const isMapVarAssign =
+          !!exprNode &&
+          exprNode.kind === "assign" &&
+          !!exprNode.target &&
+          exprNode.target.kind === "ident" &&
+          typeof exprNode.target.name === "string" &&
+          exprNode.target.name.startsWith("@") &&
+          mapVarNames.has(exprNode.target.name.slice(1));
+        if (exprNode && ((exprNode.kind !== "assign" && exprNode.kind !== "lambda" && exprNode.kind !== "unary") || isMapVarAssign)) {
           // Single structured expression — use emitExprField so engine
           // `.advance(.X)` (and any other structured-only detection in
-          // emit-expr.ts) routes correctly.
+          // emit-expr.ts) routes correctly. Map-var assigns also take this path
+          // (s169-map-inline-insert) so emitAssign's map-method RHS lowering fires.
           const body = emitExprField(binding.handlerExprNode, binding.handlerExpr, {
             mode: "client",
             ...engineExprCtxExtras,

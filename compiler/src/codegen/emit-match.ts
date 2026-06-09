@@ -340,9 +340,35 @@ function resolveOnExpr(
         variantSubscribeName: null,
       };
     }
-    // Fall-through: complex expression → Shape B effect mode.
+    // Fall-through: complex expression (calls, arrows, operators — e.g.
+    // `@nums.filter(c => c == 1)`) → Shape B effect mode. S177 bug-48: lower
+    // the raw scrml expression through the ExprNode pipeline so `@cell` sigils
+    // become `_scrml_reactive_get(...)` and scrml operators (`==`, etc.) lower
+    // to their JS forms — previously this branch emitted `innerExpr` VERBATIM,
+    // leaking the `@` sigil + scrml operators into the dispatch call and
+    // tripping E-CODEGEN-INVALID-JS. The simple regex shapes above (`@ident`,
+    // `@ident.path`, `${...}`, `.Variant`) are unchanged; only this complex
+    // fall-through is now lowered. parseExprToNode + emitExpr are the same
+    // helpers the arm-body path uses (below). On parse failure, fall back to the
+    // verbatim text (defensive — preserves prior behavior for unparseable input).
+    let loweredAccessor = innerExpr;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { parseExprToNode } = require("../expression-parser.ts") as {
+        parseExprToNode: (raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }) => any;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { emitExpr } = require("./emit-expr.ts") as {
+        emitExpr: (node: any, ctx: { mode: string }) => string;
+      };
+      const filePath = (fileAST?.filePath as string | undefined) ?? `<match-on:${matchBlock.id}>`;
+      const onNode = parseExprToNode(innerExpr, filePath, 0);
+      if (onNode) loweredAccessor = emitExpr(onNode, { mode: "client" });
+    } catch (_e) {
+      // Leave loweredAccessor = innerExpr (verbatim fallback).
+    }
     return {
-      variantExprAccessor: innerExpr,
+      variantExprAccessor: loweredAccessor,
       variantSubscribeName: null,
     };
   }

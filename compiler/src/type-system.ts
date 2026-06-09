@@ -15178,6 +15178,17 @@ function walkAndExpandFormForNodes(
       if (Array.isArray(cChildren)) walkAndSplice(cChildren);
       const cBody = (child as ASTNodeLike).body as ASTNodeLike[] | undefined;
       if (Array.isArray(cBody)) walkAndSplice(cBody);
+      // S177 r27-c6 — also recurse into an engine-decl's `bodyChildren` (the
+      // engine state-children, e.g. `<Draft>`/`<Submitted>`), whose own markup
+      // `children` may host a `<formFor>`. Without this, a formFor NESTED in an
+      // engine state-child was never expanded (the formFor tag leaked raw into
+      // the output AND its compound state cell `@<lower>` was never hoisted /
+      // bound), so a `bind:value=@<cell>.field` inside the nested formFor
+      // false-fired E-SCOPE-001. The hoist target (a top-level synth logic node)
+      // is the FILE scope, which is an ancestor of the engine-arm scope the
+      // bind-site resolves against — so the lookup resolves once the cell exists.
+      const cBodyChildren = (child as ASTNodeLike).bodyChildren as ASTNodeLike[] | undefined;
+      if (Array.isArray(cBodyChildren)) walkAndSplice(cBodyChildren);
     }
   }
 
@@ -15570,6 +15581,26 @@ function _processSchemaForCallInSchemaContext(
           const recovered = _schemaForRecoverEnumSubset(clauseRaw, typeRegistry);
           if (recovered) {
             fieldType = { kind: "union", members: [recovered, { kind: "not" }] };
+          } else {
+            // S177 r28-7b — the non-`not` member is a PREDICATED PRIMITIVE base
+            // (`bio: string req length(<=200) | not`), not an enum subset, so the
+            // subset recovery above returns null and the member stays `asIs`.
+            // `classifyFieldForSql([asIs, not])` then yields no-mapping → a bogus
+            // E-SCHEMAFOR-NO-SQL-MAPPING. Recover the leading primitive token from
+            // the non-`not` portion of the raw clause (mirror the whole-field
+            // `asIs` recovery above at the start of this loop) and re-synthesize
+            // `[resolvedPrimitive, not]` so the field rides the same nullable path
+            // as the bare `string | not` control. The predicate's CHECK
+            // constraints (`length(...)`) are parsed independently from the raw
+            // clause via `parseValidatorClauses` below — they are unaffected.
+            const nonNotPortion = clauseRaw.replace(/ \|\s*not\b.*$/, "");
+            const m = nonNotPortion.match(/^\s*([A-Za-z_$][A-Za-z0-9_$]*)/);
+            if (m) {
+              const resolved = typeRegistry.get(m[1]) as { kind?: string } | undefined;
+              if (resolved) {
+                fieldType = { kind: "union", members: [resolved, { kind: "not" }] };
+              }
+            }
           }
         }
       }

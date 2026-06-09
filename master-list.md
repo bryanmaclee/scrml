@@ -85,6 +85,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `0aa54fc2` — wrap(s176): hand-off CLOSE + changelog S176 (4 arcs) + master-list test-marker (23538->23680) + 6c maps refresh (049954e0->35172d78) + 6d state-doc + handoff-180 rotation — **pushed**
 - `efdec093` — wrap(s175): 6c maps refresh (f0b3cb04->049954e0) — **pushed**
 - `26b5f1e5` — wrap(s174): hand-off CLOSE + changelog S174 + known-gaps (+4 gaps) + 6c maps refresh (642950a2->f0b3cb04) + 6d state-doc + §14.8 any->asIs currency — **pushed**
 - `9e306082` — wrap(s173): hand-off CLOSE + changelog S173 + master-list + 6c maps refresh (e05dbb17->642950a2) — **pushed**
@@ -92,7 +93,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `170424f3` — wrap(s171): orientation + doc-currency + 3 DDs (DD3 ratified) — no code change — **pushed**
 - `9b65d386` — wrap(s170): hand-off CLOSE + master-list + changelog + maps refresh (cc69c62d) — **pushed**
 - `550b8f96` — wrap(s169): hand-off CLOSE + master-list §0 + changelog + §59 banner currency (map-arc phase c COMPLETE) — **pushed**
-- `40aa63ca` — wrap(s168): hand-off CLOSE + master-list + changelog + maps refresh (map-arc Phase a+b + inspiration audit) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

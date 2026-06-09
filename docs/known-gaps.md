@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 10 |
-| LOW | 22 |
+| MED | 9 |
+| LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -46,7 +46,7 @@ SPEC §14.8.7 (`SPEC.md:7926`) mandates: a `?{ SELECT id,email FROM users }` pro
 ### G-UNKNOWN-TYPE-LEAK — an unrecognized type-name (not `any`) silently resolves to `asIs` instead of erroring — `NEW S174; MED; must-follow-soon` (the user's "2")
 After S174 enforced `E-TYPE-ANY-FORBIDDEN` for the literal `any` token, an arbitrary UNDEFINED type name still leaks: `type Bar:struct = { a: Frobnicate }` compiles with zero diagnostic (`resolveTypeExpr` unknown-type fall-through → `asIs`/`tUnknown`). Same seam as the `any` reject (`type-system.ts` type resolution) but must fire only on TRULY-undefined types (after full resolution; care re: forward-refs + cross-file types). User-committed near-term follow-on ("2 must-follow-soon"). **RESOLVED S176 (`E-TYPE-UNKNOWN-NAME`)** — closed the broad unrecognized-type-name leak as a HARD ERROR. New `checkUnknownTypeNames` driver sharing one locus-traversal with the `any`-check; position-aware leaf-base predicate `isUnrecognizedTypeNameAtom` (PascalCase-gate + registry-PRESENCE [forward-ref-safe, not kind] + import-specifier + machine-name exemptions), invoked AFTER the imported-types seed so cross-file types resolve. BROAD scope (user-ratified S176): fires at ALL leak loci — struct/error/enum/tuple decl bodies (incl. enum-variant payload types), type-alias RHS, cell/let/const annotations, fn param+return, inline-struct/array/map-value/union/snippet/lifecycle leaves — and SYMMETRICALLY extends `E-TYPE-ANY-FORBIDDEN` to the same loci (closes the latent `any`-in-enum-payload/alias-RHS leak). SPEC §14.1.2 (NEW; §14.1.1 deferral NOTE retired; §19.9.8/§42.1 parallel-shape). Map-key locus left to `E-MAP-KEY-NOT-COMPARABLE` (no double-fire). +63 tests (38 predicate + 25 e2e); corpus re-sweep (1002 .scrml) 0 migrations; PA-independent R26: 7 fires across 6 loci, flagship single-file + 36-file 0 false-fire, symmetric any 2 fires. Scope-discovery (agent-caught, in-scope): machine-typed cells (`@s: M` via machineRegistry) added to the exempt set (98 would-be false-fires). Deferred (documented): db-block explicit annotations (scope-chain db-types, zero corpus); native-parser .scrml `Span` (feature-stale, out of gate). <!-- @gap id=g-unknown-type-leak sev=MED status=resolved -->
 
-### G-COMPONENT-001-COVERAGE — `W-COMPONENT-001` (function-typed prop nudge) is vestigial — `NEW S174; LOW`
+### G-COMPONENT-001-COVERAGE — `W-COMPONENT-001` (function-typed prop nudge) is vestigial — `NEW S174; LOW; S177 R26-confirmed no-op, deferred`
 Surfaced by the function-boundary recon: in `23-trucking-dispatch` callback props are typed `asIs` (was `any`) to dodge the warning, AND `isFunctionType` (`component-expander.ts:304-306`) matches only `=>`/`(`-prefix signatures + the check doesn't fire on the `props={...}` path (`component-expander.ts:1040`). So the "props are warned" half of the passed-vs-stored rule (a function may be PASSED/warned, never STORED/error) is currently a no-op. Diagnostic-coverage bug, not a design question — a fix also raises "should `asIs`-dodging be detected." <!-- @gap id=g-component-001-coverage sev=LOW status=open -->
 
 ### G-ROUTE-ARG-FN — no symmetric non-serializable-ARGUMENT-type gate — `NEW S174; LOW`
@@ -82,6 +82,21 @@ Pre-existing UNIFORM gap surfaced by the `now()` capability work: the §48 fn-bo
 
 ---
 
+## §S177 — gaps filed S177 (2026-06-09)
+
+> Surfaced by the bug-tail 6-fix batch (R26-triage of the open registry → 6 fixes + 6 stale-open closes + 6 defer re-confirmations). This one NEW finding is the sibling gap the r27-c6 fix disclosed.
+
+### G-FORMFOR-IN-MATCH-ARM — a `<formFor>` nested in a `<match>` block-form ARM fails codegen (E-CODEGEN-INVALID-JS) — `NEW S177; MED; gate-caught (loud, not silent)`
+<!-- @gap id=g-formfor-in-match-arm sev=MED status=open -->
+
+The S177 r27-c6 fix added `bodyChildren` recursion to the formFor-expansion walker (`walkAndExpandFormForNodes`), which now ALSO reaches a `<formFor>` nested inside a `<match>` block-form arm — but the match-arm codegen path cannot yet handle the EXPANDED formFor form, so it fails with **E-CODEGEN-INVALID-JS**. **PRE-EXISTING** (broken on the pre-r27-c6 base too — not introduced, just now reachable for expansion). The engine-state-child formFor (r27-c6) is fixed; the match-arm sibling is a separate codegen fix in the match-arm emit path.
+
+- **Mitigation:** gate-caught (exit 1, LOUD) — NOT silent-wrong-output, so the adopter gets a clear error rather than broken runtime; but the legitimate composition (a form inside a match arm) doesn't work yet. A clear "formFor in match-arm not yet supported" diagnostic would beat the generic gate.
+- **Severity MED:** a real flagship-shaped composition fails; mitigated by the loud gate-catch. Disclosed by the r27-c6 agent; PA-verified pre-existing.
+- **Cross-refs:** r27-c6 (RESOLVED S177, the sibling fix); `docs/changes/bugtail-6fix-s177-2026-06-09/progress.md`.
+
+---
+
 ## §R28 — gauntlet R28 cluster (S143, 2026-05-29)
 
 **Round:** 5-persona (React/Go/Elixir/Svelte/Pascal) Content-Publishing-Platform ("Press") gauntlet. **Purpose:** first adopter stress of the S142 surfaces — errorBoundary (§19.6) + the emitted-JS parse gate (default-ON) — plus the never-tested variant-progression `transition()` path (§14.12.6.2) and the C4 object-literal probe; re-test L22 family / channels / SSE / auth / match / each / validators. **Result:** all 5 implemented 15/15 + compiled clean in-context. **Two validation wins:** errorBoundary works end-to-end (all 5; zero walls) + the parse gate caught 2 real codegen-defect classes with zero false positives. 5 PA-confirmed compiler bugs + 1 canon-fix + 1 design call + C4 re-confirmed. Overseer caught 2 dev misreports (react+svelte both misreported the transition() path). Detail: `scrml-support/docs/gauntlets/gauntlet-r28-report.md` + `gauntlet-r28/OVERSEER-REPORT.md` + `overseer-verdicts-raw.json` + the 5 dev sources/reports.
@@ -89,7 +104,7 @@ Pre-existing UNIFORM gap surfaced by the `now()` capability work: the §48 fn-bo
 | ID | Sev | Status | Bug | Root cause / note |
 |---|---|---|---|---|
 | R28-7 | HIGH | ✅ **RESOLVED S143 (4144dc30 — user chose fix-now + empty-`<td>`)** | schemaFor + tableFor now MAP `T \| not` (nullable) + `T?` sugar optional struct fields | SPEC §41.15.8a (schemaFor → nullable column = base T's column WITHOUT NOT NULL/req; explicit inverse of §14.8.3; exactly-`[T,not]` qual; nullable-enum; `req`+`\|not` conflict → nullable wins) + §41.16.6a (tableFor → value-or-EMPTY-`<td>`, guarded so never literal null/undefined — consistent with S89 `""`-is-defined) + §34 carve-outs. emit-schema-for.ts `nullableUnionBase` + emit-table-for.ts cell-guard + type-system.ts `T?`-desugar. PA R26: nullable repro compiles clean, empty-guard `?? ""` present, node-check PASS. +4 net tests. Non-`\|not` unions (`string\|integer`) still correctly error. <!-- @gap id=r28-7 sev=HIGH status=resolved --> |
-| **R28-7b** | LOW | OPEN | predicated-base-inside-union (`bio: string req length(<=200) \| not`) resolves to `[asIs, not]` (the union member loses raw-clause predicate-base recovery) → still fires `E-SCHEMAFOR-NO-SQL-MAPPING` | pre-existing resolver limitation surfaced by R28-7; NOT one of the canonical R28 nullable shapes (`string\|not`/`integer\|not`/`Status\|not`/`T?` all work). The predicate-base recovery doesn't reach inside a union member. Out of R28-7 scope; file for resolver follow-up. <!-- @gap id=r28-7b sev=LOW status=open --> |
+| **R28-7b** | LOW | ✅ **RESOLVED S177** | predicated-base-inside-union (`bio: string req length(<=200) \| not`) resolved to `[asIs, not]` losing predicate-base recovery → false `E-SCHEMAFOR-NO-SQL-MAPPING` | **RESOLVED S177 (bugtail-6fix-s177; PA-R26-verified):** the schemaFor `[asIs,not]` conflict-case now falls back to recovering the leading primitive token from the non-`not` portion when enum-subset recovery returns null, re-synthesizing `[resolvedPrimitive, not]` so the field rides the existing nullable path; the predicate CHECK constraints parse independently. `bio` lowers to a nullable column. +5 tests. <!-- @gap id=r28-7b sev=LOW status=resolved --> |
 | R28-6 | HIGH | ✅ **RESOLVED S143 (0ecfab98)** | variant-progression `transition()` enforcement DORMANT — omitting `transition()` before post-transition field access compiled exit-0 | **CORRECTED ROOT (agent Rule-4/R26 finding): the `.get()` loose-return was a red herring** — the annotation is retained end-to-end. The real gap: `checkLifecycleBindingAccess`'s `state-decl` handler `continue`d past the RHS of a reactive assignment (`@cell = … + binding.field`), never scanning it for reads of OTHER lifecycle bindings. Fix scans the reactive-assignment RHS; symmetrically closes the same dormancy for presence-progression E-TYPE-001 RHS reads. PA R26: dormant path now fires; correct path + presence-progression clean. +6 tests. SPEC §14.12.6.2/§14.12.10. <!-- @gap id=r28-6 sev=HIGH status=resolved --> |
 | R28-2 | HIGH | ✅ **RESOLVED S143 (0dbef110) — Bug 54 un-deferred + CLOSED** | tableFor `<column>` row-access broken BOTH ways: `:let={(row)=>…}` (§41.16.3) forwarded-as-HTML; `@row` (§41.16.10) → `_scrml_reactive_get("row")` | TWO root causes both closed: (1) `rewriteAtDotInExprText` now strips `@` from the exact row-binding name → loop local (emit-table-for.ts; was only handling `@.`); (2) `:let` arrow re-parsed via the §16.6 expander machinery in the type-system column walk + `let` recognized as the colon-stripped `:let` in attribute-registry.js/html-elements.js (no W-ATTR-001). Per Rule 4, §41.16.10 defers the `@row` ergonomics, NOT the silent-wrong codegen. PA R26: `:let` emits slot body; `@row` emits loop-local (0 reactive_get). +6 tests. **Deeper root deferred → R28-2b.** <!-- @gap id=r28-2 sev=HIGH status=resolved --> |
 | R28-1 | HIGH | ✅ **RESOLVED S143 (e6fb2f3d) — gate-fire closed** | `@.` each-sigil leaked raw into emitted JS for `<match on=@.field>` nested in `<each … as alias>` → gate-caught `E-CODEGEN-INVALID-JS` | `collectMatchBlocks` now threads the enclosing `<each>` iter var into nested match-blocks; `resolveOnExpr`/`rewriteAtDotInOnExpr` lowers `on=@.field` → `iterVar.field` (byte-identical to `on=alias.field`, SPEC §17.7.3). PA R26: dev-2-go reverted to `on=@.status` compiles gate-clean (0 raw `dispatch(@.`, node --check PASS). +10 tests. **NOTE: closes the GATE-FIRE only; the deeper runtime gap (module-scope dispatcher → wrong per-item value, affects BOTH `@.` and `alias.field`) is → R28-1b.** <!-- @gap id=r28-1 sev=HIGH status=resolved --> |
@@ -97,7 +112,7 @@ Pre-existing UNIFORM gap surfaced by the `now()` capability work: the §48 fn-bo
 | **R28-1b** | HIGH | ✅ **RESOLVED S143 (1d227a74)** | block-form `<match>` inside `<each>` was NOT rendered per-item (each factory dropped the `match-block` child + a module-scope dispatcher ref'd the item var out of scope) | Fix emits the match PER-ITEM inside the each factory: render/wire fns stay module-scope (item-agnostic, reused), each `<li>` creates its own mount + calls `dispatch(mountEl, article.status)` in factory scope (where `article` is bound), dispatch takes the mount as a param with per-mount dispose isolation (stored on the mount el — no last-write-wins across siblings); phantom module-scope trigger removed. emit-each.ts handler + emit-match.ts/emit-variant-guard.ts itemScopedDispatch. PA R26: no "unhandled match-block"; happy-dom 11/0 (2 items diff statuses → each renders its own arm). R28-1 test rewritten same commit (S113). <!-- @gap id=r28-1b sev=HIGH status=resolved --> |
 | **R28-1c** | MED | **RESOLVED S158 (CLASS-LEVEL via Bug 64 hybrid `0892db38`)** | same-key in-place field mutation does NOT re-render per-item `<each>` content — keyed reconciliation reuses the `<li>` node without re-running the per-item factory; a same-key item whose field changes in-place doesn't update | CONFIRMED (R26 reverse-direction) + RESOLVED as part of the Bug 64 (b)-hybrid fix: per-item text + Tier-1 class:/attr are now live-keyed `_scrml_effect`s that resolve the item via the reconcile `key→item` map; `_scrml_deep_reactive(item)` field-read subscription makes in-place field mutation re-fire the effect. PA happy-dom-verified (Tier-1 field-mutation case). See Bug 64 disposition. <!-- @gap id=r28-1c sev=MED status=resolved --> |
 | **R28-1d** | MED | ✅ NOT-REPRODUCED S147 | bare `<program>` default-logic form (no `${...}` wrap) drops `<ul>`/`<each>` | R26 reverse-direction (S147): the canonical bare-`<program>` + `<ul><each in=@items key=@.id><li : @.name>` shape emits each-wiring correctly on HEAD `f444290a` (`_scrml_reconcile_list` present). Either fixed since S143 or the original was repro-specific. Closed; re-open with the exact R28-1b dev source if it resurfaces. <!-- @gap id=r28-1d sev=MED status=resolved --> |
-| **R28-2b** | LOW | OPEN | the leading-`:` on `:let` is stripped by the tokenizer (`tokenizer.ts:763` "Unexpected char — skip"; regex `/[A-Za-z_@]/` excludes `:`) → `:let` arrives as `let` | R28-2 worked around it (accept the `let` alias) so `:let` FUNCTIONS today. A verbatim end-to-end `:let` (cohesion with `bind:`/`class:` which keep their colon mid-name) needs a tokenizer fix — broad blast radius across all leading-colon attrs; separate tokenizer dispatch. Surfaced by the R28-2 agent. <!-- @gap id=r28-2b sev=LOW status=open --> |
+| **R28-2b** | LOW | OPEN | the leading-`:` on `:let` is stripped by the tokenizer (`tokenizer.ts:763` "Unexpected char — skip"; regex `/[A-Za-z_@]/` excludes `:`) → `:let` arrives as `let` | R28-2 worked around it (accept the `let` alias) so `:let` FUNCTIONS today. A verbatim end-to-end `:let` (cohesion with `bind:`/`class:` which keep their colon mid-name) needs a tokenizer fix — broad blast radius across all leading-colon attrs; separate tokenizer dispatch. Surfaced by the R28-2 agent. **S177 R26-confirmed reproduces** (tokenizer.ts:324 START class `/[A-Za-z_@]/` excludes `:`; mid-name `:` survives via the continuation class); deferred — broad blast radius, `:let` works via the alias. <!-- @gap id=r28-2b sev=LOW status=open --> |
 | R28-4 | MED | ✅ RESOLVED S147 (`bf5ad0db`) | `E-PA-002` advertised a `?{} CREATE TABLE` resolution but the PA introspection scanner ignored `CREATE TABLE` in `?{}` blocks (top-level AND inside fn bodies) | Root: `extractCreateTableStatements` (protect-analyzer.ts) recursed ONLY `node.children`; `?{}` sql nodes live under `body` (top-level `${}` logic block + fn-decl bodies). Fix = generic cycle-safe deep-walk (skip `span`+`_`-keys, depth-cap). Message was correct; scanner was broken. PA R26: both reproducers build shadow DB exit-0; genuine-missing guard holds; +3 regression tests (nest sql under `body`). suite 43→46/0. (Companion claim — `schemaFor` DDL satisfies `<db>` introspection — remains NOT-a-bug; surfaces intentionally decoupled.) <!-- @gap id=r28-4 sev=MED status=resolved --> |
 | R28-5 | MED | ✅ **RESOLVED S151 (`cce289b4`) = C4** | `E-TYPE-001` dormant on object-literal struct construction (`const a: T = {…}; a.field`) | RESOLVED S151: Path 4 added to `collectStructBindings` (type-system.ts) reusing the existing `seedInitialFromObjectLiteral` seeder — fn-local / top-level object-literal const/let bindings now enroll in the per-access lifecycle tracker exactly like the Shape-1 / JSX-construction forms; pre-transition field read fires E-TYPE-001, post-transition clean. Enrollment-only (walker untouched), gated on `lifecycleRegistry` membership + `{`-init (no over-fire on non-lifecycle bindings), mutually-exclusive guards. Carve-outs preserved (engine-cell, discrimination). +10 tests (lifecycle-objlit-binding.test.js). reproduce→fix→verify BG workflow + independent PA-verify (E-TYPE-001 fires pre / clean post; JSX 6/6, Shape-1 87/87, carve-out 2/2; over-fire probe clean). **Disclosed NEW LOW:** struct-field walker doesn't honor `given (…is not not)` discrimination — PRE-EXISTING, not introduced (see §0 S151 note). <!-- @gap id=r28-5 sev=MED status=resolved --> |
 | R28-C1 | HIGH | ✅ **RESOLVED — server-fn part landed S144 `44d61a19`** (this row was STALE-open; verified S151); print() residual SPLIT | SPEC §14.12.6.2 (line ~8136) + PRIMER §6.5 ALREADY use `server function publish(...)` — the `server fn`→`server function` flagship fix landed at S144 `44d61a19` per user-voice; the §0 listing was stale. Verified S151 (reverse-direction: don't "fix" what's already correct). **Residual (PARKED, canon-wide):** the §14.12.6.x worked examples + kickstarter use `print()` (~15 sites across SPEC + kickstarter) which is NOT a defined scrml builtin (absent from `examples/`, `samples/`, `compiler/runtime/`, `compiler/src/codegen/`). Needs a canon decision — the correct "read/show a value" idiom in worked examples, OR confirm `print()` is an accepted JS-host (App.D) passthrough. Pervasive + uncertain → NOT a drive-by fix; own item. <!-- @gap id=r28-c1 sev=HIGH status=resolved --> |
@@ -119,10 +134,10 @@ Pre-existing UNIFORM gap surfaced by the `now()` capability work: the §48 fn-bo
 | C2 | HIGH | ✅ RESOLVED S141 (fix-wave 55666c5b) | `->`-arm value-return `match` → `/* match expression could not be compiled */ …;)` invalid JS at exit-0 | only `=>` works; PRIMER §6.2 documents `->`. Repro `/tmp/pa-r27-match.scrml`. 4 devs. <!-- @gap id=r27-c2 sev=HIGH status=resolved --> |
 | C5 | HIGH | ✅ RESOLVED S141 (fix-wave 55666c5b) | `;` inside a string in `!{}` arm → splitter breaks the string, invalid JS at exit-0 | arm-body statement-splitter not string-literal-aware. Repro `/tmp/pa-r27-semi.scrml`. dev-5. <!-- @gap id=r27-c5 sev=HIGH status=resolved --> |
 | C3 | (LOW→re-conf) | ✅ RESOLVED S141 (fix-wave 55666c5b) | bare `int` struct field → `asIs` → `E-SCHEMAFOR-NO-SQL-MAPPING` | **= Bug 45 (already filed S136 R25)** — R27 re-confirmed 5/5 + root-caused: `BUILTIN_TYPES` type-system.ts:~623 missing `int`→`integer` alias (mirror `bool`→`boolean`). 1-line. <!-- @gap id=r27-c3 sev=LOW status=resolved --> |
-| C4 | MED | OPEN | lifecycle E-TYPE-001 **dormant on object-literal-constructed struct values** (`const u: User = {…}` — the PRIMER §6.5 verbatim shape). fn-return + `<User …>` state-instantiation DO fire. | `collectStructBindings` type-system.ts:14008 has no object-literal construction path. SPEC §14.12.1/.3 normative, NO deferral caveat → real spec-vs-impl gap (flagship). NOT in fix-wave (user scope). <!-- @gap id=r27-c4 sev=MED status=open --> |
+| C4 | MED | ✅ **RESOLVED S151 (`cce289b4`) — stale-open, re-marked S177** | lifecycle E-TYPE-001 **dormant on object-literal-constructed struct values** (`const u: User = {…}` — the PRIMER §6.5 verbatim shape). fn-return + `<User …>` state-instantiation DO fire. | Closed by `cce289b4` "fix(s151): C4/R28-5 — object-literal lifecycle E-TYPE-001 dormancy" (Path 4 in collectStructBindings + fixture lifecycle-objlit-binding.test.js); SAME root as the S151-resolved R28-5. **S177 R26-verified:** the reproducer now FIRES E-TYPE-001 on the pre-transition read (exit 1). Entry was simply never re-marked from OPEN. <!-- @gap id=r27-c4 sev=MED status=resolved --> |
 | C7 | MED | ✅ RESOLVED S142 (errorBoundary build `f3e9039d`) | errorBoundary was effectively UNIMPLEMENTED (inert marker — not just "inert anchor"). Built from-scratch to the ratified §19.6 + C-hybrid model: typed `!`-error catch → per-variant `renders` / boundary `fallback=` (priority §19.6.5) + compiler-emitted host-JS backstop for non-`!` throws (§19.6.8) + E-ERROR-005 static exhaustiveness + §19.6.4 nesting + SPEC §19.6.8 amendment. **ALSO closes the R24-step-3b errorBoundary direction-call** (ratified §19.6 + C-hybrid catch-scope, S142) **+ the errorBoundary canon-vs-impl drift** (PRIMER §6 + kickstarter `renders=.Fallback`/auto-synth/§19.11-cite → §19.6 `fallback=` + per-variant-renders form). PA dual-verify: full suite 22,153/0 gate-default-ON; happy-dom both paths (typed + backstop) + 7 conformance. <!-- @gap id=r27-c7 sev=MED status=resolved --> |
-| C6 | MED | OPEN | `bind:value=@<synth>.<field>` → E-SCOPE-001 ONLY when formFor nested in an engine state-child (works top-level; `isValid` read works both) | synth-cell scope registration doesn't propagate into engine-state-child scope. dev-4 probe. <!-- @gap id=r27-c6 sev=MED status=open --> |
-| C8 | LOW | OPEN | `@map[.Variant]` subscript → silent invalid JS `[.Submitted]` (no diagnostic) | **Primary cause was a BRIEF-error** (R27 feature-7 prescribed a non-canonical subscript; §14.10 → dot-access `@map.Submitted` is canonical). LOW compiler-bug = the missing diagnostic (silent invalid JS vs clean rejection). <!-- @gap id=r27-c8 sev=LOW status=open --> |
+| C6 | MED | ✅ **RESOLVED S177** | `bind:value=@<synth>.<field>` → E-SCOPE-001 ONLY when formFor nested in an engine state-child (works top-level) | **RESOLVED S177 (bugtail-6fix-s177; PA-R26-verified). ROOT DIFFERED from the filed hypothesis:** not a scope-registration gap — the formFor was NEVER EXPANDED (`walkAndExpandFormForNodes` didn't recurse into engine-decl `bodyChildren`), so the raw `<formFor>` leaked + `@newExpense` was never hoisted → E-SCOPE-001. Fix = one additive `bodyChildren` recursion in type-system.ts. Nested formFor now expands + binds; compiles clean. +4 tests. **Disclosed sibling → `g-formfor-in-match-arm` (NEW, §S177).** <!-- @gap id=r27-c6 sev=MED status=resolved --> |
+| C8 | LOW | ✅ **RESOLVED-BY-GATE — re-marked S177** | `@map[.Variant]` subscript → ~~silent invalid JS~~ now LOUD | **Primary cause was a BRIEF-error** (R27 feature-7 prescribed a non-canonical subscript; §14.10 → dot-access `@map.Submitted` is canonical). The filed defect was *silent* invalid JS; **S177 R26-verified** the emitted-JS parse gate (E-CODEGEN-INVALID-JS, default-ON S142 `db88e989`) now catches `[.Submitted]` LOUDLY (exit 1, zero artifacts). Residual (deferred, cosmetic): a dedicated subscript-key diagnostic would beat the generic gate — low-value polish; dot-access is canonical + works. <!-- @gap id=r27-c8 sev=LOW status=resolved --> |
 | C9 | LOW | ✅ RESOLVED S147 (`07655674`) | E-DG-002 false-positive: state read only inside a derived `.filter()` arrow flagged "never consumed" | Closed with S146 match-DG as the E-DG-002 false-positive CLASS. Root: the shared `forEachIdentInExprNode` stops at the lambda scope boundary (lin-capture). Fix = DG-local `collectLambdaBodyReactiveRefs` descends lambda bodies for reader-credit only (shared helper NOT widened — preserves lin semantics). Guard: genuine-unused still fires. +8 tests. Sibling residual surfaced: `<` inside a markup-region lambda body parse-truncates → E-DG-002 false-fires on the post-`<` cell as a SYMPTOM (tokenizer `<`-disambiguation; separate follow-up). <!-- @gap id=r27-c9 sev=LOW status=resolved --> |
 **Strategic — emitted-JS parse gate BUILT + RATIFIED (A+D), S141** (`scrml-support/docs/deep-dives/emitted-js-parse-gate-invariant-2026-05-29.md` + `scrmlTS/docs/changes/gate-emitted-js-parse-invariant-2026-05-29/`). All 5 devs' unprompted #1 ask. Landed FLAG-GATED (`validateEmit` compile option, default OFF; in-process Acorn `E-CODEGEN-INVALID-JS` backstop over final artifacts + `E-CG-003` D-conversion of the last silent-stub match site; SPEC §2.2.1 + §34). Perf admits always-on (~24ms on the 8433-line trucking-dispatch reference, ~1-2% of compile). **First run caught 16 pre-existing invalid-JS artifacts in `examples/` (C10/C11 below) — the gate works.** Flips to always-on (+ a `--validate-emit` CLI flag) once that backlog closes. Complementary to the individual C1/C2/C5 fixes. **[S142 UPDATE: backlog CLOSED — gate FLIPPED DEFAULT-ON; the gate is now a compile-time invariant by default. See ✅ Gate status + §GATE-FOUND-RESIDUALS (all resolved) below.]**
 
@@ -924,7 +939,9 @@ Major families shipped S108-S109: grid / flex / aspect / transition / timing / i
 
 ---
 
-### Bug 12 — V-kill READ-side fire — `deferred`
+### Bug 12 — V-kill READ-side fire — `deferred; S177 R26-confirmed reproduces`
+
+> **S177:** R26-verified the bare `@undecl` read still silently propagates to codegen (`_scrml_reactive_get("undecl")`, no E-STATE-UNDECLARED — symbol-table.ts:2274 only handles the pinned-forward-ref case). Stays deferred: firing it now false-positives across the engine corpus (the `<machine name=UI>` register-as-`UI` vs `@ui`-read normalization must land first); not adopter-visible under V5-strict.
 <!-- @gap id=bug-12-vkill sev=MED status=open -->
 
 S123 V-kill landed write-side enforcement (`@x = expr` at default-logic body-top fires `E-WRITE-NOT-IN-LOGIC-CONTEXT`). The READ-side fire (rejecting bare `@x` reads against undeclared cells inside `${...}` bodies) is deferred — the engine var-name canonicalization machinery is the unblocker.
@@ -1184,12 +1201,14 @@ Original symptom: W-LINT-007 ghost-pattern lint fired on `<errorBoundary fallbac
 ## §3 LOW — ergonomic / cosmetic
 
 <!-- §0-only LOW entries (no `### ` header; tracked in the §0 LOW Closed-this-arc cell) -->
-<!-- @gap id=s169-map-inline-insert sev=LOW status=open -->  <!-- inline onclick=${@m=@m.insert(...)} map-assign RHS not lowered (S169 map-arc) -->
+<!-- @gap id=s169-map-inline-insert sev=LOW status=resolved -->  <!-- RESOLVED S177 (bugtail-6fix-s177): inline map-assign handler now routes through emitExprField→emitAssign, emits _scrml_map_insert (PA R26-verified); +4 tests -->
 <!-- @gap id=s169-ordered-unordered-build sev=LOW status=open -->  <!-- @ordered cell built UNORDERED from a [:] literal (S169 map-arc; documented §59 v1 limit) -->
 
 
-### Bug 74 — `/>` + `:`-shorthand on an HTML element fires E-DG-002, not E-CLOSER-001 — `spec-vs-impl divergence` (S160, PRE-EXISTING)
-<!-- @gap id=bug-74 sev=LOW status=open -->
+### Bug 74 — `/>` + `:`-shorthand on an HTML element fires E-DG-002, not E-CLOSER-001 — `RESOLVED S177`
+<!-- @gap id=bug-74 sev=LOW status=resolved -->
+
+**RESOLVED S177 (bugtail-6fix-s177-2026-06-09; PA-independent-R26-verified).** `<span :@thing/>` now fires **E-CLOSER-001** (§4.14:982 closer-presence override) via a new `isGenuineShorthandBodyNotDirective` guard in block-splitter.js that distinguishes a genuine `:`-shorthand body from a `:let={...}/>` directive (which still correctly takes the self-closing path, no E-CLOSER-001). Canonical `<span :@thing>` stays clean. +5 tests.
 
 SPEC §4.14 line 982 specifies that a closer (`</>`, `/`, OR `/>`) present alongside a `:`-shorthand body is **E-CLOSER-001** (choose one form). The impl does NOT fire E-CLOSER-001 for the self-closing `/>` case on an HTML element — `<span :@thing />` instead surfaces **E-DG-002** (the cell "declared but never consumed", because the `/>` short-circuits the body emit). PRE-EXISTING on the S159 HTML-element `:`-shorthand path (ruling (b) S160 explicitly said "no change to `/>` handling", so this was out of (b)'s scope). Surfaced + characterized by the (b) dispatch.
 
@@ -1198,15 +1217,19 @@ SPEC §4.14 line 982 specifies that a closer (`</>`, `/`, OR `/>`) present along
 
 ---
 
-### Bug 75 — after-`>` ENGINE `:`-shorthand fails E2E at the block-splitter — `pre-existing; now-deprecated form` (S160)
+### Bug 75 — after-`>` ENGINE `:`-shorthand fails E2E at the block-splitter — `pre-existing; now-deprecated form (S160); KEEP-OPEN (user ruling S177)`
+
+> **S177 user ruling — KEEP OPEN (real bug, not wontfix):** a DEPRECATED form should compile-with-warning during its deprecation window (`W-COLON-SHORTHAND-LEGACY-PLACEMENT`), NOT hard-fail at the block-splitter with `E-STRUCTURAL-ELEMENT-MISPLACED`. The after-`>` engine `:`-shorthand stays a real bug to fix (make the engine after-`>` placement reach `parseEngineStateChildren` so the lint fires + the body compiles, byte-identical to the inside-opener form) until end-of-window promotes the lint to an error.
 <!-- @gap id=bug-75 sev=LOW status=open -->
 
 The legacy after-`>` `:`-shorthand placement on an **engine** state-child (`<Idle rule=.X> : "..."`) fails end-to-end at the block-splitter with **E-STRUCTURAL-ELEMENT-MISPLACED** — the parser parses it but the block-splitter rejects the shape. PRE-EXISTING (the after-`>` engine form never worked E2E). The now-canonical **inside-opener** engine form (`<Idle rule=.X : "...">`, S160 ruling (b)) WORKS E2E — net improvement. Consequence: the engine after-`>` `W-COLON-SHORTHAND-LEGACY-PLACEMENT` lint is parser-verified (the entry carries `legacyColonPlacement:true`) but only E2E-fires where after-`>` body text reaches `parseEngineStateChildren`; the MATCH locus after-`>` IS E2E-proven (lint fires + byte-identity). Low priority — after-`>` is deprecated; the canonical form works.
 
 ---
 
-### Bug 4 — Bare `/` in markup-text body parses as element closer — `spec'd`
-<!-- @gap id=bug-4 sev=LOW status=open -->
+### Bug 4 — Bare `/` in markup-text body parses as element closer — `RESOLVED S177`
+<!-- @gap id=bug-4 sev=LOW status=resolved -->
+
+**RESOLVED S177 (bugtail-6fix-s177-2026-06-09; PA-independent-R26-verified + Rule-4 SPEC-checked).** The `looksLikeCloser` heuristic now fires only where a bare `/` sits in a scrml8-closer position — at EOF or before a NEW OPENER (`<name`) — NOT before a real CLOSE TAG (`</...`), where an explicit closer is already present so the `/` is literal text (SPEC §4 L13832: "the bare `/` no longer has syntactic significance"). Reproducer `<li>… defined /</>` compiles clean; genuine `/`-at-EOF (CONF-015 canonical) + `/`-before-new-opener still fire E-SYNTAX-050. TWO unit tests that had LOCKED the over-fire (`<p>hi/</p>`→fires) were corrected to the spec-faithful semantic (the locked-tests-lock-spec-divergent-behavior case, pa.md Rule 4). +7 tests + both-direction guards.
 
 The `?{` half closed S108 via Approach C-narrow (markup-text-mode locus gate per SPEC §3.1 + §8.1). Bare `/` half remains open. Writing scrml-about-scrml prose where `/` appears in text (e.g., "`""` / `0` / `[]` are all defined values") can still confuse the BS-layer's `looksLikeCloser` heuristic in edge cases.
 
@@ -1242,8 +1265,10 @@ The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). Th
 
 ---
 
-### Bug 21 — Q6-narrow heuristic: deep multi-level reset on nested compound — `heuristic` (S135)
+### Bug 21 — Q6-narrow heuristic: deep multi-level reset on nested compound — `heuristic; S177 R26-confirmed, deferred`
 <!-- @gap id=bug-21 sev=LOW status=open -->
+
+**S177 R26 re-verify (stays OPEN, deferred):** runtime codegen is CORRECT (`_scrml_reset("a.b.c")` + deep-set emitted); the missing-revert symptom is currently UNREACHABLE because Tracker 2 doesn't track nested-compound deep lifecycle fields at all. A real fix needs deep-field-tracking groundwork in `checkLifecycleFieldAccess`, not just changing `fieldPath[0]` — not worth it absent adopter friction. Kept open as a benign known-limitation.
 
 `reset(@a.b.c)` where `b` is itself a compound state with its own lifecycle-annotated fields: Q6-narrow's `applyResetToCellField` walker conservatively uses `fieldPath[0]` — the first hop after the cell root — for tracker classification. The §6.8.2 B22 ratification supports deeper compound-nav targets, but the canonical scrml idiom is one hop deep (per the §6.8.2 worked examples). Deeper nesting works at runtime via the existing `_scrml_reset` codegen; only the per-access tracker's state revert is shallow.
 
@@ -1253,7 +1278,7 @@ The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). Th
 
 ---
 
-### Bug 22 — Q6-narrow heuristic: cross-cell `default=@otherCell` reset value classification — `heuristic` (S135)
+### Bug 22 — Q6-narrow heuristic: cross-cell `default=@otherCell` reset value classification — `heuristic (S135); S177 R26-confirmed, deferred`
 <!-- @gap id=bug-22 sev=LOW status=open -->
 
 `<state default=@otherCell>: (not to User) = not` — when `reset(@state)` evaluates `@otherCell` as the reset value, `classifyResetValueAgainstSpec` heuristically treats any non-`not` text as post-type for presence-progression. If `@otherCell` is itself in a pre-state at the reset moment, the heuristic misclassifies. The actual cross-cell type-check happens at the assignment site (`@state = @otherCell` would route through `classifyWriteAgainstSpec` properly); the heuristic only affects whether the per-access tracker reverts vs maintains state immediately after the reset.
@@ -1313,8 +1338,10 @@ Captured group still binds the ROOT identifier (which keys into the bindings map
 
 ---
 
-### Bug 26 — `${...}` inside `function probe() { ... }` body emits E-SCOPE-001 for `$` — `LOW` (S135)
-<!-- @gap id=bug-26 sev=LOW status=open -->
+### Bug 26 — `${...}` inside `function probe() { ... }` body emits E-SCOPE-001 for `$` — `RESOLVED S139; re-marked S177`
+<!-- @gap id=bug-26 sev=LOW status=resolved -->
+
+**RESOLVED — stale-open, re-marked S177 (R26-verified clean on HEAD `0aa54fc2`, exit 0).** Closed by the S139 block-splitter `${}`-span repairs (`da4ffd1a` "BS gobbles whole Shape 2 decl span" + `22015568` "BS-batch v2 — 3 residual ${} wrapper shapes"); a `${...}` inside a bare `function` body now compiles with zero E-SCOPE-001. The entry was never re-marked.
 
 A `${...}` block placed inside a bare `function name() { ... }` body emits an unexpected `E-SCOPE-001` diagnostic for the leading `$` character. The `${` token gets preprocessed differently inside function bodies vs at structural positions. Unrelated to the silent-swallow class that S135 structural-in-logic landing closed — surfaced as a Phase 0 probe side-finding.
 
@@ -1324,8 +1351,10 @@ A `${...}` block placed inside a bare `function name() { ... }` body emits an un
 
 ---
 
-### Bug 27 — `tryParseStructuralDecl` extra lookahead on structural-element compound forms — `cleanup` (S135)
-<!-- @gap id=bug-27 sev=LOW status=open -->
+### Bug 27 — `tryParseStructuralDecl` extra lookahead on structural-element compound forms — `NOT-A-BUG (correct behavior); re-marked S177`
+<!-- @gap id=bug-27 sev=LOW status=resolved -->
+
+**NOT-A-BUG — re-marked S177 (R26-verified on HEAD `0aa54fc2`).** The reproducer fires the CORRECT `E-STRUCTURAL-ELEMENT-MISPLACED` (exit 1) — no observable misbehavior; the entry self-classified "Not a bug." Only the wasted-lookahead cost remains (an optional micro-optimization deferred absent a parser-perf signal). Closed as not-a-bug to remove it from the live count.
 
 `tryParseStructuralDecl` enters the compound-state-decl branch when it sees `<schema><users>...` (treating it as a potential compound state-decl with field `users`), then rewinds when the child `<users>` doesn't have an `=` RHS. Works correctly (the rewind handles it; the parent eventually emits `E-STRUCTURAL-ELEMENT-MISPLACED` per the S135 structural-in-logic fix) but does extra lookahead work that could be short-circuited by checking the leading-tag name against the structural-element registry FIRST.
 
@@ -1348,8 +1377,10 @@ A `${...}` block placed inside a bare `function name() { ... }` body emits an un
 
 ---
 
-### Bug 34 — Shape-2 compound markup-init emits empty 2nd arg to `_scrml_reactive_set` — `LOW` (S136 R24)
-<!-- @gap id=bug-34 sev=LOW status=open -->
+### Bug 34 — Shape-2 compound markup-init emits empty 2nd arg to `_scrml_reactive_set` — `RESOLVED; re-marked S177`
+<!-- @gap id=bug-34 sev=LOW status=resolved -->
+
+**RESOLVED — stale-open, re-marked S177 (R26-verified on HEAD `0aa54fc2`, exit 0, valid JS).** The emitted 2nd arg is now a conservative `null` placeholder (`atom-emitter.ts:208`), NOT empty — `_scrml_reactive_set("newTicketForm.title", null)` (`node --check` clean). Closed by the structural-compound init-emission hardening (most-likely sibling `72aa6836` Bug B). The empty-2nd-arg / invalid-JS symptom is gone; the input-default threading nuance (null vs "") is a separate, unfiled low-value want.
 
 A Shape-2 compound state cell like `<form><title>= <input type="text"/></form>` (compound with markup init on a field) emits `_scrml_reactive_set("newTicketForm.title", )` — the 2nd argument is empty. Surfaced by dev-4-pascal overseer.
 
@@ -1362,8 +1393,10 @@ A Shape-2 compound state cell like `<form><title>= <input type="text"/></form>` 
 
 ---
 
-### Bug 45 — `int` ghost type silently resolves to `asIs` (causes downstream `E-SCHEMAFOR-NO-SQL-MAPPING`) — `LOW` (S136 R25; 4/4 devs)
-<!-- @gap id=bug-45 sev=LOW status=open -->
+### Bug 45 — `int` ghost type silently resolves to `asIs` (causes downstream `E-SCHEMAFOR-NO-SQL-MAPPING`) — `RESOLVED S141 (= R27-C3); re-marked S177`
+<!-- @gap id=bug-45 sev=LOW status=resolved -->
+
+**RESOLVED — stale-open, re-marked S177 (R26-verified clean on HEAD `0aa54fc2`, exit 0).** Closed by `2f29cb90` "fix(s141 r27-wave): C1/C2/C3/C5 + int-alias" — option (a) landed: `["int", tPrimitive("integer")]` added to `BUILTIN_TYPES` (type-system.ts:939). `schemaFor` on a struct with `int` fields now compiles clean; no E-SCHEMAFOR-NO-SQL-MAPPING. SAME fix that resolved R27-C3 (RESOLVED row above); this duplicate entry was never re-marked.
 
 `int` is used in struct field type position by kickstarter §6.1 examples (`age: int(>=18)`), PRIMER §6.5 example (`id: int`), AND the R25 BRIEF. ALL 4 R25 devs reached for `int`. Compiler's `BUILTIN_TYPES` only has `integer` and `number` — `int` falls through to `asIs` (any-type) silently, then `schemaFor(StructType)` breaks with a confusing downstream `E-SCHEMAFOR-NO-SQL-MAPPING: ... declared type (asIs) has no v1.0 SQL mapping`. The actual root cause ("unknown type name `int`") is not surfaced at the struct-field-type declaration site.
 
@@ -1515,8 +1548,10 @@ The `selectable=@selectedIds` (reactive-ref form) triggers a synth onchange hand
 
 ---
 
-### Bug 48 — Latent paren/bracket-depth gap in sibling `<match>` / `<machine>` / `<engine>` opener finders — `LOW; latent` (S137 — surfaced by Bug 37 agent investigation)
-<!-- @gap id=bug-48 sev=LOW status=open -->
+### Bug 48 — Latent paren/bracket-depth gap in sibling `<match>` / `<machine>` / `<engine>` opener finders — `RESOLVED S177`
+<!-- @gap id=bug-48 sev=LOW status=resolved -->
+
+**RESOLVED S177 (bugtail-6fix-s177-2026-06-09; PA-independent-R26-verified).** Ported the Bug-37 parenDepth+bracketDepth tracking to the 3 sibling opener-finders + 2 on=-capture loops in ast-builder.js. The brief was UNDER-SCOPED — the `<match>` reproducer ALSO needed a SECOND, unnamed locus: emit-match.ts `resolveOnExpr` fall-through emitted the complex `on=` expression VERBATIM (leaking `@nums` + `==`); now it lowers via parseExprToNode+emitExpr (the arm-body path's helpers, verbatim fallback on parse-fail). Both fixed. `<match on=@nums.filter(c => c == 1)>` compiles clean (emits `_scrml_reactive_get("nums").filter((c) => _scrml_structural_eq(c, 1))`). +4 tests.
 
 Same-shape bug class surfaced by the R25-Bug-37 dispatch agent (`1ce963d0`). Bug 37 fixed `_findEachOpenerEnd` in `compiler/src/ast-builder.js` by adding `parenDepth` + `bracketDepth` tracking alongside the existing braces+quotes tracking. THREE sibling finders in the same file have the same braces+quotes-only shape and would fail the same way under an inline-arrow-in-attribute-value adopter pattern:
 

@@ -11958,6 +11958,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // doesn't truncate the header).
         function _findMatchOpenerEnd(s) {
           let depth = 0;
+          let parenDepth = 0;
+          let bracketDepth = 0;
           let inDQ = false;
           let inSQ = false;
           for (let i = 0; i < s.length; i++) {
@@ -11968,7 +11970,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === "'") { inSQ = true; continue; }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
-            if (c === ">" && depth === 0) return i;
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
           }
           return -1;
         }
@@ -12000,6 +12006,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           const afterEq = header.slice(onPos).replace(/^\bon\s*=\s*/, "");
           let end = afterEq.length;
           let depth = 0;
+          // S177 bug-48 — track paren + bracket depth too, so a `>` and a
+          // whitespace boundary INSIDE an `=>` arrow / call-arg `(...)` / `[...]`
+          // (e.g. `on=@nums.filter(c => c == 1)`) is NOT mis-read as the opener's
+          // `>` or as an attribute boundary (the `c == 1` arrow body would
+          // otherwise look like a `c=` attribute and truncate the capture).
+          let parenDepth = 0;
+          let bracketDepth = 0;
           let inDQ = false;
           let inSQ = false;
           for (let i = 0; i < afterEq.length; i++) {
@@ -12010,7 +12023,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === "'") { inSQ = true; continue; }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
-            if (depth === 0 && /\s/.test(c)) {
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (depth === 0 && parenDepth === 0 && bracketDepth === 0 && /\s/.test(c)) {
               let j = i;
               while (j < afterEq.length && /\s/.test(afterEq[j])) j++;
               if (j < afterEq.length && /[A-Za-z_$]/.test(afterEq[j])) {
@@ -12756,6 +12773,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // region) to find the actual closing `>` of the opener.
         function _findOpenerEnd(s) {
           let depth = 0;
+          let parenDepth = 0;
+          let bracketDepth = 0;
           let inDQ = false;
           let inSQ = false;
           for (let i = 0; i < s.length; i++) {
@@ -12766,7 +12785,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === "'") { inSQ = true; continue; }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
-            if (c === ">" && depth === 0) return i;
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
           }
           return -1;
         }
@@ -13183,6 +13206,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // doesn't truncate the header).
         function _findMatchOpenerEnd(s) {
           let depth = 0;
+          let parenDepth = 0;
+          let bracketDepth = 0;
           let inDQ = false;
           let inSQ = false;
           for (let i = 0; i < s.length; i++) {
@@ -13193,7 +13218,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === "'") { inSQ = true; continue; }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
-            if (c === ">" && depth === 0) return i;
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
           }
           return -1;
         }
@@ -13226,6 +13255,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           const afterEq = header.slice(onPos).replace(/^\bon\s*=\s*/, "");
           let end = afterEq.length;
           let depth = 0;
+          // S177 bug-48 — track paren + bracket depth too, so a `>` and a
+          // whitespace boundary INSIDE an `=>` arrow / call-arg `(...)` / `[...]`
+          // (e.g. `on=@nums.filter(c => c == 1)`) is NOT mis-read as the opener's
+          // `>` or as an attribute boundary (the `c == 1` arrow body would
+          // otherwise look like a `c=` attribute and truncate the capture).
+          let parenDepth = 0;
+          let bracketDepth = 0;
           let inDQ = false;
           let inSQ = false;
           for (let i = 0; i < afterEq.length; i++) {
@@ -13236,9 +13272,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === "'") { inSQ = true; continue; }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
             // Attribute boundary: whitespace followed by ident-start-char + `=`
             // at depth 0. Look ahead.
-            if (depth === 0 && /\s/.test(c)) {
+            if (depth === 0 && parenDepth === 0 && bracketDepth === 0 && /\s/.test(c)) {
               let j = i;
               while (j < afterEq.length && /\s/.test(afterEq[j])) j++;
               if (j < afterEq.length && /[A-Za-z_$]/.test(afterEq[j])) {

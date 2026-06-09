@@ -155,10 +155,37 @@ describe("§6: bare-`/` heuristic still works without string-mode protection", (
     expect(errors).toEqual([]);
   });
 
-  test("`<p>hello/</p>` — bare `/` followed by `<` still fires E-SYNTAX-050 (regression guard)", () => {
+  // S177 bug-4 — the legacy bare-`/`-closer heuristic was REFINED: a `/`
+  // immediately before a REAL CLOSE TAG (`</...`) is literal text, NOT a closer
+  // attempt (a real closer is already present). Only `/` at EOF or `/` before a
+  // NEW OPENER (`<name`) still fires. The CONF-015 canonical contract (EOF) is
+  // preserved (see §6b below); the slash-before-close-tag over-fire is gone.
+  test("`<p>hello/</p>` — bare `/` before a CLOSE tag is literal text (S177 bug-4, was over-firing)", () => {
     const { errors } = split("<p>hello/</p>");
     const e050 = errors.find((e) => e.code === "E-SYNTAX-050");
-    expect(e050).toBeDefined();
+    expect(e050).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6b: bare-`/` heuristic still fires for the GENUINE legacy-closer shapes
+//       (EOF + before-new-opener) — S177 bug-4 regression guards
+// ---------------------------------------------------------------------------
+
+describe("§6b: bare-`/`-closer still flagged for genuine legacy shapes (S177 bug-4)", () => {
+  test("`<p>hello/` — `/` at EOF still fires E-SYNTAX-050 (CONF-015 canonical)", () => {
+    const { errors } = split("<p>hello" + "/");
+    expect(errors.some((e) => e.code === "E-SYNTAX-050")).toBe(true);
+  });
+
+  test("`<div>content/<li>x</li></div>` — `/` before a NEW OPENER still fires E-SYNTAX-050", () => {
+    const { errors } = split("<div>content/<li>x</li></div>");
+    expect(errors.some((e) => e.code === "E-SYNTAX-050")).toBe(true);
+  });
+
+  test("`<li>… defined /</>` — `/` before a generic close `</>` is literal (bug-4 reproducer)", () => {
+    const { errors } = split("<li>The values \"\" / 0 / [] are all defined /</>");
+    expect(errors.some((e) => e.code === "E-SYNTAX-050")).toBe(false);
   });
 });
 
