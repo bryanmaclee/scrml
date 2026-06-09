@@ -11,6 +11,30 @@
 ${
     import { LoadStatusBadge } from './load-status-badge.scrml'
 
+    // §14.8.8 (typed-SQL-row Tranche 3 — Shape C) — the cross-file typed-prop
+    // contract for the `load` prop. board.scrml's SQL projection row (SELECT
+    // l.id, .., l.status, c.name AS customer_name FROM loads l LEFT JOIN
+    // customers c) structurally WIDTH-subtypes into this `:struct`: the row
+    // carries >= these fields, each row field's type is assignable, and the
+    // extra columns (customer_id, deliver_by, customer_name, ...) are allowed.
+    // The board cell is annotated `<loadRows>: LoadCardRow[]` (importing this
+    // type), so the width-subtyping check engages at the CELL boundary and
+    // `l: LoadCardRow` flows into `<LoadCard load=l/>`. Inside the component
+    // `load.id` types `number` and `load.bogus` would error (E-TYPE-004). The
+    // contract names exactly the 10 columns this card reads.
+    export type LoadCardRow:struct = {
+        id: number,
+        status: string,
+        origin_city: string,
+        origin_state: string,
+        destination_city: string,
+        destination_state: string,
+        commodity: string,
+        weight_lbs: number,
+        pickup_at: string,
+        rate_dollars: number,
+    }
+
     // Pure formatter — pickup date string → human-readable. Falls through
     // to the raw string when parsing fails, so seed dates display fine.
     export fn formatPickupAt(at: string) -> string {
@@ -36,7 +60,7 @@ ${
     }
 
     export const LoadCard = <a class="block bg-white border border-slate-200 rounded-lg p-3 shadow-sm hover:shadow-md hover:border-blue-300 transition" props={
-        load: asIs,
+        load: LoadCardRow,
         customerName?: string,
     }
         href="/dispatch/loads/${load.id}"

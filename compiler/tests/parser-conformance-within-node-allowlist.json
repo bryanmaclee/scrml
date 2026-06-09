@@ -352,12 +352,12 @@
     "SPAN-COORD": 12
   },
   "examples/23-trucking-dispatch/components/load-card.scrml": {
-    "COUNT-LENGTH": 3,
+    "COUNT-LENGTH": 4,
     "EXTRA-FIELD": 8,
-    "FIELD-SHAPE": 11,
+    "FIELD-SHAPE": 16,
     "KIND-NAME": 2,
-    "MISSING-FIELD": 44,
-    "SPAN-COORD": 8
+    "MISSING-FIELD": 47,
+    "SPAN-COORD": 11
   },
   "examples/23-trucking-dispatch/components/load-status-badge.scrml": {
     "COUNT-LENGTH": 2,
@@ -458,10 +458,10 @@
   "examples/23-trucking-dispatch/pages/dispatch/board.scrml": {
     "COUNT-LENGTH": 4,
     "EXTRA-FIELD": 48,
-    "FIELD-SHAPE": 57,
+    "FIELD-SHAPE": 60,
     "KIND-NAME": 13,
-    "MISSING-FIELD": 119,
-    "SPAN-COORD": 285
+    "MISSING-FIELD": 120,
+    "SPAN-COORD": 287
   },
   "examples/23-trucking-dispatch/pages/dispatch/customers.scrml": {
     "COUNT-LENGTH": 10,

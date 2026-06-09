@@ -619,6 +619,17 @@ function tStruct(name: string, fields: Map<string, ResolvedType>): StructType {
 // primitive sharp (the rule does not leak into general struct assignment).
 const SQL_ROW_TYPE_NAME = "<sql-row>";
 
+// §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — the compiler-internal name
+// stamped on an INFERRED object-literal-return struct (`inferReturnTypeFromBody`).
+// Like `<sql-row>`, the `<`/`>` make it un-typeable by a user. This struct is an
+// OVER-APPROXIMATION (one arm of a possibly-union return; field types beyond the
+// SQL-row flow are `asIs`), NOT an authoritative contract — so it is EXEMPT from
+// the E-TYPE-004 struct-field-access check (firing E-TYPE-004 on `data.error`
+// when `error` is in a DIFFERENT return arm would be a false positive). It only
+// exists to THREAD a SQL row out to the cell-contract boundary (T3b). The
+// authoritative field-access checks remain `<sql-row>` rows + user `:struct`s.
+const FN_RETURN_TYPE_NAME = "<fn-return>";
+
 /** A struct that originated from a SQL projection row (Tranche-1 provenance). */
 function isSqlProjectionRowStruct(t: ResolvedType | null | undefined): t is StructType {
   return !!t && t.kind === "struct" && (t as StructType).name === SQL_ROW_TYPE_NAME;
@@ -5619,7 +5630,13 @@ function annotateNodes(
    * Returns `tAsIs()` (and emits W-SQL-ROW-UNTYPED) for the deferred long tail.
    * `span` is the host node's span (used for the W-SQL-ROW-UNTYPED lint).
    */
-  function resolveSqlRowType(sqlNode: ASTNodeLike, span: Span): ResolvedType {
+  function resolveSqlRowType(sqlNode: ASTNodeLike, span: Span, errorSink?: TSError[]): ResolvedType {
+    // T3c (typed-SQL-row Tranche 3) — the un-annotated-fn return-type pre-pass
+    // resolves a fn-body SQL decl's row type a SECOND time to infer the return
+    // shape; it passes a throwaway `errorSink` so W-SQL-ROW-UNTYPED is NOT
+    // double-emitted (the real diagnostic fires when the decl is VISITED). When
+    // `errorSink` is omitted, diagnostics go to the closure `errors` as before.
+    const _sqlErrors = errorSink ?? errors;
     const query = typeof sqlNode.query === "string" ? (sqlNode.query as string) : "";
     const chained = Array.isArray(sqlNode.chainedCalls)
       ? (sqlNode.chainedCalls as Array<{ method: string; args: string }>)
@@ -5646,7 +5663,7 @@ function annotateNodes(
     const view = "full" as const;
 
     const degradeWholeRow = (reason: string): ResolvedType => {
-      errors.push(new TSError(
+      _sqlErrors.push(new TSError(
         "W-SQL-ROW-UNTYPED",
         `W-SQL-ROW-UNTYPED: the result of this \`?{}\` SQL query is typed \`asIs\` ` +
         `(${reason}). The row's fields are not statically checked. ` +
@@ -5709,7 +5726,7 @@ function annotateNodes(
     }
 
     if (untypedCols.length > 0) {
-      errors.push(new TSError(
+      _sqlErrors.push(new TSError(
         "W-SQL-ROW-UNTYPED",
         `W-SQL-ROW-UNTYPED: SQL projection column${untypedCols.length === 1 ? "" : "s"} ` +
         `\`${untypedCols.join("`, `")}\` ` +
@@ -5835,6 +5852,100 @@ function annotateNodes(
     returnType: ResolvedType;
   }>();
 
+  // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — infer an OBJECT-LITERAL
+  // return struct type for an UN-ANNOTATED function whose body returns an object
+  // literal carrying a SQL projection row. This is the connective tissue that
+  // lets `const data = loadBoardData(tok)` carry `data.loadRows: Row[]` to the
+  // call site, where the state-cell reassignment (`@loadRows = data.loadRows`)
+  // width-subtypes it into the cell's `:struct[]` contract (T3b).
+  //
+  // BOUNDED (the design — the sizing gate):
+  //   - ONLY un-annotated fns (the caller gates on `returnAnnot` absent).
+  //   - ONLY object-literal returns produce a struct arm; every other return
+  //     shape contributes nothing (the field is simply absent from that arm).
+  //   - A field's type is the SQL row of a body-local `const/let X = ?{}.all()`
+  //     when the prop value is exactly that bare ident; otherwise `asIs`. NO
+  //     general expression-type inference.
+  //   - The return type is the UNION across object-literal arms (the auth early
+  //     return `{ unauthorized: true }` is one arm; the data return is another).
+  //   - If NO arm carries a SQL row, returns null (caller keeps `tAsIs()`) — so
+  //     the inference is INERT for every fn that does not flow a SQL row out via
+  //     an object literal (no behavior change for the existing corpus).
+  function inferReturnTypeFromBody(fnNode: ASTNodeLike): ResolvedType | null {
+    const body = fnNode.body as ASTNodeLike[] | undefined;
+    if (!Array.isArray(body)) return null;
+
+    // Pass 1 — body-local SQL decls: `const/let X = ?{...}.all()/.get()`. Resolve
+    // the row type once into a throwaway error sink (the real W-SQL-ROW-UNTYPED
+    // fires when the decl is VISITED, not here).
+    const localSqlRows = new Map<string, ResolvedType>();
+    const _sink: TSError[] = [];
+    const collectLocalSql = (nodes: ASTNodeLike[]): void => {
+      for (const s of nodes) {
+        if (!s || typeof s !== "object") continue;
+        if ((s.kind === "const-decl" || s.kind === "let-decl") && typeof s.name === "string") {
+          const sqlNode = (s as Record<string, unknown>).sqlNode as ASTNodeLike | undefined;
+          if (sqlNode && sqlNode.kind === "sql") {
+            const sp = (s.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            const rt = resolveSqlRowType(sqlNode, sp, _sink);
+            if (unwrapSqlProjectionRow(rt)) localSqlRows.set(s.name as string, rt);
+          }
+        }
+        // Descend into nested blocks (if/guard bodies) so a SQL decl inside a
+        // guarded arm is still reachable — but NOT into nested function-decls.
+        if (s.kind !== "function-decl") {
+          const sb = s.body as ASTNodeLike[] | undefined;
+          if (Array.isArray(sb)) collectLocalSql(sb);
+          const sc = s.children as ASTNodeLike[] | undefined;
+          if (Array.isArray(sc)) collectLocalSql(sc);
+        }
+      }
+    };
+    collectLocalSql(body);
+    if (localSqlRows.size === 0) return null; // No SQL row flows out — inert.
+
+    // Pass 2 — collect object-literal return arms. For each `return { ... }`,
+    // build a struct type: a prop whose value is a bare ident matching a local
+    // SQL row → that row type; everything else → asIs.
+    const arms: StructType[] = [];
+    let sawSqlRowField = false;
+    const collectReturns = (nodes: ASTNodeLike[]): void => {
+      for (const s of nodes) {
+        if (!s || typeof s !== "object") continue;
+        if (s.kind === "return-stmt") {
+          const en = (s as Record<string, unknown>).exprNode as
+            | { kind?: string; props?: Array<{ key?: string; value?: { kind?: string; name?: string } }> }
+            | undefined;
+          if (en && en.kind === "object" && Array.isArray(en.props)) {
+            const fields = new Map<string, ResolvedType>();
+            for (const p of en.props) {
+              if (!p || typeof p.key !== "string") continue;
+              let ft: ResolvedType = tAsIs();
+              const v = p.value;
+              if (v && v.kind === "ident" && typeof v.name === "string" && localSqlRows.has(v.name)) {
+                ft = localSqlRows.get(v.name)!;
+                sawSqlRowField = true;
+              }
+              fields.set(p.key, ft);
+            }
+            arms.push(tStruct(FN_RETURN_TYPE_NAME, fields));
+          }
+        }
+        if (s.kind !== "function-decl") {
+          const sb = s.body as ASTNodeLike[] | undefined;
+          if (Array.isArray(sb)) collectReturns(sb);
+          const sc = s.children as ASTNodeLike[] | undefined;
+          if (Array.isArray(sc)) collectReturns(sc);
+        }
+      }
+    };
+    collectReturns(body);
+
+    if (!sawSqlRowField || arms.length === 0) return null; // No SQL row in any arm — inert.
+    if (arms.length === 1) return arms[0];
+    return tUnion(arms);
+  }
+
   function collectFnErrorTypes(nodes: ASTNodeLike[]): void {
     for (const n of nodes) {
       if (n.kind === "function-decl" && n.name) {
@@ -5872,6 +5983,15 @@ function annotateNodes(
           const returnAnnot = (n as ASTNodeLike).returnTypeAnnotation as string | undefined;
           if (returnAnnot && typeof returnAnnot === "string") {
             returnType = resolveTypeExpr(returnAnnot, typeRegistry);
+          } else {
+            // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — un-annotated fn:
+            // infer an OBJECT-LITERAL-return struct type so a SQL-projection row
+            // returned in a field (`return { user, loadRows: rows }`) survives
+            // the call-site member access (`data.loadRows`). BOUNDED — only the
+            // object-literal-return + SQL-row-field shape is inferred; everything
+            // else stays `tAsIs()` (no general return-type inference). Annotated
+            // fns are NOT touched (this is the `else` of `returnAnnot` present).
+            returnType = inferReturnTypeFromBody(n) ?? returnType;
           }
           fnSignatures.set(n.name as string, { params: sigParams, returnType });
         } catch {
@@ -7087,6 +7207,24 @@ function annotateNodes(
             }
           }
         }
+        // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — call-result type. When
+        // `const data = loadBoardData(tok)` is initialized from a CALL to a fn
+        // whose (T3c-inferred or annotated) return type is richer than `asIs`,
+        // bind `data` to that return type so a later member access `data.loadRows`
+        // resolves the SQL row the fn returned. BOUNDED — only a direct call to a
+        // known fn-signature, and only when nothing richer was already resolved
+        // (SQL init / annotation / literal all win). The struct-return shape
+        // produced by `inferReturnTypeFromBody` is what threads the row.
+        if (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") {
+          const _callInit = (n as any).initExpr as { kind?: string; callee?: { kind?: string; name?: string } } | undefined;
+          if (_callInit && _callInit.kind === "call" && _callInit.callee && _callInit.callee.kind === "ident"
+              && typeof _callInit.callee.name === "string") {
+            const _sig = fnSignatures.get(_callInit.callee.name);
+            if (_sig && _sig.returnType && _sig.returnType.kind !== "asIs" && _sig.returnType.kind !== "unknown") {
+              resolvedType = _sig.returnType;
+            }
+          }
+        }
         // §2a — E-SCOPE-001 on undeclared identifiers inside the initializer
         // expression. Runs BEFORE the let/const name binding so a self-
         // reference in the init (e.g. `let x = x + 1`) reports against the
@@ -7190,6 +7328,26 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "state-decl": {
         resolvedType = tAsIs();
+        // §14.8.7 / §14.8.8 (S175 — typed-SQL-row Tranche 3, T3a) — a state cell
+        // initialized from a SQL projection (`<x> = ?{...}.all()` / `<x>: T =
+        // ?{...}.all()` / a fn-body reassignment `@x = ?{...}.all()` which the
+        // ast-builder also lowers to a `state-decl` carrying `sqlNode`) types the
+        // cell from the projection ROW, not the default `asIs` — exactly the
+        // let/const-decl path (~:6985). A user `:struct[]` annotation still wins
+        // (handled in the annotation block below); when it does, T3b
+        // (`checkSqlRowAgainstCellContract`) width-subtypes the row INTO the
+        // contract. `sqlNode` is attached by ast-builder.js at the `<x> = ?{}`
+        // / `<x>: T = ?{}` / `@x = ?{}` sites; it is ABSENT for every non-SQL
+        // state-decl, so this is a no-op for the ordinary cell.
+        let _stateSqlRowType: ResolvedType | null = null;
+        {
+          const _stateSqlNode = (n as Record<string, unknown>).sqlNode as ASTNodeLike | undefined;
+          if (_stateSqlNode && _stateSqlNode.kind === "sql") {
+            const _stateSqlSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            _stateSqlRowType = resolveSqlRowType(_stateSqlNode, _stateSqlSpan);
+            resolvedType = _stateSqlRowType;
+          }
+        }
         // S79 / §6.13 — reactivity attribute (debounced= / throttled=) checks.
         // Three diagnostic codes:
         //   - E-REACTIVITY-ATTR-CONFLICT — both attributes present on same cell.
@@ -7332,6 +7490,30 @@ function annotateNodes(
           }
         }
 
+        // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3b) — width-subtyping at the
+        // state-cell DECL boundary. When a cell carries a `:struct[]` / `:struct`
+        // contract annotation AND was SQL-initialized (`<x>: LoadCardRow[] =
+        // ?{...}.all()`), the ANNOTATION wins as the bound type (so consumers see
+        // the named contract, not the internal `<sql-row>` label), and the
+        // projection row is width-subtyped INTO the contract — firing
+        // E-SQL-ROW-CONTRACT-MISMATCH per unprojected/incompatible field. Same
+        // §14.8.8 rule T2 applies at the prop site, now at the cell boundary.
+        if (reactAnnot && _stateSqlRowType) {
+          const _contractAnno = resolveTypeExpr(reactAnnot, typeRegistry);
+          const _declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          if (unwrapStructContractElement(_contractAnno)) {
+            checkSqlRowAgainstCellContract(
+              (n.name as string | undefined) ?? "<anonymous>",
+              _stateSqlRowType,
+              _contractAnno,
+              _declSpan,
+              errors,
+            );
+            // Annotation wins — bind the declared contract, not the raw row label.
+            resolvedType = _contractAnno;
+          }
+        }
+
         // §2a — E-SCOPE-001 on undeclared idents in the state-decl init.
         // Same shape as the let/const handling above. Runs before the @name
         // bind so a self-reference (`@x = x`) is treated as a forward ref.
@@ -7358,6 +7540,38 @@ function annotateNodes(
             // resolvedType, use that as contextType. Fall back to null only
             // when the lookup misses (fresh untyped decl — preserves §14.10
             // line 7174 behavior for that case).
+            //
+            // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3b) — width-subtyping at
+            // the state-cell REASSIGNMENT boundary. `@loadRows = data.loadRows`
+            // inside a fn/markup body is lowered to a `state-decl` with no
+            // annotation + no sqlNode but an `initExpr` member/ident RHS. When
+            // the cell's PRIOR bind carries a `:struct[]` / `:struct` contract
+            // (from the earlier `<loadRows>: LoadCardRow[]` decl) AND the RHS
+            // resolves to a SQL projection row (`resolveSqlRowSourceFromExpr`
+            // threads a bare ident OR a one-hop member over a T3c-inferred
+            // struct-return), fire the §14.8.8 check against the contract. No
+            // annotation / no sqlNode here, so this is the connective tissue
+            // between the cell contract and the SQL-row data-flow.
+            if (!reactAnnot && typeof n.name === "string" && n.name.length > 0) {
+              const _priorContractBind = scopeChain.lookup(`@${n.name}`) as
+                | { kind?: string; resolvedType?: ResolvedType }
+                | undefined;
+              const _priorContract = _priorContractBind && _priorContractBind.kind === "reactive"
+                ? _priorContractBind.resolvedType
+                : undefined;
+              if (_priorContract && unwrapStructContractElement(_priorContract)) {
+                const _rhsSqlRow = resolveSqlRowSourceFromExpr(reactInitExprNode, scopeChain);
+                if (_rhsSqlRow) {
+                  checkSqlRowAgainstCellContract(
+                    n.name,
+                    _rhsSqlRow,
+                    _priorContract,
+                    reactSpan,
+                    errors,
+                  );
+                }
+              }
+            }
             let bvCtxType: ResolvedType | null = null;
             if (reactAnnot) {
               bvCtxType = resolvedType;
@@ -9181,7 +9395,10 @@ function checkRowFieldAccessInExpr(
         const t = entry?.resolvedType;
         if (t && t.kind === "struct") {
           const struct = t as StructType;
-          if (!struct.fields.has(n.property as string)) {
+          // T3c — an inferred object-literal-return struct is an OVER-APPROXIMATION
+          // (one arm of a possibly-union return); it is NOT an authoritative
+          // contract, so field-access against it does NOT fire E-TYPE-004.
+          if (struct.name !== FN_RETURN_TYPE_NAME && !struct.fields.has(n.property as string)) {
             const avail = [...struct.fields.keys()];
             const label = struct.name === SQL_ROW_TYPE_NAME
               ? "SQL projection row"
@@ -9278,6 +9495,132 @@ function checkPropContract(
 }
 
 /**
+ * §14.8.8 (S175 — typed-SQL-row Tranche 3, T3b/T3c) — resolve the SQL-projection
+ * row that an expression DELIVERS, when its type is reachable from the scope
+ * chain. This is the connective tissue that lets a state-cell reassignment
+ * (`@loadRows = data.loadRows`) see the row the RHS carries WITHOUT a general
+ * expression-type-inference engine.
+ *
+ * Two BOUNDED shapes are resolved (everything else returns null — no-op):
+ *   1. a bare ident / `@`-ident bound to a SQL-projection row (`@rows`, `rows`).
+ *   2. a one-hop member access `obj.field` where `obj` is a struct-typed local
+ *      (the T3c return-type inference produces such structs for un-annotated
+ *      object-literal-returning fns) AND `obj.field` is a SQL-projection row.
+ *      The struct may be a UNION arm — the field-present sql-row arm wins (the
+ *      auth early-return `{unauthorized}` arm has no such field, so it is
+ *      skipped; we are resolving a specific member, not type-checking the union).
+ *
+ * Returns the source's RESOLVED type (the `Row[]` / `Row | not` wrapper, NOT the
+ * bare row struct) so the caller can width-subtype element-wise; or null.
+ */
+function resolveSqlRowSourceFromExpr(
+  exprNode: unknown,
+  scopeChain: ScopeChain,
+): ResolvedType | null {
+  const n = exprNode as { kind?: string; name?: string; object?: unknown; property?: unknown } | undefined;
+  if (!n || typeof n !== "object") return null;
+  // Shape 1 — bare ident / @-ident bound to a sql-row.
+  if (n.kind === "ident" && typeof n.name === "string") {
+    const entry = scopeChain.lookup(n.name);
+    const t = entry?.resolvedType;
+    if (t && unwrapSqlProjectionRow(t)) return t;
+    return null;
+  }
+  // Shape 2 — one-hop member access `obj.field` over a struct-typed local.
+  if (n.kind === "member" && typeof n.property === "string") {
+    const obj = n.object as { kind?: string; name?: string } | undefined;
+    if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
+    const entry = scopeChain.lookup(obj.name);
+    const t = entry?.resolvedType;
+    if (!t) return null;
+    // Gather candidate struct types: the type itself, or each struct member of a union.
+    const candidates: StructType[] = [];
+    if (t.kind === "struct") candidates.push(t as StructType);
+    else if (t.kind === "union") {
+      for (const m of (t as UnionType).members) {
+        if (m.kind === "struct") candidates.push(m as StructType);
+      }
+    }
+    for (const s of candidates) {
+      const ft = s.fields.get(n.property as string);
+      if (ft && unwrapSqlProjectionRow(ft)) return ft; // field-present sql-row arm wins.
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * §14.8.8 (S175 — typed-SQL-row Tranche 3, T3b) — unwrap a developer-declared
+ * cell-contract annotation to the per-ITEM `:struct` it constrains. A cell
+ * holding a SQL `Row[]` carries a `:struct[]` contract; the per-row contract is
+ * the array element. A scalar `:struct` contract (for a `.get()` optional cell)
+ * is returned as-is. Returns the contract struct, or null when the annotation is
+ * not a `:struct` / `:struct[]`.
+ */
+function unwrapStructContractElement(t: ResolvedType | null | undefined): StructType | null {
+  if (!t) return null;
+  if (t.kind === "struct") return t as StructType;
+  if (t.kind === "array") {
+    const el = (t as ArrayType).element;
+    if (el && el.kind === "struct") return el as StructType;
+  }
+  return null;
+}
+
+/**
+ * §14.8.8 (S175 — typed-SQL-row Tranche 3, T3b) — width-subtype a SQL-projection
+ * row source INTO a developer-declared `:struct[]` / `:struct` cell contract at a
+ * state-cell decl OR reassignment boundary. This is the SAME §14.8.8 rule T2
+ * applies at the prop site (`checkPropContract`), now at the cell boundary.
+ *
+ * BOUNDED (the design): fires ONLY when `sourceType` carries a Tranche-1 SQL
+ * projection row (`<sql-row>` provenance) AND `contractType` resolves to a
+ * declared `:struct` / `:struct[]`. Every other assignment is a no-op — general
+ * cell assignment stays unchecked (§14.8.1 nominal isolation preserved).
+ * Element-wise: a `Row[]` source vs a `:struct[]` contract checks the row struct
+ * against the element struct (cardinality is structural, not width-checked).
+ *
+ * Fires one E-SQL-ROW-CONTRACT-MISMATCH per unsatisfied field, naming the field.
+ */
+function checkSqlRowAgainstCellContract(
+  cellName: string,
+  sourceType: ResolvedType | null | undefined,
+  contractType: ResolvedType | null | undefined,
+  span: Span,
+  errors: TSError[],
+): void {
+  const row = unwrapSqlProjectionRow(sourceType);
+  if (!row) return; // Source is not a sql-row — bounded rule does not apply.
+  const contract = unwrapStructContractElement(contractType);
+  if (!contract) return; // Contract is not a :struct / :struct[] — no-op.
+
+  const violations = checkSqlRowWidthSubtype(row, contract);
+  for (const v0 of violations) {
+    if (v0.reason === "missing") {
+      errors.push(new TSError(
+        "E-SQL-ROW-CONTRACT-MISMATCH",
+        `E-SQL-ROW-CONTRACT-MISMATCH: the SQL projection row assigned to cell \`${cellName}\` ` +
+        `does not satisfy the \`:struct\` contract \`${contract.name}\`: ` +
+        `the contract requires field \`${v0.field}\` (${formatTypeForDiagnostic(v0.targetType)}), ` +
+        `but the row does not project it. Add \`${v0.field}\` to the SELECT, or remove it from the ` +
+        `\`${contract.name}\` contract (SPEC §14.8.8).`,
+        span,
+      ));
+    } else {
+      errors.push(new TSError(
+        "E-SQL-ROW-CONTRACT-MISMATCH",
+        `E-SQL-ROW-CONTRACT-MISMATCH: the SQL projection row assigned to cell \`${cellName}\` ` +
+        `does not satisfy the \`:struct\` contract \`${contract.name}\`: ` +
+        `field \`${v0.field}\` is ${v0.sourceType ? formatTypeForDiagnostic(v0.sourceType) : "incompatible"} ` +
+        `in the row but the contract declares it ${formatTypeForDiagnostic(v0.targetType)} (SPEC §14.8.8).`,
+        span,
+      ));
+    }
+  }
+}
+
+/**
  * Check member access expressions in a bare-expr string against the type
  * registry for known struct types.
  */
@@ -9303,6 +9646,8 @@ function checkStructFieldAccess(
 
     const type = entry.resolvedType;
     if (!type || type.kind !== "struct") continue; // Not a struct — skip.
+    // T3c — inferred fn-return over-approximations are exempt (see above).
+    if (type.name === FN_RETURN_TYPE_NAME) continue;
 
     // Check whether the field exists.
     if (!type.fields || !type.fields.has(fieldName)) {
@@ -19160,6 +19505,11 @@ export {
   checkPropContract,
   checkRowFieldAccessInExpr,
   SQL_ROW_TYPE_NAME,
+  // §14.8.8 (S175 — typed-SQL-row Tranche 3) cell-boundary + source-resolution exports.
+  checkSqlRowAgainstCellContract,
+  unwrapStructContractElement,
+  resolveSqlRowSourceFromExpr,
+  FN_RETURN_TYPE_NAME,
   checkLifecycleFieldAccess,
   buildFnReturnLifecycleMap,
   checkLifecycleBindingAccess,

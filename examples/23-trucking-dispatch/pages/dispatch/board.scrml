@@ -26,6 +26,9 @@
       // markup (cf. F-COMPONENT-001 — imports inside the db-block scope
       // hit E-COMPONENT-020 even though the import resolves).
       import { LoadCard } from '../../components/load-card.scrml'
+      // §14.8.8 (typed-SQL-row Tranche 3) — the row contract the `loadRows`
+      // cell carries. The SQL projection below width-subtypes into LoadCardRow[].
+      import { LoadCardRow } from '../../components/load-card.scrml'
       import { readSessionCookie } from '../../models/auth.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
@@ -70,7 +73,7 @@
         }
 
         <currentUser> = not
-        <loadRows> = []
+        <loadRows>: LoadCardRow[] = []
         <loaded> = false
 
         function refresh() {
