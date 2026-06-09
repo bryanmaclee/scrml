@@ -7465,7 +7465,7 @@ type user:struct = {
 - `(!A && !B)` — conjunction of constraints. The value must satisfy all constraints simultaneously.
 - `A | B` — union. The value is one of the listed types.
 - `[KeyT: ValT]` — value-native **map** type (with an optional `@ordered` postfix affix). The bracketed `key-type : value-type` form registers as a concrete type (not a generic — scrml has no type parameters). The full key/value/iteration/equality/serialization rules live in §59 (Value-Native Maps); the key type SHALL itself be comparable (§59.4).
-- A field whose type is a **function type** (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is currently resolved as an opaque `asIs` value — the type system carries no resolved function-kind for struct fields, so the function shape is not type-checked. Such a field surfaces the info-level lint `W-TYPE-FN-FIELD` (§34, partitions to `result.warnings`). Whether function-typed struct fields are a first-class supported feature is an OPEN question (deferred); the lint surfaces the construct without deciding it. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type; only the param-paren-then-arrow shape `(...) -> RetType` (which does not end in `)`) is a function type.
+- A field whose type is a **function type** (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is **REJECTED** at declaration with the hard error `E-STRUCT-FUNCTION-FIELD` (§34, S174 ruling). A function is **not value data** — it has no structural equality (§45.2), is not serializable, and cannot be a map key (§59.4) — so it SHALL NOT be **stored** as a field on a value-shaped collection. This is the limit-the-primitive axiom (§14.1.1): *a struct is a collection of data and state, NOT a behavior-bearing object.* It is also the **STORED** face of the passed-vs-stored rule (§15.11.5): a function may be PASSED (a component prop, `W-COMPONENT-001`) or CALLED (an event handler, inline), but never STORED as value data (a struct field or a state cell). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The type resolves to a distinguishable `FunctionType` (not an opaque `asIs`), which is what makes the reject fire precisely on a function-typed field. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type (it is never rejected); only the param-paren-then-arrow shape `(...) -> RetType` (which does not end in `)`) is a function type.
 
 **Structs are assigned NOMINALLY.** Two structs with identical fields but different declared
 names are distinct types and are not interchangeable. The single, bounded exception is a SQL
@@ -8898,6 +8898,19 @@ objects that carry field values) are mutable. Field writes on a state instance t
 reactive updates in all observers, exactly as writes to `@variables` do. This distinction is
 normative: the immutability guarantee is on the TYPE DEFINITION, not on the instance.
 
+> **Reconciliation with the value-immutability property (the Clojure identity/value split).**
+> scrml's values are **acyclic and immutable** — that property is distributed across the spec
+> (array copy-on-write §6.5; structural `==` over immutable values §45; acyclic, hashable map
+> keys §59.5), not stated as a single axiom section. The mutability described here is NOT a
+> contradiction of it. scrml follows the **Clojure identity/value distinction**: a reactive
+> *identity* (a state cell or a state instance) is a mutable **reference** that, at any instant,
+> *holds* an immutable value; mutation swaps which immutable value the identity holds and
+> notifies observers — it never edits a value in place. The immutability is on the **value**
+> (and on the **type definition** that shapes it); the mutability is on the **identity** that
+> points at successive values. So "state instances are mutable" and "values are immutable" are
+> the two halves of one model — exactly Clojure's `atom`/`ref` holding persistent data
+> structures — not two rules in tension. (Ratified S174, function-boundary Fork 3.)
+
 **Syntax:**
 
 State types used for projection are declared with state block syntax (§4.2). A state type
@@ -9060,6 +9073,13 @@ to state projection.
 
 #### 15.11.4 Escape Hatch: Function-Typed Props
 
+> **Where this fits in the passed-vs-stored rule (§15.11.5.1).** A function-typed prop is the
+> **PASSED** face of the rule: a function may be PASSED (a prop) or CALLED (a handler), but never
+> STORED as value data (a struct field or state cell, which is rejected — §14.3). This escape
+> hatch is therefore *warned* (`W-COMPONENT-001`), not banned: the passed reference is a call
+> conduit (to the JS host / server / a parent command), not value data crossing the value graph.
+> Contrast §14.3, where storing a function on a struct field is a hard `E-STRUCT-FUNCTION-FIELD`.
+
 Function-typed props are available when neither `bind:` nor state projection is appropriate.
 Intended uses:
 - Integration with vanilla JS callbacks that expect a function reference.
@@ -9175,6 +9195,41 @@ conflict with scrml's "state is everything" principle.
 contexts (§10.4). It SHALL NOT cross component call-site boundaries. Extending `lift` across
 components would require redesigning its semantics (array accumulation for list rendering)
 in ways that conflict with existing uses. This is a permanent rejection.
+
+##### 15.11.5.1 The passed-vs-stored rule (named)
+
+The rejections above, the function-typed-prop escape hatch (§15.11.4), and the
+function-typed-struct-field reject (§14.3) are all faces of a single governing rule. Stated
+explicitly:
+
+> **A function may be PASSED (a component prop) or CALLED (an event handler, inline), but it
+> SHALL NEVER be STORED as value data (a struct field or a state cell).**
+
+The rule falls directly out of the value-data-purity axiom (§14.1.1, the limit-the-primitive
+line): a function is **not value data** — it has no structural equality (§45.2), is not
+serializable, and cannot be a map key (§59.4). The two dispositions are therefore categorically
+different, not an inconsistency:
+
+- **STORED is forbidden.** A struct field or a state cell *holds value data that flows through
+  the value graph* (it is compared with `==`, projected, serialized, used as a map key). A
+  function cannot participate in any of that. Storing one is rejected at declaration —
+  `E-STRUCT-FUNCTION-FIELD` for a struct field (§14.3); a function-typed state cell is rejected
+  on the same principle. This is the **STORED** face.
+
+- **PASSED / CALLED is permitted (warned, not banned).** A function-typed component prop
+  (§15.11.4) is a **call conduit**, not value data crossing the value graph: the reference is
+  handed to the JS host, a server boundary, or a parent-owned imperative command, and is
+  invoked at the boundary; an event handler is CALLED inline and nothing is stored. These
+  irreducible cases — vanilla-JS callback interop, the server-fn-as-callback path (§15.12.6),
+  one-shot directional notifications — cannot be expressed as value data, so the escape hatch
+  stays available. It is surfaced with the advisory `W-COMPONENT-001` (a warning, never an
+  error: prefer `bind:` / state projection where they fit) but is **not** rejected. This is the
+  **PASSED / CALLED** face.
+
+So `W-COMPONENT-001` (passed → warned) and `E-STRUCT-FUNCTION-FIELD` (stored → error) are the
+two faces of ONE rule applied to two surfaces, not a contradiction: the prop surface is a
+conduit (warned), the field/cell surface is value-data storage (rejected). See §14.3 (the
+stored-side reject) and §14.1.1 (the limit-the-primitive axiom this rule rests on).
 
 ---
 
@@ -16541,7 +16596,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
-| W-TYPE-FN-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). The type system carries no resolved function-kind for struct fields, so such a field resolves to an opaque `asIs` value and its function shape is not type-checked. Whether function-typed struct fields are a first-class supported feature is an open question (deferred); the lint surfaces the construct without deciding it. The lint does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). Partitions into `result.warnings` (non-fatal). (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Info/Warning |
+| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. | Error |
 | W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
@@ -21697,6 +21752,12 @@ parser now either matches the full block or emits a hard error.
 `==` is scrml's sole equality operator. It performs structural value comparison. There is no `===`. There is no coercion.
 
 `!=` is the negation of `==` with identical rules.
+
+> Structural `==` is well-defined because scrml values are **immutable and acyclic** (this
+> property is distributed across §6.5 array copy-on-write, this section, and §59.5 map-key
+> acyclicity — there is no single "immutability axiom" section). Reactive *identities* (state
+> cells / state instances) that hold these values are mutable references, not mutable values —
+> the Clojure identity/value split, reconciled at §15.11.2.
 
 ### 45.2 Comparability Rules
 

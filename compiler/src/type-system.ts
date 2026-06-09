@@ -819,6 +819,18 @@ function tAsIs(constraint: ResolvedType | null = null): AsIsType {
   return { kind: "asIs", constraint };
 }
 
+// §14.3 / §45.2 — function-type constructor. A function type resolves to a
+// distinguishable `FunctionType` (NOT `asIs`) so a function-typed struct field
+// is precisely detectable (closing the thin-arrow `() -> void` silent hole,
+// where the resolver formerly fell through to a plain `asIs` indistinguishable
+// from a typo'd/unrecognized type). Functions are not value data (no structural
+// equality, not serializable, not a map key) — a stored function field is
+// rejected at declaration (`E-STRUCT-FUNCTION-FIELD`, §14.3). The resolved kind
+// also lets `==`/map-key comparability classify a function uniformly.
+function tFunction(): FunctionType {
+  return { kind: "function", name: "", params: [], returnType: tAsIs() };
+}
+
 function tUnknown(): UnknownType {
   return { kind: "unknown" };
 }
@@ -2047,10 +2059,11 @@ function isFunctionShapedAnnotation(raw: string): boolean {
 }
 
 /**
- * §14.3 / W-TYPE-FN-FIELD — Is a (raw) type-expression annotation a FUNCTION
- * TYPE in struct-field position? This is the diagnostic recognizer for the
- * `W-TYPE-FN-FIELD` info-level lint (a function-typed struct field is currently
- * resolved as opaque `asIs`; first-class support is an open question, deferred).
+ * §14.3 / E-STRUCT-FUNCTION-FIELD — Is a (raw) type-expression annotation a
+ * FUNCTION TYPE in struct-field position? This is the recognizer for both the
+ * `resolveTypeExpr` FunctionType branch AND the declaration-site reject
+ * `E-STRUCT-FUNCTION-FIELD` (a function-typed struct field is REJECTED — a
+ * function is not value data, §14.3 / §15.11 passed-vs-stored rule).
  *
  * Recognizes all three function-type shapes:
  *   - `fn(...)`  / `fn (...)`               — explicit fn type
@@ -2064,7 +2077,8 @@ function isFunctionShapedAnnotation(raw: string): boolean {
  * param-paren and does NOT end with `)` (it ends with the return type). The
  * `startsWith("(") && endsWith(")")` gate is the exact disambiguator used by
  * `isLifecycleAnnotation` (checkLifecycleOnEngineCells); we reuse it here in the
- * negative so a lifecycle field never mis-fires W-TYPE-FN-FIELD.
+ * negative so a lifecycle field is never mis-classified as a function type
+ * (and so never mis-fires E-STRUCT-FUNCTION-FIELD).
  *
  * Reuses `findTopLevelArrow` (defined below; function-hoisted) for the
  * top-level thin-arrow scan so `() -> void` is recognized but `[A -> B]` (an
@@ -2367,6 +2381,24 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
     }
     // No transition glyph: just remove parens and re-resolve.
     return resolveTypeExpr(inner, typeRegistry);
+  }
+
+  // §14.3 / §45.2 — FUNCTION TYPE. A function-shaped annotation (`fn(...)`,
+  // `(...) => RetType`, or the thin-arrow `(...) -> RetType`) resolves to a
+  // distinguishable `FunctionType` rather than falling through to `asIs`. This
+  // is what makes a function-typed struct field PRECISELY detectable for the
+  // declaration-site reject (`E-STRUCT-FUNCTION-FIELD`, §14.3) and closes the
+  // thin-arrow `() -> void` silent hole — the resolver formerly dropped it to a
+  // plain `asIs` indistinguishable from a typo'd/unrecognized type. `fn()` /
+  // `(...) =>` already carried an `isFunctionField` sidecar on their `asIs`
+  // result (parseStructBody / inline-struct); resolving them to a first-class
+  // `FunctionType` here supersedes that sidecar with a real kind. The lifecycle
+  // disambiguation (`(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens
+  // and is NOT a function type) lives in `isFunctionTypeAnnotation`, and the
+  // lifecycle paren-strip branch above already consumed those forms — so a
+  // lifecycle annotation never reaches this branch.
+  if (isFunctionTypeAnnotation(trimmed)) {
+    return tFunction();
   }
 
   // Union: A | B (split on | at top level).
@@ -3421,19 +3453,27 @@ function checkLifecycleOnEngineCells(
 }
 
 // ---------------------------------------------------------------------------
-// §14.3 / W-TYPE-FN-FIELD — Function-typed struct field nudge
+// §14.3 / E-STRUCT-FUNCTION-FIELD — Function-typed struct field REJECTED
 // ---------------------------------------------------------------------------
 
 /**
- * §14.3 — A struct (or inline-struct) field whose TYPE is a function type
- * (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is
- * currently resolved as an opaque `asIs` value — the type system has no
- * resolved function-kind for struct fields, so the function-ness is dropped.
- * Whether function-typed struct fields are a first-class supported feature is
- * an OPEN question (deferred); rather than decide it silently, we surface the
- * field with an info-level `W-TYPE-FN-FIELD` nudge so adopters and the language
- * design loop both see it. The W- prefix routes the diagnostic to
- * `result.warnings` (non-fatal) — this is a nudge, not a hard stop.
+ * §14.3 (S174 ruling) — A struct (or inline-struct) field whose TYPE is a
+ * function type (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) =>
+ * string`) is REJECTED at declaration with a hard `E-STRUCT-FUNCTION-FIELD`
+ * error. A function is NOT value data — it has no structural equality, is not
+ * serializable, and cannot be a map key — so it has no business being STORED as
+ * a field on a value-shaped collection (the limit-the-primitive axiom, §14.1.1:
+ * "a struct is a collection of data and state, NOT a behavior-bearing object").
+ * This is the STORED face of the passed-vs-stored rule (§15.11): a function may
+ * be PASSED (a component prop, `W-COMPONENT-001`) or CALLED (an event handler /
+ * inline), but never STORED as value data (a struct field or state cell).
+ *
+ * The field now resolves to a distinguishable `FunctionType` (not `asIs`) via
+ * the `resolveTypeExpr` function-type branch — that precise resolution is what
+ * lets this reject fire exactly on a function-typed field (and closed the
+ * thin-arrow `() -> void` silent hole, where the resolver formerly dropped the
+ * field to a plain `asIs` indistinguishable from a typo'd type). The E- prefix
+ * (no W-/I-) routes the diagnostic to `result.errors` (fatal, CLI exit 1).
  *
  * Two field positions surface:
  *   1. Named struct decls (`type T :struct = { onClick: () -> void }`) — the
@@ -3446,7 +3486,8 @@ function checkLifecycleOnEngineCells(
  * Fires once per field. The disambiguation that keeps a lifecycle field
  * (`passwordHash: (not to string)` / `status: (Idle to Done)` / `(A -> B)`)
  * from mis-firing lives in `isFunctionTypeAnnotation` (lifecycle is the only
- * arrow shape wrapped start-and-end in parens).
+ * arrow shape wrapped start-and-end in parens) — a lifecycle field is NOT a
+ * function type and is never rejected.
  *
  * @param typeDecls — same input as `buildTypeRegistry` (struct/enum/error decls)
  * @param topNodes  — file top-level nodes (for inline-struct state-decl scan)
@@ -3459,18 +3500,20 @@ function checkFunctionTypedStructFields(
   errors: TSError[],
   fileSpan: Span,
 ): void {
-  // Fire one W-TYPE-FN-FIELD for a function-typed field.
+  // Fire one E-STRUCT-FUNCTION-FIELD for a function-typed field (hard reject).
   function fire(structLabel: string, fieldName: string, typeExpr: string, span: Span): void {
     const qualified = structLabel ? `${structLabel}.${fieldName}` : fieldName;
     errors.push(new TSError(
-      "W-TYPE-FN-FIELD",
-      `W-TYPE-FN-FIELD: Struct field '${qualified}' is declared with a function ` +
-      `type ('${typeExpr.trim()}'). The compiler currently resolves a ` +
-      `function-typed struct field as an opaque 'asIs' value — its function ` +
-      `shape is not type-checked, and whether function-typed struct fields are ` +
-      `a first-class supported feature is an open question (deferred). See SPEC §14.3.`,
+      "E-STRUCT-FUNCTION-FIELD",
+      `E-STRUCT-FUNCTION-FIELD: Struct field '${qualified}' is declared with a ` +
+      `function type ('${typeExpr.trim()}'). A function is not value data — it ` +
+      `has no structural equality, is not serializable, and cannot be a map key ` +
+      `— so it SHALL NOT be STORED as a struct field. (A function may be PASSED ` +
+      `as a component prop or CALLED as an event handler, but never stored; ` +
+      `§15.11.) For stored state, model the behavior as data (an enum tag the ` +
+      `consumer matches on, or an engine). See SPEC §14.3 / §14.1.1.`,
       span,
-      "warning",
+      // severity defaults to "error" — routes to result.errors (CLI exit 1).
     ));
   }
 
@@ -15861,11 +15904,12 @@ function processFile(
     ?? [];
   const typeRegistry = buildTypeRegistry(typeDecls, errors, fileSpan);
 
-  // §14.3 / W-TYPE-FN-FIELD — surface function-typed struct fields (named
-  // struct decls + inline-struct state-decl annotations) with an info-level
-  // nudge. Runs once, right after registry build, so the diagnostic fires
-  // exactly once per field (not per Pass-2/Pass-3 re-parse). The resolved type
-  // is unchanged (still `asIs`); this is a diagnostic-only addition.
+  // §14.3 / E-STRUCT-FUNCTION-FIELD — REJECT function-typed struct fields (named
+  // struct decls + inline-struct state-decl annotations) with a hard error.
+  // Runs once, right after registry build, so the diagnostic fires exactly once
+  // per field (not per Pass-2/Pass-3 re-parse). The field now resolves to a
+  // distinguishable `FunctionType` (resolveTypeExpr fn-type branch); this check
+  // surfaces the reject (S174 ruling — a function is not value data, §14.1.1).
   {
     const fnFieldTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
       ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
