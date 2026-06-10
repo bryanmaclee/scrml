@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-09T14:05:00Z  commit: 35172d78
+# updated: 2026-06-09T23:35:55Z  commit: c48c4f71
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -8,13 +8,13 @@ Config: bunfig.toml (timeout + happy-dom preload settings)
 Run all: `bun test compiler/tests/`
 Run single: `bun test compiler/tests/unit/<filename>.test.js`
 Coverage: `bun test compiler/tests/ --coverage`
-Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout). **S173 added +2 (E-EXPORT-001 export-reject + W-TYPE-FN-FIELD); S174 added log()-builtin / any-reject coverage; S175 added +5 typed-SQL-row files (sql-projection-extract 13 cases, sql-row-typing 4, sql-row-tranche2-width-subtype 18, sql-row-tranche3-typeflow 17, struct-fn-field-reject 11 — see the S175 section below). S176 added +6 files (unknown-type-forbidden 25, unknown-type-name-predicate 38, stdlib-math 28, stdlib-random-capability 13, stdlib-time-now-capability 8, stdlib-transitive-shim-copy 3 — see the S176 section below) + extended scrml-migrate (+Migration-3 `pure`→`fn` cases) and stdlib-shim-resolution (+2).** Current find-count (on `35172d78`): 940 total .test.js (934 + 6 S176; full-suite total not re-run post-S176).
+Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout). **S173 added +2 (E-EXPORT-001 export-reject + W-TYPE-FN-FIELD); S174 added log()-builtin / any-reject coverage; S175 added +5 typed-SQL-row files (sql-projection-extract 13 cases, sql-row-typing 4, sql-row-tranche2-width-subtype 18, sql-row-tranche3-typeflow 17, struct-fn-field-reject 11 — see the S175 section below). S176 added +6 files (unknown-type-forbidden 25, unknown-type-name-predicate 38, stdlib-math 28, stdlib-random-capability 13, stdlib-time-now-capability 8, stdlib-transitive-shim-copy 3 — see the S176 section below) + extended scrml-migrate (+Migration-3 `pure`→`fn` cases) and stdlib-shim-resolution (+2).** Current find-count (on `c48c4f71`): 948 total .test.js (940 + 8 S177; full-suite total not re-run post-S177; master-list test-marker 23538→23680 at S176 wrap).
 
 ## Test Categories
 
 | Category | Location | Count |
 |----------|----------|-------|
-| Unit | compiler/tests/unit/ | 588 files (find-count at 049954e0; +S169 value-native-map arc; +S170 native-parser regression set; +S173 export-reject/fn-field; +S174 log()/any-reject; **+S175: sql-projection-extract, sql-row-typing, sql-row-tranche2-width-subtype, sql-row-tranche3-typeflow, struct-fn-field-reject**) |
+| Unit | compiler/tests/unit/ | find-count at c48c4f71; +S169 value-native-map arc; +S170 native-parser regression set; +S173 export-reject/fn-field; +S174 log()/any-reject; **+S175: sql-projection-extract, sql-row-typing, sql-row-tranche2-width-subtype, sql-row-tranche3-typeflow, struct-fn-field-reject**; **+S177 unit: bare-slash-before-close-tag-bug4, closer-on-shorthand-body-e-closer-001-bug74, formfor-nested-in-engine-statechild-r27-c6, inline-map-assign-handler-s169, opener-arrow-truncation-bug48, schemafor-predicated-base-nullable-r28-7b**) |
 | Browser (DOM) | compiler/tests/browser/ | 37 files (+1 S169 each-as-tuple-destructure-d2c.browser; +1 S170 browser-structural-compound-deepset) |
 | Conformance | compiler/tests/conformance/ | ~40 files |
 | Integration | compiler/tests/integration/ | 106 files (+1 S169: value-native-map-e2e-d4) |
@@ -22,7 +22,7 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | LSP | compiler/tests/lsp/ | ~8 files |
 | Self-host | compiler/tests/self-host/ | ~5 files |
 | CLI commands | compiler/tests/commands/ | ~5 files |
-| **Total** | compiler/tests/ | **940 .test.js files (find-count at 35172d78; +S170 Bug-B/set-algebra/native-parser regression, +S173, +S174, +5 S175 typed-SQL-row, +6 S176 unknown-type-name / scalar-vocabulary stdlib)** |
+| **Total** | compiler/tests/ | **948 .test.js files (find-count at c48c4f71; +S173, +S174, +5 S175 typed-SQL-row, +6 S176 unknown-type-name / scalar-vocabulary stdlib, +8 S177 g-formfor/bug-tail/client-stdlib-inliner)** |
 
 ## S175 New Test Files (typed-SQL-row arc — the flagship typed-data delivery + function-boundary rule)
 
@@ -214,6 +214,24 @@ file (EXTRA-FIELD 31→32, FIELD-SHAPE 20→21, KIND-NAME 12→13, SPAN-COORD 11
 folds `@arr.push` to a bare-expr — a SEPARATE native swap-grind parity item (correct-shadow: the live fix is now
 ahead of native, the bump records the lag, it is NOT masking a regression). within-node stayed 1005/0.
 
+## S177 New Test Files (g-formfor + bug-tail batch + client stdlib-inliner)
+
+8 new files (`b1931f02` bug-tail · `75f724af` g-formfor · `c48c4f71` client stdlib-inliner):
+
+| File | Loc | Tests | Covers |
+|------|-----|-------|--------|
+| formfor-component-expand-in-arms-s177.browser.test.js | tests/browser/ | 13 | happy-dom — a `<formFor>`/`<Component>` inside an `<engine>` state-child + a `<match>` arm renders (was silent non-render / raw tag) |
+| formfor-nested-in-engine-statechild-r27-c6.test.js | tests/unit/ | 4 | emit-shape — formFor `walkAndSplice` recurses into engine `bodyChildren` (r27-c6) |
+| bare-slash-before-close-tag-bug4.test.js | tests/unit/ | 7 | E-SYNTAX-050 no longer over-fires on a bare `/` immediately before a close tag (`<li>… /</>`); still fires at EOF |
+| closer-on-shorthand-body-e-closer-001-bug74.test.js | tests/unit/ | 5 | E-CLOSER-001 fires on a `/>`+`:`-shorthand body; the directive-`:` form does NOT (`isGenuineShorthandBodyNotDirective`) |
+| opener-arrow-truncation-bug48.test.js | tests/unit/ | 4 | opener `>`-finder paren/bracket depth — `on=@nums.filter(c => c == 1)` not truncated |
+| schemafor-predicated-base-nullable-r28-7b.test.js | tests/unit/ | 5 | schemaFor on `string req length(<=200) | not` no longer mis-fires E-SCHEMAFOR-NO-SQL-MAPPING |
+| inline-map-assign-handler-s169.test.js | tests/unit/ | 4 | an inline map-method assign in a handler lowers through emitAssign (`_scrml_map_insert`), not the string path |
+| clientinline-sibling-shim-import.test.js | tests/integration/ | 26 | `_inlineSiblingShimImports` — relative `./x.js` sibling shims inlined transitively, external `bun`/`node:*` stripped |
+
+Plus extensions to existing files (bug-2-markup-text-quote-not-tracked, gauntlet-s19/tokenizer-slash,
+p3-follow-no-isComponent-routing) for the bug-tail batch.
+
 ## Fixtures & Factories
 
 | Path | Contents |
@@ -252,7 +270,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy #s177 #g-formfor #bug-4 #bug-48 #bug-74 #r27-c6 #r28-7b #s169-map-inline-insert #client-stdlib-inliner
 
 ## Links
 - [primary.map.md](./primary.map.md)
