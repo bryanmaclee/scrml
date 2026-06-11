@@ -1,6 +1,12 @@
 # primary.map.md
 # project: scrmlts
-# updated: 2026-06-09T23:35:55Z  commit: c48c4f71
+# updated: 2026-06-10  commit: d70f6bd8
+# NB: S179 maps refresh was PARTIAL (project-mapper crashed mid-run, S163 class).
+#     error.map.md folded the new S179 codes (E-ROUTE-004, E-ROUTE-003-now-enforced,
+#     I-FN-PROMOTABLE inferred-server skip, E-FN-001 kind-agnostic). Structural/dependency/
+#     test maps were NOT regenerated — but S179 changes were ADDITIVE to existing files
+#     (new validators in type-system.ts, lint+api wiring, 2 new test files; no new passes/
+#     source files), so their content is largely current. Full project-mapper refresh = next session.
 
 ## Project Fingerprint
 Language:   TypeScript / JavaScript (mixed; Bun runtime)

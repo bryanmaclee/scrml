@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-09T23:35:55Z  commit: c48c4f71
+# updated: 2026-06-10T21:00:00Z  commit: d70f6bd8
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -13,7 +13,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 - All other codes → result.errors (fatal, CLI exits 1)
 - Cross-stream helper required when asserting on W-*/I-* codes in tests (see diagnostic-stream-partition memory note)
 
-## Error Code Families (388+ codes in compiler source; +7 §59 value-native map codes IMPLEMENTED S169 + 2 S173 (E-EXPORT-001 §21.2, W-TYPE-FN-FIELD §14.3 — W-TYPE-FN-FIELD RETIRED/ESCALATED to E-STRUCT-FUNCTION-FIELD S175) + 2 S174 (W-LOG-SHADOWED §20.6.7, E-TYPE-ANY-FORBIDDEN §14.1.1) + 3 NEW S175 (E-STRUCT-FUNCTION-FIELD §14.3/§15.11, E-SQL-ROW-CONTRACT-MISMATCH §14.8.8, W-SQL-ROW-UNTYPED §14.8.7) + 1 NEW S176 (E-TYPE-UNKNOWN-NAME §14.1.2) + W-PURE-REDUNDANT → W-PURE-DEPRECATED rename §33 + E-FN-004 generalized to imported non-det stdlib bindings — fire sites live end-to-end) + S177 ZERO new codes (refinements only: E-CLOSER-001 now fires on a `/>`+`:`-shorthand body via `isGenuineShorthandBodyNotDirective` bug-74; E-SYNTAX-050 bare-`/` no longer over-fires before a close tag bug-4; a bogus E-SCHEMAFOR-NO-SQL-MAPPING on a predicated-primitive-in-union field is prevented r28-7b)
+## Error Code Families (388+ codes in compiler source; +7 §59 value-native map codes IMPLEMENTED S169 + 2 S173 (E-EXPORT-001 §21.2, W-TYPE-FN-FIELD §14.3 — W-TYPE-FN-FIELD RETIRED/ESCALATED to E-STRUCT-FUNCTION-FIELD S175) + 2 S174 (W-LOG-SHADOWED §20.6.7, E-TYPE-ANY-FORBIDDEN §14.1.1) + 3 NEW S175 (E-STRUCT-FUNCTION-FIELD §14.3/§15.11, E-SQL-ROW-CONTRACT-MISMATCH §14.8.8, W-SQL-ROW-UNTYPED §14.8.7) + 1 NEW S176 (E-TYPE-UNKNOWN-NAME §14.1.2) + W-PURE-REDUNDANT → W-PURE-DEPRECATED rename §33 + E-FN-004 generalized to imported non-det stdlib bindings — fire sites live end-to-end) + 1 NEW S179 (E-ROUTE-004 §12.5.3 non-serializable server-fn PARAM; E-ROUTE-003 same section now ENFORCED (was SPEC-only); I-FN-PROMOTABLE now skips inferred-server fns; E-FN-001 broadened to kind-agnostic structured-sqlNode so `return ?{}` fires) + S177 ZERO new codes (refinements only: E-CLOSER-001 now fires on a `/>`+`:`-shorthand body via `isGenuineShorthandBodyNotDirective` bug-74; E-SYNTAX-050 bare-`/` no longer over-fires before a close tag bug-4; a bogus E-SCHEMAFOR-NO-SQL-MAPPING on a predicated-primitive-in-union field is prevented r28-7b)
 
 | Family | Count | Description |
 |--------|-------|-------------|
