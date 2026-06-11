@@ -20,6 +20,8 @@
 
 import { describe, test, expect } from "bun:test";
 import { runRI } from "../../src/route-inference.js";
+import { splitBlocks } from "../../src/block-splitter.js";
+import { buildAST } from "../../src/ast-builder.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -152,7 +154,10 @@ describe("RI-HANDLE-002: handle() has no generatedRouteName", () => {
     expect(route.isSSE).toBe(false);
     expect(route.cpsSplit).toBeNull();
     expect(route.serverEntrySpan).toBeNull();
-    expect(route.escalationReasons).toHaveLength(0);
+    // D2 (§12.2 Trigger 8): handle() now surfaces its escalation reason(s) on the
+    // route map — `middleware-handle` (the reserved name) + `explicit-annotation`
+    // because makeHandleFn() carries the deprecated `server` keyword (isServer:true).
+    expect(route.escalationReasons.some(r => r.kind === "middleware-handle")).toBe(true);
   });
 
   test("regular server function has a generatedRouteName (not affected)", () => {
@@ -277,8 +282,14 @@ describe("RI-HANDLE-004: E-RI-002 suppressed for handle()", () => {
     const fileAST = makeFileAST("/test/app.scrml", [fn]);
     const { errors } = runRIClean([fileAST]);
 
-    // No errors of any kind should be emitted for a clean handle() function
-    const realErrors = errors.filter(e => !["E-ROUTE-001", "W-AUTH-001"].includes(e.code));
+    // No FATAL errors should be emitted for a clean handle() function.
+    // D2 (§39.3.2 amendment): a keyword-bearing `server function handle()` now
+    // correctly fires W-DEPRECATED-SERVER-MODIFIER (a deprecation warning — the
+    // reserved name supplies the escalation reason, so the `server` keyword is
+    // redundant). That warning is expected, not a regression.
+    const realErrors = errors.filter(
+      e => !["E-ROUTE-001", "W-AUTH-001", "W-DEPRECATED-SERVER-MODIFIER"].includes(e.code),
+    );
     expect(realErrors).toHaveLength(0);
   });
 });
@@ -296,5 +307,75 @@ describe("RI-HANDLE-005: handle() entry exists in routeMap", () => {
     const route = getRoute(routeMap, "/test/app.scrml", 10);
     expect(route).toBeDefined();
     expect(route.functionNodeId).toBe("/test/app.scrml::10");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RI-HANDLE-006 (D2, §12.2 Trigger 8): a KEYWORD-LESS `function handle(request,
+// resolve)` is recognized by name+signature and escalates to the middleware
+// boundary WITHOUT the deprecated `server` keyword.
+// ---------------------------------------------------------------------------
+
+function parseFileASTfromSource(source, filePath = "/test/app.scrml") {
+  const bs = splitBlocks(filePath, source);
+  const tab = buildAST(bs);
+  const ast = tab.ast;
+  return {
+    filePath,
+    nodes: ast.nodes ?? [],
+    ast,
+    imports: ast.imports ?? [],
+    exports: ast.exports ?? [],
+    components: ast.components ?? [],
+    typeDecls: ast.typeDecls ?? [],
+    spans: ast.spans ?? new Map(),
+  };
+}
+
+function findHandleNode(fileAST) {
+  let found = null;
+  function visit(nodes) {
+    for (const n of nodes ?? []) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "function-decl" && n.name === "handle") { found = n; return; }
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+    }
+  }
+  visit(fileAST.nodes);
+  return found;
+}
+
+describe("RI-HANDLE-006 (D2): keyword-less handle() escalates via Trigger 8", () => {
+  test("function handle(request, resolve) — no `server` — has boundary:middleware", () => {
+    const source = `<program>
+\${ function handle(request, resolve) {
+  return resolve(request)
+} }
+</program>`;
+    const fileAST = parseFileASTfromSource(source);
+    const handleNode = findHandleNode(fileAST);
+    expect(handleNode).not.toBeNull();
+    expect(handleNode.isHandleEscapeHatch).toBe(true);
+
+    const { routeMap } = runRIClean([fileAST]);
+    const route = routeMap.functions.get(`/test/app.scrml::${handleNode.span.start}`);
+    expect(route).toBeDefined();
+    expect(route.boundary).toBe("middleware");
+    expect(route.escalationReasons.some(r => r.kind === "middleware-handle")).toBe(true);
+    // No `server` keyword present → no explicit-annotation reason.
+    expect(route.escalationReasons.some(r => r.kind === "explicit-annotation")).toBe(false);
+  });
+
+  test("keyword-less handle() does NOT fire W-DEPRECATED-SERVER-MODIFIER (no keyword to deprecate)", () => {
+    const source = `<program>
+\${ function handle(request, resolve) {
+  return resolve(request)
+} }
+</program>`;
+    const fileAST = parseFileASTfromSource(source);
+    const { errors } = runRIClean([fileAST]);
+    const dep = (errors ?? []).filter(e => e.code === "W-DEPRECATED-SERVER-MODIFIER");
+    expect(dep).toHaveLength(0);
   });
 });

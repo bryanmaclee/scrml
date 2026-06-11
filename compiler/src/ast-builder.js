@@ -9576,10 +9576,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         errorType,
         route,
         method,
-        // §39: handle() escape hatch recognition (§39.3.1).
-        // Naming-based: isServer && name === 'handle' (not a generator). CG uses this to weave
-        // the middleware pipeline around route handlers.
-        isHandleEscapeHatch: isServer && !isGenerator && name === 'handle',
+        // §39.3.2 + §12.2 Trigger 8 (D2, server-keyword-eliminate): the middleware
+        // handle() escape hatch is recognized by its RESERVED NAME + SIGNATURE SHAPE,
+        // independent of the deprecated `server` keyword. The §39.3.2 signature is
+        // `handle(request, resolve)` — exactly two params named `request` + `resolve`.
+        // Requiring the signature (not name alone) avoids over-firing on unrelated
+        // `function handle()` / `function handle(e, tag)` declarations in user code.
+        // CG weaves on this flag (emit-functions.ts / emit-server.ts); RI Trigger 8
+        // adds the `middleware-handle` escalation reason when it is set, so a keyword-
+        // less `function handle(request, resolve)` still escalates server AND weaves.
+        isHandleEscapeHatch:
+          !isGenerator &&
+          name === 'handle' &&
+          Array.isArray(params) &&
+          params.length === 2 &&
+          params[0] && params[0].name === 'request' &&
+          params[1] && params[1].name === 'resolve',
         ...(hasReturnType ? { hasReturnType: true } : {}),
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         // §19.9.7 (A9 Ext 5): `.idempotent()` modifier flag.

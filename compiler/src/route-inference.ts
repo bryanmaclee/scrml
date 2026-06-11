@@ -28,6 +28,8 @@
  *   | { kind: 'protected-field-access', field: string, stateBlockId: string }
  *   | { kind: 'server-only-resource',   resourceType: string, span: Span }
  *   | { kind: 'explicit-annotation',    span: Span }
+ *   | { kind: 'channel-broadcast',      detail: string, span: Span }   // §12.2 Trigger 7 (D2)
+ *   | { kind: 'middleware-handle',      span: Span }                   // §12.2 Trigger 8 (D2)
  *
  * FunctionNodeId = "{filePath}::{span.start}"
  *
@@ -89,7 +91,15 @@ import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 export type EscalationReason =
   | { kind: "protected-field-access"; field: string; stateBlockId: string }
   | { kind: "server-only-resource"; resourceType: string; span: Span }
-  | { kind: "explicit-annotation"; span: Span };
+  | { kind: "explicit-annotation"; span: Span }
+  // §12.2 Trigger 7 (D2, server-keyword-eliminate): a standalone function
+  // declared inside a <channel> lexical scope that WRITES a channel-declared
+  // cell or calls broadcast()/disconnect(). `detail` names the write target /
+  // call for diagnostics.
+  | { kind: "channel-broadcast"; detail: string; span: Span }
+  // §12.2 Trigger 8 (D2): the reserved-name handle(request, resolve) middleware
+  // escape hatch, recognized by name+signature (§39.3.2), keyword-independent.
+  | { kind: "middleware-handle"; span: Span };
 
 /**
  * One server batch in a CPS split plan (Ext 1, M1.1).
@@ -1362,6 +1372,108 @@ function extractReactiveAssignmentCellName(node: LogicStatement): string | null 
 }
 
 // ---------------------------------------------------------------------------
+// §12.2 Trigger 7 (D2, server-keyword-eliminate) — channel-cell-write /
+// broadcast() / disconnect() escalation.
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a standalone-function body for the §12.2 Trigger-7 escalation signals
+ * and return the `channel-broadcast` reason(s) found. The function is presumed
+ * to already be lexically inside a `<channel>` body (the caller gates on
+ * `perFileChannelFnMap`). The two escalating signals are:
+ *
+ *   (a) a source-level WRITE to a channel-DECLARED cell — an `@<cell> = <expr>`
+ *       (state-decl reassign / bare-expr assign) whose LHS cell name is one of
+ *       the V5-strict cells declared in that channel's body
+ *       (`channelCells`); OR
+ *   (b) a call to `broadcast(...)` or `disconnect()` anywhere in the body.
+ *
+ * Over-fire discipline (LOAD-BEARING):
+ *   - READS of a channel cell do NOT escalate. Only writes (LHS) and the two
+ *     broadcast/disconnect built-in calls.
+ *   - Does NOT descend into nested `function-decl` bodies — each declaration is
+ *     analyzed for its own direct triggers (mirrors `walkBodyForTriggers`).
+ *   - Returns AT MOST ONE reason; the presence of any signal is enough to
+ *     escalate, and a single reason keeps the diagnostic surface clean.
+ *
+ * The detection is deliberately syntactic (string + structured exprNode) to
+ * match the rest of RI's direct-trigger machinery; the channel-cell ownership
+ * itself is resolved structurally upstream (`collectChannelCellMap`).
+ */
+function detectChannelBroadcastReason(
+  body: LogicStatement[],
+  channelCells: Set<string>,
+): EscalationReason | null {
+  if (!Array.isArray(body) || body.length === 0) return null;
+
+  let found: EscalationReason | null = null;
+
+  function exprTextOf(node: any): string {
+    if (!node || typeof node !== "object") return "";
+    if (node.exprNode) return emitStringFromTree(node.exprNode);
+    if (node.valueExpr) return emitStringFromTree(node.valueExpr);
+    if (typeof node.expr === "string") return node.expr;
+    return "";
+  }
+
+  function visit(node: any): void {
+    if (found !== null) return;
+    if (!node || typeof node !== "object") return;
+
+    // (a) WRITE to a channel-declared cell.
+    const writtenCell = extractReactiveAssignmentCellName(node as LogicStatement);
+    if (writtenCell !== null && channelCells.has(writtenCell)) {
+      found = {
+        kind: "channel-broadcast",
+        detail: `channel cell write @${writtenCell}`,
+        span: (node as any).span,
+      };
+      return;
+    }
+
+    // (b) broadcast(...) / disconnect() call — match a call expression at the
+    // start of a callee token. `\b` boundaries prevent matching a member
+    // suffix like `obj.broadcast(` only when it is a method call; the §38.6
+    // built-ins are bare calls, so we require a non-member boundary.
+    if (node.kind === "bare-expr" || node.kind === "return-stmt" || node.kind === "state-decl"
+        || node.kind === "let-decl" || node.kind === "const-decl" || node.kind === "tilde-decl") {
+      const txt = exprTextOf(node);
+      if (/(^|[^.\w$])(broadcast|disconnect)\s*\(/.test(txt)) {
+        const which = /(^|[^.\w$])broadcast\s*\(/.test(txt) ? "broadcast()" : "disconnect()";
+        found = {
+          kind: "channel-broadcast",
+          detail: `${which} call`,
+          span: (node as any).span,
+        };
+        return;
+      }
+    }
+
+    // Do NOT recurse into nested function-decl bodies — each is analyzed for
+    // its own direct triggers.
+    if (node.kind === "function-decl") return;
+
+    // Recurse into array-valued children (if/for/while bodies, etc.).
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "id" || key === "exprNode" || key === "valueExpr") continue;
+      const val = (node as any)[key];
+      if (Array.isArray(val)) {
+        for (const child of val) {
+          visit(child);
+          if (found !== null) return;
+        }
+      }
+    }
+  }
+
+  for (const stmt of body) {
+    visit(stmt);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // CPS transformation analysis
 // ---------------------------------------------------------------------------
 
@@ -2428,7 +2540,50 @@ export function runRI(input: RIInput): RIOutput {
         fileImportedNamespaces,
       );
 
-      const directTriggers: EscalationReason[] = [...explicitTriggers, ...bodyTriggers];
+      // -------------------------------------------------------------
+      // Trigger 7 (D2): channel-cell-write / broadcast() / disconnect()
+      // escalation. A standalone `function` DECLARATION lexically inside a
+      // <channel> body escalates server when its body WRITES a channel-
+      // declared cell or calls broadcast()/disconnect(). The channel
+      // ownership maps (Step 2d) gate this so onclient:/onserver: ATTRIBUTE
+      // handlers, `fn`, and functions outside any channel scope are never
+      // reached: `collectChannelFunctionMap` only registers standalone
+      // function-decl names inside a <channel> body.
+      // -------------------------------------------------------------
+      const channelTriggers: EscalationReason[] = [];
+      {
+        const _fnName = (fnNode as any).name;
+        const _ownerChannel = typeof _fnName === "string"
+          ? perFileChannelFnMap.get(filePath)?.get(_fnName)
+          : undefined;
+        if (_ownerChannel != null) {
+          const _channelCells =
+            perFileChannelCellMap.get(filePath)?.get(_ownerChannel) ?? new Set<string>();
+          const _reason = detectChannelBroadcastReason(body, _channelCells);
+          if (_reason !== null) channelTriggers.push(_reason);
+        }
+      }
+
+      // -------------------------------------------------------------
+      // Trigger 8 (D2): the reserved-name handle(request, resolve)
+      // middleware escape hatch. Recognized by name+signature at TAB
+      // (`isHandleEscapeHatch`, keyword-independent per §39.3.2). Adding the
+      // `middleware-handle` reason makes the escalation explicit so the
+      // deprecation lint (W-DEPRECATED-SERVER-MODIFIER) fires on a keyword-
+      // bearing `server function handle(...)`. The boundary itself is still
+      // assigned `"middleware"` downstream (Step 6) by the same flag.
+      // -------------------------------------------------------------
+      const handleTriggers: EscalationReason[] = [];
+      if ((fnNode as any).isHandleEscapeHatch === true) {
+        handleTriggers.push({ kind: "middleware-handle", span: fnNode.span });
+      }
+
+      const directTriggers: EscalationReason[] = [
+        ...explicitTriggers,
+        ...bodyTriggers,
+        ...channelTriggers,
+        ...handleTriggers,
+      ];
 
       // Build closure captures for this function.
       const closureCaptures = buildClosureCapturesForFunction(fnNode);
@@ -2957,9 +3112,12 @@ export function runRI(input: RIInput): RIOutput {
     const fnName = record.fnNode.name;
     if (!fnName) continue;
 
-    // §39.3: handle() escape hatch is middleware — never dead-warn or
-    // deprecation-warn (it is not a normal user function).
-    if ((record.fnNode as any).isHandleEscapeHatch === true) continue;
+    // §39.3: handle() escape hatch is middleware — never dead-warn (it is an
+    // entry point, not a normal user function). It MAY still deprecation-warn:
+    // D2 (§39.3.2 amendment) makes a keyword-bearing `server function handle()`
+    // fire W-DEPRECATED-SERVER-MODIFIER, since the reserved name now supplies
+    // the escalation reason (`middleware-handle`) on its own.
+    const isHandleHatch = (record.fnNode as any).isHandleEscapeHatch === true;
 
     // -- D4: W-DEAD-FUNCTION --------------------------------------------
     const callers = inverseCallerMap.get(fnNodeId);
@@ -2975,7 +3133,7 @@ export function runRI(input: RIInput): RIOutput {
     // entry points; never dead-warn.
     const isGenerator = (record.fnNode as any).isGenerator === true;
 
-    if (!hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isGenerator) {
+    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isGenerator) {
       const warn = new RIError(
         "W-DEAD-FUNCTION",
         `W-DEAD-FUNCTION: Function \`${fnName}\` has no callers, is not exported, ` +
@@ -3025,6 +3183,12 @@ export function runRI(input: RIInput): RIOutput {
           triggerDesc = `server-only resource (${first.resourceType})`;
         } else if (first.kind === "protected-field-access") {
           triggerDesc = `protected field access (${first.field})`;
+        } else if (first.kind === "channel-broadcast") {
+          // §12.2 Trigger 7 (D2).
+          triggerDesc = `channel broadcast/cell-write (${first.detail})`;
+        } else if (first.kind === "middleware-handle") {
+          // §12.2 Trigger 8 (D2): the reserved name handle() is the escalation.
+          triggerDesc = "the reserved middleware name handle()";
         } else {
           triggerDesc = first.kind;
         }
@@ -3078,11 +3242,17 @@ export function runRI(input: RIInput): RIOutput {
     }
 
     // §39.3: handle() escape hatch — treat as middleware boundary.
+    // §12.2 Trigger 8 (D2): surface the deduped escalation reasons (always
+    // includes `middleware-handle`, plus `explicit-annotation` when the
+    // deprecated `server` keyword is present) so the route map reflects WHY
+    // the function is server-side. The boundary stays "middleware" — handle()
+    // is server-executing but is woven into the pipeline, not a route.
     if ((record.fnNode as any).isHandleEscapeHatch === true) {
+      const _handleEsc = escalationResults.get(fnNodeId);
       functions.set(fnNodeId, {
         functionNodeId: fnNodeId,
         boundary: "middleware",
-        escalationReasons: [],
+        escalationReasons: _handleEsc?.deduped ?? [{ kind: "middleware-handle", span: record.fnNode.span }],
         generatedRouteName: null,
         explicitRoute: null,
         explicitMethod: null,
@@ -3556,6 +3726,12 @@ function deduplicateReasons(reasons: EscalationReason[]): EscalationReason[] {
       key = `sor:${r.resourceType}`;
     } else if (r.kind === "explicit-annotation") {
       key = "ea";
+    } else if (r.kind === "channel-broadcast") {
+      // §12.2 Trigger 7 (D2) — one channel-broadcast reason per function is
+      // sufficient; collapse regardless of which write/call supplied it.
+      key = "cbr";
+    } else if (r.kind === "middleware-handle") {
+      key = "mwh";
     } else {
       key = JSON.stringify(r);
     }

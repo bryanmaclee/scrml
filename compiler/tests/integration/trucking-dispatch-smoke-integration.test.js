@@ -310,6 +310,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // resolve to typed projection rows and fire NO lint. NO E-PROTECT-001 fires:
   // the auth `login` selects `password_hash` but is server-escalated via §12.2
   // Trigger-2 protected-field access (it verifies the hash server-side).
+  //
+  // D2 (server-keyword-eliminate-2026-06-10, §12.2 Trigger 7): the four channel
+  // publisher functions (`publishBoardEvent` / `publishDriverEvent` /
+  // `publishLoadEvent` / `publishCustomerEvent`) are `server function`s declared
+  // inside a `<channel>` body whose bodies WRITE channel-declared cells. Their
+  // channel-cell writes are now an independent escalation trigger (Trigger 7),
+  // so the deprecated `server` keyword is redundant — each fires
+  // W-DEPRECATED-SERVER-MODIFIER. The count is 19 (not 4) because the channel
+  // bodies are CHX-inlined at every cross-file consumer site under emitPerRoute,
+  // so each publisher is re-analyzed once per consumer file. The corpus is
+  // UNCHANGED (still uses the keyword this dispatch); D2 only ADDS the inference
+  // path. Migrating these to keyword-less form is D4 backlog.
   const EXPECTED_BASELINE = {
     "I-AUTH-REDIRECT-UNRESOLVED": 1,
     "W-ATTR-001": 20,
@@ -318,6 +330,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     "W-CG-CHUNK-EMPTY": 1,
     "W-CG-CHUNK-PREFETCH-UNRESOLVED": 1,
     "W-DEAD-FUNCTION": 1,
+    "W-DEPRECATED-SERVER-MODIFIER": 19,
     "W-PROGRAM-001": 4,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
     "W-SQL-ROW-UNTYPED": 6,

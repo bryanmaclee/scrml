@@ -34,6 +34,9 @@ import { runCG } from "../../src/code-generator.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { computeProgramConfig } from "../../src/compute-program-config.ts";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -649,7 +652,10 @@ describe("MW-HANDLE-001: server function handle() tagged isHandleEscapeHatch", (
     expect(handleNode.isHandleEscapeHatch).toBe(true);
   });
 
-  test("non-server function handle() does NOT have isHandleEscapeHatch: true", () => {
+  // D2 (server-keyword-eliminate, §39.3.2 amendment + §12.2 Trigger 8): the
+  // keyword-less `function handle(request, resolve)` IS now the escape hatch —
+  // recognized by reserved name + signature shape, independent of `server`.
+  test("keyword-less function handle(request, resolve) IS isHandleEscapeHatch (D2 Trigger 8)", () => {
     const source = `<program>
 \${ function handle(request, resolve) {
   return resolve(request)
@@ -673,7 +679,65 @@ describe("MW-HANDLE-001: server function handle() tagged isHandleEscapeHatch", (
       }
     }
     expect(handleNode).not.toBeNull();
-    expect(handleNode.isHandleEscapeHatch).toBe(false);
+    expect(handleNode.isHandleEscapeHatch).toBe(true);
+  });
+
+  // D2 over-fire guard: a `function handle()` with the WRONG signature (not the
+  // §39.3.2 `(request, resolve)` two-param shape) is NOT the escape hatch.
+  test("function handle() with zero params is NOT isHandleEscapeHatch (over-fire guard)", () => {
+    const source = `<program>
+\${ function handle() {
+  let x = 1
+} }
+</program>`;
+
+    const { ast } = parseSource(source);
+    let handleNode = null;
+    const _allNodeLists = [ast.nodes ?? []];
+    const _progNode = (ast.nodes ?? []).find(n => n?.kind === "markup" && n?.tag === "program");
+    if (_progNode && Array.isArray(_progNode.children)) _allNodeLists.push(_progNode.children);
+    outer: for (const _nodeList of _allNodeLists) {
+      for (const node of _nodeList) {
+        if (node?.kind !== "logic") continue;
+        for (const stmt of (node.body ?? [])) {
+          if (stmt?.kind === "function-decl" && stmt.name === "handle") {
+            handleNode = stmt;
+            break outer;
+          }
+        }
+      }
+    }
+    expect(handleNode).not.toBeNull();
+    expect(handleNode.isHandleEscapeHatch).not.toBe(true);
+  });
+
+  // D2 over-fire guard: a `function handle(e, tag)` with two params but the
+  // WRONG NAMES is NOT the escape hatch (the §39.3.2 signature names matter).
+  test("function handle(e, tag) with wrong param names is NOT isHandleEscapeHatch (over-fire guard)", () => {
+    const source = `<program>
+\${ function handle(e, tag) {
+  let _ = tag
+} }
+</program>`;
+
+    const { ast } = parseSource(source);
+    let handleNode = null;
+    const _allNodeLists = [ast.nodes ?? []];
+    const _progNode = (ast.nodes ?? []).find(n => n?.kind === "markup" && n?.tag === "program");
+    if (_progNode && Array.isArray(_progNode.children)) _allNodeLists.push(_progNode.children);
+    outer: for (const _nodeList of _allNodeLists) {
+      for (const node of _nodeList) {
+        if (node?.kind !== "logic") continue;
+        for (const stmt of (node.body ?? [])) {
+          if (stmt?.kind === "function-decl" && stmt.name === "handle") {
+            handleNode = stmt;
+            break outer;
+          }
+        }
+      }
+    }
+    expect(handleNode).not.toBeNull();
+    expect(handleNode.isHandleEscapeHatch).not.toBe(true);
   });
 
   test("server function handle generator does NOT have isHandleEscapeHatch: true", () => {
@@ -702,6 +766,38 @@ describe("MW-HANDLE-001: server function handle() tagged isHandleEscapeHatch", (
     }
     expect(handleNode).not.toBeNull();
     expect(handleNode.isHandleEscapeHatch).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MW-HANDLE-001b (D2 §39.3.2 / §12.2 Trigger 8): a KEYWORD-LESS handle() still
+// WEAVES into the request pipeline end-to-end (server JS emits _scrml_mw_wrap).
+// ---------------------------------------------------------------------------
+
+describe("MW-HANDLE-001b (D2): keyword-less handle() weaves into the pipeline", () => {
+  test("function handle(request, resolve) — no `server` — emits _scrml_mw_wrap in server JS", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mw-kwl-"));
+    try {
+      const filePath = join(dir, "app.scrml");
+      const source = `<program>
+\${ function handle(request, resolve) {
+  return resolve(request)
+}
+
+function getData() route="/api/data" method="GET" {
+  return "ok"
+} }
+</program>`;
+      writeFileSync(filePath, source);
+      const result = compileScrml({ inputFiles: [filePath], outputDir: join(dir, "dist"), write: false });
+      const out = result.outputs?.get(filePath);
+      const serverJs = out?.serverJs ?? "";
+      // The keyword-less handle() is recognized (Trigger 8) and woven into the
+      // pipeline exactly like the keyword-bearing form.
+      expect(serverJs).toContain("_scrml_mw_wrap");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
