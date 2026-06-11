@@ -3915,6 +3915,238 @@ function checkLogShadowing(
 }
 
 // ---------------------------------------------------------------------------
+// §4.18.7 / W-DISPLAY-TEXT-OVERQUOTE — over-quoted display text in a nested
+// plain-markup free-text body inside a code-default-body context
+// ---------------------------------------------------------------------------
+
+/**
+ * §4.18 inverse footgun. In a code-default body (engine state-child body,
+ * match block-form arm body, `:`-shorthand body) a bare run is CODE and display
+ * text needs an explicit `"..."` literal (§4.18.3). BUT a plain-markup element
+ * opened *inside* that code-default body (`<p>`, `<span>`, any HTML element)
+ * opens a FREE-TEXT body (§4.18.1, "Body modes nest") — its content is verbatim.
+ *
+ * An adopter who carries the code-default `"..."` habit into a nested plain-markup
+ * element writes `<p>"On the way."</p>` and gets LITERAL quote marks in the
+ * output (`<p>"On the way."</p>` renders the quotes), with no diagnostic. Spec-
+ * CORRECT (free-text is verbatim) but surprising. This info-level lint surfaces it.
+ *
+ * It is the MIRROR of E-UNQUOTED-DISPLAY-TEXT (§4.18.7): that is the UNDER-quoting
+ * case (bare prose in the code-default body itself, where a literal is REQUIRED);
+ * this is the OVER-quoting case (a literal in a nested free-text body, where bare
+ * text is wanted).
+ *
+ * Fire condition (precise): a `"..."` display-text literal is the SOLE content of
+ * a plain-markup element (an HTML element, NOT a component, NOT a scrml structural
+ * element) that is nested inside one of the three code-default-body contexts. Does
+ * NOT fire on: a `"..."` directly in a code-default body (the CORRECT §4.18.3
+ * literal); bare free-text in plain markup; a quoted string that is NOT the sole
+ * content (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes);
+ * a `"..."` outside any code-default-body context.
+ *
+ * The W- prefix routes the diagnostic to `result.warnings` (non-fatal, info).
+ */
+function checkDisplayTextOverquote(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  // Is `text` (trimmed) a SINGLE `"..."` display-text literal — i.e. it starts
+  // and ends with `"` and carries no interior UNESCAPED `"`? A run like
+  // `"a" and "b"` has interior unescaped quotes, so the adopter clearly intends
+  // literal quote marks — that is NOT the over-quote footgun and does not fire.
+  function isQuotedSoleLiteral(text: string): boolean {
+    if (typeof text !== "string") return false;
+    const t = text.trim();
+    if (t.length < 2) return false;
+    if (t.charAt(0) !== '"' || t.charAt(t.length - 1) !== '"') return false;
+    // Scan the interior (between the first and last `"`) for an unescaped `"`.
+    // An escaped quote is `\"`; a literal backslash is `\\` (so `\\` consumes
+    // two chars and does not escape a following `"`).
+    let i = 1;
+    const last = t.length - 1;
+    while (i < last) {
+      const ch = t.charAt(i);
+      if (ch === "\\") { i += 2; continue; }   // skip the escaped char
+      if (ch === '"') return false;            // an interior unescaped quote
+      i += 1;
+    }
+    return true;
+  }
+
+  // A plain-markup element = a recognized HTML element whose body is FREE-TEXT
+  // per §4.18.1. `getElementShape(tag) !== null` is the established plain-markup
+  // predicate already used elsewhere in this file (the void-element / content-
+  // model checks at the same tag positions): it is non-null ONLY for the known
+  // HTML element set, so it returns null for a user component (PascalCase — e.g.
+  // `Loading`) AND for a scrml structural element (`<engine>`/`<match>`/`<errors>`).
+  // P3-FOLLOW: this routes on the element-shape registry, NOT the legacy
+  // syntactic component flag, so both components and structural elements are
+  // excluded without a routing read of that flag.
+  function isPlainMarkupElement(n: Record<string, unknown>): boolean {
+    if (n.kind !== "markup") return false;
+    const tag = (n.tag as string | undefined) ?? (n.name as string | undefined) ?? "";
+    return getElementShape(tag) !== null;
+  }
+
+  // Does this plain-markup element's body consist SOLELY of one `"..."`
+  // display-text literal? Returns the offending text node (for span reporting)
+  // or null. Whitespace-only text siblings are ignored (source formatting).
+  function soleQuotedTextChild(
+    n: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const children = n.children;
+    if (!Array.isArray(children)) return null;
+    const significant: Record<string, unknown>[] = [];
+    for (const c of children) {
+      if (!c || typeof c !== "object") continue;
+      const cn = c as Record<string, unknown>;
+      if (cn.kind === "text") {
+        const v = typeof cn.value === "string" ? cn.value : "";
+        if (v.trim().length === 0) continue; // whitespace-only formatting
+      }
+      significant.push(cn);
+    }
+    if (significant.length !== 1) return null;
+    const only = significant[0];
+    if (only.kind !== "text") return null;
+    const v = typeof only.value === "string" ? only.value : "";
+    return isQuotedSoleLiteral(v) ? only : null;
+  }
+
+  // Fire on a plain-markup element whose sole content is a `"..."` literal.
+  function fireOn(n: Record<string, unknown>): void {
+    const textNode = soleQuotedTextChild(n);
+    if (!textNode) return;
+    const tag = (n.tag as string | undefined) ?? (n.name as string | undefined) ?? "p";
+    const span = ((textNode.span as Span | undefined)
+      ?? (n.span as Span | undefined)
+      ?? fileSpan);
+    errors.push(new TSError(
+      "W-DISPLAY-TEXT-OVERQUOTE",
+      "W-DISPLAY-TEXT-OVERQUOTE: this `\"...\"` literal is the sole content of a " +
+      `nested <${tag}> inside a code-default body (engine state-child / match arm / ` +
+      "`:`-shorthand). A plain-markup element opens a FREE-TEXT body (§4.18.1), so " +
+      "the quotes will render literally; did you mean bare text " +
+      `(\`<${tag}>On the way.</${tag}>\`)? The \`"..."\` display-text literal is the ` +
+      "code-default-body form (§4.18.3); inside a nested plain-markup element write " +
+      "bare free text. (This is the mirror of E-UNQUOTED-DISPLAY-TEXT, the " +
+      "under-quoting case; info-level, not an error.)",
+      span,
+      "info",
+    ));
+  }
+
+  // Walk every descendant markup node of a code-default body. A code-default
+  // body's content is the state-child's / arm's parsed `children` tree (engine
+  // state-children + markup-form match `armBodyChildren`); for each plain-markup
+  // descendant element we test the sole-quoted-literal condition. We do NOT fire
+  // on the structural state-child / arm node itself (it is not plain markup) nor
+  // on a `"..."` that sits directly in the code-default body (which is a correct
+  // §4.18.3 literal, not nested in a plain-markup element).
+  const seen = new WeakSet<object>();
+  function walkBodyMarkup(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) { for (const c of node) walkBodyMarkup(c); return; }
+    const n = node as Record<string, unknown>;
+    if (isPlainMarkupElement(n)) fireOn(n);
+    // Recurse into children of EVERY node so a `<div><p>"x"</p></div>` nested
+    // arbitrarily deep inside the code-default body is still reached.
+    if (Array.isArray(n.children)) { for (const c of n.children) walkBodyMarkup(c); }
+  }
+
+  // Scan a RAW arm/body source slice (the match shapes hold arm bodies as raw
+  // text — `match-block.armsRaw`, `match-arm-inline.result`) for the nested
+  // `<tag>"..."</tag>` pattern. The native/skipped-expr re-spacing inserts
+  // spaces around `<`/`>`/`/` (e.g. `< p > "x" < / p >`), so the regex tolerates
+  // optional whitespace. Only a SOLE `"..."` body between the tags fires.
+  function scanRawArmText(raw: string): void {
+    if (typeof raw !== "string" || raw.length === 0) return;
+    // <tag> "..." </tag>  — tag is an identifier; body is one quoted literal.
+    // The body group `"(?:[^"\\]|\\.)*"` matches a single literal (no interior
+    // unescaped `"`), so `"a" and "b"` (two literals) does NOT match. Leading/
+    // trailing whitespace between the tags and the literal is tolerated.
+    const re = /<\s*([A-Za-z][A-Za-z0-9-]*)\s*>\s*("(?:[^"\\]|\\.)*")\s*<\s*\/\s*\1\s*>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      const tag = m[1];
+      // Plain markup only — lowercase HTML element, not a component (PascalCase)
+      // and not a structural element (getElementShape null).
+      if (getElementShape(tag) === null) continue;
+      errors.push(new TSError(
+        "W-DISPLAY-TEXT-OVERQUOTE",
+        "W-DISPLAY-TEXT-OVERQUOTE: this `\"...\"` literal is the sole content of a " +
+        `nested <${tag}> inside a match arm (a code-default body). A plain-markup ` +
+        "element opens a FREE-TEXT body (§4.18.1), so the quotes will render " +
+        `literally; did you mean bare text (\`<${tag}>On the way.</${tag}>\`)? The ` +
+        "`\"...\"` display-text literal is the code-default-body form (§4.18.3); " +
+        "inside a nested plain-markup element write bare free text. (Mirror of " +
+        "E-UNQUOTED-DISPLAY-TEXT; info-level, not an error.)",
+        fileSpan,
+        "info",
+      ));
+    }
+  }
+
+  // Walk the top-level nodes; on each code-default-body locus, descend.
+  const topSeen = new WeakSet<object>();
+  function walkTop(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (topSeen.has(node as object)) return;
+    topSeen.add(node as object);
+    if (Array.isArray(node)) { for (const c of node) walkTop(c); return; }
+    const n = node as Record<string, unknown>;
+
+    // (1) Engine state-children — each `engine-decl.bodyChildren` entry is a
+    // state-child whose markup body is a code-default body. Walk its children.
+    if (n.kind === "engine-decl" && Array.isArray(n.bodyChildren)) {
+      for (const stateChild of n.bodyChildren) walkBodyMarkup(stateChild);
+    }
+
+    // (2) Markup-form match — `<match>` arms code-default. When the markup-
+    // expansion pass re-parsed bare-body arms into `armBodyChildren` (S177),
+    // those are walkable; otherwise the arms live in `armsRaw` (raw text).
+    if (n.kind === "match-block") {
+      if (Array.isArray(n.armBodyChildren)) {
+        for (const armBody of n.armBodyChildren) walkBodyMarkup(armBody);
+      }
+      if (typeof n.armsRaw === "string") scanRawArmText(n.armsRaw);
+    }
+
+    // (3) Expression-form match — `match-stmt` arms hold their result body as a
+    // raw `result` string on each `match-arm-inline` / `match-arm-block`.
+    if (n.kind === "match-stmt" && Array.isArray(n.body)) {
+      for (const arm of n.body) {
+        if (!arm || typeof arm !== "object") continue;
+        const a = arm as Record<string, unknown>;
+        if (typeof a.result === "string") scanRawArmText(a.result);
+      }
+    }
+
+    // (4) `:`-shorthand bodies — when a `:`-shorthand body itself contains a
+    // nested plain-markup element with a sole quoted child. The ast-builder
+    // strips quotes when the body IS a display-text literal (correct), so only a
+    // NESTED plain-markup element over-quotes; that lands in the synthesized
+    // children handled by (1)/(2) when inside engine/match, and in the raw
+    // `shorthandBodyRaw` otherwise.
+    if (typeof n.shorthandBodyRaw === "string" && n.closerForm === "shorthand") {
+      scanRawArmText(n.shorthandBodyRaw);
+    }
+
+    // Recurse into structural containers so nested engines / matches / markup
+    // anywhere in the tree are reached.
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walkTop(c); }
+      else if (v && typeof v === "object") walkTop(v);
+    }
+  }
+  for (const node of topNodes) walkTop(node);
+}
+
+// ---------------------------------------------------------------------------
 // §14.x / E-TYPE-ANY-FORBIDDEN — `any` is not a type in scrml (hard line)
 // ---------------------------------------------------------------------------
 
@@ -16766,6 +16998,12 @@ function processFile(
     // line). Reject the literal type-token `any` in every type-annotation
     // position; `asIs` is the sanctioned untyped escape hatch.
     checkAnyTypeForbidden(typeDecls, fnFieldTopNodes, errors, fileSpan);
+    // §4.18.7 / W-DISPLAY-TEXT-OVERQUOTE — a `"..."` literal that is the sole
+    // content of a plain-markup element nested inside a code-default body
+    // (engine state-child / match arm / `:`-shorthand) renders LITERAL quotes
+    // (the nested element's body is free-text, §4.18.1); info-level nudge. The
+    // mirror of E-UNQUOTED-DISPLAY-TEXT (the under-quoting case).
+    checkDisplayTextOverquote(fnFieldTopNodes, errors, fileSpan);
   }
 
   // TS-B Step 1.2: Seed type registry with imported types from dependency files (§21.3).
