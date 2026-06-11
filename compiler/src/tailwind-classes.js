@@ -2078,7 +2078,36 @@ function offsetToLineCol(source, offset) {
  * @returns {string}
  */
 function maskInterpolations(value) {
-  let out = "";
+  const ranges = findInterpolationRanges(value);
+  if (ranges.length === 0) return value;
+
+  // Replace each interpolation region with spaces (preserving newlines so
+  // offsetToLineCol still produces correct line numbers).
+  const chars = value.split("");
+  for (const [start, end] of ranges) {
+    for (let k = start; k < end; k++) {
+      if (chars[k] !== "\n") chars[k] = " ";
+    }
+  }
+  return chars.join("");
+}
+
+/**
+ * Locate every `${...}` interpolation region in `value`, returning `[start, end)`
+ * half-open index pairs (end is exclusive). Handles brace-balanced `${...}`
+ * (nested objects, ternary expressions, etc.); if a `${` has no matching `}` the
+ * region extends to the end of the string.
+ *
+ * Indices are into `value` directly. Because `maskInterpolations` replaces each
+ * region with the same number of characters, these indices also map 1:1 onto the
+ * masked string — so callers scanning a masked value can use these ranges to
+ * decide whether a `/\S+/` token is glued to a dynamic interpolation.
+ *
+ * @param {string} value
+ * @returns {Array<[number, number]>}
+ */
+function findInterpolationRanges(value) {
+  const ranges = [];
   let i = 0;
   while (i < value.length) {
     if (value[i] === "$" && value[i + 1] === "{") {
@@ -2091,19 +2120,43 @@ function maskInterpolations(value) {
         if (depth === 0) break;
         j++;
       }
-      // Replace [i, j+1] with spaces (preserving newlines so offsetToLineCol
-      // still produces correct line numbers).
       const end = Math.min(j + 1, value.length);
-      for (let k = i; k < end; k++) {
-        out += value[k] === "\n" ? "\n" : " ";
-      }
+      ranges.push([i, end]);
       i = end;
     } else {
-      out += value[i];
       i++;
     }
   }
-  return out;
+  return ranges;
+}
+
+/**
+ * Decide whether a `/\S+/` class token spanning `[tokenStart, tokenEnd)` is a
+ * fragment of a dynamic class name — i.e. it is glued (no intervening whitespace)
+ * to, or overlaps, a `${...}` interpolation region. Such tokens are
+ * runtime-concatenation fragments (`driver-` from `class="driver-${@status}"`,
+ * or `-suffix` from `class="${expr}-suffix"`) and are NOT complete utilities, so
+ * the Tailwind lints must not validate them.
+ *
+ * A token is considered glued when an interpolation region is immediately
+ * adjacent on either side (`range.start === tokenEnd` or `range.end === tokenStart`)
+ * or overlaps the token's span. Tokens separated from an interpolation by
+ * whitespace (`class="flex ${x} grid"`) are standalone classes and are NOT
+ * treated as fragments — they remain fully validated.
+ *
+ * @param {number} tokenStart inclusive
+ * @param {number} tokenEnd   exclusive
+ * @param {Array<[number, number]>} interpolationRanges from findInterpolationRanges
+ * @returns {boolean}
+ */
+function tokenTouchesInterpolation(tokenStart, tokenEnd, interpolationRanges) {
+  for (const [rangeStart, rangeEnd] of interpolationRanges) {
+    // Immediately adjacent (glued, no whitespace boundary).
+    if (rangeStart === tokenEnd || rangeEnd === tokenStart) return true;
+    // Overlapping spans.
+    if (rangeStart < tokenEnd && rangeEnd > tokenStart) return true;
+  }
+  return false;
 }
 
 /**
@@ -2146,6 +2199,7 @@ export function findUnsupportedTailwindShapes(source) {
     // contents are JS expressions that frequently include ':' (ternaries) and
     // would otherwise produce false-positive W-TAILWIND-001 diagnostics. The
     // mask preserves length so source offsets stay accurate.
+    const interpolationRanges = findInterpolationRanges(attrValue);
     const masked = maskInterpolations(attrValue);
 
     // Walk the (masked) attribute value, recording each class name and its
@@ -2157,6 +2211,22 @@ export function findUnsupportedTailwindShapes(source) {
     const seenInThisAttr = new Set();
     while ((classMatch = classRe.exec(masked)) !== null) {
       const cls = classMatch[0];
+
+      // Skip dynamic-class fragments: a token glued to (no whitespace) or
+      // overlapping a `${...}` interpolation is a runtime-concatenation
+      // fragment (`hover:bg-` from `class="hover:bg-${color}"`), not a
+      // complete utility, so it is statically un-validatable. The mask
+      // preserves length, so classMatch.index maps 1:1 onto attrValue.
+      if (
+        tokenTouchesInterpolation(
+          classMatch.index,
+          classMatch.index + cls.length,
+          interpolationRanges,
+        )
+      ) {
+        continue;
+      }
+
       if (seenInThisAttr.has(cls)) continue;
       seenInThisAttr.add(cls);
 
@@ -2280,6 +2350,7 @@ export function findUnrecognizedClasses(source) {
     // JS expression contents (which may themselves contain class-name-shaped
     // string literals or arbitrary tokens) do not generate diagnostics. The
     // mask preserves length so source offsets stay accurate.
+    const interpolationRanges = findInterpolationRanges(attrValue);
     const masked = maskInterpolations(attrValue);
 
     const classRe = /\S+/g;
@@ -2287,6 +2358,24 @@ export function findUnrecognizedClasses(source) {
     const seenInThisAttr = new Set();
     while ((classMatch = classRe.exec(masked)) !== null) {
       const cls = classMatch[0];
+
+      // Skip dynamic-class fragments: a token glued to (no whitespace) or
+      // overlapping a `${...}` interpolation is a runtime-concatenation
+      // fragment (`driver-` from `class="driver-${@status}"`, `-suffix` from
+      // `class="${expr}-suffix"`), not a complete utility, so it is
+      // statically un-validatable. The mask preserves length, so
+      // classMatch.index maps 1:1 onto attrValue. Whitespace-separated tokens
+      // (`class="flex ${x} grid"`) are NOT glued and stay validated.
+      if (
+        tokenTouchesInterpolation(
+          classMatch.index,
+          classMatch.index + cls.length,
+          interpolationRanges,
+        )
+      ) {
+        continue;
+      }
+
       if (seenInThisAttr.has(cls)) continue;
       seenInThisAttr.add(cls);
 

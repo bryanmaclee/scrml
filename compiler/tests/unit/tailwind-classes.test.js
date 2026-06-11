@@ -26,7 +26,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { getTailwindCSS, getTailwindCSSWithDiagnostic, getAllUsedCSS, getAllUsedCSSWithDiagnostics, scanClassesFromHtml } from "../../src/tailwind-classes.js";
+import { getTailwindCSS, getTailwindCSSWithDiagnostic, getAllUsedCSS, getAllUsedCSSWithDiagnostics, scanClassesFromHtml, findUnrecognizedClasses, findUnsupportedTailwindShapes } from "../../src/tailwind-classes.js";
 
 // ---------------------------------------------------------------------------
 // §1 Known utility classes produce correct CSS
@@ -1001,5 +1001,113 @@ describe("§19d scanClassesFromHtml + arbitrary values", () => {
     const classes = scanClassesFromHtml('<span class="bg-[#ff00ff] bg-[rgb(0,255,0)]"></span>');
     expect(classes).toContain("bg-[#ff00ff]");
     expect(classes).toContain("bg-[rgb(0,255,0)]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §20 Dynamic-class fragments — `class="prefix-${expr}"` is not validated
+//
+// `class="driver-${@status}"` is a runtime-concatenation: the static `driver-`
+// prefix is glued to a `${...}` interpolation and is NEVER a complete utility.
+// Both tailwind scan loops mask `${...}` to whitespace (length-preserving) then
+// `/\S+/`-split; before this fix the fragment before the mask (`driver-`) was
+// extracted and lint-failed. The fix skips any token glued to (no whitespace
+// boundary) or overlapping a `${...}` region.
+//
+// Boundary contract:
+//   - GLUED (adjacent / overlapping) tokens  -> skipped (fragment).
+//   - WHITESPACE-SEPARATED standalone tokens  -> still validated.
+//   - STATIC tokens with no interpolation     -> unchanged (still fire).
+// Covers both findUnrecognizedClasses (W-TAILWIND-UNRECOGNIZED-CLASS) and
+// findUnsupportedTailwindShapes (W-TAILWIND-001).
+// ---------------------------------------------------------------------------
+
+describe("§20 Dynamic-class fragment skip — W-TAILWIND-UNRECOGNIZED-CLASS", () => {
+  const firedOn = (diags, cls) =>
+    diags.some(d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS" && d.className === cls);
+
+  test("prefix glued to a state interpolation does not fire on the prefix", () => {
+    const diags = findUnrecognizedClasses('<div class="driver-${@status}"></div>');
+    expect(firedOn(diags, "driver-")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("recognized utilities pass and the glued prefix is skipped (no fire on any token)", () => {
+    const diags = findUnrecognizedClasses('<div class="flex gap-2 badge-${@n}"></div>');
+    // flex / gap-2 are recognized; badge- is a fragment -> nothing fires.
+    expect(firedOn(diags, "flex")).toBe(false);
+    expect(firedOn(diags, "gap-2")).toBe(false);
+    expect(firedOn(diags, "badge-")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("suffix glued AFTER an interpolation does not fire on the suffix", () => {
+    const diags = findUnrecognizedClasses('<div class="${expr}-suffix"></div>');
+    expect(firedOn(diags, "-suffix")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("Tailwind-shaped dynamic prefix (grid-cols-) does not fire", () => {
+    const diags = findUnrecognizedClasses('<div class="grid-cols-${n}"></div>');
+    expect(firedOn(diags, "grid-cols-")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("STATIC custom classes (no interpolation) STILL fire — no blanket suppression", () => {
+    const diags = findUnrecognizedClasses('<div class="counter-app my-card"></div>');
+    expect(firedOn(diags, "counter-app")).toBe(true);
+    expect(firedOn(diags, "my-card")).toBe(true);
+  });
+
+  test("fully-dynamic class (whole value is one interpolation) is unchanged — no fire", () => {
+    const diags = findUnrecognizedClasses(`<div class="\${cond ? 'a':'b'}"></div>`);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("whitespace-separated typo NEXT TO an interpolation still fires (not glued)", () => {
+    const diags = findUnrecognizedClasses('<div class="flexx ${x} grid"></div>');
+    // flexx is a standalone typo separated by whitespace -> still caught.
+    expect(firedOn(diags, "flexx")).toBe(true);
+    // grid is recognized; ${x} is masked -> no other fires.
+    expect(firedOn(diags, "grid")).toBe(false);
+  });
+});
+
+describe("§20 Dynamic-class fragment skip — W-TAILWIND-001 (findUnsupportedTailwindShapes)", () => {
+  const firedOn = (diags, cls) =>
+    diags.some(d => d.code === "W-TAILWIND-001" && d.className === cls);
+
+  test("variant-shaped dynamic prefix (hover:bg-) does not fire", () => {
+    // hover:bg- contains ':' so it passes the shape prefilter, fails registry
+    // lookup, and pre-fix mis-fired W-TAILWIND-001 on the fragment.
+    const diags = findUnsupportedTailwindShapes('<div class="hover:bg-${color}"></div>');
+    expect(firedOn(diags, "hover:bg-")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("arbitrary-value bracket fragments around an interpolation do not fire", () => {
+    // `p-[` is glued to ${...}; `]` is glued after it. Both are fragments.
+    const diags = findUnsupportedTailwindShapes('<div class="p-[${size}]"></div>');
+    expect(firedOn(diags, "p-[")).toBe(false);
+    expect(firedOn(diags, "]")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("variant suffix glued AFTER an interpolation does not fire", () => {
+    const diags = findUnsupportedTailwindShapes('<div class="${v}:p-4"></div>');
+    expect(firedOn(diags, ":p-4")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("genuinely-unsupported STATIC variant (group-hover:) STILL fires — no blanket suppression", () => {
+    // group-hover: is shape-valid (':') but unsupported by the engine; it is
+    // static (no interpolation) so it must still fire.
+    const diags = findUnsupportedTailwindShapes('<div class="group-hover:p-4"></div>');
+    expect(firedOn(diags, "group-hover:p-4")).toBe(true);
+  });
+
+  test("whitespace-separated unsupported variant next to an interpolation still fires", () => {
+    const diags = findUnsupportedTailwindShapes('<div class="group-hover:p-4 ${x}"></div>');
+    expect(firedOn(diags, "group-hover:p-4")).toBe(true);
   });
 });
