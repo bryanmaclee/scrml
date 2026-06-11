@@ -15,7 +15,9 @@
 //   corpus-pervasive — this was the LARGEST native-flip residual cluster.
 //
 //   This is parity-COMPLETENESS for a form live already accepts, not a subset
-//   expansion. §33.6 (`fn ≡ pure function`) is respected — the `function`
+//   expansion. §33.6 (`fn` and `pure function` enforce the same purity
+//   contract; `fn` is canonical, `pure function` the deprecated synonym) is
+//   respected — the `function`
 //   keyword keeps fnKind:"function" (NOT collapsed into "fn"); the two remain
 //   distinct fnKinds.
 //

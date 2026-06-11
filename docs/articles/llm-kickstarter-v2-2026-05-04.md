@@ -1926,7 +1926,7 @@ ${
 - **`navigate(path, .Hard)` is the 302 server-redirect mode** (§20). Default mode `.Soft` is client-side route swap; `.Hard` forces a server redirect (useful post-login, post-logout, etc.).
 - **Tailwind utility classes work** (§26), including variant prefixes (`hover:`, `md:`, `dark:`) and arbitrary values (`grid-cols-[1fr_2fr]`, `bg-[#1a1a1a]`). Unrecognized classes fire `W-TAILWIND-UNRECOGNIZED-CLASS` lint — typos surface at compile time, not silent.
 - **`I-MATCH-PROMOTABLE` info-lint nudges Tier-0 lift** (§56). When you write `if (@phase == .X) … else if (@phase == .Y) …` chains, the lint suggests a `<match for=Phase on=@phase>` block. The `bun scrml promote --match <file>[:line]` CLI does the mechanical rewrite for you — state-children body content carries forward verbatim; the wrapper swap is the commitment moment.
-- **`pure fn` is REDUNDANT** (§33.6, S32 ratification — `fn` ≡ `pure function`). Either form works, but writing `pure fn` or `pure function` when `fn` alone suffices fires `W-PURE-REDUNDANT`. Use plain `fn` for pure compute; reach for the explicit `pure function` form only when emphasizing purity at the declaration site is editorially worth the extra keyword.
+- **`pure fn` and `pure function` are DEPRECATED** (§33, deprecate-pure ratification — the `pure` modifier is deprecated language-wide). **`fn` is the canonical pure form** (`server fn` for server-side pure functions); bare `function` (no modifier) is impure. Any `pure`-modifier declaration fires `W-PURE-DEPRECATED` (which supersedes the former `W-PURE-REDUNDANT`). Always write plain `fn` for pure compute — it carries the full purity contract on its own. Run `bun scrml migrate --fix` to rewrite existing `pure function` / `pure fn` declarations to `fn`.
 
 ---
 

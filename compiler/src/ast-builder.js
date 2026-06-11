@@ -6715,7 +6715,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     // A6 (S99 2026-05-17) — NESTED `fn` KEYWORD-FORM DECLARATION inside a
     // function body. SPEC §7.3.1 explicitly permits nested fn declarations
-    // (inheriting the §48 purity contract). SPEC §48.11: `fn` ≡ `pure function`.
+    // (inheriting the §48 purity contract). SPEC §48.11: `fn` is the canonical
+    // pure form (`pure function` is its deprecated synonym; identical contract).
     //
     // Without this handler, `fn testExpr(expr) { ... }` inside an outer
     // `function bodyUsesCompileTimeApis(body) { ... }` falls through to the
@@ -6730,7 +6731,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //   `async fn name(...) { ... }`       — async nested fn
     //   `server fn name(...) { ... }`      — server nested fn
     //   `async server fn name(...) { ... }` — async server nested fn
-    //   `pure fn name(...) { ... }`        — redundant `pure` (W-PURE-REDUNDANT)
+    //   `pure fn name(...) { ... }`        — deprecated `pure` (W-PURE-DEPRECATED)
     //   `pure server fn name(...) { ... }` — pure + server nested fn
     //
     // `pure` tokenizes as IDENT (not KEYWORD); detect via text + lookahead.
@@ -9637,7 +9638,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&
        peek(2)?.kind === "KEYWORD" && peek(2)?.text === "fn")
     );
-    // `pure fn` shorthand (§48.2, §33.2; redundant per §33.6 — W-PURE-REDUNDANT).
+    // `pure fn` (§48.2, §33.2; deprecated per §33 — W-PURE-DEPRECATED, supersedes W-PURE-REDUNDANT).
     const _pureFnShorthandLookahead = tok.text === "pure" && (
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "fn") ||
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&

@@ -10,7 +10,8 @@
  * Fix (commit db2dd3c): added a nested-fn handler in parseOneStatement
  * mirroring the top-level handler at ast-builder.js:~7760. SPEC §7.3.1
  * "Function declarations inside ${} logic blocks MAY be nested" + SPEC
- * §48.11 "fn ≡ pure function". Downstream stages (type-system scope walker,
+ * §48.11 (`fn` is the canonical pure form; `pure function` is its deprecated
+ * synonym — identical contract). Downstream stages (type-system scope walker,
  * §48 purity checker, codegen emit-functions) already recurse into body and
  * already handle function-decl nodes with `fnKind: "fn"`.
  *

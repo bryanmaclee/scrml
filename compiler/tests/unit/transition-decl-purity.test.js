@@ -1,7 +1,9 @@
 /**
  * §33.6 — Transition-body purity (S32 Phase 4g)
  *
- * Per §33.6: `fn` ≡ `pure function`. Transition bodies are pure-function-
+ * Per §33.6: `fn` and `pure function` enforce the identical purity contract
+ * (`fn` is the canonical pure form; `pure function` is its deprecated synonym).
+ * Transition bodies are pure-function-
  * equivalent: `from` + params → returned next-state literal, no I/O, no
  * non-determinism, no outer-scope mutation.
  *

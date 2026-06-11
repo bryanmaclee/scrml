@@ -7873,7 +7873,8 @@ function annotateNodes(
         }
 
         // §33.6 Phase 4g: apply fn-level purity rules. Transition bodies are
-        // pure-function-equivalent per §33.6 (fn ≡ pure function). Reuse the
+        // pure-function-equivalent per §33.6 (`fn` is the canonical pure form;
+        // `pure function` is its deprecated synonym; identical contract). Reuse the
         // same walker that fn bodies use so the same E-FN-001..E-FN-005
         // codes surface uniformly — users already understand these codes.
         if (Array.isArray(txBody)) {

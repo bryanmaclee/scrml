@@ -11,7 +11,8 @@
  * **Spec:** SPEC §56.X. Single message shape (the constraint here is
  * binary — the body either satisfies §48.3 or it does not). Mirrors
  * I-MATCH-PROMOTABLE in being a Tier-N → Tier-N+1 ergonomic surface:
- * fn ≡ pure function (§48.11), and the §48.3 prohibitions are exactly
+ * `fn` is the canonical pure form (§48.11; `pure function` is its
+ * deprecated synonym), and the §48.3 prohibitions are exactly
  * the discriminator the lint probes.
  *
  * **Pipeline placement:** runs as a post-TS pass invoked from api.js,
@@ -286,7 +287,7 @@ function makeFnPromotableDiag(node) {
   const message =
     `Line ${line}: I-FN-PROMOTABLE — \`function ${name}\` body meets the \`fn\` body ` +
     `constraints (§48.3.3). Consider promoting to \`fn ${name}\` for the pure / ` +
-    `state-factory contract. \`fn\` is the ergonomic shorthand for \`pure function\` ` +
+    `state-factory contract. \`fn\` is the canonical pure form ` +
     `(§48.11); the §48.3 prohibitions you already satisfy become enforced invariants ` +
     `at the declaration site. See SPEC §56.`;
 
