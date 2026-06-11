@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 13 |
+| LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1693,7 +1693,9 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 ---
 
 ### G-TAILWIND-DYNAMIC-CLASS-PREFIX — `W-TAILWIND-UNRECOGNIZED-CLASS` false-positives on the static prefix of a dynamic class `class="prefix-${expr}"` — `NEW S183; LOW; lint false-positive`
-<!-- @gap id=g-tailwind-dynamic-class-prefix sev=LOW status=open -->
+<!-- @gap id=g-tailwind-dynamic-class-prefix sev=LOW status=resolved -->
+
+**RESOLVED S183 (`88a3ac48`).** `findInterpolationRanges` + `tokenTouchesInterpolation` skip any class token glued to / overlapping a `${}` interpolation, applied to BOTH scan loops — `findUnrecognizedClasses` (W-TAILWIND-UNRECOGNIZED-CLASS) AND `findUnsupportedTailwindShapes` (W-TAILWIND-001, which the agent empirically confirmed ALSO mis-fired on `hover:bg-${color}` → `hover:bg-`). `maskInterpolations` refactored to delegate to the shared range helper (masked-string return preserved). SPEC §26.5.1 normative note added. +12 tests. PA-independent verify: `driver-${@status}`=0 hits, `flex gap-2 badge-${@n}`=0, static `flexx` STILL fires (no over-suppression). **Incidental (NOT this fix):** `class="prefix-${@cell}"` now surfaces a separate `E-DG-002` unused-`@cell` WARNING — the dependency graph doesn't count a class-attribute `${@cell}` as a render-consumer; candidate DG seam, filed-as-note for a future session (warning, non-fatal).
 
 **Surfaced S183 dog-food (round 4, `<each>` sweep); isolated to plain markup.** A dynamic class `class="driver-${@status}"` fires `W-TAILWIND-UNRECOGNIZED-CLASS` on the static prefix `'driver-'`. Root: `findUnrecognizedClasses` (`compiler/src/tailwind-classes.js:2268`) masks `${...}` interpolations to WHITESPACE (length-preserving, line ~2283 `maskInterpolations`), so `driver-${@status}` splits on the now-whitespace mask into the standalone token `driver-` (a runtime-concatenation fragment ending in `-`, never a complete utility) which fails `getTailwindCSS()` -> lints. Fully-dynamic classes (`class="${cond ? 'a' : 'b'}"`) are correctly masked-to-nothing; only the MIXED static-prefix-glued-to-interpolation case mis-fires. Isolated S183: fires in plain `<div class="driver-${@status}">` with NO `<each>`/struct; control `class="flex gap-2 badge-${@n}"` passes `flex`/`gap-2` but fires on `'badge-'`. **High-frequency** (state/BEM/theme class names). LOW (info-level, non-fatal). **Fix:** skip any `\S+` class token that overlaps OR is directly adjacent (no whitespace) to a `${}` interpolation region. **Fix dispatched S183** (`tailwind-dynamic-class-prefix-2026-06-11`).
 
