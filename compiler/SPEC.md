@@ -3294,7 +3294,7 @@ cannot be read inside a server-escalated function. Pass the current value as a f
 argument instead:
 
   saveOrder(@total)   // call site passes current value
-  server function saveOrder(amount) { ... }
+  function saveOrder(amount) { ... }
 ```
 
 ---
@@ -14019,8 +14019,10 @@ ${ function getUser() {
 } }
 ```
 
-Error E-SCOPE-012: `session` is not available in client-side functions. Add the
-`server` annotation: `server function getUser()`.
+Error E-SCOPE-012: `session` is not available in client-side functions. `session`
+is reachable only from a server-escalated function — give `getUser` a server reason
+(a `?{}` query, a server-only stdlib import, or call it only from server contexts so
+§12.2 inference classifies it server-side).
 
 **Error codes:**
 
@@ -28686,8 +28688,8 @@ E-AUTH-001: '@editingId' is client-local and cannot be used as a bound parameter
   in a ?{} persistence block.
   Only server-authoritative variables and values derived from server function arguments
   may appear as bound parameters in INSERT/UPDATE/DELETE statements.
-  To persist a client-local value, pass it to a server function first:
-    server function logEdit(id) {
+  To persist a client-local value, pass it to a server-side function first:
+    function logEdit(id) {
         ?{`INSERT INTO audit_log (object_id) VALUES (${id})`}.run()
     }
   Then call: logEdit(@editingId)

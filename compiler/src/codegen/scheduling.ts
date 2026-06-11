@@ -396,7 +396,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           "E-CG-006",
           `E-CG-006: ${(stmt as ASTNode).kind} node found in client-boundary function body. ` +
           `This code uses server-only features (${(stmt as ASTNode).kind}) but is marked to run in the browser. ` +
-          `Move it to a server function or remove the client boundary.`,
+          `Move it to a server-side function or remove the client boundary.`,
           ((stmt as ASTNode).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as object,
         ));
         continue;
@@ -562,7 +562,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
             "E-CG-006",
             `E-CG-006: ${(stmt as ASTNode).kind} node found in client-boundary function body. ` +
             `This code uses server-only features (${(stmt as ASTNode).kind}) but is marked to run in the browser. ` +
-            `Move it to a server function or remove the client boundary.`,
+            `Move it to a server-side function or remove the client boundary.`,
             ((stmt as ASTNode).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as object,
           ));
           continue;
@@ -598,7 +598,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           "E-CG-006",
           `E-CG-006: ${(stmt as ASTNode).kind} node found in client-boundary function body. ` +
           `This code uses server-only features (${(stmt as ASTNode).kind}) but is marked to run in the browser. ` +
-          `Move it to a server function or remove the client boundary.`,
+          `Move it to a server-side function or remove the client boundary.`,
           ((stmt as ASTNode).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as object,
         ));
         i++;

@@ -894,7 +894,7 @@ const PATTERNS = [
   {
     regex: /\b(createSignal|createEffect|createMemo|createStore|createResource|createComputed|createDeferred|createSelector|createReaction|createMutable|createRoot|createContext|mergeProps|splitProps|untrack|batch)\s*\(/g,
     ghost: "createSignal() / createEffect() / createMemo() / createStore() etc. (Solid primitive)",
-    correction: "scrml has no Solid primitives. State: `<x> = init` (Solid signal). Effects: reactive `${...}` blocks (Solid createEffect). Memo: `const <x> = expr` (Solid createMemo). Store: nested compound state `<obj><field> = init</>` (§6.3 Variant C). Resource: server functions `${ server function fetch() { ... } }` + RemoteData enum (§13.5). Lifecycle: `<onMount>` / `<onCleanup>` (§6.7). Untrack / batch are no-ops in scrml — the compiler manages reactivity granularity. See SPEC §6, §6.3, §6.7, §13.5.",
+    correction: "scrml has no Solid primitives. State: `<x> = init` (Solid signal). Effects: reactive `${...}` blocks (Solid createEffect). Memo: `const <x> = expr` (Solid createMemo). Store: nested compound state `<obj><field> = init</>` (§6.3 Variant C). Resource: a server-side function `${ function fetch() { ... } }` (the server boundary is inferred per §12.2) + RemoteData enum (§13.5). Lifecycle: `<onMount>` / `<onCleanup>` (§6.7). Untrack / batch are no-ops in scrml — the compiler manages reactivity granularity. See SPEC §6, §6.3, §6.7, §13.5.",
     see: "§6, §6.3, §6.7, §13.5",
     code: "W-LINT-019",
     skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),

@@ -8499,7 +8499,7 @@ function annotateNodes(
                 "W-AUTH-001",
                 `W-AUTH-001: 'server @${n.name as string}' has no detected initial load. ` +
                 `The variable will display its placeholder until explicitly assigned. ` +
-                `Add an 'on mount' block or assign from a server function.`,
+                `Add an 'on mount' block or assign from a server-side function.`,
                 declSpan,
                 "warning",
               ));
@@ -8530,7 +8530,7 @@ function annotateNodes(
                 "E-AUTH-002",
                 `E-AUTH-002: 'server @${serverVarName}' is derived from client-local reactive variable '${leaked}'. ` +
                 `Server-authoritative variables cannot read client-local state without crossing the server boundary. ` +
-                `Fetch \`@${serverVarName}\` from the server via \`server function\` or move the dependency into a server path.`,
+                `Fetch \`@${serverVarName}\` from the server in a server-side function or move the dependency into a server path.`,
                 declSpan,
               ));
             }
@@ -17871,7 +17871,7 @@ function checkFnBodyProhibitions(
               errors.push(new TSError(
                 "E-FN-004",
                 `E-FN-004: \`fn ${fnName}\` body calls \`${callee}()\` (\`${origin}\`), which is non-deterministic — it reads host state. ` +
-                `\`fn\` must be a pure function of its inputs. Call \`${callee}()\` from a \`function\` or \`server function\` and pass the result into \`fn ${fnName}\` as a parameter.`,
+                `\`fn\` must be a pure function of its inputs. Call \`${callee}()\` from a \`function\` (the server boundary is inferred per §12.2) and pass the result into \`fn ${fnName}\` as a parameter.`,
                 stmtSpan,
               ));
               break; // one E-FN-004 per statement for the imported non-det call
