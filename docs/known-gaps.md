@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 12 |
+| LOW | 11 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -49,8 +49,8 @@ After S174 enforced `E-TYPE-ANY-FORBIDDEN` for the literal `any` token, an arbit
 ### G-COMPONENT-001-COVERAGE — `W-COMPONENT-001` (function-typed prop nudge) is vestigial — `NEW S174; LOW; S177 R26-confirmed no-op, deferred`
 Surfaced by the function-boundary recon: in `23-trucking-dispatch` callback props are typed `asIs` (was `any`) to dodge the warning, AND `isFunctionType` (`component-expander.ts:304-306`) matches only `=>`/`(`-prefix signatures + the check doesn't fire on the `props={...}` path (`component-expander.ts:1040`). So the "props are warned" half of the passed-vs-stored rule (a function may be PASSED/warned, never STORED/error) is currently a no-op. Diagnostic-coverage bug, not a design question — a fix also raises "should `asIs`-dodging be detected." <!-- @gap id=g-component-001-coverage sev=LOW status=open -->
 
-### G-ROUTE-ARG-FN — no symmetric non-serializable-ARGUMENT-type gate — `NEW S174; LOW`
-`E-ROUTE-003` (§12.5) gates non-serializable RETURN types (recursive into struct fields). There is NO symmetric ARGUMENT-direction gate: a function passed INTO a server-escalated fn (incl. a function-typed struct field, once 4A's `FunctionType` is wired) may silently drop/stringify rather than error. Fork-4-INDEPENDENT (hits bare function args too). File as a separate `E-ROUTE` arg-direction amendment; do NOT bundle with the 4A landing. <!-- @gap id=g-route-arg-fn sev=LOW status=open -->
+### G-ROUTE-ARG-FN — wire-serializability gate (return + arg) — `NEW S174; RESOLVED S179`
+`E-ROUTE-003` (§12.5) gates non-serializable RETURN types (recursive into struct fields). There was NO symmetric ARGUMENT-direction gate. **S179 SURVEY finding (corrected the premise):** `E-ROUTE-003` itself was SPEC-ONLY — emitted in ZERO source files; a spec-vs-impl divergence (§12.5 mandated a `SHALL`-error the compiler silently skipped, generating ser/deser without validating). So NEITHER direction was built. **RESOLVED S179** (dispatch `e-route-serializability-gate-2026-06-10`, agent `a9c1a0c46f5d52beb`): a wire-serializability gate (`isWireSerializable` + `checkRouteWireSerializability`) in the type pass (consuming the §12 route map + resolved types) now fires **`E-ROUTE-003`** (return) + **NEW `E-ROUTE-004`** (param) on non-serializable kinds (function, markup/`html-element`, snippet, cssClass, engine, state object), recursing struct fields / array / union / map; `asIs` allowed (escape hatch). SPEC §12.5.3 + §34 amended. PA-independent repro fired both codes; full suite 23,772/0. Deferred follow-ons (small): SSE yield-element-type check (`.skip`); un-annotated inferred-return (already rejected at decl sites). <!-- @gap id=g-route-arg-fn sev=LOW status=resolved -->
 
 ---
 

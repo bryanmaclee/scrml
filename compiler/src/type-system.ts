@@ -3601,6 +3601,269 @@ function checkFunctionTypedStructFields(
 }
 
 // ---------------------------------------------------------------------------
+// §12.5 / E-ROUTE-003 + E-ROUTE-004 — server-fn wire-serializability gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Is a resolved type JSON-serializable for the §12.3 client↔server wire?
+ *
+ * §12.5.1 whitelist (the SERIALIZABLE set): `primitive` (string/number/boolean),
+ * `not`, `enum` (variant-name string on the wire), `array` of a serializable
+ * element, `struct` where EVERY field is serializable (RECURSE), a `union` whose
+ * members are all serializable (covers `T | not`), a value-native `map` (§59.10
+ * lossless entries codec) whose value type is serializable, and a `predicated`
+ * type (a refinement over a serializable primitive/enum base).
+ *
+ * The NON-SERIALIZABLE set fires the reject: `function` (a function is not value
+ * data — §15.11, no structural equality, no JSON form), `html-element` (markup —
+ * the scrml analog of §12.5's "DOM nodes"; post-S166 there are no class
+ * instances, so markup IS the live "DOM nodes / class instances" case), `snippet`
+ * (parameterized markup), `cssClass`, `machine` (an engine), and `state` (a
+ * live state object with identity — not a value).
+ *
+ * The UNVERIFIABLE set defaults to ALLOW (no error): `asIs` and `unknown`. `asIs`
+ * is the deliberate escape hatch (§14.1.1) — erroring on it would break the
+ * hatch. `error` types are likewise allowed (an error envelope crossing the wire
+ * is the §19 failable-call contract; its fields are validated where they are
+ * declared). `ref-binding` / `meta-splice` are compiler-internal sentinels that
+ * never appear as a declared param/return type — allowed (no false fire).
+ *
+ * `seen` cycle-guards a recursive struct/map graph (a struct field whose type is
+ * the same struct, etc.) so a self-referential type does not stack-overflow.
+ *
+ * Returns `{ ok: true }` when serializable, or `{ ok: false, offending, path }`
+ * where `offending` names the non-serializable type-kind and `path` is the
+ * field-access path to it (`""` for the top-level type, `.field` / `[]` for a
+ * nested struct field / array element).
+ */
+interface SerCheckResult {
+  ok: boolean;
+  offending?: string;
+  path?: string;
+}
+
+function isWireSerializable(
+  type: ResolvedType | undefined | null,
+  typeRegistry: Map<string, ResolvedType>,
+  seen: Set<ResolvedType>,
+  path = "",
+): SerCheckResult {
+  if (!type) return { ok: true };
+  // Cycle guard — a recursive struct/map graph re-visits the same node object.
+  if (seen.has(type)) return { ok: true };
+
+  switch (type.kind) {
+    // --- SERIALIZABLE leaves -------------------------------------------------
+    case "primitive":
+    case "not":
+    case "enum":
+    case "predicated":
+      return { ok: true };
+
+    // UNVERIFIABLE — the escape hatch + the compiler-internal sentinels. Default
+    // ALLOW (do NOT error — erroring on `asIs` would break the §14.1.1 hatch).
+    case "asIs":
+    case "unknown":
+    case "error":
+    case "ref-binding":
+    case "meta-splice":
+      return { ok: true };
+
+    // --- NON-SERIALIZABLE — fire ---------------------------------------------
+    case "function":
+      return { ok: false, offending: "function", path };
+    case "html-element":
+      return { ok: false, offending: "markup (html-element)", path };
+    case "snippet":
+      return { ok: false, offending: "snippet (parameterized markup)", path };
+    case "cssClass":
+      return { ok: false, offending: "cssClass", path };
+    case "machine":
+      return { ok: false, offending: "machine (engine)", path };
+    case "state":
+      return { ok: false, offending: "state object", path };
+
+    // --- RECURSE -------------------------------------------------------------
+    case "array":
+      return isWireSerializable(type.element, typeRegistry, new Set([...seen, type]), `${path}[]`);
+
+    case "map": {
+      // A value-native map serializes losslessly (§59.10). The KEY is constrained
+      // to §45-comparable types at the declaration site, all of which are
+      // serializable; the VALUE is unconstrained — recurse it.
+      return isWireSerializable(type.value, typeRegistry, new Set([...seen, type]), `${path}{}`);
+    }
+
+    case "union": {
+      const nextSeen = new Set([...seen, type]);
+      for (const member of type.members) {
+        const r = isWireSerializable(member, typeRegistry, nextSeen, path);
+        if (!r.ok) return r;
+      }
+      return { ok: true };
+    }
+
+    case "struct": {
+      const nextSeen = new Set([...seen, type]);
+      for (const [fieldName, fieldType] of type.fields) {
+        // §59.4 / §45.2 — a struct field that was FUNCTION-SHAPED but lowered to
+        // `asIs` carries the `isFunctionField` sidecar; treat it as a function
+        // (non-serializable) so the recursion stays precise even when the field
+        // resolver collapsed it. (E-STRUCT-FUNCTION-FIELD already hard-rejects
+        // a declared fn-typed field, but a struct may reach here from an import
+        // whose decl was not in this file's reject pass.)
+        if ((fieldType as { isFunctionField?: boolean })?.isFunctionField === true) {
+          return { ok: false, offending: "function", path: `${path}.${fieldName}` };
+        }
+        const r = isWireSerializable(fieldType, typeRegistry, nextSeen, `${path}.${fieldName}`);
+        if (!r.ok) return r;
+      }
+      return { ok: true };
+    }
+
+    default:
+      // Any future ResolvedType kind defaults to ALLOW — a serializability gate
+      // SHALL NOT block a construct it does not understand (no false fire). New
+      // non-serializable kinds get an explicit `case` above.
+      return { ok: true };
+  }
+}
+
+/**
+ * §12.5 — Wire-serializability gate for every server-escalated function.
+ *
+ * For each `function-decl` whose route (per RI's `routeMap`, keyed
+ * `${filePath}::${span.start}`) has `boundary === "server"`:
+ *
+ *  - RETURN direction → `E-ROUTE-003` (the SPEC §12.5.3 reject, wired here — it
+ *    was emitted NOWHERE before this gate). A server-fn return value crosses the
+ *    network boundary; a non-JSON-serializable return type (a function, markup,
+ *    snippet, engine, …) produces garbage on the wire, so it is a compile error.
+ *    SKIPPED for an SSE generator (`server function*`): a generator's "return"
+ *    is the generator object, never serialized — checking it would false-fire.
+ *    The yielded ELEMENT type IS what crosses the wire (§37.4 JSON.stringify),
+ *    but the AST exposes no resolved yield-element type without body-walk yield
+ *    inference; that check is DEFERRED (see progress.md / the .skip test).
+ *
+ *  - PARAM direction → `E-ROUTE-004` (NEW). Arguments cross client→server (§12.3
+ *    "serialization … for all arguments"); a non-serializable param type cannot
+ *    be transmitted. Applies to SSE generators too — their params are query-
+ *    encoded onto the §37.3 GET route.
+ *
+ * Both recurse into struct fields / array elements / union members / map values
+ * via `isWireSerializable`. `asIs` (and `unknown`) default ALLOW — the escape
+ * hatch is preserved. Errors default severity "error" → result.errors (CLI exit
+ * 1), matching the E-* partition.
+ *
+ * Fast-path: a `routeMap` with no server-classified functions is a no-op (the
+ * per-node `boundary === "server"` guard short-circuits the type resolution).
+ */
+function checkRouteWireSerializability(
+  topNodes: ASTNodeLike[],
+  routeMap: RouteMap,
+  typeRegistry: Map<string, ResolvedType>,
+  filePath: string,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  if (!routeMap || !routeMap.functions || routeMap.functions.size === 0) return;
+
+  function checkFn(n: ASTNodeLike): void {
+    const fnName = (n.name as string | undefined) ?? "(anonymous)";
+    const span = (n.span as Span | undefined) ?? fileSpan;
+    const fnId = `${filePath}::${(n.span as Span | undefined)?.start}`;
+    const route = routeMap.functions.get(fnId);
+    if (!route || route.boundary !== "server") return;
+
+    const isGenerator = (n as { isGenerator?: boolean }).isGenerator === true || route.isSSE === true;
+
+    // --- PARAM direction → E-ROUTE-004 (applies to generators too) ----------
+    if (Array.isArray(n.params)) {
+      for (const param of (n.params as unknown[])) {
+        const paramName = typeof param === "string"
+          ? param
+          : ((param as ASTNodeLike)?.name as string | undefined);
+        const paramAnnot = (typeof param === "object" && param !== null)
+          ? ((param as ASTNodeLike).typeAnnotation as string | undefined)
+          : undefined;
+        if (!paramName || !paramAnnot) continue; // un-annotated param defaults asIs → allow
+        const paramType = resolveTypeExpr(paramAnnot, typeRegistry);
+        const r = isWireSerializable(paramType, typeRegistry, new Set());
+        if (!r.ok) {
+          const where = r.path ? `${paramName}${r.path}` : paramName;
+          errors.push(new TSError(
+            "E-ROUTE-004",
+            `E-ROUTE-004: Server function '${fnName}' has a parameter '${where}' whose ` +
+            `type is not JSON-serializable (${r.offending}). Arguments to a server ` +
+            `function cross the client→server network boundary and are serialized as ` +
+            `JSON (§12.3); a ${r.offending} cannot be transmitted. Pass serializable ` +
+            `data instead (a primitive, struct of serializable fields, enum, array, ` +
+            `\`T | not\`, or map), or move the logic so the non-serializable value ` +
+            `never crosses the boundary. See SPEC §12.5.`,
+            span,
+          ));
+        }
+      }
+    }
+
+    // --- RETURN direction → E-ROUTE-003 (skipped for SSE generators) --------
+    if (!isGenerator) {
+      const returnAnnot = (n as ASTNodeLike).returnTypeAnnotation as string | undefined;
+      if (returnAnnot && typeof returnAnnot === "string") {
+        const returnType = resolveTypeExpr(returnAnnot, typeRegistry);
+        const r = isWireSerializable(returnType, typeRegistry, new Set());
+        if (!r.ok) {
+          const where = r.path ? `the return value${r.path}` : "the return value";
+          errors.push(new TSError(
+            "E-ROUTE-003",
+            `E-ROUTE-003: Server function '${fnName}' returns a value whose type is ` +
+            `not JSON-serializable (${r.offending}${r.path ? ` at ${where}` : ""}). A ` +
+            `server function's return value crosses the network boundary and is ` +
+            `serialized as JSON (§12.5); a ${r.offending} cannot be transmitted. ` +
+            `Return serializable data instead (a primitive, struct of serializable ` +
+            `fields, enum, array, \`T | not\`, or map). See SPEC §12.5.`,
+            span,
+          ));
+        }
+      }
+      // Un-annotated return type: the inferred return type is not resolved at this
+      // decl-site pass (it would require body return-stmt inference). Left to the
+      // §12.5 "infers the return type from the body" path; a non-serializable
+      // INFERRED return is a deferred follow-on (the dominant authored shape
+      // annotates `-> Type`, and the markup/fn/engine inferred-return cases are
+      // already rejected at their own decl sites by E-STRUCT-FUNCTION-FIELD etc.).
+    }
+  }
+
+  // Walk top-level nodes, recursing into body/children/bodyChildren for
+  // function-decls nested inside `${...}` logic nodes / engine arms (the same
+  // recursion shape as collectFnErrorTypes).
+  const visited = new WeakSet<object>();
+  function walk(ns: ASTNodeLike[] | undefined): void {
+    if (!Array.isArray(ns)) return;
+    for (const n of ns) {
+      if (!n || typeof n !== "object") continue;
+      if (visited.has(n as object)) continue;
+      visited.add(n as object);
+      if (n.kind === "function-decl" && n.name) checkFn(n);
+      for (const key of ["body", "children", "bodyChildren", "nodes", "ast"]) {
+        const val = (n as Record<string, unknown>)[key];
+        if (Array.isArray(val)) walk(val as ASTNodeLike[]);
+      }
+      const arms = (n as Record<string, unknown>).arms;
+      if (Array.isArray(arms)) {
+        for (const arm of arms) {
+          if (!arm || typeof arm !== "object") continue;
+          const armBody = (arm as Record<string, unknown>).body;
+          if (Array.isArray(armBody)) walk(armBody as ASTNodeLike[]);
+        }
+      }
+    }
+  }
+  walk(topNodes);
+}
+
+// ---------------------------------------------------------------------------
 // §20.6.7 / W-LOG-SHADOWED — log() builtin shadowing nudge
 // ---------------------------------------------------------------------------
 
@@ -16513,6 +16776,17 @@ function processFile(
       if (typeof en === "string" && en) exemptTypeNames.add(en);
     }
     checkUnknownTypeNames(typeDecls, unknownTopNodes, typeRegistry, exemptTypeNames, errors, fileSpan);
+
+    // §12.5 / E-ROUTE-003 + E-ROUTE-004 — wire-serializability gate for every
+    // server-escalated function. RUNS HERE — AFTER the imported-types seed and
+    // checkUnknownTypeNames — so `typeRegistry` already holds cross-file imported
+    // struct/enum types a server-fn param/return annotation may reference. The
+    // routeMap (RI output, threaded into processFile) supplies the per-fn server
+    // classification; `isWireSerializable` recurses into struct fields / array
+    // elements / union members / map values. Non-serializable RETURN → E-ROUTE-003
+    // (the SPEC §12.5.3 reject, previously emitted nowhere); non-serializable
+    // PARAM → E-ROUTE-004 (NEW). `asIs` defaults ALLOW (escape hatch preserved).
+    checkRouteWireSerializability(unknownTopNodes, routeMap, typeRegistry, filePath, errors, fileSpan);
   }
 
   // §14.3 + §14.12 — Build the per-file lifecycle registry. Empty if no struct
