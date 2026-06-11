@@ -107,6 +107,25 @@ function readExprValue(attrs: AttrNode[], attrName: string): string | null {
   return null;
 }
 
+// isMalformedEffect — S182 (Fix 1) parity with the live parser. `effect=`
+// (state-child §51.0.H Form 1) is a §7 logic-context block; the `${...}` form is
+// REQUIRED. An `effect=` attribute whose value is present but NOT an `expr`-kind
+// (`${...}`) — a bare `effect=load()` — is malformed, mirroring the live
+// `effectMalformed` flag so the dual-pipeline parity test holds. An empty `${ }`
+// body (expr-kind with whitespace-only raw) is also malformed. Absent `effect=`
+// is fine.
+function isMalformedEffect(attrs: AttrNode[]): boolean {
+  for (const attr of attrs) {
+    if (!attr || attr.name !== "effect") continue;
+    const value = attr.value;
+    if (!value || value.kind === "absent") return true; // bare `effect` / `effect=`
+    if (value.kind !== "expr") return true;             // bare value, not `${...}`
+    if (typeof value.raw === "string" && value.raw.trim().length === 0) return true; // `${ }`
+    return false;
+  }
+  return false; // no effect= present
+}
+
 // readRuleAttrInput — verbatim raw input that `parseRuleAttrValue` expects.
 // Routes the five legal `rule=` source forms (dotted-ident `.X`, wildcard `*`,
 // paren-form `(.A | .B)`, quoted `".X"`, bare `X`) to the correct accessor.
@@ -507,6 +526,8 @@ function walkOneStateChild(
     onTimeoutElements,
     innerEngines,
     effectRaw: readExprValue(attrs, "effect"),
+    // S182 (Fix 1) — parity with live `effectMalformed`.
+    effectMalformed: isMalformedEffect(attrs),
     onTransitionElements,
     payloadBindings: readPayloadBindings(attrs),
     // §51.0.S.2.3 (S154 — #14 event-payload-transition) — the leading

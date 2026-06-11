@@ -751,6 +751,14 @@ export interface EngineStateChildEntry {
    *  Capture-with-null fallback for malformed `effect=` (unbalanced braces) —
    *  see B17.2 SURVEY.md decision 3. */
   effectRaw: string | null;
+  /** S182 (Fix 1) — true iff `effect=` was present on this state-child opener
+   *  but NOT in the required `${...}` logic-block form (a bare value, or
+   *  unbalanced/empty braces). `effect=` is a §7 logic-context block (§51.0.H
+   *  Form 1); the `${...}` form is required. PASS 17
+   *  (`validateEngineB17Diagnostics`) fires `E-ENGINE-EFFECT-NOT-INTERPOLATED`
+   *  (Error). Optional for back-compat with synthesized-AST tests that predate
+   *  the field. */
+  effectMalformed?: boolean;
   /** §51.0.H — `<onTransition>` siblings inside this state-child body.
    *  Empty array when none are present. */
   onTransitionElements: OnTransitionEntry[];
@@ -5357,23 +5365,49 @@ function registerEngineDecl(
   // already surfaces a diagnostic.
   if (varName.length === 0) return;
 
+  // S182 (Fix 1) — opener `effect=` was present but NOT in the required
+  // `${...}` logic-block form (the parser flagged `openerEffectMalformed`).
+  // Fire E-ENGINE-EFFECT-NOT-INTERPOLATED here in PASS 10.A, independent of the
+  // collision checks below, so a malformed-effect engine that ALSO duplicates a
+  // name still reports the malformed effect. The `${}` capture path is
+  // untouched, so a canonical `effect=${...}` never reaches here.
+  if (engineDecl.openerEffectMalformed === true) {
+    const badSlice = typeof engineDecl.openerEffectBadSlice === "string"
+      ? engineDecl.openerEffectBadSlice
+      : null;
+    fireEngineEffectNotInterpolated(engineDecl, "opener", varName, badSlice, errors, filePath);
+  }
+
   // Collision check — does a state-cell ALREADY live at this name in the
   // file scope? Per §51.0.C: "You SHALL NOT separately declare the engine's
   // variable." If a `<varName> = init` exists in scope, fire
   // E-ENGINE-VAR-DUPLICATE. We check the file scope only — same-scope
   // semantics per §51.0.C. (Cross-scope name shadowing is captured by B2's
   // E-NAME-COLLIDES-STATE infrastructure on the OTHER side, not here.)
+  // S182 (Fix 2) — mutual exclusivity with the legacy `E-ENGINE-003` (type-
+  // system.ts buildMachineRegistry). `E-ENGINE-VAR-DUPLICATE` (§51.0.C) is the
+  // canonical §51.0 duplicate code and owns the `<engine>`-keyword form; the
+  // legacy `<machine>`-keyword form keeps `E-ENGINE-003` (which gates on
+  // `legacyMachineKeyword === true`). Skipping `E-ENGINE-VAR-DUPLICATE` for the
+  // legacy keyword here yields exactly ONE duplicate code per declaration for
+  // BOTH forms. (Registration still returns either way — a duplicate cell must
+  // not be re-registered regardless of which code fired.)
+  const isLegacyMachine = engineDecl.legacyMachineKeyword === true;
   const existing = fileScope.stateCells.get(varName);
   if (existing != null && existing.engineMeta == null) {
     // Existing record is a NON-engine state-cell — duplicate.
-    fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    if (!isLegacyMachine) {
+      fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    }
     return;
   }
   if (existing != null && existing.engineMeta != null) {
     // Two engines auto-declaring the same variable — also a duplicate.
     // Per §51.0.C, the engine OWNS its variable; two engines fighting for
     // the same name violates singleton-ness.
-    fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    if (!isLegacyMachine) {
+      fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    }
     return;
   }
 
@@ -5395,6 +5429,45 @@ function registerEngineDecl(
     enumerable: false,
     configurable: true,
     writable: true,
+  });
+}
+
+/**
+ * Fire `E-ENGINE-EFFECT-NOT-INTERPOLATED` (Error, §51.0.H / §51.0.B + §34).
+ * `effect=` (engine opener Form 3 AND state-child Form 1) is a §7 logic-context
+ * block — the `${...}` form is REQUIRED. The bare single-expression sugar that
+ * a plain event handler permits (`onclick=load()`, §5.2.3) does NOT extend to
+ * `effect=`; a bare value was previously captured as null and SILENTLY tree-
+ * shaken (the effect never ran). This makes that footgun a hard error.
+ *
+ *   locus     — "opener" (Form 3) or "state-child" (Form 1).
+ *   subject   — for the opener, the engine var name; for a state-child, its tag.
+ *   badSlice  — the offending raw value text for the message (or null).
+ */
+function fireEngineEffectNotInterpolated(
+  decl: any,
+  locus: "opener" | "state-child",
+  subject: string,
+  badSlice: string | null,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = decl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const got = badSlice != null && badSlice.length > 0 ? ` \`${badSlice}\`` : " a bare value";
+  const where = locus === "opener"
+    ? `engine \`${subject}\` opener \`effect=\` (§51.0.H Form 3)`
+    : `state-child \`<${subject}>\` \`effect=\` (§51.0.H Form 1)`;
+  errors.push({
+    code: "E-ENGINE-EFFECT-NOT-INTERPOLATED",
+    message:
+      `E-ENGINE-EFFECT-NOT-INTERPOLATED: ${where} must be a \`${'$'}{...}\` logic block; ` +
+      `got${got}. \`effect=\` is a logic-context block, not the single-expression ` +
+      `handler sugar (\`onclick=load()\`, §5.2.3) — wrap it: \`effect=${'$'}{ ... }\`. ` +
+      `(SPEC §51.0.B / §51.0.H + §34.)`,
+    span,
+    severity: "error",
   });
 }
 
@@ -9359,6 +9432,24 @@ export function validateEngineB17Diagnostics(
 
   for (const sc of stateChildren) {
     if (!sc || typeof sc !== "object") continue;
+
+    // ----- Fire-site #6: E-ENGINE-EFFECT-NOT-INTERPOLATED (§51.0.H Form 1, S182) -----
+    // `effect=` present on the state-child opener but NOT in the required
+    // `${...}` logic-block form (a bare value, or unbalanced/empty braces — the
+    // parser flagged `effectMalformed`). Was previously captured as null and
+    // silently tree-shaken; now a hard error. Mutually exclusive with #1
+    // (a malformed effect has no captured `effectRaw`, so #1's `effectRaw != null`
+    // gate cannot also fire).
+    if (sc.effectMalformed === true) {
+      fireEngineEffectNotInterpolated(
+        engineDecl,
+        "state-child",
+        typeof sc.tag === "string" ? sc.tag : "",
+        null,
+        errors,
+        filePath,
+      );
+    }
 
     // ----- Fire-site #1: E-ENGINE-EFFECT-AMBIGUOUS (§51.0.H line 20471) -----
     // `effect=` on multi-target `rule=` is ambiguous — which target triggers it?

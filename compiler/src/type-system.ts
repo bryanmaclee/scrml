@@ -4975,14 +4975,25 @@ function buildMachineRegistry(
       }
     }
 
-    // E-ENGINE-003: duplicate machine name
+    // E-ENGINE-003: duplicate machine name.
+    // S182 (Fix 2) — mutual exclusivity with the §51.0.C `E-ENGINE-VAR-DUPLICATE`
+    // (symbol-table.ts PASS 10.A). Every `machineDecls` entry is a `kind:"engine-
+    // decl"` node (legacy `<machine>` is a deprecated alias producing the same
+    // node — `a41df176`). The canonical §51.0 duplicate diagnostic is
+    // `E-ENGINE-VAR-DUPLICATE`; it owns the `<engine>`-keyword form. `E-ENGINE-003`
+    // is retained ONLY for the legacy `<machine>`-keyword form, so exactly one
+    // duplicate code fires per declaration. (SYM skips `E-ENGINE-VAR-DUPLICATE`
+    // for legacy `<machine>` symmetrically.) `legacyMachineKeyword` is set by the
+    // parser (ast-builder.js) from `block.name === "machine"`.
     if (registry.has(name)) {
-      errors.push(new TSError(
-        "E-ENGINE-003",
-        `E-ENGINE-003: Duplicate machine name '${name}'. ` +
-        `A machine with this name is already declared in this file.`,
-        span,
-      ));
+      if (decl.legacyMachineKeyword === true) {
+        errors.push(new TSError(
+          "E-ENGINE-003",
+          `E-ENGINE-003: Duplicate machine name '${name}'. ` +
+          `A machine with this name is already declared in this file.`,
+          span,
+        ));
+      }
       continue;
     }
 

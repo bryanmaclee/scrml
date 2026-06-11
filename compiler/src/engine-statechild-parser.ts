@@ -2213,8 +2213,19 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // braces, missing `${`) → `effectRaw: null`; B17.3 typer can surface a
     // diagnostic. Balanced-brace scan: find `effect=`, skip to `${`, then
     // walk to matching `}`.
+    // S182 (Fix 1) — `effect=` (state-child §51.0.H Form 1) is a §7 logic-
+    // context block; the `${...}` form is REQUIRED. A bare value (`effect=foo()`)
+    // or unbalanced/empty braces was captured as null → the effect was silently
+    // tree-shaken. Flag the malformed case so PASS 17 (`validateEngineB17Diagnostics`)
+    // fires `E-ENGINE-EFFECT-NOT-INTERPOLATED` (Error) instead of dropping it.
     let effectRaw: string | null = null;
+    let effectMalformed = false;
+    const effectPresentIdx = afterTagForRule.search(/(?:^|\s)effect\s*=/);
     const effectIdx = afterTagForRule.search(/(?:^|\s)effect\s*=\s*\$\{/);
+    if (effectPresentIdx >= 0 && effectIdx < 0) {
+      // `effect=` present but NOT followed by `${` — a bare value.
+      effectMalformed = true;
+    }
     if (effectIdx >= 0) {
       // Locate the `${` after `effect=`.
       const dollarBrace = afterTagForRule.indexOf("${", effectIdx);
@@ -2231,6 +2242,15 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
         if (braceDepth === 0) {
           // `effectRaw` is the substring between `${` and the matching `}`.
           effectRaw = afterTagForRule.slice(dollarBrace + 2, j);
+          // S182 (Fix 1) — an empty `${ }` body has nothing to run; treat as
+          // malformed so PASS 17 surfaces E-ENGINE-EFFECT-NOT-INTERPOLATED.
+          if (effectRaw.trim().length === 0) {
+            effectRaw = null;
+            effectMalformed = true;
+          }
+        } else {
+          // S182 (Fix 1) — `${` present but braces never balanced: malformed.
+          effectMalformed = true;
         }
         // If braces never balanced (j ran off the end), `effectRaw` stays
         // null per SURVEY decision 3.
@@ -2419,6 +2439,10 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       innerEngines,
       // ---- B17.2 NEW (§51.0.H) ----
       effectRaw,
+      // S182 (Fix 1) — true iff `effect=` was present on this state-child but
+      // NOT in the required `${...}` logic-block form (bare value, or
+      // unbalanced/empty braces). PASS 17 fires E-ENGINE-EFFECT-NOT-INTERPOLATED.
+      effectMalformed,
       onTransitionElements,
       // ---- B1 NEW (§51.0.B.1) ----
       payloadBindings,

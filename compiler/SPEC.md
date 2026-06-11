@@ -16894,6 +16894,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
 | E-ENGINE-EFFECT-ON-DERIVED | §51.0.H, §51.0.J | `effect=` used on the opener of a `derived=` engine (the boot init effect, §51.0.H Form 3). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing to do. Resolution: use a mount-time `${}` effect at the enclosing scope, or a non-derived engine. (Catalog addition S148 — Insight 33 Fork C1 edge-case ruling iii. NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J — fires on derived state changes.) | Error |
+| E-ENGINE-EFFECT-NOT-INTERPOLATED | §51.0.B, §51.0.H | `effect=` (engine opener Form 3 OR state-child Form 1) is a §7 logic-context block, so the `${...}` form is REQUIRED. A bare value (`effect=load()`) or unbalanced/empty braces was previously captured as null and SILENTLY tree-shaken — the effect never ran. The bare single-expression sugar that a plain event handler permits (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Resolution: wrap the body in `${...}` — `effect=${ load() }`. (Catalog addition S182 — dog-food round 2; Option B reject-with-diagnostic, user-ratified.) | Error |
 | E-ONTRANSITION-NO-TARGET | §51.0.H | An `<onTransition>` element appears with neither `to=.Variant` nor `from=.Variant`. The handler has no trigger (per the §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear — `to=` fires when leaving toward `.Variant`; `from=` fires when arriving from `.Variant`). Add `to=.Variant` (outgoing) or `from=.Variant` (incoming). (Catalog addition S74 — A1b B17.3.) | Error |
 | E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
 | W-ENGINE-INITIAL-MISSING | §51.0.E | `initial=` omitted on a non-derived `<engine>`. Compiler defaults to the first state-child's variant. Add `initial=.Variant` to silence the warning. | Warning |
@@ -24606,7 +24607,7 @@ body's own, not inherited by nested plain markup.
 | `derived=expr` | mutually exclusive with `initial=` | Engine value computed from a reactive expression — see §51.0.J. |
 | `pinned` | optional | Opt-out from hoisting per §6.10. Covers BOTH the engine identifier AND the auto-declared variable. |
 | `var=identifier` | optional | Override the auto-derived variable name (§51.0.C). Use for disambiguation when the auto-name collides. |
-| `effect=${...}` | optional; non-derived only | **Boot-only init effect (S148, §51.0.H Form 3).** A logic-context expression that runs ONCE at module-init as the effect of the implicit init→`initial=` transition (Elm `init`+`Cmd`). Writes to the engine variable inside it are checked against `.<initial>.rule`. Forbidden on `derived=` engines — `E-ENGINE-EFFECT-ON-DERIVED` (§51.0.J). Distinct slot from the state-child `effect=` (§51.0.H Form 1). |
+| `effect=${...}` | optional; non-derived only | **Boot-only init effect (S148, §51.0.H Form 3).** A logic-context expression that runs ONCE at module-init as the effect of the implicit init→`initial=` transition (Elm `init`+`Cmd`). Writes to the engine variable inside it are checked against `.<initial>.rule`. Forbidden on `derived=` engines — `E-ENGINE-EFFECT-ON-DERIVED` (§51.0.J). Distinct slot from the state-child `effect=` (§51.0.H Form 1). **The `${...}` logic-block form is REQUIRED (this is a §7 logic-context block, not the single-expression handler sugar): a bare `effect=load()` is `E-ENGINE-EFFECT-NOT-INTERPOLATED` (§34), NOT a silent no-op (S182).** |
 | `accepts=MsgType` | optional; non-derived | **Engine message vocabulary (S154, §51.0.S).** An enum type identifier declaring the message vocabulary the engine's `(state × message)` arms dispatch on (the type checked per-state for message-arm exhaustiveness, §51.0.S). Its value MUST resolve to a declared `:enum` type — otherwise `E-ENGINE-ACCEPTS-NOT-ENUM` (§34). A state-child that declares a `(state × message)` arm while the opener has no `accepts=` fires `E-ENGINE-MSG-WITHOUT-ACCEPTS` (§34). See §51.0.S. |
 
 **State-children** are tags inside the body, named after variants of `Type`. Each
@@ -25244,6 +25245,13 @@ Engines support two surface forms for transition effects, picked by complexity.
 when `rule=` is single-target. Combining `effect=` with a multi-target `rule=` is
 ambiguous (which target triggers it?) — `E-ENGINE-EFFECT-AMBIGUOUS` (§34).
 
+**The `${...}` logic-block form is REQUIRED (S182).** `effect=` is a §7 logic-context
+block (a full, possibly multi-statement body — codegen re-parses it as `${...}`), so the
+delimiter is mandatory. The bare single-expression sugar that a plain event handler permits
+(`onclick=load()`, §5.2.3) does NOT extend to `effect=` — it cannot carry a logic block. A
+bare `effect=playSound("grow")` (or unbalanced/empty braces) is `E-ENGINE-EFFECT-NOT-
+INTERPOLATED` (§34), NOT a silent no-op. Wrap it: `effect=${ playSound("grow") }`.
+
 **Form 2 — `<onTransition>` element child (multi-target or attribute-bearing):**
 
 ```scrml
@@ -25310,6 +25318,11 @@ transition**, co-located with the engine declaration exactly as Elm co-locates
 - **`E-ENGINE-EFFECT-AMBIGUOUS` does not apply.** That code guards a state-child `effect=`
   against a multi-target `rule=`. The opener has no `rule=`; its single edge is
   init→`initial=`. `once` / `if=` are likewise not applicable (a single boot fire).
+- **The `${...}` logic-block form is REQUIRED (S182).** Like the state-child `effect=`
+  (Form 1), the opener `effect=` is a §7 logic-context block; the `${...}` delimiter is
+  mandatory. A bare `effect=load()` (or unbalanced/empty braces) is
+  `E-ENGINE-EFFECT-NOT-INTERPOLATED` (§34), NOT a silent no-op — the bare event-handler
+  sugar (`onclick=load()`, §5.2.3) does NOT extend here. Wrap it: `effect=${ load() }`.
 
 **Edge-case rulings (S148, user-ratified):**
 
@@ -31120,6 +31133,7 @@ of the original D2 brief for the canonical listing):
 | `E-VARIANT-AMBIGUOUS` | Error | Bare variant reference ambiguous (§14.10 expression positions, §18.0.3 match-arm patterns). |
 | `E-ENGINE-INVALID-TRANSITION` | Runtime | Direct write or .advance violates rule= contract (§51.0.F-G). |
 | `E-ENGINE-EFFECT-AMBIGUOUS` | Error | effect= on a multi-target rule= (§51.0.H). |
+| `E-ENGINE-EFFECT-NOT-INTERPOLATED` | Error | effect= (opener Form 3 or state-child Form 1) not in the required `${...}` logic-block form (§51.0.B, §51.0.H). |
 | `E-ONTRANSITION-NO-TARGET` | Error | `<onTransition>` element has neither to= nor from= attribute (§51.0.H). |
 | `E-ENGINE-VAR-DUPLICATE` | Error | Separate decl of engine's auto-declared variable (§51.0.C). |
 | `W-ENGINE-INITIAL-MISSING` | Warning | initial= omitted on non-derived engine (§51.0.E). |

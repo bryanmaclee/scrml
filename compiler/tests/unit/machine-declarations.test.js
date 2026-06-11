@@ -65,7 +65,11 @@ function makeTypeDecl(name, kind, raw) {
 }
 
 function makeMachineDecl(engineName, governedType, rulesRaw) {
-  return { kind: "engine-decl", engineName, governedType, rulesRaw, span: span() };
+  // S182 (Fix 2) — these helpers model the LEGACY `<machine>`-keyword decl
+  // (the file is the §51.3 `< machine>` subsystem). E-ENGINE-003 is the legacy
+  // duplicate-name code and now gates on `legacyMachineKeyword: true` (the
+  // canonical `<engine>` form uses §51.0.C `E-ENGINE-VAR-DUPLICATE` instead).
+  return { kind: "engine-decl", engineName, governedType, rulesRaw, legacyMachineKeyword: true, span: span() };
 }
 
 // ---------------------------------------------------------------------------

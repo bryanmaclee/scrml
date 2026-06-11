@@ -124,6 +124,17 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
   "_matchArmBodyForm",        // companion tag on each armBodyChildren wrapper
                               // (self-closing / shorthand / bare-body) — same
                               // live-only expansion-support metadata class.
+  "openerEffectMalformed",    // S182 (Fix 1) — LIVE-only diagnostic-support flag
+                              // on an engine-decl: `effect=` present on the
+                              // opener but NOT in the required `${...}` logic-
+                              // block form. Drives E-ENGINE-EFFECT-NOT-
+                              // INTERPOLATED. The native parser has no opener
+                              // `effect=` read at all (the open `effect=` opener
+                              // native gap), so it never carries this flag; a
+                              // live-pipeline-internal diagnostic field, NOT a
+                              // semantic divergence.
+  "openerEffectBadSlice",     // companion raw-text slice for the above message —
+                              // same live-only diagnostic-support metadata class.
 ]);
 
 // ---------------------------------------------------------------------------

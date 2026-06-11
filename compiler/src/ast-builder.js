@@ -12981,8 +12981,29 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // engine-statechild-parser effectRaw scan is depth-only, which is
         // adequate there because state-child openers are short; the opener
         // effect body is a full logic block, so it gets the stronger scan).
+        // S182 (Fix 1) — `effect=` is a §7 logic-context block (§51.0.H Form 3),
+        // so the `${...}` form is REQUIRED; the bare single-expression sugar
+        // (`onclick=load()`, §5.2.3) does NOT extend here. A bare/unbalanced
+        // `effect=` value was previously captured as null → silently tree-shaken
+        // (the boot effect never fired). Flag the malformed case so SYM (PASS
+        // 10.A `registerEngineDecl`) can fire `E-ENGINE-EFFECT-NOT-INTERPOLATED`
+        // (Error). Detect via `effect=` present in the header WITHOUT a following
+        // `${`; the `${...}`-capture path below is untouched.
         let openerEffect = null;
+        let openerEffectMalformed = false;
+        let openerEffectBadSlice = null;
+        const openerEffectPresentIdx = header.search(/(?:^|\s)effect\s*=/);
         const openerEffectIdx = header.search(/(?:^|\s)effect\s*=\s*\$\{/);
+        if (openerEffectPresentIdx >= 0 && openerEffectIdx < 0) {
+          // `effect=` is present but NOT followed by `${` — a bare value.
+          openerEffectMalformed = true;
+          // Capture a short raw slice for the diagnostic message (the run of
+          // characters after `effect=` up to the next top-level `>` / `/` / EOL).
+          const afterEq = header.slice(openerEffectPresentIdx).replace(/^\s*effect\s*=\s*/, "");
+          const sliceMatch = afterEq.match(/^[^>\n]*/);
+          openerEffectBadSlice = sliceMatch ? sliceMatch[0].trim() : afterEq.trim();
+          if (openerEffectBadSlice.length === 0) openerEffectBadSlice = null;
+        }
         if (openerEffectIdx >= 0) {
           const dollarBrace = header.indexOf("${", openerEffectIdx);
           if (dollarBrace >= 0) {
@@ -13008,6 +13029,17 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             // Unbalanced braces → openerEffect stays null (best-effort capture;
             // downstream rewriteExpr would surface a parse error if the malformed
             // text reached codegen, but a null here keeps the AST clean).
+          }
+          // S182 (Fix 1) — `effect=${` was present but the capture failed
+          // (unbalanced braces, or an empty `${ }` body): treat as a malformed
+          // effect so SYM fires E-ENGINE-EFFECT-NOT-INTERPOLATED rather than
+          // silently dropping it.
+          if (openerEffect === null) {
+            openerEffectMalformed = true;
+            if (dollarBrace >= 0) {
+              const raw = header.slice(openerEffectIdx).replace(/^\s*/, "").match(/^[^\n]*/);
+              openerEffectBadSlice = raw ? raw[0].trim() : null;
+            }
           }
         }
         // §51.0.P (S67 ratification, struck 2026-05-08) — `parallel` bareword
@@ -13292,6 +13324,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // onIdle arm (ordering ruling ii); B16 fires E-ENGINE-EFFECT-ON-
           // DERIVED when it is non-null on a derived engine (ruling iii).
           openerEffect,
+          // S182 (Fix 1) — `effect=` present on the opener but NOT in the
+          // required `${...}` logic-block form (a bare value, or unbalanced/
+          // empty braces). SYM (PASS 10.A `registerEngineDecl`) fires
+          // `E-ENGINE-EFFECT-NOT-INTERPOLATED` (Error). `openerEffectBadSlice`
+          // carries the offending raw text for the message (or null).
+          openerEffectMalformed,
+          openerEffectBadSlice,
           pinned,
           // §51.0.P (S68 ratification, STRUCK 2026-05-08): the `parallelAttr`
           // field on engine-decl nodes was removed alongside the spec strike.
