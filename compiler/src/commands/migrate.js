@@ -12,8 +12,19 @@
  *   3. `pure` modifier   (W-PURE-DEPRECATED):  `pure function`/`pure fn` → `fn`;
  *                                              `[server ]pure[ server ]function` → `server fn`.
  *
- * Migrations gated by `--program-shape` (v0.3 Wave 2 — S86):
- *   3. Program-shape rewrite per SPEC §40.8 (one-program-per-application).
+ * Migrations gated by `--fix` (AST/compile-aware — see the migrateFile tier):
+ *   - arm-arrow `:>`, given-guard `:>`, `:`-shorthand inside-opener (SPEC §18.2 /
+ *     §42.2.3 / §4.14). See `rewriteMatchArmArrows` / `rewriteGivenGuardArrows` /
+ *     `rewriteColonShorthandPlacement` below.
+ *   4. `server` keyword on `server function` (W-DEPRECATED-SERVER-MODIFIER,
+ *     server-keyword-eliminate S180): strip the deprecated `server` keyword from
+ *     `server function NAME(` declarations that STILL escalate server without it
+ *     (the lint firing IS the proof it is safe). Excludes the SSE generator
+ *     `server function*` (deferred) and never `server fn`. Diagnostic-driven —
+ *     see `rewriteServerFunctionKeyword` below.
+ *
+ * Migration gated by `--program-shape` (v0.3 Wave 2 — S86):
+ *   - Program-shape rewrite per SPEC §40.8 (one-program-per-application).
  *      File classified as entry / route / module / schema-anchor / ambiguous;
  *      route files with per-route-only attrs rewrite `<program ...>` → `<page ...>`.
  *      Entry files unwrap redundant `${...}` wrappers around top-level decls.
@@ -606,6 +617,237 @@ export function rewriteColonShorthandPlacement(source, filePath) {
     if (rewritten.slice(at, at + original.length) !== original) continue;
     rewritten = rewritten.slice(0, at) + newBody + rewritten.slice(at + original.length);
     count += armCount;
+  }
+
+  return { rewritten, changed: rewritten !== source, count };
+}
+
+// ---------------------------------------------------------------------------
+// Migration 4 (server-keyword-eliminate) — strip the deprecated `server`
+// keyword from `server function NAME(` declarations, but ONLY where it is
+// SAFE: where the function STILL escalates server without it.
+//
+// `server function` and `function` are NOT synonyms — `server` is a server-
+// vs-client EXECUTION boundary, not a no-op. A naive text rewrite would
+// silently CLIENT-FLIP a security/auth/payment function (regress §10.4
+// lift-permission, the §12.2 wire-chunk gate, MCP discovery). The safety
+// comes from one clean compiler signal:
+//
+//   W-DEPRECATED-SERVER-MODIFIER (route-inference.ts Step 5d / D5) fires iff a
+//   function is keyword-`server`-annotated AND has at least one NON-explicit-
+//   annotation escalation reason (T1/T2/T3 body content, T5 caller-context,
+//   T7 channel cell-write/broadcast, T8 reserved-name handle) — i.e. EXACTLY
+//   when the keyword is REDUNDANT. So:
+//     - lint FIRES on a `server function`  → dropping `server` keeps it server
+//       (the other reason remains)         → SAFE to strip.
+//     - lint does NOT fire on `server fn`  → pure-server pin → auto-preserved.
+//     - lint does NOT fire on a keyword-only-no-trigger `server function`
+//       (the pure/stub CLIENT-FLIP danger) → left untouched (correct).
+//
+// Migration 4 therefore strips `server ` at each W-DEPRECATED fire-site's
+// `server function NAME(` declaration, with ONE explicit exclusion: never a
+// generator `server function*` (SSE is DEFERRED to its own DD — and a SQL-
+// bearing SSE WOULD fire W-DEPRECATED, so the `function*` exclusion is
+// required, not belt-and-suspenders). Belt-and-suspenders: never `server fn`
+// (the lint won't fire there anyway).
+//
+// This is a `--fix`-tier migration (it needs `result.warnings` from a staged
+// compile, like the AST-driven rewrites), NOT a pure-text `applyMigrations`
+// rule — a pure regex cannot distinguish an escalating `server function` from
+// a keyword-only one and would client-flip the danger sites.
+// ---------------------------------------------------------------------------
+
+/**
+ * Staged-compile the source IN PLACE (mirrors `sanityCheckParse`'s option-β
+ * harness) and return the W-DEPRECATED-SERVER-MODIFIER diagnostics so
+ * Migration 4 can locate the redundant-`server` declarations. The compile
+ * must run from the file's real on-disk position so cross-file imports +
+ * caller-context (T5) escalation resolve correctly.
+ *
+ * Returns the list of `{ span }` for each fire-site (the function-decl span;
+ * `span.start` anchors the forward scan for the `server function NAME(`).
+ * On any read/stage/compile failure, returns `[]` (fail closed — strip
+ * nothing rather than strip blindly).
+ *
+ * @param {string} source — the (already W-* `:>`-migrated) source to analyse
+ * @param {string} filePath — real on-disk path (for the import graph)
+ * @returns {Array<{ span: { start: number, end: number } | null }>}
+ */
+function gatherDeprecatedServerWarnings(source, filePath) {
+  let originalContent;
+  try {
+    originalContent = readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+
+  let result;
+  let stagingError = null;
+  try {
+    try {
+      writeFileSync(filePath, source, "utf8");
+    } catch (err) {
+      stagingError = err;
+    }
+    if (!stagingError) {
+      try {
+        result = compileScrml({
+          inputFiles: [filePath],
+          write: false,
+          gather: true,
+          log: () => {},
+        });
+      } catch {
+        return [];
+      }
+    }
+  } finally {
+    try {
+      writeFileSync(filePath, originalContent, "utf8");
+    } catch (restoreErr) {
+      // Restoration failed; surface loudly — same contract as sanityCheckParse.
+      throw new Error(
+        `Migration 4 harness: failed to restore original content at ${filePath} ` +
+        `(file may be left in staged state): ${restoreErr.message}`,
+      );
+    }
+  }
+
+  if (stagingError || !result) return [];
+
+  // W-* diagnostics land in `result.warnings` (the W-/I- partition). Be
+  // defensive and also scan `result.errors` in case a build routes a
+  // warning-severity diagnostic there.
+  const streams = [];
+  if (Array.isArray(result.warnings)) streams.push(...result.warnings);
+  if (Array.isArray(result.errors)) streams.push(...result.errors);
+
+  const sites = [];
+  for (const d of streams) {
+    if (!d || d.code !== "W-DEPRECATED-SERVER-MODIFIER") continue;
+    sites.push({ span: d.span ?? null });
+  }
+  return sites;
+}
+
+/**
+ * Migration 4 — strip the redundant deprecated `server` keyword from
+ * `server function NAME(` declarations that STILL escalate server without it
+ * (proven by W-DEPRECATED-SERVER-MODIFIER firing on them).
+ *
+ * Diagnostic-driven (compile → collect fire-sites → span-rewrite), NOT a
+ * pure-text regex (which cannot tell an escalating `server function` from a
+ * keyword-only one — see the block comment above).
+ *
+ * The strip predicate, per fire-site `span.start`:
+ *   1. Scan forward from `span.start`, skipping any `pure`/`async` modifier
+ *      words + interleaving whitespace, to find the `server` keyword token.
+ *      (`pure server function` / `async server function` are valid prefixes;
+ *      the W-DEPRECATED span.start may sit on `pure`/`async`, not `server`.)
+ *   2. Confirm the word immediately after `server` (one whitespace run) is
+ *      the literal `function` keyword.
+ *   3. EXCLUDE a generator: if the char after `function` (skipping nothing —
+ *      `function*` has no gap) is `*`, do NOT strip. SSE is deferred.
+ *   4. Belt-and-suspenders: if the keyword after `server` is `fn` (not
+ *      `function`), do NOT strip. (The lint won't fire on `server fn`, but
+ *      we never want a stray `server fn` stripped by a span coincidence.)
+ *   5. Strip the `server` keyword + the single whitespace run that follows it,
+ *      leaving `function NAME(`.
+ *
+ * Applied right-to-left so earlier offsets stay valid. A re-run on an
+ * already-stripped `function NAME(` finds no W-DEPRECATED → no edit
+ * (idempotent). The rewritten source is then re-verified by the standard
+ * `sanityCheckParse` gate in `migrateFile`.
+ *
+ * @param {string} source — raw source text (post W-* `:>` migration)
+ * @param {string} filePath — real on-disk path (for the import graph)
+ * @returns {{ rewritten: string, changed: boolean, count: number }}
+ */
+export function rewriteServerFunctionKeyword(source, filePath) {
+  const sites = gatherDeprecatedServerWarnings(source, filePath);
+  if (sites.length === 0) {
+    return { rewritten: source, changed: false, count: 0 };
+  }
+
+  // A scrml identifier/keyword word char (for word-boundary scanning).
+  const isWordChar = (ch) => /[A-Za-z0-9_$]/.test(ch);
+
+  // From `from`, read the next contiguous word token (returns { word, start,
+  // end }) or null if the next non-whitespace char is not a word char.
+  const readWordAt = (from) => {
+    let i = from;
+    while (i < source.length && /\s/.test(source[i])) i++;
+    if (i >= source.length || !isWordChar(source[i])) return null;
+    const start = i;
+    while (i < source.length && isWordChar(source[i])) i++;
+    return { word: source.slice(start, i), start, end: i };
+  };
+
+  // Collect one strip-edit per fire-site: the [server-start, function-start)
+  // slice to delete (the `server` keyword + its trailing whitespace run).
+  const edits = [];
+  const seen = new Set();
+
+  for (const { span } of sites) {
+    const anchor = span && typeof span.start === "number" && span.start >= 0
+      ? span.start
+      : -1;
+    if (anchor < 0) continue;
+
+    // Walk past optional leading `pure`/`async` modifier words to reach
+    // `server`. Stop after at most two modifier words (the closed prefix set).
+    let cursor = anchor;
+    let serverTok = null;
+    for (let hops = 0; hops < 3; hops++) {
+      const w = readWordAt(cursor);
+      if (!w) break;
+      if (w.word === "server") { serverTok = w; break; }
+      if (w.word === "pure" || w.word === "async") { cursor = w.end; continue; }
+      // Any other word at the anchor means this isn't a `[pure|async] server
+      // function` decl shape — don't strip.
+      break;
+    }
+    if (!serverTok) continue;
+
+    // The token immediately after `server` must be the `function` keyword.
+    const next = readWordAt(serverTok.end);
+    if (!next) continue;
+    if (next.word !== "function") {
+      // `server fn` (or anything else) — never strip (belt-and-suspenders).
+      continue;
+    }
+
+    // EXCLUDE the SSE generator `server function*`: a `*` immediately follows
+    // `function` (the `*` is glued; `function *` is also possible — skip
+    // whitespace to the `*`). DEFER per ruling 1.
+    let k = next.end;
+    while (k < source.length && /\s/.test(source[k])) k++;
+    if (source[k] === "*") continue;
+
+    // Strip [serverTok.start, next.start): the `server` keyword + the single
+    // whitespace run that separates it from `function`.
+    const delStart = serverTok.start;
+    const delEnd = next.start;
+    const key = `${delStart}:${delEnd}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    edits.push({ delStart, delEnd });
+  }
+
+  if (edits.length === 0) {
+    return { rewritten: source, changed: false, count: 0 };
+  }
+
+  // Apply right-to-left so earlier offsets stay valid. Fail-safe: confirm the
+  // slice we're about to delete still reads `server` + whitespace.
+  edits.sort((a, b) => b.delStart - a.delStart);
+  let rewritten = source;
+  let count = 0;
+  for (const { delStart, delEnd } of edits) {
+    const slice = rewritten.slice(delStart, delEnd);
+    if (!/^server\s+$/.test(slice)) continue; // moved/clobbered — skip
+    rewritten = rewritten.slice(0, delStart) + rewritten.slice(delEnd);
+    count++;
   }
 
   return { rewritten, changed: rewritten !== source, count };
@@ -2115,6 +2357,14 @@ Optional migrations (opt-in flags):
                             angleDepth-aware (a \`>\` inside a string value or
                             markup body is opaque). Surfaces
                             W-COLON-SHORTHAND-LEGACY-PLACEMENT pre-migration.
+  - \`server\` keyword       (--fix, W-DEPRECATED-SERVER-MODIFIER, S180): strips
+                            the deprecated \`server\` keyword from
+                            \`server function NAME(\` declarations that STILL
+                            escalate server WITHOUT it (the lint firing IS the
+                            safety proof). Diagnostic-driven — staged-compiles to
+                            find the redundant-keyword sites. Excludes the SSE
+                            generator \`server function*\` (deferred) and never
+                            touches \`server fn\` (pure-server pin).
 
 Arguments:
   <file>                  A single .scrml file
@@ -2127,10 +2377,15 @@ Options:
   --exclude=<glob>        Additional exclude pattern (substring match)
   --no-default-excludes   Disable built-in samples/ + tests/ exclusions
   --program-shape         Enable v0.3 program-shape migration (SPEC §40.8)
-  --fix                   Enable the \`:>\` canonicalisation rewrites:
-                          arm-arrow (SPEC §18.2 / §34): \`=>\` / \`->\` arm
-                          separators → \`:>\`; and given-guard (SPEC §42.2.3 /
-                          §34): standalone \`given x => { ... }\` → \`given x :> { ... }\`
+  --fix                   Enable the AST/compile-aware canonicalisation rewrites:
+                          \`:>\` arm-arrow (SPEC §18.2 / §34): \`=>\` / \`->\` arm
+                          separators → \`:>\`; given-guard (SPEC §42.2.3 / §34):
+                          standalone \`given x => { ... }\` → \`given x :> { ... }\`;
+                          \`:\`-shorthand inside-opener placement; and the
+                          \`server\`-keyword strip (W-DEPRECATED-SERVER-MODIFIER,
+                          S180): \`server function NAME(\` → \`function NAME(\` where
+                          the function still escalates server (excludes
+                          \`server function*\` SSE + \`server fn\`).
   --report                With --dry-run --program-shape, emit a structured
                           advisory report listing every in-scope file's bucket,
                           evidence, and proposed action (REWRITE / SKIP /
@@ -2370,6 +2625,24 @@ export function migrateFile(filePath, opts, cwd) {
       changed = true;
     }
     migrations.colonShorthandPlacement = csResult.count;
+
+    // Step 1e: Migration 4 (server-keyword-eliminate) — strip the redundant
+    // deprecated `server` keyword from `server function NAME(` declarations
+    // that STILL escalate server without it (proven by the
+    // W-DEPRECATED-SERVER-MODIFIER lint firing on them). DIAGNOSTIC-driven —
+    // it staged-compiles the post-`:>`-migration text to collect the fire-
+    // sites, then span-strips `server ` at each. Excludes the SSE generator
+    // `server function*` (deferred) and never touches `server fn` (the lint
+    // won't fire there). Runs LAST in the `--fix` chain so it analyses the
+    // fully-canonicalised text. See `rewriteServerFunctionKeyword` for the
+    // safety rationale (why a pure-text regex would client-flip the danger
+    // sites).
+    const sfResult = rewriteServerFunctionKeyword(rewritten, filePath);
+    if (sfResult.changed) {
+      rewritten = sfResult.rewritten;
+      changed = true;
+    }
+    migrations.serverFnKeyword = sfResult.count;
   }
 
   // Step 2: optionally apply v0.3 program-shape migration.
@@ -2525,6 +2798,7 @@ export function runMigrate(args) {
   let totalMatchArmArrow = 0;
   let totalGivenGuardArrow = 0;
   let totalColonShorthandPlacement = 0;
+  let totalServerFnKeyword = 0;
   const failures = [];
   const reportRows = []; // for --report aggregation
 
@@ -2550,6 +2824,7 @@ export function runMigrate(args) {
         totalMatchArmArrow += r.migrations.matchArmArrow ?? 0;
         totalGivenGuardArrow += r.migrations.givenGuardArrow ?? 0;
         totalColonShorthandPlacement += r.migrations.colonShorthandPlacement ?? 0;
+        totalServerFnKeyword += r.migrations.serverFnKeyword ?? 0;
       }
       if (dryRun && r.diff && !report) {
         console.log(r.diff);
@@ -2585,6 +2860,7 @@ export function runMigrate(args) {
     if (totalMatchArmArrow > 0) console.log(`    ${c.dim(`arm-arrow \`:>\` migrations:`)} ${totalMatchArmArrow}`);
     if (totalGivenGuardArrow > 0) console.log(`    ${c.dim(`given-guard \`:>\` migrations:`)} ${totalGivenGuardArrow}`);
     if (totalColonShorthandPlacement > 0) console.log(`    ${c.dim(`\`:\`-shorthand inside-opener migrations:`)} ${totalColonShorthandPlacement}`);
+    if (totalServerFnKeyword > 0) console.log(`    ${c.dim(`\`server\` keyword strips (\`server function\` -> \`function\`):`)} ${totalServerFnKeyword}`);
   }
   if (unchangedCount > 0) {
     console.log(`  ${c.dim(`${unchangedCount} unchanged`)}`);
