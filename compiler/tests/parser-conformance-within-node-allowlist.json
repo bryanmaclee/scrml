@@ -837,10 +837,11 @@
     "SPAN-COORD": 33
   },
   "samples/compilation-tests/combined-020-calculator.scrml": {
-    "EXTRA-FIELD": 28,
-    "FIELD-SHAPE": 18,
+    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 29,
+    "FIELD-SHAPE": 20,
     "KIND-NAME": 11,
-    "MISSING-FIELD": 128,
+    "MISSING-FIELD": 114,
     "SPAN-COORD": 72
   },
   "samples/compilation-tests/combined-021-component-basic.scrml": {
@@ -4783,11 +4784,11 @@
     "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s79-calculator.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 40,
-    "FIELD-SHAPE": 23,
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 41,
+    "FIELD-SHAPE": 25,
     "KIND-NAME": 14,
-    "MISSING-FIELD": 139,
+    "MISSING-FIELD": 124,
     "SPAN-COORD": 194
   },
   "samples/compilation-tests/gauntlet-s79-counter-todo.scrml": {
@@ -5911,11 +5912,11 @@
   },
   "samples/file-manager-r11.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 76,
-    "FIELD-SHAPE": 63,
-    "KIND-NAME": 28,
-    "MISSING-FIELD": 288,
-    "SPAN-COORD": 230
+    "EXTRA-FIELD": 66,
+    "FIELD-SHAPE": 59,
+    "KIND-NAME": 24,
+    "MISSING-FIELD": 260,
+    "SPAN-COORD": 248
   },
   "samples/gauntlet-r11-elixir-chat.scrml": {
     "KIND-NAME": 12,

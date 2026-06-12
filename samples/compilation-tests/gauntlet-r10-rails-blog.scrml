@@ -410,7 +410,7 @@
                 // ===================================
                 // if= attribute for conditional rendering (SS spec §control)
 
-                <div class="view-list" if=@currentView == "list">
+                <div class="view-list" if=(@currentView == "list")>
                     <h2>Posts
                     ${
                         if (@activeTagFilter) {
@@ -419,7 +419,7 @@
                     }
                     </>
 
-                    <div if=@posts.length == 0>
+                    <div if=(@posts.length == 0)>
                         <p class="empty-state">No posts yet. Create your first one!</>
                     </div>
 
@@ -452,7 +452,7 @@
                 // ===================================
                 // Tag removal inline — Rails: button_to posts_tag_path(@post, tag), method: :delete
 
-                <div class="view-show" if=@currentView == "show">
+                <div class="view-show" if=(@currentView == "show")>
                     <div class="post-nav">
                         <button onclick=showList()>Back to Posts</>
                         <button onclick=showEdit(@currentPostId)>Edit</>
@@ -498,7 +498,7 @@
                 // No csrf_field (the compiler should handle this — but it's unspecified).
                 // Manual oninput= handlers instead of bind:value (bind: may not compile yet).
 
-                <div class="view-new" if=@currentView == "new">
+                <div class="view-new" if=(@currentView == "new")>
                     <h2>New Post</>
                     <div class="form-error" if=@formError>
                         <p>${@formError}</>
@@ -552,7 +552,7 @@
                 // A <PostForm> component would be the right abstraction here,
                 // but you write it from scratch.
 
-                <div class="view-edit" if=@currentView == "edit">
+                <div class="view-edit" if=(@currentView == "edit")>
                     <h2>Edit Post</>
                     <div class="form-error" if=@formError>
                         <p>${@formError}</>

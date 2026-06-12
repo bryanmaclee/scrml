@@ -4,8 +4,8 @@ ${
 }
 <program>
     <div class="wizard">
-        <span if=@step == 1>one</>
-        <span else-if=@step == 2>two</>
+        <span if=(@step == 1)>one</>
+        <span else-if=(@step == 2)>two</>
         <span else>other</>
     </>
 </>

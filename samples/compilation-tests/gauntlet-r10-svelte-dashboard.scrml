@@ -294,7 +294,7 @@
                     }
                 }
             </>
-            <p if=@history.length == 0 class="chart-empty">
+            <p if=(@history.length == 0) class="chart-empty">
                 No data yet. Timer will populate this chart.</>
         </>
 
