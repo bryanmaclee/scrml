@@ -2831,6 +2831,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // `>` should decrement angleDepth. Cleared on `/>` (self-close) or after
     // it fires on `>`.
     let pendingVoidClose = false;
+    // g-division-in-ternary-arm (S188): track unmatched ternary `?` at depth 0
+    // so an `@cell :` that is a ternary value-arm separator is NOT mistaken
+    // for the start of a typed reactive state-decl (`@name: Type`). The S25
+    // typed-reactive boundary break (below) assumed `:` after `@` cannot appear
+    // mid-expression at depth 0 — false for a ternary consequent `cond ? @cell
+    // : alt`. Incremented on a depth-0 `?`, decremented on the matching `:`.
+    let ternaryDepth = 0;
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
     const DECL_KEYWORDS = new Set(["const", "let", "type", "function", "fn"]);
@@ -3035,16 +3042,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const COMPOUND_OPS = new Set(["+=", "-=", "*=", "/=", "%=", "++", "--"]);
             const isCompoundOrUpdate = next1 && next1.kind === "OPERATOR" && COMPOUND_OPS.has(next1.text);
             if (isCompoundOrUpdate && tok.kind === "AT_IDENT" && lastPart !== "=") break;
-            // S25 — S22 §6 bug fix: `@name :` at depth 0 always begins a
-            // typed state-decl (§53). Without this guard, an untyped
-            // `@x = 1` followed by `@y: Type = expr` in the same logic
-            // block silently swallows the typed decl — collectExpr kept
-            // consuming because `@y` wasn't followed by `=`. The `:`
-            // after `@` cannot appear mid-expression at depth 0
-            // (ternary uses `?`, object keys are inside `{}` which is
-            // depth > 0).
+            // S25 — S22 §6 bug fix: `@name :` at depth 0 begins a typed
+            // state-decl (§53). Without this guard, an untyped `@x = 1`
+            // followed by `@y: Type = expr` in the same logic block silently
+            // swallows the typed decl — collectExpr kept consuming because
+            // `@y` wasn't followed by `=`.
+            //
+            // g-division-in-ternary-arm (S188): the original S25 comment claimed
+            // "the `:` after `@` cannot appear mid-expression at depth 0 (ternary
+            // uses `?`)" — that was WRONG. A ternary consequent CAN be a bare
+            // `@cell` (`cond ? @cell : alt`), and there the depth-0 `@cell :`
+            // IS the ternary value-arm separator, not a typed-decl start.
+            // Mis-firing this break truncated the init at the consequent
+            // (`@e > 0 ? @h /` etc.) and emitted invalid JS (E-CODEGEN-INVALID-JS).
+            // Guard with `ternaryDepth === 0` so the break fires ONLY for a
+            // genuine top-level typed-reactive decl, never inside a ternary arm.
             const isTypedReactive = next1 && next1.kind === "PUNCT" && next1.text === ":";
-            if (isTypedReactive && tok.kind === "AT_IDENT" && lastPart !== "=") break;
+            if (isTypedReactive && ternaryDepth === 0 && tok.kind === "AT_IDENT" && lastPart !== "=") break;
             // high-deepset-write-loss (2026-06-06): a dotted-path reactive
             // statement at depth 0 also begins a NEW statement. The forms are
             //   `@obj.path.to.prop = value`     -> reactive-nested-assign (§5.2.3)
@@ -3247,6 +3261,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (tok.kind === "PUNCT" && (tok.text === "}" || tok.text === ")" || tok.text === "]")) {
         if (depth === 0) break;
         depth--;
+      }
+      // g-division-in-ternary-arm (S188): track ternary `?`/`:` nesting at
+      // delimiter-depth 0 (and outside markup). A depth-0 `?` opens a ternary;
+      // the next depth-0 `:` (while ternaryDepth > 0) is its value-arm separator,
+      // NOT a typed-reactive-decl colon. Updated here (mirroring the brace-depth
+      // tracking above) so the boundary checks for the NEXT token see the
+      // correct ternary state. `?.`/`??` tokenize as OPERATOR (not PUNCT "?"),
+      // so optional-chaining / nullish-coalescing do not perturb the count.
+      if (depth === 0 && angleDepth === 0 && tok.kind === "PUNCT") {
+        if (tok.text === "?") ternaryDepth++;
+        else if (tok.text === ":" && ternaryDepth > 0) ternaryDepth--;
       }
       // Track angle-bracket depth as ELEMENT NESTING (not delimiter nesting).
       // Open: `<` IDENT/KEYWORD increments — opens an element.
