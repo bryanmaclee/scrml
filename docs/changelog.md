@@ -2,6 +2,23 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-12 (S187 — recovery session: completed S186's crashed tutorial-staleness remediation A–E; docs-only; full suite 23,946→23,957)
+
+A recovery session. The S186 session shut down unexpectedly **twice**, mid-dispatch (environmental "socket connection closed" crashes). All in-flight work was salvaged and the tutorial-staleness remediation was completed + landed. No compiler-source change this session; the +11 full-suite delta is the S186 channel-codegen tests (`658cb1a9`) now reflected at wrap.
+
+- **`d47177fc` — tutorial staleness remediation A–E (execute the S186 audit).** Completed `docs/audits/tutorial-staleness-audit-2026-06-12.md` (26 findings, items A1–E21) against `docs/tutorial.md` + `docs/tutorial-snippets/*`. **All 4 HIGH defects fixed:** 02b `<schema>` placement (E-SCHEMA-003 cleared), §7 `not`-as-negation → `!` (§42.10), `scrml init` scaffold prose (`src/app.scrml` + `.gitignore`), block-form `<match>` documented as shipped (§18.0.1). Plus: `=>`/`->` match-arm + `!{}`-handler separators → `:>` (S147); `<onTransition>` directional `to=`/`from=` model; `server function` → `function`; §6 auto-await prose → compiler-managed body-split/CPS (§19.9.3) + `E-PROG-004` corrected to compile-error (§40.4) not Info-lint; `.get()` absence framing; **`<each in=@coll as x key=x.id>` added as canonical Tier-1 iteration (§17.7, space binder)**; version labels → v0.7.0; SPEC line-count 26,000→32,000; section-refs (§7→§42, §13.1→§19.9.8); block-`<match>` glossary entry. **Verification:** verify-tutorial.sh 11/11 PASS; residual-staleness re-grep 0 for every closed class; Verified-clean items (projection `=>`, fn-return `->`, `if=`/`else-if=` chain) untouched; `<each>` compile-verified clean.
+
+- **Crash recovery (2 socket-crashes, nothing lost).** Predecessor agent crashed mid-Group-B (A + B5/B6 salvaged to a branch SHA); a continuation agent FF-merged that recovered branch + landed B7/B8 (both HIGH) + B9/B10 then crashed (B9/B10 salvaged); after 2 environmental crashes the PA switched to crash-proof **PA-direct** for the mechanical remainder (B11–E21) — file-delta'd A→B10 to main, finished + compile-verified each edit. Both unpushed S186 commits recovered + pushed (`658cb1a9` channel codegen; `538fe2d2` tutorial audit). New memory `feedback_repeated_dispatch_crash_pa_direct`. Rule 4 held — SPEC-verified §19.9.3 (body-split) + §40.4 (E-PROG-004 = Error) before encoding the B11 rewrite.
+
+### 2026-06-12 (S186 — channel codegen fixes + tutorial staleness audit; session crashed pre-wrap, reconstructed at S187; 23,946→23,957)
+
+S186 (Profile A) landed two commits before the session shut down unexpectedly without wrapping. This entry is reconstructed from the commits + live gap state at S187 recovery (the remediation of the audit produced here is the S187 entry above).
+
+- **`658cb1a9` — channel codegen.** Reconnect bare-int (Bug1) + `onserver`/`onclient` handler wiring (Bug2) + S186 dog-food gaps. Touched `compiler/src/route-inference.ts` + `compiler/src/type-system.ts` + `compiler/tests/unit/channel.test.js` (+11 full-suite tests — the 23,946→23,957 delta).
+- **`538fe2d2` — tutorial staleness audit.** Produced `docs/audits/tutorial-staleness-audit-2026-06-12.md` (26 findings: 4 HIGH / 11 MED / 11 LOW) and filed `g-not-negation-unenforced` (LOW — E-TYPE-045 under-enforced: `not x` prefix-negation compiles clean despite SPEC §42.10 making it an error). The audit's remediation plan A1–E21 is what S187 executed.
+
+known-gaps grew during S186 (channel dog-food + the `g-not-negation-unenforced` filing); live counts at S187 close: **HIGH 0 · MED 9 · LOW 15 · Nominal 9** (139 @gap tokens) per `bun scripts/state.ts`.
+
 ### 2026-06-12 (S185 — errarm re-fail-from-arm (2-layer) fix + validator inline-msg paren-canonical (E-VALIDATOR-INLINE-COLON) + engine/§36 dog-food; ~23,921→23,946)
 
 Profile A FULL session, directed-fix sequence interleaved with the S179/S180 waiting-time dog-food pattern. Both real bugs this session were dog-food finds during agent waits. Two compiler-source landings + a doc-migration arc + 3 gaps touched (2 resolved, 1 filed LOW). Full suite 0 fail.
