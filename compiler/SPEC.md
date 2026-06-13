@@ -18517,7 +18517,7 @@ A `<channel>` element accepts the following attributes. All apply identically wh
 
 The auto-reconnect delay emitted into every channel's client-side `onclose` setTimeout is `2000` ms by default. Per-channel override via `<channel reconnect=N>` is documented in §38.3. Project-level default override via `<program channel-reconnect=>` is the additive (S81) surface for projects with multiple channels that want a single cadence without repeating the attribute on every channel declaration.
 
-**Accepted form.** Bare integer milliseconds (e.g. `"500"` for fast dev cadence, `"5000"` for production), or duration string with unit suffix `"Nms"` / `"Ns"` / `"Nm"` / `"Nh"` (same form set accepted by `<program idempotency-ttl=>` minus `d` — channel reconnect at day-scale is structurally suspicious).
+**Accepted form.** Bare integer milliseconds (e.g. `500` for fast dev cadence, `5000` for production — bare, matching the `<channel reconnect=N>` per-channel form in §38.2), or a quoted duration string with unit suffix `"Nms"` / `"Ns"` / `"Nm"` / `"Nh"` (same form set accepted by `<program idempotency-ttl=>` minus `d` — channel reconnect at day-scale is structurally suspicious). The bare-integer form is canonical (per `g-channel-reconnect-bare-int`); the quoted form is reserved for the unit-suffixed duration strings.
 
 **Precedence.** When both `<program channel-reconnect=N>` and `<channel reconnect=M>` are present on a channel, the per-channel `reconnect=` wins. When only `<program channel-reconnect=N>` is present, every channel without an explicit `reconnect=` inherits `N`. When neither is present, `2000` ms is used.
 
@@ -18762,7 +18762,9 @@ The compiler emits a WebSocket upgrade route at `/_scrml_ws/<name>` and a `_scrm
 | E-CHANNEL-005 | `onserver:message` call expression contains more than one parameter | Error |
 | E-CHANNEL-006 | `onclient:*` handler function declared as `server function` | Error |
 | E-CHANNEL-007 | `name=` (or `topic=`) attribute value contains `${...}` interpolation; static literal required (§38.11) | Error |
-| E-CHANNEL-INSIDE-PROGRAM | `<channel>` element appears as a descendant of `<program>` rather than at file top level. **D3 / M19.** See §38.1, §34. | Error |
+| ~~E-CHANNEL-INSIDE-PROGRAM~~ | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — that is now the CANONICAL v0.3 placement, not a violation. Replaced by `E-CHANNEL-OUTSIDE-PROGRAM`. See §38.1, §34. | — |
+| E-CHANNEL-OUTSIDE-PROGRAM | A `<channel>` appears at file top level IN A FILE THAT ALSO CONTAINS a `<program>` element. Under v0.3, when a file declares `<program>`, channels in that file SHALL be descendants of `<program>`. **Module-file dispensation (S87, §38.12.6):** a `<channel>` at file top in a file with NO `<program>` (the PURE-CHANNEL-FILE shape) is canonical and does NOT fire. (Direction REVERSED from the retired `E-CHANNEL-INSIDE-PROGRAM`.) See §38.1, §38.4.1, §34. | Error |
+| E-CHANNEL-INSIDE-PAGE | A `<channel>` appears inside `<page>`. Channels are app-scope shared-state vehicles — siblings of `<page>` declarations inside `<program>`, not nested inside any individual `<page>`. See §38.1, §4.15, §34. | Error |
 | E-CHANNEL-SHARED-MODIFIER | `@shared` modifier used inside (or outside) a channel body. The modifier is removed in v0.next; auto-sync comes from being declared inside a channel body. **D3 / M19.** See §38.4, §34. | Error |
 | W-CHANNEL-001 | `topic=` is statically proven to be `not`; `broadcast()` will always be a no-op | Warning |
 

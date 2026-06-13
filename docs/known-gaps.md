@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 1 |
 | MED | 8 |
-| LOW | 16 |
+| LOW | 15 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1826,10 +1826,12 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
-### G-CHANNEL-SPEC-38-9-STALE — §38.9 error-code table + §38.2/§38.3.1 bare-vs-quoted reconnect are SPEC-internally inconsistent post-v0.3-reversal — `NEW S186; LOW; SPEC doc`
-<!-- @gap id=g-channel-spec-38-9-stale sev=LOW status=open -->
+### G-CHANNEL-SPEC-38-9-STALE — §38.9 error-code table + §38.2/§38.3.1 bare-vs-quoted reconnect are SPEC-internally inconsistent post-v0.3-reversal — `RESOLVED S189 (PA-direct doc-currency)`
+<!-- @gap id=g-channel-spec-38-9-stale sev=LOW status=resolved -->
 
 **Surfaced S186 dog-food (channels §38).** SPEC-internal inconsistency (a doc bug, not spec-vs-impl): (1) §38.9's error-code table still lists `E-CHANNEL-INSIDE-PROGRAM` as the live placement error ("`<channel>` appears as a descendant of `<program>` rather than at file top level — D3/M19") and OMITS `E-CHANNEL-OUTSIDE-PROGRAM` + `E-CHANNEL-INSIDE-PAGE` — directly contradicting §38.1 / §38.4.1, where the v0.3 reversal (2026-05-12) made channel-inside-`<program>` CANONICAL and explicitly RETIRED `E-CHANNEL-INSIDE-PROGRAM` ("its trigger shape is now canonical, not violating"). The §38.9 table was never updated for the reversal. (2) §38.3.1's `channel-reconnect` worked examples show the QUOTED form (`"500"` / `"5000"`) while §38.2's `<channel reconnect=2000>` is BARE — pick one canonical reconnect form (ties to g-channel-reconnect-bare-int's disposition: once bare is accepted, make §38.3.1's examples bare or note both-accepted). **Verified-not-a-compiler-bug (companion finding):** the placement WALKER itself was correctly updated for v0.3 — channel-inside-`<program>` compiles clean (E-CHANNEL-INSIDE-PROGRAM does NOT fire); only the §38.9 doc table lags. (Separately, PRIMER §13.7 B19-specifics still describe the pre-v0.3 `walkChannelPlacement` firing E-CHANNEL-INSIDE-PROGRAM at depth≥1 — historically-frozen B19-landing prose; minor, fold into the SPEC-doc cleanup if convenient.) **Fix:** §38.9 table — retire the `E-CHANNEL-INSIDE-PROGRAM` row, add `E-CHANNEL-OUTSIDE-PROGRAM` + `E-CHANNEL-INSIDE-PAGE` rows (cross-ref §38.1/§38.4.1); §38.3.1 reconnect-form consistency. Naturally bundles with the g-channel-reconnect-bare-int / g-channel-handler-wiring landing as the SPEC-side cleanup.
+
+**RESOLVED S189 (PA-direct, doc-currency only — no compiler source, no §34 code change).** All three parts: (1) §38.9 LOCAL error-table (SPEC ~line 18765) — retired the stale `E-CHANNEL-INSIDE-PROGRAM` row (struck-through + "Retired 2026-05-12 v0.3 Wave-1 reversal" note, mirroring the §34 catalog treatment) and added `E-CHANNEL-OUTSIDE-PROGRAM` + `E-CHANNEL-INSIDE-PAGE` rows (with the S87 module-file dispensation), reconciling §38.9 with the already-correct §34 catalog rows. (2) §38.3.1 reconnect "Accepted form" — de-quoted the `"500"`/`"5000"` illustration to bare `500`/`5000` (matching `<channel reconnect=N>` in §38.2 + the resolved g-channel-reconnect-bare-int), and clarified that the bare-integer form is canonical while the quoted form is reserved for unit-suffixed duration strings. (3) PRIMER §13.7 B19 row — added a v0.3-currency note flagging that the row records the pre-v0.3 landing and the walker now fires `E-CHANNEL-OUTSIDE-PROGRAM`. SPEC-INDEX Sections-table regenerated + footer re-synced (32,241→32,252, ~9 drift since S185) + section count corrected 58→59 (§59 landed S168, footer never updated). Net SPEC +2L.
 
 ---
 
