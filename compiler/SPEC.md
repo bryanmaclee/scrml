@@ -2205,13 +2205,25 @@ The cell starts absent (`pre`); a read before a `T`-shaped value is assigned fir
 
 *(A `const`-derived cell still requires an expression — `const <x>: T` with no RHS is a derived-with-no-expression error, NOT covered by this shape. An untyped no-RHS `<x>` — no type AND no RHS — is a separate construct, not governed here.)*
 
+#### RHS is a bare expression — no `${ }` wrapper
+
+All three RHS shapes take a **bare expression** as the right-hand side. Wrapping the RHS in a `${ }` logic block is **non-canonical** and SHALL be compile error **E-DECL-RHS-INTERP-WRAPPED** (§34):
+
+```scrml
+<bad>         = ${ @names.length }          // E-DECL-RHS-INTERP-WRAPPED — write  <bad> = @names.length
+const <bad>   = ${ @names.filter(...) }     // E-DECL-RHS-INTERP-WRAPPED — write  const <bad> = @names.filter(...)
+const <bad>: number = ${ @count * 2 }       // E-DECL-RHS-INTERP-WRAPPED — write  const <bad>: number = @count * 2
+```
+
+There is ONE canonical RHS form (the bare expression); the `${ }` interpolation wrapper belongs to markup/interpolation contexts (§3.3, §10.2), not to a declaration RHS — admitting it here would be a redundant second form (`limit-the-primitive`, §14.1.1). The diagnostic fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural declarations and recovers by unwrapping (so no spurious `E-SCOPE-001` on the orphaned `$`).
+
 **Cross-references:**
 - §6.1 — The two access forms
 - §6.4 — Render-by-tag semantics (full rules for when `<varname/>` is legal)
 - §6.6 — Derived values: `const <x>` (top-level and in-compound form)
 - §6.8 — The `default=` attribute and `reset(@cell)` keyword (optional attribute on any shape)
 - §6.11 — Auto-synthesized validity surface (from Shape 2 validators)
-- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE, E-REFINEMENT-NO-DEFAULT (refinement-typed no-RHS whose canonical empty violates the predicate)
+- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE, E-REFINEMENT-NO-DEFAULT (refinement-typed no-RHS whose canonical empty violates the predicate), E-DECL-RHS-INTERP-WRAPPED (`${ }`-wrapped decl RHS — the RHS is a bare expression)
 - §42.1.1 — `""`/`0`/`false`/`[]` are DEFINED values, distinct from absence (`not`); grounds the Shape 4 canonical-empty defaults
 - §14.12 — implicit `(not to T)` lifecycle on a bare-`T` no-canonical-empty no-RHS cell
 
@@ -16880,6 +16892,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-STATE-PINNED-FORWARD-REF | §6.10 | Read of a `pinned` state declaration before its declaration site in source order. `pinned` opts the declaration out of hoisting; forward reads are therefore unsafe. | Error |
 | E-CELL-NO-RENDER-SPEC | §6.4 | `<varname/>` used as render-by-tag in markup, but the cell has no render-spec (Shape 1 plain cell or Shape 3 non-markup derived). Use `${@varname}` interpolation to display the value. | Error |
 | E-CELL-RENDER-SPEC-NOT-BINDABLE | §6.2 | Shape 2 declaration (`<name req> = <markup>`) where the RHS markup element is not bindable (e.g., `<div>`, `<span>`). Shape 2 requires a bindable form element. Use `const <name>` (Shape 3) for display-only markup cells. | Error |
+| E-DECL-RHS-INTERP-WRAPPED | §6.2 | A derived/state-cell declaration RHS is wrapped in a `${ }` logic block — `const <bad> = ${ @x }` (Shape 3) / `<bad> = ${ @x }` (Shape 1) / `const <bad>: T = ${ @x }` (typed). The canonical RHS is a BARE expression (§6.2 — the three RHS shapes are all bare expressions); the `${ }` wrapper is non-canonical at decl-RHS position (there is ONE canonical form — `limit-the-primitive`, §14.1.1). Resolution: remove the wrapper — write `const <bad> = @x`. Pre-fix the wrapped RHS collapsed to a bare `$` identifier → a misleading `E-SCOPE-001: Undeclared identifier `$`` cascade; this code fires INSTEAD and recovers by unwrapping (no spurious E-SCOPE-001). Fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural decls in logic-block / default-logic position. (Catalog addition S190 cluster-c dog-food; emitted at `compiler/src/ast-builder.js` `tryParseStructuralDecl`.) | Error |
 | E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific case: `function reset() {...}` or `fn reset {...}` shadows the `reset` keyword. | Error |
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |

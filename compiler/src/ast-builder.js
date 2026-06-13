@@ -2852,6 +2852,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let lastTok = startTok;
     let depth = 0;
     let angleDepth = 0; // Track < ... > nesting for component tag expressions
+    // Cluster-C Bug 2 (S190) — markup-RHS over-consumption boundary.
+    // When collectExpr is collecting a markup VALUE (a `const Name = <markup>`
+    // Form-2 auto-lift RHS, a markup-typed derived `const <x> = <span>...`, etc.),
+    // the value is a SINGLE top-level markup element. `markupEverOpened` records
+    // that angleDepth went > 0 (genuine markup, not a `<` less-than operator —
+    // the Bug-3 guard prevents the increment when the prev token ends a value).
+    // `markupRootClosed` records that the top-level element FULLY closed
+    // (angleDepth returned to 0 via `</tag>` / `/>` / void `>`). Once the root
+    // closes, anything that follows in the block is a SIBLING statement, not part
+    // of the markup — without this, the trailing close `>` was read as a binary
+    // operator (RHS context) and the next sibling decl / `fn` / cell was vacuumed
+    // into the markup const's raw body (silent data loss for cells/deriveds/
+    // bindables; E-SCOPE-001 for functions). See the boundary break below.
+    let markupEverOpened = false;
+    let markupRootClosed = false;
+    // A close tag `</div>` spans `<` `/` IDENT `>`; angleDepth decrements at the
+    // opening `<` of the close tag, but the markup is not TEXTUALLY complete until
+    // its closing `>`. `pendingRootCloseGt` defers `markupRootClosed` to that `>`
+    // so the break below does not fire mid-close-tag (self-close `/>` and void `>`
+    // already sit at the terminal `>`, so they set markupRootClosed directly).
+    let pendingRootCloseGt = false;
     // A7 fix: when an HTML void element is opened (`<br`, `<input`, etc.),
     // the matching close is the open-tag's bare `>` (not `</tag>`, which
     // doesn't exist for void elements). pendingVoidClose flags that the next
@@ -2874,6 +2895,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (tok.kind === "EOF") break;
       // Skip comments — they must not leak as JS statements (BUG-2)
       if (tok.kind === "COMMENT") { consume(); continue; }
+      // Cluster-C Bug 2 (S190) — markup-RHS over-consumption boundary.
+      // A `const Name = <markup>` / markup-typed-derived RHS is a SINGLE top-level
+      // markup VALUE. Once that root element fully closed (markupRootClosed, set
+      // in the angle-tracking below when angleDepth returned to 0), anything that
+      // follows in the same block is a SIBLING statement (a `<cell> = init` decl,
+      // a derived `const <x> = ...`, a `<bindable req> = <input/>`, a `fn`/
+      // `function`, etc.) — NOT part of the markup. We must STOP here, BEFORE the
+      // RHS-context machinery reads the trailing close `>` as a binary operator
+      // and vacuums the sibling into the markup const's raw body. Pre-fix this was
+      // SILENT data loss for cells/deriveds/bindables (the initializer / tag was
+      // swallowed) and a LOUD E-SCOPE-001 for functions (the `fn` decl was
+      // absorbed so its name never registered). Comments above were already
+      // skipped; a `;`/`}` would have broken via the existing depth-0 guards. The
+      // only thing this break can affect is a genuine markup-value RHS, since
+      // `markupRootClosed` is set only after real markup (`markupEverOpened`).
+      if (markupRootClosed && depth === 0) break;
       if (stopAt && tok.text === stopAt && depth === 0) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
@@ -3338,10 +3375,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const isVoidHtmlTag = isTagNameAfter && afterLt.kind === "IDENT" && HTML_VOID_ELEMENTS.has(afterLt.text.toLowerCase());
         if (isCloseTagStart && angleDepth > 0) {
           angleDepth--;
+          // Cluster-C Bug 2 (S190): the top-level close tag opened; defer the
+          // markupRootClosed signal to its closing `>` (handled below) so the
+          // break does not fire mid-`</tag>`.
+          if (angleDepth === 0 && markupEverOpened) pendingRootCloseGt = true;
         } else if (isTagNameAfter) {
           if (angleDepth > 0) {
             // Inside markup — child tag opener, unconditional.
             angleDepth++;
+            markupEverOpened = true;
             if (isVoidHtmlTag) pendingVoidClose = true;
           } else {
             // Outside markup — Bug 3 guard against `value < value`.
@@ -3354,19 +3396,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             );
             if (!prevEndsValue) {
               angleDepth++;
+              markupEverOpened = true;
               if (isVoidHtmlTag) pendingVoidClose = true;
             }
           }
         }
       }
       // Self-close: `/` followed by `>` decrements element depth.
-      if (angleDepth > 0 && tok.kind === "PUNCT" && tok.text === "/" && depth === 0) {
+      // Cluster-C Bug 2 (S190) guard: an ANONYMOUS closer `</>` is the token
+      // sequence `<` `/` `>` — its `<`+`/` was ALREADY decremented above by the
+      // `isCloseTagStart` branch (afterLt === `/`). Without the `lastTok !== "<"`
+      // guard, this self-close branch then mis-reads the same `/` `>` as a self-
+      // close and DOUBLE-decrements angleDepth (a latent miscount that the new
+      // markupRootClosed boundary made observable — `</>` closed the root one
+      // level too early). A genuine self-close `<tag/>` has the `/` preceded by
+      // tag content (name / attr / `"`), never by the opener `<`.
+      if (angleDepth > 0 && tok.kind === "PUNCT" && tok.text === "/" && depth === 0 && lastTok && lastTok.text !== "<") {
         const next = peek(1);
         if (next && next.kind === "PUNCT" && next.text === ">") {
           angleDepth--;
           // `<voidtag/>` self-closes via the slash; cancel any pending void close
           // so the subsequent `>` does not double-decrement.
           pendingVoidClose = false;
+          // Cluster-C Bug 2 (S190): a self-closed top-level markup element is done,
+          // but the `/` here precedes its `>`; defer markupRootClosed to that `>`
+          // (handled below) so the break does not fire before `/>` is consumed.
+          if (angleDepth === 0 && markupEverOpened) pendingRootCloseGt = true;
         }
       }
       // A7 fix: void-element close — when `pendingVoidClose` is set, the next
@@ -3375,6 +3430,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (pendingVoidClose && tok.kind === "PUNCT" && tok.text === ">" && depth === 0 && angleDepth > 0) {
         angleDepth--;
         pendingVoidClose = false;
+        // Cluster-C Bug 2 (S190): a void top-level markup element (`<br>`) is done.
+        if (angleDepth === 0 && markupEverOpened) markupRootClosed = true;
+      }
+      // Cluster-C Bug 2 (S190): the closing `>` of a top-level `</tag>` close tag
+      // (deferred from the close-tag `<` above) — the markup value is now complete.
+      if (pendingRootCloseGt && tok.kind === "PUNCT" && tok.text === ">" && depth === 0 && angleDepth === 0) {
+        pendingRootCloseGt = false;
+        markupRootClosed = true;
       }
       // E-EQ-004: `===` and `!==` are not valid scrml operators (§45)
       if (tok.kind === "OPERATOR" && (tok.text === "===" || tok.text === "!==")) {
@@ -5061,7 +5124,43 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // BLOCK_REF, or EOF — same boundary rules as the legacy `@NAME = init` path).
     // Phase A1a Step 11.0a — when this call is recursive inside a compound
     // body, also stop at the next sibling-decl opener or compound close.
-    const { expr } = collectExpr(null, inCompoundBody ? { compoundBody: true } : null);
+    let { expr } = collectExpr(null, inCompoundBody ? { compoundBody: true } : null);
+
+    // Cluster-C Bug 1 (S190) — `${...}`-wrapped decl RHS reject.
+    //
+    // The canonical derived/state-cell RHS is a BARE expression (SPEC §6.2:
+    // Shape 1 `<x> = expr`, Shape 3 `const <x> = expr`). A `${ ... }` LOGIC-block
+    // wrapper at decl-RHS position is non-canonical: `const <bad> = ${ @x }` /
+    // `<bad> = ${ @x }` / `const <bad>: T = ${ @x }`. Pre-fix, the collected RHS
+    // string was the literal `${ ... }` text, which `safeParseExprToNode` parsed
+    // to a bare `$` identifier → a MISLEADING `E-SCOPE-001: Undeclared identifier
+    // \`$\`` cascade downstream (the orphaned `$`).
+    //
+    // RULING (S190): REJECT with a clean diagnostic naming the cause + the fix
+    // (remove the `${ }` wrapper → bare expression). Do NOT unwrap-and-accept —
+    // there is ONE canonical RHS form (`limit-the-primitive`; consistent with the
+    // S182/S183/S188 ERROR rulings on the silent/defect-accept class). Recovery:
+    // unwrap the inner expression text so the cell still binds a sensible
+    // `initExpr` and the spurious orphan-`$` E-SCOPE-001 cascade is suppressed
+    // (mirrors the S189 E-SYNTAX-045 recover-without-cascade pattern); the pushed
+    // Error fails compilation regardless.
+    {
+      const _trimmed = typeof expr === "string" ? expr.trim() : "";
+      if (_trimmed.startsWith("${") && _trimmed.endsWith("}")) {
+        const _inner = _trimmed.slice(2, -1).trim();
+        const _typeSuffix = typeAnnotation ? `: ${typeAnnotation}` : "";
+        const _declForm = (isConst ? `const <${name}>` : `<${name}>`) + _typeSuffix;
+        errors.push(new TABError(
+          "E-DECL-RHS-INTERP-WRAPPED",
+          `E-DECL-RHS-INTERP-WRAPPED: The RHS of \`${_declForm}\` is wrapped in a \`${'$'}{ }\` logic block. ` +
+          `A derived/state-cell RHS is a BARE expression (§6.2) — the \`${'$'}{ }\` wrapper is non-canonical here. ` +
+          `Remove the wrapper: write \`${_declForm} = ${_inner || '<expr>'}\`.`,
+          spanOf(startTok, peek()) || { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
+        // Recover by unwrapping so the cell binds the inner expression (no orphan-`$`).
+        expr = _inner;
+      }
+    }
 
     // Bug 71 (S157) — build the structural match-expr side-field for the typer.
     // Done AFTER collectExpr so `init` / `initExpr` (and thus the reactive emit)
@@ -14013,14 +14112,33 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const typeDecls = body.filter(n => n.kind === "type-decl");
       // Attach defChildren to each component-def: siblings that follow it in the body.
       // Mark consumed nodes so they're removed from the body (avoid duplicate CSS output).
+      // defChildren are conceptually COMPONENT-SCOPED siblings (component-local CSS
+      // `#{}`, scoped helper markup / SQL, etc.) — see symbol-table.ts B17 note. They
+      // are NOT file-scope declarations.
+      //
+      // Cluster-C Bug 2 (S190) — the vacuum SHALL stop at a sibling that is itself a
+      // file-scope DECLARATION: a reactive cell (`state-decl`), a function
+      // (`function-decl`), or a plain `const`/`let` binding (`const-decl`/`let-decl`).
+      // A markup component-def followed by `<name> = "Ada"` / `const <doubled> = ...`
+      // / `fn label()` previously vacuumed the decl into defChildren and DROPPED it
+      // from the body — SILENT data loss for cells/deriveds (the cell registered via
+      // the §6.9 hoist but lost its initializer / never recomputed) and a LOUD
+      // E-SCOPE-001 for functions (the name never registered). The collectExpr
+      // markup-RHS boundary fix (above) splits them into separate nodes; this stops
+      // the post-pass from re-merging them. SQL/CSS/markup siblings still attach
+      // (the collectexpr-blockref SQL-defChild contract is preserved). The existing
+      // component-def/import/export/type-decl breaks are retained.
+      const DEF_CHILD_STOP_KINDS = new Set([
+        "component-def", "import-decl", "export-decl", "type-decl",
+        "state-decl", "function-decl", "const-decl", "let-decl",
+      ]);
       const components = [];
       const consumedIndices = new Set();
       for (let ci = 0; ci < body.length; ci++) {
         if (body[ci].kind === "component-def") {
           const defChildren = [];
           for (let si = ci + 1; si < body.length; si++) {
-            if (body[si].kind === "component-def" || body[si].kind === "import-decl" ||
-                body[si].kind === "export-decl" || body[si].kind === "type-decl") break;
+            if (DEF_CHILD_STOP_KINDS.has(body[si].kind)) break;
             defChildren.push(body[si]);
             consumedIndices.add(si);
           }
