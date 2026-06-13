@@ -17,12 +17,20 @@
  *   §C14.11 Runtime: derived engine variant cell follows upstream changes
  *   §C14.12 Runtime: chained derivation (engine A from upstream → engine B from A)
  *   §C14.13 Runtime: initial-undefined throw fires at engine-init time
+ *   §C14.15 Full-pipeline boundary: §51.9.3 legacy projection needs a machine source
  *
  * SCOPE: per BRIEF — derived variant cell emission via `_scrml_derived_declare`
  * + `_scrml_derived_subscribe` + inline E-DERIVED-ENGINE-INITIAL-UNDEFINED
- * throw in the closure. Today's parser only carries the legacy single-source-var
- * form `{ kind: "legacy-source-var", varName }` (rich `derived=match @x {...}`
- * is NOT YET PARSED). Tests cover the legacy form end-to-end.
+ * throw in the closure. The §C14.8/§C14.9/§C14.10 end-to-end cases drive
+ * codegen DIRECTLY (`runUpToSYM` + `generateClientJs`), DELIBERATELY bypassing
+ * the type pass's `validateDerivedMachines` (§51.9.3) so they exercise the
+ * `legacy-source-var` identity-projection codegen in isolation. Their source
+ * substrate (`@order: Phase` — a PLAIN enum cell) does NOT satisfy the §51.9.3
+ * machine-source requirement, so it is REJECTED full-pipeline with E-ENGINE-004;
+ * §C14.15 pins that boundary as intended behavior (and confirms the modern
+ * §51.0.J `derived=match @order {...}` form is the correct full-pipeline shape
+ * over a plain enum cell). The rich `derived=match @x {...}` form IS parsed as
+ * of S190 (the older `NOT YET PARSED` note is retired).
  *
  * OUT OF SCOPE per BRIEF: <onTransition>/effect= firing on derived state-children
  * (parser blocker), body rendering (C13/follow-on), cross-file mount (C15).
@@ -45,6 +53,10 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { generateClientJs } from "../../src/codegen/emit-client.ts";
 import { makeCompileContext } from "../../src/codegen/context.ts";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
+import { compileScrml } from "../../src/api.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -346,6 +358,8 @@ describe("C14 §C14.7 — non-derived engines SKIPPED (C12 territory)", () => {
 // ---------------------------------------------------------------------------
 
 describe("C14 §C14.8 — end-to-end client JS emission for derived engine", () => {
+  // NOTE: drives codegen DIRECTLY (skips validateDerivedMachines). The `@order: Phase`
+  // plain-cell source is full-pipeline-REJECTED (E-ENGINE-004) — see §C14.15.
   test("`<engine for=Health derived=@order>...state-children...</>` emits derived substrate", () => {
     const src = `<program>
 \${
@@ -389,6 +403,7 @@ describe("C14 §C14.8 — end-to-end client JS emission for derived engine", () 
 // ---------------------------------------------------------------------------
 
 describe("C14 §C14.9 — derived + non-derived engines coexist in one file", () => {
+  // NOTE: codegen-direct (skips validateDerivedMachines); plain-cell source — see §C14.15.
   test("both engines emit independent substrates; no name collisions", () => {
     const src = `<program>
 \${
@@ -436,6 +451,7 @@ describe("C14 §C14.9 — derived + non-derived engines coexist in one file", ()
 // ---------------------------------------------------------------------------
 
 describe("C14 §C14.10 — emit-client.ts pulls in `derived` chunk for derived engines", () => {
+  // NOTE: codegen-direct (skips validateDerivedMachines); plain-cell source — see §C14.15.
   test("client JS includes _scrml_derived_declare runtime helper", () => {
     const src = `<program>
 \${
@@ -733,5 +749,88 @@ describe("C14 §C14.14 — A1b/B16 compile-time rejections still fire (no regres
     // Legacy <machine> uses emit-machines.ts wiring; C14 substrate must NOT emit.
     expect(js).not.toContain("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
     expect(js).not.toContain('_scrml_derived_declare("ui", () => {');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C14.15 — Full-pipeline boundary: §51.9.3 legacy projection needs a machine
+// source. The §C14.8/§C14.9/§C14.10 cases drive codegen directly and so never
+// run validateDerivedMachines; these drive the REAL compile() to pin the
+// §51.9.3 boundary and confirm the modern §51.0.J shape is the plain-cell path.
+// ---------------------------------------------------------------------------
+
+describe("C14 §C14.15 — full-pipeline §51.9.3 machine-source boundary", () => {
+  let TMP;
+  function compileSource(name, source) {
+    if (!TMP) TMP = mkdtempSync(join(tmpdir(), "c14-fullpipe-"));
+    const filePath = join(TMP, `${name}.scrml`);
+    writeFileSync(filePath, source);
+    const result = compileScrml({
+      inputFiles: [filePath],
+      outputDir: join(TMP, `${name}.dist`),
+      write: false,
+      log: () => {},
+    });
+    return {
+      errors: result.errors || [],
+      warnings: result.warnings || [],
+    };
+  }
+
+  test("legacy `derived=@order` over a PLAIN enum cell fires E-ENGINE-004 (machine-source required)", () => {
+    // Same substrate the §C14.8 codegen-direct case uses: @order is a plain
+    // `Phase` enum cell, NOT machine-bound (the sibling `<engine for=Phase>`
+    // binds the auto-cell @phase). The legacy 1:1 projection (§51.9.3) has no
+    // machine source → E-ENGINE-004.
+    const src = `<program>
+\${
+  type Phase:enum = { Idle, Loading, Done }
+  type Health:enum = { Idle, Loading, Done }
+  @order: Phase = Phase.Idle
+}
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Loading></>
+  <Loading rule=.Done></>
+  <Done></>
+</>
+<engine for=Health derived=@order>
+  <Idle></>
+  <Loading></>
+  <Done></>
+</>
+</program>`;
+    const result = compileSource("plain-cell-legacy", src);
+    const fires = result.errors.filter((e) => e.code === "E-ENGINE-004");
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    // The improved diagnostic steers to BOTH the machine-source form AND the
+    // modern §51.0.J `derived=match` form that works over a plain enum cell.
+    expect(fires[0].message).toMatch(/§51\.9\.3/);
+    expect(fires[0].message).toMatch(/derived=match @order/);
+    expect(fires[0].message).toMatch(/SomeMachine/);
+  });
+
+  test("modern `derived=match @order { ... }` over the SAME plain enum cell compiles clean", () => {
+    // §51.0.J — the modern expression form projects a plain enum cell variant
+    // by variant; no machine source required, so NO E-ENGINE-004.
+    const src = `<program>
+\${
+  type Phase:enum = { Idle, Loading, Done }
+  type Health:enum = { Idle, Loading, Done }
+  @order: Phase = Phase.Idle
+}
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Loading></>
+  <Loading rule=.Done></>
+  <Done></>
+</>
+<engine for=Health derived=match @order { .Idle => .Idle, .Loading => .Loading, .Done => .Done }>
+  <Idle></>
+  <Loading></>
+  <Done></>
+</>
+</program>`;
+    const result = compileSource("plain-cell-modern", src);
+    expect(result.errors.filter((e) => e.code === "E-ENGINE-004")).toEqual([]);
+    expect(result.errors.filter((e) => e.severity === "error")).toEqual([]);
   });
 });

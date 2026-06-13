@@ -28489,7 +28489,7 @@ Authority declarations give the compiler enough information to:
 - Distinguish variables that SHALL be pre-rendered in SSR from variables that are client-only and SHALL be skipped during SSR.
 - Derive DDL and schema from structured state type definitions (interacting with §39 Schema and Migrations).
 
-### 52.2 Two-Tier Model
+> **Shared / global reactive state — see §51.0.A (S190 cross-ref, DD1 Fork 2 close).** §52 governs the *authority* axis (where a variable's data lives — server vs client). The distinct question of *shared / global reactive state* (the "global store" axis — state read by many components without prop-drilling) is answered by the **engine-singleton**, not by §52: per the §51.0.A S178 amendment, a singleton `<engine>` mounted cross-file via `<EngineName/>` and ambient-read via `@cellName` (§15.13.4) IS scrml's typed global reactive store; scrml ships no free-shaped untyped global store by design. Authority (§52) and shared-state (§51.0.A engine-singleton) are orthogonal: an engine cell MAY itself be `server`-authoritative (§52 Tier 2) or client-local — the engine-singleton answers "shared by whom," §52 answers "owned by whom."
 
 State authority in scrml uses a **two-tier model**. The tier is chosen based on whether the state is structured (mapped to a database table) or primitive (a flag, counter, or simple scalar).
 

@@ -5353,8 +5353,10 @@ export function validateDerivedMachines(
         "E-ENGINE-004",
         `E-ENGINE-004: Derived machine '${engineName}' references source variable ` +
         `'@${sourceVar}', but no machine-bound reactive with that name was found in scope. ` +
-        `The 'derived from @var' clause must name a reactive variable whose type is a machine (e.g., ` +
-        `'@${sourceVar}: SomeMachine = ...').`,
+        `The legacy 'derived=@var' 1:1 projection (§51.9.3) must name a reactive whose type is a ` +
+        `machine (e.g., '@${sourceVar}: SomeMachine = ...'). To derive from a PLAIN enum/struct cell ` +
+        `like '@${sourceVar}', use the modern §51.0.J form 'derived=match @${sourceVar} { ` +
+        `.SourceVariant => .TargetVariant, ... }' instead.`,
         fileSpan,
       ));
       continue;
