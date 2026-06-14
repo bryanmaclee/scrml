@@ -13,7 +13,7 @@ The whole **`if=fn()` condition-routing bug class** closed (3 MEDs), then a **de
 - **Tests:** pre-commit subset **16,989 pass / 90 skip / 0 fail** (live `bun scripts/state.ts`). Full suite green via per-phase pre-push gates + the wrap-push gate.
 - **known-gaps (live):** the if=fn() trio closed (MED 6→5); bug-1 stays `open` for its 3 separate sub-arcs (NOT composing-family work). Run `bun scripts/state.ts` for the precise board.
 - **Version:** v0.7.0, no cut. **Inbox:** empty. **Commit-gate:** Configuration B (`.git/hooks`). Leave as-is.
-- **Maps:** 6c project-mapper refresh status — SEE "Wrap execution" below. Watermark was `1e17213e` (12 behind at wrap).
+- **Maps:** 6c project-mapper **REFRESHED → `7f2092cf`** (was `1e17213e`, 12 behind) — 5 maps written; added the §26.7 Tailwind composing-family Task-Shape Routing (`registerRing/Gradient/Transform/Filters/Backdrop` + the `*_COMPOSE` consts; Approach-C no-preflight) + the if=fn 3-seam routing — the gaps agents flagged 3×. Current for source.
 - **Worktrees:** CLEAN — all 5 session worktrees removed at 6b (g-attr a4736cab · bug1-p1 ab455f5f · bug1-p2 a3f0bf9e · bug1-p3 a7cabcc1 · bug1-p4 a2985e07). Only main remains.
 - **scrml-support:** user-voice S191 appended (if=fn() survey-reversal + bug-1 deep-dive/C-ruling/per-phase rulings + currentColor + Flux verbatim) + the bug-1 deep-dive doc (`docs/deep-dives/tailwind-preflight-css-2026-06-13.md`, status:current). Committed + pushed at wrap.
 
