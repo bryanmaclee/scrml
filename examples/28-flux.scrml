@@ -23,15 +23,16 @@
 
     type Terrain:enum = { Floor, Wall, Mountain }
 
-    <cols> = 15
-    <rows> = 9
-    <px>   = 7
-    <py>   = 4
-    <seed> = 42
+    <cols>   = 15
+    <rows>   = 9
+    <px>     = 7
+    <py>     = 4
+    <seed>   = 42
+    <vision> = 2        // Chebyshev sight radius; becomes level-driven in the sheet layer
 
-    // Derived board. Reads its deps on the RHS (@px/@py/@seed/@cols/@rows) →
-    // recomputes + re-renders ${@board} whenever any of them changes.
-    const <board> = renderBoard(@px, @py, @seed, @cols, @rows)
+    // Derived board. Reads its deps on the RHS → recomputes + re-renders
+    // ${@board} whenever any of them changes.
+    const <board> = renderBoard(@px, @py, @seed, @cols, @rows, @vision)
 
     // --- world generation (pure) ----------------------------------------------
 
@@ -86,14 +87,32 @@
         }
     }
 
-    fn renderBoard(px: int, py: int, seed: int, cols: int, rows: int) -> string {
+    // Chebyshev-distance vision test — a square sight bubble of radius r.
+    fn inVision(px: int, py: int, x: int, y: int, r: int) -> bool {
+        let dx = x - px
+        if (dx < 0) { dx = -dx }
+        let dy = y - py
+        if (dy < 0) { dy = -dy }
+        let m = dx
+        if (dy > dx) { m = dy }
+        return m <= r
+    }
+
+    // Out-of-vision cells render as the void of flux (blank). In-vision cells
+    // take shape (terrain). The player carries a moving bubble of determined
+    // world through the dark.
+    fn renderBoard(px: int, py: int, seed: int, cols: int, rows: int, vision: int) -> string {
         let out = ""
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < cols; x++) {
                 if (x == px && y == py) {
                     out = out + "@"
                 } else {
-                    out = out + glyphFor(cellTerrain(seed, x, y, cols, rows))
+                    if (inVision(px, py, x, y, vision)) {
+                        out = out + glyphFor(cellTerrain(seed, x, y, cols, rows))
+                    } else {
+                        out = out + " "
+                    }
                 }
             }
             out = out + "\n"
