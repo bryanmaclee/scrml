@@ -17,6 +17,7 @@
 
 import { emitExprField } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
+import { autoDeriveEngineVarName } from "../engine-varname.ts";
 
 // ---------------------------------------------------------------------------
 // §51.5.1 — Compile-time illegal-transition collector (S28 slice 3)
@@ -275,7 +276,10 @@ export function emitProjectionFunction(machine: DerivedMachineLike): string[] {
  */
 export function emitDerivedDeclaration(machine: DerivedMachineLike): string[] {
   const lines: string[] = [];
-  const projected = machine.projectedVarName ?? machine.name.toLowerCase();
+  // §51.0.C — prefer the type-system-supplied projected name; when absent, derive via
+  // the ONE canonical rule (engine-varname.ts) so the fallback agrees with SYM/type-system
+  // (was `machine.name.toLowerCase()`, which collapsed `MarioState`->`mariostate`).
+  const projected = machine.projectedVarName ?? autoDeriveEngineVarName(machine.name);
   const source = machine.sourceVar ?? "";
   const fnName = `_scrml_project_${machine.name}`;
   lines.push(`// §51.9 derived machine: @${projected} projects @${source} through ${machine.name}`);

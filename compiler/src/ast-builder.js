@@ -51,6 +51,7 @@ import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
+import { autoDeriveEngineVarName } from "./engine-varname.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -13635,7 +13636,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           if (varMatch) {
             engineName = varMatch[1];
           } else if (governedType.length > 0) {
-            engineName = governedType[0].toLowerCase() + governedType.slice(1);
+            // §51.0.C — ONE canonical acronym-run rule (engine-varname.ts).
+            engineName = autoDeriveEngineVarName(governedType);
           }
         } else {
           // Pre-S25 sentence form — detect and report. Accept a best-effort
@@ -13703,23 +13705,25 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
 
         // §51.0.C — compute the auto-declared variable name. Resolution order:
-        //   1. `var=NAME` override → use NAME verbatim
-        //   2. `name=NAME` legacy form → use NAME verbatim (back-compat)
-        //   3. Auto-derive from `for=Type` per §51.0.C lowercase-first-character rule
-        //   4. Empty string (parse failed; downstream surfaces a clearer error)
+        //   1. `var=NAME` override → use NAME VERBATIM (explicit user choice,
+        //      not a derivation; never canonicalised).
+        //   2. `name=NAME` legacy form → auto-derive via the canonical rule so the
+        //      registered cell name matches the canonical `@name` read (e.g.
+        //      `name=UI` registers `@ui`; pre-fix it registered `UI` verbatim and the
+        //      `@ui` read missed lookup — the §6.1.2 read-side V-kill blocker).
+        //   3. Auto-derive from `for=Type` via the canonical acronym-run rule.
+        //   4. Empty string (parse failed; downstream surfaces a clearer error).
+        // The ONE canonical rule lives in engine-varname.ts and is applied identically
+        // here, at SYM registration, in §51.9 projected-var synthesis, and in codegen.
         let varName = "";
         let varNameOverride = null;
         if (varMatch) {
           varName = varMatch[1];
           varNameOverride = varMatch[1];
         } else if (nameMatch) {
-          varName = nameMatch[1]; // legacy `name=` IS the variable name
+          varName = autoDeriveEngineVarName(nameMatch[1]);
         } else if (governedType.length > 0) {
-          // §51.0.C literal rule: lowercase the first character only.
-          // Edge cases (all-uppercase types like URL → uRL): per audit §1.2,
-          // implement literal rule per spec; surface as small spec amendment if
-          // current behavior diverges. See SURVEY.md for deferral notes.
-          varName = governedType[0].toLowerCase() + governedType.slice(1);
+          varName = autoDeriveEngineVarName(governedType);
         }
 
         // §51.0.E — record initial=.Variant. B14 records; B15 validates against

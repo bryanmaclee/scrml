@@ -77,6 +77,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
+import { autoDeriveEngineVarName } from "./engine-varname.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on)
@@ -5255,11 +5256,12 @@ function buildMachineRegistry(
 
 /**
  * §51.9 — Map a machine name to its synthesized projected reactive var name.
- * Lowercases the leading uppercase run: `UI` → `ui`, `Order` → `order`,
- * `UIMode` → `uiMode`, `HTTPStatus` → `httpStatus`.
+ * Delegates to the ONE canonical §51.0.C rule (engine-varname.ts) so the
+ * projected-var name agrees with SYM registration and codegen. Examples:
+ * `UI` → `ui`, `Order` → `order`, `UIMode` → `uiMode`, `HTTPStatus` → `httpStatus`.
  */
 function engineNameToProjectedVar(name: string): string {
-  return name.replace(/^[A-Z]+(?=[A-Z][a-z])|^[A-Z]+$|^[A-Z]/, m => m.toLowerCase());
+  return autoDeriveEngineVarName(name);
 }
 
 /**

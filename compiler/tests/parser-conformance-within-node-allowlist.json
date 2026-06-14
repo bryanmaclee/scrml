@@ -6324,7 +6324,7 @@
   "samples/rust-dev-debate-dashboard.scrml": {
     "COUNT-LENGTH": 1,
     "EXTRA-FIELD": 55,
-    "FIELD-SHAPE": 39,
+    "FIELD-SHAPE": 46,
     "KIND-NAME": 18,
     "MISSING-FIELD": 204,
     "SPAN-COORD": 118

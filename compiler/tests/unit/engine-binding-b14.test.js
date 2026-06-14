@@ -155,7 +155,7 @@ describe("B14 AST-builder — §51.0 engine syntax", () => {
     expect(eng.pinned).toBe(false);
   });
 
-  test("legacy `<engine name=N for=T>` form preserved", () => {
+  test("legacy `<engine name=N for=T>` form — name canonicalised to varName (S192)", () => {
     const src = `<program>
 <engine name=OrderEngine for=Order>
   .Pending => .Confirmed
@@ -163,9 +163,14 @@ describe("B14 AST-builder — §51.0 engine syntax", () => {
 </program>`;
     const ast = buildAstFromSource(src);
     const eng = findEngineDecl(ast);
+    // S192 §51.0.C canonicalisation: `engineName` is the MACHINE NAME (the
+    // §51.9 machine-registry key + `_scrml_project_<Name>` codegen identifier)
+    // and stays VERBATIM; the auto-declared VARIABLE name (`varName`) now runs
+    // through the ONE canonical acronym-run rule (was verbatim `OrderEngine`),
+    // so the registered cell matches the canonical `@orderEngine` read.
     expect(eng.engineName).toBe("OrderEngine");
     expect(eng.governedType).toBe("Order");
-    expect(eng.varName).toBe("OrderEngine"); // legacy `name=` IS varName.
+    expect(eng.varName).toBe("orderEngine");
   });
 
   test("export <engine ...> Form 1 sets isExported:true", () => {
@@ -197,7 +202,8 @@ export
 // autoDeriveEngineVarName helper (§51.0.C edge cases)
 // ---------------------------------------------------------------------------
 
-describe("autoDeriveEngineVarName (§51.0.C literal lowercase-first rule)", () => {
+describe("autoDeriveEngineVarName (§51.0.C canonical acronym-run rule)", () => {
+  // Single leading capital → lowercase it.
   test("MarioState → marioState", () => {
     expect(autoDeriveEngineVarName("MarioState")).toBe("marioState");
   });
@@ -210,14 +216,34 @@ describe("autoDeriveEngineVarName (§51.0.C literal lowercase-first rule)", () =
     expect(autoDeriveEngineVarName("Health")).toBe("health");
   });
 
-  test("URL → uRL (literal first-char rule, audit §1.2 spec-amendment flag)", () => {
-    // Per the §51.0.C literal rule, only the FIRST character lowercases.
-    // Audit §1.2 flagged this as a potential spec amendment (could enumerate
-    // contiguous-uppercase-run rule); B14 implements the literal spec.
-    expect(autoDeriveEngineVarName("URL")).toBe("uRL");
+  test("MarioMachine → marioMachine (legacy `Machine` suffix kept)", () => {
+    expect(autoDeriveEngineVarName("MarioMachine")).toBe("marioMachine");
   });
 
-  test("T → t (single-letter type)", () => {
+  // All-uppercase name → lowercase entirely (acronym-run rule, was `uRL`).
+  test("URL → url (all-caps lowercases entirely; §51.0.C amended)", () => {
+    expect(autoDeriveEngineVarName("URL")).toBe("url");
+  });
+
+  test("ID → id (all-caps lowercases entirely)", () => {
+    expect(autoDeriveEngineVarName("ID")).toBe("id");
+  });
+
+  // Acronym RUN before a CamelCase word → lowercase the run except the letter
+  // that begins the next word.
+  test("UIState → uiState (acronym run before CamelCase word)", () => {
+    expect(autoDeriveEngineVarName("UIState")).toBe("uiState");
+  });
+
+  test("HTTPClient → httpClient (acronym run before CamelCase word)", () => {
+    expect(autoDeriveEngineVarName("HTTPClient")).toBe("httpClient");
+  });
+
+  test("URLState → urlState (acronym run before CamelCase word)", () => {
+    expect(autoDeriveEngineVarName("URLState")).toBe("urlState");
+  });
+
+  test("T → t (single-letter type; all-caps lowercases)", () => {
     expect(autoDeriveEngineVarName("T")).toBe("t");
   });
 
@@ -295,16 +321,20 @@ describe("B14 SYM PASS 10.A — engine cell registration", () => {
     expect(rec.isPinned).toBe(true);
   });
 
-  test("legacy `name=` form still registers (back-compat)", () => {
+  test("legacy `name=` form registers the CANONICAL cell name (S192)", () => {
     const src = `<program>
 <engine name=OrderEngine for=Order>
   .Pending => .Confirmed
 </>
 </program>`;
     const sym = runUpToSYM(src);
-    expect(sym.fileScope.stateCells.has("OrderEngine")).toBe(true);
-    const rec = sym.fileScope.stateCells.get("OrderEngine");
-    expect(rec.engineMeta.varName).toBe("OrderEngine");
+    // S192: `name=OrderEngine` registers `@orderEngine` (canonical acronym-run
+    // rule), NOT `OrderEngine` verbatim — so a canonical `@orderEngine` read
+    // resolves (the register/read mismatch that blocked the read-side V-kill).
+    expect(sym.fileScope.stateCells.has("orderEngine")).toBe(true);
+    expect(sym.fileScope.stateCells.has("OrderEngine")).toBe(false);
+    const rec = sym.fileScope.stateCells.get("orderEngine");
+    expect(rec.engineMeta.varName).toBe("orderEngine");
     expect(rec.engineMeta.forType).toBe("Order");
   });
 

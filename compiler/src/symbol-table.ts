@@ -5125,35 +5125,21 @@ function stringLiteralValueOf(arg: any): string | null {
 //   component bodies become walkable, the same B14 walker can fire it.
 
 /**
- * §51.0.C — auto-derive a variable name from a type name. Literal rule:
- * lowercase the first character, leave the rest unchanged.
+ * §51.0.C — auto-derive a variable name from a type name.
  *
- * Examples (per spec §51.0.C table):
- *   `MarioState`  → `marioState`
- *   `LoadPhase`   → `loadPhase`
- *   `Health`      → `health`
+ * The ONE canonical acronym-run rule now lives in `engine-varname.ts`; this
+ * is a stable-name re-export so existing importers (and tests asserting on
+ * `autoDeriveEngineVarName`) keep resolving to the single canonical behaviour.
+ * Prior to this collapse the SYM-side rule lowercased only the first character
+ * (`URL`→`uRL`), diverging from the type-system §51.9 projected-var rule
+ * (`URL`→`url`) and the legacy `engineName` verbatim path (`UI`→`UI`); that
+ * register/read mismatch silently blocked the §6.1.2 read-side
+ * `E-STATE-UNDECLARED` fire. See `engine-varname.ts` for the full rule.
  *
- * Edge cases (audit §1.2 — surfaced as spec-amendment follow-up):
- *   `URL`         → `uRL`   (literal first-char rule; per spec)
- *   `T`           → `t`     (single-letter)
- *   `myType`      → `myType` (lowercase-leading; identity)
- *   `_Internal`   → `_Internal` (leading non-letter; identity)
- *
- * The function is an idempotent character-level transformation. If
- * downstream behavior diverges, the spec amendment for §51.0.C should
- * enumerate the contiguous-uppercase-run rule explicitly.
+ * Examples: `MarioState`→`marioState`, `Health`→`health`, `URL`→`url`,
+ * `UIState`→`uiState`, `HTTPClient`→`httpClient`.
  */
-export function autoDeriveEngineVarName(typeName: string): string {
-  if (typeof typeName !== "string" || typeName.length === 0) return "";
-  const first = typeName.charCodeAt(0);
-  // ASCII A-Z = 65-90; lowercase by adding 32. Non-letter first chars (like
-  // `_` or digits — the latter is illegal in scrml ident grammar but we
-  // defensively pass through) → identity.
-  if (first >= 65 && first <= 90) {
-    return typeName[0]!.toLowerCase() + typeName.slice(1);
-  }
-  return typeName;
-}
+export { autoDeriveEngineVarName } from "./engine-varname";
 
 /**
  * Construct a `StateCellRecord` for an engine's auto-declared variable.
@@ -5379,9 +5365,14 @@ function registerEngineDecl(
     : "";
   if (varName.length === 0) {
     if (typeof engineDecl.varNameOverride === "string" && engineDecl.varNameOverride.length > 0) {
+      // `var=NAME` override — verbatim (explicit user choice, never canonicalised).
       varName = engineDecl.varNameOverride;
     } else if (typeof engineDecl.engineName === "string" && engineDecl.engineName.length > 0) {
-      varName = engineDecl.engineName;
+      // Legacy `name=NAME` / back-filled engineName — run through the ONE canonical
+      // §51.0.C rule so the registered cell name matches the canonical `@name` read
+      // (idempotent: an already-canonical engineName is unchanged). This is the
+      // register-side guard that closes the §6.1.2 read-side V-kill blocker.
+      varName = autoDeriveEngineVarName(engineDecl.engineName);
     } else if (typeof engineDecl.governedType === "string" && engineDecl.governedType.length > 0) {
       varName = autoDeriveEngineVarName(engineDecl.governedType);
     }

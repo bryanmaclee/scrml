@@ -992,15 +992,24 @@ Major families shipped S108-S109: grid / flex / aspect / transition / timing / i
 
 ---
 
-### Bug 12 — V-kill READ-side fire — `deferred; S177 R26-confirmed reproduces`
+### Bug 12 — V-kill READ-side fire — `deferred; named unblocker (var-name canon) LANDED S192, RE-SCOPED by census`
 
-> **S177:** R26-verified the bare `@undecl` read still silently propagates to codegen (`_scrml_reactive_get("undecl")`, no E-STATE-UNDECLARED — symbol-table.ts:2274 only handles the pinned-forward-ref case). Stays deferred: firing it now false-positives across the engine corpus (the `<machine name=UI>` register-as-`UI` vs `@ui`-read normalization must land first); not adopter-visible under V5-strict.
+> **S192:** The §51.0.C engine var-name canonicalisation that this gap was pending **LANDED** (`feat(s192)` — four divergent derivations collapsed into one `compiler/src/engine-varname.ts`; the `<machine name=UI>` register-as-`UI` vs `@ui`-read mismatch is CLOSED — register, read, and codegen now agree). But a full-corpus read-side census (1049 files via `runSYM`) then showed canonicalisation is **necessary but NOT sufficient**: 34 legit-but-unresolved reads across 15 files, ZERO genuine typos, in FOUR classes the read-side fire must resolve first. The fire was therefore NOT landed; re-scoped.
+> **S177:** R26-verified the bare `@undecl` read still silently propagates to codegen (`_scrml_reactive_get("undecl")`, no E-STATE-UNDECLARED — symbol-table.ts only handles the pinned-forward-ref case).
 <!-- @gap id=bug-12-vkill sev=MED status=open -->
 
-S123 V-kill landed write-side enforcement (`@x = expr` at default-logic body-top fires `E-WRITE-NOT-IN-LOGIC-CONTEXT`). The READ-side fire (rejecting bare `@x` reads against undeclared cells inside `${...}` bodies) is deferred — the engine var-name canonicalization machinery is the unblocker.
+S123 V-kill landed write-side enforcement (`@x = expr` at default-logic body-top fires `E-WRITE-NOT-IN-LOGIC-CONTEXT`). The READ-side fire (rejecting bare `@x` reads against undeclared cells inside `${...}` bodies) is deferred. **S192 closed the originally-named unblocker** (engine var-name canonicalisation) and ran the read-side census that the deferral was waiting for.
+
+**Census (S192) — the four legit-but-unresolved read classes (all MUST NOT fire; none are typos):**
+1. **`const @name = expr` derived reactives** (§6.2) — declared, but SYM's `lookupStateCell` does not index them (e.g. quiz-app `@currentQuestion`/`@scorePercent`, bun-admin `@lowStockCount`, svelte-dashboard `@doubleCount`/`@countSquared`).
+2. **Cross-FILE channel-scoped cell reads** — `<boardEvents> = []` declared in another file's `<channel>` body, imported + inlined by CE (§38.12) POST-SYM (23-trucking-dispatch `@boardEvents`/`@currentCustomerEvents`/`@currentDriverEvents`, 10 fires / 8 files). Per-file SYM cannot see the other file's channel body.
+3. **`ref=@name` element-ref bindings** — `<canvas ref=@canvasEl>` then `@canvasEl` read (the ref auto-declares a binding SYM doesn't register as a cell).
+4. **§40.8 default-logic body-top auto-lift** (`@products = []` at `<program>` body-top) — already write-side-exempt; manifests read-side too (the auto-lifted cell is never registered in `stateCells`).
+
+To land the read-side fire SOUNDLY, the compiler must FIRST either register classes 1+3 in the SYM cell table (a SYM-architecture change with its own blast radius) and resolve class 2 at a POST-CE stage (SYM cannot, per-file), or relocate the whole check to a post-CE pass. An "exempt every unresolved read" carve-out is rejected — classes 1+3 are normal declared cells, not narrow surfaces, so exempting them would also swallow genuine typos and defeat the diagnostic.
 
 - **Workaround:** declare all cells structurally with `<x> = init` before reading via `@x` in `${...}` bodies (which is the canonical V5-strict pattern anyway; the workaround IS the correct usage).
-- **Status:** deferred S123; engine var-name canonicalization unblocks. Not adopter-visible if V5-strict patterns are followed; only surfaces if adopter typos `@x` against a name that doesn't have a `<x>` decl.
+- **Status:** deferred S123; **named unblocker (var-name canon) LANDED S192 + census run.** Read-side fire now blocked on broader SYM cell-registration / post-CE relocation work (the four census classes above). Not adopter-visible if V5-strict patterns are followed; only surfaces if adopter typos `@x` against a name that doesn't have a `<x>` decl.
 
 ---
 

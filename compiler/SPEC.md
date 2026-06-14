@@ -17027,7 +17027,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
 | E-TAILWIND-001 | §26.4.1 | Invalid arbitrary value in Tailwind utility class (empty brackets, whitespace, malformed hex/unit/function, injection vector, unbalanced parens, malformed `var()` or `url()`) | Error |
 | E-NAME-COLLIDES-STATE | §6.1 | Local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names. Example: `<count> = 0; ... let count = 5`. | Error |
-| E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. Read-side fire (bare `@name` read with no decl) is DEFERRED to a post-V-kill follow-up unit pending SYM engine var-name canonicalisation (engine `< machine name=UI ...>` registers cell as `UI` verbatim, markup-side `@ui` per §51.0.C lowercased-first read misses lookup — out of V-kill scope). | Error |
+| E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. Read-side fire (bare `@name` read with no decl) is DEFERRED. The §51.0.C engine var-name canonicalisation that this was originally pending LANDED S192 (the engine `<machine name=UI ...>` register/read mismatch is closed — register, read, and codegen now agree on the one canonical var name). A read-side census across the full corpus (S192) then found that canonicalisation alone is NOT sufficient: a per-file SYM read still legitimately fails to resolve three further declared-cell surfaces — `const @name = expr` derived reactives (§6.2; not indexed in the SYM cell table), cross-FILE channel-scoped cell reads (`<boardEvents>` declared in another file's `<channel>` body, inlined by CE §38.12 POST-SYM), and `ref=@name` element-ref bindings — alongside the §40.8 default-logic auto-lift surface already exempted write-side. The read-side fire therefore awaits either resolving those surfaces at SYM or relocating the check to a post-CE stage. | Error |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies (state-block grammar) are NOT default-logic-mode loci and are NOT affected. **Per-file exemption:** `compiler/src/unit-cc-exemption-list.json` provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
 | E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
 | E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
@@ -25080,17 +25080,34 @@ scalar-typed payloads — the binding's type is the declared field type per §14
 #### 51.0.C Auto-declared variable + auto-derived var name
 
 When you declare `<engine for=Type ...>`, the compiler **auto-declares** a reactive state
-cell typed as `Type`. The variable name is derived from the type name (Move 16):
+cell typed as `Type`. The variable name is derived from the type name by the
+**acronym-run rule** (Move 16):
+
+> **Acronym-run rule.** Lowercase the leading run of uppercase letters. If that run is
+> immediately followed by a lowercase letter, the run's *final* uppercase letter begins the
+> next CamelCase word and stays uppercase; all earlier letters of the run lowercase. An
+> all-uppercase name lowercases entirely. A name that already begins with a lowercase letter
+> (or a non-letter) is returned unchanged.
 
 | Type name | Auto-derived var name | Rationale |
 |---|---|---|
-| `MarioState` | `marioState` | Lowercase-first-character of the type name |
-| `LoadPhase` | `loadPhase` | Lowercase-first-character |
-| `MarioMachine` (legacy) | `marioMachine` (literal lowercase-first; `Machine` suffix kept) | Pre-engine-rename naming; new code prefers names that don't end in `Machine` |
-| `Health` | `health` | Lowercase-first-character |
+| `MarioState` | `marioState` | Single leading capital → lowercase it |
+| `LoadPhase` | `loadPhase` | Single leading capital |
+| `Health` | `health` | Single leading capital |
+| `MarioMachine` (legacy) | `marioMachine` (single leading capital; `Machine` suffix kept) | Pre-engine-rename naming; new code prefers names that don't end in `Machine` |
+| `URL` | `url` | All-uppercase name lowercases entirely |
+| `ID` | `id` | All-uppercase name lowercases entirely |
+| `UIState` | `uiState` | Acronym run `UI` before CamelCase word `State`: lowercase `u`, the final run letter `I` begins `State` and stays uppercase |
+| `HTTPClient` | `httpClient` | Acronym run `HTTP` before `Client`: lowercase `htt`, the final run letter `P` begins `Client` and stays uppercase |
+
+The auto-derivation is **one canonical rule applied identically at every site** — symbol-table
+registration, type-system projected-var synthesis (§51.9), and codegen. (Prior revisions
+diverged on acronym-leading names; that divergence is closed.) The reference implementation is
+the regular-expression substitution
+`name.replace(/^[A-Z]+(?=[A-Z][a-z])|^[A-Z]+$|^[A-Z]/, m => m.toLowerCase())`.
 
 The variable is reactive and readable everywhere via canonical access (`@marioState`,
-`@loadPhase`, etc., per §6 V5-strict).
+`@loadPhase`, `@url`, `@uiState`, etc., per §6 V5-strict).
 
 **Override via `var=` attribute** when the auto-derived name collides with another
 identifier in scope:
