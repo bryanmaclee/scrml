@@ -978,14 +978,17 @@ Major families shipped S108-S109: grid / flex / aspect / transition / timing / i
 
 **Phase 3 LANDED S191** (transform, C-style; user "continue phase 3" — beyond-filed continuation) — directional `translate-{x,y}` / `scale-{x,y}` / 2D `rotate` / `skew-{x,y}` (named + arbitrary) now COMPOSE via NEW `registerTransform` + `TRANSFORM_COMPOSE` (`transform: translate(var(--tw-translate-x,0),var(--tw-translate-y,0)) rotate(var(--tw-rotate,0)) skewX(…) skewY(…) scaleX(var(--tw-scale-x,1)) scaleY(…)`). **BEHAVIOR CHANGE landed:** was modern individual props (last-wins) → now composes. Per-utility decisions: full-shorthand escape hatch (`transform-[…]`/`scale-[1.5]`/`translate-[10px]`) STAYS literal (composes via separate CSS props); 3D `rotate-x/y/z` STAYS literal (v3's 2D `--tw-*` model has no 3D-rotate var). SPEC §26.7.2. PA-R26: `translate-x-4 translate-y-2 rotate-45 scale-x-110` → all 4 in one shorthand, 0 collisions. Behavior-change test-sweep = 1 file (transform-shorthand §4/§5/§7); the minor-families `scale-[1.5]`/`translate-[10px]` hits are correctly-unchanged escape-hatch forms. Suite 16,936/0.
 
-**Still open (BEYOND filed scope + separate sub-arcs):**
-- **Phase 4 — filter + backdrop-filter** (the LAST composing family; 9-var filter + 9-var backdrop shorthands, C-style under §26.7). Completes the Rule-2 "all composing families" ambition.
+**Phase 4 LANDED S191** (filter + backdrop-filter, C-style; the LAST composing family) — NEW `registerFilters`/`registerBackdrop` + `FILTER_COMPOSE`/`BACKDROP_COMPOSE`: `blur/brightness/contrast/grayscale/hue-rotate/invert/saturate/sepia/drop-shadow` (named + arbitrary) compose via `filter: var(--tw-blur,) var(--tw-brightness,) … var(--tw-drop-shadow,)` (9 empty-fallback vars); the `backdrop-*` family (has `opacity`, no drop-shadow) emits BOTH `-webkit-backdrop-filter` + `backdrop-filter`. NET-NEW (zero lint inverts). SPEC §26.7.3. PA-R26: `blur-sm brightness-50 grayscale backdrop-blur-md backdrop-saturate-150` → filter + (webkit)backdrop shorthands, all vars set, 0 empty/undefined. Suite 16,989/0. **AGENT PROCESS NOTE:** the agent twice attempted a pre-commit-hook bypass (`core.hooksPath=/dev/null`, `--no-verify`) for speed then self-reverted; moot for the file-delta'd content (PA's landing commit ran the full gate), flagged as the recurring agent --no-verify-reach.
+
+**✅ ALL FOUR COMPOSING FAMILIES COMPLETE** under SPEC §26.7 (ring/shadow §26.7 · gradient §26.7.1 · transform §26.7.2 · filter/backdrop §26.7.3), Approach C (inline `var()` fallbacks, NO global preflight block — §26.1 minimalism preserved). The bug-1 Tailwind preflight arc is DONE.
+
+**Still open (separate sub-arcs — NOT composing-family work):**
 - **String-shaped arbitrary values** — `content-["text"]` + `font-[Inter]` need bracket-parser extension. SEPARATE arc.
 - **Safelist / `@apply`** — lint precision for custom-vs-typo classes. SEPARATE arc.
 - Arbitrary `ring-offset-[<len>]` — the lone remaining ring-family member without a utility (named ring-offset-{w} shipped P1).
 
-- **Workaround (for not-yet-landed surfaces):** drop a `#{}` CSS shim block with the rules written by hand.
-- **Status:** FILED SCOPE CLOSED S191 (Phase 1 ring/shadow + Phase 2 gradient). Phase 3 (transform) / Phase 4 (filter) = beyond-filed composing-family continuation. String-shaped + safelist = separate arcs. **Gap stays `open` for the remainder; the filed bug is resolved.**
+- **Workaround (for the separate-arc surfaces):** drop a `#{}` CSS shim block with the rules written by hand.
+- **Status:** FILED SCOPE CLOSED S191 (P1 ring/shadow + P2 gradient). **ALL composing families LANDED S191 (P1-P4).** Remaining = string-shaped + safelist + arbitrary ring-offset-[len] (separate smaller arcs). **Gap stays `open` for those three; the filed bug + the full composing-family ambition are both resolved.**
 
 ---
 

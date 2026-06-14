@@ -16266,7 +16266,47 @@ A `translate-x-4 translate-y-2 rotate-45 scale-x-110` element resolves `--tw-tra
 
 **3D-rotate exclusion.** Tailwind v3's `--tw-*` transform model is 2D-only — there is no 3D-rotate var. `rotate-x` / `rotate-y` / `rotate-z` therefore STAY literal (`transform: rotateX(<v>)`) and do NOT compose with the 2D shorthand (the same escape-hatch shape). The 2D `--tw-rotate` is the `rotate(<angle>)` function in the composing shorthand, set by the named `rotate-{N}` / arbitrary `rotate-[<angle>]` form. (A bare `skew-[<angle>]` with no axis is not a utility — `skew-x-*` / `skew-y-*` are the directional forms — so it continues to fire `W-TAILWIND-UNRECOGNIZED-CLASS`.)
 
-**Phase status.** ring / ring-offset / shadow is **Phase 1**; the gradient family is **Phase 2**; the **transform** family (translate / scale / rotate / skew directional + named, §26.7.2) is **Phase 3** — all landed under this inline-fallback model and their class tokens are RECOGNIZED (no `W-TAILWIND-UNRECOGNIZED-CLASS`). filter and backdrop-filter are subsequent phases under the same model; until they land, their class tokens continue to fire `W-TAILWIND-UNRECOGNIZED-CLASS` (§26.5) as deferred-family regression guards. The arbitrary-width `ring-offset-[<len>]` form is the lone remaining ring-family member without a utility (no arbitrary-width offset); the bare `skew-[<angle>]` axis-less form has no utility (use `skew-x-*` / `skew-y-*`).
+#### 26.7.3 Filter + backdrop-filter family (Phase 4)
+
+The **filter** family (`blur-*` / `brightness-*` / `contrast-*` / `grayscale` / `hue-rotate-*` / `invert` / `saturate-*` / `sepia` / `drop-shadow-*`) and the **backdrop-filter** family (the `backdrop-` prefixed equivalents) each compose a SINGLE `filter:` / `backdrop-filter:` declaration from NINE independent custom properties, using the same inline-fallback model. A `blur-sm brightness-50` pairing is the broken case under single-property emit (each would write its own `filter:`, last-write-wins); composing via the `--tw-*` filter vars makes every present filter FUNCTION contribute to one declaration.
+
+```css
+/* the composing filter shorthand — emitted by EVERY filter utility */
+filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
+
+/* the composing backdrop-filter shorthand (+ the -webkit- companion for Safari) — emitted by EVERY backdrop utility */
+-webkit-backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
+backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
+```
+
+The `var()` references carry **EMPTY inline fallbacks** (`var(--tw-blur,)`). This is the load-bearing design choice for the filter families: an UNSET filter contributes nothing — a `var(--tw-blur,)` that resolves to empty is just whitespace in the space-separated filter-function list. The shorthand is emitted only when ≥1 filter (or backdrop) utility is present, so there is always ≥1 non-empty function (an all-empty `filter:` would be invalid CSS). As with ring/shadow, gradient, and transform, **no global `*, ::before, ::after { --tw-blur: ; … }` preflight defaults block is emitted** — preserving the §26.1/§26.2 "only what's used" minimalism axiom.
+
+**Two divergences from the plain filter set in the backdrop set:** the backdrop set has an **`opacity`** filter (`backdrop-opacity-{N}` → `opacity(N/100)`) that the plain filter set does NOT, and it has **no `drop-shadow`**. The backdrop shorthand therefore reads `--tw-backdrop-opacity` where the plain shorthand reads `--tw-drop-shadow`. Every backdrop utility additionally emits the `-webkit-backdrop-filter` companion declaration (Safari still requires the prefix for `backdrop-filter`).
+
+**Per-utility setters (Tailwind v3 values):**
+
+```css
+/* blur-{k} (none/sm/(base)/md/lg/xl/2xl/3xl; bare `blur` == 8px) — set --tw-blur + the shorthand */
+.blur-sm { --tw-blur: blur(4px); filter: <shorthand>; }
+/* brightness-{N} / contrast-{N} / saturate-{N} (value = N/100 multiplier) */
+.brightness-50 { --tw-brightness: brightness(0.5); filter: <shorthand>; }
+/* grayscale / grayscale-0, invert / invert-0, sepia / sepia-0 (bare == 100%, -0 == no-op) */
+.grayscale { --tw-grayscale: grayscale(100%); filter: <shorthand>; }
+/* hue-rotate-{N} + negatives (-hue-rotate-N) */
+.hue-rotate-90 { --tw-hue-rotate: hue-rotate(90deg); filter: <shorthand>; }
+/* drop-shadow-{k} (sm/(base)/md/lg/xl/2xl/none — multi-drop-shadow() stacks; filter-only) */
+.drop-shadow-lg { --tw-drop-shadow: drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1)); filter: <shorthand>; }
+/* backdrop-opacity-{N} (the backdrop-only filter — value = N/100) */
+.backdrop-opacity-50 { --tw-backdrop-opacity: opacity(0.5); -webkit-backdrop-filter: <shorthand>; backdrop-filter: <shorthand>; }
+```
+
+A `blur-sm brightness-50 grayscale` element resolves `--tw-blur` to `blur(4px)`, `--tw-brightness` to `brightness(0.5)`, and `--tw-grayscale` to `grayscale(100%)` (the other six vars fall to their empty fallbacks), so the single composed `filter:` applies all three functions — no function is lost to last-write-wins.
+
+**Bare `filter` / `backdrop-filter`.** The bare `filter` utility emits ONLY the composing shorthand (a Tailwind v3 holdover — in v3 the `filter` class re-applied the `--tw-*` cascade); `filter-none` / `backdrop-filter-none` reset to `filter: none` / `backdrop-filter: none`.
+
+**Arbitrary `blur-[…]` / `brightness-[…]` / `backdrop-blur-[…]` etc.** Each wraps the bracket value in its filter function, sets the one `--tw-*` var, and emits the composing shorthand (`blur-[2px]` → `--tw-blur: blur(2px)` + shorthand), so an arbitrary filter composes with another on the same element. A multi-token (underscore-list) drop-shadow value (`drop-shadow-[0_4px_3px_red]`) is a list and follows the same single-token-only rule as the transform/gradient arbitrary forms — it fires `E-TAILWIND-001` (use the named `drop-shadow-*` scale for multi-layer shadows).
+
+**Phase status.** ring / ring-offset / shadow is **Phase 1**; the gradient family is **Phase 2**; the **transform** family (translate / scale / rotate / skew directional + named, §26.7.2) is **Phase 3**; the **filter** and **backdrop-filter** families (§26.7.3) are **Phase 4** — all landed under this inline-fallback model and their class tokens are RECOGNIZED (no `W-TAILWIND-UNRECOGNIZED-CLASS`). **All composing families are now complete** (ring/shadow · gradient · transform · filter/backdrop). The arbitrary-width `ring-offset-[<len>]` form is the lone remaining ring-family member without a utility (no arbitrary-width offset); the bare `skew-[<angle>]` axis-less form has no utility (use `skew-x-*` / `skew-y-*`).
 
 ---
 

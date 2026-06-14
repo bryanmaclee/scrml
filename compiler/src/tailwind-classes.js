@@ -876,6 +876,201 @@ function registerTransform() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Composing filter + backdrop-filter families (blur / brightness / contrast /
+// grayscale / hue-rotate / invert / saturate / sepia / drop-shadow + the
+// backdrop-* equivalents) — Approach C (§26.7.3, S191 Phase 4). Same inline-
+// `var()`-fallback model as the box-shadow (registerRing / registerEffects),
+// gradient (registerGradient), and transform (registerTransform) families.
+//
+// THE COMPOSE PROBLEM (same class as ring/shadow/transform): `blur-sm
+// brightness-50` on one element each contribute a DIFFERENT filter FUNCTION to
+// ONE `filter:` declaration. If each utility wrote its own single-property
+// `filter:` (`.blur-sm { filter: blur(4px) }` + `.brightness-50 { filter:
+// brightness(.5) }`), CSS class-order last-write-wins would obliterate one —
+// the author asked for blur AND brightness. The composing shorthand reads NINE
+// independent `--tw-*` vars so every present filter function contributes.
+//
+// INLINE FALLBACKS (the Approach-C minimalism choice): each `var()` reference in
+// the shorthand carries an EMPTY inline fallback (`var(--tw-blur,)`). An unset
+// filter contributes NOTHING — `var(--tw-blur,)` resolving to empty is just
+// whitespace in the space-separated `filter` function list. The shorthand is
+// only emitted when ≥1 filter utility is present, so there is always ≥1 non-
+// empty function (an all-empty `filter:` would be invalid). NO global
+// `*, ::before, ::after { --tw-blur: ; ... }` preflight defaults block is
+// emitted — preserving the §26.1/§26.2 "only what's used" minimalism axiom.
+//
+// FILTER vs BACKDROP divergence: the backdrop set has `opacity` (which the plain
+// filter set does NOT) and has NO `drop-shadow`. backdrop-filter ALSO emits the
+// `-webkit-backdrop-filter` companion (Safari still requires the prefix).
+// ---------------------------------------------------------------------------
+
+// The composing `filter:` shorthand emitted by EVERY filter utility. Each
+// `var()` reference carries an EMPTY inline fallback so an unset function
+// contributes nothing (just collapses to whitespace) — partial application is
+// always valid.
+const FILTER_COMPOSE =
+  "filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)";
+
+// The composing `backdrop-filter:` shorthand (+ the `-webkit-` companion for
+// Safari) emitted by EVERY backdrop utility. The backdrop set substitutes
+// `opacity` for `drop-shadow` (vs the plain filter set above).
+const BACKDROP_COMPOSE =
+  "-webkit-backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,); " +
+  "backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,)";
+
+// Tailwind v3 blur scale (px). Bare `blur` == 8px (the default). `blur-none` ==
+// `blur(0)`. Shared by the named `blur-{k}` form (keyed by suffix) — the
+// arbitrary `blur-[<len>]` form sets `blur(<v>)` directly.
+const BLUR_VALUES = {
+  "none": "0", "sm": "4px", "": "8px", "md": "12px",
+  "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px",
+};
+
+// brightness / contrast / saturate percentage scales (value = N/100, as a
+// unitless multiplier — `brightness-50` -> `brightness(.5)`).
+const BRIGHTNESS_VALUES = ["0", "50", "75", "90", "95", "100", "105", "110", "125", "150", "200"];
+const CONTRAST_VALUES = ["0", "50", "75", "100", "125", "150", "200"];
+const SATURATE_VALUES = ["0", "50", "100", "150", "200"];
+
+// hue-rotate degree scale (+ negatives via `-hue-rotate-N` / the backdrop form).
+const HUE_ROTATE_VALUES = ["0", "15", "30", "60", "90", "180"];
+
+// backdrop-opacity percentage scale (value = N/100 — `backdrop-opacity-50` ->
+// `opacity(.5)`). This is the one filter the plain filter set lacks.
+const BACKDROP_OPACITY_VALUES = ["0", "5", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55", "60", "65", "70", "75", "80", "85", "90", "95", "100"];
+
+// drop-shadow named scale (Tailwind v3 multi-`drop-shadow()` stacks). Filter-
+// only (the backdrop set has no drop-shadow). `drop-shadow-none` == a no-op
+// transparent drop-shadow.
+const DROP_SHADOW_VALUES = {
+  "sm": "drop-shadow(0 1px 1px rgb(0 0 0 / 0.05))",
+  "": "drop-shadow(0 1px 2px rgb(0 0 0 / 0.1)) drop-shadow(0 1px 1px rgb(0 0 0 / 0.06))",
+  "md": "drop-shadow(0 4px 3px rgb(0 0 0 / 0.07)) drop-shadow(0 2px 2px rgb(0 0 0 / 0.06))",
+  "lg": "drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1))",
+  "xl": "drop-shadow(0 20px 13px rgb(0 0 0 / 0.03)) drop-shadow(0 8px 5px rgb(0 0 0 / 0.08))",
+  "2xl": "drop-shadow(0 25px 25px rgb(0 0 0 / 0.15))",
+  "none": "drop-shadow(0 0 #0000)",
+};
+
+// A filter setter: set one `--tw-<varName>` var + emit the FILTER_COMPOSE
+// shorthand. Shared by named + arbitrary filter forms.
+function filterSetter(varName, value) {
+  return `--tw-${varName}: ${value}; ${FILTER_COMPOSE}`;
+}
+
+// A backdrop setter: set one `--tw-backdrop-<varName>` var + emit the
+// BACKDROP_COMPOSE shorthand (+ `-webkit-` companion). Shared by named +
+// arbitrary backdrop forms.
+function backdropSetter(varName, value) {
+  return `--tw-backdrop-${varName}: ${value}; ${BACKDROP_COMPOSE}`;
+}
+
+// ---------------------------------------------------------------------------
+// filter family (named utilities, §26.7.3) — each sets one `--tw-*` filter var
+// + the composing FILTER_COMPOSE shorthand.
+// ---------------------------------------------------------------------------
+
+function registerFilters() {
+  // blur-{k} (bare `blur` == 8px; `blur-none` == blur(0)).
+  for (const [k, v] of Object.entries(BLUR_VALUES)) {
+    const cls = k ? `blur-${k}` : "blur";
+    registry.set(cls, `.${escapeCssClass(cls)} { ${filterSetter("blur", `blur(${v})`)} }`);
+  }
+
+  // brightness-{N} / contrast-{N} / saturate-{N} (value = N/100 multiplier).
+  for (const n of BRIGHTNESS_VALUES) {
+    registry.set(`brightness-${n}`, `.brightness-${n} { ${filterSetter("brightness", `brightness(${Number(n) / 100})`)} }`);
+  }
+  for (const n of CONTRAST_VALUES) {
+    registry.set(`contrast-${n}`, `.contrast-${n} { ${filterSetter("contrast", `contrast(${Number(n) / 100})`)} }`);
+  }
+  for (const n of SATURATE_VALUES) {
+    registry.set(`saturate-${n}`, `.saturate-${n} { ${filterSetter("saturate", `saturate(${Number(n) / 100})`)} }`);
+  }
+
+  // grayscale / grayscale-0, invert / invert-0, sepia / sepia-0 — bare == 100%,
+  // -0 == the no-op 0.
+  registry.set("grayscale", `.grayscale { ${filterSetter("grayscale", "grayscale(100%)")} }`);
+  registry.set("grayscale-0", `.grayscale-0 { ${filterSetter("grayscale", "grayscale(0)")} }`);
+  registry.set("invert", `.invert { ${filterSetter("invert", "invert(100%)")} }`);
+  registry.set("invert-0", `.invert-0 { ${filterSetter("invert", "invert(0)")} }`);
+  registry.set("sepia", `.sepia { ${filterSetter("sepia", "sepia(100%)")} }`);
+  registry.set("sepia-0", `.sepia-0 { ${filterSetter("sepia", "sepia(0)")} }`);
+
+  // hue-rotate-{N} + negatives (`-hue-rotate-N`).
+  for (const n of HUE_ROTATE_VALUES) {
+    registry.set(`hue-rotate-${n}`, `.hue-rotate-${n} { ${filterSetter("hue-rotate", `hue-rotate(${n}deg)`)} }`);
+    if (n !== "0") {
+      registry.set(`-hue-rotate-${n}`, `.${escapeCssClass(`-hue-rotate-${n}`)} { ${filterSetter("hue-rotate", `hue-rotate(-${n}deg)`)} }`);
+    }
+  }
+
+  // drop-shadow-{k} (bare `drop-shadow` == the default stack; `drop-shadow-none`
+  // == the no-op transparent shadow).
+  for (const [k, v] of Object.entries(DROP_SHADOW_VALUES)) {
+    const cls = k ? `drop-shadow-${k}` : "drop-shadow";
+    registry.set(cls, `.${escapeCssClass(cls)} { ${filterSetter("drop-shadow", v)} }`);
+  }
+
+  // `filter` (the bare utility) emits ONLY the composing shorthand — it
+  // re-applies the cascade of `--tw-*` filter vars set by sibling utilities (a
+  // Tailwind v3 holdover; in v3 a `filter` class was required to activate the
+  // composition). `filter-none` resets to no filter.
+  registry.set("filter", `.filter { ${FILTER_COMPOSE} }`);
+  registry.set("filter-none", ".filter-none { filter: none }");
+}
+
+// ---------------------------------------------------------------------------
+// backdrop-filter family (named utilities, §26.7.3) — the `backdrop-` prefixed
+// equivalents (substituting `opacity` for `drop-shadow`). Each sets one
+// `--tw-backdrop-*` var + the composing BACKDROP_COMPOSE shorthand (+ `-webkit-`).
+// ---------------------------------------------------------------------------
+
+function registerBackdrop() {
+  // backdrop-blur-{k} (bare `backdrop-blur` == 8px).
+  for (const [k, v] of Object.entries(BLUR_VALUES)) {
+    const cls = k ? `backdrop-blur-${k}` : "backdrop-blur";
+    registry.set(cls, `.${escapeCssClass(cls)} { ${backdropSetter("blur", `blur(${v})`)} }`);
+  }
+
+  // backdrop-brightness / -contrast / -saturate (value = N/100 multiplier).
+  for (const n of BRIGHTNESS_VALUES) {
+    registry.set(`backdrop-brightness-${n}`, `.backdrop-brightness-${n} { ${backdropSetter("brightness", `brightness(${Number(n) / 100})`)} }`);
+  }
+  for (const n of CONTRAST_VALUES) {
+    registry.set(`backdrop-contrast-${n}`, `.backdrop-contrast-${n} { ${backdropSetter("contrast", `contrast(${Number(n) / 100})`)} }`);
+  }
+  for (const n of SATURATE_VALUES) {
+    registry.set(`backdrop-saturate-${n}`, `.backdrop-saturate-${n} { ${backdropSetter("saturate", `saturate(${Number(n) / 100})`)} }`);
+  }
+
+  // backdrop-opacity-{N} (the backdrop-only filter — value = N/100).
+  for (const n of BACKDROP_OPACITY_VALUES) {
+    registry.set(`backdrop-opacity-${n}`, `.backdrop-opacity-${n} { ${backdropSetter("opacity", `opacity(${Number(n) / 100})`)} }`);
+  }
+
+  // backdrop-grayscale / -invert / -sepia (bare == 100%, -0 == no-op).
+  registry.set("backdrop-grayscale", `.backdrop-grayscale { ${backdropSetter("grayscale", "grayscale(100%)")} }`);
+  registry.set("backdrop-grayscale-0", `.backdrop-grayscale-0 { ${backdropSetter("grayscale", "grayscale(0)")} }`);
+  registry.set("backdrop-invert", `.backdrop-invert { ${backdropSetter("invert", "invert(100%)")} }`);
+  registry.set("backdrop-invert-0", `.backdrop-invert-0 { ${backdropSetter("invert", "invert(0)")} }`);
+  registry.set("backdrop-sepia", `.backdrop-sepia { ${backdropSetter("sepia", "sepia(100%)")} }`);
+  registry.set("backdrop-sepia-0", `.backdrop-sepia-0 { ${backdropSetter("sepia", "sepia(0)")} }`);
+
+  // backdrop-hue-rotate-{N} + negatives.
+  for (const n of HUE_ROTATE_VALUES) {
+    registry.set(`backdrop-hue-rotate-${n}`, `.backdrop-hue-rotate-${n} { ${backdropSetter("hue-rotate", `hue-rotate(${n}deg)`)} }`);
+    if (n !== "0") {
+      registry.set(`-backdrop-hue-rotate-${n}`, `.${escapeCssClass(`-backdrop-hue-rotate-${n}`)} { ${backdropSetter("hue-rotate", `hue-rotate(-${n}deg)`)} }`);
+    }
+  }
+
+  // `backdrop-filter` (bare) emits ONLY the composing shorthand; `-none` resets.
+  registry.set("backdrop-filter", `.backdrop-filter { ${BACKDROP_COMPOSE} }`);
+  registry.set("backdrop-filter-none", ".backdrop-filter-none { -webkit-backdrop-filter: none; backdrop-filter: none }");
+}
+
 function registerEffects() {
   const SHADOWS = {
     "sm": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
@@ -1608,6 +1803,36 @@ const ARBITRARY_DECL_TRANSFORM = {
   "from": (v) => gradientFromSetter(v.css),
   "via":  (v) => gradientViaSetter(v.css),
   "to":   (v) => gradientToSetter(v.css),
+  // Filter family (arbitrary value) — Approach C (§26.7.3, S191 Phase 4). Each
+  // wraps the bracket value in its filter FUNCTION, sets the one `--tw-*` var,
+  // and emits FILTER_COMPOSE so an arbitrary filter COMPOSES with another filter
+  // on the same element (`blur-[2px] brightness-50` -> both functions in one
+  // `filter:` declaration) instead of each writing its own single-property
+  // `filter:` (CSS last-write-wins clobbered all but the last — the bug-1
+  // blocker). The other filter vars resolve to their EMPTY inline fallback (an
+  // unset function contributes nothing). `blur-[2px]` -> `--tw-blur: blur(2px)`.
+  "blur":        (v) => filterSetter("blur", `blur(${v.css})`),
+  "brightness":  (v) => filterSetter("brightness", `brightness(${v.css})`),
+  "contrast":    (v) => filterSetter("contrast", `contrast(${v.css})`),
+  "grayscale":   (v) => filterSetter("grayscale", `grayscale(${v.css})`),
+  "hue-rotate":  (v) => filterSetter("hue-rotate", `hue-rotate(${v.css})`),
+  "invert":      (v) => filterSetter("invert", `invert(${v.css})`),
+  "saturate":    (v) => filterSetter("saturate", `saturate(${v.css})`),
+  "sepia":       (v) => filterSetter("sepia", `sepia(${v.css})`),
+  "drop-shadow": (v) => filterSetter("drop-shadow", `drop-shadow(${v.css})`),
+  // Backdrop-filter family (arbitrary value) — same Approach-C model, the
+  // `backdrop-` prefixed equivalents (substituting `opacity` for `drop-shadow`).
+  // Each sets one `--tw-backdrop-*` var + emits BACKDROP_COMPOSE (+ `-webkit-`).
+  // `backdrop-blur-[2px]` -> `--tw-backdrop-blur: blur(2px)`.
+  "backdrop-blur":       (v) => backdropSetter("blur", `blur(${v.css})`),
+  "backdrop-brightness": (v) => backdropSetter("brightness", `brightness(${v.css})`),
+  "backdrop-contrast":   (v) => backdropSetter("contrast", `contrast(${v.css})`),
+  "backdrop-grayscale":  (v) => backdropSetter("grayscale", `grayscale(${v.css})`),
+  "backdrop-hue-rotate": (v) => backdropSetter("hue-rotate", `hue-rotate(${v.css})`),
+  "backdrop-invert":     (v) => backdropSetter("invert", `invert(${v.css})`),
+  "backdrop-opacity":    (v) => backdropSetter("opacity", `opacity(${v.css})`),
+  "backdrop-saturate":   (v) => backdropSetter("saturate", `saturate(${v.css})`),
+  "backdrop-sepia":      (v) => backdropSetter("sepia", `sepia(${v.css})`),
 };
 
 // Overloaded prefixes — property depends on value shape.
@@ -2783,5 +3008,7 @@ registerEffects();
 registerRing();
 registerGradient();
 registerTransform();
+registerFilters();
+registerBackdrop();
 registerLayout();
 registerProse();

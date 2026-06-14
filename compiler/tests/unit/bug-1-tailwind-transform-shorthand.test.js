@@ -17,12 +17,13 @@
  *   - 3D rotate (`rotate-x` / `rotate-y` / `rotate-z`) — STAYS literal `transform:
  *     rotateX(<v>)` (the 2D `--tw-*` model has no 3D-rotate var; escape hatch).
  *
- * Composing families landed under the same inline-fallback model (§26.7):
+ * Composing families landed under the same inline-fallback model (§26.7) —
+ * ALL composing families are now complete:
  *   - `ring-*` / `ring-offset-*` named (box-shadow compose) — Phase 1
  *   - `bg-gradient-*` / `from-*` / `to-*` / `via-*` (gradient compose) — Phase 2
  *   - translate/scale/rotate/skew directional + named (transform compose) — Phase 3
+ *   - filter / backdrop-filter families (§26.7.3) — Phase 4 (S191, NET-NEW)
  * Still genuinely deferred (separate bug-1 sub-items):
- *   - filter / backdrop-filter families (Phase 4)
  *   - arbitrary `ring-offset-[<len>]` (no arbitrary-width offset utility)
  *   - `content-["..."]` / `font-[Inter]` (string-shaped values)
  *   - Safelist / `@apply` mechanism
