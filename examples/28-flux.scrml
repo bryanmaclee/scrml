@@ -1,52 +1,50 @@
 // Example 28: Flux — the shifting-labyrinth explorer (v1, text mode)
 //
-// A canonical-scrml dog-food game. The world is in "flux" — unobserved
-// geometry is indeterminate and only takes shape inside your vision; it
-// re-rolls when you leave unless you spend memory to lock it. v1 builds the
-// single-player TEXT (ASCII) mode; the 8-bit "pages" + doom-esque "spa"
-// render modes are stubbed behind the RenderMode engine for later.
+// A canonical-scrml dog-food game. The world is in "flux": unobserved geometry
+// is indeterminate and only takes shape inside your vision; it RE-ROLLS each
+// time you leave and return — UNLESS you spend memory to lock it. v1 builds the
+// single-player TEXT (ASCII) mode; the 8-bit "pages" + doom-esque "spa" render
+// modes are stubbed behind a RenderMode engine for later.
 //
-// LAYERS LANDED SO FAR:
-//   1. keystone — derived <board> string in a <div whitespace-pre> re-renders
-//      reactively on move (NOT <pre>: §4.17 raw-content emits ${...} literally).
-//   2. terrain — a hand-rolled deterministic hash (scrml has NO seeded PRNG, so
-//      we build one from + * % only, kept < 2^53 since ints are JS doubles) +
-//      corridor-biased labyrinth + a spawn clearing + Wall/Mountain collision.
+// THE FLUX MECHANIC (this layer):
+//   - vision: a Chebyshev sight bubble (radius @vision) around the player.
+//   - shift:  each non-memory cell carries a per-cell nonce; it bumps every time
+//             the cell leaves your vision, so re-observing it re-rolls its shape.
+//   - memory: "Remember" world-locks the cell you stand on (cost 1) — it stops
+//             shifting. "Pin home" (cost +1) also keeps it visible THROUGH the
+//             fog as a persistent landmark. Two tiers, each its own expense.
 //
-//   §40.8  — <program> as logic-default container
-//   §6.6   — const <derived> reactive cell recomputes on dep change
-//   §48    — pure `fn` (terrain + board are pure compute; deps passed as args)
-//   §14.4  — type Terrain:enum; §18 match for the glyph map
-//   §5.2.2 — onclick=fn(args) bare-call event handlers
+//   §40.8 <program> container · §6.6 derived cells · §48 pure fn · §14.3/§14.4
+//   structs+enums · §18 match · §6.5.1 COW array reassign (no deep reactivity)
 
 <program>
 
     type Terrain:enum = { Floor, Wall, Mountain }
+    type Memory:struct = { x: int, y: int, terrain: Terrain, home: bool }
 
-    <cols>   = 15
-    <rows>   = 9
-    <px>     = 7
-    <py>     = 4
-    <seed>   = 42
-    <vision> = 2        // Chebyshev sight radius; becomes level-driven in the sheet layer
+    <cols>     = 15
+    <rows>     = 9
+    <px>       = 7
+    <py>       = 4
+    <seed>     = 42
+    <vision>   = 2            // Chebyshev sight radius; becomes level-driven in the sheet layer
+    <budget>   = 6           // memory-budget — the scarce resource you spend to lock cells
+    <nonce>    = Array(135).fill(0)   // per-cell re-roll counter (cols*rows = 135), COW-reassigned
+    <memories>: Memory[] = []         // locked cells (frozen terrain); home=true also shows in fog
 
-    // Derived board. Reads its deps on the RHS → recomputes + re-renders
-    // ${@board} whenever any of them changes.
-    const <board> = renderBoard(@px, @py, @seed, @cols, @rows, @vision)
+    // Derived board — recomputes + re-renders ${@board} when any dep changes.
+    const <board> = renderBoard(@px, @py, @seed, @cols, @rows, @vision, @nonce, @memories)
 
     // --- world generation (pure) ----------------------------------------------
 
-    // Deterministic cell hash. No seeded PRNG exists in scrml (scrml:random is
-    // unseeded Math.random + fn-forbidden), so we hand-roll a multiplicative
-    // hash. Every intermediate product is kept < 2^53 (ints are JS doubles —
-    // no bitwise ops, no u32 wrap), so multipliers stay small (h<2.1e9 * 131).
-    // NB: named intermediates (not `(a+b) % c`) — the latter trips a Phase-1
-    // ExprNode round-trip bug (emitStringFromTree drops the precedence parens:
-    // `(a+b)%c` -> `a+b%c`). Real codegen is correct, but the corpus-invariant
-    // idempotency audit flags it. Filed as a dog-food gap; intermediates are
-    // also just cleaner. Each step stays < 2^53 (h<2.1e9 * 131 ~ 2.7e11).
-    fn hashCell(seed: int, x: int, y: int) -> int {
-        let h = seed % 100003 + 101
+    // Deterministic cell hash. No seeded PRNG exists in scrml, so we hand-roll a
+    // multiplicative hash; named intermediates keep every product < 2^53 (ints are
+    // JS doubles) AND dodge the emitStringFromTree (a+b)%c paren-drop. `nonce` is
+    // mixed in so a re-observed cell re-rolls.
+    fn hashCell(seed: int, x: int, y: int, nonce: int) -> int {
+        // nonce mixed EARLY so it cascades through all three multiplications —
+        // a late mix only nudges the final %100 by a few and rarely re-rolls.
+        let h = seed % 100003 + nonce * 6151 + 101
         let a = h * 131 + x * 2654435 + 1
         h = a % 2147483647
         let b = h * 131 + y * 2654435 + 1
@@ -56,12 +54,10 @@
         return h
     }
 
-    // Terrain for a cell: bordered frame, a guaranteed spawn clearing at the
-    // center, corridor lanes on a 4-grid (labyrinth-not-open per the design),
-    // hash-driven interior with a cave/mountain mix.
-    fn cellTerrain(seed: int, x: int, y: int, cols: int, rows: int) -> Terrain {
+    // Terrain for a cell at a given nonce. Border frame + center spawn clearing
+    // are STABLE (never shift — keeps the game navigable); the interior re-rolls.
+    fn cellTerrain(seed: int, x: int, y: int, cols: int, rows: int, nonce: int) -> Terrain {
         if (x <= 0 || x >= cols - 1 || y <= 0 || y >= rows - 1) { return .Wall }
-        // named intermediates avoid the `(cols-1)/2` -> `cols-1/2` paren-drop (same Phase-1 bug)
         let cw = cols - 1
         let ch = rows - 1
         let cx = cw / 2
@@ -69,7 +65,7 @@
         let ddx = x - cx
         let ddy = y - cy
         if (ddx >= -1 && ddx <= 1 && ddy >= -1 && ddy <= 1) { return .Floor }
-        let r = hashCell(seed, x, y) % 100
+        let r = hashCell(seed, x, y, nonce) % 100
         if (x % 4 == 0 || y % 4 == 0) {
             if (r < 88) { return .Floor }
             return .Wall
@@ -77,6 +73,14 @@
         if (r < 50) { return .Floor }
         if (r < 85) { return .Wall }
         return .Mountain
+    }
+
+    // Terrain at a cell using its CURRENT nonce (from the @nonce array).
+    fn terrainAtCell(seed: int, x: int, y: int, cols: int, rows: int, nonce: int[]) -> Terrain {
+        let idx = y * cols + x
+        let n = 0
+        if (idx >= 0 && idx < nonce.length) { n = nonce[idx] }
+        return cellTerrain(seed, x, y, cols, rows, n)
     }
 
     fn glyphFor(t: Terrain) -> string {
@@ -87,7 +91,8 @@
         }
     }
 
-    // Chebyshev-distance vision test — a square sight bubble of radius r.
+    // --- vision + memory lookup (pure) ----------------------------------------
+
     fn inVision(px: int, py: int, x: int, y: int, r: int) -> bool {
         let dx = x - px
         if (dx < 0) { dx = -dx }
@@ -98,20 +103,37 @@
         return m <= r
     }
 
-    // Out-of-vision cells render as the void of flux (blank). In-vision cells
-    // take shape (terrain). The player carries a moving bubble of determined
-    // world through the dark.
-    fn renderBoard(px: int, py: int, seed: int, cols: int, rows: int, vision: int) -> string {
+    fn findMemoryIdx(mems: Memory[], x: int, y: int) -> int {
+        for (let i = 0; i < mems.length; i++) {
+            let mm = mems[i]
+            if (mm.x == x && mm.y == y) { return i }
+        }
+        return -1
+    }
+
+    // --- render ---------------------------------------------------------------
+    // player > in-vision (memory:frozen | live:rolled) > home-memory-in-fog > flux void
+
+    fn renderBoard(px: int, py: int, seed: int, cols: int, rows: int, vision: int, nonce: int[], mems: Memory[]) -> string {
         let out = ""
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < cols; x++) {
                 if (x == px && y == py) {
                     out = out + "@"
                 } else {
+                    let mi = findMemoryIdx(mems, x, y)
                     if (inVision(px, py, x, y, vision)) {
-                        out = out + glyphFor(cellTerrain(seed, x, y, cols, rows))
+                        if (mi >= 0) {
+                            out = out + glyphFor(mems[mi].terrain)
+                        } else {
+                            out = out + glyphFor(terrainAtCell(seed, x, y, cols, rows, nonce))
+                        }
                     } else {
-                        out = out + " "
+                        if (mi >= 0 && mems[mi].home) {
+                            out = out + glyphFor(mems[mi].terrain)
+                        } else {
+                            out = out + " "
+                        }
                     }
                 }
             }
@@ -120,16 +142,63 @@
         return out
     }
 
-    // --- movement (collision-checked) -----------------------------------------
+    // --- movement + the shift (impure) ----------------------------------------
+
+    // Bump the nonce of every cell that WAS in vision but is NOT after the move —
+    // those re-roll on next sighting. COW: returns a fresh array (no deep reactivity).
+    fn bumpLeftVision(nonce: int[], opx: int, opy: int, npx: int, npy: int, vision: int, cols: int, rows: int) -> int[] {
+        let result = nonce.slice()
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let wasIn = inVision(opx, opy, x, y, vision)
+                let isIn = inVision(npx, npy, x, y, vision)
+                if (wasIn && !isIn) {
+                    let idx = y * cols + x
+                    result[idx] = result[idx] + 1
+                }
+            }
+        }
+        return result
+    }
 
     function move(dx: int, dy: int) {
         let nx = @px + dx
         let ny = @py + dy
         if (nx < 0 || nx >= @cols || ny < 0 || ny >= @rows) { return }
-        let t = cellTerrain(@seed, nx, ny, @cols, @rows)
+        let t = terrainAtCell(@seed, nx, ny, @cols, @rows, @nonce)
         if (t != Terrain::Floor) { return }
+        @nonce = bumpLeftVision(@nonce, @px, @py, nx, ny, @vision, @cols, @rows)
         @px = nx
         @py = ny
+    }
+
+    // --- memory actions (impure) ----------------------------------------------
+
+    function lockMemory() {
+        if (@budget < 1) { return }
+        let mi = findMemoryIdx(@memories, @px, @py)
+        if (mi >= 0) { return }
+        let t = terrainAtCell(@seed, @px, @py, @cols, @rows, @nonce)
+        @memories = [...@memories, { x: @px, y: @py, terrain: t, home: false }]
+        @budget = @budget - 1
+    }
+
+    function pinHome() {
+        let mi = findMemoryIdx(@memories, @px, @py)
+        if (mi < 0) { return }
+        if (@memories[mi].home) { return }
+        if (@budget < 1) { return }
+        let result = []
+        for (let i = 0; i < @memories.length; i++) {
+            let mm = @memories[i]
+            if (i == mi) {
+                result.push({ x: mm.x, y: mm.y, terrain: mm.terrain, home: true })
+            } else {
+                result.push(mm)
+            }
+        }
+        @memories = result
+        @budget = @budget - 1
     }
 
     // --- render ---------------------------------------------------------------
@@ -139,16 +208,25 @@
             <h1 class="text-center text-lg text-emerald-400 mb-1">FLUX</>
             <p class="text-center text-xs text-gray-500 mb-5">shifting-labyrinth explorer</>
 
-            <!-- NB: NOT <pre> — §4.17 makes <pre>/<code> raw-content (${...} is literal there).
-                 A <div> with whitespace-pre renders the \n-joined board AND interpolates. -->
+            <!-- NB: NOT <pre> — §4.17 makes <pre>/<code> raw-content (${...} literal). -->
             <div class="whitespace-pre text-emerald-400 text-sm leading-tight bg-black rounded-lg p-4 mb-5">${@board}</div>
 
             <div class="flex justify-between bg-black rounded-lg p-3 mb-5 text-xs">
-                <span class="text-gray-400 uppercase">POS</>
-                <span>${@px}, ${@py}</>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400 uppercase">POS</>
+                    <span>${@px}, ${@py}</>
+                </>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400 uppercase">MEM</>
+                    <span class="text-emerald-400">${@budget}</>
+                </>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400 uppercase">LOCKED</>
+                    <span>${@memories.length}</>
+                </>
             </>
 
-            <div class="grid grid-cols-3 gap-2 w-40 mx-auto">
+            <div class="grid grid-cols-3 gap-2 w-40 mx-auto mb-4">
                 <span></>
                 <button class="py-2 bg-gray-700 text-white text-sm rounded cursor-pointer border-0" onclick=move(0, -1)>N</>
                 <span></>
@@ -158,6 +236,11 @@
                 <span></>
                 <button class="py-2 bg-gray-700 text-white text-sm rounded cursor-pointer border-0" onclick=move(0, 1)>S</>
                 <span></>
+            </>
+
+            <div class="grid grid-cols-2 gap-2">
+                <button class="py-2 bg-emerald-700 text-white text-xs rounded cursor-pointer border-0" onclick=lockMemory()>REMEMBER (1)</>
+                <button class="py-2 bg-emerald-900 text-white text-xs rounded cursor-pointer border-0" onclick=pinHome()>PIN HOME (1)</>
             </>
         </>
     </>
