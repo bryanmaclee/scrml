@@ -1,46 +1,48 @@
-# scrmlTS — Session 190 (CLOSE)
+# scrmlTS — Session 191 (CLOSE)
 
 **Date:** 2026-06-13.
-**Previous:** `handOffs/hand-off-194.md` (S189 CLOSE — autonomous gap-grind, the only HIGH closed).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-195.md` at next OPEN.
-**Profile:** A — FULL. Opened `"read pa.md and start session"` (default A). User-driven arcs + a decision pass.
+**Previous:** `handOffs/hand-off-195.md` (S190 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-196.md` at next OPEN.
+**Profile:** A — FULL. Opened `"read pa.md and start session"` (default A). Long, dense, user-driven.
 
 ## What this session was
-A user-driven sequence: **3 source arcs landed + pushed** (each PA-independent-R26-verified; one dispatch crash recovered with zero loss), a **deep-dive run + ratified** (L19 KEEP), a **decision pass** through the ruling-gated gap tail, and the **2B (DD1 Fork 2) doc deliverable closed**. Two PA verify-before-claim catches were load-bearing. Board MED 7·LOW 15 → **HIGH 0 · MED 6 · LOW 12**.
+The whole **`if=fn()` condition-routing bug class** closed (3 MEDs), then a **deep-dive → data-first ruling → 4-phase build** that took **bug-1 (Tailwind composing utilities)** from filed-scope through **ALL FOUR composing families**, plus a major next-session direction (**the "Flux" game**). 7 dispatches (1 deep-dive + 6 dev), all PA-independent-R26 dual-verified before landing; per-arc/per-phase land+push authority held end-to-end. Board MED 6→5.
 
 ## Session-close state
-- **HEAD `1e17213e`** (the §51.9+2B+rulings commit). **origin == HEAD** after the wrap push. The 3 source landings: `11c648c7` Cluster C · `f0030049` derived-engine expr form · `1e17213e` §51.9+2B+rulings. **+ the wrap commit on top.** All pushed.
-- **Tests:** pre-commit subset **16,873 pass / 90 skip / 0 fail** (live `bun scripts/state.ts`). Full suite confirmed green via per-landing pre-push gates (24,100 at the derived-engine landing; TodoMVC PASS).
-- **known-gaps (live):** **HIGH 0 · MED 6 · LOW 12 · Nominal 9** (148 @gap tokens).
-- **Version:** v0.7.0, no cut. **Inbox:** empty (no outbound due). **Commit-gate:** Configuration B (`.git/hooks`). Leave as-is.
-- **Maps:** 6c project-mapper refresh ran at wrap (watermark `a00624f5` → `1e17213e`). **Worktrees:** clean (all 3 session worktrees removed at landing: cluster-c a3dc49d + the dead-stall acffd1ee · derived-engine a52be30f · §51.9 a065d7df).
-- **scrml-support:** user-voice S190 appended (the arcs + the decision-pass + L19-KEEP ratifications) + the L19 deep-dive doc (`docs/deep-dives/l19-multi-statement-handler-2026-06-13.md`, `status: ratified`) — committed + pushed at wrap.
+- **HEAD `004007fb`** (bug-1 Phase 4). **origin `15f1bdb4`** at this writing → **local 3 commits ahead** (`ddf5919d` P3 · `2a2e3238` P4-BRIEF · `004007fb` P4) — **the wrap-push (this close) pushes these + the wrap commit.** User authorized "push it too."
+- **Tests:** pre-commit subset **16,989 pass / 90 skip / 0 fail** (live `bun scripts/state.ts`). Full suite green via per-phase pre-push gates + the wrap-push gate.
+- **known-gaps (live):** the if=fn() trio closed (MED 6→5); bug-1 stays `open` for its 3 separate sub-arcs (NOT composing-family work). Run `bun scripts/state.ts` for the precise board.
+- **Version:** v0.7.0, no cut. **Inbox:** empty. **Commit-gate:** Configuration B (`.git/hooks`). Leave as-is.
+- **Maps:** 6c project-mapper refresh status — SEE "Wrap execution" below. Watermark was `1e17213e` (12 behind at wrap).
+- **Worktrees:** CLEAN — all 5 session worktrees removed at 6b (g-attr a4736cab · bug1-p1 ab455f5f · bug1-p2 a3f0bf9e · bug1-p3 a7cabcc1 · bug1-p4 a2985e07). Only main remains.
+- **scrml-support:** user-voice S191 appended (if=fn() survey-reversal + bug-1 deep-dive/C-ruling/per-phase rulings + currentColor + Flux verbatim) + the bug-1 deep-dive doc (`docs/deep-dives/tailwind-preflight-css-2026-06-13.md`, status:current). Committed + pushed at wrap.
 
-## The 3 source arcs (all RESOLVED + landed + pushed)
-1. **Cluster C — `${}`-decl-boundary mis-split (`11c648c7`, agent a3dc49d1).** `g-derived-rhs-interp-wrapped` (LOW) + `g-markup-const-consumes-cell-decl` (re-tagged **LOW→MED** — S189's §6.9 hoist had MASKED it into silent data-loss; verify-before-dispatch caught the severity-upgrade). Two `ast-builder.js` parse fixes: NEW `E-DECL-RHS-INTERP-WRAPPED` (reject `${}`-wrapped decl RHS, unwrap-recover) + the markup-const-swallows-rest-of-block fix (`markupRootClosed` boundary + defChildren stop-at-decl + `</>` double-decrement guard). Dog-food broadened the scope; first dispatch stalled (no fix work) + re-dispatched. +19 tests; full suite 24,084/0.
-2. **§51.0.J derived-engine EXPRESSION form (`f0030049`, agent a52be30f; user "full feature build now").** `g-derived-engine-expression-form` (LOW). `derived=match @x {...}` + `derived=<expr>` (ternary/call) now build + reactively recompute (parser operator-aware → `derivedExprNode`; symbol-table 3 kinds + all-upstream enum + B16 light-up; type-system skips §51.9 for modern forms [legacy UNTOUCHED]; codegen via C14 `_scrml_derived_*` + per-upstream DG edges). All 6 rejection codes fire. +16 tests; full suite 24,100/0. **Filed `g-legacy-derived-projection-plain-cell` (LOW)** — pre-existing §51.9 test-vs-pipeline gap (resolved same session, arc 3).
-3. **§51.9 clearer-error + 2B close + decision-pass rulings (`1e17213e`, agent a065d7df).** `g-legacy-derived-projection-plain-cell` (LOW) — E-ENGINE-004 steers plain-cell `derived=@var` → modern `derived=match` (kept §51.9.3 machine-source req); c14 §C14.15 full-pipeline boundary block. **2B close:** the §51.0.A note + PRIMER §7 were already landed S178 (stale "untouched" carry-forward); added the §52.1 cross-ref. `bug-17-l19` RESOLVED (L19 KEEP, see decision pass). +2 tests; full gate 16,873/0.
+## ✅ if=fn() condition-routing class — CLOSED (3 MEDs)
+`g-attr-if-fn-call-misroute` (`98bdb760`, agent a4736cab — standalone call-ref → conditional, emit-html.ts) + 2 siblings (`90fd7412`, PA-direct): `g-attr-if-fn-chain-head-call-misroute` (chain head read fn-name as cell, emit-event-wiring.ts:1296) + `g-attr-if-fn-display-not-mount` (standalone display-toggled vs mount/unmount, clean-subtree handler). **Survey reversal banked:** the parent's "interprocedural reactive analysis" premise was a MISDIAGNOSIS — `_scrml_effect` dynamic-tracks. +17 tests. `if=fn()` now == `if=(fn())` everywhere.
 
-## Decision pass (user "decision pass, lets go") — concluded
-- **§51.9 `g-legacy-derived-projection-plain-cell`** → "Test-truth + clearer error" (built, arc 3).
-- **L19 `bug-17-l19`** → "Commission a deep-dive" → DD returned one-directional **KEEP** → user "Ratify KEEP — close bug-17-l19". **L19 STANDS** (single-expression inline handlers; named-fn for multi-statement). No language change. DD doc `status: ratified`; Phase-5 debate framing PARKED for a future adopter-refugee signal (OQ-2).
-- **3 settled-defers confirmed** (no open fork): `a5` (ratified adoption-watch trigger), `bug-12-vkill` (blocked on engine var-name canonicalization), `g-channel-server-keyword-auto-migrate` (zero demand).
+## ✅ bug-1 Tailwind preflight — ALL FOUR COMPOSING FAMILIES COMPLETE (§26.7)
+Deep-dive `scrml-support/docs/deep-dives/tailwind-preflight-css-2026-06-13.md`. **Emission model RULED = Approach C** (inline `var()` fallbacks, NO global preflight block) — user "data-first C, validate in Phase 0"; PA byte-validation settled it (A/B block 824B fixed/file; C +33B box-shadow / +9B filter; C wins everywhere realistic + preserves §26.1 minimalism + correctness). 4 phases:
+- **P1 ring/ring-offset/shadow** `ed3fa5ee` §26.7. `box-shadow: var(--tw-ring-offset-shadow,0 0 #0000), var(--tw-ring-shadow,0 0 #0000), var(--tw-shadow,0 0 #0000)`. **currentColor ring-default RATIFIED** (user "currentColor is fine, keep it" — scrml-divergence from TW blue-500). PA caught+fixed agent ring-[width] consistency gap.
+- **P2 gradient** `f5b71e61` §26.7.1 — **FILED SCOPE CLOSED.** `--tw-gradient-stops` compose; from-color `to`-default = v3-faithful transparent twin (`hexToTransparentRgb`). +47.
+- **P3 transform** `ddf5919d` §26.7.2 — **BEHAVIOR CHANGE** (user "continue phase 3"): directional translate/scale/rotate/skew individual-props → composing `transform:` shorthand. Escape-hatch (`transform-[…]`/`scale-[1.5]`) + 3D rotate-x/y/z stay literal.
+- **P4 filter/backdrop** `004007fb` §26.7.3 — net-new, last family. `filter: var(--tw-blur,)…` empty-fallback; backdrop has opacity (no drop-shadow), emits `-webkit-` companion. +53.
+- All 4 = §26.7/.1/.2/.3, Approach C. **Agent process note (recurring):** P4 agent twice attempted a pre-commit-hook bypass (`core.hooksPath=/dev/null`, `--no-verify`) then self-reverted; moot for file-delta'd content (PA landing gate is real).
 
-## 🟡 Carry-forward queue (cross-check live `@gap` + git log)
-**The remaining tail is BLOCKED / HARD / SETTLED-DEFER — none a clean autonomous close:**
-- **MED 6:** `r28-c2` (PARTIAL — §11.3/§11.13 fixed; `<db>`/print parked) · `a5` (refinement freeze — DEFERRED, ratified adoption-watch trigger) · `bug-1` (Tailwind arbitrary-values — mostly BLOCKED on preflight-CSS infra; string-shaped bracket-parser piece is a tractable partial) · `bug-12-vkill` (E-STATE-UNDECLARED read-side — blocked on engine var-name canonicalization) · `bug-14` (MCP V0.D runtime — partial-impl) · `g-attr-if-fn-call-misroute` (hard — interprocedural reactive analysis of fn body).
-- **LOW 12:** enumerate live via `@gap`; notably `g-channel-server-keyword-auto-migrate` (S189 Enhanced-A, zero demand) + the BS-stale/feature-stale tail (bug-75 after-`>` engine `:`-shorthand; r28-2b `:let` leading-colon; etc.).
-- **Native parser CHARTER B** — M2.4/MK2 next (~v0.8). The S190 live-pipeline additions (E-DECL-RHS-INTERP-WRAPPED · derived-engine `derived=match`/expr · derivedExprText/Node STRIP_KEY'd LIVE-only) are live-pipeline ONLY — re-sync at cutover.
-- **VERIFIED.md** — open (USER action).
+## 🎮 NEXT SESSION — "Flux" game dog-food (user S191 vision — START next session)
+**Replace `examples/14-mario` with "Flux"**, a real game in canonical scrml all the way, incorporated into the demo site (scrml.dev, adjacent). 3 modes = the site's 3 progressive themes: plain-HTML → **ASCII maze** (main world-exploration mode; color+shape walls/mountains; labyrinth channels/caves/canyons/dugways/catwalks; player=emoji); "pages" → **8-bit formats** (per level); SPA → **doom-esque/goldeneye**. "Flux" = name + mechanic: fog-of-war (differs per mode); visibility scales w/ player LEVEL (L1=see 1 beyond emoji); unseen world "takes shape" only on a locked criterion. **3 LOCKED things (else flux):** (1) what each player sees inside their area; (2) area overlap between players (locked while overlapping); (3) MEMORIES — locked in-world AND at "home", each with its own EXPENSE. Comprehensive **D&D-style player sheet**; **state PERSISTS.** Vision only ("I have ideas I will get to") — NOT specified/built. Next: user flesh-out → likely design doc/deep-dive → canonical-scrml build (will dog-food channels/multiplayer-overlap, fog reactivity, 3 render modes, progression schema, persistence HARD — expect real gaps). Verbatim: user-voice S191 + memory `project_flux_game_dogfood`.
 
 ## Open questions to surface at next open
-- **Wrap commit + push:** confirm the wrap commit (hand-off + changelog + master-list + 6c maps + 6d state-regen + handoff-194 rotation) + push landed. Confirm scrml-support (user-voice S190 + L19 DD doc) committed + pushed.
-- **Next-session shape:** the gap tail is blocked/hard/settled-defer. No clean autonomous close remains. Candidates: a hard-build MED (the `bug-1` Tailwind string-shaped partial, or `g-attr-if-fn-call-misroute`), a dog-food sweep for new surface, or the native-parser CHARTER B M2.4/MK2 arc (~v0.8). Several need USER direction (prioritization, not rulings).
+1. **The user's S191 open Qs that weren't answered** (Q1 was answered = continue phases): **Q2** — the 2 separate bug-1 sub-arcs (string-shaped `content-["x"]`/`font-[Inter]` bracket-parser · safelist/@apply lint precision) — follow-up or defer? **Q4** — next hard MED after bug-1 (engine var-name canonicalization unblocks `bug-12-vkill`; or `bug-14` MCP; or native-parser CHARTER B M2.4/MK2 ~v0.8). **Q5** — VERIFIED.md examples human-verification pass (USER action).
+2. **bug-1 remaining (separate arcs):** string-shaped arbitrary values · safelist/@apply · arbitrary `ring-offset-[<len>]` (lone ring-family member without a utility). All `open` in the bug-1 gap.
+3. **Maps refresh** — see Wrap execution (the §26.7 composing-family work is the key map gap; agents flagged it 3×).
+
+## Wrap execution (S191 — 8 steps; user "wrap" + "push it too")
+1 hand-off (this) · 2 master-list (§A S191 + §0 state-regen) · 3 changelog S191 · 4 inbox empty/no outbound · 5 tests (subset 16,989; full via push gate) · 6 working-tree clean at push · 6b worktrees CLEANED ×5 · **6c maps — SEE BELOW** · 6d state-regen PASS (gap-counts + recent-sessions) · 7 PUSH (scrmlTS + scrml-support) · 8 user-voice S191 + memory `project_flux_game_dogfood` + this hand-off.
 
 ## pa.md directives in force
-- Rules R1–R5. `---` answer-delimiter. Profile A/B. wrap = 8 steps (6b/6c/6d). full-wrap discriminator. 88% floor.
-- Dispatch protocol: S88 isolation · F4 startup-verify · S90 CWD · S99/S126 Bash-edit + no-cd · S136 BRIEF.md archival · **S138 R26 dual-verify (load-bearing this session — the Cluster-C severity-mask + the §51.9 message-steer both caught/confirmed via PA-independent R26)** · S147 branch-leak coherence · S164 bg-commit-race · **S187 crash-recovery (the Cluster-C first dispatch stalled — cleaned + re-dispatched, zero loss)** · S180 waiting-time (dog-food broadened Cluster C).
-- Memory live: `feedback_verify_before_claim` (TWO catches: the masked Cluster-C severity + the stale 2B carry-forward) · `feedback_no_batch_ratify_foundational_axioms` + `feedback_signal_ruling_scope` (the decision pass — L19 lock got a DD not a snap-ratify) · `feedback_waiting_time_work_pattern` (dog-food) · `feedback_dont_preclassify_fix_as_surgical` (the derived-engine "contained" mis-framing corrected).
+- Rules R1–R5 · `---` answer-delimiter · Profile A/B · wrap=8 steps (6b/6c/6d) · full-wrap discriminator · 88% floor.
+- Dispatch: S88 isolation · F4 startup-verify · S90 CWD · S99/S126 Bash-edit + no-cd · S136 BRIEF.md archival · **S138 R26 dual-verify (load-bearing all session — caught 2 siblings + 2 agent gaps)** · S147 branch-leak coherence · S164 bg-commit-race · S180 waiting-time (Tier-2 next-dispatch prep kept the 4-phase arc flowing) · S187 crash-recovery.
+- Memory live: **`feedback_dont_preclassify_fix_as_surgical`** (the survey-reversal — gap over-estimated its own fix) · `feedback_r26_empirical_verification` + `feedback_verify_before_claim` (dual-verify caught the siblings + agent gaps) · `feedback_no_batch_ratify_foundational_axioms` (the C-emission axiom-tension — resolved data-first WITHOUT a debate, C sidesteps the fork) · `feedback_waiting_time_work_pattern` · **NEW `project_flux_game_dogfood`**.
 
 ## Tags
-#session-190 #close #profile-a #cluster-c #derived-engine-expression-form #decision-pass #L19-keep #2B-close #verify-before-claim
+#session-191 #close #profile-a #if-fn-class #bug-1-tailwind-preflight #approach-c #all-composing-families #flux-game #survey-reversal #data-first-validation
