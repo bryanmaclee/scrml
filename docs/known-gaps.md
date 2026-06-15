@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 6 |
-| LOW | 17 |
+| MED | 7 |
+| LOW | 19 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -175,6 +175,22 @@ The S196 read-authority core (change-id `state-decl-shape-disambiguation-2026-06
 
 ### G-S52-RETRACTION-DOC-STALENESS — two derived docs still teach the deleted §52 auto-persist/optimistic model — `NEW S194; LOW; open — doc-currency / ouroboros`
 The S194 §52.6.2 retraction (Q1=C/Q2=WF — §52 is read-authority; the dev owns the `?{}` write; the compiler-generated optimistic-update + rollback + auto-persist were DELETED) left two DERIVED docs stale (surfaced by the wrap 6c `project-mapper` non-compliance scan): (1) `docs/articles/components-are-states-devto-2026-04-29.md` (lines 139, 175) claims the compiler "generates the optimistic-update path, generates the rollback" for `authority="server"` — now FALSE (its own line-239 self-justification "the claim follows the spec" is void because the spec it followed was amended); (2) `docs/heads-up/spec-consolidation-2026-05-25.md` (lines 297, 332, 370) describes §52.4 as the compiler synthesizing "optimistic update on writes, rollback on server-error" — contradicts the retraction (also resolves that doc's S166 carried-uncertain §52.4 TBD flag). The initial-load/SSR claims in BOTH remain compliant (read-authority infra IS still compiler-generated). Fix: reword the optimistic/rollback/auto-persist claims to the read-authority-only model (or deref the heads-up to scrml-support). Deferred from the S194 wrap (Rule-1-adjacent article + end-of-wrap edit-risk); the normative SPEC §52.6 is correct, this is derived-doc lag. <!-- @gap id=g-s52-retraction-doc-staleness sev=LOW status=open -->
+
+---
+
+## §S195 — gaps filed S195 (2026-06-15, corpus-rewrite wave-1a)
+
+### G-ENGINE-AUTODECL-BARE-VARIANT-WRITE — auto-declared `<engine for=T>` (no manual `<var>` decl) + bare-variant writes in a sibling `function` body fire `E-VARIANT-AMBIGUOUS` — `NEW S195; MED; open`
+An `<engine for=T initial=.V>` relies on PRIMER §7's auto-declared-variable promise (first engine auto-declares `<var>`). But bare-variant writes (`@var = .Variant`) in a sibling `function` body fire `E-VARIANT-AMBIGUOUS` (§14.10) — the type-checker cannot see the auto-cell's type from the function scope. The kickstarter §11.1 engine recipe VERBATIM does NOT compile (5 errors: E-STRUCTURAL-ELEMENT-MISPLACED + 2× E-STATE-UNDECLARED + 2× E-VARIANT-AMBIGUOUS). Workaround: add an explicit `<var>: T = .Initial` decl alongside the engine — which then draws `E-DG-002` "declared but never consumed." Surfaced by the 16-remote-data wave-1a grounding (the `<match for=Phase>` form has no such gap — the load-bearing reason 16 went match, not engine). Fix touches the type-system (auto-cell type visible to sibling fn-body bare-variant resolution) + the kickstarter §11.1 recipe currency.
+<!-- @gap id=g-engine-autodecl-bare-variant-write sev=MED status=open -->
+
+### G-BLOCKSPLITTER-COMMENT-SPAN-NOT-OPAQUE — the block-splitter / arm + state-child scanners don't treat `<!-- -->` as opaque — `NEW S195; LOW; open`
+Two triggers, one root (comment spans aren't exempted from scanner state-tracking): (a) an HTML comment containing literal tag-mentions (`<each>`/`<empty>`) inside a `<match>` arm body counts them toward closer balance → `E-MATCH-PARSE-001` (16-remote-data finding); (b) an ODD number of `'` inside a comment in an `<engine>` state-child body opens a phantom single-quote string that swallows the rest of the body → spurious `E-ENGINE-STATE-CHILD-MISSING` for every variant (05-multi-step-form finding). Both worked around in the wave-1a rewrites (no special chars in in-body comments). Fix: exempt `<!-- -->` spans from quote-state + tag-stack tracking in `block-splitter.js` + the arm/state-child scanners. Sibling-adjacent to the GAP-A void-scanner fix (`f563bc89`), same scanner family.
+<!-- @gap id=g-blocksplitter-comment-span-not-opaque sev=LOW status=open -->
+
+### G-EACH-BODY-SIGIL-INVARIANT-CLASSIFIER — `expr-node-corpus-invariant.test.js` escape-hatch classifier has no `@.`-sigil awareness — `NEW S195; LOW; open (test-infra, not a compiler bug)`
+The corpus-invariant test round-trips each example's expr-nodes through acorn and bails if >50% are ParseError "escape hatches." A bare `@.`/`@.field` interpolation in an `<each>` body (a valid scrml-native contextual sigil, §17.7.3) is not standard JS, so acorn yields a ParseError → counted as an escape hatch; a small `<each>`-heavy example trips the >50% gate. 04-live-search used the canonical `as person` alias (codegen-identical) to dodge it. Consequence: examples cannot teach the bare `@.` sigil in `<each>` bodies until the classifier whitelists `@.`-bearing bare-exprs as a recognized native form. NOT a compiler bug — a test-infra classifier blind spot; relevant to later corpus waves that want to teach `@.` (gap G5).
+<!-- @gap id=g-each-body-sigil-invariant-classifier sev=LOW status=open -->
 
 ---
 
