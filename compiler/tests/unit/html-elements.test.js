@@ -101,7 +101,7 @@ describe("void elements", () => {
 
 describe("rendersToDom", () => {
   it("is true for all HTML elements", () => {
-    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each"]);
+    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each", "render"]);
     for (const tag of getAllElementNames()) {
       if (nonDomElements.has(tag)) continue; // scrml structural elements
       expect(getElementShape(tag).rendersToDom).toBe(true);
@@ -124,6 +124,14 @@ describe("rendersToDom", () => {
   // expands to placeholder span at codegen time, not a DOM-rendering tag.
   it("is false for errors (scrml validation errors element)", () => {
     const shape = getElementShape("errors");
+    expect(shape).not.toBeNull();
+    expect(shape.rendersToDom).toBe(false);
+  });
+
+  // render-expr-primitive: <render of=X/> render-expression primitive (SPEC §19.x) —
+  // structural; codegen expands to a placeholder span + per-variant dispatch.
+  it("is false for render (scrml render-expression primitive)", () => {
+    const shape = getElementShape("render");
     expect(shape).not.toBeNull();
     expect(shape.rendersToDom).toBe(false);
   });

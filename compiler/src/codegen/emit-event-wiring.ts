@@ -87,7 +87,7 @@ interface LogicBinding {
    * A1c C11: `errors-element` discriminates the `<errors of=expr/>` first-class
    * element binding (SPEC §55.8 / L13).
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "errors-element";
+  kind?: "if-chain-branch" | "if-chain-else" | "errors-element" | "render-element";
   chainId?: string;
   branchId?: string;
   branchIndex?: number;
@@ -105,6 +105,16 @@ interface LogicBinding {
   fieldName?: string;
   bodyExpr?: string;
   bodyExprNode?: ExprNode;
+
+  /**
+   * render-expr-primitive — `<render of=X/>` element fields.
+   * Required when `kind === "render-element"`. See binding-registry.ts.
+   * Top-level `<render of=@cell/>` is wired here; arm-payload `<render of=err/>`
+   * is wired per-arm by emit-variant-guard.ts (held value in arm-fn scope).
+   */
+  renderHeldAccessor?: string;
+  renderHeldSubscribe?: string;
+  renderVariantExprs?: Record<string, string>;
 
   /**
    * Phase A10 (S78, 2026-05-10) — engine arm context tag.
@@ -294,6 +304,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   });
   const logicBindings = allLogicBindings.filter((b) => {
     if (!b.engineArm) return true;
+    // render-expr-primitive — an arm-tagged `<render of=X/>` binding is
+    // re-emitted PER-ARM by emit-variant-guard.ts:emitArmWireFunction, where
+    // the held value X (the arm payload binding) is in scope. Skip it from
+    // global emission (the held ident is undefined at module scope). A
+    // top-level `<render of=@cell/>` has no `engineArm` and is handled by the
+    // global path below.
+    if (b.kind === "render-element") return false;
     // Default reactive-text binding (kind === undefined) AND not a
     // conditional-display / mount-toggle / visibility variant → handled
     // per-arm. All other kinds remain in global emission (v1 limitation
@@ -832,6 +849,55 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // pull the latest derived value and re-render.
         lines.push(`      render_${suffix}();`);
         lines.push(`      _scrml_reactive_subscribe(${JSON.stringify(encodedSourceKey)}, function() { render_${suffix}(); });`);
+        lines.push(`    }`);
+        lines.push(`  }`);
+        continue;
+      }
+
+      // -----------------------------------------------------------------
+      // render-expr-primitive — top-level `<render of=@cell/>` element wiring
+      // (SPEC §19.x). The held value lives in a reactive cell (NOT an arm
+      // payload binding — those are wired per-arm by emit-variant-guard.ts).
+      // The render fires the held value's per-variant `renders` markup at the
+      // anchor + re-fires when the cell changes. SIDESTEPS the `__scrml_error`
+      // envelope gate — dispatches on the held value's OWN `.variant`/`.data`.
+      // -----------------------------------------------------------------
+      if (binding.kind === "render-element" && binding.anchorId && binding.renderHeldAccessor) {
+        const anchorId = binding.anchorId as string;
+        let acc = binding.renderHeldAccessor as string;
+        const variantExprs = (binding.renderVariantExprs ?? {}) as Record<string, string>;
+        const subscribeName = binding.renderHeldSubscribe;
+        // Apply encoded cell names when encoding is active (the accessor +
+        // every per-variant expr read `_scrml_reactive_get("<cell>")`).
+        let encodedSubscribe = subscribeName;
+        if (encodingCtx && encodingCtx.enabled && typeof subscribeName === "string") {
+          const enc = encodingCtx.encode(subscribeName);
+          if (enc !== subscribeName) {
+            acc = acc.split(`_scrml_reactive_get("${subscribeName}")`).join(`_scrml_reactive_get(${JSON.stringify(enc)})`);
+            for (const k of Object.keys(variantExprs)) {
+              variantExprs[k] = variantExprs[k].split(`_scrml_reactive_get("${subscribeName}")`).join(`_scrml_reactive_get(${JSON.stringify(enc)})`);
+            }
+            encodedSubscribe = enc;
+          }
+        }
+        const suffix = anchorId.replace(/[^a-zA-Z0-9_]/g, "_");
+        lines.push(`  // <render of=@cell/> element wiring (render-expr-primitive)`);
+        lines.push(`  {`);
+        lines.push(`    const el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+        lines.push(`    if (el) {`);
+        lines.push(`      const render_${suffix} = function() {`);
+        lines.push(`        const _hv = (${acc});`);
+        lines.push(`        const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
+        lines.push(`        switch (_rt) {`);
+        for (const [vName, vExpr] of Object.entries(variantExprs)) {
+          lines.push(`          case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
+        }
+        lines.push(`        }`);
+        lines.push(`      };`);
+        lines.push(`      render_${suffix}();`);
+        if (typeof encodedSubscribe === "string" && encodedSubscribe.length > 0) {
+          lines.push(`      _scrml_reactive_subscribe(${JSON.stringify(encodedSubscribe)}, function() { render_${suffix}(); });`);
+        }
         lines.push(`    }`);
         lines.push(`  }`);
         continue;

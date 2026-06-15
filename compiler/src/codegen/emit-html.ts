@@ -1041,6 +1041,133 @@ export function generateHtml(
         return;
       }
 
+      // ---------------------------------------------------------------------
+      // render-expr-primitive — `<render of=X/>` (SPEC §19.x, §19.2).
+      //
+      // Fires the HELD enum value X's per-variant `renders` contract (§19.2) at
+      // this markup position. X is commonly a `<match>` arm payload binding
+      // (`<Failed err> <render of=err/> </>`) — a local JS parameter in the arm
+      // render/wire function scope — or an `@cell` holding an enum value.
+      //
+      // CONTRACT-FIRING primitive (limit-the-primitive axiom, RATIFIED S195
+      // a/c): it dispatches X to its enum's per-variant `renders` markup. It
+      // never falls back to a tag string, never infers, never generalizes the
+      // `renders` grammar (stays error-enum-scoped). The exhaustiveness fence
+      // (every reachable variant of X's enum MUST declare `renders`) is the
+      // typer's E-RENDER-NO-CLAUSE (type-system.ts; reuses the §19.6.6
+      // E-ERROR-005 per-variant logic), so by the time codegen runs every
+      // variant has a `renders` template here.
+      //
+      // CODEGEN REUSE: the per-variant render markup compiles via the SAME
+      // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` the `<errorBoundary>`
+      // path uses — the ONLY difference is the firing site + the `dataExpr`.
+      // The boundary path passes `_eb_result.data` (the caught error envelope's
+      // payload); here we pass `(<heldValue>).data` (the held value's payload).
+      // This SIDESTEPS the `__scrml_error` envelope gate entirely
+      // (emit-event-wiring.ts) — the held value is never pretended to be a
+      // thrown error; we dispatch on its OWN `.variant` against its OWN `.data`.
+      // `<errorBoundary>` codegen is left untouched (§19.6.1).
+      // ---------------------------------------------------------------------
+      if (tag === "render") {
+        const span = node.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
+        const ofAttr = attrs.find((a: any) => a.name === "of");
+
+        // `of=` is REQUIRED. The typer fires E-RENDER-NO-OF (fatal); here we
+        // surface the same code defensively so a registry-bypassing test path
+        // also reports it, then emit an empty anchor so HTML rendering proceeds.
+        if (!ofAttr || !ofAttr.value) {
+          if (errors) {
+            errors.push(new CGError(
+              "E-RENDER-NO-OF",
+              `E-RENDER-NO-OF: \`<render>\` is missing the required \`of\` attribute. ` +
+              `The \`of=\` attribute references the held enum value to display, e.g. ` +
+              `\`<render of=err/>\` (a \`<match>\` arm payload binding) or \`<render of=@cell/>\`. ` +
+              `See SPEC §19.x.`,
+              span,
+            ));
+          }
+          parts.push(`<span data-scrml-render-anchor="${genVar("scrml_render")}"></span>`);
+          return;
+        }
+
+        // Resolve `of=` → the held value's runtime JS accessor.
+        //   - bare ident `err`   → a local binding (match-arm payload param /
+        //                          engine-arm payload). Lower to the plain JS
+        //                          identifier; it is in scope inside the arm
+        //                          render/wire fn the binding is tagged with.
+        //   - `@cell`            → a reactive cell. Lower to
+        //                          `_scrml_reactive_get("cell")`.
+        // The held value at runtime is `{ variant, data }` for a payload-bearing
+        // variant or a bare string tag for a unit variant — the same shape the
+        // engine/match dispatcher reads (emit-variant-guard.ts).
+        const ofVal = ofAttr.value as { kind?: string; name?: string };
+        let heldAccessor: string | null = null;
+        let heldSubscribe: string | null = null;   // @cell name to subscribe (null for a local binding)
+        if ((ofVal.kind === "variable-ref" || ofVal.kind === "ident") && typeof ofVal.name === "string" && ofVal.name.length > 0) {
+          if (ofVal.name.startsWith("@")) {
+            const cellName = ofVal.name.slice(1);
+            // Dotted path (`@compound.field`) — read the root cell then walk.
+            const dot = cellName.indexOf(".");
+            if (dot === -1) {
+              heldAccessor = `_scrml_reactive_get(${JSON.stringify(cellName)})`;
+              heldSubscribe = cellName;
+            } else {
+              const root = cellName.slice(0, dot);
+              const path = cellName.slice(dot); // includes leading "."
+              heldAccessor = `(_scrml_reactive_get(${JSON.stringify(root)}))${path}`;
+              heldSubscribe = root;
+            }
+          } else {
+            // Local binding (match-arm / engine-arm payload). Plain JS ident.
+            heldAccessor = ofVal.name;
+            heldSubscribe = null;
+          }
+        } else if (errors) {
+          errors.push(new CGError(
+            "E-RENDER-NO-OF",
+            `E-RENDER-NO-OF: \`<render of=...>\` requires an \`@\`-rooted cell or a held ` +
+            `enum binding as its \`of=\` value. Got an unrecognized value shape. ` +
+            `Example: \`<render of=err/>\` or \`<render of=@phase/>\`. See SPEC §19.x.`,
+            span,
+          ));
+        }
+
+        // Build the per-variant render-markup dispatch keyed by variant name,
+        // substituting THIS held value's `.data` as the runtime payload source.
+        // enumRenders is the file's per-enum variant->renders map (collected at
+        // the top of generateHtml; the SAME source the boundary path reads).
+        const variantRenderExprs: Record<string, string> = {};
+        for (const info of enumRenders.values()) {
+          for (const [variant, rawMarkup] of info.renders) {
+            const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
+            const payloadFields = info.variantFields.get(variant);
+            // dataExpr — the held value's payload object. `(acc).data` mirrors
+            // the boundary's `_eb_result.data`. The `(acc) != null` guard in
+            // emitBoundaryMarkupExpr keeps a unit-variant (bare-string held
+            // value, `.data` undefined) from throwing on field substitution.
+            variantRenderExprs[variant] = emitBoundaryMarkupExpr(
+              tpl,
+              heldAccessor ? `(${heldAccessor}).data` : `(null)`,
+              payloadFields,
+            );
+          }
+        }
+
+        const anchorId = genVar("scrml_render");
+        parts.push(`<span data-scrml-render-anchor="${anchorId}"></span>`);
+
+        if (registry && heldAccessor !== null) {
+          registry.addLogicBinding({
+            kind: "render-element",
+            anchorId,
+            renderHeldAccessor: heldAccessor,
+            ...(heldSubscribe !== null ? { renderHeldSubscribe: heldSubscribe } : {}),
+            renderVariantExprs: variantRenderExprs,
+          } as any);
+        }
+        return;
+      }
+
       if (tag === "program") {
         // Named programs are worker bundles (§4.12.4) — skip entirely.
         // Only emit children for the unnamed/root program.

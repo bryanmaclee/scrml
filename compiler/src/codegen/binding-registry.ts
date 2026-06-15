@@ -101,7 +101,7 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element";
 
   // Conventional reactive / conditional binding fields.
   // Required for `kind === undefined` bindings (the default).
@@ -226,6 +226,39 @@ export interface LogicBinding {
   fieldName?: string;
   bodyExpr?: string;
   bodyExprNode?: any;
+
+  /**
+   * render-expr-primitive — `<render of=X/>` element fields (SPEC §19.x).
+   * Required when `kind === "render-element"`.
+   *
+   *   anchorId            — the placeholder anchor id stamped into the
+   *                         `<span data-scrml-render-anchor="...">` HTML
+   *                         hookpoint. The runtime locates the anchor via this
+   *                         id and replaces its `innerHTML` with the held
+   *                         value's variant `renders` markup.
+   *   renderHeldAccessor  — the JS expression that yields the HELD enum value at
+   *                         runtime. For a `<match>`/engine arm payload binding
+   *                         (`<render of=err/>`) this is the plain JS identifier
+   *                         (`err`) — in scope inside the arm render/wire fn the
+   *                         binding is tagged with via `engineArm`. For an
+   *                         `@cell` (`<render of=@phase/>`) this is
+   *                         `_scrml_reactive_get("phase")` (or a dotted walk for
+   *                         `@compound.field`).
+   *   renderHeldSubscribe — for the `@cell` form, the root cell name to
+   *                         `_scrml_reactive_subscribe` on so the render re-fires
+   *                         when the held value changes. Undefined for a local
+   *                         arm-payload binding (the arm dispatcher re-runs the
+   *                         render fn on variant change, re-firing the render).
+   *   renderVariantExprs  — variant name -> JS string expr producing that
+   *                         variant's `renders` markup, with the held value's
+   *                         `.data` substituted as the payload source. Built via
+   *                         the same `compileBoundaryMarkup` + `emitBoundaryMarkupExpr`
+   *                         the `<errorBoundary>` path uses (firing-site + data-arg
+   *                         differ; SIDESTEPS the `__scrml_error` envelope gate).
+   */
+  renderHeldAccessor?: string;
+  renderHeldSubscribe?: string;
+  renderVariantExprs?: Record<string, string>;
 
   /**
    * Phase A10 (S78, 2026-05-10) — engine arm context tag.

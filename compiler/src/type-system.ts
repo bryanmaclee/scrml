@@ -7670,6 +7670,89 @@ function annotateNodes(
           }
         }
 
+        // render-expr-primitive (SPEC §19.x) — `<render of=X/>` exhaustiveness
+        // fence. The render-expression fires the HELD value X's per-variant
+        // `renders` contract (§19.2) at this markup position. X's static type
+        // MUST be an enum, and every reachable variant of that enum MUST declare
+        // a `renders` clause — otherwise a held variant could reach this site
+        // with nothing to display (the held-value counterpart to E-ERROR-005
+        // §19.6.6; this fence REUSES that per-variant-renders logic). This is the
+        // limit-primitives fence: never a default, never a tag-string, never
+        // inference (cf. design-insight render-expression ratification S195).
+        {
+          const _renderTag = (n.tag as string) ?? (n.name as string) ?? "";
+          if (_renderTag === "render") {
+            const _rSpan = (n.span as Span | undefined) ?? {
+              file: filePath, start: 0, end: 0, line: 1, col: 1,
+            };
+            const _attrs = Array.isArray(n.attrs) ? (n.attrs as ASTNodeLike[]) : [];
+            const _ofAttr = _attrs.find((a) => a && (a as { name?: unknown }).name === "of");
+            if (!_ofAttr || !_ofAttr.value) {
+              errors.push(new TSError(
+                "E-RENDER-NO-OF",
+                `E-RENDER-NO-OF: \`<render>\` is missing the required \`of\` attribute. ` +
+                `The \`of=\` attribute references the held enum value to display, e.g. ` +
+                `\`<render of=err/>\` (a \`<match>\` arm payload binding) or \`<render of=@cell/>\`. ` +
+                `See SPEC §19.x.`,
+                _rSpan as Span,
+              ));
+            } else {
+              // Resolve the `of=` value's static type. The canonical shape is a
+              // bare ident / @-cell reference (a held enum value); resolve it via
+              // the scope chain. A non-resolvable expression is left silent here
+              // (conservative — no false fence fire on an exotic shape).
+              const _ofVal = _ofAttr.value as { kind?: string; name?: string };
+              let _ofType: ResolvedType | null = null;
+              if ((_ofVal.kind === "variable-ref" || _ofVal.kind === "ident")
+                && typeof _ofVal.name === "string" && _ofVal.name.length > 0) {
+                const _lookupName = _ofVal.name.startsWith("@")
+                  ? _ofVal.name.slice(1)
+                  : _ofVal.name;
+                const _entry = scopeChain.lookup(_lookupName)
+                  ?? scopeChain.lookup(`@${_lookupName}`);
+                if (_entry && (_entry as { resolvedType?: ResolvedType }).resolvedType) {
+                  _ofType = (_entry as { resolvedType: ResolvedType }).resolvedType;
+                }
+              }
+              // Only fence when the type RESOLVES. `asIs` / unresolved → silent
+              // (the binding type may be erased in a context this pass can't see;
+              // a false fence fire would be worse than a missed one — codegen's
+              // runtime dispatch is still correct). A type that resolves to a
+              // NON-enum is a hard error (the primitive is error-enum-scoped).
+              if (_ofType && _ofType.kind === "enum") {
+                const _enumT = _ofType as { name?: string; variants?: VariantDef[] };
+                const _enumName = _enumT.name ?? "(anonymous)";
+                if (Array.isArray(_enumT.variants)) {
+                  for (const v of _enumT.variants) {
+                    if (!v.renders) {
+                      errors.push(new TSError(
+                        "E-RENDER-NO-CLAUSE",
+                        `E-RENDER-NO-CLAUSE: \`<render of=...>\` requires every reachable ` +
+                        `variant of the held value's enum to declare a \`renders\` clause, but ` +
+                        `variant '${_enumName}::${v.name}' has none. A \`<render>\` fires each ` +
+                        `variant's own \`renders\` markup (§19.2); a variant with no \`renders\` ` +
+                        `could reach this site with nothing to display. Add a \`renders\` clause ` +
+                        `to '${_enumName}::${v.name}' (the same fence as \`<errorBoundary>\` ` +
+                        `E-ERROR-005, §19.6.6). See SPEC §19.x.`,
+                        _rSpan as Span,
+                      ));
+                    }
+                  }
+                }
+              } else if (_ofType && _ofType.kind !== "asIs" && _ofType.kind !== "unknown") {
+                errors.push(new TSError(
+                  "E-RENDER-NOT-ENUM",
+                  `E-RENDER-NOT-ENUM: \`<render of=...>\` requires its \`of=\` target to be an ` +
+                  `enum value (it fires the value's per-variant \`renders\` contract, §19.2). ` +
+                  `The target resolved to a non-enum type ('${_ofType.kind}'). \`<render>\` is ` +
+                  `error-enum-scoped — it does not generalize to non-enum values. See SPEC §19.x.`,
+                  _rSpan as Span,
+                ));
+              }
+            }
+          }
+        }
+
         // S159 — SPEC §17.7.3 / §34 E-SYNTAX-064 (S154 ruling (a), R3).
         // A `:`-shorthand body that references the `@.` contextual iteration
         // sigil (`<li : @.name>`) is the §17.7 `<each>` per-item form — owned
@@ -10466,9 +10549,30 @@ function annotateNodes(
             const bindings = typeof variant === "string"
               ? (bindingsByVariant.get(variant) ?? [])
               : [];
-            for (const bindName of bindings) {
+            // render-expr-primitive: resolve each payload binding to its CONCRETE
+            // variant-field type (position-determined, mirroring §51.0.B.1) instead
+            // of erasing to `asIs`. This lets `<render of=binding/>` resolve the
+            // held value's static enum type via the scope chain (the exhaustiveness
+            // fence reads it below). Falls back to `asIs` when the match `for=Type`
+            // / variant / field type can't be resolved (unchanged legacy behavior).
+            const forTypeName = (n as { forType?: unknown }).forType;
+            let armFieldTypes: ResolvedType[] | null = null;
+            if (typeof forTypeName === "string" && typeof variant === "string") {
+              const enumT = typeRegistry.get(forTypeName);
+              if (enumT && enumT.kind === "enum" && Array.isArray(enumT.variants)) {
+                const vDef = enumT.variants.find((v) => v.name === variant);
+                if (vDef && vDef.payload && vDef.payload.size > 0) {
+                  armFieldTypes = Array.from(vDef.payload.values());
+                }
+              }
+            }
+            for (let bi = 0; bi < bindings.length; bi++) {
+              const bindName = bindings[bi];
               if (typeof bindName === "string" && bindName.length > 0) {
-                scopeChain.bind(bindName, { kind: "variable", resolvedType: tAsIs() });
+                const fieldType = armFieldTypes && bi < armFieldTypes.length
+                  ? armFieldTypes[bi]
+                  : tAsIs();
+                scopeChain.bind(bindName, { kind: "variable", resolvedType: fieldType });
               }
             }
             const armChildren = (wrapper as { children?: unknown }).children;

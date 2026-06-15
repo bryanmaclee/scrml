@@ -410,6 +410,18 @@ function emitArmWireFunction(
     const domEvent = (b.eventName || "").replace(/^on/, "");
     return !DELEGABLE_EVENTS.has(domEvent);
   });
+  // render-expr-primitive — `<render of=X/>` bindings tagged with THIS arm
+  // context. The held value X is commonly the arm's own payload binding
+  // (`<Failed err> <render of=err/>`), so it is a wire-fn parameter and is in
+  // scope here. The dispatch fires the held value's per-variant `renders`
+  // markup against the anchor's innerHTML (SPEC §19.x). Re-fires on each arm
+  // re-wire (variant change re-runs render+wire), which re-evaluates the held
+  // value. SIDESTEPS the `__scrml_error` envelope gate — dispatches on the
+  // held value's OWN `.variant`/`.data`.
+  const wireableRenders = logicBindings.filter(
+    (b) => b.kind === "render-element" && typeof b.anchorId === "string" &&
+           typeof b.renderHeldAccessor === "string",
+  );
 
   // B1 (§51.0.B.1) — payload bindings as wire-fn parameters. The dispatcher
   // passes `_data[fieldName]` positionals after `_root`, matching the
@@ -422,7 +434,7 @@ function emitArmWireFunction(
   const wireParams = ["_root", ...payloadBindings].join(", ");
 
   // No bindings to wire → no-op shell so the dispatcher branch stays uniform.
-  if (wireableLogic.length === 0 && wireableEvents.length === 0) {
+  if (wireableLogic.length === 0 && wireableEvents.length === 0 && wireableRenders.length === 0) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
 
@@ -468,6 +480,34 @@ function emitArmWireFunction(
       // No reactive deps — write once. No dispose needed.
       lines.push(`      el.textContent = ${rewrittenExpr};`);
     }
+    lines.push(`    }`);
+    lines.push(`  }`);
+  }
+
+  // ---- render-expr-primitive `<render of=X/>` dispatch ----
+  // The held value X is in scope (arm payload binding → wire-fn parameter).
+  // Switch on `X.variant` (object form) or use the bare string tag (unit
+  // variant), set the anchor's innerHTML to the matching variant's `renders`
+  // markup (the per-variant exprs already reference `(X).data`). The
+  // exhaustiveness fence (typer E-RENDER-NO-CLAUSE) guarantees every reachable
+  // variant has a template, so an unmatched tag is a should-not-happen leaf.
+  for (const binding of wireableRenders) {
+    const anchorId = binding.anchorId as string;
+    const acc = binding.renderHeldAccessor as string;
+    const variantExprs = (binding.renderVariantExprs ?? {}) as Record<string, string>;
+    const suffix = anchorId.replace(/[^a-zA-Z0-9_]/g, "_");
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+    lines.push(`    if (el) {`);
+    // Tag extraction mirrors the variant-guard dispatcher: object → `.variant`,
+    // bare string → the value itself.
+    lines.push(`      const _hv = (${acc});`);
+    lines.push(`      const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
+    lines.push(`      switch (_rt) {`);
+    for (const [vName, vExpr] of Object.entries(variantExprs)) {
+      lines.push(`        case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
+    }
+    lines.push(`      }`);
     lines.push(`    }`);
     lines.push(`  }`);
   }

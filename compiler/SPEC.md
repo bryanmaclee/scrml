@@ -1053,7 +1053,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 
 ### 4.15 Scrml-defined structural elements (registered at the block-grammar layer)
 
-**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40). Updated 2026-05-20 (S111 — quoted-text model) — `<engine>` / `<match>` body-form notes mark their state-child / arm bodies as code-default bodies (§4.18). Updated 2026-06-04 (S162) for `<each>` (§17.7) — closes the §4.15/§24.4 registry gap: `<each>` is normatively structural per §17.7 / §18.5.6 (S130 HU-1) but had been omitted from these registry enumerations; the native parser registered it at the #2f each-promotion landing.
+**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40). Updated 2026-05-20 (S111 — quoted-text model) — `<engine>` / `<match>` body-form notes mark their state-child / arm bodies as code-default bodies (§4.18). Updated 2026-06-04 (S162) for `<each>` (§17.7) — closes the §4.15/§24.4 registry gap: `<each>` is normatively structural per §17.7 / §18.5.6 (S130 HU-1) but had been omitted from these registry enumerations; the native parser registered it at the #2f each-promotion landing. Updated 2026-06-15 (S196) for `<render>` (§19.15) — the render-expression that fires a held enum value's per-variant `renders` markup (held-error-display, RATIFIED S195).
 
 **The registered structural elements:**
 
@@ -1062,6 +1062,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 | `<engine>` | §51.0 | `for=Type` (required), `initial=.Variant`, `var=name`, `derived=expr` | bare-body (state-children); each state-child body is a **code-default body** (§4.18 — S111) |
 | `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms); each arm body is a **code-default body** (§4.18 — S111) |
 | `<each>` (S130 HU-1) | §17.7 | `in=expr` OR `of=expr` (exactly one required), `as name` (optional), `key=expr` (optional) | per-item template (markup) + optional `<empty>` sub-element; `:`-shorthand single-expr per-item body (§4.14) |
+| `<render>` (S196) | §19.15 | `of=expr` (required — the held enum value to display) | self-closing; NO body — fires the held value's per-variant `renders` markup (§19.2), exhaustiveness-fenced (§19.15.3) |
 | `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) — free-text body (plain markup, NOT code-default) |
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
 | `<onTimeout>` (S67; `name=` S79) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required), `name=IDENT` (optional, S79 — addressable for `cancelTimer`) | self-closing only |
@@ -1070,11 +1071,11 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 
 **Normative statements:**
 
-- The block splitter SHALL classify openers `<engine`, `<match>`, `<each`, `<errors`, `<onTransition`, `<onTimeout`, `<onIdle`, and `<page` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
+- The block splitter SHALL classify openers `<engine`, `<match>`, `<each`, `<errors`, `<onTransition`, `<onTimeout`, `<onIdle`, `<render`, and `<page` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
 - These element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
 - (S111 — quoted-text model.) The state-child bodies of `<engine>` and the arm bodies of `<match>` are **code-default bodies** (§4.18.1) — a bare run in those bodies is code; display text is a `"..."` display-text literal (§4.18.3). The `<errors>` override-template body and any plain-markup element body are free-text bodies. The `<page>` body is a distinct **third** body-mode — `default-logic` (§40.8) — neither code-default nor free-text; the §4.18 split does not classify it. The body-mode of a structural element's body is fixed by the element kind per §4.18.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
-- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, or `page` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `render`, or `page` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
 - These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children); `<page>` is grammatical only as a child of `<program>` in multi-page apps. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R).
 - `<page>` SHALL NOT carry a `route=` attribute. Routing in scrml is filesystem-inferred (per Pillar 3 — compiler owns the wiring; cross-ref §47.9.2 path-preserve emission); a `route=` attr on `<page>` is `E-PAGE-ROUTE-ATTR-FORBIDDEN` (doubly forbidden: it both regresses against filesystem inference AND collides with the existing nested-program `route=` per §4.12.2). The allowed attribute set on `<page>` is exactly the four PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=` — and any other attribute fires `E-PAGE-INVALID-ATTR` with guidance toward the markup-element alternative or moving the attribute to `<program>` (app-wide concerns).
 
@@ -12527,7 +12528,7 @@ There is NO try/catch. There are NO exceptions. Errors are values that flow thro
 
 #### 19.2.1 Syntax
 
-An enum variant MAY carry a `renders` clause. The `renders` clause specifies markup that SHALL be used to display the variant when it appears in a markup context inside an `< errorBoundary>`.
+An enum variant MAY carry a `renders` clause. The `renders` clause specifies markup that SHALL be used to display the variant — either when it appears in a markup context inside an `< errorBoundary>` (caught from a live `!`-call, §19.6.3), OR when a `<render of=X/>` render-expression (§19.15) fires the held value's display contract from any markup position. The `renders` clause is the variant's **display contract**: narrower in meaning (one declared per-variant display) but wider in reach (fireable wherever the value is held, not only on a thrown path). **S196 amendment (render-expression, RATIFIED S195):** prior to S196 the clause fired ONLY inside an `< errorBoundary>`; `<render of=X/>` (§19.15) makes the same contract fireable from a HELD value (the canonical errors-as-states `.Failed(err)` lift), reusing the §19.6.6 exhaustiveness machinery without widening `< errorBoundary>` and without generalizing `renders` to non-error enums.
 
 **Formal grammar (extends §14.4):**
 
@@ -13549,6 +13550,9 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
+| E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
+| E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; cycle 2 (v0.next+1). Reserved; not yet emitted. | Error |
@@ -13901,6 +13905,44 @@ After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms wer
 ### Normative Basis
 
 The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
+
+### 19.15 The `<render of=X/>` Render-Expression (held-variant display)
+
+**Added 2026-06-15 (S196); RATIFIED S195** (held-error-display deep-dive + adversarial debate; design-insight "Held-error display — render-expression primitive (a/c)"). The render-expression closes the held-error-DISPLAY gap: a variant's `renders` clause (§19.2) fires automatically only when an `< errorBoundary>` catches a LIVE `!`-call (§19.6.3), but the canonical errors-as-states lift routes the failure into a HELD state cell (`@phase = .Failed(err)`), where no `renders` clause could fire. `<render of=X/>` fires a HELD value's per-variant `renders` markup from any markup position.
+
+#### 19.15.1 Syntax
+
+`<render of=X/>` is a self-closing scrml structural element (§4.15) with one required attribute `of=`. Its value is the held enum value to display — a match-arm / engine-arm payload binding (`<render of=err/>`, the common case) or a reactive cell (`<render of=@phase/>`). It is grammatical anywhere markup goes; the most common locus is a `<match for=Type>` arm body that owns the held payload (§18.0.1).
+
+```scrml
+type LoadError:enum = { NotFound(id: string) renders <p>No item #${id}.</p>, Network(msg: string) renders <p>Network: ${msg}.</p> }
+type Phase:enum = { Idle, Loading, Loaded(title: string), Failed(err: LoadError) }
+<phase>: Phase = .Idle
+<match for=Phase on=@phase>
+  <Loading>    <p>Loading…</p>  </>
+  <Failed err> <render of=err/> </>
+</match>
+```
+
+#### 19.15.2 Semantics
+
+`<render of=X/>` dispatches on X's runtime variant tag and sets the render site's markup to that variant's `renders` clause (§19.2), with the variant's payload fields bound from X's `.data`. It is a CONTRACT-FIRING expression — it fires a value's already-declared per-variant display contract. It is NEVER view-GENERATING: it does not synthesize a default view, a tag-string, or an inferred rendering. When X changes (a reactive cell, or a re-bound arm payload), the render site re-fires.
+
+#### 19.15.3 Exhaustiveness fence (the limit-primitives guarantee)
+
+`<render of=X/>` is well-formed ONLY when X's static type is an enum that declares a `renders` clause for EVERY variant reachable at the site. This REUSES the §19.6.6 (E-ERROR-005) per-variant exhaustiveness logic at a new fire site. A reachable variant with no `renders` clause is a COMPILE ERROR — **E-RENDER-NO-CLAUSE** — never a default, never a tag-string, never inference. A missing `of=` attribute is **E-RENDER-NO-OF**; an `of=` value whose static type resolves to a non-enum is **E-RENDER-NOT-ENUM** (when the type resolves; a conservatively-unresolved `asIs` `of=` value does not fence — it emits an inert no-op rather than a false positive). The fence is what keeps the render-expression a SHARP primitive (it fires a declared contract or fails to compile) rather than a god-object view-operator.
+
+#### 19.15.4 What it does NOT do (the design boundaries)
+
+- It does NOT touch `< errorBoundary>` (§19.6), which stays purely a CATCH primitive for live `!`-calls. The render-expression is a NEW, independent fire site — it never pretends a held value was thrown (the codegen sidesteps the `__scrml_error` envelope gate entirely).
+- It does NOT generalize the `renders` grammar to non-error enums. `renders` remains the per-variant display contract of error-shaped enums (§19.2); `<render>` simply makes that contract fireable from a held value as well as a caught one. Generalizing `renders` to every enum (a universal view-clause) was the highest god-ification risk and is explicitly REJECTED.
+- It does NOT replace the value-match string helper (`fn errorMessage(e) -> string`) or the structural nested `<match for=ErrType on=@held>` — both remain FULLY VALID for STRING display and for finer per-variant control. `<render of=X/>` is for delegating to a declared per-variant `renders` MARKUP contract.
+
+#### 19.15.5 Codegen
+
+The render-expression REUSES the existing per-variant `renders` machinery (the boundary's `allVariantRenderExprs` map + `emitBoundaryMarkupExpr`), substituting X's `.data` as the payload source instead of the boundary's `_eb_result.data`. It emits a render-anchor plus a per-variant `switch (X.variant)` that sets the anchor's `innerHTML` to the matching variant's `renders` markup, re-firing on X's reactive change. No new display infrastructure is introduced.
+
+**Cross-references.** §19.2 (the `renders` display contract this fires); §19.6 / §19.6.6 (`< errorBoundary>` + the E-ERROR-005 exhaustiveness fence the render-expression reuses); §18.0.1 (the `<match for=Type>` arm — the common render-expression locus); §13.5 (RemoteData — `Failed(Error)` is a held error variant the render-expression displays); §4.15 (`<render>` structural-element registration). Authority: design-insight "Held-error display — render-expression primitive (a/c)" (2026-06-15, RATIFIED), the error-handling holistic deep-dive, and the held-error-display debate.
 
 ---
 
@@ -15863,7 +15905,7 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 
 ### 24.4 Scrml-defined structural elements (Stage 0b D4 — registry distinction)
 
-**Added:** 2026-05-04 — registers the v0.next scrml-defined structural elements alongside the HTML element registry. These are NOT HTML elements; the registry distinguishes them. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40). Updated 2026-06-04 (S162) for `<each>` (§17.7 — registry catch-up; cross-ref §4.15).
+**Added:** 2026-05-04 — registers the v0.next scrml-defined structural elements alongside the HTML element registry. These are NOT HTML elements; the registry distinguishes them. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40). Updated 2026-06-04 (S162) for `<each>` (§17.7 — registry catch-up; cross-ref §4.15). Updated 2026-06-15 (S196) for `<render>` (§19.15 — the held-variant render-expression; cross-ref §4.15).
 
 **Registered scrml structural elements:**
 
@@ -15877,6 +15919,7 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 | `<onTimeout>` (S67) | §51.0.M | Per-state-child time-driven transition declaration; child of an engine state-child only |
 | `<onIdle>` (S77) | §51.0.R | Engine-wide event-timeout watchdog; child of `<engine>` only (sibling of state-children); one per engine maximum |
 | `<page>` (v0.3 Wave 1) | §40 | Per-route attribute container in multi-page apps; child of `<program>` only; route URL is filesystem-inferred (no `route=` attr); accepts exactly the four per-route concerns `db=`, `auth=`, `csrf=`, `ratelimit=` |
+| `<render>` (S196) | §19.15 | Held-variant render-expression; self-closing, `of=expr` required; fires the held enum value's per-variant `renders` markup (§19.2), exhaustiveness-fenced (§19.15.3) |
 
 **Normative statements:**
 
@@ -16934,6 +16977,9 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
+| E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
+| E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`< errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `< errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, promoted to error in cycle 2 (v0.next+1 = v0.3.0). Reserved; not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). Resolution: declare `idempotency-store=` on the closest-ancestor `<program>` (matching the `db=` driver), import `scrml:redis`, or annotate the function with `.idempotent()` if the batch is monotone-by-construction. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |

@@ -1926,7 +1926,10 @@ describe("§35 State Type Registry", () => {
       //   non-DOM (codegen replaces it with the synthesized reconciling-list
       //   subscriber + per-item factory). <empty> is also a legal sub-element
       //   inside <each> (per Q4 ratification).
-      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each"]);
+      // render-expr-primitive: <render of=X/> render-expression primitive (SPEC §19.x) is
+      //   structural — non-DOM (codegen expands to a placeholder span + per-variant
+      //   `renders` dispatch on the held value).
+      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each", "render"]);
       for (const [name, st] of reg) {
         if (nonDomElements.has(name)) {
           expect(st.isHtml).toBe(false);

@@ -796,6 +796,37 @@ REGISTRY.set("empty", {
 // iteration markup; nothing renders FROM the `<each>` tag itself.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// <render> — render-expression primitive (SPEC §19.x, render-expr-primitive-2026-06-15).
+//
+// Fires a HELD error-enum value's per-variant `renders` contract (§19.2) at
+// the markup position where the value is held — the held-value counterpart to
+// <errorBoundary> catching a LIVE `!`-call. Cohesive with <errors of=expr/>.
+//
+//   <render of=X/>   — X is an enum value (commonly a `<match>` arm payload
+//                     binding, e.g. <Failed(err)> binding `err`).
+//
+// Self-closing, one attribute `of=<expr>` (the held value). It is a
+// CONTRACT-FIRING primitive: it dispatches X to its enum's per-variant `renders`
+// markup. It does NOT touch <errorBoundary> (stays pure catch) and does NOT
+// generalize the `renders` grammar (stays error-enum-scoped). The exhaustiveness
+// fence (every reachable variant must declare `renders`) reuses §19.6.6
+// E-ERROR-005 logic via a dedicated diagnostic.
+//
+// rendersToDom: false — structural; codegen expands to a placeholder span +
+// runtime per-variant dispatch (mirrors <errors>).
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("render", {
+  tag: "render",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["of", attr("string", true)],   // required — the held enum value
+  ]),
+  isVoid: false,        // self-closing form is canonical
+  rendersToDom: false,  // structural — codegen expands to a placeholder span
+});
+
 REGISTRY.set("each", {
   tag: "each",
   attributes: new Map([

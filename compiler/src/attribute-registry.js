@@ -400,6 +400,21 @@ ELEMENT_ATTR_REGISTRY.set("empty", {
 // body for single-expression bodies (`<li : @.name>`).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// <render> — render-expression primitive (SPEC §19.x, render-expr-primitive).
+//
+// Self-closing `<render of=X/>` fires the HELD enum value X's per-variant
+// `renders` contract at this markup position (§19.2). The `of=` value is a bare
+// scrml-native reference (commonly a `<match>` arm payload binding) — no
+// `${...}` interpolation. Mirrors the <errors of=expr/> attribute shape.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("render", {
+  allowedAttrs: new Map([
+    ["of",  attrSpec({ supportsInterpolation: false })],   // required — the held enum value
+  ]),
+});
+
 ELEMENT_ATTR_REGISTRY.set("each", {
   allowedAttrs: new Map([
     ["in",   attrSpec({ supportsInterpolation: false })],   // collection-iteration source
