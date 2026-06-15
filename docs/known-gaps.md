@@ -15,8 +15,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 0 |
-| MED | 7 |
+| HIGH | 2 |
+| MED | 10 |
 | LOW | 19 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -191,6 +191,26 @@ Two triggers, one root (comment spans aren't exempted from scanner state-trackin
 ### G-EACH-BODY-SIGIL-INVARIANT-CLASSIFIER — `expr-node-corpus-invariant.test.js` escape-hatch classifier has no `@.`-sigil awareness — `NEW S195; LOW; open (test-infra, not a compiler bug)`
 The corpus-invariant test round-trips each example's expr-nodes through acorn and bails if >50% are ParseError "escape hatches." A bare `@.`/`@.field` interpolation in an `<each>` body (a valid scrml-native contextual sigil, §17.7.3) is not standard JS, so acorn yields a ParseError → counted as an escape hatch; a small `<each>`-heavy example trips the >50% gate. 04-live-search used the canonical `as person` alias (codegen-identical) to dodge it. Consequence: examples cannot teach the bare `@.` sigil in `<each>` bodies until the classifier whitelists `@.`-bearing bare-exprs as a recognized native form. NOT a compiler bug — a test-infra classifier blind spot; relevant to later corpus waves that want to teach `@.` (gap G5).
 <!-- @gap id=g-each-body-sigil-invariant-classifier sev=LOW status=open -->
+
+### G-FAILABLE-ARM-NESTED-CONSTRUCTOR-CRASH — a payload-bearing variant constructor NESTED as an arg in an `!{}` arm lowers to a string-invoked-as-function → runtime crash — `NEW S195; HIGH; open`
+Inside an `!{}` (or held-error-routing) arm, `@phase = .Failed(LoadError::NotFound(id))` — a payload-bearing variant constructor used as a nested arg — lowers to `data: { err: "NotFound" ( id ) }` (a string invoked as a function) → runtime crash `"NotFound" is not a function`. The SAME nested constructor in a plain `function` body lowers correctly. Site: the `!{}` arm-body rewriter `emit-logic.ts ~520-565` (rewriteBlockBody / _emitNestedGuardedArmBody). Compiles clean → crashes at runtime on a real errors-as-states idiom. Workaround (used by the landed 09): bind the whole error and route it (`| err :> { @phase = .Failed(err); return }`) — `err` is a bound var, not a nested constructor. GATES the render-expression primitive build (any display option must consume a correctly-constructed `.Failed(err)`). Surfaced by the 09-(b) rewrite + the error-handling deep-dive (Bug 1 / H4).
+<!-- @gap id=g-failable-arm-nested-constructor-crash sev=HIGH status=open -->
+
+### G-EACH-BODY-BARE-VARIANT-ARG — a bare `.Variant` enum literal as an event-handler call-ARG directly in an `<each>` per-item body emits invalid JS — `NEW S195; HIGH; open (non-blocking — workarounds ship)`
+`<each ...><button onclick=moveTo(card.id, .InProgress)>` emits the raw leading-dot `.InProgress` instead of the enum's frozen string `"InProgress"` → `E-CODEGEN-INVALID-JS`. Triangulated (wave-2 06-kanban grounding): the bare-variant→frozen-string lowering EXISTS in the Tier-0 `${for/lift}`, static-markup, and `<match>`-arm/variant-guard paths but is MISSING in the direct each-render-fn path (`compiler/src/codegen/emit-each.ts`). NON-GATING — 3 compile-verified workarounds (factor the move into a per-direction id-only handler so the bare `.Variant` lives in a fn body [the recommended idiom]; per-card `<match for=Status>`; the Tier-0 form). Parallel to wave-1 GAP-A but non-blocking (workarounds ship today). Surfaced by the wave-2 06 grounding.
+<!-- @gap id=g-each-body-bare-variant-arg sev=HIGH status=open -->
+
+### G-HELD-ERROR-DISPLAY — a held error variant (the errors-as-states `.Failed(err)`) cannot fire its own `renders` clause — `NEW S195; MED; RATIFIED-fix-pending-build`
+A variant's `renders` clause (§19.2) fires ONLY when an `<errorBoundary>` (§19.6) catches a LIVE `!`-call — never for a variant HELD in a state cell. So the canonical errors-as-states lift (`@phase = .Failed(err)`) and the auto-display surface structurally never meet; today you bridge with a re-fail shim (a smell) or duplicate the per-variant markup. **RATIFIED FIX (S195, a/c):** a NEW narrow render-expression primitive ("fire this value's `renders` contract here"), exhaustiveness-fenced (reuse §19.6.6 E-ERROR-005; compile-error if a reachable variant lacks `renders`); reuses `allVariantRenderExprs` + `emitBoundaryMarkupExpr` (firing-site + data-arg change). Keyword NOT `show` (§17.2 collision) → `render`/postfix (spec-time). Build queued; gated on g-failable-arm-nested-constructor-crash. Authority: `scrml-support/docs/deep-dives/error-handling-holistic-2026-06-15.md` + `…/docs/debates/error-handling-display-gap-2026-06-15.md` + design-insight (RATIFIED a/c).
+<!-- @gap id=g-held-error-display sev=MED status=open -->
+
+### G-SHORTHAND-INTERP-MATCH-ARM-CODEGEN — `${...}` interpolation inside a `<match>`-arm `:`-shorthand display-text literal (§4.18.4) emits LITERALLY → silent wrong output — `NEW S195; MED; open`
+`<Failed reason : "Failed: ${reason}">` COMPILES CLEAN but emits `return "Failed: ${reason}"` literally (the bare-body form `<Failed reason><p>${reason}</p></>` lowers correctly). §4.18.4 normatively specifies `${...}` interpolation inside a `"..."` display-text literal, but it is NOT lowered for the match-arm `:`-shorthand locus — worse than an error: silent wrong output. OPEN: likely a shared shorthand-interpolation-lowering gap across ALL code-default-body loci (engine state-child §51.0, match arm §18.0.1, §4.14). Surfaced by the error-handling deep-dive (Seam 3 / H2); pairs with the render-expression build.
+<!-- @gap id=g-shorthand-interp-match-arm-codegen sev=MED status=open -->
+
+### G-MATCH-ARM-APOSTROPHE-BS — an apostrophe in `<match>`-arm FREE-TEXT prose breaks the block-splitter — `NEW S195; MED; open`
+`<Failed> <p>We'll try again later.</p> </>` → `E-CTX-001` "Unclosed `<match>`" because the block-splitter scanner reads the apostrophe as a string delimiter (control `We will` compiles clean). Failure UI prose routinely uses contractions (Couldn't / We'll / Didn't); the 09 rewrites work around it by banning contractions in arm prose. Same family as the S144 `//`-in-string disambiguation cluster + the S195 `g-blocksplitter-comment-span-not-opaque` (the BS doesn't treat comment/quote spans as opaque in markup-ish free-text). Site: `block-splitter.js` (string-delimiter scan). Surfaced by the 09-(a) + the error-handling deep-dive (Bug 2 / H5).
+<!-- @gap id=g-match-arm-apostrophe-bs sev=MED status=open -->
 
 ---
 
