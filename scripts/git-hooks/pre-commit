@@ -1,5 +1,5 @@
 #!/bin/bash
-# scrmlTS pre-commit hook
+# scrml pre-commit hook
 # Checks:
 #   1. Branch is not main (warning — only PA should commit to main)
 #   2. Test suite passes (unit + integration + conformance, excluding browser)

@@ -4176,7 +4176,7 @@ function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table) {
 // updates reassign (\`@arr = [...@arr, x]\`). v1 uses a plain shallow clone of
 // the entries object (HAMT / structural-sharing deferred).
 //
-// Acyclic precondition (the cycles-prereq, scrmlTS 8d9db4e1): value-cycles are
+// Acyclic precondition (the cycles-prereq, scrml 8d9db4e1): value-cycles are
 // forbidden in scrml source by construction, so _scrml_value_canonical needs
 // NO cycle-guard (unlike _scrml_structural_eq, which kept one defensively for
 // malformed JS-host values).

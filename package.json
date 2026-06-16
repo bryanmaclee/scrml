@@ -1,18 +1,18 @@
 {
-  "name": "scrmlts",
+  "name": "scrml",
   "version": "0.7.0",
   "description": "A complete compiler for the web.",
   "type": "module",
   "private": true,
   "license": "MIT",
   "author": "Bryan Maclee",
-  "homepage": "https://bryanmaclee.github.io/scrmlTS/",
+  "homepage": "https://bryanmaclee.github.io/scrml/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bryanmaclee/scrmlTS.git"
+    "url": "https://github.com/bryanmaclee/scrml.git"
   },
   "bugs": {
-    "url": "https://github.com/bryanmaclee/scrmlTS/issues"
+    "url": "https://github.com/bryanmaclee/scrml/issues"
   },
   "keywords": [
     "scrml",

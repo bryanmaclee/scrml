@@ -10174,7 +10174,7 @@ function annotateNodes(
         // §59.7 — E-MAP-BRACKET-WRITE. A bracket-write whose receiver cell is
         // map-typed (`@m[k] = v`) is an ERROR: writes to a map are method-native
         // (`.insert(k, v)`), and the cycles-prereq COW path (`_scrml_deep_set`,
-        // scrmlTS `8d9db4e1`) is array/object-shaped — applied to a map cell it
+        // scrml `8d9db4e1`) is array/object-shaped — applied to a map cell it
         // would corrupt the map's internal representation. This typer-fatal gate
         // fires BEFORE the COW lowering (emit-logic.ts), so codegen never sees a
         // map bracket-write — no codegen change is needed.

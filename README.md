@@ -658,7 +658,7 @@ The [`examples/`](examples/) directory contains curated examples that show what 
 - [Spec Quick-Lookup](compiler/SPEC-INDEX.md) — find any section fast
 - [Pipeline Contracts](compiler/PIPELINE.md) — stage-by-stage compiler pipeline
 
-## scrmlTS
+## The compiler
 
 The working compiler for **scrml** — a complete compiler for the web.
 This is the TypeScript/JavaScript implementation that compiles `.scrml` source into
@@ -691,7 +691,7 @@ For recent fixes and work currently in flight, see [`docs/changelog.md`](./docs/
 # Install Bun if you don't have it — https://bun.sh
 curl -fsSL https://bun.sh/install | bash
 
-# Install scrmlTS dependencies
+# Install scrml dependencies
 bun install
 
 # Link the scrml binary onto your PATH (one-time, from the repo root)
@@ -733,7 +733,7 @@ MIT — see [LICENSE](./LICENSE).
 ## Related projects
 
 - **[giti](https://github.com/bryanmaclee/giti)** — a collaboration platform and git alternative designed around scrml's compiler strengths. The CLI (save, switch, merge, undo, history, status, land, init, describe, sync) wraps jj (jujutsu) as the engine until the scrml compiler can do AST-level conflict resolution natively. Long-term vision is a hosted forge; GitHub is the stopgap.
-- **[6nz](https://github.com/bryanmaclee/6NZ)** — a purpose-built code editor for the scrml ecosystem. An "Interactive Development Experience" written entirely in scrml, with a focus-centered viewport, NeoVim-superset keybindings plus mouse, CodeMirror 6 + canvas overlay, and offline-first PWA delivery. Currently in design phase, awaiting compiler API exposure in scrmlTS. The companion [Z-motion input spec](https://github.com/bryanmaclee/6NZ/tree/main/z-motion-spec) is released under CC0 so others can adopt it.
+- **[6nz](https://github.com/bryanmaclee/6NZ)** — a purpose-built code editor for the scrml ecosystem. An "Interactive Development Experience" written entirely in scrml, with a focus-centered viewport, NeoVim-superset keybindings plus mouse, CodeMirror 6 + canvas overlay, and offline-first PWA delivery. Currently in design phase, awaiting compiler API exposure in scrml. The companion [Z-motion input spec](https://github.com/bryanmaclee/6NZ/tree/main/z-motion-spec) is released under CC0 so others can adopt it.
 
 ## Status
 

@@ -1,8 +1,8 @@
-# scrmlTS — vPA pointer
+# scrml — vPA pointer
 
 This repo's **vice-PA (vPA)** directives live at:
 
-    ../scrml-support/vpa-scrmlTS.md
+    ../scrml-support/vpa-scrml.md
 
 To boot a vPA (a warm successor maturing alongside the live PA), open a SECOND
 Claude instance in this repo and say:
@@ -21,6 +21,6 @@ The PA's own boot phrase is unchanged: **"read pa.md and start session."**
 
 `pa.md` boots the live PA (the driver). `vpa.md` boots the warm successor. They are
 distinct roles in the same baton-pass continuity model — the **flogeance** workflow
-(`../scrml-support/vpa-scrmlTS.md` + the `pa-scrmlTS.md` S199 baton addendum +
+(`../scrml-support/vpa-scrml.md` + the `pa-scrml.md` S199 baton addendum +
 `handOffs/delta-log.md`). This stub exists so "read vpa.md and boot" resolves the way
 "read pa.md and start session" does — mechanically, for the global convention.

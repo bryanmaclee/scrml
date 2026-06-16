@@ -2,6 +2,10 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-16 (S200 — repo rename: `scrmlTS`→`scrml`, self-host `scrml`→`scrml-native`)
+
+Administrative rename — no compiler/source behavior change. The working compiler (the artifact adopters use) takes the public canonical name **`scrml`**; the dormant pure self-host repo becomes **`scrml-native`**. GitHub repos renamed (old URLs auto-redirect), local dirs + git remotes switched over, and a **surgical** content sweep updated forward-looking current-truth — repo identity, the live PA-directive sidecars (`pa-scrml.md` et al.), load-bearing paths, `package.json`, and navigation maps — while **preserving historical records verbatim**: changelog blocks, hand-offs, user-voice session entries, deep-dives, design-insights, and archived briefs correctly retain "scrmlTS" as the name at that time. Full suite green across the move (**24,372 / 0**). Plan + target list: `docs/changes/s200-repo-rename/SCOPING.md`.
+
 ### 2026-06-16 (S199 — E-leg server-authoritative engine `<engine server=@source>` SHIPPED + HOS engine showcase + gap-184 §11.1 recipe modernized + the flogeance/vPA continuity workflow built [FIRST live baton-pass]; board HIGH 2→3 · MED 10→11)
 
 Resumed the two S198 threads — the E-leg build and the vPA workflow. The **E-leg** (server-authoritative engine hydration, `<engine for=T server=@source>`) was re-dispatched, crashed on a transient env-500 after committing Phase 0+1 (3rd dispatch-path crash this arc), and was finished PA-direct (user "PA-direct, go") — then dog-fooded onto the trucking **HOS engine showcase**. gap-184's flagship engine recipe was modernized, and a bounded `<each>` sweep surfaced a 2nd compiler bug. The **vPA / PA-continuity workflow** ("flogeance") was named, scaffolded, and given its role directive — and the session CLOSED via the **FIRST live baton-pass**: a warm vPA absorbed the session's `delta-log` through the baton entry and assumed the PA role for this wrap, instead of a cold wrap+restart.

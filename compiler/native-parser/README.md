@@ -1,6 +1,6 @@
 # compiler/native-parser/
 
-The scrml-native compiler **front-end** — a composed-engines parser that, per **charter B** (ratified S111), replaces the WHOLE front-end: the heuristic block-splitter, the Acorn JS layer, BPP, and the statechild re-tokenizers. M1 (composed-engines lexer) is complete; the parser ships behind `--parser=scrml-native` at M5. Lives in the scrmlTS compiler pipeline.
+The scrml-native compiler **front-end** — a composed-engines parser that, per **charter B** (ratified S111), replaces the WHOLE front-end: the heuristic block-splitter, the Acorn JS layer, BPP, and the statechild re-tokenizers. M1 (composed-engines lexer) is complete; the parser ships behind `--parser=scrml-native` at M5. Lives in the scrml compiler pipeline.
 
 NOT a port. NOT the v1.0 self-host (the from-scratch hand-built compiler is a separate, post-v1.0 effort). Acorn is the conformance ORACLE — never the design template. Under charter B, M6 deletes the `compiler/src/` front-end stages (`block-splitter.js`, the Acorn integration, `body-pre-parser.ts`) — replaced by this parser behind a soak-gated flag flip.
 

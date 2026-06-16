@@ -137,7 +137,7 @@ export function sortBy(array, keyOrFn, direction) {
 // AND inside an IIFE in the client runtime — a correctness invariant cannot ride
 // a maybe-present global, so the algorithm is transcribed locally here.
 //
-// Acyclic precondition (S168 cycles-prereq, scrmlTS 8d9db4e1): value cycles are
+// Acyclic precondition (S168 cycles-prereq, scrml 8d9db4e1): value cycles are
 // forbidden in scrml source by construction, so this walk needs NO cycle-guard
 // and always terminates.
 //

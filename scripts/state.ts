@@ -336,7 +336,7 @@ function main() {
 
   const L: string[] = [];
   L.push("══════════════════════════════════════════════════════════════════");
-  L.push(`  scrmlTS — state at HEAD ${head}   (bun scripts/state.ts)`);
+  L.push(`  scrml — state at HEAD ${head}   (bun scripts/state.ts)`);
   L.push("══════════════════════════════════════════════════════════════════");
   L.push("");
   L.push(`Version: ${version()}`);

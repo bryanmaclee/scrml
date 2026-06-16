@@ -304,7 +304,7 @@ export const CHUNK_HASH_PLACEHOLDER = "00000000";
 const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
 
 /**
- * Sentinel surfaced when scrmlTS `package.json` cannot be read or its
+ * Sentinel surfaced when scrml `package.json` cannot be read or its
  * `version` field is missing/non-string. The `chunks.json` manifest's
  * `compiler` field is informational only — a fallback value is always
  * preferable to throwing inside codegen (Q-OPEN-4 ratification, S92).
@@ -323,7 +323,7 @@ let cachedCompilerIdentity: string | undefined;
 
 /**
  * Compute the `ChunksManifest.compiler` identity string from the
- * scrmlTS `package.json` `version` field (Q-OPEN-4, S92).
+ * scrml `package.json` `version` field (Q-OPEN-4, S92).
  *
  * Single-sourced from `package.json` so the manifest tracks the shipped
  * compiler version without a manually-synced string constant. The value
@@ -352,7 +352,7 @@ export function getCompilerIdentity(): string {
   if (cachedCompilerIdentity !== undefined) {
     return cachedCompilerIdentity;
   }
-  // Locate scrmlTS package.json relative to this module:
+  // Locate scrml package.json relative to this module:
   //   compiler/src/codegen/route-splitter.ts → ../../../package.json
   // Use `import.meta.url` so the resolution is correct regardless of
   // whether the module is imported from source (Bun TS loader) or from
