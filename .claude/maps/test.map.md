@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-15T11:00:00-06:00  commit: 471cbb34
+# updated: 2026-06-16  commit: 76d03aa9
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -22,7 +22,18 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | LSP | compiler/tests/lsp/ | ~8 files |
 | Self-host | compiler/tests/self-host/ | ~5 files |
 | CLI commands | compiler/tests/commands/ | ~5 files |
-| **Total** | compiler/tests/ | **992 .test.js files (verified `find compiler/tests -name '*.test.js' | wc -l` = 992 on `471cbb34`; +5 S196: render-expr-primitive [integration, 6 cases] + the 4 render-expr prereq-bug unit files [g-failable-arm-nested-constructor-crash 6, g-match-arm-apostrophe-bs 8, g-shorthand-interp-match-arm-codegen 8, h1-steer-markup-in-value-match 8]; +1 S195: match-arm-void-element-scanner [13 cases / 46 expects]; +4 S191: attr-if-fn-call-conditional [12 cases], attr-if-fn-condition-followup [5 cases], bug-1-tailwind-filter-family [28 cases], bug-1-tailwind-gradient-family [14 cases] — also extended bug-1-tailwind-ring-family/transform-shorthand/minor-families/unrecognized-class/arbitrary-value-emit/tailwind-classes)** |
+| **Total** | compiler/tests/ | **992 .test.js files (verified `find compiler/tests -name '*.test.js' | wc -l` = 992 on `471cbb34`; +5 S196: render-expr-primitive [integration, 6 cases] + the 4 render-expr prereq-bug unit files [g-failable-arm-nested-constructor-crash 6, g-match-arm-apostrophe-bs 8, g-shorthand-interp-match-arm-codegen 8, h1-steer-markup-in-value-match 8]; +1 S195: match-arm-void-element-scanner [13 cases / 46 expects]; +4 S191: attr-if-fn-call-conditional [12 cases], attr-if-fn-condition-followup [5 cases], bug-1-tailwind-filter-family [28 cases], bug-1-tailwind-gradient-family [14 cases] — also extended bug-1-tailwind-ring-family/transform-shorthand/minor-families/unrecognized-class/arbitrary-value-emit/tailwind-classes); +2 S198-S199: engine-hydration-initial-cell [unit, 16 cases] (A-leg `initial=@cell`) + engine-hydration-server-source [unit, 18 cases] (E-leg `server=@source`) — find-count = 994 at `76d03aa9`** |
+
+## S198-S199 New Test Files (engine-hydration arc — A-leg `initial=@cell` + E-leg `server=@source`)
+
+2 new unit files (`7532bd8f` S198 A-leg / `2e3aa6a4` S199 E-leg). Full suite at the E-leg land: 24,372 pass / 0 fail / 1009 files; within-node parity clean. R26 dog-food verified (bare-root + dotted field-access; compile exit 0, `node --check` OK).
+
+| File | Dir | Cases | Coverage |
+|------|-----|-------|----------|
+| compiler/tests/unit/engine-hydration-initial-cell.test.js | tests/unit/ | 16 | `7532bd8f` (S198 A-leg). `initial=@cell` SNAPSHOT-once: parser captures `initialCell`; codegen emits `emitEngineCellHydrationInit` deferred after `reactiveLines`; routes through guard-free `_scrml_engine_hydrate_init`; E-ENGINE-INITIAL-BOTH-FORMS (vs `initial=.Literal`), E-ENGINE-INITIAL-CELL-UNDECLARED, E-ENGINE-INITIAL-CELL-TYPE fences; the runtime decoder-boundary `E-ENGINE-INITIAL-INVALID-VARIANT`. Construction-not-transition. |
+| compiler/tests/unit/engine-hydration-server-source.test.js | tests/unit/ | 18 | `2e3aa6a4` (S199 E-leg). `server=@source` REACTIVE server-authoritative: parser captures `serverSource` (bare-root + dotted `@driver.current_status`); codegen `emitEngineServerSourceHydration` emits the `_scrml_reactive_subscribe(rootCell)` → guard-free `_scrml_engine_hydrate_init` IIFE with null-safe field-walk + skip-if-absent; mutual-exclusion E-ENGINE-SERVER-WITH-DERIVED / E-ENGINE-SERVER-WITH-INITIAL-CELL; W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE info nudge; reuses A-leg E-ENGINE-INITIAL-CELL-* on bare-root; W-ENGINE-INITIAL-MISSING suppression; DG credits the root cell (no false E-DG-002). |
+
+Also EXTENDED (not new) by `4f6aa2e8` (HOS showcase): compiler/tests/integration/trucking-dispatch-smoke-integration.test.js (+7L — the `<engine for=HOSStatus server=@source>` dog-food on examples/23-trucking-dispatch/pages/driver/hos.scrml + components/driver-card.scrml). The within-node allowlist (`parser-conformance-within-node-allowlist.json`) was bumped by both legs (+1 MISSING-FIELD per engine-decl for `initialCell`/`serverSource`, the native-parser parity backlog).
 
 ## S196 New Test Files (render-expression primitive `<render of=X/>` + render-expr prereq steer)
 

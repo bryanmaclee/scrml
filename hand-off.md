@@ -1,56 +1,67 @@
-# scrmlTS — Session 198 (WRAPPED + PUSHED; E-leg designed-not-built + vPA workflow open)
+# scrmlTS — Session 199 (CLOSE — WRAPPED via the FIRST live baton-pass)
 
-**Date:** 2026-06-16 (opened 2026-06-15).
-**Previous:** `handOffs/hand-off-202.md` (S197 CLOSE).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-203.md` at next OPEN.
-**Profile:** A — FULL. **A long, deep session: trucking corpus dog-food (1a+1b) + a full engine-hydration design-arc (DD→debate→F-primitive shipped) + a workflow/meta conversation that opened the vPA idea.**
+**Date:** 2026-06-16.
+**Previous:** `handOffs/hand-off-203.md` (S198 CLOSE — WRAPPED + PUSHED).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-204.md` at next OPEN.
+**Profile:** A — FULL.
+**Closed via the FIRST live baton-pass:** a warm vPA (booted off `vpa.md` mid-S199) absorbed the S199 `handOffs/delta-log.md` through the baton entry **[17]**, assumed PA authority, and ran this 8-step wrap **WARM** — no cold wrap+restart. The outgoing PA stood down. This fat hand-off persists for cold-start safety + audit (the delta-log is what the next vPA absorbs).
 
-## ⏭️ NEXT SESSION — START HERE (two resumable threads, user-ratified order)
-**1. BUILD THE E-LEG (re-dispatch — it crashed environmentally x2, NOT a design/brief problem).** FULLY DESIGNED + RATIFIED; brief archived at `docs/changes/engine-server-source-hydration-eleg-2026-06-16/BRIEF.md`. Re-dispatch `scrml-js-codegen-engineer` isolation:worktree off that brief in a STABLE env (the S198 env degraded — 2 stream-watchdog stalls, both pre-edit, nothing lost). It's a clean pickup. The design (do NOT re-litigate):
-   - **`<engine for=T server=@source>`** — the server-authoritative engine (the "E-leg"). Surface RATIFIED (`server=@source` value-bearing attr — the §52 *authority* sense of `server`, NOT the deprecated function-*placement* sense; parallel to §52 Tier-2 `<var server>`).
-   - **Model RATIFIED:** the engine HYDRATES (guard-free, via the F-primitive's `_scrml_engine_hydrate_init`) from a server-owned SOURCE cell, reactively, whenever the source resolves/changes; CLIENT writes remain GUARDED transitions (`_scrml_engine_direct_set`). The source-subscription is the ONLY guard-free path. The engine does NOT self-load — it rides an existing server source's §52 load (which already does fetch-on-mount + SSR pre-render).
-   - **Two reuse-seams** (PA-located, in the brief): derived-engine source-subscription (`emit-engine.ts`, gated on `derivedExpr`+read-only — must be lifted to a WRITABLE path; the Phase-0 STOP) + `_scrml_engine_hydrate_init` (reused reactively).
-   - **§38 server-push composes for free** (a pushed source-cell change fires the same hydrate). **DEFERRED:** the MMORPG world engine + G1 (§52 write-back/persist) + the bare `<engine server>` auto-self-load form (resolved as wrong).
-   - Design-insight recorded (`~/.claude/design-insights.md` engine-hydration verdict + this E-leg extension). DD: `scrml-support/docs/deep-dives/engine-hydration-from-persisted-state-2026-06-15.md`.
-   - **Once E-leg lands:** the HOS `<engine>` showcase becomes buildable (a follow-on trucking corpus rewrite — the "engines everywhere" goal; HOS currently has the dead engine REMOVED + a match-based validator from 1b).
+---
 
-**2. RESUME THE vPA WORKFLOW DESIGN (the user's marketable meta-idea; "hash it out").** A maturation/baton-pass PA-continuity system to kill the ~280k cold-start tax. See the dedicated section below — capture is there. User wants to: lock in the session's workflow lessons (DONE this wrap — user-voice + pa.md), hash out his OTHER workflow ideas (NOT yet shared — ask), and start the immediately-incorporable part (the PA↔vPA messaging protocol). **OPEN Q for the user:** where does the scrmlTS-side scaffold live — `scrml-support` (near the PA directives) or seeded in the NEW PRIVATE repo (the bulk of the system = his marketable IP, kept private)?
+## ⚡ THE BIG ONE — S200 = repo rename (do FIRST next session; user-chosen timing)
+`scrml` → **`scrml-native`** (pure self-host) AND `scrmlTS` → **`scrml`** (the working compiler becomes the public canonical name — points at the artifact adopters use through v1.0; `-native` names the self-host). **Big careful sweep — SCOPE FIRST. Do NOT do mid-session or with an agent in flight.** Targets: home-dir paths (`/home/bryan-maclee/scrmlMaster/scrmlTS` → `.../scrml`), git remotes, `pa.md` + `pa-core-scrmlTS.md` + `vpa-scrmlTS.md` + primer + master-list + PA memory + hand-off cross-refs, dropbox outbox paths, the S100 path-discipline hook (hardcodes `scrmlTS`), agent-brief absolute paths, resource-maps, `.claude/worktrees/` paths. User (S199): *"session 200 would be great for the name change."*
 
-## What landed + PUSHED this session (origin `f3319c57`, coherence 0/0)
-- **`d18ac83a` slice 1a — LoadStatus enum-wiring** (corpus): ~126 status if-chains → exhaustive `match`, dup transition tables collapsed, stored repr → variant names, new `InvoiceStatus` enum. Ratified surface: store-variant-name / match-directly / no-mapper.
-- **`7532bd8f` engine-hydration F-primitive — `initial=@cell` (A-leg)**: construction-snapshot hydration through the guard-free hook; decoder-boundary graft (`E-ENGINE-INITIAL-INVALID-VARIANT` runtime + 3 §34 codes); SPEC §51.0.E. RATIFIED via DD → authentic F-vs-B debate (F 48.5 vs 41.0).
-- **`57d799f6` slice 1b — DriverStatus enum-wiring**: driver-card→`match`; HOS transition validation → shared `isValidHosTransition`/`driverNextStates`; current_status seed/writes/payloads → variant names; **dead HOS engine REMOVED** (showcase deferred to E-leg).
-- **`73d937a2` chore**: 2 gaps + state regen + hand-off. **`f3319c57` fix**: within-node allowlist re-baseline for driver-card (the 1b push-gate fail — my brief omitted the re-baseline step; now baked into the brief template).
-- **scrml-support `624322d`**: user-voice S198 + the engine-hydration DD. (THIS wrap adds another scrml-support commit — user-voice S198 continuation.)
+---
 
-## vPA workflow — the idea (CAPTURE for resume)
-**Problem:** ~50% of a 1M session is fixed overhead (session-start ~280k + wrap ~60-80k + occasional push-fixes ~50k), paid COLD + SERIALLY every session. Plus the debate-agent-loading tax (real agents > synthesis, but loading costs the wrap/start tax per debate — hit THIS session: the F-vs-B experts weren't loaded → staging + a PA-composed interim + lucky mid-session pickup + re-run).
-**Idea:** a **maturation/baton-pass** system, 2 Claude instances, coordinated via the existing file-messaging dropbox (`handOffs/incoming/`). A **vPA (vice-PA)** matures alongside the live PA — warms ONCE, in PARALLEL, OVERLAPPED with productive work (monitoring the PA's dispatched agents, holding the loaded debate panel) — so the baton-pass is cheap (successor already warm). Not kill/resurrect; a rolling baton (vPA→PA→re-warm-as-next-vPA).
-**The three hard parts (PA analysis):**
-  1. **CRUX — delta-absorption must be CHEAP** or the vPA pays the tax too: warm once fully, then absorb the PA's DELTAS (commit msgs + a running "what-I-just-did" delta-log in the message stream), NOT re-read docs. The maturation = the amortization. Designing that delta-log is the heart.
-  2. **Two instances = files + a TRIGGER, not live-IPC.** No ambient watching; a message is acted on only when that instance is PROMPTED (user, `/loop`/`schedule` poller, or a task-notification). The trigger is first-class.
-  3. **Single-writer land authority.** Only the LIVE PA holds commit/land authority; the vPA is read-mostly + sandboxes (debates, agent-result digestion) until the pass. The pass IS the authority transfer.
-**Agent-ownership-transfer mechanism (PA answer):** the task-notification goes to the dispatcher (PA), so the vPA can't inherit THAT — but the agent writes progress+commits to a shared worktree/`progress.md`; the vPA "owns" it by reading THOSE (filesystem-shared) + doing the file-delta landing from its own instance. Offloads the heavy result-digestion context from PA to vPA.
-**Startable-now piece:** extend `handOffs/` with a PA↔vPA message vocab (state-delta · agent-ownership-transfer · debate-request/result · baton-pass) + the cheap delta-log convention. A design doc + light scaffold, NOT a build. **Public/private split:** the generalized productized system = private/marketable IP; the scrmlTS-side adaptation = the startable concrete piece (location TBD — the open Q above).
+## Session-close state (verified)
+- **HEAD:** `wrap(s199)` (this wrap commit) — **pushed to origin**. Substantive landings this session: E-leg `2e3aa6a4` · HOS showcase `4f6aa2e8` · gap-184 `d6608255` · each-gap `76d03aa9`.
+- **Sync:** scrmlTS pushed (pre-wrap was 0/2 unpushed — `d6608255` + `76d03aa9` — landed + pushed with the wrap). scrml-support pushed (NEW `vpa-scrmlTS.md` + pa.md S199 baton addendum + user-voice S199). Both clean, 0/0.
+- **Board:** **HIGH 3 · MED 11 · LOW 20 · Nominal 8.** (S198 close was HIGH 2 · MED 10 · LOW 20 · Nominal 8; S199 added +1 HIGH `g-each-component-body-invalid-js` and +1 MED `g-colon-shorthand-markup-misparse`.)
+- **Tests:** full suite **24,372 / 0** (at E-leg/HOS); pre-commit subset **17,219 / 0** (gap-184/each-gap). No compiler source changed after HOS `4f6aa2e8` (gap-184 + each-gap + wrap are docs-only) → full suite unchanged through close; pre-push hook is the gate.
+- **Maps:** REFRESHED to watermark **`76d03aa9`** (was stale at `471cbb34`) via `project-mapper` incremental on the E-leg/HOS source surface (engine/codegen/symbol-table/dependency-graph/runtime).
+- **Inbox:** empty. **Worktrees:** main only (E-leg agent worktree `agent-a3eafd6196921f173` cleaned at 6b — its Phase 0/1 commits were subsumed by the PA-direct landing `2e3aa6a4`).
+- **Experts staged** (`~/.claude/agents/`): `xstate-expert` · `elm-architecture-expert` · `threejs-webgl-integration-expert`.
+- **Version:** v0.7.0.
 
-## Workflow lessons LOCKED IN this wrap (user-voice + pa.md updated)
-- **Context-economics / use warm context fully.** Warm context is a depreciating asset; ~50% fixed overhead means a warm session should be USED to value-exhaustion, not wrapped early. Estimate work in WARM-MARGINAL terms (1B cost ~20k warm vs ~280k+ cold), not cold-session terms. The S198 "lean wrap at 35% remaining" was the premature-wrap reflex recurring (`feedback_dont_wrap_at_43_percent`) — obeyed the letter ("your call") missed the spirit.
-- **Wrap-calibration:** wrap when genuinely near the floor (~15-20%) OR warm threads are spent / next-work is cold-and-unrelated. NOT "we did a chunk / we're deep in."
-- **PA-is-partner, not list-executor.** The dispatch→land→dispatch rhythm + treating the trucking slices as a list = agent-orchestration drift. The engine-hydration arc was the partner exception. Pull on the language-direction threads (what the dog-food/gaps/findings TELL us) WITH the user — don't file-and-move.
-- **Brief-template fix (BAKED IN):** corpus-rewrite / codegen briefs that touch within-node-corpus fixtures MUST include the within-node allowlist re-baseline + a FULL `bun run test` (not just the pre-commit subset) before DONE. (The 1b push-gate fail; now in the E-leg brief.)
+---
 
-## State as of close
-- **Board:** HIGH 2 · MED 10 · LOW 20 · Nominal 8. Tests: pre-commit subset 17,110 / 0 fail; full suite 24,354 / 0 (F-primitive). Version v0.7.0.
-- **Sync:** scrmlTS 0/0 (pushed); scrml-support pushed this wrap. Worktrees: ONLY main (5 cleaned this wrap — 1a/F/1b landed + 2 dead E-leg).
-- **MAPS REFRESH DEFERRED (the one full-wrap step skipped):** the F-primitive touched `compiler/src` (emit-engine/symbol-table/runtime-template) → maps watermark `471cbb34` is stale. Refresh DEFERRED because the env is degraded (2 dispatch crashes) — avoided another project-mapper dispatch into it. **OWED next session** (incremental on the F-primitive + E-leg files).
-- Gaps filed S198: `g-match-alternation-value-vs-derived` (MED), `g-engine-server-flag-silent-swallow` (MED — superseded by the E-leg for `server=@source`).
-- Experts staged (`~/.claude/agents/`): `xstate-expert` (forged) + `elm-architecture-expert` — dispatchable for future debates.
+## What landed S199 (detail)
 
-## Corpus-rewrite arc — remaining (carried)
-Trucking slices 2-5 (decl-coupled validators · `<each>` sweep · errors-as-states · typed props) + the HOS engine showcase (now E-leg-gated) + wave-3 deferred `32-markup-as-value` (HIGH `g-markup-value-ternary-fnreturn-codegen` blocked) + gauntlet measurement + the gap-184/§11.1 currency-bug.
+**1. E-leg — `<engine for=T server=@source>` server-authoritative hydration (`2e3aa6a4`, pushed).**
+The engine HYDRATES guard-free from a server-owned SOURCE cell (via `_scrml_engine_hydrate_init`, reused from the S198 `initial=@cell` F-primitive), reactively, whenever the source resolves/changes; CLIENT writes stay GUARDED (`_scrml_engine_direct_set`) — source-subscription is the ONLY guard-free path. `server=@source` = §52 *authority* sense (NOT the deprecated fn-placement sense). The engine rides an existing server source's §52 load (fetch-on-mount + SSR pre-render); it does NOT self-load. +18 unit tests (`engine-hydration-server-source.test.js`); full suite 24,372/0; R26-verified (bare-root + field-access); S147 coherence clean. **Supersedes `g-engine-server-flag-silent-swallow` for the `=@source` form** (bare no-value `<engine server>` stays resolved-wrong/out-of-scope). The re-dispatch crashed on a transient env-500 after committing Phase 0+1 (3rd dispatch-path crash this arc — NOT PA-loop); PA-direct finished Phase 2-4 (user: *"PA-direct, go"*). DD `scrml-support/docs/deep-dives/engine-hydration-from-persisted-state-2026-06-15.md`; design-insight recorded.
+
+**2. HOS engine showcase (`4f6aa2e8`, pushed)** — the canonical engine example the S193 MMORPG/"engines-everywhere" reframe asked for (S198's 1b removed the dead HOS engine and deferred the showcase to the E-leg). Trucking `pages/driver/hos.scrml` + `components/driver-card.scrml` now use `server=@currentDriver.current_status`; the engine renders the current-status badge + hydrates `@driverStatus`; `rule=` = the HOS transitions; buttons read `@driverStatus`. Within-node `hos` re-baselined; trucking +`W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE:1`. **E-leg→showcase arc CLOSED.**
+
+**3. gap-184 a+b (`d6608255`, was unpushed → pushed with wrap)** — kickstarter §11.1 flagship engine recipe MODERNIZED (bare-body + typed `Loaded(rows: Row[])` payload + `<each>`; compiles clean) + filed **`g-colon-shorthand-markup-misparse`** (MED — the underlying BS `:`-shorthand-markup mis-parse that surfaces a misleading `E-STRUCTURAL-ELEMENT-MISPLACED` cascade). State regen +1 MED.
+
+**4. `<each>` corpus sweep → `g-each-component-body-invalid-js` (HIGH, `76d03aa9`, was unpushed → pushed with wrap)** — `<each>` over a COMPONENT-list (`<LoadCard>`) loses component scope (E-SCOPE-001) + emits invalid JS (E-CODEGEN-INVALID-JS); the board conversion was REVERTED (blocked); plain-HTML `<each>` works.
+
+**5. flogeance / vPA continuity workflow built (the workflow-meta thread).** The maturation/baton-pass PA-continuity system attacking the ~280k cold-start tax. Landed: the new private **flogeance** repo (built in scrml — itself a dogfood; scrmlTS *consumes* it) SCAFFOLDED (git init + project pa.md + README + `docs/ideas.md` + dropbox; committed local `d846fec`, **NO remote — user adds**), then REFRAMED → **MPA** (Master PA Orchestrator) with a 6-DD slate authored (vPA) in `flogeance/docs/ideas.md`; the vPA role directive `scrml-support/vpa-scrmlTS.md` (sibling to pa.md; boot-hardened so the `delta-log` WINS over hand-off/master-list on conflict — entries [9][12]); the pa.md S199 baton-pass addendum (PA side); the `handOffs/delta-log.md` PA→vPA stream + format ratified (raw-stream-only, PA single-writer); the `scrmlTS/vpa.md` boot pointer (*"read vpa.md and boot"*). **This wrap is the FIRST live baton-pass — executed WARM by the successor.**
+
+---
+
+## ⏭️ OPEN THREADS / NEXT PRIORITIES
+
+1. **S200 repo rename** (see THE BIG ONE above) — the explicit next-session arc.
+2. **3 fresh-arc compiler bugs** (BS/codegen — "delicate, fresh-arc-shaped per the repeated-crash pattern + S140 PA-direct-during-instability lesson). These are the remaining high-value scrml-correctness work:
+   - `g-each-component-body-invalid-js` (**HIGH**) — `<each>` over a component-list loses component scope (E-SCOPE-001) + emits invalid JS.
+   - `g-markup-value-ternary-fnreturn-codegen` (**HIGH**, pre-existing, S197) — markup-as-value (Pillar 1) fails to codegen in 3 documented forms (inline ternary `${c ? <a/> : <b/>}` · derived-cell ternary · `fn f() -> markup { return <m/> }`). Blocks the deferred `32-markup-as-value` example.
+   - `g-colon-shorthand-markup-misparse` (**MED**) — BS `:`-shorthand-markup mis-parse → misleading `E-STRUCTURAL-ELEMENT-MISPLACED`.
+3. **flogeance / MPA** — the vPA workflow REFRAMED → Master PA Orchestrator; a 6-DD slate is authored in `flogeance/docs/ideas.md`. flogeance is **LOCAL-ONLY** (commit `d846fec`, no remote — user adds it). **flogeance is where the user discusses remaining workflow ideas** (more not yet shared). The PA↔vPA system itself is now LIVE + proven (this session's baton-pass).
+4. **Trucking corpus rewrite continues** (the S193 "show real scrml" arc; HOS engine showcase now done): slices 2-5 — decl-coupled validators · `<each>` sweep · errors-as-states · typed props.
+
+## Carried backlog (lower priority)
+- Trucking slices 2-5 + remaining corpus-rewrite waves.
+- Wave-3 deferred `32-markup-as-value` (blocked on `g-markup-value-ternary-fnreturn-codegen` HIGH).
+- Gauntlet measurement; value-native map §59 phase-c build (Nominal); the broader §59/Nominal-spec-ahead slate (8 Nominal entries).
+
+---
+
+## The vPA / flogeance workflow — now LIVE (orientation for the next vPA)
+The model (see `scrml-support/vpa-scrmlTS.md` + `handOffs/delta-log.md` header): the vPA boots ONCE (full PA-style start, overlapped with PA productivity), then stays current by absorbing the PA's `delta-log` on poke (NOT re-reading docs), and **takes the baton** when the PA nears wrap. Rolling baton: vPA → PA → (fresh) vPA. **Single-writer rule:** only the LIVE PA commits/appends-to-delta-log; the vPA is read-only until the baton-pass. The delta-log is ephemeral-per-baton-cycle, raw-stream-only, and WINS over this hand-off on conflict (the hand-off only rewrites at wrap). S199 proved the loop end-to-end: a vPA booted mid-session, absorbed through [11], then through the baton [17], and ran this wrap as the new PA.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence · S180 waiting-time · **S198 wrap-calibration + context-economics + partner-not-list + the within-node-allowlist brief-template fix (NEW this wrap)** · wrap 8-step.
+R1–R5 · `---` delimiter · Profile A · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence (`rev-list --left-right` + branch-tip==FINAL_SHA) · S180 waiting-time 3-tier · S198 wrap-calibration + context-economics (warm-marginal) + partner-not-list + within-node-allowlist brief-template fix · **S199 baton-pass (PA side: delta-log is PA single-writer; baton vs cold-wrap; 5-step handoff)** · wrap 8-step (incl. 6b worktree-clean + 6c maps + 6d state-regen).
 
 ## Tags
-#session-198 #wrapped #pushed #e-leg-designed-not-built #vpa-workflow-open #engine-hydration-F-shipped #trucking-1a-1b-landed #context-economics-locked-in
+#session-199 #close #wrapped #first-live-baton-pass #e-leg-shipped #hos-showcase #flogeance-mpa #s200-repo-rename #board-high-3-med-11

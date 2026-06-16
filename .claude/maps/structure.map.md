@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-15  commit: 471cbb34
+# updated: 2026-06-16  commit: 76d03aa9
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -63,8 +63,8 @@ scratch/  — throwaway working files
 ### S155 — #14 event-payload-transition (typer batch 2 + codegen batch 3)
 - compiler/src/symbol-table.ts (11280L at S155) — SYM PASS 11 resolves `acceptsType` against `fileAst.typeDecls`; fires `E-ENGINE-ACCEPTS-NOT-ENUM` when the type is absent or non-`:enum`; PASS 20 block-form `<match>` exhaustiveness now carries `E-MATCH-SUBSET-DEAD-ARM`; per-state message-arm exhaustiveness fires `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` and `E-ENGINE-MSG-WITHOUT-ACCEPTS`. Exports `MessageArmEntry` interface and `EngineStateChildEntry.messageArms`.
 - compiler/src/type-system.ts (17070L at S155) — two-plane `.advance(.X)` resolution (§51.0.G.1): state-plane via `_scrml_engine_advance`, message-plane via `_scrml_engine_dispatch_message`; `parseEnumSubsetRefinement()` materializes `PredicatedType` with `subsetVariants: Set<string>` for `Role oneOf([.A,.B])` / `notIn([...])` (§53.15.1); three-zone exhaustiveness pass for enum-subset `<match>` (§18.8.1 / §18.0.1): in-subset arms, out-of-subset dead arms (→ `E-MATCH-SUBSET-DEAD-ARM`), absent arms; `E-ENGINE-MSG-UNKNOWN` fires when `.advance(.X)` targets a variant in NEITHER the state plane NOR the message plane.
-- compiler/src/codegen/emit-engine.ts (4398L) — `emitEngineMessageArmTable()` (§51.0.S batch 3): emits per-engine `__scrml_engine_<varName>_arm_table` keyed by (from-state-tag, message-tag); `engineMessageArmTableName()`, `engineHasMessageArms()`, `collectEnginesWithMessageArms()`, `collectEngineMessageVariants()` exported for threading into emit-each and emit-event-wiring; `parseEnumVariantFieldsForType()` resolves payload-binding field names at codegen time.
-- compiler/src/runtime-template.js (+78L at S155) — `_scrml_engine_dispatch_message(varName, msg, armTable, table, timersTable, idleEntry, internalTable, historyMap)` runtime helper (§51.0.S.2); resolves message tag + payload, dispatches to per-state arm fn, calls `_scrml_engine_advance` for the target transition, handles idle-reset on handled message.
+- compiler/src/codegen/emit-engine.ts (4398L) — `emitEngineMessageArmTable()` (§51.0.S batch 3): emits per-engine `__scrml_engine_<varName>_arm_table` keyed by (from-state-tag, message-tag); `engineMessageArmTableName()`, `engineHasMessageArms()`, `collectEnginesWithMessageArms()`, `collectEngineMessageVariants()` exported for threading into emit-each and emit-event-wiring; `parseEnumVariantFieldsForType()` resolves payload-binding field names at codegen time. **S198-S199 engine-hydration arc**: `emitEngineCellHydrationInit`/`...ForFile` (A-leg `initial=@cell` snapshot-once) + `emitEngineServerSourceHydration(meta)`/`...ForFile` [~:1746] (E-leg `server=@source` reactive server-authoritative — `_scrml_reactive_subscribe(rootCell)` → guard-free `_scrml_engine_hydrate_init`, null-safe dotted field-walk, skip-if-absent); both REUSE the shared runtime helper `_scrml_engine_hydrate_init` (no new runtime helper) and the guard-free construction hook (engine stays writable).
+- compiler/src/runtime-template.js (+78L at S155) — `_scrml_engine_dispatch_message(varName, msg, armTable, table, timersTable, idleEntry, internalTable, historyMap)` runtime helper (§51.0.S.2); resolves message tag + payload, dispatches to per-state arm fn, calls `_scrml_engine_advance` for the target transition, handles idle-reset on handled message. **S198 (`7532bd8f`)**: NEW `_scrml_engine_hydrate_init(varName, snapshot, validTags, forType)` (~L3817) — the SHARED guard-free engine-hydration construction hook (bare reactive set, NEVER `_scrml_engine_direct_set`) + the decoder-boundary runtime guard `E-ENGINE-INITIAL-INVALID-VARIANT` (a non-`for=T`/absence value at construction throws); reused by BOTH the A-leg `initial=@cell` snapshot and the S199 E-leg `server=@source` reactive hydration.
 
 ### S156 — Bug 62 (`<each>` engine-ctx threading) + (d)-A enum-subset (4 batches)
 
@@ -745,6 +745,37 @@ SPEC §52.6.2/.3/.4 retracted auto-persist (Q1=C/Q2=WF) + NEW §52.6.6 + NEW §5
 - **compiler/SPEC-INDEX.md** — regenerated; the §52 row now reads "READ-authority + reactive-wiring layer (load +
   SSR + E-AUTH) — the persist write is the dev's explicit `?{}` at BOTH tiers (§52.6.2 auto-persist RETRACTED; §52.6.6
   dev write-fn convention; SPEC-ISSUE-026 RESOLVED)".
+
+## Key S198-S199 Source Changes (engine-hydration arc — A-leg `initial=@cell` snapshot-once + E-leg `server=@source` reactive server-authoritative)
+
+The engine-hydration arc seeds an `<engine for=T>` instance from a RUNTIME cell instead of the
+static `initial=.Literal`. Two legs landed across S198-S199; both route through ONE guard-free
+construction hook and a SHARED runtime helper (`_scrml_engine_hydrate_init`) — no transition guard
+(`rule=` does not apply to construction), engine stays WRITABLE (dev writes route through
+`_scrml_engine_direct_set` unchanged). Authority: `docs/changes/engine-hydration-initial-cell-2026-06-15/BRIEF.md`
+(A-leg) + `docs/changes/engine-server-authority-2026-06-16/BRIEF.md` (E-leg).
+
+**A-leg — `initial=@cell` (S198, `7532bd8f`, Approach F):** SNAPSHOT-ONCE at engine construction.
+- compiler/src/ast-builder.js — recognize `initial=@cell`; capture `engineDecl.initialCell` (bare cell name).
+- compiler/src/symbol-table.ts — `EngineMetadata.initialCell`; `E-ENGINE-INITIAL-BOTH-FORMS` (mutual-exclusion with `initial=.Literal`); existence fires `E-ENGINE-INITIAL-CELL-UNDECLARED` (reuses E-STATE class), type-mismatch fires `E-ENGINE-INITIAL-CELL-TYPE`.
+- compiler/src/codegen/emit-engine.ts — NEW `emitEngineCellHydrationInit` / `emitEngineCellHydrationInitsForFile` — deferred AFTER `reactiveLines` (the Phase-0 ordering fix; mirrors the `eachDispatchers` deferral). Snapshots the cell value at construction, routes through guard-free `_scrml_engine_hydrate_init`.
+- compiler/src/codegen/emit-client.ts — wires the A-leg `emitEngineCellHydrationInitsForFile(fileAST)` into the client stage.
+- compiler/src/runtime-template.js — NEW `_scrml_engine_hydrate_init(varName, snapshot, validTags, forType)` (~L3817): guard-free construction set (bare reactive set, never `_scrml_engine_direct_set`) + the decoder-boundary runtime guard `E-ENGINE-INITIAL-INVALID-VARIANT` (a non-`for=T`/absence value at construction throws — the ratified graft).
+- compiler/src/dependency-graph.ts — credits the `initialCell` as a reader (prevents a false E-DG-002 "declared, never read").
+- SPEC §51.0 (initial=@cell attr-table row + construction-not-transition semantic) + §34 codes. Native-parser re-sync to emit `initialCell` is parity backlog (live canonical; within-node allowlist bumped +1 MISSING-FIELD per engine-decl).
+
+**E-leg — `server=@source` (S199, `2e3aa6a4`):** REACTIVE server-authoritative — HYDRATES GUARD-FREE on EVERY source change (the server is the authority asserting truth). `server` here is the §52 AUTHORITY sense (a value-bearing decl-attr); dotted field-access path supported (`server=@driver.current_status`). Phase 0+1 (parser+SYM) recovered from agent crash; Phase 2-4 PA-direct, user-authorized.
+- compiler/src/ast-builder.js — `server=@source` captured as `engineDecl.serverSource` via `/\bserver\s*=\s*@(IDENT(?:\.IDENT)*)\b/` (dotted path preserved as the full string).
+- compiler/src/symbol-table.ts — `EngineMetadata.serverSource`; mutual-exclusion `E-ENGINE-SERVER-WITH-DERIVED` (forbidden with `derived=`) / `E-ENGINE-SERVER-WITH-INITIAL-CELL` (forbidden with `initial=@cell`); existence + type-compat REUSE the A-leg codes (`E-ENGINE-INITIAL-CELL-UNDECLARED` / `-TYPE`, BARE-ROOT only — field-access passes conservatively); `W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE` info nudge when the source cell is not itself a §52 read-authority cell (mechanism works, semantics is the dev's claim); `W-ENGINE-INITIAL-MISSING` SUPPRESSED when `serverSource` is set (the placeholder is intentional — unresolved source waits at `initial=.Literal`/first-state until it resolves).
+- compiler/src/codegen/emit-engine.ts — NEW `emitEngineServerSourceHydration(meta)` / `emitEngineServerSourceHydrationsForFile(fileAST)` [~:1746]: a reactive IIFE — `_scrml_reactive_subscribe(rootCell, __scrml_eleg_h)` → `_scrml_engine_hydrate_init` GUARD-FREE on every change (REUSES the A-leg runtime helper — NO new runtime helper). Splits the dotted source path: ROOT cell is subscribed, the field tail is a null-safe walk (`__v = (__v == null) ? null : __v["seg"]`). Skip-if-absent (`if (__v == null) return;` — unresolved source sits at the `initial=.Literal` placeholder; NOT a throw). §38 server-push composes for free (a pushed source-cell change fires the same subscription → same re-hydrate). Initial call `__scrml_eleg_h()` runs once for the SSR-already-resolved case.
+- compiler/src/codegen/emit-client.ts — imports + wires `emitEngineServerSourceHydrationsForFile(fileAST)` (stage `emit-engine-server-source-hydrations`); emitted AFTER `emitReactiveWiring`, alongside the A-leg, under `// --- engine server-authoritative reactive hydration (§52, E-leg) ---`.
+- compiler/src/dependency-graph.ts — credits the ROOT cell of the dotted source path as a reader (`serverSource.split(".")[0]` → `creditReader` + `emitMarkupReadEdge`) — fixes a false E-DG-002 the HOS dog-food surfaced.
+- compiler/src/native-parser-canary/within-node-classifier.ts — `serverSource` added to `STRIP_KEYS` [~:160] — a LIVE-only codegen-support field (the native parser does NOT yet recognize the `server=@source` form, same swap-class as `derivedExprNode`); stripped from the parity comparison, NOT a semantic divergence (both routes render identically).
+- SPEC §51.0.E (NEW server-form subsection + forward-ref fix) + §51.0 attr-table row + §34 (+3 codes; 2 reused-code rows extended) + §52.4.4 reciprocal statement; SPEC-INDEX regenerated (61 rows). Supersedes g-engine-server-flag-silent-swallow for the `server=@source` form. Persist-back is the dev's explicit `?{}` (§52.6.2).
+
+**HOS engine showcase (S199, `4f6aa2e8`):** the trucking corpus now dog-foods the E-leg — `examples/23-trucking-dispatch/pages/driver/hos.scrml` + `components/driver-card.scrml` declare `<engine for=HOSStatus server=@source>` (the "engines-everywhere" mandate). Smoke test + within-node allowlist updated; the engine-example gap the v1 corpus missed.
+
+**gap-184 kickstarter modernization (S199, `d6608255`):** `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.1 engine recipe modernized to the current engine forms; underlying BS bug filed in `docs/known-gaps.md`.
 
 ## Key S196 Source Changes (render-expression primitive `<render of=X/>` + render-expr prereq steer)
 
