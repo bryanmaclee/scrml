@@ -1,0 +1,22 @@
+// d1d7-unbound-ref.scrml — detector-validation fixture for D1 + D7
+// (D1-MOUNT-THROW + S-UNBOUND-REF).
+//
+// S202 acceptance bug 2 SHAPE: for-lift/`<each>` INLINED a component and left a
+// prop unsubstituted, so the per-item body referenced an identifier bound in NO
+// scope -> `ReferenceError: load is not defined` thrown on first card render at
+// mount. Compiled clean; `node --check` passed; caught only by a hand-run R26.
+// The current compiler rejects a plainly-undeclared identifier at COMPILE time
+// (E-SCOPE-001) and the inlining substitution bug is fixed, so a clean fixture
+// no longer throws an unbound-ref at mount. The detector-validation test
+// reproduces the HISTORICAL mount-time `ReferenceError: x is not defined` to
+// PROVE D1 (mount-throw) + D7 (`/is not defined/` match) fire. The fixture
+// documents the loop-body unbound-ref shape.
+<program>
+type Row:struct = { id: string, name: string }
+<rows>: Row[] = []
+<ul>
+    <each in=@rows key=@.id>
+        <li : @.name>
+    </each>
+</ul>
+</program>

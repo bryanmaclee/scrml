@@ -1,0 +1,17 @@
+// d4-raw-interp-attr.scrml — detector-validation fixture for D4 (S-RAW-INTERP).
+//
+// S202 acceptance bug 3 SHAPE: a `${...}` interpolation inside a string-literal
+// markup attribute shipped as LITERAL TEXT into the rendered attribute value
+// (href="/x/${load.id}" was JSON.stringify'd raw, surviving the `${` into the
+// DOM). The current compiler LOWERS this correctly (the bug is fixed — see
+// compiler/tests/browser/markup-value-render.browser.test.js), so a clean
+// fixture no longer emits the literal `${`. The detector-validation test mounts
+// this fixture (which renders clean today) and then reproduces the HISTORICAL
+// broken render — a literal `${...}` surviving into an attribute value — to PROVE
+// D4's attribute-value scan fires on the symptom. The fixture documents the shape.
+<program>
+<link>: string = "abc"
+<main>
+    <a href="/x/${ @link }">go</a>
+</main>
+</program>

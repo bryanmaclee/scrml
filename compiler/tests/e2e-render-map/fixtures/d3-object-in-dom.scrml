@@ -1,0 +1,17 @@
+// d3-object-in-dom.scrml — detector-validation fixture for D3 (S-OBJECT-IN-DOM).
+//
+// S202 acceptance bug 1 SHAPE: a non-primitive value reaches an interpolation
+// display site and is coerced via String(v) -> "[object ...]" in the DOM text.
+// The original bug was markup-as-value assigned to textContent ("[object
+// HTMLSpanElement]"); this fixture reproduces the SAME detector symptom via the
+// still-live shape of interpolating a struct value directly into text
+// (String({x,y}) === "[object Object]"). D3's `.includes("[object ")` fires on
+// either. This fixture COMPILES CLEAN and RENDERS the symptom — it is a genuine
+// (not injected) D3 trigger, so the detector is proven against real render output.
+<program>
+type Point:struct = { x: number, y: number }
+<pt>: Point = { x: 1, y: 2 }
+<main>
+    <p>${ @pt }</p>
+</main>
+</program>
