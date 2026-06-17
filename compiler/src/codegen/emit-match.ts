@@ -660,6 +660,19 @@ function buildMatchArms(
   // during the bare-body re-parse, attached to matchBlock.bodyChildren after the
   // loop so emit-each's collectEachBlocks(fileAST) emits their render fns.
   const collectedEachBlocks: any[] = [];
+  // g-each-over-arm-payload-binding-unbound (2026-06-17) — the reactive cell
+  // driving this match (its `on=` cell, or the auto-implied engine var). When an
+  // arm's `<each in=BINDING>` iterates the arm PAYLOAD binding, emit-each must
+  // resolve the iterable from THIS cell at runtime (the each render fn is a
+  // top-level no-arg fn — the arm-render-fn param `rows`/`items` is not in its
+  // scope). Null when the cell is not subscribe-eligible (constant `.Variant`
+  // on=, or an unresolved complex expression — those shapes don't carry a live
+  // variant payload to iterate, so no stamp).
+  const _armCellResolution = resolveOnExpr(matchBlock, fileAST);
+  const _armCellName: string | null =
+    _armCellResolution && _armCellResolution.variantSubscribeName
+      ? _armCellResolution.variantSubscribeName
+      : null;
 
   for (const entry of result.arms) {
     // Wildcard arm `<_>` — S109 Match block-form Phase 5: explicit render.
@@ -894,6 +907,18 @@ function buildMatchArms(
       }
     }
 
+    // g-each-over-arm-payload-binding-unbound (2026-06-17) — stamp any
+    // `<each in=BINDING>` in THIS arm's body whose iterable is one of this
+    // arm's payload bindings. The each-block nodes were just restamped + are
+    // shared refs (attached to matchBlock.bodyChildren below), so the stamp
+    // reaches the node emit-each's collectEachBlocks(fileAST) later finds.
+    if (_armCellName && payloadBindings.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { stampArmPayloadEaches } = require("./emit-each.ts") as {
+        stampArmPayloadEaches: typeof import("./emit-each.ts").stampArmPayloadEaches;
+      };
+      stampArmPayloadEaches(body, _armCellName, tag, payloadBindings, payloadFieldNames);
+    }
     if (payloadFieldNames) {
       arms.push({ tag, payloadBindings, payloadFieldNames, body });
     } else {

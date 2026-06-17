@@ -121,6 +121,28 @@ interface EachBlockAstNode {
   isNested?: boolean;
   /** The OUTER each's iter var name (set alongside isNested). */
   enclosingEachIterVar?: string | null;
+  /**
+   * g-each-over-arm-payload-binding-unbound (2026-06-17) — set at LIFT time by
+   * emit-match's buildMatchArms / emit-engine's buildEngineArms when this
+   * each-block's `in=` iterable is the ENCLOSING match-/engine-arm's PAYLOAD
+   * BINDING (e.g. arm `.Loaded(rows)` → body `<each in=rows>`). After arm-body
+   * flattening the each loses its arm association, so `collectEachBlocks`
+   * (post-flatten) cannot see the binding; the each render fn is a top-level
+   * no-arg fn and `const _items = rows;` would reference an UNBOUND name →
+   * `ReferenceError` at mount. With this stamp, emitEachBodyRenderForFile
+   * resolves the iterable from the reactive cell instead — the binding value
+   * lives at `_scrml_reactive_get(cellName).data[fieldName]` when the current
+   * variant is `variantTag`. ONE shared mechanism for match + engine arms
+   * (emitted shape is identical). Null/absent for every non-arm-payload each.
+   */
+  armPayloadBinding?: {
+    /** Reactive cell name driving the arm (match on= cell / engine var). */
+    cellName: string;
+    /** The variant tag whose payload carries this binding. */
+    variantTag: string;
+    /** The runtime data key (declared variant field name, position-resolved). */
+    fieldName: string;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +209,100 @@ export function collectEachBlocks(fileAST: any): EachBlockAstNode[] {
   // emit-match.ts:118.
   walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST, null);
   return found;
+}
+
+// ---------------------------------------------------------------------------
+// g-each-over-arm-payload-binding-unbound (2026-06-17) — arm-payload stamp
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk an arm's renderable body subtree and stamp every `<each in=BINDING>`
+ * whose `in=` iterable is a BARE reference to one of the arm's payload bindings
+ * with `armPayloadBinding` (cell name + variant tag + runtime field name). This
+ * is called at LIFT time — from emit-match's `buildMatchArms` and emit-engine's
+ * `buildEngineArms` — where the arm-payload binding context IS known. After the
+ * arm-body flatten the each-block loses its arm association (match: lifted into
+ * `matchBlock.bodyChildren`; engine: lives in the state-child markup children),
+ * so the post-flatten `collectEachBlocks` walker cannot recover it. The stamp
+ * survives because it mutates the same node refs `collectEachBlocks` later finds.
+ *
+ * ONE shared mechanism for BOTH match-arm and engine-arm payload bindings — the
+ * emitted shape (`_scrml_reactive_get(cell).data[field]` gated on the variant)
+ * is identical. `cellName` is the reactive cell driving the arm (match's `on=`
+ * cell / engine var). `payloadBindings[i]` is the local binding name and
+ * `payloadFieldNames[i]` its position-resolved runtime data key (defaults to the
+ * binding name when field-name resolution was unavailable). Iterables that are
+ * NOT a bare payload-binding reference (e.g. `@cell`, `g.items`, a count) are
+ * left untouched — they resolve through the existing module-scope paths.
+ *
+ * The match-side restamp gives lifted each-blocks a big synthetic id; the
+ * engine-side each keeps its file-counter id. Either way the node ref is the
+ * one `collectEachBlocks` returns, so the stamp is the right node.
+ */
+export function stampArmPayloadEaches(
+  body: any,
+  cellName: string,
+  variantTag: string,
+  payloadBindings: string[],
+  payloadFieldNames: string[] | undefined,
+): void {
+  if (!cellName || !variantTag) return;
+  if (!Array.isArray(payloadBindings) || payloadBindings.length === 0) return;
+  // binding-name -> runtime field name (default: the binding name itself).
+  const fieldFor = new Map<string, string>();
+  for (let i = 0; i < payloadBindings.length; i++) {
+    const local = payloadBindings[i];
+    if (!local) continue;
+    const field = (payloadFieldNames && payloadFieldNames[i]) ? payloadFieldNames[i] : local;
+    fieldFor.set(local, field);
+  }
+  if (fieldFor.size === 0) return;
+
+  const seen = new WeakSet<object>();
+  function walk(node: any, insideNestedScope: boolean): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const n of node) walk(n, insideNestedScope);
+      return;
+    }
+    if (node.kind === "each-block") {
+      // Only a TOP-LEVEL each (directly in the arm body, NOT nested inside
+      // another each's per-item template) reads the arm payload from module
+      // scope. A nested each's source references the OUTER each's iter var and
+      // is emitted INLINE in the outer factory (where that binding IS in scope),
+      // so it must NOT be redirected to the reactive cell.
+      const eb = node as EachBlockAstNode;
+      if (!insideNestedScope && eb.iterShape === "in") {
+        const raw = String(eb.inExprRaw ?? "").trim();
+        // The iterable must be a BARE identifier (the payload binding name).
+        // `@cell`, `g.items`, `rows.filter(...)` etc. are NOT a bare binding ref
+        // — leave them to the existing resolution paths.
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(raw) && fieldFor.has(raw)) {
+          eb.armPayloadBinding = {
+            cellName,
+            variantTag,
+            fieldName: fieldFor.get(raw)!,
+          };
+        }
+      }
+      // Descend into this each's per-item template under a NESTED scope (any
+      // each found there is iter-scoped to THIS each, not the arm payload).
+      if (Array.isArray(eb.templateChildren)) walk(eb.templateChildren, true);
+      // <empty> body is NOT iter-scoped, but it is also not a payload-binding
+      // iteration site; descend under the current scope for completeness.
+      if (eb.emptyChild) walk(eb.emptyChild, insideNestedScope);
+      if (Array.isArray(eb.bodyChildren)) walk(eb.bodyChildren, true);
+      return;
+    }
+    // Recurse into known container fields. Arm bodies / nested markup are NOT a
+    // new iteration scope, so `insideNestedScope` carries through unchanged.
+    for (const key of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren"]) {
+      if (Array.isArray((node as any)[key])) walk((node as any)[key], insideNestedScope);
+    }
+  }
+  walk(body, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -1903,7 +2019,23 @@ export function emitEachBodyRenderForFile(
     // Reading `_items` first establishes the dep edge unconditionally; we query the
     // mount AFTER and bail (dep already tracked) if it is not yet in the DOM.
     let itemsExpr: string;
-    if (node.iterShape === "in") {
+    if (node.iterShape === "in" && node.armPayloadBinding) {
+      // g-each-over-arm-payload-binding-unbound (2026-06-17) — the iterable is
+      // the enclosing match-/engine-arm's PAYLOAD BINDING. The arm render fn
+      // receives it as a param, but THIS top-level no-arg render fn does not, so
+      // the bare `const _items = rows;` would be UNBOUND → ReferenceError at
+      // mount. Resolve from the reactive cell instead: the binding value lives
+      // at `_scrml_reactive_get(cell).data[field]` when the current variant is
+      // `variantTag`. The reactive-get also establishes the dep edge (same
+      // dep-first-read invariant the `@cell` path relies on), so a later
+      // arm-entry remount re-renders against the live payload. When the cell is
+      // NOT currently the payload-carrying variant, fall back to `[]` (the each
+      // mount is not in the DOM then anyway — the arm isn't rendered).
+      const { cellName, variantTag, fieldName } = node.armPayloadBinding;
+      const vVar = `_scrml_arm_v_${node.id}`;
+      fnLines.push(`  const ${vVar} = _scrml_reactive_get(${JSON.stringify(cellName)});`);
+      itemsExpr = `(${vVar} && typeof ${vVar} === "object" && ${vVar}.variant === ${JSON.stringify(variantTag)} && ${vVar}.data) ? ${vVar}.data[${JSON.stringify(fieldName)}] : []`;
+    } else if (node.iterShape === "in") {
       const inExpr = node.inExprRaw ?? "[]";
       // Rewrite `@cell` to `_scrml_reactive_get("cell")` for V5-strict reactivity.
       // §59.8 (D4) — map-aware: `@m.entries()` etc. lower to `_scrml_map_*`.

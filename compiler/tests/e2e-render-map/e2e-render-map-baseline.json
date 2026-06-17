@@ -5,8 +5,8 @@
     "cells": 438,
     "histogram": {
       "renders-empty": 20,
-      "compiles-but-throws": 33,
-      "renders-clean": 254,
+      "compiles-but-throws": 30,
+      "renders-clean": 257,
       "smell-detected-wrong": 5,
       "fails-compile": 125,
       "HARNESS-TIMEOUT": 1
@@ -127,26 +127,14 @@
       "seeded": false
     },
     "examples/16-remote-data.scrml#empty": {
-      "state": "compiles-but-throws",
-      "smells": [
-        "D1-MOUNT-THROW",
-        "S-UNBOUND-REF"
-      ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "rows is not defined"
-      }
+      "state": "renders-clean",
+      "smells": [],
+      "seeded": false
     },
     "examples/16-remote-data.scrml#populated": {
-      "state": "compiles-but-throws",
-      "smells": [
-        "D1-MOUNT-THROW",
-        "S-UNBOUND-REF"
-      ],
-      "seeded": true,
-      "detail": {
-        "throwMessage": "rows is not defined"
-      }
+      "state": "renders-clean",
+      "smells": [],
+      "seeded": true
     },
     "examples/17-schema-migrations.scrml#empty": {
       "state": "compiles-but-throws",
@@ -229,15 +217,9 @@
       "seeded": false
     },
     "examples/29-engine-vs-flags.scrml#empty": {
-      "state": "compiles-but-throws",
-      "smells": [
-        "D1-MOUNT-THROW",
-        "S-UNBOUND-REF"
-      ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "items is not defined"
-      }
+      "state": "renders-clean",
+      "smells": [],
+      "seeded": false
     },
     "examples/30-validated-form.scrml#empty": {
       "state": "renders-clean",

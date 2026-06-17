@@ -2441,6 +2441,23 @@ function buildEngineArms(
         postMountJs = lines.join("\n");
       }
     }
+    // g-each-over-arm-payload-binding-unbound (2026-06-17) — stamp any
+    // `<each in=BINDING>` in THIS state-child's render body whose iterable is one
+    // of the arm's payload bindings (e.g. `.Loaded(items)` -> `<each in=items>`).
+    // The each-block lives in the state-child markup children (`body`), which is
+    // reachable from the engine-decl in fileAST, so emit-each's
+    // collectEachBlocks(fileAST) later finds the SAME node ref. Without the stamp
+    // emit-each emits `const _items = items;` in the top-level no-arg render fn
+    // (the arm render fn param `items` is not in its scope) -> ReferenceError at
+    // mount. ONE shared mechanism with the match side (emitted shape identical):
+    // resolve from `_scrml_reactive_get(varName).data[field]` gated on the variant.
+    if (meta.varName && payloadBindings.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { stampArmPayloadEaches } = require("./emit-each.ts") as {
+        stampArmPayloadEaches: typeof import("./emit-each.ts").stampArmPayloadEaches;
+      };
+      stampArmPayloadEaches(body, meta.varName, tag, payloadBindings, payloadFieldNames);
+    }
     if (postMountJs) {
       arms.push({ tag, payloadBindings, payloadFieldNames, body, postMountJs });
     } else {
