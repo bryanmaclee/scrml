@@ -557,6 +557,26 @@ function normalizeTokenizedRaw(raw: string): string {
   //   `@ . id` and `@.id` (idempotent).
   s = s.replace(/@\s*\.\s*([A-Za-z_$])/g, "@.$1");
 
+  // g-nested-component-member-arg-misparse (S200) — collapse the tokenized
+  //   GENERAL member-access spacing `obj . field` → `obj.field`. Same mechanism
+  //   as the `@.`-sigil and call-form collapses above: the logic tokenizer
+  //   space-pads the `.` member operator, so a component body's nested-component
+  //   prop arg `<Badge s=row.name/>` round-trips as `s=row . name`. The markup
+  //   attribute tokenizer (tokenizer.ts ~654) then reads `row` as ATTR_IDENT
+  //   (stops at the space) and strands `.name` — either a phantom bare attr
+  //   (E-COMPONENT-011) or, when the stranded segment matches a declared prop,
+  //   a silent member-DROP (`status=load.status` → `status=load`). Collapsing
+  //   here restores `row.name` before re-tokenization; chained access
+  //   (`row.inner.name`) collapses left-to-right under the global replace.
+  //   Pre-`.` class `[A-Za-z0-9_$\)\]]` covers ident / call-result `)` /
+  //   index-result `]`; post-`.` class `[A-Za-z_$]` requires a letter so numeric
+  //   literals (`3.14`, even space-padded `3 . 14`) and bare-variant leading
+  //   dots (`.Idle`, no preceding ident char) are never matched. The `@.` sigil
+  //   was already collapsed above (its `.` is preceded by `@`, not in this
+  //   pre-class), so the two rules compose without double-touch; an `@obj.field`
+  //   ref collapses its member tail here and its sigil above.
+  s = s.replace(/([A-Za-z0-9_$\)\]])\s*\.\s*([A-Za-z_$])/g, "$1.$2");
+
   return s;
 }
 
