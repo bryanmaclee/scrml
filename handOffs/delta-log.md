@@ -1,15 +1,15 @@
 # PA ↔ vPA delta-log (flogeance — scrmlTS adaptation)
 
-**Ratified S199 (2026-06-16).** The fine-grained PA→vPA absorption stream. The vPA reads
-`[last-absorbed+1 .. now]` on a poke to stay current WITHOUT re-reading the fat hand-off or
-cold-reading the docs. Append-only. Migrates into the `flogeance` repo when it's built; lives here now
-for the 2-manual-terminal immediate-benefit mode.
+**Ratified S199 (2026-06-16); deputy-reframed S203 (2026-06-17).** The fine-grained PA→deputy absorption
+stream. The deputy (the persistent vPA — `vpa-scrml.md`) reads `[last-absorbed+1 .. now]` on a poke to
+stay current WITHOUT re-reading the fat hand-off or cold-reading the docs. Append-only. Migrates into the
+`flogeance` repo when it's built; lives here now for the 2-manual-terminal immediate-benefit mode.
 
 **Format:** one block per entry —
 ```
 [seq] kind  · what-happened  · → pointer  · (vpa: directive)
 ```
-- **kind** ∈ `rule` (user decision) · `disp` (agent fired) · `land` (commit landed) · `find` (gap/bug/finding) · `state` (board/test/sync delta) · `baton` (handoff)
+- **kind** ∈ `rule` (user decision) · `disp` (agent fired) · `land` (commit landed) · `find` (gap/bug/finding) · `state` (board/test/sync delta) · ~~`baton` (handoff)~~ (RETIRED S202 — deputy model; historical entries S199 [17][18] / S200 [8][9] only). A deputy reboot-gap entry (Function 3, staged) is an ordinary `state` entry flagged `(deputy)`.
 - **pointer** = SHA / file:line / gap-id / doc / agent-id (the vPA pulls detail only if needed)
 - **(vpa: …)** = optional; the ONLY field that asks the vPA to do/note something (hold · sandbox a debate · take ownership of agent X · absorb-and-stand-by). Most entries omit it.
 
@@ -18,10 +18,12 @@ dispatch, a landing, a finding, a state delta — NOT per tool-call. The vPA abs
 since-last-poke at sparse checkpoints (prompt-cache TTL → don't poke constantly; keep vPA context lean).
 
 **Relationship to the other logs:** distinct from user-voice (verbatim user statements, durable) and
-the changelog (per-session landings, coarse). This stream is ephemeral-per-baton-cycle; it does NOT
-replace the wrap hand-off (kept for cold-start safety + audit) — it replaces the vPA's *dependence* on it.
+the changelog (per-session landings, coarse). This is the live PA-state stream the deputy absorbs; it does NOT
+replace the wrap hand-off (kept for cold-start safety + audit) — it replaces the deputy's *dependence* on it.
 
-**Single-writer rule:** only the LIVE PA appends. The vPA is read-only on this file until the baton-pass.
+**Single-writer rule (refined S203):** only the LIVE PA appends to the source stream. The deputy is read-only
+on this file — the one narrow exception is the staged Function-3 reboot-gap entry (an ordinary `state` entry
+flagged `(deputy)`, observation-only, recording an agent that landed while the PA was rebooting; never substantive).
 
 ---
 
@@ -103,3 +105,12 @@ replace the wrap hand-off (kept for cold-start safety + audit) — it replaces t
 [23] land · Class A RESOLVED + LANDED (file-delta from worktree-agent-acfe15d2699c08221@2033d908; 7 files, EXCLUDED the 2 filter-refine stale-view files [enumerator/generator, S67/S112 base-staleness — tier code intact, verified]). g-each-over-arm-payload-binding-unbound → resolved; **board HIGH 1→0**. ONE shared lift-time fix: stampArmPayloadEaches (emit-each) stamped by emit-match buildMatchArms + emit-engine buildEngineArms; emit-each resolves iterable from _scrml_reactive_get(cell).data[field] gated on .variant===tag; emit-variant-guard UNCHANGED. PA R26: 16+29 compile+node-check OK, bare unbound GONE, mount clean. **DOG-FOOD CLOSED THE LOOP: the render-map FOUND this + VERIFIED the fix** — 16#empty/#populated + 29#empty flipped compiles-but-throws→renders-clean (baseline histogram 33→30/254→257). +10-test browser regression; full browser 442/0; e2e-render-map 7/0; within-node not over-budget. Worktree 6b-cleaned. **S202 user-batch (fix-A · file-all · refine-filter) COMPLETE.** 4 commits unpushed (harness 0a0e0391 · gaps 42413515 · filter-refine 04ad76e3 · classA). Triage backlog open: 4 MED + 1 LOW (empty-mount/nullish-text/raw-interp-corners/rails-hang). · → Class A commit
 [24] disp · DD dispatched (scrml-deep-dive, bg agent ad8e7987f6c26c1ed) on vpa-deputy-reframe — the BIGGER flogeance redesign (changes the PA loop itself). User S202: the baton (succession, ratified S199, tried S199+S200) "didn't work"; reframe vPA → persistent DEPUTY (alongside, never replaces): (a) curate verified thinned context-digest [PA session-start reads thin] · (b) continuous maintenance [maps/changelog/state.ts] on a DISJOINT write-surface · (c) reboot-gap continuity. Value = dilate PA context window. DD's 1st task = DIAGNOSE WHY THE BATON FAILED (from the S199/S200 record) so the deputy doesn't rebuild it. Open: digest (dilatable=volatile-half not stable-expertise; staleness/verification = ouroboros risk) · writer-partition (breaks S199 single-writer → surface-disjoint + commit-coord PA-live-vs-reboot) · deputy's own context-regress (narrow role keeps it bounded? make-or-break) · honest dilation cost/benefit. Recordkeeping consequence: pa.md S199 baton addendum + memory project_flogeance_vpa_workflow + vpa spec all now wrong (baton retired). Feed-to-debate if digest/writer-partition forks. · → scrml-support/docs/deep-dives/vpa-deputy-reframe-2026-06-17.md (pending)
 [25] wrap · S202 WRAP (user "push the 4 then start wrap"). PUSHED: the 4 (flograph b0346f28 · B d830ec59 · board a0f93c92 · L1-harness 0a0e0391 · gaps 42413515 · filter-refine 04ad76e3 · Class A 60d547e1 — all on origin, 0/0) + scrml-support 5c3186a (5 design docs + user-voice S202 + baton-RETIRED banners on pa.md§S199/vpa-scrml.md). Wrap docs: hand-off S202-CLOSE · changelog S202 block · master-list §0 (board HIGH 0·MED 14·LOW 21·Nominal 8) · memory project_flogeance_vpa_workflow deputy-update · user-voice S202. Maps refreshing fa2edccf→60d547e1 (project-mapper). state-regen + check. **S202 = 3 HIGH-adjacent resolved (each-inline B + case-c + Class A) · flagship complete · flograph + L1-render-map BUILT · 4 DDs (dock/e2e/deputy ADOPTED; baton RETIRED).** Wrap commit + push pending the maps landing. NEXT: vPA-deputy BUILD (Function-2 first) · flograph/dock/block-lease (flogeance-in-scrml) · e2e L2/L3 + the 125-fails-compile tier-triage · 4 MED/LOW backlog · trucking slices 2-5. · → hand-off-S202-CLOSE
+```
+
+## Session 203 — 2026-06-17
+
+```
+[1] state · session OPEN (Profile A FULL, "read pa.md and start session"). Caught up: scrml 0/0 clean + scrml-support 0/0 clean (both fetched); HEAD 1bcf5c71 (S202 wrap); board HIGH 0/MED 14/LOW 21/Nominal 8; hooksPath UNSET→default .git/hooks (config-B pre/post/pre-push present — S202 rename-orphan fix holding); inbox empty; maps fresh 60d547e1. PRIMER read full EXCEPT §13.7 AST-contracts (deferred, surgical-read-if-resolver-dispatch). · → hand-off S203 OPEN
+[2] rule · NEXT ARC = vPA-deputy Function-2 thin build (user "your read is good, go"). Settle the commit-model fork first, then author the thin slice. · → user
+[3] rule · COMMIT-MODEL FORK RESOLVED PA-direct (NOT a close call) = **Option A sharpened**: deputy runs in its OWN worktree on a `deputy-maint` branch and NEVER advances main's HEAD — ever, incl the reboot gap. Single-writer REFINED: "only the PA advances main's HEAD; the deputy advances only deputy-maint; the PA integrates (merge at commit-points+wrap+boot, clean by construction on the disjoint surface)." Resolved against the one-sided coherence record (a permanent 2nd main-committer institutionalizes the S119/S142/S147/S164 hazard the coherence apparatus closes; Option A is git-native + ~1 `git worktree add`). REJECTED: deputy-commits-main-directly-with-pathspec. No debate/forge. · → vpa-scrml.md §commit-protocol + pa-scrml.md §"S199 addendum — vPA deputy (PA side)"
+[4] land · THIN FUNCTION-2 DEPUTY SPEC AUTHORED (PA-direct; NOT yet committed): (1) `vpa-scrml.md` rewritten baton→deputy — 3 functions (F2 maintenance LIVE / F1 digest + F3 reboot-bridge staged), a MAINTENANCE boot (not the PRIMER+SPEC-INDEX expert boot — narrow-role needs no language expertise), surface-partition table, Option-A commit protocol, re-hydratable, narrow-role-IS-feasibility hard rule; (2) `pa-scrml.md` §S199-addendum REPLACED w/ the PA-side deputy contract (merge deputy-maint at commit-points+wrap+boot; wrap shrinks ~60-80k→~20-30k by merging instead of regenerating maps/state.ts/changelog); (3) delta-log header deputy-reframed (baton kind retired→historical; F3 narrow exception noted); (4) `handOffs/deputy-state.md` stub created (deputy re-hydration anchor); (5) memory `project_flogeance_vpa_workflow` S203 block + description. UNBUILT (no deputy instance has run): digest (F1), reboot-bridge (F3), `flogeance/docs/ideas.md` §Settled→Superseded (user's private repo). **COMMIT + PUSH PENDING** (user authorized the build, not commit/push). · → vpa-scrml.md · pa-scrml.md · handOffs/{delta-log,deputy-state}.md · memory
