@@ -163,8 +163,11 @@ describe("GITI-019 §3: direct top-level interpolation unchanged (no regression)
     expect(typeof client).toBe("string");
     // Still valid JS.
     expect(isValidEsm(client).ok).toBe(true);
-    // The unaffected path: textContent assignment, no `?? ""` coalesce guard.
-    expect(client).toContain('.textContent = _scrml_reactive_get("msg") || "fallback"');
+    // The unaffected path: direct interpolation display, no `?? ""` coalesce guard.
+    // markup-value-in-expression-2026-06-17: the display routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`);
+    // the coalesce-free expression is preserved verbatim as the value argument.
+    expect(client).toContain('_scrml_render_value(el, _scrml_reactive_get("msg") || "fallback")');
     expect(client).not.toContain('?? ""');
   });
 });

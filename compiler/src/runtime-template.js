@@ -713,6 +713,20 @@ function _scrml_reactive_get(name) {
   return _scrml_state[name];
 }
 
+// markup-as-value display (§1.4/§7.4 Pillar 1) — node-aware interpolation.
+// A markup-typed interpolation value is a real DOM node (built by the markup-value
+// codegen: createElement + appendChild). Assigning a node to el.textContent would
+// stringify it to "[object HTMLSpanElement]"; render it into the element instead.
+// String / primitive values keep the byte-identical textContent path (null/undefined
+// become "" per scrml's absence model — "" is itself a defined value and stringifies).
+function _scrml_render_value(el, v) {
+  if (v instanceof Node) {
+    el.replaceChildren(v);
+  } else {
+    el.textContent = (v == null ? "" : String(v));
+  }
+}
+
 function _scrml_reactive_set(name, value) {
   const __t_set_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
   // S79 / §6.13 — when a reactivity rule is registered for the cell, route

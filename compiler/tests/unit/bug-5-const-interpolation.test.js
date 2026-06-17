@@ -225,10 +225,15 @@ describe("§5: regression — `${@var}` interpolation still uses synchronous rea
     expect(result.errors).toEqual([]);
   });
 
-  test("client.js still wires `_scrml_effect(function() { el.textContent = _scrml_reactive_get(\"count\") })`", () => {
+  test("client.js still wires `_scrml_effect(function() { _scrml_render_value(el, _scrml_reactive_get(\"count\")) })`", () => {
     const result = compile(atVarFx);
     const js = result.outputs.get(atVarFx).clientJs;
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*el\.textContent\s*=\s*_scrml_reactive_get\("count"\)/);
+    // markup-value-in-expression-2026-06-17: the interpolation display now
+    // routes through the node-aware `_scrml_render_value(el, expr)` helper
+    // (a markup-typed value renders as a node; a primitive keeps textContent)
+    // instead of the bare `el.textContent = expr`. Same reactive `_scrml_effect`
+    // subscription; the display call is the only shape change.
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("count"\)\)/);
   });
 });
 

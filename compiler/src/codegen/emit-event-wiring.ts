@@ -1225,8 +1225,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           lines.push(`      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`);
           lines.push(`      _scrml_effect(function() { (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); });`);
         } else {
-          lines.push(`      el.textContent = ${rewrittenExpr};`);
-          lines.push(`      _scrml_effect(function() { el.textContent = ${rewrittenExpr}; });`);
+          // markup-as-value (§1.4/§7.4 Pillar 1): node-aware display. A markup-
+          // typed value is a DOM node → render it into el; a string/primitive
+          // keeps the byte-identical textContent path. _scrml_render_value
+          // (core chunk) dispatches on `instanceof Node` at runtime.
+          lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
+          lines.push(`      _scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); });`);
         }
         lines.push(`    }`);
         lines.push(`  }`);
@@ -1272,7 +1276,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         lines.push(`  {`);
         lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
         lines.push(`    if (el) {`);
-        lines.push(`      el.textContent = ${rewrittenExpr};`);
+        // markup-as-value (§1.4/§7.4 Pillar 1): node-aware one-shot display.
+        // A markup-typed value renders into el; a string/primitive keeps the
+        // byte-identical textContent path via _scrml_render_value (core chunk).
+        lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
         lines.push(`    }`);
         lines.push(`  }`);
       }

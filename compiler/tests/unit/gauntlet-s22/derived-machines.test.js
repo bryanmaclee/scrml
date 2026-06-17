@@ -479,8 +479,10 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     // The derived-fn wiring is present (regression guard from slice 2).
     expect(clientJs).toContain('_scrml_derived_fns["ui"]');
     // The reactive display effect for ${@ui} MUST be emitted — the whole fix.
-    expect(clientJs).toContain("el.textContent = _scrml_reactive_get(\"ui\")");
-    expect(clientJs).toMatch(/_scrml_effect\(function\(\)\s*\{\s*el\.textContent\s*=\s*_scrml_reactive_get\("ui"\)/);
+    // markup-value-in-expression-2026-06-17: the display routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
+    expect(clientJs).toContain("_scrml_render_value(el, _scrml_reactive_get(\"ui\"))");
+    expect(clientJs).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("ui"\)\)/);
     // No false-positive E-DG-002 on @order.
     const falseDg = errors.find(e => e.code === "E-DG-002" && /@order/.test(e.message));
     expect(falseDg).toBeUndefined();

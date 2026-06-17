@@ -805,6 +805,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         if ((node as any).shape === "derived") {
           chunks.add("derived");
         }
+        // markup-value-in-expression-2026-06-17 — markup-typed derived cells
+        // (`const <x> = <markup>`, the §6.6.17 markup-as-value derived form)
+        // carry `shape: "decl-with-spec"` + `_cellKind: "markup-typed"`, NOT
+        // `shape: "derived"`. emit-logic.ts still emits a `_scrml_derived_declare`
+        // for them (factory-shell → derived cell), so without this gate the
+        // `derived` chunk is tree-shaken away and the call throws
+        // `_scrml_derived_declare is not defined` at runtime — the same
+        // tree-shake class as Bug 57. Pull the chunk for the markup-typed form.
+        if ((node as any)._cellKind === "markup-typed") {
+          chunks.add("derived");
+        }
         if ((node as any).defaultExpr) {
           chunks.add("reset");
         }

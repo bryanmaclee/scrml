@@ -151,9 +151,13 @@ describe("Bug 61 — @compound.<synthProp> rollup read collapses to a dotted-key
     // (NB: the validator runner legitimately reads the per-field VALUE cell via
     // `_scrml_reactive_get("form.name")`; that is a separate, correct read — so
     // we assert on the display-slot shape specifically, not a global absence.)
-    expect(clientJs).toMatch(/el\.textContent = _scrml_reactive_get\("form"\)\.name/);
+    // markup-value-in-expression-2026-06-17: the display slot routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
+    // The load-bearing part of this test is the READ SHAPE — member access
+    // `_scrml_reactive_get("form").name`, NOT a collapsed dotted-key read.
+    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_reactive_get\("form"\)\.name/);
     // The display slot must NOT have been collapsed to a dotted-key read.
-    expect(clientJs).not.toMatch(/el\.textContent = _scrml_reactive_get\("form\.name"\)/);
+    expect(clientJs).not.toMatch(/_scrml_render_value\(el, _scrml_reactive_get\("form\.name"\)/);
   });
 });
 

@@ -121,3 +121,139 @@ built by pretest; pass 39/0 once compiled). within-node canary: NO OVER-BUDGET
 line (corpus aggregate printed, no re-baseline needed).
 
 Salvage applied CLEANLY (git apply --check passed; no --3way / no hand-reapply).
+
+## 2026-06-17 — RENDER layer dispatch (markup-value display wiring)
+
+pwd: /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a78fccd56adff7793
+
+STEP 0 FF-merge of codegen commit 2b4ea4d8: SUCCEEDED (268a27c5..2b4ea4d8
+fast-forward). greps confirm codegen present: emit-expr.ts `case "markup-value"`=1,
+emit-lift.js emitMarkupValueExpr=1.
+
+Phase 0 — emit-site location (CONFIRMED):
+  The `${...}` interpolation display wiring lives in
+  compiler/src/codegen/emit-event-wiring.ts. The bug `el.textContent = <node>`
+  appears at THREE sites in the default-text logic-binding loop:
+    - reactive path (varRefs>0, non-async): lines 1228-1229
+        `el.textContent = <expr>;` + `_scrml_effect(fn(){ el.textContent = <expr>; })`
+        ← all 4 brief forms (a/b/c/d) hit here (each has @n/@badge/@x ref).
+    - static one-shot path (no varRefs, default-kind): line 1275
+        `el.textContent = <expr>;` ← no-ref interpolations.
+  (errorBoundary 1168, server-fn async 1197/1225-1226 are out of scope —
+   error envelopes + Promise coercion, not markup nodes.)
+
+LAYER 1 (runtime helper) — DONE:
+  Added `_scrml_render_value(el, v)` to runtime-template.js right after
+  `_scrml_reactive_get` (in the always-included `core` chunk; first boundary
+  marker is `wire` at template line ~985, well after the insertion point).
+  Shape: `if (v instanceof Node) el.replaceChildren(v); else el.textContent =
+  (v == null ? "" : String(v));`. String path stays textContent (byte-identical
+  intent). NOTE: the runtime body is a backtick template literal (opens at
+  runtime-template.js:425) — the helper comment must NOT contain backticks or
+  ${} (the S167 collision class); authored comment plain-text accordingly.
+  Verified: template node --check PASS; emitted runtime (fresh hash 01gbisgl)
+  contains _scrml_render_value exactly once.
+
+LAYER 2 (emit sites) — DONE:
+  compiler/src/codegen/emit-event-wiring.ts — the `${...}` interpolation display
+  wiring. Changed the bare `el.textContent = <expr>` writes to node-aware
+  `_scrml_render_value(el, <expr>)` at the TWO in-scope sites:
+    - reactive non-async path (was lines 1228-1229): the one-shot + the
+      `_scrml_effect` re-bind both route through the helper.
+    - static one-shot default-text path (was line 1275).
+  Left UNCHANGED (out of scope — values are awaited Promises/strings, never a
+  live DOM node on the client): the server-fn async paths (1197/1225-1226) and
+  the errorBoundary text render (1168, error-envelope dispatch).
+  String path: a primitive value flows through the helper's `else` branch →
+  `el.textContent = (v == null ? "" : String(v))`, observable-identical to the
+  old `el.textContent = v` for every defined scrml value (null/undefined do not
+  exist in scrml; "" stays "").
+
+CHUNK-DETECTION FIX (pre-existing tree-shake gap — REQUIRED for form (d) render):
+  Root-caused via a temporary probe on detectFromNode's state-decl case. The
+  markup-typed derived `const <x> = <markup>` (§6.6.17 markup-as-value derived)
+  carries `shape: "decl-with-spec"` + `_cellKind: "markup-typed"`, NOT
+  `shape: "derived"`. emit-logic.ts emits `_scrml_derived_declare("x", factory)`
+  for it, but emit-client.ts detectRuntimeChunks gated the `derived` chunk ONLY
+  on `shape === "derived"` → the chunk was tree-shaken → form (d) threw
+  `_scrml_derived_declare is not defined` at mount (the SAME class as Bug 57).
+  This is PRE-EXISTING (independent of the display wiring; reproduces with only
+  the committed runtime helper present, and with/without a <program> root).
+  Fix: added `if (node._cellKind === "markup-typed") chunks.add("derived")` to
+  the state-decl chunk gate. Confirmed: form (d) runtime now defines
+  _scrml_derived_declare; all 6 render tests pass.
+
+RENDER R26 (happy-dom, all 6 in compiler/tests/browser/markup-value-render.browser.test.js):
+  (a) inline ternary  — renders <span>neg</span> (@n=0) then <span>pos</span>
+      (@n=1); textContent NOT "[object...]". PASS.
+  (b) derived ternary — `${@badge}` renders the chosen <span>; reactive flip. PASS.
+  (c) fn-return markup — `${label(@n)}` renders <span>7</span> then <span>42</span>. PASS.
+  (d) plain markup-typed derived (control) — `${@x}` renders <span>3</span>. PASS.
+  string regression `${@count}` — renders "5"→"99", NO node child, NOT "[object". PASS.
+  string regression literal — renders "hello world" verbatim. PASS.
+  6 pass / 0 fail / 40 expect() calls.
+
+## 2026-06-17 — FULL-SUITE + CANARY + TodoMVC VERIFICATION (RENDER dispatch DONE)
+
+COUPLED TEST UPDATES (8 assertions / 7 files) — the interpolation-display emit
+changed `el.textContent = expr` → `_scrml_render_value(el, expr)`. These tests
+asserted the old literal shape; updated to the new helper-call shape (each test's
+load-bearing property preserved: reactive _scrml_effect subscription, sync-not-
+async, member-access read shape, no coalesce wrap):
+  - bug-5-const-interpolation.test.js (reactive effect wiring)
+  - server-fn-markup-interpolation.test.js (§3 sync-not-async)
+  - gauntlet-s22/derived-machines.test.js (§51.9 projected-var display)
+  - giti-019-lift-loop-coalesce-parens.test.js (direct interp no-coalesce)
+  - engine-var-markup-binding.test.js (§2.1 + §2.2 engine-var display)
+  - derived-reactive-markup-wiring.test.js (Bug 4 derived effect wrap)
+  - conf-compound-rollup-read-bug-61.test.js (member-access read shape)
+
+PRE-COMMIT GATE (unit+integration+conformance):
+  BEFORE my emit change: 17137 pass / 0 fail / 90 skip (baseline)
+  AFTER emit (pre test-update): 8 fail (the literal-shape assertions above)
+  AFTER test-update: 17137 pass / 0 fail / 90 skip — baseline restored.
+
+FULL `bun run test`: 24402 pass / 0 fail / 225 skip / 1 todo (1015 files).
+  (prior base was 24395 pass / 2 fail — the 2 fails were TodoMVC dist-presence,
+   environmental; gone now that the dist is built. +6 render tests + +1 string
+   regression net the pass-count delta.)
+  ("error: boom" in the tail is an INTENTIONAL subscriber-throw test fixture in
+   value-indexed-subscribers.test.js — final tally 0 fail.)
+
+WITHIN-NODE CANARY (M6.5.b.0 parity gate): 1012 pass / 0 fail; allowlist JSON
+  UNMODIFIED; PARSE-FAILURE: 0. The within-node gate measures NATIVE-vs-LIVE
+  PARSER AST divergence, NOT runtime-emit byte-count — my change is runtime-
+  template + codegen-emit + chunk-detection only (parser untouched), so NO
+  OVER-BUDGET fired and NO re-baseline was needed. (The brief's "string
+  interpolations over-budget" hypothesis does not apply: the canary is parser-
+  shape, not emit-size.)
+
+TodoMVC: dist rebuilt with the new runtime (app.client.js uses
+  _scrml_render_value 5×; node --check PASS for client + runtime). Browser gate:
+  49 pass / 0 fail / 8 skip.
+
+STRING-PATH BYTE-IDENTICAL — CLARIFICATION:
+  The GENERATED JS LINE changed (`el.textContent = X` → `_scrml_render_value(el, X)`)
+  — so it is NOT byte-identical at the source-line level (the change is by design;
+  node-aware dispatch can't live anywhere else). The RENDERING BEHAVIOR for every
+  DEFINED scrml value is observable-identical: the helper's else-branch does
+  `el.textContent = (v == null ? "" : String(v))`, and `el.textContent = x` vs
+  `el.textContent = String(x)` produce identical DOM for strings/numbers/bools.
+  null/undefined don't exist in scrml (both → absence → ""), so no real string
+  interpolation can hit the only divergent input. Two happy-dom string-regression
+  tests assert the text renders unchanged ("5"→"99"; "hello world" verbatim).
+
+EMIT SITES CHANGED (exact):
+  compiler/src/codegen/emit-event-wiring.ts
+    - reactive non-async default-text path (was 1228-1229) → 2 _scrml_render_value lines
+    - static one-shot default-text path (was 1275)         → 1 _scrml_render_value line
+  UNCHANGED: server-fn async (1197/1225-1226 — awaited Promise/string),
+             errorBoundary text render (1168 — error-envelope dispatch).
+
+DEFERRED FORKS: none triggered (no keyed reconciliation, no multiple-node/mixed
+  text+node interpolation, no SSR-of-node). The markup-typed-derived `derived`-
+  chunk tree-shake gap was IN-SCOPE-adjacent (required for the brief-mandated form
+  (d) render; Bug 57 class) — fixed, not deferred.
+
+GAP g-markup-value-ternary-fnreturn-codegen: RESOLVED (codegen was the prior
+  layer; render now works for all 4 forms in happy-dom).

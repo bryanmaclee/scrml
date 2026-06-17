@@ -107,7 +107,9 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     const { clientJs } = compileSource(src, "effect-wrap");
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain("_scrml_effect(function()");
-    expect(wiringSection).toMatch(/_scrml_effect\(function\(\) \{ el\.textContent = _scrml_derived_get\("isInsert"\); \}\)/);
+    // markup-value-in-expression-2026-06-17: the display routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
+    expect(wiringSection).toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_derived_get\("isInsert"\)\); \}\)/);
   });
 
   test("string-returning derived also wired correctly", () => {

@@ -280,11 +280,13 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     expect(clientJs.length).toBeGreaterThan(0);
 
     // Pre-fix: the placeholder span had NO wiring. Post-fix: the lift-site
-    // emits `el.textContent = _scrml_reactive_get("marioState")` PLUS an
+    // emits `_scrml_render_value(el, _scrml_reactive_get("marioState"))` PLUS an
     // `_scrml_effect(...)` subscription so writes to @marioState propagate.
+    // markup-value-in-expression-2026-06-17: the display routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
     expect(clientJs).toContain('_scrml_reactive_get("marioState")');
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*el\.textContent\s*=\s*_scrml_reactive_get\("marioState"\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("marioState"\)\)/,
     );
   });
 
@@ -330,11 +332,13 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     // the display site go through the standard reactive accessor.
     expect(clientJs).toContain('_scrml_reactive_get("marioState")');
     expect(clientJs).toContain('_scrml_reactive_get("healthRisk")');
+    // markup-value-in-expression-2026-06-17: the display routes through the
+    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*el\.textContent\s*=\s*_scrml_reactive_get\("marioState"\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("marioState"\)\)/,
     );
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*el\.textContent\s*=\s*_scrml_reactive_get\("healthRisk"\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("healthRisk"\)\)/,
     );
   });
 });

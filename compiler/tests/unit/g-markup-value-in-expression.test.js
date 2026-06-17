@@ -11,13 +11,22 @@
  * while the plain markup-typed derived control (`const <x> = <span>${@n}</span>`)
  * compiled fine.
  *
- * STATUS: ALL FORMS LANDED. Form (c) `return <markup>` routes through the
- * `emitMarkupValueExpr` IIFE primitive (emit-lift.js). Forms (a)/(b) (the ternary
- * forms) reuse that SAME primitive: the salvaged parse layers (block-splitter
- * full-RHS scan + ast-builder `sawTernaryAtRoot` guard + `parseExprWithMarkupValues`)
- * recover each ternary markup arm to a `markup-value` ExprNode leaf, and emit-expr's
- * `case "markup-value"` lowers it via `emitMarkupValueExpr` — a real createElement-built
- * DOM node. None of the four forms emit E-CODEGEN-INVALID-JS / dropped arms / raw `< span >`.
+ * STATUS: ALL FORMS LANDED (codegen) + RENDER WIRED. Form (c) `return <markup>`
+ * routes through the `emitMarkupValueExpr` IIFE primitive (emit-lift.js). Forms
+ * (a)/(b) (the ternary forms) reuse that SAME primitive: the salvaged parse layers
+ * (block-splitter full-RHS scan + ast-builder `sawTernaryAtRoot` guard +
+ * `parseExprWithMarkupValues`) recover each ternary markup arm to a `markup-value`
+ * ExprNode leaf, and emit-expr's `case "markup-value"` lowers it via
+ * `emitMarkupValueExpr` — a real createElement-built DOM node. None of the four
+ * forms emit E-CODEGEN-INVALID-JS / dropped arms / raw `< span >`.
+ *
+ * THIS file asserts the CODEGEN SHAPE. The companion RENDER-level R26 (happy-dom:
+ * the DOM shows the rendered markup, NOT "[object HTMLSpanElement]") lives in
+ * compiler/tests/browser/markup-value-render.browser.test.js — added with the
+ * render-layer fix (markup-value-in-expression-2026-06-17): a node-aware display
+ * helper `_scrml_render_value(el, v)` (core runtime) that the `${...}` display
+ * emit sites call (compiler/src/codegen/emit-event-wiring.ts), so a markup-typed
+ * value is rendered into the element instead of stringified onto textContent.
  */
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
