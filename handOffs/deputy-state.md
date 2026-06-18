@@ -9,10 +9,10 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S204). First deputy instance, booted S203. On tick 9.
+- **State:** LIVE — steady-state (S204). First deputy instance, booted S203. On tick 10.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
-- **Last-absorbed delta seq:** S204 **[3]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S204 3]).
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base rebased onto main `bdd6e1c9` (tick 9). **Tip:** `git rev-parse deputy-maint` (tick-9 commits: digest `15367e8a` + this).
+- **Last-absorbed delta seq:** S204 **[5]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S204 5]).
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base rebased onto main `5295a61c` (tick 10). **Tip:** `git rev-parse deputy-maint` (tick-10 commits: digest + this).
 - **Owed maintenance:** **MAPS REFRESH owed** (deferred — see below). Digest/recent-sessions/gap-counts current.
 
 ## ⚠ OWED: maps refresh (DEFERRED) + a mechanism gap for the PA
@@ -34,13 +34,13 @@ The #3 landing `a6405053` touched `compiler/src/ast-builder.js` (the `E-CONTROL-
 
 ## Tick log (compressed)
 
-T1 boot [1-5]; T2 [6-7] F1 LIVE; T3 [8-9] source-freshness+GO-LIVE; T4 [10] rebase; T5 [11-13]; **T6-T7 reboot-gap** (wrap #3-in-flight → bridged: digest current at wrap HEAD, watched af88c53a); **T8 gap-CLOSED** (fresh PA S204 merged deputy-maint + re-attached #3); **T9** absorbed S204 [1-3] (#3 LANDED a6405053); digest regen; maps owed→deferred.
+T1 boot [1-5]; T2 [6-7] F1 LIVE; T3 [8-9] source-freshness+GO-LIVE; T4 [10] rebase; T5 [11-13]; **T6-T7 reboot-gap** (wrap #3-in-flight → bridged: digest current at wrap HEAD, watched af88c53a); **T8 gap-CLOSED** (fresh PA S204 merged deputy-maint + re-attached #3); **T9** absorbed S204 [1-3] (#3 LANDED a6405053); digest regen; maps owed→deferred. **T10** [4-5] flograph corpus-annotation slices (dog-food, docs/tooling); digest regen; maps STILL owed/deferred (no PA mechanism-ruling yet).
 
 ## Currency snapshot (@ tick 9)
 
 - **Board:** HIGH 0 · MED 12 · LOW 23 · Nominal 8 (g-raw-interp resolved via #3; PA regen'd §0).
 - **maps:** watermark `60d547e1` — **STALE / OWED** (ast-builder.js #3 landing). Deferred (see above).
-- **digest:** current (head `3207ef0a` → rebased; stamped at regen-time HEAD; delta-seq 3).
+- **digest:** current (head `5e326e3e`, delta-seq 5).
 - **recent-sessions / gap-counts:** PASS.
 - **flograph:** `--mmd`/`--filter`/`--focus` [S203 14]; round-trip intact.
 
