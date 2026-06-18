@@ -9,47 +9,46 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — **REBOOT-GAP MODE (F3)**. The S203 PA wrapped (`69172d25 wrap(s203)`) with #3 in-flight + rebooted; the deputy keeps looping across the gap. First deputy instance, booted S203. On tick 6.
+- **State:** LIVE — **REBOOT-GAP MODE (F3)**. S203 PA wrapped (`69172d25 wrap(s203)`, now PUSHED) with #3 in-flight + rebooted; deputy keeps looping. First deputy instance, booted S203. On tick 7.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
-- **Last-absorbed delta seq:** S203 **[15]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S203 15]).
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base FF'd to the settled wrap HEAD `69172d25` (tick 6). **Tip:** `git rev-parse deputy-maint` (tick-6 commit: digest+recent-sessions regen `f7bf75de` + this).
-- **Owed maintenance:** none (digest + recent-sessions current @ wrap HEAD).
+- **Last-absorbed delta seq:** S203 **[15]** (no new entries since the wrap; the fresh PA hasn't committed any yet).
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base = wrap HEAD `69172d25`. **Tip:** `git rev-parse deputy-maint` (tick-7 commit: recent-sessions push-flip + this).
+- **Owed maintenance:** none.
 
-## ⚠ FOR THE FRESH PA ON BOOT (reboot-gap hand-back)
+## ⚠ FOR THE FRESH PA ON BOOT (reboot-gap hand-back — STILL PENDING)
 
-1. **`git merge deputy-maint`** first — picks up the **current digest** (`head 69172d25 / delta-seq 15` → step-0 reads `digest: current` and thins) + the regen'd `@generated:recent-sessions` (added the `69172d25` wrap anchor; it was post-wrap one-behind).
-2. **The wrap is COMMITTED but NOT PUSHED** — main was `ahead 7` of origin at `69172d25` (recent-sessions marks it `LOCAL-ONLY`). Finish the wrap: push (after merging deputy-maint so the maint rides the same push).
-3. **#3 agent `af88c53a8985b37fb` is STILL IN-FLIGHT** (see watch list) — re-attach + monitor it, or read this anchor / the delta-log for a `(deputy) state` entry if the deputy recorded its completion during the gap. Landing #3 is the fresh PA's first task (S67 file-delta + R26 dual-verify + expected-error reclassification + e2e baseline regen + flip g-raw-interp) per [15]'s directive — NOT the deputy's (substantive).
+1. **`git merge deputy-maint` FIRST** — the wrap was PUSHED (`origin/main == 69172d25`) but **deputy-maint was NOT merged before that push** (coherence `0 ahead-main / N ahead-deputy`). So origin/main carries a STALE digest (`stamp c718d4c2 / seq 13` from the last merge) + recent-sessions. The deputy's reboot-gap maintenance (current digest `head 69172d25 / seq 15` + recent-sessions with the `69172d25` anchor `pushed`) is on deputy-maint, unmerged. Merge it, then push the merge so origin gets the current digest. (Until then the fresh PA's step-0 digest reads STALE → distrust+fall-back fires correctly — safe, but the thin-start benefit is lost for that one boot.)
+2. **#3 agent `af88c53a8985b37fb` is STILL IN-FLIGHT** (see watch list) — re-attach + monitor, or read for a `(deputy) state` entry if the deputy recorded completion during the gap. Landing #3 is the fresh PA's first task (S67 file-delta + R26 dual-verify + expected-error reclassification + e2e baseline regen + flip g-raw-interp) per [15] — NOT the deputy's.
 
 ## In-flight dispatches (F3 watch list)
 
-- **`af88c53a8985b37fb`** — bare-control-flow-in-markup diagnostic ([13], #3 ruling (a) reject+recover). **Status @ tick 6 (reboot-gap):** worktree `.claude/worktrees/agent-af88c53a8985b37fb` present (locked); branch tip `342640b3 "WIP(ctrl-flow-diag): bump within-node parity allowlist..."` (3 WIP commits: start → SPEC §34 row+§17.4 note → within-node allowlist) + DIRTY working tree (`M e2e-render-map-baseline.json`) → **actively running, NOT completed**. No `(deputy) state` re-attach entry yet (the [15] directive says append ON COMPLETION). **Watching each tick:** completion ≈ branch settles (clean tree, a non-WIP/final commit, deliverables present — SPEC §34 + recovery + baseline regen + R26). On completion → append `[N] (deputy) state · agent af88c53a completed @ <FINAL_SHA>, files: <list>; NOT landed (PA file-delta)` to the delta-log (the one narrow single-writer exception).
+- **`af88c53a8985b37fb`** — bare-control-flow-in-markup diagnostic ([13]). **Status @ tick 7:** worktree present (locked); ADVANCED to 4 WIP commits — `453ff948` start · `82e7fc0a` SPEC §34 + §17.4 note · `342640b3` within-node allowlist · `8d6c3396` reclassify 3 render-map cells S-RAW-INTERP→fails-compile — + a STAGED uncommitted new test `compiler/tests/unit/control-flow-in-markup-reject.test.js`. Progressed since tick 6 (alive, not stalled) but uncommitted staged work → **NOT complete**. No `(deputy) state` re-attach entry yet. Watching: completion ≈ all deliverables committed + tree clean + (ideally) a non-WIP/final commit; the brief mandates SPEC §34 + recovery codegen + within-node allowlist + 3-fixture reclassify + e2e baseline regen + R26 + full test + the reject test. On completion → append `[N] (deputy) state · agent af88c53a completed @ <FINAL_SHA>; files: <list>; NOT landed (PA file-delta)`.
 - ~~`abcf64f7198fe9cf3`~~ — CLOSED tick 5 (stop-surfaced [11]).
 
 ## Tick log
 
-**Tick 1 (boot):** absorbed [1]…[5]; recent-sessions regen; init. **Tick 2:** [6]+[7] (F1 LIVE); first digest. **Tick 3:** [8]+[9] (source-freshness + GO-LIVE F3/self-drive). **Tick 4:** [10] (e2e backlog; abcf64f7 dispatched); rebased. **Tick 5:** [11]+[12]+[13] (abcf64f7 closed; board MED→12/LOW→23; af88c53a dispatched); FF. **Tick 6 (REBOOT-GAP):** absorbed [14] (flograph filter) + [15] (WRAP with #3 in-flight — F3's first real reboot-bridge use + explicit (vpa:) directive). FF'd onto wrap HEAD `69172d25`; regen digest (→ current, seq 15) + recent-sessions (post-wrap one-behind) → `f7bf75de`. af88c53a still WIP+dirty → watching, no re-attach entry yet.
+**T1 (boot):** [1]…[5]; recent-sessions regen; init. **T2:** [6]+[7] (F1 LIVE); first digest. **T3:** [8]+[9] (source-freshness + GO-LIVE). **T4:** [10] (abcf64f7 dispatched); rebased. **T5:** [11..13] (abcf64f7 closed; board MED→12/LOW→23; af88c53a dispatched). **T6 (REBOOT-GAP):** [14]+[15] (WRAP, #3 in-flight, F3 first use + (vpa:) directive); FF'd onto wrap HEAD `69172d25`; digest→current(seq15) + recent-sessions(post-wrap one-behind). **T7 (REBOOT-GAP):** no new deltas; wrap got PUSHED → recent-sessions push-flip (`69172d25` LOCAL-ONLY→pushed); digest still current (only derived commits since); af88c53a advanced (8d6c3396 + staged reject test) still in-flight; flagged deputy-maint UNMERGED-before-push for the fresh PA.
 
-## Currency snapshot (@ tick 6)
+## Currency snapshot (@ tick 7)
 
 - **Board:** HIGH 0 · MED 12 · LOW 23 · Nominal 8.
-- **maps:** watermark `60d547e1` — N behind HEAD but ALL docs/tooling/test-fixture (no `compiler/src`·`stdlib`·`.scrml`), CURRENT for compiler-source. WARN-only. **WATCH:** af88c53a [13] WILL land `compiler/src` (new §34 diagnostic) + SPEC.md — on its landing a project-mapper maps refresh becomes genuinely owed (flag to the PA; SPEC.md is PA-owned so maps-vs-spec is a PA-wrap concern, but the source-map refresh is the deputy seam).
-- **digest:** current (head `69172d25`, delta-seq 15).
-- **recent-sessions / gap-counts:** PASS (recent-sessions just regen'd; wrap anchor LOCAL-ONLY until pushed).
-- **flograph:** tool gained `--mmd`/`--filter`/`--focus` [14]; `--emit`/`--check` round-trip intact; deputy artifact-commit cadence not yet established (only the board-state digest is committed today).
+- **maps:** watermark `60d547e1` — behind HEAD but ALL docs/tooling/test-fixture (no compiler-source), CURRENT. **WATCH:** af88c53a [13] WILL land `compiler/src` (§34 diagnostic) + SPEC.md — maps refresh becomes owed on its landing.
+- **digest:** current (head `69172d25`, delta-seq 15) on deputy-maint — but UNMERGED to origin (see hand-back).
+- **recent-sessions / gap-counts:** PASS (wrap anchor now `pushed`).
+- **flograph:** `--mmd`/`--filter`/`--focus` added [14]; round-trip intact.
 
 ## Function 3 — agent monitoring (LIVE)
 
-Each tick: `ls .claude/worktrees/` + `git -C <agent-worktree> log/status` for branch tip + dirty state; scan delta-log for `disp` without matching `land`/`find`-close. **Append a `(deputy) state` delta-log entry ONLY when** an agent COMPLETED **and the PA is absent/rebooting** (the narrow single-writer exception — observation-only) so the fresh PA re-attaches. NEVER land (substantive → PA S67 file-delta). Detection of "completed": branch stops advancing + worktree clean + deliverables present (no reliable task-notification — it went to the dead PA instance, so poll git-state).
+Each tick: `ls .claude/worktrees/` + `git -C <agent-wt> log/status` for branch tip + dirty state; scan delta-log for `disp` without `land`/`find`-close. **Append a `(deputy) state` delta-log entry ONLY when** an agent COMPLETED **and the PA is absent/rebooting** (the narrow single-writer exception — observation-only). NEVER land (PA S67 file-delta). No reliable task-notification (it went to the dead PA) → poll git-state for completion.
 
 ## Sync rule (each tick)
 
-`git merge --ff-only main`; if NOT a clean FF (deputy diverged) → `git rebase main` (clean on the disjoint surface; surface a real conflict = partition breach). Main may move mid-tick (PA actively committing) — absorb up to the HEAD seen at tick start; the next tick gets later commits.
+`git merge --ff-only main`; if NOT clean FF → `git rebase main` (clean on the disjoint surface; a real conflict = partition breach to surface). Main may move/push mid-gap independent of deputy-maint — absorb up to the HEAD seen at tick start.
 
 ## Operational notes (for re-hydration)
 
 - **node_modules:** fresh worktree has NONE → symlink main's in (survives FF+rebase): `ln -s /home/bryan-maclee/scrmlMaster/scrml/node_modules ./node_modules` · `ln -s /home/bryan-maclee/scrmlMaster/scrml/compiler/node_modules ./compiler/node_modules`
-- **CWD slip:** Bash CWD resets to MAIN after each command — `cd` the worktree (or `git -C`) before worktree ops.
+- **CWD slip:** Bash CWD resets to MAIN — `cd` the worktree (or `git -C`) before worktree ops.
 - **Untracked new file:** `git add` before commit; tracked modifications commit by plain pathspec.
 - **Commit gate:** pre-commit WARNS on non-main; runs ~17k subset (~80-120s); deputy commits derived-only → always passes; never `--no-verify`. `git rebase` does NOT run the gate.
 
