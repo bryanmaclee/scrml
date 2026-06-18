@@ -9,13 +9,15 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S204 pushed; idle between PA tasks). First deputy instance, booted S203. On tick 13.
+- **State:** LIVE — steady-state (S204 pushed; deputy-maint CAUGHT UP — origin current, coherence 0/0). First deputy instance, booted S203. On tick 14.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
 - **Last-absorbed delta seq:** S204 **[8]** (no new entries since the wrap).
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Descends main `e723de04`. **Tip:** `git rev-parse deputy-maint` (tick-13: recent-sessions push-flip + this). Carries the maps refresh + regens NOT yet in main (see below).
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Descends main `0bc9fe0e` (== main; all prior deputy work merged + pushed). **Tip:** `git rev-parse deputy-maint` (tick-14: this deputy-state note).
 - **Owed maintenance:** none on deputy-maint. (The strand below is PA-side — deputy can't fix it.)
 
 ## ⚠⚠ RECURRING PATTERN (now 2×) — PA pushes before merging deputy-maint → deputy work strands on origin
+
+**S204 instance RESOLVED (tick 14):** the PA did the catch-up `git merge deputy-maint` + push per the tick-13 recommendation → origin now carries the current maps (`cc765a5a`) + digest + recent-sessions; coherence `0/0`. The hard-pre-push-merge-gate recommendation below still stands as the durable fix (it prevented nothing this time — it was a manual catch-up).
 
 **It happened again.** Tick 12 flagged "merge deputy-maint before pushing S204." The PA **pushed S204 anyway** (`e723de04` on origin) **without merging deputy-maint** → **origin's maps are STALE (`60d547e1`)** while the current maps (`cc765a5a`, the #3 source change) + the re-regen'd digest/recent-sessions sit STRANDED on deputy-maint. Coherence `0 2`, clean FF — they land whenever the PA next merges deputy-maint (a follow-up `git merge deputy-maint && git push`, or the next session's boot-merge).
 
@@ -35,7 +37,7 @@ User: *"refresh the maps, this does not require my consent."* Function-2 mainten
 
 ## Tick log (compressed)
 
-T1 boot [1-5]; T2 [6-7] F1; T3 [8-9] GO-LIVE; T4 [10]; T5 [11-13]; **T6-T8 reboot-gap** (#3 bridged → fresh PA re-attached + LANDED a6405053); **T9** S204 [1-3]; **T10** [4-5] flograph; **T11** [6] dilation ~3%; **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling, main-clean verified) + [7-8] (S204 wrap, push-pending); **T13** S204 PUSHED pre-merge → maps/digest/recent-sessions STRANDED on deputy-maint (2nd merge-before-push miss); recent-sessions push-flip.
+T1 boot [1-5]; T2 [6-7] F1; T3 [8-9] GO-LIVE; T4 [10]; T5 [11-13]; **T6-T8 reboot-gap** (#3 bridged → fresh PA re-attached + LANDED a6405053); **T9** S204 [1-3]; **T10** [4-5] flograph; **T11** [6] dilation ~3%; **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling, main-clean verified) + [7-8] (S204 wrap, push-pending); **T13** S204 PUSHED pre-merge → maps/digest/recent-sessions STRANDED on deputy-maint (2nd merge-before-push miss); recent-sessions push-flip. **T14** PA caught up (merged deputy-maint + pushed) → origin current, 0/0; nothing owed.
 
 ## Currency snapshot (@ tick 13)
 
