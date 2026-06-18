@@ -1,49 +1,46 @@
-# scrml — Session 203 (CLOSE)
+# scrml — Session 204 (OPEN)
 
-**Date:** 2026-06-17. **Previous:** `handOffs/hand-off-207.md` (S202 CLOSE). **Next-session pickup:** rotate THIS → `handOffs/hand-off-208.md` at OPEN. **Profile:** A — FULL.
+**Date:** 2026-06-17. **Previous:** `handOffs/hand-off-208.md` (S203 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-209.md` at OPEN. **Profile:** A — FULL ("read pa.md and start session" → default A).
 
-> **WRAPPED WITH #3 IN-FLIGHT — F3's first reboot-bridge use.** The PA did NOT hold for the #3 fix agent (`af88c53a8985b37fb`); it stays RUNNING across this wrap, and the deputy (F3) monitors it. **NEXT-PA FIRST TASK:** boot (step-0 digest + delta-log tail), find the deputy's `(deputy) state` entry for #3 (or check the agent's branch/progress.md directly), then RE-ATTACH it: file-delta its compiler/src + SPEC §34 + §17.4 note + the 3-fixtures expected-error reclassification + the e2e-render-map baseline regen; **R26-dual-verify** (S138 — observe-one: S-RAW-INTERP gone + canonical `${ for/lift }` still-clean); flip `g-raw-interp-channel-meta-corners` → resolved; refresh maps (6c) + state §0 (6d) for #3's effect; push. (If #3 STOP-surfaced, read its report.) This is the in-flight-across-reboot pattern the deputy was built for; the deputy WATCHES + RECORDS only — landing is substantive/PA-owned.
+**Boot:** digest **STALE** (delta-log moved since stamp `c718d4c2`) → authoritative fallback reads done: pa-scrml.md(full) · PRIMER(full; §13.7 B-step internals at skim depth) · SPEC-INDEX(changelog header + #3-section nav grep; full Sections-table deferred-greppable) · master-list §0 · hand-off S203 CLOSE · delta-log [1]–[15] · user-voice S195→S203. Git: scrml + scrml-support **0/0**. Hooks: config-B live (`core.hooksPath` unset→default `.git/hooks`; pre/post/pre-push present; gate confirmed firing S202). Inbox empty.
 
-## ⭐ THE HEADLINE — the vPA-deputy system is LIVE (this changes how the next session operates)
+## ⭐ #3 LANDED `a6405053` (push pending) — F3 reboot-bridge's first real re-attach
+Agent `af88c53a8985b37fb` (bare-control-flow-in-markup diagnostic, the #3 reject+recover ruling) **COMPLETED across the PA reboot** — report received this session. `FINAL_SHA 572ef009`, branch `worktree-agent-af88c53a8985b37fb`, worktree clean, **no leak** (pwd-start commit verified). Merge-base / agent base = `96732a29`. Real delta (merge-base..branch) = **+276/−27, 5 files**:
+- `compiler/src/ast-builder.js` (+81) — `E-CONTROL-FLOW-IN-MARKUP` detector + graceful recovery (drop the offending markup-text block; nothing reaches AST/DOM) in `liftBareDeclarations`.
+- `compiler/SPEC.md` (+13) — §34 catalog row (after `E-CTRL-011`) + §17.4 normative note (the `${ }` wrapper is mandatory).
+- `compiler/tests/parser-conformance-within-node-allowlist.json` (+14) — **6 fixtures** (3 named + 3 same-disease: `gauntlet-s20-sql/sql-all-001`, `sql-in-for-loop-001`, `gauntlet-s20-validation/reactive-encoded-001`).
+- `compiler/tests/e2e-render-map/e2e-render-map-baseline.json` (51) — 3 named cells `S-RAW-INTERP`→`fails-compile` + histogram.
+- NEW `compiler/tests/unit/control-flow-in-markup-reject.test.js` (+144, 11 cases).
 
-S203 built + shipped the **vPA-deputy** end-to-end (the S202-adopted reframe; baton retired). It is a **persistent second Claude instance** that runs ALONGSIDE the PA, never assumes authority, does a NARROW projection/maintenance role, and **self-drives on a `/loop` cadence**. All three functions LIVE:
-- **F1 digest** (`bun scripts/state.ts --digest` → `handOffs/digest.md`) — thins session-start.
-- **F2 maintenance** (maps/changelog/state.ts §0/flograph on `deputy-maint`) — shrinks the wrap.
-- **F3 reboot-bridge** — monitors dispatched agents across a PA reboot; records completions as `(deputy) state` delta entries.
+**Agent self-verified:** full `bun test` = **24434 pass / 0 fail / 231 skip / 1 todo**; R26 observe-one: all 3 named fixtures BEFORE smell-detected-wrong [S-RAW-INTERP] → AFTER fails-compile [E-CONTROL-FLOW-IN-MARKUP], **zero remaining S-RAW-INTERP**; canonical `${ for/lift }` still 0-error (no false-fire). NEW code = `E-CONTROL-FLOW-IN-MARKUP` (descriptive, §17.4/§7; sibling of `E-UNQUOTED-DISPLAY-TEXT` per S111). 2 deferreds flagged (not baked): contact-book#populated pre-existing drift; `while (@n < 3)`-comparator hits the pre-existing `<`-as-tag BS ambiguity (E-CTX-001) before the detector — out of scope.
 
-**What the NEXT PA must do differently (ratified S203):**
-1. **Session-start STEP 0 (Profile A AND B):** read `handOffs/digest.md`, run `bun scripts/state.ts` + read its `digest:` line (SOURCE-based freshness — current unless a projected source changed since the stamp; the digest's own commit doesn't stale it). If `current` → TRUST it for the volatile board/rulings/activity + skip re-deriving (master-list §0 narrows to non-board; hand-off narrows to OPEN THREADS). If `STALE`/absent → distrust + fall back to authoritative reads. **NEVER digest PRIMER/SPEC-INDEX/Rules.**
-2. A deputy may be RUNNING (`../scrml-deputy-maint` worktree on the `deputy-maint` branch). **Integrate it: `git merge deputy-maint` at your commit-points + wrap + boot** (clean by construction — disjoint surface). **Do NOT clean up the `deputy-maint` worktree** (it lives OUTSIDE `.claude/worktrees/`, so the S83 6b sweep won't — but don't manually remove it).
-3. The contract: `scrml-support/vpa-scrml.md` (deputy side) + `pa-scrml.md` §"S199 addendum — vPA deputy (PA side)" + `scrml/vpa.md` (root stub; "read vpa.md and boot"). DD: `scrml-support/docs/deep-dives/vpa-deputy-reframe-2026-06-17.md`. Stream: `handOffs/delta-log.md`. Anchor: `handOffs/deputy-state.md`.
+**LANDING RECORD (S204, user "land and push"):** PA-authored commit **`a6405053`** on main.
+- ✅ **Rule-4 SPEC-verified** — §34 row (after E-CTRL-011) + §17.4 normative note faithful to the (a) reject+recover ruling; descriptive name per S111.
+- ✅ **`deputy-maint` merged** clean FF `69172d25..73c7e688` (reboot-gap maintenance: digest + recent-sessions regen @ wrap HEAD + deputy-state ticks 6-7).
+- ✅ **file-delta** the 5 files from `worktree-agent-af88c53a@572ef009` (base `96732a29`; no sibling clobber; no leak).
+- ✅ **PA-independent R26 dual-verify (S138)** — both probes fail-compile with E-CONTROL-FLOW-IN-MARKUP; **ZERO markup-body raw-interp** (the only surviving `${` is the benign generated WebSocket template literal in `.client.js`, NOT the bug); canonical `${ for/lift }` clean (no false-fire).
+- ✅ **gap `g-raw-interp-channel-meta-corners` → resolved** + §0 regen (MED 12→11; `state.ts --check` PASS).
+- ✅ **full suite 24434/0** + TodoMVC PASS + browser checks (post-commit hook on landed main).
+- ✅ **coherence 0/4** (1 landing + 3 deputy reboot-gap), no leak.
 
-## Session shape
-A long Profile-A session, three arcs: (1) **vPA-deputy full build → LIVE** (spec → F2 → F1 → freshness-fix → full go-live; every piece validated against real artifacts — the freshness flaw was caught that way). (2) **e2e backlog triage** — the render-map's "render bugs" were mostly CORPUS + HARNESS debt, not codegen. (3) **flograph render-filter** (disjoint while #3 runs). Plus the live deputy maintained the derived surface THROUGH the arcs (PA/deputy division of labor validated).
+**REMAINING this session:** (a) **push** (a6405053 + the 3 deputy commits + the session-state commit); (b) **6b cleanup** of `agent-af88c53a` worktree only — **NOT** `../scrml-deputy-maint`; (c) **maps 6c → deferred to the deputy** (its surface per the write-partition; it refreshes off the new main on its next tick + the PA merges at the next commit-point — keeps the surface disjoint, the merge clean by construction. Maps are 28-behind, WARN-only/not-gated).
 
-## Session-close state (as of pre-draft — FINALIZE AT WRAP)
-- **HEAD:** scrml `fc548d90` (local; **PENDING push** with the #3 landing) · scrml-support `7d91005` (PUSHED 0/0). Local scrml is **0/2 ahead of origin** (c718d4c2 BRIEF+[13] · fc548d90 flograph) — push with #3.
-- **Board:** **HIGH 0 · MED 12 · LOW 23 · Nominal 8** (S203: MED 14→12, LOW 21→23 from the e2e reclassifications). [PENDING: #3 may add an §34 code + flip g-raw-interp.]
-- **Version:** v0.7.0. **Worktrees:** main + `../scrml-deputy-maint` (PERSISTENT — do not remove). **Experts staged:** xstate · elm-architecture · threejs-webgl-integration.
-- **Maps:** watermark `60d547e1` — STALE vs HEAD but all S203 commits are doc/test-infra/script-only (no compiler/src) UNTIL #3 lands. [PENDING 6c: refresh after #3.] **Digest:** STALE (deputy regens next tick).
-- **Tests:** pre-push full green at last push (24429/0/225). [PENDING: re-run at wrap post-#3.]
+## Deputy status (LIVE)
+Self-driving (`/loop` cron `39fed15c`, every 30 min). `deputy-maint` @ `73c7e688`, **0/3 FF ahead of main** — reboot-gap maintenance done (it watched #3 across the reboot per F3, recorded ticks 6-7 in `deputy-state.md`; no `(deputy) state` delta entry because the PA came alive and owns the landing). Merge at the #3 landing. **Do NOT remove `../scrml-deputy-maint`** (lives outside `.claude/worktrees/`; 6b sweep won't touch it; don't manually either).
 
-## ⏭️ IN-FLIGHT + OPEN THREADS
-1. **#3 fix dispatch IN-FLIGHT (the in-flight-at-wrap piece).** Agent `af88c53a8985b37fb` (scrml-js-codegen-engineer, isolation:worktree, bg) — the `bare-control-flow-in-markup` diagnostic (reject+recover, user-ruled (a)). BRIEF: `docs/changes/bare-control-flow-in-markup-diagnostic-2026-06-17/BRIEF.md`. **On landing:** file-delta its compiler/src + SPEC §34 + the §17.4 note + the expected-error reclassification of the 3 fixtures + the e2e-render-map baseline regen; **R26-dual-verify** (S138 — independent observe-one: S-RAW-INTERP gone + canonical `${ for/lift }` still-clean); flip `g-raw-interp-channel-meta-corners` → resolved; full `bun run test`; push (with the 2 banked commits). If the agent STOP-surfaces again, read its report.
-2. **Push-pending:** 2 banked scrml commits (held for the #3 landing).
-3. **e2e triage residue (LOW, open):** `g-reflect-variant-shape-inconsistent` (reflect's 3 paths disagree string vs {name}; §14.4.2 says name-strings) · `g-rendermap-needs-server-classification` (harness: mock-server or `needs-server` cell-state for full-stack/`<db>` apps) · `g-mount-hang-rails-dev` (#4, LOW) · the meta-in-component-001 sample bug (`${v.name}`→`${v}`, optional). `g-fullstack-empty-mount-throws` = non-gap (b+c). `g-render-nullish-text` = resolved (seed-gap fixed).
-4. **Deputy follow-ups (deferred):** the commit-gate path-scoped skip (the ~17k-test overhead on derived deputy commits — flagged, careful-surface, not built); the digest's "open questions" + precise-in-flight (scope-cut, future enhancement).
-5. **flograph / dock / block-lease** — flograph filter added S203; the dock (adopted S202) thin-build rides the doc-checker; block-lease is the dock's parallelism follow-on; the flogeance-in-scrml product is the build target.
+## Open threads (carried from S203)
+1. **#3 landing** (above) — first task.
+2. **Push-pending:** none separate — #3 landing is the next push; origin is at the s203 wrap `69172d25` (0/0).
+3. **e2e triage residue (LOW, open):** `g-reflect-variant-shape-inconsistent` (reflect's 3 paths disagree string vs {name}; §14.4.2 = name-strings) · `g-rendermap-needs-server-classification` (harness: mock-server / `needs-server` cell for full-stack/`<db>` apps) · `g-mount-hang-rails-dev` (#4, LOW) · meta-in-component-001 sample bug (`${v.name}`→`${v}`, optional). `g-fullstack-empty-mount-throws` = non-gap. `g-render-nullish-text` = resolved.
+4. **Deputy follow-ups (deferred):** commit-gate path-scoped skip (the ~17k-test overhead on derived deputy commits — flagged, not built); digest "open questions" + precise-in-flight (scope-cut, future enhancement).
+5. **flograph / dock / block-lease:** flograph `--mmd/--filter/--focus` render-filter added S203; the dock (adopted S202) thin-build rides the doc-checker; block-lease is the dock's parallelism follow-on; flogeance-in-scrml is the build target.
 6. **Trucking corpus slices 2-5** (S193 carried): decl-coupled validators · `<each>` sweep · errors-as-states · typed props.
 
-## Partition nuances discovered S203 (for a future vpa-scrml.md refinement)
-- **PA regens the §0 gap-counts rollup on ITS OWN @gap-token landings** (the rollup derives from PA-owned @gap source, so the PA keeps it coherent in the same commit); the deputy regens it continuously + for other changes. (vpa-scrml.md currently says deputy-owns the §0 rollup — true for continuous drift; PA-source-changes need PA-regen for commit-coherence.)
-- **Session-close changelog block is PA-narrative-shaped** (the deputy owns docs/changelog.md for continuous/coarse landings, but a design-heavy session's narrative needs the PA who did the work — the deputy can't synthesize design-arc narrative from delta-pointers). Decide at wrap: PA writes the S203 block OR pokes the deputy.
-
-## Recordkeeping (S203)
-- **DONE:** memory `project_flogeance_vpa_workflow` (S203 block + description); the deputy spec authored (vpa-scrml.md) + PA contract (pa-scrml.md step 0 + S199-addendum) + vpa.md stub + deputy-state.md + delta-log [1]-[14]; e2e gap reclassifications + §0 regen.
-- **PENDING AT WRAP:** user-voice S203 append (verbatim directives: "your read is good go" · "go ratify the start change" · "yes land 2a and classify meta; #1 is b+c" · "a, dispatch it" · "lets get this system live while warm" · "pre-stage the wrap" · etc.); changelog S203 block; maps 6c; state 6d; push.
+## Board / state (as of OPEN)
+**HIGH 0 · MED 11 · LOW 23 · Nominal 8** (`g-raw-interp-channel-meta-corners` resolved S204). v0.7.0. HEAD `a6405053` (push pending; origin at `69172d25`, coherence 0/4). Maps 28 commits behind HEAD (`60d547e1`) — **deferred to the deputy** (6c next tick; WARN-only). Tests: full `bun test` 24434/0 + TodoMVC PASS (post-commit, landed main). Digest current @ `73c7e688` (will go STALE on the #3 commit; deputy regens next tick).
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · step-0 digest-first (S203) · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence · S164 bg-commit-race · S180 waiting-time 3-tier · S198 context-economics/partner-not-list · S199→S202 baton RETIRED → **deputy LIVE S203** · wrap 8-step (deputy shrinks 6b/6c/6d/changelog).
+R1–R5 · `---` delimiter · Profile A · step-0 digest-first (S203) · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence · S164 bg-commit-race · S180 waiting-time 3-tier · S198 context-economics/partner-not-list · deputy LIVE (S203, PA integrates `deputy-maint` at commit-points/wrap/boot) · wrap 8-step (deputy shrinks 6b/6c/6d/changelog).
 
 ## Tags
-#session-203 #close-predraft #profile-a #vpa-deputy-LIVE #f1-digest #f2-maintenance #f3-reboot-bridge #self-poke-loop #e2e-triage #flograph-filter #3-in-flight #board-high-0
+#session-204 #open #profile-a #vpa-deputy-LIVE #f3-reboot-bridge-first-use #3-ready-to-land #e-control-flow-in-markup #board-high-0
