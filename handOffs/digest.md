@@ -1,9 +1,9 @@
-<!-- @digest head=271cf4d1 delta-seq=16 -->
+<!-- @digest head=414ca194 delta-seq=17 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `271cf4d1`** + delta-log **[16]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `271cf4d1`
+> **HEAD `414ca194`** + delta-log **[17]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `414ca194`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `271cf4d1`
+## Board — from `@gap` tokens @ `414ca194`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -24,15 +24,15 @@
 - `[14]` rule · BLOCK-NAMING via the COMPILER not a 2nd parser (user Q) — for block-lease block-ID/extent extraction the scrml compiler's real parser/AST/symbol-table/RW-DG is… → conversation S206
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[10]` state · pushed scrml-support batch (DD §7.2 + user-voice + DD doc → origin b44d94b); scrml batch in flight (b1 10255c94 + deputy ticks 36/37 FF'd). NEXT: user decision… → push
 - `[11]` disp/find · dPA DELIBERATION-SATELLITE DD done (dpa-deliberation-satellite-2026-06-18, scrml-support eb7a216) — user idea "bank debates/DDs, run batched in a dPA sub-sessio… → dpa DD §10
 - `[12]` state · CANDIDATE banked (user "just a thought", NOT ratified): CC user-prompts to vPA via transcript-tail (~free) → (1) vPA mechanical user-voice capture + PA curates… → hand-off thread 2b
 - `[13]` find · vPA-COMMUNICATION-SURFACE DD done (vpa-communication-surface-2026-06-18, scrml-support 0c8e136) — folds inbox-triage + pub/sub + pointer-router + transcript-cap… → vpa-comms-surface DD
 - `[15]` disp/find · BLOCK-ANALYSIS-EMIT SCOPE done (Plan agent → docs/changes/block-analysis-emit-2026-06-18/SCOPE-AND-DECOMPOSITION.md) — the compiler-emits-block-analysis impl pl… → SCOPE-AND-DECOMPOSITION.md
 - `[16]` disp · D1+D2 DISPATCHED parallel (block-analysis-emit v1, scrml-js-codegen-engineer isolation:worktree, F3-watched). D1=footprint extractor (agent a4e06003bbee9b9a2 →… → docs/changes/block-analysis-emit-2026-06-18/
+- `[17]` land/disp · D1 LANDED (696a53d0) — block-analysis-footprint.ts footprintForBlock (add-alongside; body-dg-builder.ts ZERO diff verified 2 ways; BREAK-1 canary on real compil… → 696a53d0 + agent a2322e040
 
 ## State
-- Version: 0.7.0 · maps: 12 commits behind HEAD (watermark 359a1d83, HEAD 271cf4d1)
+- Version: 0.7.0 · maps: 16 commits behind HEAD (watermark 359a1d83, HEAD 414ca194)
 - Recent wraps:
   - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519

@@ -8,15 +8,15 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. S206 active; flogeance renamed → flogence (S206); block-lease primitive building. First deputy instance, booted S203. On tick 48.
+- **State:** LIVE — steady-state. S206 active; flogeance renamed → flogence (S206); block-lease primitive building. First deputy instance, booted S203. On tick 49.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
-- **Last-absorbed delta seq:** S206 **[16]** (PA-source; deputy appended S205 F3 [22]).
+- **Last-absorbed delta seq:** S206 **[17]** (PA-source; deputy appended S205 F3 [22]).
 - **`deputy-maint`:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`, descends main (PA integrates via the merge-before-push gate). **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** none. (digest current — PA wrap-regen 74d7d0e2; recent-sessions regen'd this tick; maps current.)
+- **Owed maintenance:** MAPS batch (block-analysis-emit: D1 landed `696a53d0` block-analysis-footprint.ts; D2 re-dispatch in-flight) → refresh when D2 lands. (digest current — PA wrap-regen 74d7d0e2; recent-sessions regen'd this tick; maps current.)
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19] ratification — record each tick)
 
-- **heartbeat:** tick **T48** · last-absorbed **[S206 16]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T49** · last-absorbed **[S206 17]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → re-read §3c; run flograph/dock --check + record health each tick (standing since T27).
 - **ACK (vpa:) [S205 19]** → adopted the ACK+heartbeat block (this tick T34); recording each tick going forward.
 - **ACK (F3 defer, wrap [21]) → DELIVERED:** all 3 deferred agents LANDED in S206 (g-colon-shorthand e2516298 · g-engine-autodecl 105f1ee4 · slice-2 e1c20e3a). The reboot-bridge worked end-to-end; my delta-log [22] confirmed the block-splitter the S206 PA then landed.
@@ -35,7 +35,8 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## In-flight dispatches (F3 watch list)
 
-- **2 NEW in-flight (block-analysis-emit v1, [16], PA alive → track only):** D1 footprint-extractor `a4e06003bbee9b9a2` (778eb65e progress) · D2 `a8ad5f2b1ab34fb19` (af22db40 start). Both scrml-js-codegen-engineer/isolation:worktree → likely compiler/src → maps batch on landing.
+- **1 in-flight (block-analysis-emit D2 re-dispatch [17], PA alive → track):** `a2322e040eb1d9944` (1fc2b356 walk-node-tree). compiler/src → maps batch. (original D2 `a8ad5f2b` superseded by the re-dispatch.)
+- **LANDED, in maps batch:** D1 footprint-extractor `a4e06003bbee9b9a2` (696a53d0, block-analysis-footprint.ts — add-alongside, body-dg-builder ZERO-diff).
 - LANDED (worktrees retained, 6b-cleanup PA-pending): the 5 S205 agents (slice-3/g-match/g-colon-shorthand/g-engine-autodecl/slice-2).
 
 ## Tick log (compressed)
