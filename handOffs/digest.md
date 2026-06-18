@@ -1,9 +1,9 @@
-<!-- @digest head=1b15f701 delta-seq=21 -->
+<!-- @digest head=f69219d3 delta-seq=12 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `1b15f701`** + delta-log **[21]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `1b15f701`
+> **HEAD `f69219d3`** + delta-log **[12]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `f69219d3`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,26 +13,25 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `1b15f701`
+## Board — from `@gap` tokens @ `f69219d3`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 4 `rule` (delta-log S205 — 2026-06-18)
-- `[2]` rule/land · "push it and adopt the merge-before-push gate" — PUSHED the 3 deputy-maintenance commits (origin e723de04→0bc9fe0e, gate-checked deputy-maint ^main==0). RATIFIE… → pa-scrml.md S199 addendum + user-voice S205
-- `[15]` rule · MERGE-BEFORE-PUSH gate RATIFIED (user "adopt the merge-before-push gate") — pa.md S199 + wrap step 7; text corrected after a live-deputy divergence race (plain…
-- `[16]` rule · DEPUTY GUARDRAIL CHECKS wired (user "wire the deputy checks") — vpa-scrml.md step 3c: flograph/dock --check per tick + health snapshot + route-new-findings. (vp…
-- `[19]` rule/land · WRAP-EXAMINATION → ratified (a) S42 WRAP-THINNING (bloat irreducible, reference digest/delta-log/deputy-state for mechanical) + PA↔vPA PROTOCOL sharpen-async (DD decisive: OTP cast model; ACK+heartbeat in deputy-state; OQ-2 priority-flag NOT adopted). Encoded pa-scrml.md + vpa-scrml.md; DD committed. (vpa: adopt the ACK+heartbeat block per vpa-scrml.md §steady-state S205 — record it each tick going forward.)
+## Recent rulings — last 3 `rule` (delta-log S206 — 2026-06-18)
+- `[5]` rule/land · "land all 3, hold push" then "push" — PUSHED (gate caught deputy tick-34 strand → FF-merged first). origin 9f203d82→359a1d83. full suite 24463/0. board HIGH0/ME… → 359a1d83
+- `[6]` rule/land · user "get flograph to safe parallel same-file disps; a then b" → built (a) block-scope INTERIM: dock --units + dock --diff-scope --owns (PA-direct, thin; lang-a… → scrml 1b15f701 + DD 4ba445c
+- `[8]` rule/disp · user REJECTED b2-ii componentize-to-lease — co-location-of-behaviour axiom + no-refactor-tax (user-voice S206, banked memory feedback_colocation_of_behaviour_ax… → user-voice 1f129fe
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[13]` disp/land · MATCH-ALTERNATION — dispatched (a634857265ed2b578) + LANDED (9a7bc3a5). g-match-alternation-value-vs-derived (MED) closed; ast-builder S27 arm-scanner + parseAr…
-- `[14]` find/land · WITHIN-NODE PARITY push-FAILED (S198 omission recurred — slice-3 brief lacked the re-baseline+full-suite mandate). Re-baselined 13 over-budget trucking fixtures… → origin). LESSON: fold the re-baseline into every corpus-rewrite brief.
-- `[17]` find · DEPUTY-DILATION re-measure (clean cycle, digest booted current): F1 ~8.3k realized, total ~1.5% confirmed. + corpus-hygiene DEREF (48 superseded → archive/deep-dives, exhaustive 802-ref rewrite) + flograph --with-archive currency tier + flogence-harness-validation capstone.
-- `[18]` disp · 3 dev agents + 1 DD dispatched (F3-bridged): slice2 decl-coupled-validators (aeca436) · g-engine-autodecl (af5ed82) · g-colon-shorthand (ab4fe40) · PA↔vPA-proto…
-- `[19]` rule/land · WRAP-EXAMINATION → ratified (a) S42 WRAP-THINNING (bloat irreducible, reference digest/delta-log/deputy-state for mechanical) + PA↔vPA PROTOCOL sharpen-async (DD decisive: OTP cast model; ACK+heartbeat in deputy-state; OQ-2 priority-flag NOT adopted). Encoded pa-scrml.md + vpa-scrml.md; DD committed. (vpa: adopt the ACK+heartbeat block per vpa-scrml.md §steady-state S205 — record it each tick going forward.)
-- `[20]` state · COMPLETED-but-DEFERRED to next session (F3): g-engine-autodecl (ca43c723, done) + slice2 (5e39ab89, done — needs within-node re-baseline + compound-field-rbt BU… → hand-off S205-CLOSE open-thread #1
+- `[7]` find/land · (b1) Scheme-C carried-comment anchor PROVEN for named defs — rename/move survive (inv1 100%), the DROPPED-anchor failure CAUGHT by the inv3 orphan WARN, split s… → scrml 10255c94 + DD d538a75
+- `[8]` rule/disp · user REJECTED b2-ii componentize-to-lease — co-location-of-behaviour axiom + no-refactor-tax (user-voice S206, banked memory feedback_colocation_of_behaviour_ax… → user-voice 1f129fe
+- `[9]` find · DD DONE (markup-lease-anchor-2026-06-18, b44d94b) — state-keyed seed VALIDATED on the real messages.scrml case (zero file change, false-collision fixed = co-loc… → markup-lease-anchor DD
+- `[10]` state · pushed scrml-support batch (DD §7.2 + user-voice + DD doc → origin b44d94b); scrml batch in flight (b1 10255c94 + deputy ticks 36/37 FF'd). NEXT: user decision… → push
+- `[11]` disp/find · dPA DELIBERATION-SATELLITE DD done (dpa-deliberation-satellite-2026-06-18, scrml-support eb7a216) — user idea "bank debates/DDs, run batched in a dPA sub-sessio… → dpa DD §10
+- `[12]` state · CANDIDATE banked (user "just a thought", NOT ratified): CC user-prompts to vPA via transcript-tail (~free) → (1) vPA mechanical user-voice capture + PA curates… → hand-off thread 2b
 
 ## State
-- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark 359a1d83, HEAD 1b15f701)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 359a1d83, HEAD f69219d3)
 - Recent wraps:
   - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519

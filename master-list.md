@@ -93,7 +93,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `1bcf5c71` — wrap(s202): close — each-inline arc closed (board HIGH 0) + trucking flagship complete + flograph & L1 render-map built + 4 DDs (dock/e2e/deputy adopted, baton retired) — **pushed**
 - `caa8f77b` — wrap(s201): close — the 2-HIGH pass DONE (each-body-bare-variant + markup-value end-to-end) + member-arg; board HIGH 1 — **pushed**
 - `535de409` — wrap(s200) 6c: maps refresh 76d03aa9->b1f5f8bf + delta-log [10] (S200 wrap complete) — **pushed**
-- `b727c24a` — wrap(s199): E-leg server-auth engine + HOS showcase + gap-184 §11.1 + flogence/vPA workflow [FIRST live baton-pass] — **pushed**
+- `b727c24a` — wrap(s199): E-leg server-auth engine + HOS showcase + gap-184 §11.1 + flogeance/vPA workflow [FIRST live baton-pass] — **pushed**
 - `13c3c978` — wrap(s198): close — trucking 1a/1b + engine-hydration F-primitive landed; E-leg designed-not-built; vPA workflow open; context-economics locked in — **pushed**
 <!-- @generated:recent-sessions END -->
 
