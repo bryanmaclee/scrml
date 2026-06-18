@@ -1,9 +1,9 @@
-<!-- @digest head=bf7c8759 delta-seq=8 -->
+<!-- @digest head=897a2c69 delta-seq=6 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `bf7c8759`** + delta-log **[8]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `bf7c8759`
+> **HEAD `897a2c69`** + delta-log **[6]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `897a2c69`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,23 +13,23 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `bf7c8759`
+## Board — from `@gap` tokens @ `897a2c69`
 - **HIGH 0** · MED 11 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 0 `rule` (delta-log S204 — 2026-06-17)
-- _(none in the latest session)_
+## Recent rulings — last 1 `rule` (delta-log S205 — 2026-06-18)
+- `[2]` rule/land · "push it and adopt the merge-before-push gate" — PUSHED the 3 deputy-maintenance commits (origin e723de04→0bc9fe0e, gate-checked deputy-maint ^main==0). RATIFIE… → pa-scrml.md S199 addendum + user-voice S205
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[2]` state · #3 RE-ATTACH READY — agent af88c53a8985b37fb (bare-control-flow-in-markup) COMPLETED across the reboot (F3's first real use; PA alive → PA owns the landing, no… → agent report + FINAL_SHA 572ef009
-- `[3]` land · #3 LANDED a6405053 (user "land and push"). E-CONTROL-FLOW-IN-MARKUP reject+recover — file-delta the 5 files from worktree-agent-af88c53a@572ef009 AFTER a clean-… → a6405053
-- `[4]` land · flograph corpus-annotation SLICE 1 (user "flograph" → "annotate the corpus") + a parser fix the dog-food surfaced. Authored the board-<each> saga: board-each-co… → flograph slice-1 commit + spec §2.2
-- `[5]` land/find · flograph SLICE 2 (user "slice 2") — annotated the recent design corpus so the provenance SWEEP surfaces REAL asserted-not-verified claims. 4 DDs @node'd (kind=d… → slice-2 commit (scrml-support) + delta-log [5]
-- `[6]` find/land · DEPUTY-DILATION LOOP CLOSED (user "push and close the deputy-dilation loop"). PUSHED slices 1+2 (scrml bdd6e1c9..5295a61c gate-green 24434/0; scrml-support ab9a… → vpa-deputy DD §S204-measurement + flograph edge
-- `[7]` land/find · flograph SLICE 3 (user "flograph 3") — the SUPERSESSION/currency layer, via TOOL ENHANCEMENT not manual annotation. flograph.ts now reads write-once-tier frontm… → flograph.ts + spec §2.1/§4.5
+- `[1]` state · COLD S205 boot (Profile A FULL, "read pa.md and start session. vpa is running"). digest CURRENT (FIRST clean digest boot — S204 booted stale) → thin-start reali… → hand-off S205 OPEN + handOffs/hand-off-209.md (S204 rotated)
+- `[2]` rule/land · "push it and adopt the merge-before-push gate" — PUSHED the 3 deputy-maintenance commits (origin e723de04→0bc9fe0e, gate-checked deputy-maint ^main==0). RATIFIE… → pa-scrml.md S199 addendum + user-voice S205
+- `[3]` find · DEPUTY-DILATION RE-MEASURE on a clean cycle (closes the S204 follow-up). digest booted CURRENT → F1 REALIZED ~8.3k (master-list §0 skipped 9,364 tok − thin-path… → vpa-deputy DD §S205-remeasurement
+- `[4]` land · DOCK THIN-BUILD (40590c73) — scripts/dock.ts, the agentic code-provenance dock checker (DD agentic-code-provenance-dock-2026-06-17, ADOPTED S202). Scans #dock[… → 40590c73
+- `[5]` land · FLOGRAPH SLICE 4 (7d53119f) — cites/derivation layer. companion: frontmatter → synthesized cites edges (slice-3 pattern; corpus had 0 cites before); NEW --deriv… → 7d53119f
+- `[6]` land · DOCK SLICE 2 (686dc795) — coverage walker over scrml .scrml defs (inv1+inv3). --coverage: thin regex def-extractor (engine/channel/fn/type/component), inv1 dock… → 686dc795
 
 ## State
-- Version: 0.7.0 · maps: 5 commits behind HEAD (watermark cc765a5a, HEAD bf7c8759)
+- Version: 0.7.0 · maps: 12 commits behind HEAD (watermark cc765a5a, HEAD 897a2c69)
 - Recent wraps:
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
   - 69172d25 wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use)
