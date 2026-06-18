@@ -29,16 +29,17 @@
 // authoritative (mirrors flograph's design principle).
 //
 // MODES:
-//   bun scripts/dock.ts                 REPORT — dock/edge counts + resolution + sweep (stdout)
-//   bun scripts/dock.ts --check         CHECK  — malformed(ERROR) + dangling/superseded-target(WARN) + sweep(INFO); exit 1 on ERROR
-//   bun scripts/dock.ts --corpus a,b    override the default code corpus globs (comma-separated; * supported)
+//   bun scripts/dock.ts                 REPORT   — dock/edge counts + resolution + sweep (stdout)
+//   bun scripts/dock.ts --check         CHECK    — malformed(ERROR) + dangling/superseded-target(WARN) + sweep(INFO); exit 1 on ERROR
+//   bun scripts/dock.ts --coverage      COVERAGE — scrml-definition coverage (inv1) + orphaned docks (inv3); over .scrml
+//   bun scripts/dock.ts --corpus a,b    override the default corpus (code globs for report/check; .scrml dirs/globs for --coverage)
 //
 // TOKEN (DD open #5 Approach A — inline dev-only, the @gap precedent; `·`-separated fields):
 //   #dock[ implements=<node> · decided-by=<node> · cites=<node> · verified ]
 //   #dock[ chore ]   — the cheap escape: no decision edge, declares "no reasoning here" (filterable out)
 //   edges: implements|decided-by|cites = a flograph @node id ; bare `verified` = the dock-level grounding bit.
 
-import { existsSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { readFileSync } from "fs";
 import { build, defaultCorpus, SUPERSEDED, globSync, rel, type Node } from "./flograph.ts";
 
@@ -175,13 +176,93 @@ function check(corpus: string[]): number {
   return errors ? 1 : 0;
 }
 
+// ── Coverage walker (S205 dock slice 2 — inv1 coverage + inv3 boundary, over scrml .scrml defs) ──
+// The INVERSE of the edge-checker: instead of "which docks resolve?", ask "which DEFINITIONS carry a
+// dock?". A reasoning-unit (DD open #1) is a NAMED scrml definition — engine / component / fn|function /
+// type / channel. The scrml dock form is a `// #dock[…]` COMMENT on/just-above the definition (scrml
+// comments are non-emitted, so no strip-at-build is needed for this form — DD open #5 Approach A).
+//   inv1 coverage         : a definition is "docked" iff a #dock sits within [defLine-2, defLine]. → WARN.
+//   inv3 boundary coherence: a #dock with NO definition within [dockLine, dockLine+2] is ORPHANED. → WARN.
+// Deliberately scopes to the SUBSTANTIVE definition forms (not every `<x>=0` state cell — that is part of
+// its enclosing unit, and the `chore` escape covers genuinely-reasonless code). Thin regex extraction —
+// no scrml-parser integration (stays a harness; flogeance-in-scrml uses the real parser later).
+const SCRML_DEFS: { kind: string; re: RegExp }[] = [
+  { kind: "engine",    re: /<engine\b[^>]*?\b(?:for|var)=\.?(\w+)/ },
+  { kind: "channel",   re: /<channel\b[^>]*?\bname=["']?(\w+)/ },
+  { kind: "function",  re: /^\s*(?:export\s+)?(?:server\s+)?(?:function|fn)\s+(\w+)\s*\(/ },
+  { kind: "type",      re: /^\s*(?:export\s+)?type\s+(\w+)\s*:/ },
+  { kind: "component", re: /^\s*(?:export\s+)?const\s+([A-Z]\w*)\s*=\s*</ },
+  { kind: "component", re: /^\s*export\s+<([A-Z]\w*)/ },
+];
+
+type Def = { kind: string; name: string; file: string; line: number };
+function extractDefs(file: string): Def[] {
+  const lines = readFileSync(file, "utf8").split("\n");
+  const defs: Def[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    for (const p of SCRML_DEFS) {
+      const m = lines[i].match(p.re);
+      if (m) { defs.push({ kind: p.kind, name: m[1] ?? "(anon)", file, line: i + 1 }); break; }
+    }
+  }
+  return defs;
+}
+
+function findScrml(roots: string[]): string[] {
+  const out: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const f of readdirSync(root, { recursive: true }) as string[]) if (f.endsWith(".scrml")) out.push(`${root}/${f}`);
+  }
+  return out;
+}
+
+function coverageMode(corpus: string[]): number {
+  const docks = scan(corpus);
+  const docksByFile = new Map<string, number[]>();
+  for (const d of docks) { const a = docksByFile.get(d.file) ?? []; a.push(d.line); docksByFile.set(d.file, a); }
+
+  let totalDefs = 0, docked = 0;
+  const byKind: Record<string, { n: number; docked: number }> = {};
+  const defLineByFile = new Map<string, Set<number>>();
+  for (const file of corpus) {
+    const defs = extractDefs(file);
+    const dlines = docksByFile.get(file) ?? [];
+    const ds = new Set<number>(); defLineByFile.set(file, ds);
+    for (const def of defs) {
+      ds.add(def.line);
+      totalDefs++;
+      byKind[def.kind] ??= { n: 0, docked: 0 }; byKind[def.kind].n++;
+      if (dlines.some(dl => dl >= def.line - 2 && dl <= def.line)) { docked++; byKind[def.kind].docked++; }
+    }
+  }
+  // inv3: a dock with no definition within [dockLine, dockLine+2] is orphaned (boundary-incoherent).
+  const orphans = docks.filter(dk => { const s = defLineByFile.get(dk.file); return !s || ![dk.line, dk.line + 1, dk.line + 2].some(l => s.has(l)); });
+  const pct = totalDefs ? (100 * docked / totalDefs).toFixed(1) + "%" : "n/a";
+
+  console.log("dock --coverage (scrml definitions; inv1 coverage + inv3 boundary)");
+  console.log(`  corpus:  ${corpus.length} .scrml file(s)`);
+  console.log(`  defs:    ${totalDefs}  (${Object.entries(byKind).sort().map(([k, v]) => `${k}:${v.docked}/${v.n}`).join(" ") || "none found"})`);
+  console.log(`  inv1 coverage:        ${docked}/${totalDefs} definitions docked (${pct})`);
+  console.log(`  inv3 orphaned docks:  ${orphans.length} (#dock not adjacent to a definition)`);
+  for (const o of orphans.slice(0, 8)) console.log(`         orphan: ${o.raw} in ${rel(o.file)}:${o.line}`);
+  return 0;
+}
+
 // ── main ──────────────────────────────────────────────────────────────────
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const cIdx = args.indexOf("--corpus");
-  const raw = cIdx >= 0 ? args[cIdx + 1].split(",").map(p => p.startsWith("/") ? p : `${ROOT}/${p}`) : DEFAULT_CODE_CORPUS;
-  const corpus = raw.flatMap(p => p.includes("*") ? globSync(p) : [p]).filter(existsSync);
+  const override = cIdx >= 0 ? args[cIdx + 1].split(",").map(p => p.startsWith("/") ? p : `${ROOT}/${p}`) : null;
 
+  if (args.includes("--coverage")) {
+    // default scrml corpus = real authored scrml (stdlib + examples); --corpus overrides (recursive).
+    const roots = override ?? [`${ROOT}/stdlib`, `${ROOT}/examples`];
+    const scrmlCorpus = override ? override.flatMap(p => p.includes("*") ? globSync(p) : (p.endsWith(".scrml") ? [p] : findScrml([p]))).filter(existsSync) : findScrml(roots);
+    process.exit(coverageMode(scrmlCorpus));
+  }
+
+  const corpus = (override ?? DEFAULT_CODE_CORPUS).flatMap(p => p.includes("*") ? globSync(p) : [p]).filter(existsSync);
   if (args.includes("--check")) process.exit(check(corpus));
   else report(corpus);
 }
