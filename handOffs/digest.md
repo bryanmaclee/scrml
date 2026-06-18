@@ -1,9 +1,9 @@
-<!-- @digest head=0d448fec delta-seq=9 -->
+<!-- @digest head=98820d11 delta-seq=10 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `0d448fec`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `0d448fec`
+> **HEAD `98820d11`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `98820d11`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `0d448fec`
+## Board — from `@gap` tokens @ `98820d11`
 - **HIGH 0** · MED 11 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -21,15 +21,15 @@
 - `[2]` rule/land · "push it and adopt the merge-before-push gate" — PUSHED the 3 deputy-maintenance commits (origin e723de04→0bc9fe0e, gate-checked deputy-maint ^main==0). RATIFIE… → pa-scrml.md S199 addendum + user-voice S205
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[4]` land · DOCK THIN-BUILD (40590c73) — scripts/dock.ts, the agentic code-provenance dock checker (DD agentic-code-provenance-dock-2026-06-17, ADOPTED S202). Scans #dock[… → 40590c73
 - `[5]` land · FLOGRAPH SLICE 4 (7d53119f) — cites/derivation layer. companion: frontmatter → synthesized cites edges (slice-3 pattern; corpus had 0 cites before); NEW --deriv… → 7d53119f
 - `[6]` land · DOCK SLICE 2 (686dc795) — coverage walker over scrml .scrml defs (inv1+inv3). --coverage: thin regex def-extractor (engine/channel/fn/type/component), inv1 dock… → 686dc795
 - `[7]` land · CORPUS-HYGIENE DEREF (user "act on the corpus-hygiene finding"; scrml 9ccbd0d4 + scrml-support 02055c8). 48 fully-superseded deep-dives → archive/deep-dives/ (4… → archive/deep-dives/ (48) + the two deref commits
 - `[8]` land · FLOGRAPH --with-archive PROVENANCE TIER (40-… commit). Completes the currency model: the deref cleaned the live DIR but left lineage dangling; --with-archive ad… → scripts/flograph.ts defaultCorpus + dock.ts nodeGraph
 - `[9]` land · FLOGEANCE HARNESS VALIDATION REPORT (capstone; scrml-support 9672d26). Records what S204-S205 built+PROVED (additive to the design DDs which predate the build):… → flogeance-harness-validation-2026-06-18.md
+- `[10]` state · WIRED the deputy flograph/dock GUARDRAIL checks (user "wire the deputy checks") — the "start benefiting from flograph NOW" lever (turns the built harnesses into… → vpa-scrml.md §3c · (vpa: NEW standing tick-step — re-read vpa-scrml.md §"Steady state" 3c; and THIS tick run `bun scripts/flograph.ts --check --with-support --with-archive` + `bun scripts/dock.ts --check` + `bun scripts/dock.ts --coverage`, record a health-snapshot line in deputy-state.md, route only NEW actionable findings to the PA per 3c)
 
 ## State
-- Version: 0.7.0 · maps: 18 commits behind HEAD (watermark cc765a5a, HEAD 0d448fec)
+- Version: 0.7.0 · maps: 26 commits behind HEAD (watermark cc765a5a, HEAD 98820d11)
 - Recent wraps:
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
   - 69172d25 wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use)
