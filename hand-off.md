@@ -1,43 +1,41 @@
-# scrml — Session 205 (CLOSE)
+# scrml — Session 206 (OPEN)
 
-**Date:** 2026-06-18. **Previous:** `handOffs/hand-off-209.md` (S204 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-210.md` at OPEN. **Profile:** A — FULL. **Deputy:** LIVE all session.
+**Date:** 2026-06-18. **Previous:** `handOffs/hand-off-210.md` (S205 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-211.md` at OPEN. **Profile:** A — FULL (digest-thinned boot; full PRIMER/SPEC-INDEX cold reads DEFERRED pending session direction — read SPEC sections on demand per Rule 4). **Deputy:** worktree present (`../scrml-deputy-maint` @ deputy-maint, fully merged `^main==0`); liveness of the cron loop `39fed15c` not re-confirmed at boot.
 
-> **FIRST thinned wrap (S42 re-scope ratified S205).** This hand-off bloats the IRREDUCIBLE (narrative · open-questions · anomalies) and REFERENCES the digest / delta-log / deputy-state for the MECHANICAL state — do NOT expect board tables / counts / in-flight-agent write-ups here; read them from:
-> - **Board / counts / maps / version** → `bun scripts/state.ts` + the digest (`handOffs/digest.md`, booted CURRENT).
-> - **In-flight detail / landings / rulings** → `handOffs/delta-log.md` S205 tail.
-> - **Deputy state / agent F3 watch / ACK+heartbeat** → `handOffs/deputy-state.md`.
+> **Thinned wrap (S42 re-scope S205).** Mechanical state lives in: `bun scripts/state.ts` + `handOffs/digest.md` (board/counts/version/maps) · `handOffs/delta-log.md` (in-flight/landings/rulings) · `handOffs/deputy-state.md` (deputy + F3 watch). This hand-off carries only the irreducible.
 
-## ⭐ S205 — a context-economics-enforced deep session
-The user enforced context-economics hard (user-voice S205 verbatim): ~50% of a session is fixed start/stop ceremony; don't burn the warm ~38% on ceremony/hedging/wrap-reflexes; and **with F3, agent landings persist across sessions → don't hold back DISPATCHING on budget grounds** (dispatching is ~free on PA context; the next session lands the in-flight). The PA's drift to wrap-proposals + "land before I run out" was the called-out waste. Net: 4 agents dispatched, 2 landed in-session, 3 deferred to next session (F3) by design — not by failure.
+## Boot state (S206 OPEN)
+- Digest **CURRENT** (stamp 74d7d0e2) → board trusted: **HIGH 0 · MED 10 · LOW 23 · Nominal 8**, v0.7.0, subset 17161/90/0, maps 4 behind HEAD (492b4bb9 vs 9f203d82).
+- Git: main `9f203d82`, origin **0/0**, `deputy-maint ^main == 0`. Inbox **empty**. scrml-support sync: not yet checked at OPEN.
+- Untracked `handOffs/hand-off-209.md` (S204 close, rotated S205-OPEN, never committed) — git-add at next commit.
 
-## ⏭️ OPEN THREADS / Open questions (the irreducible)
+## ⏭️ OPEN THREADS
 
-### 1. LAND the 3 deferred agents (F3-bridged; their worktrees + branches persist)
-- **g-engine-autodecl** — agent `af5ed82479580631c`, FINAL_SHA `ca43c723`, branch `worktree-agent-af5ed82479580631c`. COMPLETE. Type-system fix (the genuine root was a bare-variant at a **comparison-in-`return`** position, NOT the engine-write I scoped — R26 reverse-direction caught it). Land: file-delta `compiler/src/type-system.ts` + the new test `compiler/tests/unit/engine-autodecl-bare-variant-write.test.js`; **reconcile known-gaps via TARGETED flip** (its base predates the other S205 known-gaps changes — do NOT wholesale file-delta); PA-independent repro-verify; full suite. Agent ran full `bun run test` 24444/0.
-- **slice 2 (decl-coupled validators)** — agent `aeca43607dd011a51`, FINAL_SHA `5e39ab89`, branch `worktree-agent-aeca43607dd011a51`. COMPLETE. 9 forms → Shape-2 compound + §55 validity surface (7 files). **TWO landing-todos:** (a) **re-baseline the within-node parity allowlist** for its changed fixtures BEFORE pushing — it reported only the pre-commit SUBSET (17148), not the full suite, so the parity gate WILL reject like slice 3 did (run `bun test compiler/tests/parser-conformance-within-node.test.js`, set over-budget entries to printed `raw`). (b) **File the compiler bug it found:** compound-field Shape-2 render-by-tag — `<field/>` for a Shape-2 field that's a CHILD of a Variant-C compound emits a LITERAL `<field />` tag silently (the input never renders; the §55 surface itself wires fine). Agent worked around with raw `bind:value=@compound.field`. Repro `/tmp/probe-compound-rbt.scrml` (won't survive — re-derive). Sev MED.
-- **g-colon-shorthand-markup-misparse** — agent `ab4fe40551c515110`, branch `worktree-agent-ab4fe40551c515110`. **CHECK STATUS** (was IN-FLIGHT at wrap — may have completed; deputy-state F3 watch + delta-log `disp` will show). Block-splitter fix (the `:`-shorthand-markup-body misparse → misleading E-STRUCTURAL). If complete: file-delta block-splitter.js + test + targeted known-gaps flip.
-- **Reconcile note:** all 3 agents' bases predate sibling S205 landings → known-gaps + (possibly) ast-builder/§11.1 touch overlaps; land via TARGETED known-gaps flips (not wholesale file-delta), per the S205 pattern. Fix-files were kept disjoint (type-system / trucking / block-splitter) to minimize this.
+### 1. ✅ LANDED the 3 deferred F3-bridged agents (S206) — push HELD per user
+All 3 branched off the S205 **session-start** base (`feedback_worktree_base_session_start_staleness`), reconciled at landing. Coherence 0/3, no leak.
+- **g-colon-shorthand** `e2516298` — clean file-delta block-splitter.js + test; targeted gap flip → resolved. Rule-4 verified §4.14:986/:990.
+- **g-engine-autodecl** `105f1ee4` — cherry-pick `d9ef8ee3` (clean auto-merge, non-overlapping w/ match-alt's type-system.ts); targeted gap flip → resolved. S138 dual-verify: comparison-in-return probe clean post-fix / `E-VARIANT-AMBIGUOUS` pre-fix.
+- **trucking slice-2** `e1c20e3a` — reconciled via `git merge main` into the branch (3 slice-3 overlaps, conflict-free); merged app EXIT 0 baseline-preserved; file-delta 7 forms + progress; within-node allowlist re-baselined (6 fixtures, gate 1012/0); NEW gap filed (below).
+- **NEW gap (slice-2 todo b):** `g-compound-field-render-by-tag-unexpanded` (MED, open) — Shape-2 field that's a CHILD of a Variant-C compound doesn't expand its render-by-tag `<field/>`; silently emits literal `<field />` (no input, no diagnostic). Top-level Shape-2 works. Durable repro `docs/changes/g-compound-field-render-by-tag-unexpanded-2026-06-18/repro/`. Workaround: raw `bind:value=@compound.field`.
 
-### 2. RATIFIED + encoded this session (all on origin / committed)
-- **Merge-before-push HARD gate** (pa.md S199 + wrap step 7). **S42 wrap-thinning re-scope** (pa.md — this hand-off is its first use). **PA↔vPA protocol = sharpen-async** (vpa-scrml.md ACK+heartbeat; DD `pa-vpa-communication-protocol-2026-06-18.md`; OQ-2 priority-flag NOT adopted). **Deputy guardrail checks** (vpa-scrml.md step 3c — flograph/dock `--check` per tick).
+All 3 LANDED + PUSHED (origin `359a1d83`); full suite 24463/0. Board HIGH 0 · MED 9 · LOW 23.
 
-### 3. Carried threads
-- **flogeance/flograph:** slice 4 (derivation corpus-annotation) · dock production-integration · block-lease build · the harness-validation capstone (`flogeance-harness-validation-2026-06-18.md`) is the handoff to flogeance-in-scrml (separate instance).
-- **Trucking slices:** slice 2 landing → slice 4 (errors-as-states — 148 `?{}` / 0 `!{}` today, the biggest idiom gap) → slice 5 (typed props — mostly verification).
-- **Open MEDs** (board): g-shorthand-interp-engine-element-loci · g-engine-server-flag-silent-swallow (entangled w/ E-leg) · g-tier1-ssr-prerender · g-match-alternation... (resolved) · r28-c2 · a5 · bug-1 · bug-14. **e2e LOW residue:** g-reflect-variant-shape · g-rendermap-server-classification · g-mount-hang-rails · meta-in-component-001.
-- **Corpus hygiene (carried):** 53→5 superseded-in-live-corpus closed via the deref; `--with-archive` is the diagnostic-lineage tier.
+### 2. ⭐ flograph / block-lease "safe parallel same-file dispatch" arc (the S206 design thread — at a decision point)
+User goal: "get flograph to the point of being able to launch parallel disps affecting the same file safely." Built + proven this session (all pushed):
+- **(a) the block-scope INTERIM** (`scripts/dock.ts` `1b15f701`): `dock --units <file>` (enumerate leasable blocks w/ thin extents, lang-aware scrml+TS) + `dock --diff-scope <range> --owns id,…` (post-landing containment check, exit 1 on stray). **Dog-fooded:** code-def overlap (`type-system.ts` g-engine vs match-alt) PROVABLY DISJOINT → **code-def parallel dispatch is now enforceable**; markup overlap (`messages.scrml`) FALSE-collides (render-markup sits in no named def). block-lease DD §7.1.
+- **(b1) anchoring PROVEN for named defs** (`10255c94` + DD §7.2): Scheme-C carried-comment survives rename/move; the dropped-anchor failure is caught by the inv3 orphan WARN. → block-lease-for-CODE no longer blocked on anchoring, only the BUILD (registry/lifecycle/blast-region = flogeance-in-scrml).
+- **(b2) markup-anchor DD DONE** (`scrml-support/docs/deep-dives/markup-lease-anchor-2026-06-18.md`, pushed): user REJECTED b2-ii componentize-to-lease (**co-location-of-behaviour axiom** + no-refactor-tax, user-voice S206 + memory `feedback_colocation_of_behaviour_axiom`). DD verdict: the **state-keyed seed** (lease a region by the reactive STATE it touches, not its structure) VALIDATES on the real case w/ zero file change; **D (state-footprint) vs G (hybrid+escalation)** survive every constraint (0/8 dev-polls favor prior A/B/C). **Two breaks:** BREAK-1 (compound `@form`→cell-grain needs DOTTED-PATH footprints; **PA-verified the DG is ROOT-CELL today** at `body-dg-builder.ts:399` → dotted-path write-tracking is a BUILD PREREQ for both D+G, feasible) · BREAK-2 (transitive-write hazard = the D/G differentiator). Feeds a DEBATE.
+- **DECISION PENDING (next session):** run the **D-vs-G debate** (DD recommends + forge `stm-concurrency-expert`; participants solid-js-signals + salsa-incremental-compilation + the forged STM seat) / **spike the dotted-path DG extension** first (common prereq, grounds BREAK-1) / continue. User said "bank it" S206 → picked up next session.
 
-## ⚠ Anomalies / lessons (irreducible)
-- **The S198 within-node-parity omission RECURRED** (slice-3 brief didn't mandate the re-baseline + full-suite → pre-push gate rejected → re-baselined). **FOLD INTO EVERY corpus-rewrite brief:** "run FULL `bun run test`; re-baseline the M6.5.b.0 allowlist for over-budget fixtures IN THE LANDING." Slice-2's landing has this todo pending (above).
-- **Reconcile-at-landing for sibling agents:** when ≥2 agents touch known-gaps (each flips its gap) off bases that predate each other's landings, land via TARGETED flips, not wholesale file-delta (would clobber sibling flips + my precedence-resolve + BUG-1). Did this for match-alternation; pending for the 3 deferred.
-- **Push "exit 0" ≠ push succeeded** when the push is a compound bg command (the last `git rev-list` exits 0); always grep the push output for `main -> main` / `rejected` + verify `origin...HEAD 0/0`.
+### 3. Carried (board / other arcs)
+- Open MEDs: g-shorthand-interp-engine-element-loci · g-engine-server-flag-silent-swallow (entangled w/ E-leg) · g-tier1-ssr-prerender · r28-c2 · a5 · bug-1 · bug-14 · **g-compound-field-render-by-tag-unexpanded** (NEW S206). e2e LOW residue: g-reflect-variant-shape · g-rendermap-server-classification · g-mount-hang-rails · meta-in-component-001.
+- Trucking slices: slice-2 LANDED → slice-4 (errors-as-states, 148 `?{}` / 0 `!{}` — biggest idiom gap) → slice-5 (typed props, mostly verification).
 
-## Recordkeeping
-- **Worktrees (6b DEFERRED to next session):** 5 agent worktrees live — RETAIN the 3 unlanded (af5ed82 g-engine, aeca436 slice2, ab4fe40 g-colon) for landing; the 2 landed (a3a475 slice3, a634857 match-alt) can be removed next session; + the PERSISTENT `../scrml-deputy-maint` (NEVER remove). Light disk debt, non-blocking.
-- **Push state:** scrml main + scrml-support — see the wrap-close coherence line in delta-log; pushed at wrap.
+### 4. Worktree cleanup (6b owed — ALL 5 agent worktrees now landed → removable)
+All 5 S205 agent worktrees are landed (slice-3 a3a475 · match-alt a634857 · g-colon ab4fe40 · g-engine af5ed82 · slice-2 aeca436) → all removable at wrap. NEVER remove `../scrml-deputy-maint` (persistent deputy).
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · **S205 merge-before-push gate · S205 S42 wrap-thinning · S205 PA↔vPA sharpen-async (ACK+heartbeat)** · deputy LIVE + step-3c guardrail checks · wrap 8-step (thinned).
+R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate · S205 S42 wrap-thinning · S205 PA↔vPA sharpen-async · deputy + step-3c guardrail · wrap 8-step (thinned).
 
 ## Tags
-#session-205 #close #profile-a #thinned-wrap-first-use #context-economics-enforced #merge-before-push-gate #wrap-thinning #pa-vpa-protocol-sharpen-async #deputy-guardrail-checks #3-MED-gaps-closed #slice-3-each-sweep #4-agents-dispatched #3-deferred-landings-f3 #board-high-0-med-10
+#session-206 #open #profile-a #digest-thinned-boot #land-3-deferred-agents #f3-bridged #reconcile-at-landing #board-high-0-med-10
