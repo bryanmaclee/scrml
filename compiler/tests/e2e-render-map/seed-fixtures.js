@@ -17,13 +17,26 @@
  *
  * The cell-set is applied AFTER mount via the reactive set side-channel
  * (_scrml_reactive_set), so the values must match the cell's declared shape.
+ *
+ * SEED-SHAPE INVARIANT (S203). A populated seed MUST provide EVERY field the app's
+ * template renders off the item's struct. A seed missing a field → the template
+ * interpolates JS `undefined` → literal "undefined" in the DOM → a FALSE
+ * `S-NULLISH-TEXT` smell that looks like a codegen bug but is a seed gap. When a
+ * POPULATED cell shows `S-NULLISH-TEXT`, TRIAGE: (1) does the seed provide every
+ * rendered field of the struct? If not, fix the seed here (it is NOT a compiler
+ * bug). (2) Only if the seed is complete is the `undefined` a real codegen leak.
+ * Precedent: the 03-contact-book `phone` gap (g-render-nullish-text, S203) was a
+ * seed gap, not codegen.
  */
 
 export const POPULATED_SEEDS = {
   "examples/03-contact-book.scrml": {
+    // NOTE (S203): the Contact struct is { id, name, email, phone } and the template renders
+    // ${contact.phone}; a seed missing `phone` renders literal "undefined" (a FALSE S-NULLISH-TEXT).
+    // See the seed-shape invariant in this file's header.
     contacts: [
-      { id: "1", name: "Ada Lovelace", email: "ada@x.io" },
-      { id: "2", name: "Alan Turing", email: "alan@x.io" },
+      { id: "1", name: "Ada Lovelace", email: "ada@x.io", phone: "555-0001" },
+      { id: "2", name: "Alan Turing", email: "alan@x.io", phone: "555-0002" },
     ],
   },
   "examples/06-kanban-board.scrml": {
