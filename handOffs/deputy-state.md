@@ -9,7 +9,7 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S205 active). First deputy instance, booted S203. On tick 27.
+- **State:** LIVE — steady-state (S205 active). First deputy instance, booted S203. On tick 29.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
 - **Last-absorbed delta seq:** S205 **[10]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S205 6]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Descends main `0d448fec` (PA integrated ticks 12-15 via the pre-push merge gate). **Tip:** `git rev-parse deputy-maint` (tick-26: digest regen + this).
@@ -37,11 +37,12 @@ The clean-cycle re-measure (the S204 [6] follow-up) ran: digest booted current �
 
 ## In-flight dispatches (F3 watch list)
 
-- _(empty)_ — `af88c53a` landed (#3); `abcf64f7` closed tick 5.
+- **`a3a475168766ceba8`** — trucking slice-3 each-sweep (for/lift→each across examples/23-trucking-dispatch). **Status @ tick 29:** worktree present (locked); 3 WIP commits (customer/home + loads done, invoices left Tier-0) + dirty (load-detail.scrml + progress.md) → in-flight; surfaced a compiler bug (BUG-1 nested-quote ternary in per-item each attr). **PA ALIVE** (uncommitted hand-off + change-dir in main) → PA owns the landing; no `(deputy)` entry. Watching. NOTE: edits `.scrml` corpus → a maps refresh may be owed once it lands (assess then).
+- ~~`af88c53a`~~ landed (#3); ~~`abcf64f7`~~ closed tick 5.
 
 ## Tick log (compressed)
 
-T1 boot [S199-S203]; T2-T3 F1 LIVE + GO-LIVE; T4-T5 e2e/flograph; **T6-T8 reboot-gap** (#3 in-flight bridged → fresh PA re-attached + LANDED); **T9-T11** S204 [1-6] (#3 landed, flograph slices, dilation ~3% frame-fix); **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling); **T13** 2nd merge-before-push miss flagged; **T14** PA caught up; **T15** absorbed S205 [1-6] — merge-before-push gate RATIFIED + F1 realized ~8.3k + dock built; digest regen. **LESSON (T15):** the source-based digest oracle CAUGHT an absorb-miss (pre-rebase delta-log read showed [8], missed the S205 block) → **always re-check the delta-log AFTER sync/rebase, not before.** **T16-25** PA idle — 10 consecutive no-op ticks (held surface current, no commits). **T26** PA resumed: absorbed S205 [7] corpus-hygiene deref (48 superseded DDs→archive/) + [8] flograph --with-archive provenance tier + [9] flogeance harness-validation capstone; gate fired (f07f8406); digest regen. **T16-25** PA idle (no-ops). Wait — T26 already covered. **T27** absorbed [10] (§3c guardrail wired); ran first health check: flograph PASS (curr-sweep 0), dock PASS, cov 0%; drift self-fixed (re-emit --with-support --with-archive); 1 tooling-nit routed (§3/§3c emit-flag mismatch); digest regen.
+T1 boot [S199-S203]; T2-T3 F1 LIVE + GO-LIVE; T4-T5 e2e/flograph; **T6-T8 reboot-gap** (#3 in-flight bridged → fresh PA re-attached + LANDED); **T9-T11** S204 [1-6] (#3 landed, flograph slices, dilation ~3% frame-fix); **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling); **T13** 2nd merge-before-push miss flagged; **T14** PA caught up; **T15** absorbed S205 [1-6] — merge-before-push gate RATIFIED + F1 realized ~8.3k + dock built; digest regen. **LESSON (T15):** the source-based digest oracle CAUGHT an absorb-miss (pre-rebase delta-log read showed [8], missed the S205 block) → **always re-check the delta-log AFTER sync/rebase, not before.** **T16-25** PA idle — 10 consecutive no-op ticks (held surface current, no commits). **T26** PA resumed: absorbed S205 [7] corpus-hygiene deref (48 superseded DDs→archive/) + [8] flograph --with-archive provenance tier + [9] flogeance harness-validation capstone; gate fired (f07f8406); digest regen. **T16-25** PA idle (no-ops). Wait — T26 already covered. **T27** absorbed [10] (§3c guardrail wired); ran first health check: flograph PASS (curr-sweep 0), dock PASS, cov 0%; drift self-fixed (re-emit --with-support --with-archive); 1 tooling-nit routed (§3/§3c emit-flag mismatch); digest regen. **T28** no-op (main static; §3c green; discarded a no-op digest stamp-bump). **T29** NEW in-flight agent a3a475168766ceba8 (trucking slice-3 each-sweep) → F3 watch (PA alive, no entry); main static, digest current, §3c unchanged.
 
 ## Currency snapshot (@ tick 15)
 
