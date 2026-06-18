@@ -41,6 +41,7 @@
 
 import { existsSync, readdirSync } from "fs";
 import { readFileSync } from "fs";
+import { execSync } from "child_process";
 import { build, defaultCorpus, SUPERSEDED, globSync, rel, type Node } from "./flograph.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -250,11 +251,116 @@ function coverageMode(corpus: string[]): number {
   return 0;
 }
 
+// ── Block-scope (S206 — block-lease interim; DD block-lease-parallelism-2026-06-18 §1/§5/§7) ─────────────
+// The interim that makes "parallel dispatches on the SAME file" safe WITHOUT the lease registry / anchoring-
+// proof / blast-region those need (deferred to flogeance-in-scrml). Two thin modes on the units the coverage
+// walker already finds:
+//   --units <file>                         enumerate leasable BLOCKS with extents → the PA allocates disjoint
+//                                          sets at dispatch time ("cherry-picking with a plan", §5).
+//   --diff-scope <base>..<branch> --owns … post-landing CONTAINMENT check: every changed hunk maps to a block;
+//                                          a hunk in a block NOT in --owns is a STRAY (the agent left its lane).
+// Block-id = `<relpath>::<name>`. Extents = THIN next-def-boundary (a def owns [line, nextDefStart-1]); crude
+// (no nested defs; trailing content lumps into the last def) — catches the gross cross-block stray, not sub-def
+// precision. Language-aware: .scrml → SCRML_DEFS (the walker's set); .ts/.js/.mjs → TS_DEFS. Honest ceiling
+// (mirrors the DD §5): this enforces DISJOINT EDIT LANES, never CORRECTNESS — two disjoint edits can still be
+// jointly wrong; and render-markup that sits in no named def shows as UNSCOPED (block-grain is weakest there).
+const TS_DEFS: { kind: string; re: RegExp }[] = [
+  { kind: "function", re: /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s+(\w+)\s*[(<]/ },
+  { kind: "class",    re: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)\b/ },
+  { kind: "const-fn", re: /^\s*(?:export\s+)?const\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function\b|(?:<[^>]*>\s*)?\([^)]*\)\s*(?::[^=]+?)?=>|<)/ },
+];
+
+type DefExt = { kind: string; name: string; line: number; end: number };
+function defsWithExtents(relpath: string, content: string): DefExt[] {
+  const lines = content.split("\n");
+  const set = relpath.endsWith(".scrml") ? SCRML_DEFS : TS_DEFS;
+  const raw: { kind: string; name: string; line: number }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    for (const p of set) {
+      const m = lines[i].match(p.re);
+      if (m) { raw.push({ kind: p.kind, name: m[1] ?? "(anon)", line: i + 1 }); break; }
+    }
+  }
+  raw.sort((a, b) => a.line - b.line);
+  return raw.map((d, i) => ({ ...d, end: i + 1 < raw.length ? raw[i + 1].line - 1 : lines.length }));
+}
+
+function toRel(file: string): string {
+  const abs = file.startsWith("/") ? file : `${ROOT}/${file}`;
+  return abs.startsWith(ROOT + "/") ? abs.slice(ROOT.length + 1) : file;
+}
+
+function gitShow(ref: string, relpath: string): string {
+  try { return execSync(`git show ${ref}:${relpath}`, { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 }); }
+  catch { return ""; }
+}
+
+// parse `git diff <range> --unified=0` → per-file new-side changed line ranges
+function changedLinesByFile(range: string): Map<string, Array<[number, number]>> {
+  const out = new Map<string, Array<[number, number]>>();
+  const diff = execSync(`git diff ${range} --unified=0 --no-color`, { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 });
+  let file = "";
+  for (const line of diff.split("\n")) {
+    const f = line.match(/^\+\+\+ b\/(.+)$/);
+    if (f) { file = f[1]; continue; }
+    const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+    if (h && file) {
+      const start = parseInt(h[1], 10);
+      const count = h[2] === undefined ? 1 : parseInt(h[2], 10);
+      const a = out.get(file) ?? []; out.set(file, a);
+      a.push(count === 0 ? [start, start] : [start, start + count - 1]); // count 0 = pure deletion at the splice line
+    }
+  }
+  return out;
+}
+
+function unitsMode(file: string): number {
+  const relpath = toRel(file);
+  const abs = `${ROOT}/${relpath}`;
+  if (!existsSync(abs)) { console.error(`dock --units: no such file: ${relpath}`); return 1; }
+  const defs = defsWithExtents(relpath, readFileSync(abs, "utf8"));
+  console.log(`dock --units ${relpath}  (${defs.length} leasable block(s))`);
+  for (const d of defs) console.log(`  ${relpath}::${d.name}  [${d.line}..${d.end}]  ${d.kind}`);
+  return 0;
+}
+
+function diffScopeMode(range: string, owns: Set<string>): number {
+  const branch = range.includes("..") ? range.split("..").pop()! : ""; // "" → compare against the working tree on disk
+  const changed = changedLinesByFile(range);
+  let strays = 0, unscoped = 0, owned = 0;
+  console.log(`dock --diff-scope ${range}${owns.size ? `  (owns: ${[...owns].join(", ")})` : "  (no --owns: enumerate only)"}`);
+  for (const [relpath, ranges] of [...changed].sort()) {
+    const content = branch ? gitShow(branch, relpath) : (existsSync(`${ROOT}/${relpath}`) ? readFileSync(`${ROOT}/${relpath}`, "utf8") : "");
+    const defs = defsWithExtents(relpath, content);
+    const touched = new Set<string>();
+    let fileUnscoped = 0;
+    for (const [s, e] of ranges) for (let ln = s; ln <= e; ln++) {
+      const d = defs.find(d => ln >= d.line && ln <= d.end);
+      if (d) touched.add(`${relpath}::${d.name}`); else fileUnscoped++;
+    }
+    for (const id of [...touched].sort()) {
+      if (owns.size === 0 || owns.has(id)) { owned++; console.log(`  ok    ${id}`); }
+      else { strays++; console.log(`  STRAY ${id}  (touched — not in --owns)`); }
+    }
+    if (fileUnscoped) { unscoped += fileUnscoped; console.log(`  warn  ${relpath}: ${fileUnscoped} changed line(s) in no named block (render-markup / top-matter / between-defs)`); }
+  }
+  console.log(`  -> ${owned} owned, ${strays} STRAY, ${unscoped} unscoped-line(s)${strays ? "  [VIOLATION: an agent edited outside its lane]" : ""}`);
+  return strays > 0 ? 1 : 0;
+}
+
 // ── main ──────────────────────────────────────────────────────────────────
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const cIdx = args.indexOf("--corpus");
   const override = cIdx >= 0 ? args[cIdx + 1].split(",").map(p => p.startsWith("/") ? p : `${ROOT}/${p}`) : null;
+
+  if (args.includes("--units")) process.exit(unitsMode(args[args.indexOf("--units") + 1]));
+  if (args.includes("--diff-scope")) {
+    const range = args[args.indexOf("--diff-scope") + 1];
+    const oIdx = args.indexOf("--owns");
+    const owns = new Set(oIdx >= 0 ? args[oIdx + 1].split(",").map(s => s.trim()).filter(Boolean) : []);
+    process.exit(diffScopeMode(range, owns));
+  }
 
   if (args.includes("--coverage")) {
     // default scrml corpus = real authored scrml (stdlib + examples); --corpus overrides (recursive).
