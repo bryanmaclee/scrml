@@ -142,6 +142,125 @@ describe("§19.15 top-level `<render of=@cell/>` codegen", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §6 — asIs-erased non-enum concretization (ss3 item4 g-render-not-enum-asis-miss).
+//
+// An UNTYPED reactive cell binds with `resolvedType: asIs` — the resolved-type
+// fence (§19.15.3) deliberately stays SILENT on `asIs` to avoid a false fire on
+// a real-enum-but-erased value. But codegen then emits an inert empty-switch
+// render no-op (`switch(_rt){}` → renders NOTHING) for a provably-non-enum cell.
+// The fence concretizes the cell's INITIALIZER: it fires E-RENDER-NOT-ENUM ONLY
+// for an UNAMBIGUOUS non-enum literal init (string/number/bool/array/object/map),
+// and STAYS SILENT for anything that could be an enum (a bare ident / `.Variant`,
+// a call return, `not`, a derived value). The guard is the whole point — never
+// widen the fence to ambiguous shapes.
+// ---------------------------------------------------------------------------
+describe("§19.15.3 asIs-erased of= target concretizes from a provably-non-enum literal init", () => {
+  test("string-literal cell (`<s> = \"hello\"`) → E-RENDER-NOT-ENUM (was a silent empty-switch no-op)", () => {
+    const src = [
+      "<program>",
+      '<s> = "hello"',
+      "<div><render of=@s/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  test("number-literal cell (`<n> = 42`) → E-RENDER-NOT-ENUM", () => {
+    const src = [
+      "<program>",
+      "<n> = 42",
+      "<div><render of=@n/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  test("boolean-literal cell (`<b> = true`) → E-RENDER-NOT-ENUM", () => {
+    const src = [
+      "<program>",
+      "<b> = true",
+      "<div><render of=@b/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  test("negated-number-literal cell (`<n> = -7`) → E-RENDER-NOT-ENUM", () => {
+    const src = [
+      "<program>",
+      "<n> = -7",
+      "<div><render of=@n/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  test("array-literal cell (`<a> = [1, 2, 3]`) → E-RENDER-NOT-ENUM", () => {
+    const src = [
+      "<program>",
+      "<a> = [1, 2, 3]",
+      "<div><render of=@a/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  test("object/struct-literal cell (`<o> = { x: 1 }`) → E-RENDER-NOT-ENUM", () => {
+    const src = [
+      "<program>",
+      "<o> = { x: 1, y: 2 }",
+      "<div><render of=@o/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBeGreaterThan(0);
+  });
+
+  // --- the STRICT guard: ambiguous / could-be-enum inits STAY SILENT ---
+
+  test("NEGATIVE: a real typed-enum cell with all-variants-renders stays clean (no false fence)", () => {
+    const src = [
+      "<program>",
+      'type LE:enum = { NotFound(id: string) renders <p>No #${id}</p>, Network(msg: string) renders <p>Net ${msg}</p> }',
+      '<err>: LE = .NotFound("42")',
+      "<div><render of=@err/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBe(0);
+    expect(errsByCode(result, "E-RENDER-NO-CLAUSE").length).toBe(0);
+  });
+
+  test("NEGATIVE: a call-init cell (`<d> = loadThing()`) stays SILENT — could return an enum", () => {
+    const src = [
+      "<program>",
+      "function loadThing() { 42 }",
+      "<d> = loadThing()",
+      "<div><render of=@d/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBe(0);
+  });
+
+  test("NEGATIVE: an absence-init cell (`<x> = not`) stays SILENT (render fence is enum-scoped)", () => {
+    const src = [
+      "<program>",
+      "<x> = not",
+      "<div><render of=@x/></div>",
+      "</program>",
+    ].join("\n");
+    const result = compileSource(src);
+    expect(errsByCode(result, "E-RENDER-NOT-ENUM").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §5 — <errorBoundary> codegen is UNCHANGED (render-expr is an independent fire site)
 // ---------------------------------------------------------------------------
 describe("§19.15.4 render-expr does not perturb the errorBoundary catch path", () => {

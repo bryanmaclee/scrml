@@ -70,6 +70,13 @@ worktree, NOT main, NOT `../scrml-spa-ss3`. If `node_modules` absent:
 `ln -s /home/bryan-maclee/scrmlMaster/scrml/node_modules ./node_modules` +
 `ln -s /home/bryan-maclee/scrmlMaster/scrml/compiler/node_modules ./compiler/node_modules`.
 
+**BASE SETUP (run immediately after F4, BEFORE any edit):** your worktree may be a reused one with stale
+state. Put it on a FRESH branch at the current ss3 tip:
+`git checkout -B ss3-item7-asyncread-fresh spa/ss3 --force`
+then confirm `git log --oneline -3` shows recent `ss3 item` commits (this guarantees your base carries
+ss3 item2's ordered-map changes in emit-logic.ts/emit-expr.ts — leave those intact; your fix is a
+DIFFERENT region). If `spa/ss3` is not a known ref, STOP and report. Do ALL work on this fresh branch.
+
 **Path discipline (S88/S99/S126):** worktree-absolute paths only; NEVER a main path; NEVER `cd` into
 main. `git status` after each step. You are based off `spa/ss3` — leave item2's ordered-map changes intact.
 

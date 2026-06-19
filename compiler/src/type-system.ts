@@ -598,6 +598,16 @@ interface ScopeEntry {
    * downstream let/const/lin declarations in child scopes can detect shadowing.
    */
   isLin?: boolean;
+  /**
+   * SPEC §19.x render-expr-primitive — `<render of=@cell/>` enum-only fence.
+   * The declaring AST node, stashed on reactive-cell binds so the render fence
+   * can recover the cell's INITIALIZER when its `resolvedType` erased to `asIs`.
+   * Lets the fence concretize a provably-non-enum literal init (`<s> = "hello"`,
+   * `<n> = 42`, an array/object/map literal) and fire E-RENDER-NOT-ENUM, instead
+   * of silently emitting an inert empty-switch render no-op. Read lazily — only
+   * the render fence inspects it; never type-driving.
+   */
+  declNode?: ASTNodeLike;
 }
 
 // ---------------------------------------------------------------------------
@@ -2814,6 +2824,67 @@ function extractInitLiteral(init: unknown): SourceInfo {
   }
 
   return { kind: "unconstrained" };
+}
+
+/**
+ * SPEC §19.x render-expr-primitive (`<render of=@cell/>`) enum-only fence —
+ * concretization classifier. Inspect a state-decl's INITIALIZER ExprNode and
+ * decide whether the cell holds a PROVABLY non-enum value, used ONLY when the
+ * cell's `resolvedType` erased to `asIs`/`unknown` (an untyped reactive cell)
+ * and the resolved-type fence therefore stayed silent.
+ *
+ * Returns:
+ *   "non-enum" — the init is an UNAMBIGUOUS non-enum literal that can never be
+ *                an enum value: a string / number / boolean / template-string
+ *                literal (`<s> = "x"`, `<n> = 42`, `<b> = true`), a negated
+ *                numeric literal (`<n> = -7`), or an array / object(struct) /
+ *                map literal. Caller fires E-RENDER-NOT-ENUM.
+ *   "unknown"  — anything that COULD resolve to an enum, or whose shape this
+ *                pass can't pin: a bare ident (incl. a `.Variant` enum literal,
+ *                which parses as `ident` with a leading-dot name) or member
+ *                access, a call return (`fetchData()`, `.Loaded(x)`), a `not`
+ *                absence literal, an arithmetic / derived expression, or no init
+ *                at all. Caller STAYS SILENT (the deliberate conservative choice
+ *                — a false fence fire would be worse than a missed one).
+ *
+ * STRICT by construction (R3/R4, S195 ratification): the enum-only scoping is
+ * preserved exactly — the only ADDED fences are for the unambiguous non-enum
+ * literal set; ambiguity always falls through to "unknown".
+ */
+function classifyRenderInitShape(initExpr: unknown): "non-enum" | "unknown" {
+  if (!initExpr || typeof initExpr !== "object") return "unknown";
+  const node = initExpr as { kind?: string; litType?: string; op?: string; prefix?: boolean; argument?: { kind?: string; litType?: string } };
+  switch (node.kind) {
+    case "lit": {
+      // String / number / boolean / template-string literals are provably
+      // non-enum. The `not` absence literal (`litType: "not"`) is NOT — it is
+      // not an enum value either, but the held-value fence is enum-scoped and
+      // an absence target is left to the existing optional/absence checks; stay
+      // conservative and do not co-opt the render fence for it.
+      if (node.litType === "string" || node.litType === "number"
+        || node.litType === "bool" || node.litType === "template") {
+        return "non-enum";
+      }
+      return "unknown";
+    }
+    case "unary": {
+      // Negated numeric literal (`-7`) — still a provably-non-enum number.
+      if (node.op === "-" && node.prefix && node.argument
+        && node.argument.kind === "lit" && node.argument.litType === "number") {
+        return "non-enum";
+      }
+      return "unknown";
+    }
+    case "array":
+    case "object":
+    case "map-lit":
+      // Array / object(struct) / map literals are provably non-enum.
+      return "non-enum";
+    default:
+      // ident (incl. a bare `.Variant`), member, call, match, cast, arithmetic
+      // binary, etc. — could be an enum or can't be pinned. Stay silent.
+      return "unknown";
+  }
 }
 
 /**
@@ -7723,15 +7794,16 @@ function annotateNodes(
               // (conservative — no false fence fire on an exotic shape).
               const _ofVal = _ofAttr.value as { kind?: string; name?: string };
               let _ofType: ResolvedType | null = null;
+              let _ofEntry: ScopeEntry | null = null;
               if ((_ofVal.kind === "variable-ref" || _ofVal.kind === "ident")
                 && typeof _ofVal.name === "string" && _ofVal.name.length > 0) {
                 const _lookupName = _ofVal.name.startsWith("@")
                   ? _ofVal.name.slice(1)
                   : _ofVal.name;
-                const _entry = scopeChain.lookup(_lookupName)
+                _ofEntry = scopeChain.lookup(_lookupName)
                   ?? scopeChain.lookup(`@${_lookupName}`);
-                if (_entry && (_entry as { resolvedType?: ResolvedType }).resolvedType) {
-                  _ofType = (_entry as { resolvedType: ResolvedType }).resolvedType;
+                if (_ofEntry && _ofEntry.resolvedType) {
+                  _ofType = _ofEntry.resolvedType;
                 }
               }
               // Only fence when the type RESOLVES. `asIs` / unresolved → silent
@@ -7768,6 +7840,35 @@ function annotateNodes(
                   `error-enum-scoped — it does not generalize to non-enum values. See SPEC §19.x.`,
                   _rSpan as Span,
                 ));
+              } else {
+                // `asIs` / `unknown` / unresolved. The pass-visible type erased,
+                // so the resolved-type fence above stayed silent (a false fence
+                // fire would be worse than a missed one). But for an untyped
+                // reactive cell, the binding's TYPE is `asIs` while its literal
+                // INITIALIZER is a known shape — concretize from the decl node's
+                // init to catch the provably-non-enum case the type erasure hid
+                // (otherwise codegen emits an inert empty-switch render no-op that
+                // displays NOTHING — a silent miss, not the helpful enum-only
+                // error). The guard is STRICT (SPEC §19.x error-enum scoping,
+                // ratified S195): fire E-RENDER-NOT-ENUM ONLY when the init is an
+                // UNAMBIGUOUS non-enum literal. Anything that COULD be an enum
+                // (a bare ident incl. a `.Variant`, a call return, a member access,
+                // an `not`/absence, an arithmetic/derived value) stays silent —
+                // when in doubt, no fence. `classifyRenderInitShape` returns
+                // "non-enum" only for the unambiguous set.
+                const _initShape = _ofEntry?.declNode
+                  ? classifyRenderInitShape((_ofEntry.declNode as { initExpr?: unknown }).initExpr)
+                  : "unknown";
+                if (_initShape === "non-enum") {
+                  errors.push(new TSError(
+                    "E-RENDER-NOT-ENUM",
+                    `E-RENDER-NOT-ENUM: \`<render of=...>\` requires its \`of=\` target to be an ` +
+                    `enum value (it fires the value's per-variant \`renders\` contract, §19.2). ` +
+                    `The target's initializer is a non-enum literal. \`<render>\` is ` +
+                    `error-enum-scoped — it does not generalize to non-enum values. See SPEC §19.x.`,
+                    _rSpan as Span,
+                  ));
+                }
               }
             }
           }
@@ -9104,8 +9205,12 @@ function annotateNodes(
               bindType = priorBind.resolvedType;
             }
           }
-          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: bindType, isServer });
-          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: bindType, isServer });
+          // SPEC §19.x — stash the declaring node so the `<render of=@cell/>`
+          // enum-only fence can recover this cell's initializer when `bindType`
+          // erases to `asIs` (an untyped reactive cell). Lazily read by the fence
+          // ONLY; never type-driving. See ScopeEntry.declNode + the render fence.
+          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: bindType, isServer, declNode: n });
+          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: bindType, isServer, declNode: n });
 
           if (isServer) {
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
