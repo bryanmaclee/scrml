@@ -13,7 +13,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## Deputy status (RESUME POINT)
 
-- **State:** LIVE — steady-state. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA execution-agent role + dock-health tool built). flogence (renamed from flogeance S206). On tick 86 (next fresh deputy starts at T87).
+- **State:** LIVE — steady-state. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA execution-agent role + dock-health tool built). flogence (renamed from flogeance S206). On tick 88.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). **A fresh deputy must re-arm its own `/loop`** (the cron dies with the old instance). CronDelete `39fed15c` to cancel the old one if still alive.
 - **Last-absorbed delta seq:** S209 **[6]** (PA-source; the deputy itself appended the S205 F3 entry [22]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint`. FF onto main at boot.
@@ -33,7 +33,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T86** · last-absorbed **[S209 6]** · deputy-maint tip = `git rev-parse deputy-maint`.
+- **heartbeat:** tick **T88** · last-absorbed **[S209 6]** · deputy-maint tip = `git rev-parse deputy-maint`.
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). No new `(vpa:)` in S206-S209.
 
 ## Standing facts (durable)
@@ -62,7 +62,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## In-flight dispatches (F3 watch list)
 
-- _(none in flight)_ — all S205-S208 agents landed + 6b-cleaned. The g-pure-module HIGH crash→S208-salvage loop closed (432c28b6).
+- **1 in-flight (S209, PA alive → track):** sPA "ss1" `a6eb2c2fd9ba6086b` — `ss1-route-misinference-server-value-export` (emit-server.ts + var-counter.ts; the S208-filed trucking route-mis-inference gap). compiler/src → maps batch on landing. (All prior S205-S208 agents landed + cleaned; g-pure-module crash→S208-salvage loop closed.)
 
 ## Currency snapshot (@ tick 86)
 
