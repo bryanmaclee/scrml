@@ -1690,6 +1690,7 @@ Use `@name` or change `bind:value` to `value=name`.
 **Error codes (cross-ref §34):**
 - `E-CELL-NO-RENDER-SPEC` — `<x/>` render-by-tag for a cell declared without a render-spec.
 - `E-CELL-RENDER-SPEC-NOT-BINDABLE` — `<x/>` render-by-tag for a cell whose render-spec is not a bindable shape.
+- `E-CELL-AMBIGUOUS-MEMBER-RENDER` — a bare `<member/>` render-by-tag where the member leaf name is declared in more than one in-scope Variant-C compound; the bare reference cannot pick one (fatal; the diagnostic lists the candidate qualified paths and suggests rendering inside the compound's block body or renaming). A compound-member `<field/>` IS valid render-by-tag (§6.3) and resolves through any in-scope compound when EXACTLY one member matches; a >1-match is this error. (NEW S207.)
 
 ### 5.5 Dynamic Class Binding
 

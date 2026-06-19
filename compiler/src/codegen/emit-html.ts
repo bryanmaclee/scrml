@@ -13,7 +13,7 @@ import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./em
 // `<userName/>` to its decl record; getCellKind surfaces B5's `_cellKind` annotation
 // (`"bindable"` for Shape 2 with bindable RHS — the only legal use kind that survives
 // B6's diagnostic walker).
-import { lookupStateCell, lookupQualifiedStateCell, getCellKind } from "../symbol-table.ts";
+import { lookupStateCell, lookupQualifiedStateCell, lookupCompoundMembersByLeafName, getCellKind } from "../symbol-table.ts";
 // A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
 // `parsePredicateAnnotation` extracts the predicate from a typeAnnotation string;
 // `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
@@ -1615,6 +1615,39 @@ export function generateHtml(
         if (!decl && enclosingCompoundStack.length > 0) {
           const enclosing = enclosingCompoundStack[enclosingCompoundStack.length - 1];
           decl = lookupQualifiedStateCell(fileScope, [enclosing, tag]);
+        }
+        // g-compound-field-render-by-tag-unexpanded — a compound MEMBER's
+        // render-by-tag (`<uname/>`) used OUTSIDE the compound's lexical block
+        // body (e.g. in a sibling `<form>`) has no `enclosingCompoundStack`
+        // entry to qualify with, so the two lookups above both miss and the tag
+        // was silently emitted as a literal element. Per SPEC §6.3.5:2290 +
+        // §6.4.2 the member `<uname/>` SHALL expand to its bound input wherever
+        // it is referenced. Scan every compound parent in scope for a member
+        // whose leaf name matches `tag`; resolve when exactly one matches.
+        if (!decl) {
+          const memberMatches = lookupCompoundMembersByLeafName(fileScope, tag);
+          if (memberMatches.length === 1) {
+            decl = memberMatches[0];
+          } else if (memberMatches.length > 1) {
+            // §6.4 forbids a silent pick: when the same member name lives in
+            // more than one in-scope compound, the bare `<tag/>` reference is
+            // ambiguous. Surface a diagnostic and leave the tag unexpanded
+            // (the literal-tag fall-through below) rather than guess.
+            const span = node.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
+            const candidatePaths = memberMatches
+              .map((m) => `@${m.qualifiedPath}`)
+              .join(", ");
+            if (errors) errors.push(new CGError(
+              "E-CELL-AMBIGUOUS-MEMBER-RENDER",
+              `E-CELL-AMBIGUOUS-MEMBER-RENDER: render-by-tag \`<${tag}/>\` is ambiguous — ` +
+              `the member name \`${tag}\` is declared in more than one in-scope compound ` +
+              `(${candidatePaths}). A bare member \`<${tag}/>\` reference cannot pick one. ` +
+              `Disambiguate by referencing the field through its compound, e.g. render the ` +
+              `field inside its compound's block body \`<compound><${tag}/></>\`, or rename ` +
+              `the colliding members. See SPEC §6.3.5 / §6.4.`,
+              span,
+            ));
+          }
         }
         const cellKind = decl ? getCellKind(decl.declNode as any) : undefined;
         if (decl && cellKind === "bindable") {

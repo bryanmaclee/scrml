@@ -11755,6 +11755,53 @@ export function lookupQualifiedStateCell(
 }
 
 /**
+ * Find every compound MEMBER reachable from `scope` (walking the parent
+ * chain) whose LEAF name equals `leafName`.  Used by the codegen render-by-tag
+ * resolver so a bare `<member/>` reference used OUTSIDE the compound's lexical
+ * block body (e.g. in a sibling `<form>`) still resolves to its bound member
+ * cell — SPEC §6.3.5:2290 ("`<formRes><name/></>` is valid render-by-tag for
+ * `name`") + §6.4.2 (Shape-2 expansion).
+ *
+ * `lookupQualifiedStateCell([compound, member])` resolves a member only when
+ * the compound parent name is already known (the lexical-stack fallback in
+ * emit-html.ts). When the use site is not lexically inside the compound body,
+ * there is no enclosing name to qualify with, so we scan: for every compound
+ * parent in scope, descend one level into its `_scope` and collect a non-
+ * synthesized member matching `leafName`.
+ *
+ * Returns ALL matches (in deterministic scope-then-declaration order). The
+ * caller decides: zero → not a compound member; exactly one → resolve;
+ * more than one → ambiguous (§6.4 forbids a silent pick — the caller surfaces
+ * a diagnostic and leaves the tag unexpanded).
+ *
+ * Synthesized validity-surface records (`isValid`/`errors`/`touched`/
+ * `submitted`, B11) are excluded — they are virtual cells with no render-spec.
+ * Only the SINGLE level of compound membership is scanned (the common
+ * one-deep compound form); deeper nesting is not in the render-by-tag
+ * member-reference contract.
+ */
+export function lookupCompoundMembersByLeafName(
+  scope: Scope | null | undefined,
+  leafName: string,
+): StateCellRecord[] {
+  const matches: StateCellRecord[] = [];
+  let s: Scope | null | undefined = scope;
+  while (s) {
+    for (const parentRec of s.stateCells.values()) {
+      if (!parentRec.isCompoundParent) continue;
+      const subScope = (parentRec.declNode as ReactiveDeclNode & ScopeAnnotated)._scope;
+      if (!subScope) continue;
+      const member = subScope.stateCells.get(leafName);
+      if (member && !member.isSynthesized) {
+        matches.push(member);
+      }
+    }
+    s = s.parent;
+  }
+  return matches;
+}
+
+/**
  * B4 — Look up an import binding by local name. Walks the parent chain (so a
  * future per-function or per-component import-binding scope is forward-
  * compatible); today's importBindings live only on the file-level root.

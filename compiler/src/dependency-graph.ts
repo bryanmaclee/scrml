@@ -2283,6 +2283,48 @@ export function runDG(input: DGInput): DGOutput {
         }
       : _baseCreditReader;
 
+    // g-compound-field-render-by-tag-unexpanded — map each compound MEMBER leaf
+    // name to its parent compound's bare name for this file. A bare render-by-tag
+    // `<uname/>` whose decl is a compound member (NOT a top-level cell) consumes
+    // the PARENT compound (`@signup`) per SPEC §6.3.5; the parent is the cell
+    // that owns a DG node (members are folded into the parent — see
+    // collectAllReactiveDecls, which does NOT descend into a state-decl's
+    // children). Without crediting the parent on a member render-by-tag, E-DG-002
+    // false-fires on a compound consumed ONLY through a member `<field/>`.
+    // Built once per file; only populated when compound parents exist.
+    const compoundMemberToParent = new Map<string, string>();
+    {
+      const collectCompoundMembers = (list: ASTNode[]): void => {
+        for (const n of list) {
+          if (n.kind === "state-decl") {
+            const sd = n as Record<string, unknown>;
+            const parentName = sd.name as string | undefined;
+            const kids = sd.children as ASTNode[] | undefined;
+            if (parentName && Array.isArray(kids) && kids.length > 0) {
+              for (const kid of kids) {
+                if (kid.kind === "state-decl") {
+                  const kidName = (kid as Record<string, unknown>).name as string | undefined;
+                  // Last writer wins is fine; an ambiguous duplicate member name
+                  // is handled at the render-by-tag resolver (codegen) — here we
+                  // only need ANY parent to credit so E-DG-002 doesn't false-fire.
+                  if (kidName && !compoundMemberToParent.has(kidName)) {
+                    compoundMemberToParent.set(kidName, parentName);
+                  }
+                }
+              }
+            }
+          }
+          if ((n as Record<string, unknown>).kind === "logic" && Array.isArray((n as Record<string, unknown>).body)) {
+            collectCompoundMembers((n as Record<string, unknown>).body as ASTNode[]);
+          }
+          if ("children" in n && Array.isArray((n as MarkupNode).children)) {
+            collectCompoundMembers((n as MarkupNode).children as ASTNode[]);
+          }
+        }
+      };
+      collectCompoundMembers(fileAST.nodes);
+    }
+
     // -------------------------------------------------------------------------
     // A-1.3 — markup-context read emission (flag activated)
     //
@@ -2541,6 +2583,24 @@ export function runDG(input: DGInput): DGOutput {
           creditReader(rbtTag);
           if (markupContextEmitEdges && node.span) {
             emitMarkupReadEdge(node.span, rbtTag);
+          }
+        } else if (
+          // g-compound-field-render-by-tag-unexpanded — the tag is not a
+          // top-level cell, but it IS a compound member used as render-by-tag
+          // (`<uname/>` for `<signup><uname/>...</>`). Credit the PARENT compound
+          // (the cell that owns the DG node) so E-DG-002 does not false-fire on a
+          // compound consumed only through a member `<field/>` (SPEC §6.3.5).
+          typeof rbtTag === "string" &&
+          rbtTag.length > 0 &&
+          /^[a-z]/.test(rbtTag) &&
+          compoundMemberToParent.has(rbtTag)
+        ) {
+          const parentName = compoundMemberToParent.get(rbtTag)!;
+          if (reactiveVarNodeIds.has(parentName)) {
+            creditReader(parentName);
+            if (markupContextEmitEdges && node.span) {
+              emitMarkupReadEdge(node.span, parentName);
+            }
           }
         }
         const attrs = (node as Record<string, unknown>).attrs;
