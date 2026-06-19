@@ -342,6 +342,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     "W-PROGRAM-001": 4,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
     "W-SQL-ROW-UNTYPED": 6,
+    // S208 Fix B (W-SERVER-IMPORT-UNEMITTED, g-pure-module-server-emit): the
+    // cross-file server-import invariant surfaces trucking's PRE-EXISTING
+    // route-mis-inference bug — 6 distinct broken-import shapes (deduped by
+    // target + missing-name set) where a server-CALLED exported helper
+    // route-infers into a handler, so its `.server.js` emits the ROUTE, not the
+    // value `export` the consumer imports: auth `rolePath`/`SESSION_TTL_SECONDS`/
+    // `SESSION_DB_PATH` (login/register/billing/app), status-picker
+    // `validNextStates` (load-detail), driver-card `isValidHosTransition` (home).
+    // All TRUE positives — baseline-main's trucking server bundles throw
+    // missing-export at runtime; tracked as
+    // g-route-mis-inference-server-called-pure-helper. Aggregate 74 -> 80.
+    "W-SERVER-IMPORT-UNEMITTED": 6,
   };
 
   test("aggregate diagnostic count matches baseline", () => {

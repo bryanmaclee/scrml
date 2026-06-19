@@ -2056,6 +2056,118 @@ export function compileScrml(options = {}) {
     : new Set();
 
   // ---------------------------------------------------------------------------
+  // W-SERVER-IMPORT-UNEMITTED (S208, Fix B) — cross-file server-import invariant.
+  //
+  // A server bundle that imports `from "./X.server.js"` produces a GREEN compile
+  // but throws at RUNTIME when (a) X.server.js is never emitted (the imported
+  // module is a pure-helper with no server content → `Cannot find module`), or
+  // (b) X.server.js IS emitted but does not export an imported name (a
+  // server-CALLED pure helper that route-infers into a handler — `auth.server.js`
+  // emits the ROUTE `export const __ri_route_rolePath`, not `export const rolePath`
+  // → missing export). Both are the "compiled-green != works" class
+  // (g-pure-module-server-emit-missing). Fix A (emit-server tree-shaking) prunes
+  // the CLIENT-only-used import, so a SURVIVING server-import is genuinely
+  // referenced server-side; this warning is the cross-file defense-in-depth that
+  // catches the residual broken shapes emit-server cannot see (no sibling-emission
+  // knowledge). Runs on the COMPILE (before the write gate) so it fires in any
+  // write mode; non-fatal — surfaces in result.warnings. Works in SOURCE-path
+  // space: `./X.server.js` reverses to `./X.scrml`, resolved against the importing
+  // file's source dir, looked up in cgResult.outputs (keyed by source path).
+  // ---------------------------------------------------------------------------
+  function checkServerImportInvariant() {
+    if (!cgResult.outputs) return;
+    const outputByAbsSource = new Map();
+    for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
+
+    // Exported names declared in an emitted .server.js (ESM forms; errs toward
+    // "exported" — an unmodeled form just means no false warning).
+    const exportedNamesOf = (js) => {
+      const names = new Set();
+      let m;
+      const declRe = /\bexport\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/g;
+      while ((m = declRe.exec(js))) names.add(m[1]);
+      const braceRe = /\bexport\s*\{([^}]*)\}/g;
+      while ((m = braceRe.exec(js))) {
+        for (const part of m[1].split(",")) {
+          const t = part.trim();
+          if (!t) continue;
+          const as = t.split(/\s+as\s+/); // `X as Y` exports Y; bare `X` exports X
+          names.add((as[1] ?? as[0]).trim());
+        }
+      }
+      if (/\bexport\s+default\b/.test(js)) names.add("default");
+      return names;
+    };
+
+    // `import D, { a, b as c } from "./X.server.js"` — default + named clause +
+    // the relative .server.js path. Namespace `import * as X` is not matched.
+    const importRe =
+      /\bimport\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
+
+    // Compile-wide dedup: one warning per DISTINCT broken-import shape (target +
+    // kind + missing-name set), so a route-mis-inferred helper imported by many
+    // per-route server bundles fires once, not once per bundle.
+    const seen = new Set();
+    for (const [filePath, output] of cgResult.outputs) {
+      if (!output.serverJs) continue;
+      const importerBase = basename(filePath, ".scrml");
+      let m;
+      importRe.lastIndex = 0;
+      while ((m = importRe.exec(output.serverJs))) {
+        const [, defaultName, namedClause, relServer] = m;
+        const relScrml = relServer.replace(/\.server\.js$/, ".scrml");
+        const targetAbs = resolve(dirname(filePath), relScrml);
+        const target = outputByAbsSource.get(targetAbs);
+        if (!target) continue; // external / cross-unit / vendor — not our invariant
+        const targetBase = basename(targetAbs, ".scrml");
+
+        if (!target.serverJs) {
+          // (a) MISSING-FILE — target emits no .server.js at all.
+          const dk = "F|" + targetAbs;
+          if (seen.has(dk)) continue;
+          seen.add(dk);
+          allErrors.push({
+            stage: "CG",
+            code: "W-SERVER-IMPORT-UNEMITTED",
+            message: `Server bundle '${importerBase}.server.js' imports from '${relServer}', but '${targetBase}.scrml' has no server content and emits no .server.js — the import dangles at runtime ("Cannot find module"). Either use '${targetBase}' server-side so its .server.js is emitted, or keep its imports out of server code.`,
+            file: filePath,
+            line: 1,
+            column: 1,
+            severity: "warning",
+          });
+          continue;
+        }
+        // (b) MISSING-EXPORT — target emits .server.js but not all imported names.
+        const exported = exportedNamesOf(target.serverJs);
+        const wanted = [];
+        if (defaultName) wanted.push("default");
+        if (namedClause) {
+          for (const part of namedClause.split(",")) {
+            const t = part.trim();
+            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
+          }
+        }
+        const missing = wanted.filter((n) => n && !exported.has(n));
+        if (missing.length > 0) {
+          const dk = "E|" + targetAbs + "|" + missing.slice().sort().join(",");
+          if (seen.has(dk)) continue;
+          seen.add(dk);
+          allErrors.push({
+            stage: "CG",
+            code: "W-SERVER-IMPORT-UNEMITTED",
+            message: `Server bundle '${importerBase}.server.js' imports { ${missing.join(", ")} } from '${relServer}', but that .server.js exports no such name — the import fails at runtime (missing export). A server-CALLED pure helper that route-infers into a handler emits the route, not a value export.`,
+            file: filePath,
+            line: 1,
+            column: 1,
+            severity: "warning",
+          });
+        }
+      }
+    }
+  }
+  checkServerImportInvariant();
+
+  // ---------------------------------------------------------------------------
   // Write output files
   // ---------------------------------------------------------------------------
 
@@ -2165,6 +2277,9 @@ export function compileScrml(options = {}) {
         }
       }
     }
+
+    // (W-SERVER-IMPORT-UNEMITTED — the cross-file server-import invariant — runs
+    // BEFORE this write gate, so it fires in any write mode; see checkServerImportInvariant.)
 
     // In browser mode, write the shared runtime file (not needed in library mode)
     if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
