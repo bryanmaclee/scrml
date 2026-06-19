@@ -19,6 +19,15 @@ wholesale. Source anything the footprint doesn't cover from the vPA (a pointer, 
 fall back to the named SPEC section if the vPA is down. You land on branch `spa/ss<N>` only — the PA
 re-integrates to main.
 
+**RUN AUTONOMOUSLY (S209):** execute the WHOLE list without pausing for per-item user confirmation —
+scope→dispatch→verify→land-on-branch→advance, top-to-bottom. Don't ask "should I dispatch / land /
+continue?"; just do it. Surface to the user ONLY on a real blocker (design ruling / mis-cluster /
+blast-radius / contention / unrecoverable failure) — and even then PARK that item and CONTINUE down
+the list. **Close WITHOUT a wrap:** when the list is dispositioned, send ONE re-integration message
+to the PA inbox (`scrml/handOffs/incoming/`) + the user closes the instance. No hand-off, no
+master-list, no changelog — the PA owns all durable bookkeeping at re-integration. See
+`spa-scrml.md` §"Standing autonomy" + §"Lifecycle".
+
 `spa-lists/INDEX.md` maps each `ss<N>` to its speciality + one-line scope (so the human knows what
 `<N>` to launch).
 
