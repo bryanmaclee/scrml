@@ -442,8 +442,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // function-body emit path so `@m[k]` reads / `@m.<method>(…)` / `@m.size`
   // inside function bodies lower to the `_scrml_map_*` runtime. Sibling to
   // engineVarNames.
-  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
+  // §59.8 (S169): the `@ordered`-typed subset, so a reassignment `@m = [...]`
+  // inside a function body lowers the literal ordered. Sibling to mapVarNames.
+  const orderedMapVarNames: Set<string> = collectOrderedMapVarNames(ctx.fileAST);
   // B17.4 (§51.0.H): the subset of engines that have at least one effect=/
   // <onTransition> arm. Threaded through scheduling/CPS opts to enable hook-
   // firing wraps on `.advance()` calls inside function bodies.
@@ -795,6 +798,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           ...(machineBindings ? { machineBindings } : {}),
           ...(engineBindings ? { engineBindings } : {}),
           ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+          ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
           ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
           ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
           ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -839,6 +843,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       ...(machineBindings ? { machineBindings } : {}),
       ...(engineBindings ? { engineBindings } : {}),
       ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+      ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
       ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
       ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
       ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -995,6 +1000,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         ...(machineBindings ? { machineBindings } : {}),
         ...(engineBindings ? { engineBindings } : {}),
         ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+        ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
         ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
       ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
         ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -1056,7 +1062,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

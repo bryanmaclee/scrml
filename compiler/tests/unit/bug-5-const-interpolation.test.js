@@ -31,6 +31,10 @@
  *   §6  Regression — `${serverFn()}` still uses async IIFE wrapper
  *   §7  Tilde guard — `${ initializer; ~ }` does NOT emit invalid JS (bitwise-NOT)
  *   §8  Reactive-display-wiring block is NOT empty for const interpolations
+ *   §12 ss3 item7 (giti-006) — dotted-path `${@data.name}` does NOT leak a
+ *       spurious file-scope `_scrml_reactive_get("data").name;` read orphan
+ *       (dead + throws on async-null); render-effect preserved; method-call
+ *       shape (side-effecting) is NOT over-suppressed.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -48,9 +52,39 @@ function fix(name, src) {
 }
 
 let constStringFx, constNumberFx, literalStringFx, atVarFx, serverFnFx, tildeFx;
+let pathReadFx, pathReadAsyncFx, methodCallFx;
 
 beforeAll(() => {
   mkdirSync(FIXTURE_DIR, { recursive: true });
+
+  // ss3 item7 (giti-006) — a dotted-path reactive read in markup:
+  // `${@data.name}`. Pre-fix this leaked a spurious file-scope
+  // `_scrml_reactive_get("data").name;` bare statement (dead + throws on
+  // async-null). The interpolation is render-consumed at DOMContentLoaded.
+  pathReadFx = fix("path-read-sync.scrml", `\${ <data>: { name: string, role: string } = { name: "Ada", role: "eng" } }
+<div><p>\${@data.name}</p></div>
+`);
+
+  // ss3 item7 (giti-006) — async-initialized reactive read of a dotted path.
+  // The cell holds the null placeholder until the server fetch resolves; the
+  // spurious file-scope `null.name` would THROW at module-init.
+  pathReadAsyncFx = fix("path-read-async.scrml", `\${
+  server function loadUser() {
+    let result = { name: "Ada", role: "eng" }
+    return result
+  }
+}
+\${ <data> = loadUser() }
+<div><p>\${@data.name}</p></div>
+`);
+
+  // ss3 item7 (giti-006) guard — a method CALL on a reactive read in markup
+  // (`${@items.length}` is a read; a call like `.join(",")` is a side-effecting
+  // method invocation). Verify the suppression's trailing chain is member/index
+  // ONLY and does NOT swallow a method-call shape.
+  methodCallFx = fix("path-method-call.scrml", `\${ <items> = ["a", "b"] }
+<div><p>\${@items.join(",")}</p></div>
+`);
 
   constStringFx = fix("const-string.scrml", `<program>
 
@@ -391,5 +425,66 @@ describe("§11 (Phase 2): Anomaly B filter preserves side-effecting bare-exprs i
     // file scope. Phase 2's filter matches only pure-read shapes; assignment
     // shapes (with `=` operator) are preserved.
     expect(js).toMatch(/_scrml_reactive_set\("count",/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §12: ss3 item7 (giti-006) — dotted-path reactive read in markup does NOT
+//      leak a spurious file-scope `_scrml_reactive_get("x").path;` statement
+// ---------------------------------------------------------------------------
+
+describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation does NOT leak a file-scope read orphan", () => {
+  test("compile succeeds (sync path read)", () => {
+    const result = compile(pathReadFx);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("file-scope has NO orphan `_scrml_reactive_get(\"data\").name;` bare statement", () => {
+    const result = compile(pathReadFx);
+    const js = result.outputs.get(pathReadFx).clientJs;
+    // Pre-fix: the suppression regex matched only the bare-cell read
+    // `_scrml_reactive_get("data")` (from `${@data}`), NOT the dotted-path read
+    // `_scrml_reactive_get("data").name` (from `${@data.name}`), so the path
+    // read leaked at file scope. The fix extends the reactive/derived
+    // alternative with a member/index trailing chain. Match the file-scope
+    // region only (BEFORE the `// --- Event handler wiring` marker).
+    const fileScope = js.split("// --- Event handler wiring")[0] ?? "";
+    expect(fileScope).not.toMatch(/^\s*_scrml_reactive_get\("data"\)\.name\s*;\s*$/m);
+  });
+
+  test("the render-effect inside DOMContentLoaded is STILL emitted (correct rendering preserved)", () => {
+    const result = compile(pathReadFx);
+    const js = result.outputs.get(pathReadFx).clientJs;
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("data"\)\.name\)/);
+  });
+
+  test("emitted client.js parses as JS (node --check equivalent)", () => {
+    const result = compile(pathReadFx);
+    const js = result.outputs.get(pathReadFx).clientJs;
+    const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
+    expect(() => new Function(stripped)).not.toThrow();
+  });
+
+  test("async-initialized path read: NO module-top `_scrml_reactive_get(\"data\").name;` (would throw on null placeholder)", () => {
+    const result = compile(pathReadAsyncFx);
+    expect(result.errors).toEqual([]);
+    const js = result.outputs.get(pathReadAsyncFx).clientJs;
+    const fileScope = js.split("// --- Event handler wiring")[0] ?? "";
+    // The headline crash: for an async reactive whose cell holds null until the
+    // fetch resolves, a file-scope `null.name` throws at module-init.
+    expect(fileScope).not.toMatch(/^\s*_scrml_reactive_get\("data"\)\.name\s*;\s*$/m);
+    // The async init wiring (server-fn fetch + reactive_set) is preserved.
+    expect(js).toMatch(/_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadUser_\d+\(\)\)/);
+  });
+
+  test("GUARD: a method-call on a reactive read (`${@items.join(\",\")}`) is NOT suppressed — side effects preserved", () => {
+    // The suppression's trailing chain is member (`.path`) + index (`[k]`) only,
+    // deliberately excluding the call alternative. A trailing method call is a
+    // side-effecting invocation that MUST keep emitting / wiring. Verify the
+    // render wiring still consumes the call shape (it is not silently dropped).
+    const result = compile(methodCallFx);
+    expect(result.errors).toEqual([]);
+    const js = result.outputs.get(methodCallFx).clientJs;
+    expect(js).toMatch(/_scrml_reactive_get\("items"\)\.join\(/);
   });
 });

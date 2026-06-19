@@ -226,6 +226,29 @@ export interface EmitExprContext {
    */
   mapVarNames?: Set<string> | null;
   /**
+   * §59.8 (S169) — file-level set of cell names whose `state-decl` type
+   * annotation is an `@ordered` value-native map (`[KeyT: ValT]@ordered`).
+   * Mirrors `mapVarNames` (bare names, no `@`). The ordered-ness of a map
+   * VALUE is a property of the TARGET CELL's type, NOT of the literal, so a
+   * map-lit RHS assigned to one of these cells must lower to
+   * `_scrml_map_from_entries([...], true)`. Populated by
+   * `collectOrderedMapVarNames(fileAST)`. Used by `emitAssign` to set
+   * `emitMapLitOrdered` on the RHS of a reassignment `@m = [...]` whose target
+   * cell is ordered. NULL or empty → no cell is ordered (all map literals lower
+   * unordered, the §59 default).
+   */
+  orderedMapVarNames?: Set<string> | null;
+  /**
+   * §59.8 (S169) — TRANSIENT per-emission flag. When true, the NEXT
+   * `emitMapLit` lowers its literal as `_scrml_map_from_entries([...], true)`
+   * (insertion-order iteration). Set by `emitAssign` (reassignment to an
+   * ordered cell) and by `emit-logic.ts` (the decl-init RHS of an `@ordered`
+   * decl). `emitMapLit` recurses into entry keys/values with this flag CLEARED
+   * so NESTED map-VALUE literals stay unordered (per-value `@ordered` is a
+   * separate known v1 gap — codegen has no per-value annotation).
+   */
+  emitMapLitOrdered?: boolean;
+  /**
    * §20.6 (shadowing, Open-Q3) — names declared in the current scope
    * (function params, let/const locals, function-decls). When the set
    * contains "log", a user-declared `log` is in scope and WINS over the
@@ -583,13 +606,20 @@ function emitSpread(node: SpreadExpr, ctx: EmitExprContext): string {
  * runtime handles it, and failing valid hashable keys would be a regression.
  */
 function emitMapLit(node: MapLitExpr, ctx: EmitExprContext): string {
+  // §59.8 (S169) — the OUTERMOST literal rides the target cell's ordered-ness,
+  // threaded via the transient `emitMapLitOrdered` flag. The flag is consumed
+  // here and CLEARED for the recursion into entry keys/values so a NESTED
+  // map-VALUE literal (`["outer": ["a": 1]]`) stays unordered — per-value
+  // `@ordered` is a separate known v1 gap (codegen has no per-value annotation).
+  const ordered = ctx.emitMapLitOrdered === true;
   if (node.entries.length === 0) {
-    return `_scrml_map_from_entries([], false)`;
+    return `_scrml_map_from_entries([], ${ordered})`;
   }
+  const inner: EmitExprContext = { ...ctx, emitMapLitOrdered: false };
   const pairs = node.entries
-    .map(e => `[${emitExpr(e.key, ctx)}, ${emitExpr(e.value, ctx)}]`)
+    .map(e => `[${emitExpr(e.key, inner)}, ${emitExpr(e.value, inner)}]`)
     .join(", ");
-  return `_scrml_map_from_entries([${pairs}], false)`;
+  return `_scrml_map_from_entries([${pairs}], ${ordered})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,7 +1102,24 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
 
 function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   const target = node.target;
-  const value = emitExpr(node.value, ctx);
+  // §59.8 (S169) — a reassignment `@m = [...]` to an `@ordered` map cell must
+  // lower its RHS map-literal ordered. The ordered-ness rides the TARGET cell's
+  // type (in `orderedMapVarNames`), not the literal. Set the transient flag on
+  // the RHS-emission ctx for the plain `=` reactive-ident case only; compound
+  // ops (`+=` etc.) never carry a bare map literal RHS, and the server/
+  // fallthrough lvalue paths are unaffected. (Precedent: emit-event-wiring.ts
+  // keys its reassignment branch on `mapVarNames.has(target.name.slice(1))`.)
+  const targetIsOrderedMap =
+    node.op === "=" &&
+    target.kind === "ident" &&
+    typeof target.name === "string" &&
+    target.name.startsWith("@") &&
+    ctx.orderedMapVarNames != null &&
+    ctx.orderedMapVarNames.has(target.name.slice(1));
+  const valueCtx: EmitExprContext = targetIsOrderedMap
+    ? { ...ctx, emitMapLitOrdered: true }
+    : ctx;
+  const value = emitExpr(node.value, valueCtx);
 
   // Reactive assignment: @var = expr → _scrml_reactive_set("var", expr)
   if (target.kind === "ident" && target.name.startsWith("@")) {

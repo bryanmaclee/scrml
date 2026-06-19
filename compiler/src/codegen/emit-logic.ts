@@ -6,7 +6,7 @@ import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMer
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr } from "./emit-lift.js";
-import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRuntimeCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
@@ -143,6 +143,15 @@ export interface EmitLogicOpts {
    * (reactive-deps.ts). Sibling to `engineVarNames`.
    */
   mapVarNames?: Set<string> | null;
+  /**
+   * §59.8 (S169): the STRICT subset of `mapVarNames` whose `state-decl` type
+   * annotation is an `@ordered` map (`[KeyT: ValT]@ordered`). Used by
+   * `emit-expr.ts:emitAssign` to lower a reassignment `@m = [...]` to an
+   * ordered cell as `_scrml_map_from_entries([...], true)`. Computed once per
+   * file via `collectOrderedMapVarNames` (reactive-deps.ts). NULL or empty →
+   * no cell is ordered (all map literals lower unordered, the §59 default).
+   */
+  orderedMapVarNames?: Set<string> | null;
   /**
    * C13 (§51.0.G): Engine variable names in the file's scope. Used by
    * `emit-expr.ts:emitCall` to detect `.advance` calls on engine variables
@@ -713,6 +722,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // §59 (D4) — map variable name set so emit-expr can intercept `@m[k]`
     // reads / `@m.<method>(…)` calls / `@m.size` and lower them to `_scrml_map_*`.
     mapVarNames: opts.mapVarNames ?? null,
+    // §59.8 (S169) — ordered-map cell names so emit-expr:emitAssign lowers a
+    // reassignment `@m = [...]` to an ordered cell with the ordered flag set.
+    orderedMapVarNames: opts.orderedMapVarNames ?? null,
     // C13 (§51.0.G) — engine variable name set so emit-expr can detect
     // `.advance` calls on engine-bound `@vars`.
     engineVarNames: opts.engineVarNames ?? null,
@@ -867,13 +879,25 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
   const ctx = opts.encodingCtx;
   const encodedName = ctx ? ctx.encode(qualifiedName) : qualifiedName;
 
+  // §59.8 (S169) — the reset init-thunk re-evaluates the SAME init expression
+  // the C1 dispatch path emits, so it must lower an `@ordered`-typed map init
+  // ordered too. Compute from `node.typeAnnotation` (decl-site only).
+  const _thunkAnno = (node as any).typeAnnotation;
+  const _thunkInitOrderedMap =
+    typeof _thunkAnno === "string" &&
+    isMapTypeAnnotation(_thunkAnno) &&
+    _thunkAnno.trim().endsWith("@ordered");
+  const _thunkExprCtx: EmitExprContext = _thunkInitOrderedMap
+    ? { ..._makeExprCtx(opts), emitMapLitOrdered: true }
+    : _makeExprCtx(opts);
+
   // Prefer the structured `initExpr` (Phase 3 fast path); fall back to the
   // raw `init` string when only the legacy AST shape is available. Both
   // paths produce the same emitted JS via emitExprField. When neither is
   // present (e.g. tilde-only init or other rare shapes), skip — there's
   // nothing to re-evaluate.
   if (node.initExpr) {
-    const initBody = emitExpr(node.initExpr, _makeExprCtx(opts));
+    const initBody = emitExpr(node.initExpr, _thunkExprCtx);
     // GITI-014: paren-wrap object-literal bodies — `() => {a: 1}` mis-parses
     // as a block statement; `() => ({a: 1})` parses as the expression we want.
     // S142 gate-tail: the AST predicate (kind === "object") misses a payload-
@@ -894,7 +918,7 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
   if (!initStr || initStr === "null") return null;
   // Use emitExprField with the raw fallback so derivedNames/server-mode
   // routing matches the main reactive-set arm.
-  const initBody = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
+  const initBody = emitExprField(node.initExpr, initStr, _thunkExprCtx);
   // GITI-014: same paren-wrap guard for the fallback string path. No ExprNode
   // available here, so use the string-form predicate.
   const wrappedInit = arrowBodyStringNeedsParens(initBody) ? `(${initBody})` : initBody;
@@ -2261,6 +2285,39 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const _isEngineReassign = !isInit && !!opts.engineBindings?.has(node.name);
       const _histDet = _isEngineReassign ? detectHistoryForm(node.initExpr) : { isHistoryForm: false, strippedNode: null };
       const _effectiveInitExpr = _histDet.isHistoryForm ? _histDet.strippedNode : node.initExpr;
+      // §59.8 (S169) — the decl's OWN init RHS rides this cell's `@ordered`-ness,
+      // computed directly from `node.typeAnnotation` (no name-set lookup needed
+      // for the decl's own init). A `[KeyT: ValT]@ordered`-typed decl whose init
+      // is a map literal (`["b": 2]` or `[:]`) lowers the OUTERMOST literal
+      // ordered: `_scrml_map_from_entries([...], true)`. The map-lit emitter
+      // clears the flag for nested entry keys/values, so nested map-VALUE
+      // literals stay unordered (a separate known v1 gap). Reassignments inside
+      // function bodies carry no `typeAnnotation`, so this is decl-site only.
+      const _declAnno = (node as any).typeAnnotation;
+      // §59.8 (S169) — the RHS map-literal of ANY write to an `@ordered` map
+      // cell (decl-init OR a reassignment inside a function body) must lower the
+      // OUTERMOST literal ordered. The AST builder emits a `state-decl` for BOTH
+      // shapes — a decl-init carries the `@ordered` `typeAnnotation`, while a
+      // reassignment `@m = [...]` carries no annotation but names a cell in
+      // `orderedMapVarNames` (the file-level set of `@ordered`-typed cells).
+      // Covering both via the name-set (with the decl's own annotation as the
+      // fallback for the rare synthetic AST that lacks the set) is exactly the
+      // `mapVarNames` precedent — codegen keys on the collected name-set, not on
+      // a resolved type. A non-`@ordered` cell is absent from the set, so its
+      // init/reassign correctly stays unordered (the §59 default).
+      const _declIsOrderedMap =
+        typeof _declAnno === "string" &&
+        isMapTypeAnnotation(_declAnno) &&
+        _declAnno.trim().endsWith("@ordered");
+      const _nameIsOrderedMap =
+        typeof node.name === "string" &&
+        !!opts.orderedMapVarNames &&
+        opts.orderedMapVarNames.has(node.name);
+      const _initIsOrderedMap = _declIsOrderedMap || _nameIsOrderedMap;
+      const _initExprCtx = (o: EmitLogicOpts): EmitExprContext =>
+        _initIsOrderedMap
+          ? { ..._makeExprCtx(o), emitMapLitOrdered: true }
+          : _makeExprCtx(o);
       // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped server-
       // function REASSIGNMENT to a channel-owned cell. The AST builder emits
       // a `state-decl` (not a bare-expr) for `@name = expr` inside a function
@@ -2282,13 +2339,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         opts.channelOwnedCells.has(node.name) &&
         node.initExpr
       ) {
-        const serverCtx: EmitExprContext = { ..._makeExprCtx(opts), mode: "server" };
+        const serverCtx: EmitExprContext = { ..._initExprCtx(opts), mode: "server" };
         const rhsStr = emitExpr(_effectiveInitExpr, serverCtx);
         return `broadcast({ __type: "__sync", __key: ${JSON.stringify(node.name)}, __val: (${rhsStr}) });`;
       }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
-        const rewrittenInit = emitExpr(_effectiveInitExpr, _makeExprCtx(opts));
+        const rewrittenInit = emitExpr(_effectiveInitExpr, _initExprCtx(opts));
         const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr, _effectiveInitExpr);
         // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
@@ -2304,7 +2361,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit, _histDet.isHistoryForm));
       }
       // Phase 4 simplified fallback: initExpr is missing (rare)
-      const rewrittenInit = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
+      const rewrittenInit = emitExprField(node.initExpr, initStr, _initExprCtx(opts));
       const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr);
       // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {

@@ -268,8 +268,12 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // §59 (D4) — value-native MAP variable names in the file's scope. Threaded
   // into `emit-logic` via `EmitLogicOpts.mapVarNames` so emit-expr intercepts
   // `@m[k]` reads / `@m.<method>(…)` calls / `@m.size`. Sibling to engineVarNames.
-  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(fileAST);
+  // §59.8 (S169) — the STRICT `@ordered`-typed subset of `mapVarNames`. Threaded
+  // into `emit-logic` via `EmitLogicOpts.orderedMapVarNames` so emit-expr lowers
+  // a reassignment `@m = [...]` to an ordered cell ordered. Sibling to mapVarNames.
+  const orderedMapVarNames: Set<string> = collectOrderedMapVarNames(fileAST);
   // B17.4 (§51.0.H) — engines with hooks gate the wrap on `.advance()` /
   // direct-write call sites; threaded into `emit-logic` via
   // `EmitLogicOpts.enginesWithHooks`.
@@ -315,9 +319,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // yet still declare synth cells, and the `@<compound>.<synthProp>` read must
   // still route. Only spread when non-empty to keep emitOpts lean.
   const synthCellKeysSpread = synthCellKeys.size > 0 ? { synthCellKeys } : {};
-  const emitOpts: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; mapVarNames?: Set<string>; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; enginesWithHistory?: Set<string>; enginesWithMessageArms?: Set<string>; engineMessageVariants?: Map<string, Set<string>>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
-    ? { derivedNames, ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
-    : { ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
+  const emitOpts: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; mapVarNames?: Set<string>; orderedMapVarNames?: Set<string>; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; enginesWithHistory?: Set<string>; enginesWithMessageArms?: Set<string>; engineMessageVariants?: Map<string, Set<string>>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
+    ? { derivedNames, ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
+    : { ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl
@@ -468,12 +472,26 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // `TypeError`. (Before S144 this shape never reached here: the read
       // compiled to the dead bare `_scrml_input_<id>_.member` form, which the
       // first regex alternative already matched and suppressed.)
+      //
+      // ss3 item7 (giti-006, 2026-06-19) — extend the `_scrml_(reactive|derived)_get`
+      // alternative with the SAME trailing member-access / index chain the input-state
+      // alternative already carries. Pre-fix it matched only the bare-cell read
+      // `_scrml_reactive_get("data")` (from `${@data}`) but NOT the path read
+      // `_scrml_reactive_get("data").name` (from `${@data.name}`), so a markup
+      // interpolation of a dotted path leaked a spurious file-scope statement. That
+      // statement is dead (its value is unused — the render wiring at DOMContentLoaded
+      // is the sole consumer) AND harmful: for an async-initialized reactive whose cell
+      // holds the `null` placeholder until a server fetch resolves, the file-scope
+      // `null.name` THROWS at module-init, crashing the page before the fetch lands.
+      // The trailing chain is member (`.path`) + index (`[k]`) ONLY — NO call
+      // alternative — because a trailing call (`_scrml_reactive_get("x").map(...)`) is
+      // a method invocation with side effects and MUST keep emitting at file-scope.
       if (
         pid &&
         !groupTildeCtx &&
         stmt.kind === "bare-expr" &&
         code &&
-        /^(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|_scrml_(?:reactive|derived)_get\([^)]*\)|_scrml_input_state_registry\.get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\]|\([^)]*\))*)\s*;?\s*$/.test(code.trim())
+        /^(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|_scrml_(?:reactive|derived)_get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])*|_scrml_input_state_registry\.get\([^)]*\)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\]|\([^)]*\))*)\s*;?\s*$/.test(code.trim())
       ) {
         continue;
       }

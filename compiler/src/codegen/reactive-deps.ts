@@ -415,6 +415,86 @@ export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string
 }
 
 /**
+ * §59.8 (S169) — Collect the names of every cell whose `state-decl` type
+ * annotation is an `@ordered` value-native map (`[KeyT: ValT]@ordered`). This is
+ * the STRICT subset of `collectMapVarNames` for which a map-literal VALUE must
+ * lower to insertion-order iteration (`_scrml_map_from_entries([...], true)`).
+ *
+ * The ordered-ness of a map VALUE is a property of the TARGET CELL's type, NOT
+ * of the literal — a bare `["a": 1]` is unordered; the same literal assigned to
+ * an `@ordered` cell is ordered. Codegen has no resolved type at the emit site,
+ * so `emit-expr.ts` keys the ordered-vs-unordered branch on this name-set
+ * (`emitAssign` reassignments) exactly as `mapVarNames` keys the map-vs-array
+ * branch. The decl's OWN init RHS is handled directly from `node.typeAnnotation`
+ * in `emit-logic.ts` (no set lookup needed there).
+ *
+ * Mirrors `collectMapVarNames`, but admits a cell ONLY when its `typeAnnotation`
+ * is an `@ordered` map: `isMapTypeAnnotation(ann)` AND the trimmed annotation
+ * ends in `@ordered`. A `map-lit` RHS WITHOUT the affix does NOT make a cell
+ * ordered (the §59 default is unordered), so the (b) RHS-inference branch of
+ * `collectMapVarNames` is deliberately omitted here.
+ */
+export function collectOrderedMapVarNames(
+  fileAST: Record<string, unknown>,
+): Set<string> {
+  const names = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return names;
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as ASTNode;
+
+      // Only `state-decl` carries a `typeAnnotation`, and only an `@ordered`
+      // map annotation makes a cell ordered.
+      if (
+        n.kind === "state-decl" &&
+        typeof n.name === "string" &&
+        n.name.length > 0
+      ) {
+        const anno = (n as any).typeAnnotation;
+        if (
+          typeof anno === "string" &&
+          isMapTypeAnnotation(anno) &&
+          anno.trim().endsWith("@ordered")
+        ) {
+          names.add(n.name as string);
+        }
+      }
+
+      // Recurse the same structures as collectMapVarNames so ordered map cells
+      // declared inside logic blocks / compounds / control flow are found.
+      if (n.kind === "logic" && Array.isArray(n.body)) {
+        visit(n.body as unknown[]);
+      }
+      if (Array.isArray(n.children)) {
+        visit(n.children as unknown[]);
+      }
+      if (n.kind === "match-stmt" && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "if-stmt") {
+        if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
+        if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+        if ((n as any).catchNode && Array.isArray((n as any).catchNode.body)) visit((n as any).catchNode.body as unknown[]);
+        if (Array.isArray((n as any).finallyBody)) visit((n as any).finallyBody as unknown[]);
+      }
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return names;
+}
+
+/**
  * §59 (D4) — Does this file USE a value-native map ANYWHERE? Drives the `'map'`
  * runtime chunk gate in `emit-client.ts:detectRuntimeChunks` — without the
  * chunk, a map-using build ReferenceErrors on `_scrml_map_get` (the helpers are

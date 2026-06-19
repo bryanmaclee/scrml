@@ -3394,3 +3394,168 @@ describe("Lin-B5: lin param — scoping and interaction", () => {
     expect(e001[0].message).toContain("local");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §43 Bug `g-bare-literal-attr-value` (sPA ss3, 2026-06-19) —
+//     bare numeric/duration/boolean literals on the spec-typed bare-literal
+//     STRUCTURAL attrs (interval/running/delay; §6.7.5 <timer>, §6.7.6 <poll>,
+//     §6.7.8 <timeout>) must NOT false-fire E-SCOPE-001.
+//
+// The block-splitter parses a bare literal attr value (`interval=1000`) as a
+// `variable-ref` whose `name` IS the literal text ("1000"), so visitAttr's
+// scope lookup missed and false-fired E-SCOPE-001. The fix exempts the bare-
+// literal SHAPE on the allowlisted attrs (TS_SPEC_BARE_LITERAL_ATTRS) — VALUE-
+// AWARE, NOT an unconditional attr-name skip.
+//
+// These tests compile REAL .scrml SOURCE through the full pipeline (compileScrml)
+// so the bug-producing block-splitter shape is actually exercised — synthesizing
+// the variable-ref AST by hand would bypass the very stage that creates the bug
+// (S137 R26: synthetic-AST regression tests miss upstream BS/parser bugs).
+// ---------------------------------------------------------------------------
+
+import { compileScrml as _compileScrml_g } from "../../src/api.js";
+import {
+  mkdtempSync as _mkdtempSync_g,
+  writeFileSync as _writeFileSync_g,
+  rmSync as _rmSync_g,
+} from "fs";
+import { join as _join_g } from "path";
+import { tmpdir as _tmpdir_g } from "os";
+
+/** Compile a .scrml source string through the full pipeline, return result. */
+function _compileSrc_g(src) {
+  const TMP = _mkdtempSync_g(_join_g(_tmpdir_g(), "ts-g-bare-lit-"));
+  const file = _join_g(TMP, "app.scrml");
+  _writeFileSync_g(file, src);
+  const result = _compileScrml_g({
+    inputFiles: [file],
+    outputDir: _join_g(TMP, "out"),
+    write: false,
+    log: () => {},
+  });
+  _rmSync_g(TMP, { recursive: true, force: true });
+  return result;
+}
+
+/** All diagnostic codes across the errors + warnings streams (cross-stream). */
+function _allCodes_g(result) {
+  return [
+    ...(result.errors ?? []).map(e => e.code),
+    ...(result.warnings ?? []).map(w => w.code),
+  ];
+}
+
+describe("§43 g-bare-literal-attr-value — spec-typed bare-literal structural attrs", () => {
+  // ----- POSITIVE: bare literals must NOT fire E-SCOPE-001 -----
+
+  test("<timer interval=1000 running=@running> — no E-SCOPE-001 on `1000`", () => {
+    const src = `<program>
+  <tick> = 0
+  <running> = true
+  <timer interval=1000 running=@running>
+    \${ @tick = @tick + 1 }
+  </>
+  <p>\${@tick}</p>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("<poll id=\"p\" interval=5000> — no E-SCOPE-001 on `5000`", () => {
+    const src = `<program>
+  <serverTime> = 0
+  <poll id="p" interval=5000>
+    \${ @serverTime = @serverTime + 1 }
+  </>
+  <p>\${@serverTime}</p>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("<timeout delay=500> — no E-SCOPE-001 on `500`", () => {
+    const src = `<program>
+  <tick> = 0
+  <timeout delay=500>
+    \${ @tick = @tick + 1 }
+  </>
+  <p>\${@tick}</p>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("<timer interval=2000 running=false/> — no E-SCOPE-001 on `2000` OR `false`, but W-LIFECYCLE-007 STILL fires on `false`", () => {
+    const src = `<program>
+  <tick> = 0
+  <timer interval=2000 running=false/>
+  <p>\${@tick}</p>
+</program>`;
+    const result = _compileSrc_g(src);
+    const errCodes = (result.errors ?? []).map(e => e.code);
+    expect(errCodes).not.toContain("E-SCOPE-001");
+    // The boolean-literal `running=false` warning (§6.7.5) is a SEPARATE pass —
+    // the exemption must leave it intact. Cross-stream check (W-* → warnings).
+    expect(_allCodes_g(result)).toContain("W-LIFECYCLE-007");
+  });
+
+  // ----- NEGATIVE: must STILL fire E-SCOPE-001 (no over-relaxation) -----
+
+  test("NO OVER-RELAX: bare numeric on a generic HTML attr (`<input value=42>`) STILL errors", () => {
+    const src = `<program>
+  <input value=42/>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).toContain("E-SCOPE-001");
+  });
+
+  test("reactive `<timer interval=@bogus>` (undeclared var) STILL scope-checks → E-SCOPE-001", () => {
+    const src = `<program>
+  <tick> = 0
+  <timer interval=@bogus>
+    \${ @tick = @tick + 1 }
+  </>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).toContain("E-SCOPE-001");
+  });
+
+  test("reactive `<timer running=@bogus>` (undeclared var) STILL scope-checks → E-SCOPE-001", () => {
+    const src = `<program>
+  <tick> = 0
+  <timer interval=1000 running=@bogus>
+    \${ @tick = @tick + 1 }
+  </>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).toContain("E-SCOPE-001");
+  });
+
+  // ----- GUARD: <onTimeout after=DURATION> handled by dedicated walker -----
+  // (bounded investigation result — `after` is NOT in the allowlist; a
+  // well-formed engine compiles clean of E-SCOPE-001 on the duration literal).
+
+  test("well-formed <onTimeout after=500ms to=.X/> compiles clean of E-SCOPE-001", () => {
+    const src = `<program>
+  type LoadPhase:enum = { Idle, Loading, Done, TimedOut }
+
+  function startLoad() {
+    @loadPhase = .Loading
+  }
+
+  <engine for=LoadPhase initial=.Idle>
+    <Idle rule=.Loading>
+      <button onclick=startLoad()>Load</button>
+    </>
+    <Loading rule=(.Done | .TimedOut)>
+      <onTimeout after=500ms to=.TimedOut/>
+      "Loading…"
+    </>
+    <Done rule=.Idle : "done">
+    <TimedOut rule=.Idle : "timed out">
+  </>
+</program>`;
+    const codes = (_compileSrc_g(src).errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+});

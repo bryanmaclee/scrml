@@ -1063,11 +1063,13 @@ function parseComponentDef(
           defSpan,
         ));
       }
-      // §15.11.4: W-COMPONENT-001 — function-typed prop (escape hatch warning)
-      // NOTE: This check is blocked when the component definition has function types in props={..}
-      // because splitBlocks prematurely closes the tag on '>' inside plain {..} attribute values.
-      // isFunctionType is checked here for completeness but will not fire until block-splitter.js
-      // is updated to track plain { depth in scanAttributes.
+      // §15.11.4: W-COMPONENT-001 — function-typed prop (escape hatch warning).
+      // Fires on the canonical arrow function-type prop (`() => void`, `(e) => T`),
+      // single- or multi-line `props={...}`. block-splitter `scanAttributes` now tracks
+      // bare `{` depth (block-splitter.js:1233-1241), so the `>` inside `=> ...` no longer
+      // closes the opener early — the historical block that made this check vestigial is
+      // closed. (Verified sPA-ss3: the diagnostic fires; the prior "will not fire" note
+      // was stale.)
       if (isFunctionType(decl.type)) {
         ceErrors.push(makeCEError(
           "W-COMPONENT-001",

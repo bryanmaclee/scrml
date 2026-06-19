@@ -146,3 +146,77 @@ describe("§59 value-native map — END-TO-END", () => {
     expect(h._scrml_map_get(m, "DAL-001")).toBe(4500);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S169 — `@ordered` value-native map builds ORDERED end-to-end (§59.2 / §59.8).
+//
+// An `@ordered`-typed cell must lower its map-literal init AND any reassignment
+// to `_scrml_map_from_entries([...], true)`; a non-`@ordered` cell and a NESTED
+// map-VALUE literal stay `false`. Guards the full codegen threading path (the
+// unit suite exercises the emit seam in isolation; this drives the real pipeline).
+// ---------------------------------------------------------------------------
+
+const ORDERED_SRC = `<div>
+    \${
+        <ordered>: [string: number]@ordered = ["b": 2, "a": 1]
+        <emptyOrdered>: [string: number]@ordered = [:]
+        <plain>: [string: number] = ["b": 2, "a": 1]
+        <nested>: [string: [string: number]]@ordered = ["outer": ["b": 2, "a": 1]]
+        function rebuild() {
+            @ordered = ["c": 3, "d": 4]
+        }
+    }
+    <p>ordered: \${@ordered.size}</>
+    <p>empty: \${@emptyOrdered.size}</>
+    <p>plain: \${@plain.size}</>
+    <p>nested: \${@nested.size}</>
+    <button onclick=rebuild()>rebuild</>
+</div>`;
+
+function compileOrdered() {
+  const dir = mkdtempSync(join(tmpdir(), "map-ordered-"));
+  const filePath = join(dir, "ordered.scrml");
+  writeFileSync(filePath, ORDERED_SRC);
+  const outDir = join(dir, "dist");
+  const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, log: () => {} });
+  const errors = (result.errors || []).filter(e => e.severity == null || e.severity === "error");
+  const clientJs = readFileSync(join(outDir, "ordered.client.js"), "utf8");
+  rmSync(dir, { recursive: true, force: true });
+  return { errors, clientJs };
+}
+
+describe("§59.8 value-native map — @ordered builds ORDERED (S169)", () => {
+  let out;
+  beforeAll(() => { out = compileOrdered(); });
+
+  test("compiles with NO codegen errors", () => {
+    expect(out.errors).toEqual([]);
+  });
+
+  test("emitted client JS is syntactically valid", () => {
+    expect(() => new vm.Script(out.clientJs)).not.toThrow();
+  });
+
+  test("@ordered decl-init literal lowers ORDERED (reactive_set + init_set)", () => {
+    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+    expect(out.clientJs).toContain('_scrml_init_set("ordered", () => _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+  });
+
+  test("@ordered empty [:] init lowers ORDERED", () => {
+    expect(out.clientJs).toContain('_scrml_reactive_set("emptyOrdered", _scrml_map_from_entries([], true))');
+    expect(out.clientJs).toContain('_scrml_init_set("emptyOrdered", () => _scrml_map_from_entries([], true))');
+  });
+
+  test("a reassignment `@ordered = [...]` inside a function body lowers ORDERED", () => {
+    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["c", 3], ["d", 4]], true))');
+  });
+
+  test("a NON-@ordered map cell stays UNORDERED", () => {
+    expect(out.clientJs).toContain('_scrml_reactive_set("plain", _scrml_map_from_entries([["b", 2], ["a", 1]], false))');
+  });
+
+  test("a NESTED map-VALUE literal inside an @ordered cell stays UNORDERED (outer ordered)", () => {
+    // Outer ordered (`, true)`), inner value-map unordered (`, false)`).
+    expect(out.clientJs).toContain('_scrml_reactive_set("nested", _scrml_map_from_entries([["outer", _scrml_map_from_entries([["b", 2], ["a", 1]], false)]], true))');
+  });
+});

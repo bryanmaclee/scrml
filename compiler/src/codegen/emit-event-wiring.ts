@@ -387,11 +387,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // `onclick=@m.insert(k, v)` in a map-only file (no `<engine>`) still needs
   // the map interception. Merged into the extras spread so direct
   // `emitExprField(..., { ...engineExprCtxExtras })` calls below see it.
-  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
+  // §59.8 (S169) — the `@ordered`-typed subset, so a reassignment `@m = [...]`
+  // inside an event handler (`onclick=rebuild()`) lowers the literal ordered.
+  const orderedMapVarNames: Set<string> = collectOrderedMapVarNames(ctx.fileAST);
   const engineExprCtxExtras = {
     ...(engineRewriteCtx?.exprCtxExtras ?? {}),
     ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+    ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
   };
 
   lines.push("");
