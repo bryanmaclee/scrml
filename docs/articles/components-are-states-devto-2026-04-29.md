@@ -11,7 +11,7 @@ canonical_url:
 
 **TL;DR: `<input>` is already a state. `<Card>` should be too. One concept replaces useState, hooks rules, dependency arrays, Zustand, Pinia, Redux, context, and most prop drilling.**
 
-> **Status (as of May 2026):** the conceptual frame (state-as-type, primitive `<x> = 0` reactive cells, compound state with structural-children, validators on cells, server-side authority via `<schema>` + `protect=` + `<db>` + `<channel>`) tracks the current spec. The single scrml example below is a 2026-04 design preview of the user-defined `<Card authority="server" table="cards">` "state object" surface — that exact declaration shape is still landing and the example may use older draft attribute names. The point of the example is structural (one declaration covers shape + sync + boundary); the canonical current spelling lives in the kickstarter v2 §11.3 (channel recipe) + §3 (compound state) + §11.1 (engine recipe). See `docs/articles/llm-kickstarter-v2-2026-05-04.md` for the up-to-date code.
+> **Status (as of May 2026):** the conceptual frame (state-as-type, primitive `<x> = 0` reactive cells, compound state with structural-children, validators on cells, server-side authority via `<schema>` + `protect=` + `<db>` + `<channel>`) tracks the current spec. The single scrml example below is a 2026-04 design preview of the user-defined `<Card authority="server" table="cards">` "state object" surface — that exact declaration shape is still landing and the example may use older draft attribute names. The point of the example is structural (one declaration covers shape + sync + boundary); the canonical current spelling lives in the kickstarter v2 §11.3 (channel recipe) + §3 (compound state) + §11.1 (engine recipe). See `docs/articles/llm-kickstarter-v2-2026-05-04.md` for the up-to-date code. **Correction (2026-06):** an earlier version of this article said the compiler *generates* the optimistic-update and rollback path for `authority="server"`. That auto-persist route was retracted (§52.6.2, 2026-06-14) and never actually shipped. The compiler generates the read path (initial load, SSR pre-render, the boundary check) and lands assignments locally for an instant response; the persist write is your explicit `?{}` server function. The body below reflects the current model.
 
 Every framework I have looked at picks one of `useState`, `ref`, `createSignal`, or `signal`, and then bolts on a stack of secondary mechanisms to plug the gaps that one primitive cannot fill on its own. Hooks rules. Dependency arrays. A store library. A context API. Prop drilling for everything in between. I have hobbled through React when I had to. I have written enough TypeScript to be annoyed by it. I have spent eighteen months and about twenty compiler attempts circling one question: what would happen if state were a type, and a component were a state?
 
@@ -136,7 +136,7 @@ server fn renameCard(id: number, title: string(.length > 0 && .length < 200)) {
 
 That is the screen. Both halves.
 
-`<Card>` is a state type. The fields are typed. `authority="server"` and `table="cards"` say where the source of truth lives. The compiler reads the SQLite schema at compile time, generates the initial-load query, generates the optimistic-update path, generates the rollback, and pre-renders the list in SSR (§52.3). The `Card` interface in TypeScript and the schema on disk cannot drift, because there is one declaration.
+`<Card>` is a state type. The fields are typed. `authority="server"` and `table="cards"` say where the source of truth lives. The compiler reads the SQLite schema at compile time, generates the initial-load query, pre-renders the list in SSR, and enforces the client/server boundary (§52). The write itself stays one `?{}` server function you author, because that is the line where the real decisions live. The `Card` interface in TypeScript and the schema on disk cannot drift, because there is one declaration.
 
 `<EditState>` is also a state type. No `authority=` attribute, so it is client-local by default (§52.2). The compiler emits zero sync infrastructure for it.
 
@@ -159,7 +159,7 @@ Every one of them has the same compile-time guarantees:
 1. A typed value. The shape is known to the compiler.
 2. Predicate-checked writes. Inline constraints (§53) gate every assignment.
 3. Reactive subscribers tracked at compile time. The dependency graph is built before the program runs.
-4. Optional authority. State that lives on a server is declared `authority="server"` and gets sync infrastructure for free.
+4. Optional authority. State that lives on a server is declared `authority="server"` and gets its read path generated for free: the initial load, the SSR pre-render, and the boundary check. The write stays your `?{}`.
 5. Optional state-machine rules. A reactive variable can be bound to an `<engine>` (§51) so transitions are typed too.
 
 Layer those as you need them. Leave them off where you don't. A counter is one line: `@count = 0`. A server-synced kanban is the example above. The mechanism is the same.
@@ -172,7 +172,7 @@ Layer those as you need them. Leave them off where you don't. A counter is one l
 - **Context APIs.** A `@var` at the enclosing scope is reachable from any component nested inside it (§6.2). No provider component, no consumer hook.
 - **Most prop drilling.** State that does not need to be local does not have to travel through five components to reach where it is used.
 - **Runtime validators on the wire.** Inline predicates (§53) are checked at the boundary because they are part of the type. There is no zod schema sitting next to the TS type.
-- **Optimistic-update boilerplate.** A type with `authority="server"` gets the optimistic insert, reconcile, and rollback generated (§52). I am not asking developers to hand-write the same ten lines on every screen.
+- **Optimistic-update boilerplate.** A type with `authority="server"` gets the read path generated: the initial load, the SSR pre-render, the boundary check, and the instant-local update on assignment (§52). The persist write stays the developer's one `?{}` query, and that is on purpose. The write is where server IDs get assigned, where INSERT versus UPDATE gets chosen, and where invariants get enforced, so it is the one place a compiler should not guess for you. I am not asking developers to hand-write the same ten lines of fetch, reconcile, and rollback on every screen. Just the one line that carries a real decision.
 
 That is most of a typical app's `package.json` state-management section. The reason it can be killed is that one primitive (state-as-type) is doing the work that five different primitives used to share.
 
@@ -182,7 +182,7 @@ This is a position piece, not a sales pitch. The point is not that scrml has no 
 
 - **Some state is genuinely global.** Auth session, theme, current user. Declare it at file scope, or in a top-level state block. The mechanism is the same, the placement is the developer's call.
 - **Some forms are genuinely complex.** A multi-step wizard with cross-step validation is not five lines in any language. scrml gives you `<engine>` for the transition rules and inline predicates for the value constraints. The shape of the work is smaller. The work is still real.
-- **Some state crosses a network.** `authority="server"` is the declaration; the sync infrastructure is generated. The wire is still a wire. The compiler does not pretend latency is zero. It just stops asking the developer to write the same fetch-reconcile-rollback by hand.
+- **Some state crosses a network.** `authority="server"` is the declaration; the read path is generated. The wire is still a wire. The compiler does not pretend latency is zero, and it does not pretend it can write your database for you. It stops asking the developer to hand-write the fetch, the SSR hydration, and the boundary check. The write stays an explicit `?{}`, where it belongs.
 - **Mutability contracts are deeper than predicates alone.** Predicates are the value layer. Lifecycles (`null → number`) and machine transitions are the other two. I am writing the dedicated unpacking of all three in the next piece in this series. This article only touches the value layer because that is what the state-as-type frame needs.
 
 The line between "framework plumbing" and "actual app logic" is a lot brighter when one side of it is a typed declaration instead of five libraries negotiating.
@@ -233,10 +233,10 @@ This block is an HTML comment so it does not render on dev.to.
 - ✅ `bind:value=@var` and `bind:propName` for two-way reactive — SPEC §5.2.2 (line 994 `bind:value=@var` desugaring), §15.11.1 (component bind props).
 - ✅ Inline predicates `string(.length > 0 && .length < 200)` — SPEC §53.2.1 grammar (line 19265-19293), §53.2.2 usage positions (line 19299-19309).
 - ✅ Dependency graph at compile time — SPEC §31 (line 11745-11768 "Dependency Graph: Purpose, construction, route analysis").
-- ✅ Optimistic update / sync infrastructure for `authority="server"` — SPEC §52.1 motivation enumerates "Generate server-sync infrastructure automatically (initial load, optimistic update, rollback, re-fetch)" line 18699.
+- ✅ Read-authority infrastructure for `authority="server"` — SPEC §52.1 + §52.6.2: compiler generates initial-load-on-mount, SSR pre-render, and the E-AUTH boundary check; the persist write is the developer's explicit `?{}` server fn. The auto-persist / optimistic-update / rollback path was RETRACTED 2026-06-14 (§52.6.2 / §52.6.3) — never implemented (a `console.warn` no-op), and it contradicted §52's own flagship example (§52.4.5).
 - ✅ Default authority is local; form state needs no declaration — SPEC §52.2 lines 18711-18713.
 - ✅ `< machine>` binding for typed transitions — SPEC §6.1.1 line 1386 (`@var: MachineName = initialValue` syntax confirmed live as an opt-in layer).
-- ⚠️ The article claims the compiler "generates the optimistic-update path, generates the rollback, and pre-renders the list in SSR" for `authority="server"`. SPEC §52.1 enumerates these as compiler-generated infrastructure (lines 18696-18701) and §52.3.4 normative statements confirm sync generation is mandatory for `authority="server"`. The detailed implementation status of every sub-piece (e.g., is rollback fully wired today vs. spec-aspirational) is not exhaustively re-verified per file in the compiler source for this draft — the claim follows the spec, which is the article-level source of truth. Soften wording is unnecessary; this is what `authority="server"` is normatively defined to mean. Flag retained for awareness.
+- ✅ Corrected 2026-06: the body previously claimed the compiler "generates the optimistic-update path, generates the rollback." Per §52.6.2's retraction (2026-06-14) that auto-persist route was never implemented and contradicted §52.4.5; §52 is a read-authority layer (initial load + SSR pre-render + boundary check), and the persist write is the developer's `?{}`. Body + status banner updated to the current model.
 - ⚠️ The article uses `<EditState> @ui` as the instance-binding form (matching the SPEC §52.3.5 worked example exactly). This binding form is current per the worked example. If the binding-form syntax has drifted between spec and implementation, this would need re-checking; per spec it is correct.
 
 **Forbidden territory check (bio §6):** all clear.
