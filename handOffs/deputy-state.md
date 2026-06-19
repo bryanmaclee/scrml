@@ -12,7 +12,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S207 **[14]** (S208 boot landed g-pure-module but not yet delta-logged; git-inferred).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** maps batch (g-pure-module `432c28b6` tree-shake fix, 1 compiler/src file) — BATCHED for S208 next compiler-src (1 fresh change; per the firm rule). Else current.
+- **Owed maintenance:** none. (Maps REFRESHED this tick d931f8be→9afc746e [g-pure-module tree-shake + Fix-B W-SERVER-IMPORT-UNEMITTED]; digest after maps; §3c green.)
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
@@ -45,12 +45,13 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T76** S207 WRAPPED — absorbed [1-14]; PA integrated my ~5 pending commits + skipped maps-6c → deputy refreshed maps c553dd84→d931f8be (g-compound + new E-CELL-AMBIGUOUS-MEMBER-RENDER code); recent-sessions + digest regen; §3c PASS. g-pure-module HIGH fix in-flight-CRASHED → S208 re-dispatches.
 - **T77** digest regen (cleared the T76 bundled-maps stamp artifact so S208-boot reads current); main idle post-wrap; g-pure-module still crashed-pending-S208.
 - **T81** S208 booted (T78-80 no-ops): g-pure-module HIGH LANDED (432c28b6 salvaged) + my tick-76/77 integrated + pushed (maps reached origin). digest regen (HIGH gap closed); maps batch (g-pure-module) held.
+- **T82** Fix B landed (05b88433, W-SERVER-IMPORT-UNEMITTED) — maps batch hit ≥2 (g-pure-module + Fix B) → REFRESHED d931f8be→9afc746e (incl. the new W-code); digest after maps; §3c PASS; no in-flight.
 
 ## Currency snapshot (@ tick 76)
 
 - **Board:** gap-counts PASS; recent-sessions regen'd (wrap anchor). g-compound-rbt MED closed; g-pure-module HIGH open (fix in-flight-crashed).
-- **maps:** watermark **`d931f8be`** (REFRESHED T76) — current.
-- **digest:** current (head `099207c0`, delta-seq S207 14).
+- **maps:** watermark **`9afc746e`** (REFRESHED T82) — current.
+- **digest:** current (head `9afc746e`, delta-seq S207 14).
 - **flograph/dock:** §3c PASS.
 
 ## Function 3 — agent monitoring (LIVE)

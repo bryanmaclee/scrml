@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-18  commit: d931f8be
+# updated: 2026-06-19  commit: 9afc746e
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -1321,6 +1321,67 @@ a member render-by-tag (clears the spurious E-DG-002).
 SPEC para.6.3:2290 ratifies compound-member render-by-tag = EXPAND. para.6 error-list: NEW
 `E-CELL-AMBIGUOUS-MEMBER-RENDER` entry added (Rule-4 -- code ships with its para-entry). Surgical
 -- reuses the existing top-level Shape-2 expansion entirely. Board MED 8->7.
+
+
+## Key S208 Source Changes (g-pure-module-server-emit tree-shake fix + W-SERVER-IMPORT-UNEMITTED warning)
+
+Two commits (`432c28b6` Fix A tree-shake, `05b88433` Fix B W-code). Both additive; default
+pipeline output UNCHANGED except where a client-only pure-module was previously imported at
+runtime (Fix A prunes the dangling import line). No new AST node shapes.
+find-count: **1016 at `9afc746e`** (verified: +2 integration test files).
+
+### Fix A -- g-pure-module-server-emit HIGH: tree-shake unused local-.scrml server imports (`432c28b6`)
+
+Root cause: a local `.scrml` module imported purely for client-side use emitted an import
+line for `"./mod.server.js"` at the top of the server bundle even when the imported names
+were NEVER referenced in any server-side expression. The `.server.js` for a pure-client
+module is never emitted, so the import caused a runtime `Cannot find module` crash.
+`node --check` and the compile gate passed silently (node --check does not follow import
+specifiers at check time). Option 1 (emit the `.server.js`) rejected because TYPE imports
+have no runtime export and produce link-errors on erased type imports.
+
+- **compiler/src/codegen/emit-server.ts** -- two-phase sentinel approach:
+  - Named imports from local `.scrml` sources are DEFERRED at emit time; instead of
+    emitting an import line immediately, the emitter records them in `deferredLocalImports[]`
+    and inserts a `LOCAL_SERVER_IMPORT_SENTINEL` bare-comment at the import position [:17/:19].
+  - After the full server body is assembled, the prune pass [:2057-:2083] scans the body
+    for word-boundary references to each deferred specifier local name via
+    `localServerImportNameUsed()` [:27]. Specifiers with no body reference are dropped;
+    an import line is emitted only for survivors. When ALL specifiers are unused the entire
+    import line is omitted (sentinel collapses to empty).
+  - State: `_localImportSentinelIdx`, `deferredLocalImports` (module-level). The sentinel
+    is a bare comment so it cannot itself match an identifier reference [:2058-:2059].
+- **compiler/tests/integration/g-pure-module-server-emit.test.js** (NEW, 145L) -- R26
+  regression: p1 client-only pure-module import is pruned (the dangling import line is
+  absent from the server bundle); p2 no-over-prune -- a module that does emit a `.server.js`
+  keeps its import. Find-count: **1015 at `432c28b6`**.
+- **docs/known-gaps.md** -- section-0 HIGH 1->0 (g-pure-module-server-emit RESOLVED).
+
+### Fix B -- W-SERVER-IMPORT-UNEMITTED: cross-file server-import invariant (`05b88433`)
+
+A POST-CODEGEN cross-file invariant that scans each emitted server bundle for server-import
+specifiers and warns when the named target is absent or does not export the imported name.
+Catches residual shapes Fix A cannot see (a server-context import whose specific export
+is missing even though the target `.server.js` was emitted).
+
+- **compiler/src/api.js** -- NEW `checkServerImportInvariant()` [:2077], wired after
+  codegen and before the write gate [:2168] so it fires in any write mode (incl. dry-run).
+  Two sub-variants:
+  - **(a) MISSING-FILE** [:2131] -- the named `.server.js` emits no output at all.
+  - **(b) MISSING-EXPORT** [:2157] -- the `.server.js` is emitted but does not export
+    the imported name (server-called pure-helper route-mis-inference: `auth.server.js`
+    emits routes and `__ri_route_*` helpers but not the value export `rolePath`).
+  - Code: `W-SERVER-IMPORT-UNEMITTED` (Info; non-fatal -> `result.warnings`).
+    Deduped compile-wide by distinct (target, missing-name-set) shape [:2073].
+- The trucking flagship surfaced 6 true-positive instances (auth / status-picker /
+  driver-card exported helpers route-inferred into server handlers -- `.server.js` emits
+  the route but not the value export). Trucking smoke baseline: `+W-SERVER-IMPORT-UNEMITTED:6`
+  (74->80 warnings). Gap **g-route-mis-inference-server-called-pure-helper (MED)** filed.
+- **compiler/SPEC.md** -- section-34 +1 row (W-SERVER-IMPORT-UNEMITTED).
+- **docs/known-gaps.md** -- section-0 MED 8->9 (new gap filed).
+- **compiler/tests/integration/w-server-import-unemitted.test.js** (NEW, 130L) --
+  regression: missing-export fires; client-only-no-fire (tree-shaken class suppressed);
+  missing-file fires; non-fatal partition verified. Find-count: **1016 at `9afc746e`**.
 
 
 ## Ignored / Generated Paths

@@ -1,9 +1,9 @@
-<!-- @digest head=7337ddff delta-seq=14 -->
+<!-- @digest head=9afc746e delta-seq=14 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `7337ddff`** + delta-log **[14]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `7337ddff`
+> **HEAD `9afc746e`** + delta-log **[14]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `9afc746e`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,8 +13,8 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `7337ddff`
-- **HIGH 0** · MED 8 · LOW 23 · Nominal 8
+## Board — from `@gap` tokens @ `9afc746e`
+- **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 0 `rule` (delta-log S207 — 2026-06-18)
@@ -29,7 +29,7 @@
 - `[14]` state · g-pure-module-server-emit FIX IN-FLIGHT (agent a56577f8 RATE-LIMITED @72-tool-uses — 5th env crash; worktree CLEAN, no loss). Fix A COMMITTED in-branch @9b3fe86… → 9b3fe86a + progress.md
 
 ## State
-- Version: 0.7.0 · maps: 5 commits behind HEAD (watermark d931f8be, HEAD 7337ddff)
+- Version: 0.7.0 · maps: current
 - Recent wraps:
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
   - 6512b592 wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename
