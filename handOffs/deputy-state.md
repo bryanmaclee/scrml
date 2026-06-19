@@ -8,15 +8,15 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S206 WRAPPED** (6512b592); **S207 started** (D3 landed fee6fc98). First deputy instance, booted S203. On tick 52.
+- **State:** LIVE — steady-state. **S206 WRAPPED** (6512b592); **S207 started** (D3 landed fee6fc98). First deputy instance, booted S203. On tick 53.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S206 **[18]** (PA-source; deputy appended S205 F3 entry [22]).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** maps batch (D3 `fee6fc98` emit-integration, 1 compiler/src file) — BATCHED for the next S207 compiler-src landing (1 trailing file right after the T50 refresh; poor economics to run project-mapper alone). Else current.
+- **Owed maintenance:** maps batch (D3 `fee6fc98` emit-integration; the in-flight g-each-peritem ternary fix may add) — BATCHED for the S207 settling point. D4 `447f5244` is dock.ts tooling (not mapped). Else current.
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T52** · last-absorbed **[S206 18]** (PA-source; S207 not yet delta-logged) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T53** · last-absorbed **[S206 18]** (S207 burst UNLOGGED past [18] — agent/landing state git-inferred) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → §3c health-check run + recorded each tick (standing).
 - **ACK (vpa:) [S205 19]** → ACK+heartbeat block recorded each tick (standing).
 - No new `(vpa:)` directives since [S205 19]; the S206 burst ([1]-[18]) carried none.
@@ -36,7 +36,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## In-flight dispatches (F3 watch list)
 
-- _(none in flight)_ — D3 LANDED (fee6fc98, s207; in the deferred maps batch); worktree stale (6b-cleanup PA-pending). block-analysis-emit D1+D2+D3 feature complete.
+- **In-flight (git-inferred; S207 delta-log stale at [18]):** g-each-peritem-attr-ternary-quoted-arms fix `adf67ae2a6a813d93` (c1dfcd61 test) — the slice-3 BUG-1. block-analysis-emit D1-D4 arc COMPLETE (D3 fee6fc98 compiler/src + D4 447f5244 dock.ts consumer); their worktrees stale (6b-pending).
 
 ## Tick log (compressed)
 
@@ -48,6 +48,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T50** S206 WRAPPED — maps batch REFRESHED 359a1d83→d12fdef7 (D1 footprint + D2 builder/serializer, 2 new modules + 2 tests; leak-clean; zero new E-codes); digest + recent-sessions regen; §3c PASS; all worktrees cleaned.
 - **T51** PA integrated tick-50; digest regen (cleared the bundled-maps stamp artifact); D3 block-analysis-integration dispatched → 1 in-flight F3-watched.
 - **T52** D3 LANDED (fee6fc98, s207 — block-analysis-emit complete); maps batch owed (D3, 1 file) → BATCHED for next S207 compiler-src; digest current; no in-flight.
+- **T53** D4 LANDED (447f5244, dock.ts artifact-consumer — block-analysis-emit arc tooling COMPLETE); g-each-peritem ternary fix in-flight (BUG-1); maps batch (D3) held; digest current; delta-log stale at [18].
 
 ## Currency snapshot (@ tick 50)
 
