@@ -325,6 +325,22 @@ function attrConditionOperatorAhead(raw: string, pos: number): string | null {
   const c = raw[i];
   const n = i + 1 < raw.length ? raw[i + 1] : "";
 
+  // keyword is-operators (§42 absence/presence): `is not not` / `is some` /
+  // `is not`. Postfix (no RHS) but still OPERATORS — a bare unquoted condition
+  // `if=fn() is not` must reject-with-parens exactly like the binary operators
+  // below, NOT silently drop the keyword run. Before this, `is`/`is some`/
+  // `is not` were absent from the op-set, so the value-reader terminated the
+  // atomic ident and the trailing keyword run was tokenized as stray boolean
+  // attributes (dropped) — `if=fn() is not` emitted `if((fn()))` (plain
+  // truthiness, the absence check DROPPED + INVERTED, no diagnostic: the
+  // silent-WRONG class). S209 ratified REJECT-with-parens. Longest match first
+  // (`is not not` before `is not`); whole-word `is` only (`island` / `isReady`
+  // are identifiers — guarded by the mandatory `[ \t]+` keyword separator and
+  // the trailing `\b`). Returned exact-text matches what the reject branch
+  // consumes (leading ws handled separately by the caller).
+  const isOp = /^(?:is[ \t]+not[ \t]+not|is[ \t]+some|is[ \t]+not)\b/.exec(raw.slice(i));
+  if (isOp) return isOp[0];
+
   // `>=` — intercept BEFORE the outer tag-close test consumes the `>`.
   if (c === ">" && n === "=") return ">=";
   // bare `>` as a comparison operator: only when separated from the ident by
@@ -394,6 +410,61 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
 
   function skipWs() {
     while (pos < raw.length && /[ \t\r\n\f]/.test(raw[pos])) advance();
+  }
+
+  // cluster-A (S188 "reject + parens") — shared reject-capture for a CONDITION
+  // attribute (`if=`/`show=`/`else-if=`) whose already-read atomic value
+  // (`atomicExpr` = `@n` / `obj.prop` / `fn(args)`) is followed by a bare
+  // operator. Consumes the leading inline ws + the detected operator run + the
+  // RHS up to the attribute boundary and pushes ONE ATTR_OP_REJECT token, so the
+  // AST builder fires E-ATTR-UNQUOTED-OPERATOR exactly once and steers to
+  // parens/quotes. Caller must have confirmed `attrConditionOperatorAhead(raw,
+  // pos) !== null`. Shared by BOTH the bare-ident path and the call path — a
+  // call followed by an operator (`if=fn() is not`, `if=fn() && @m`) previously
+  // committed to ATTR_CALL and silently dropped the trailing run (the
+  // silent-WRONG class for `is not`: `if=fn() is not` emitted `if((fn()))` —
+  // plain truthiness, the absence check dropped + inverted).
+  function pushConditionOpReject(name: string, atomicExpr: string, vs: number, vl: number, vc: number) {
+    const op = attrConditionOperatorAhead(raw, pos)!;
+    let expr = atomicExpr;
+    // Consume the leading inline whitespace + the detected operator chars FIRST,
+    // so the boundary loop below reads only the RHS (a bare spaced `>` operator
+    // is consumed here; the loop then breaks on the genuine tag-close `>`).
+    while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) { expr += raw[pos]; advance(); }
+    for (let k = 0; k < op.length && pos < raw.length; k++) { expr += raw[pos]; advance(); }
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    let stringCh: string | null = null;
+    while (pos < raw.length) {
+      const c2 = raw[pos];
+      if (stringCh !== null) {
+        if (c2 === "\\" && pos + 1 < raw.length) { expr += c2 + raw[pos + 1]; advance(2); continue; }
+        if (c2 === stringCh) stringCh = null;
+        expr += c2; advance(); continue;
+      }
+      const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
+      if (atDepthZero) {
+        // `/>` self-close and a bare `>` tag-close end the RHS run. The leading
+        // operator (incl. the `>` of `>=` / spaced `>`) was already consumed
+        // above, so any `>` reached here is a genuine tag boundary.
+        if (c2 === "/" && raw[pos + 1] === ">") break;
+        if (c2 === ">") break;
+      }
+      if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
+      if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
+      if (c2 === ")") { parenDepth--; expr += c2; advance(); continue; }
+      if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
+      if (c2 === "]") { bracketDepth--; expr += c2; advance(); continue; }
+      if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
+      if (c2 === "}") { braceDepth--; expr += c2; advance(); continue; }
+      expr += c2; advance();
+    }
+    tokens.push(makeToken(
+      "ATTR_OP_REJECT",
+      JSON.stringify({ name, value: expr.replace(/\s+$/, ""), op }),
+      vs, absOff(), vl, vc,
+    ));
   }
 
   function readIdentRaw() {
@@ -727,7 +798,15 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
               args += raw[pos];
               advance();
             }
-            tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: ident, args }), vs, absOff(), vl, vc));
+            // cluster-A — a CONDITION attribute call followed by a bare operator
+            // (`if=fn() is not` / `if=fn() && @m`) rejects-with-parens, exactly
+            // like the bare-ident path below. Without this the ATTR_CALL emit
+            // committed here and the trailing operator run was silently dropped.
+            if (isConditionAttrName(name) && attrConditionOperatorAhead(raw, pos) !== null) {
+              pushConditionOpReject(name, `${ident}(${args})`, vs, vl, vc);
+            } else {
+              tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: ident, args }), vs, absOff(), vl, vc));
+            }
           } else if (ident === "not" && isPrefixNotOperandAhead(raw, pos)) {
             // S188 follow-up (g-not-negation-enforce attr-bare hole) — bare
             // prefix-`not`-as-negation in an UNQUOTED attribute value, e.g.
@@ -930,50 +1009,9 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             // tracked) up to the attribute boundary so the captured text
             // mirrors the author's intent in the diagnostic. The `>=` / spaced
             // `>` cases are intercepted here BEFORE the outer tag-close test
-            // would consume the `>`.
-            const op = attrConditionOperatorAhead(raw, pos)!;
-            let expr = ident;
-            // Consume the leading inline whitespace + the detected operator
-            // chars FIRST, so the boundary loop below reads only the RHS. This
-            // lets a bare spaced `>` operator (`@n > 3`) be captured whole — the
-            // operator's `>` is consumed here, and the boundary loop then breaks
-            // on the genuine tag-close `>` after the RHS.
-            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) { expr += raw[pos]; advance(); }
-            for (let k = 0; k < op.length && pos < raw.length; k++) { expr += raw[pos]; advance(); }
-            let parenDepth = 0;
-            let braceDepth = 0;
-            let bracketDepth = 0;
-            let stringCh: string | null = null;
-            while (pos < raw.length) {
-              const c2 = raw[pos];
-              if (stringCh !== null) {
-                if (c2 === "\\" && pos + 1 < raw.length) { expr += c2 + raw[pos + 1]; advance(2); continue; }
-                if (c2 === stringCh) stringCh = null;
-                expr += c2; advance(); continue;
-              }
-              const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-              if (atDepthZero) {
-                // `/>` self-close and a bare `>` tag-close end the RHS run. The
-                // leading operator (incl. the `>` of `>=` / spaced `>`) was
-                // already consumed above, so any `>` reached here is a genuine
-                // tag boundary.
-                if (c2 === "/" && raw[pos + 1] === ">") break;
-                if (c2 === ">") break;
-              }
-              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
-              if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
-              if (c2 === ")") { parenDepth--; expr += c2; advance(); continue; }
-              if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
-              if (c2 === "]") { bracketDepth--; expr += c2; advance(); continue; }
-              if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
-              if (c2 === "}") { braceDepth--; expr += c2; advance(); continue; }
-              expr += c2; advance();
-            }
-            tokens.push(makeToken(
-              "ATTR_OP_REJECT",
-              JSON.stringify({ name, value: expr.replace(/\s+$/, ""), op }),
-              vs, absOff(), vl, vc,
-            ));
+            // would consume the `>`. Shared with the call path via
+            // pushConditionOpReject (atomic value = the bare ident here).
+            pushConditionOpReject(name, ident, vs, vl, vc);
           } else {
             tokens.push(makeToken("ATTR_IDENT", ident, vs, absOff(), vl, vc));
           }

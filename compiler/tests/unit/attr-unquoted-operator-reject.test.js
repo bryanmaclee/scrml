@@ -72,6 +72,7 @@ function wrap(body) {
     <n> = 5
     <m> = 3
     <obj> = { flag: true }
+    <isReady> = false
     function check() { return @n > 0 }
 }
 ${body}
@@ -128,6 +129,84 @@ describe("E-ATTR-UNQUOTED-OPERATOR — bare operator matrix (if=)", () => {
   });
 });
 
+// =============================================================================
+// KEYWORD is-OPERATORS (§42 absence/presence) — `is not` / `is some` /
+// `is not not`. Postfix operators that were ABSENT from the cluster-A op-set:
+// the bare form silently DROPPED the keyword run. For `is not` this was also an
+// INVERSION — `if=fn() is not` emitted `if((fn()))` (plain truthiness) instead
+// of the absence check (g-attr-bare-compound-is-op-silent-drop, S209 ratified
+// REJECT-with-parens). Both the bare-ident AND the call path are covered — the
+// call path (`if=fn() <op>`) previously committed to ATTR_CALL and never
+// reached the operator-reject check at all (latent for binary ops too).
+// =============================================================================
+
+describe("E-ATTR-UNQUOTED-OPERATOR — keyword is-operators (if=)", () => {
+  const isOpCases = [
+    ["is not (ident)", "@n is not"],
+    ["is some (ident)", "@n is some"],
+    ["is not not (ident)", "@n is not not"],
+    ["is not (member)", "@obj.flag is not"],
+    ["is not (call)", "check() is not"],
+    ["is some (call)", "check() is some"],
+    ["is not not (call)", "check() is not not"],
+  ];
+
+  for (const [label, expr] of isOpCases) {
+    test(`bare \`${label}\` (if=${expr}) — fires REJECT exactly once`, () => {
+      const { errors } = compileWholeScrml(wrap(`    <p if=${expr}>x</>`), `if-${label}`);
+      expect(countCode(errors, REJECT)).toBe(1);
+      // No silent-WRONG truthiness emission: the operator is rejected, not dropped.
+      expect(codesOf(errors)).not.toContain("E-CTX-001");
+      expect(codesOf(errors)).not.toContain("E-SCOPE-001");
+    });
+  }
+
+  test("show=@n is not — fires REJECT", () => {
+    const { errors } = compileWholeScrml(wrap(`    <p show=@n is not>x</>`), "show-isnot");
+    expect(countCode(errors, REJECT)).toBe(1);
+  });
+
+  test("else-if=check() is some (chained) — fires REJECT", () => {
+    const body = `    <p if=@n>a</>
+    <p else-if=check() is some>b</>`;
+    const { errors } = compileWholeScrml(wrap(body), "elseif-issome");
+    expect(countCode(errors, REJECT)).toBe(1);
+  });
+
+  test("diagnostic names the keyword operator and steers to parens/quotes (call form)", () => {
+    const { errors } = compileWholeScrml(wrap(`    <p if=check() is not>x</>`), "isnot-msg");
+    const rej = errors.find((e) => e.code === REJECT);
+    expect(rej).toBeTruthy();
+    expect(rej.message).toContain("is not");
+    expect(rej.message).toContain("if=(check() is not)");
+    expect(rej.message).toContain('if="check() is not"');
+  });
+});
+
+// =============================================================================
+// CALL PATH — a CONDITION attribute CALL followed by a bare BINARY operator
+// (`if=fn() && @m`) was the same silent-drop class as the keyword is-ops: the
+// ATTR_CALL emit committed before the operator-reject check could run. Now
+// shares pushConditionOpReject with the bare-ident path.
+// =============================================================================
+
+describe("E-ATTR-UNQUOTED-OPERATOR — call followed by a binary operator (if=)", () => {
+  const callOpCases = [
+    ["&&", "check() && @m"],
+    [">=", "check() >= @n"],
+    ["==", "check() == @n"],
+    ["?: (spaced)", "check() ? @n : @m"],
+  ];
+  for (const [label, expr] of callOpCases) {
+    test(`bare \`${label}\` (if=${expr}) — fires REJECT exactly once`, () => {
+      const { errors } = compileWholeScrml(wrap(`    <p if=${expr}>x</>`), `ifcall-${label}`);
+      expect(countCode(errors, REJECT)).toBe(1);
+      expect(codesOf(errors)).not.toContain("E-CTX-001");
+      expect(codesOf(errors)).not.toContain("E-SCOPE-001");
+    });
+  }
+});
+
 describe("E-ATTR-UNQUOTED-OPERATOR — show= and else-if= conditions", () => {
   test("show=@n && @m — fires REJECT", () => {
     const { errors } = compileWholeScrml(wrap(`    <p show=@n && @m>x</>`), "show-and");
@@ -162,6 +241,12 @@ describe("E-ATTR-UNQUOTED-OPERATOR — preserved atomic/quote/paren forms (clean
     ["paren (@n && @m)", "    <p if=(@n && @m)>x</>"],
     ["paren (@n ? @m : @n)", "    <p if=(@n ? @m : @n)>x</>"],
     ["paren nested ((@n || @m) && @obj.flag)", "    <p if=((@n || @m) && @obj.flag)>x</>"],
+    // Keyword is-op: paren/quoted forms stay clean (the reject only steers the BARE form).
+    ["paren (check() is not)", "    <p if=(check() is not)>x</>"],
+    ["paren (@n is some)", "    <p if=(@n is some)>x</>"],
+    ['quoted "check() is not"', '    <p if="check() is not">x</>'],
+    // Identifier that merely STARTS with `is` is not the operator (whole-word guard).
+    ["atomic @isReady (starts with is)", "    <p if=@isReady>x</>"],
   ];
 
   for (const [label, body] of cleanCases) {

@@ -1,0 +1,12 @@
+// ss3 item1 repro — bare-compound is-op in an attribute condition
+<div class="app">
+    ${
+        <user> = "alice"
+        function getUser() {
+            @user
+        }
+    }
+    <p if=getUser() is not>no user (BARE absence — should reject-with-parens)</>
+    <p if=(getUser() is not)>no user (PAREN absence — control, must stay correct)</>
+    <p if=getUser() is some>has user (BARE presence)</>
+</div>
