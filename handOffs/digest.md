@@ -1,9 +1,9 @@
-<!-- @digest head=3f3fb5c6 delta-seq=7 -->
+<!-- @digest head=55fc3aad delta-seq=11 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `3f3fb5c6`** + delta-log **[7]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `3f3fb5c6`
+> **HEAD `55fc3aad`** + delta-log **[11]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `55fc3aad`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,23 +13,25 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `3f3fb5c6`
-- **HIGH 1** · MED 11 · LOW 17 · Nominal 8
-- Named open HIGHs: `g-engine-name-attr-swallows-var-duplicate`
+## Board — from `@gap` tokens @ `55fc3aad`
+- **HIGH 0** · MED 11 · LOW 17 · Nominal 8
+- Named open HIGHs: _none_
 
-## Recent rulings — last 1 `rule` (delta-log S210 — 2026-06-20)
+## Recent rulings — last 3 `rule` (delta-log S210 — 2026-06-20)
 - `[6]` rule/disp · **AE ruling (a) REVERSED → re-dispatched as (b) (user "your reco looks good, go").** PA Rule-4 MISS: ruling (a) "reject name= on <engine>" was keyed on the §51.… → docs/changes/engine-name-dual-table-fix-2026-06-20/BRIEF.md
+- `[8]` rule/disp · **sPA list REBUILD launched + fattening rule folded into doctrine (user "go, run the rebuild and fold in the fattening rule").** Trigger: user note that sPAs fi… → spa-scrml.md + wf_93dd3ae0-922
+- `[10]` rule/disp · **dPA MV BUILT + backend debate banked (user "try the dpa for the backend debate").** First dPA instantiation (DD-designed S206, never built). MV (PA-direct, li… → dpa-scrml.md + dpa-queue.md#dpa-001
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[2]` find · **S210 inbox triage — 3 HIGH filed (user "triage the 3 HIGH bugs").** All R26-verified on HEAD 41422726 (S138 reverse-dir). (AD) g-attr-interp-fn-name-not-renam… → known-gaps §S210 + 3 @gap tokens
-- `[3]` disp · **2 HIGH fix dispatches (user "dispatch the 3 HIGH fixes")** — scrml-js-codegen-engineer, isolation:worktree, bg, opus. (1) **AE** `engine-name-attr-reject-2026… → docs/changes/{engine-name-attr-reject,codegen-interp-literal}-2026-06-20/BRIEF.md
-- `[4]` state · **3 sibling acks sent + giti LOW filed (user "draft the sibling acks").** giti finding re-verified on HEAD 41422726 (E-COMPONENT-035 ×2, misleading cross-file-i… → 6nz/flogence/giti handOffs/incoming/
-- `[5]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED** (user "your reco looks good, go"). S83-verified (tip 84e68141==reported, merge-base e8a5491f, only ast-… → f65b1de9 + known-gaps + master-list
 - `[6]` rule/disp · **AE ruling (a) REVERSED → re-dispatched as (b) (user "your reco looks good, go").** PA Rule-4 MISS: ruling (a) "reject name= on <engine>" was keyed on the §51.… → docs/changes/engine-name-dual-table-fix-2026-06-20/BRIEF.md
 - `[7]` disp/land · **sPA ss13 (phantom-codegen-nominal-stdlib) RE-INTEGRATED — NO-EXECUTE** (user "lets get ss13 integrated"). S83-verified (tip 04b8397c==reported; docs-only bran… → c3e9d16e + SPEC-INDEX §59 row
+- `[8]` rule/disp · **sPA list REBUILD launched + fattening rule folded into doctrine (user "go, run the rebuild and fold in the fattening rule").** Trigger: user note that sPAs fi… → spa-scrml.md + wf_93dd3ae0-922
+- `[9]` disp/land · **AE (engine name= dual-table) RESOLVED option (b) + landed** (re-dispatch a1ad1907). PA-verified (S83: tip faa213c5==reported; disjoint from ss13/ss4/AD+regex… → faa213c5 + known-gaps §S210
+- `[10]` rule/disp · **dPA MV BUILT + backend debate banked (user "try the dpa for the backend debate").** First dPA instantiation (DD-designed S206, never built). MV (PA-direct, li… → dpa-scrml.md + dpa-queue.md#dpa-001
+- `[11]` disp/land · **sPA lists REBUILT + landed (user "land them").** Workflow wf_93dd3ae0 (5 agents: 3 inventory scanners → cluster+fatten synth → worktree writer) rebuilt spa-li… → 2ee52738 + spa-lists/INDEX.md
 
 ## State
-- Version: 0.7.0 · maps: 16 commits behind HEAD (watermark 41422726, HEAD 3f3fb5c6)
+- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark 5c68e87e, HEAD 55fc3aad)
 - Recent wraps:
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD

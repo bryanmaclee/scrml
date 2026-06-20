@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-19  commit: b67cd6e6
+# updated: 2026-06-20  commit: 5c68e87e
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -22,7 +22,7 @@ compiler/src/validators/  — attribute validation and lint passes: ast-walk.ts,
 compiler/src/native-parser-canary/  — canary harness for native-parser pipeline parity checks; **within-node-classifier.ts (445L) — the within-node parity classifier; `STRIP_KEYS` set drops pipeline-internal-only node keys before comparison (S166: `bodyStart` added — native LogicEscape/Meta raw-slice host-start coordinate, no live analogue; **S188: `_notPrefixNegation` added — the LIVE-only diagnostic-support stamp `parseExprToNode` puts on a prefix-`not`-as-negation ExprNode to drive E-TYPE-045; native represents `not` as a `NotValue` atom and never stamps, so it's a live-pipeline-internal field, NOT a semantic divergence**)**
 compiler/src/native-walker/  — walker utilities for native-parser output traversal; **engine-statechild-walker.ts** (S154 `messageArms` array + S160 ruling (b) `legacyColonPlacement: false` default; **S164 B2: imports `parseMessageArms`/`parseRuleAttrValue` from engine-statechild-parser.ts and populates `messageArms` from `parseMessageArms(bodyRaw).arms` — was hard-coded `[]`**); **NEW S164 attrvalue-exprnode-walker.ts** (`populateNativeAttrValueExprNodes` — stamps `exprNode`/`argExprNodes` on native attr-values by reusing the live `safeParseExprToNodeGlobal`, run from the api.js native branch); **NEW S170 exprtext-backfill-walker.ts** (`backfillNativeExprText` — stamps the legacy string `.expr`/`.init`/`.condition` from structured `exprNode`/`initExpr`/`condExpr` siblings so type-system regex-over-text passes work under native; run from api.js:960)
 compiler/native-parser/  — bootstrap native parser (37 `.js` files + paired `.scrml` self-host mirrors); replaces block-splitter+ast-builder at M5-swap; activated via `--parser=scrml-native`. **S162 UPDATE: the native parser NOW promotes BOTH `<each>` → `each-block` (NEW unit A: `isEachBlock`/`synthEachBlockNode` in parse-file.js) AND `<match>` → `match-block` (already promoted via `isMatchBlock`/`synthMatchBlockNode`) to structural FileAST nodes — the S153 "does NOT promote" each/match precondition is CLOSED/RETIRED.** **S164-S165 UPDATE: §51.0.S message-arm (B2), native attr-value `exprNode`/`argExprNodes` population, F2-match string-literal arms, promote-each (3 §17.4 for-stmt gaps), R1 typed-`@cell` decl, and `server function*`+yield ALL LANDED — flip-failures 674→451.** **S166 UPDATE: bare-`function name()! -> Err` failable recognition + cross-file `${...}`-wrapped `export` raw-slice fix LANDED.** **S170 UPDATE: re-measured 605 native-only flip-failures on `df08f282` (default 0-fail / fully green) + landed fix-wave-1 (`5a346faa`: `on mount`/`on dismount`, `const @name` derived-decl [F5 CLOSED], deepset/array-mutation node-synth + destructured-param + var-decl typeAnnotation thread, NEW exprText-backfill walker) + fix-wave-2 (`cc69c62d`: BlockStub `verbatim` match-arm/lambda body recovery — the Mario fix, +17) → ~508 native-only flip-failures.** Remaining native-parser flip-failures are a reduced family set — see the "Native-Parser File Table" below + domain.map.md "Native-Parser Swap Orientation". The `.scrml` mirrors are FEATURE-stale (S162) — native fixes go in the `.js`.
-compiler/tests/  — **957 .test.js files total at 5a51c1ca** (verified `find` count) across all categories (S173: +2; S174: log()/any-reject; S175: +5 typed-SQL-row; S176: +6 unknown-type-name/scalar-vocabulary; S177: +8; S179: +2; S180: +5; **S181: +2 [display-text-overquote.test.js, server-keyword-error-msg-canon.test.js]**)
+compiler/tests/  — **1024 .test.js files total at 5c68e87e** (verified `find compiler/tests -name '*.test.js' | wc -l` = 1024; +4 S210) (verified `find` count) across all categories (S173: +2; S174: log()/any-reject; S175: +5 typed-SQL-row; S176: +6 unknown-type-name/scalar-vocabulary; S177: +8; S179: +2; S180: +5; **S181: +2 [display-text-overquote.test.js, server-keyword-error-msg-canon.test.js]**)
 compiler/tests/unit/  — unit tests covering individual compiler passes; +13 S154-S158 files; +2 S159 files (per-item-handler-live-keying-bug73.test.js + html-colon-shorthand-content-model-s159.test.js); **+2 S160 files** (colon-shorthand-inside-opener-s154b.test.js + typed-array-no-rhs-default.test.js); **+1 S167** (deepset-write-loss-position.test.js); **+1 S168** (cow-bracket-write-emit.test.js); **S170 unit:** structural-compound-deepset.test.js + data-set-algebra.test.js + 6 native-parser regression files + native-blockstub-verbatim-body.test.js. 2 prior tests LOCKING the Bug-B mistarget corrected to the SPEC-faithful leaf shape
 compiler/tests/integration/  — full compile-to-output verification tests; **S166: m6.4a-native-p2-form1.test.js +§B — emitted-output regression for the native cross-file `export const Name = <markup>` raw-slice fix (`${...}`-wrapped export expands `<Badge/>` in consumer HTML; E-COMPONENT-020/035 GONE)**
 compiler/tests/browser/  — browser runtime tests via happy-dom (33+ files; +5 S157-S159; **+1 S167: browser-deepset-write-loss**; **+1 S168: browser-cow-bracket-write**; **+1 S170: browser-structural-compound-deepset**)
@@ -1497,6 +1497,92 @@ OVERLAPPED a real local block (D6 — the block-lease two-holders failure).
   new D6 describe block: a channel-import source no longer produces phantom blocks for the
   channel's fns; the importing file's own fns are still counted.
 
+
+
+
+## Key S210 Source Changes (engine name= dual-table fix + codegen interp-literal serializer)
+
+Three dispatch landings. No new §34 error codes. find-count: **1024 at `5c68e87e`** (verified
+`find compiler/tests -name '*.test.js' | wc -l` = 1024; +4 NEW .test.js files).
+
+### engine-name-dual-table-fix (`29b34c6c`)
+
+Fixes g-engine-name-attr-swallows-var-duplicate (6nz AE). `<engine name=N for=Type>` + a
+machine-typed cell `@x: N` compiled exit-0 but threw E-ENGINE-001-RT on every legal transition.
+
+**Root:** SYM `registerEngineDecl` auto-derived a phantom var from the `name=` attribute
+instead of unifying with the user-declared `@x` cell (§51.3.3 — a modern engine with `name=N`
+GOVERNS `@x: N`). The §51.3 write-guard then pointed at an EMPTY `__scrml_transitions_N` table
+(the MODERN engine's transitions live in the §51.0 `__scrml_engine_<var>_transitions` table that
+emit-engine.ts populates from `engineMeta.stateChildren`). SPEC §51.0.B adds the `name=` row.
+
+**Files changed:**
+- compiler/src/symbol-table.ts (+81L) — `registerEngineDecl`: gate on modern-engine body
+  heuristic (`/<\s*[A-Z]/` on `rulesRaw`, same gate as `buildMachineRegistry`); scan the
+  file scope for a single machine-typed cell whose `typeAnnotation` names the engine; bind
+  the engine's variable to that cell (`boundToGovernedCell = true`); the existing collision
+  branch then UNIFIES (attaches `engineMeta` to the cell's existing record) instead of firing
+  E-ENGINE-VAR-DUPLICATE. A `var=` override or multi-cell ambiguity skips the binding.
+- compiler/src/codegen/emit-reactive-wiring.ts (+26L) — `buildMachineBindingsMap`: NEW
+  `isModernEngine` check (empty `machine.rules` + not derived) skips emitting a §51.3
+  write-guard binding for a modern-engine-governed cell (the cell is in `engineBindings`
+  and routes via `emitEngineWriteGuard` against the populated §51.0 table). `emitReactiveWiring`
+  transition-table loop: skip emitting the dead empty `__scrml_transitions_N` table for a
+  modern engine (`machine.rules.length === 0`) — output minimality. Legacy arrow-body named
+  machines (non-empty `machine.rules`) are fully untouched.
+- compiler/SPEC.md — §51.0.B opener-attr table: added `name=N` row (doc-gap currency;
+  parallel to `<machine name=N>`, DD1 2026-04-30 P1 ratification).
+- compiler/tests/integration/engine-name-dual-table.test.js (NEW) — end-to-end: compile
+  + `node --check` + runtime round-trip; write-guard routes to the populated §51.0 table.
+  Full suite 24659/0. 88 pre-existing engine tests pass unchanged.
+
+### codegen-interp-literal serializer fix (`14fb0230`)
+
+Fixes two HIGH codegen bugs (g-attr-interp-fn-name-not-renamed + g-literal-arg-expr-serializer-wrong-span).
+
+**Files changed:**
+- compiler/src/codegen/code-segments.ts (+151L) — `rewriteCodeSegments` extended to
+  handle **template literals as HYBRID** strings: static text spans are OPAQUE (never
+  transformed), `${...}` interpolations are CODE (recursively re-entered via brace-depth
+  tracking + inner string/regex/template/comment mode tracking). Adds `"template"` to the
+  `Mode` union. The whole-buffer fn-name mangle (`emit-client.ts`) and keyword-lowering
+  passes (rewrite.ts, expression-parser.ts) now correctly transform function names inside
+  template-literal attribute interpolations (`class="${fn()}"`). The static text spans
+  (e.g. `class="x-`) remain opaque per the existing S144 Bug Z fence.
+- compiler/src/expression-parser.ts (+24L) — `acornNodeToExprNode` Literal arm: NEW
+  regex-literal branch before the BigInt fallback. A regex `Literal` node (typeof `value`
+  is object; carries `.regex` + `.raw`) now produces `makeEscapeHatch(node, span, node.raw)`
+  so the literal's OWN source text (`/[^a-z0-9]+/g`) is the escape-hatch payload — NOT the
+  outer `rawSource` (the enclosing expression). Prevents the wrong-span miscompile where a
+  regex in call-arg position re-serialized the entire enclosing expression into the arg slot.
+- compiler/src/ast-builder.js (+75L) — `collectBracedBody`: STRING tokens are now
+  re-quoted with their delimiter before being pushed into the body-text accumulator (fixes
+  Root B of g-literal-arg-expr-serializer-wrong-span — a STRING token like `"a-b-c"` was
+  pushed as bare content, dropping the quotes, so `f("a-b-c")` was reassembled as `f(a-b-c)`
+  and misparsed as subtraction). Also: COMPOUND_OPS set completed with shift-assign operators
+  (`<<=`/`>>=`/`>>>=`) + `&&=`/`||=`/`??=` + `++`/`--` (ss4 item 7 — the prior set omitted
+  shift/bitwise/logical compound-assigns, so a newline-separated `@x <<= 1` boundary was missed
+  → collectExpr swallowed trailing statements → silent data-loss class). Export-channel body
+  structural lift (ss5 item 2, Option 2b): `export <channel>` body now passes through
+  `liftBareDeclarations` at the TAB stage (channel-root context, same as the non-export path)
+  so bare state-decl text lines lift into synthetic `${...}` logic blocks; previously the
+  exported channel body collapsed to a single RAW TEXT child, blocking MOD/SYM structural
+  registration until a deep codegen reparse in emit-channel.
+- compiler/src/tokenizer.ts (+8L) — OPERATORS array: shift-compound-assign operators
+  (`<<=`/`>>=`/`>>>=`) inserted BEFORE the bare shift ops (`<<`/`>>`/`>>>`) and before
+  `==`/`!=`, per longest-match rule (ss4 item 7 — `<<=` must lex as ONE OPERATOR token; without
+  the prefix `@x <<= 1` lexed `<<` + `=` and broke `rewriteReactiveAssign`'s contiguous-op
+  regex → E-CODEGEN-INVALID-JS).
+- compiler/src/engine-statechild-parser.ts (+33L) — `skipCommentOrString`: NEW `<!--...-->`
+  HTML-comment arm (ss4 item 2, g-blocksplitter-comment-span-not-opaque). A `<!-- ... -->`
+  opener inside `rulesRaw` was fell-through to the `<` scanner, which tripped on a
+  quote/backtick/`</Variant>` inside the comment interior → phantom string opened → subsequent
+  state-children swallowed → spurious E-ENGINE-STATE-CHILD-MISSING. The NEW arm consumes to
+  the matching `-->`; the outer state-child loop also checks `skipCommentOrString` AT the
+  `<` position so a comment starting exactly at `lt` is skipped whole.
+- compiler/tests/unit/engine-statechild-comment-opacity.test.js (NEW) — see test.map.md S210 section.
+- compiler/tests/unit/g-attr-interp-fn-name-not-renamed.test.js (NEW) — see test.map.md S210 section.
+- compiler/tests/unit/g-literal-arg-expr-serializer-wrong-span.test.js (NEW) — see test.map.md S210 section.
 
 ## Ignored / Generated Paths
 node_modules/, compiler/node_modules/, dist/, compiler/dist/, compiler/native-parser/dist/,
