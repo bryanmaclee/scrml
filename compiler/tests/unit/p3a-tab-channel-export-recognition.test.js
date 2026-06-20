@@ -109,3 +109,90 @@ export <channel name="hub" onserver:open=onConnect() onserver:message=onMsg(m)>
     expect(e).toBeDefined();
   });
 });
+
+/**
+ * g-export-channel-body-text (Option 2b, S-ss5 item 2): an `export <channel>`
+ * body with BARE V5-strict state-decls (the SPEC §38.12.4 / §38.4 canonical
+ * shape — `<messages> = []` directly in the channel body, NO `${...}` wrapper)
+ * MUST parse STRUCTURALLY at TAB exactly like a non-export `<channel>` body.
+ *
+ * Pre-fix, the export path bypassed the channel-root structural lift that
+ * non-export channels reach via the `block.type==="markup"` branch, so the
+ * exported body collapsed to a single RAW TEXT child — no `state-decl` nodes,
+ * no auto-sync cells (the downstream wire-layer never emitted the cell mirror).
+ * These tests lock the structural parse so it cannot regress.
+ */
+describe("P3.A TAB — export <channel> BARE body parses structurally (Option 2b)", () => {
+  // Collect every state-decl name reachable under a channel markup node,
+  // descending through synthetic `${...}` logic blocks (kind:"logic"/body).
+  function channelStateDeclNames(channelNode) {
+    const names = [];
+    (function walk(list) {
+      for (const n of list ?? []) {
+        if (!n || typeof n !== "object") continue;
+        if (n.kind === "state-decl" && typeof n.name === "string") names.push(n.name);
+        if (Array.isArray(n.children)) walk(n.children);
+        if (n.kind === "logic" && Array.isArray(n.body)) walk(n.body);
+      }
+    })(channelNode.children ?? []);
+    return names;
+  }
+
+  function childKinds(channelNode) {
+    return (channelNode.children ?? []).map(c => c && c.kind);
+  }
+
+  test("bare `<messages> = []` body — structural state-decl, no raw-text child", () => {
+    const { ast, errors } = build(`export <channel name="chat" topic="lobby">
+  <messages> = []
+</>
+`);
+    expect(errors.filter(e => !e.code.startsWith("W-"))).toEqual([]);
+    const ch = (ast.channelDecls || [])[0];
+    expect(ch._p3aIsExport).toBe(true);
+    // Body lifts into a structural logic block (synthetic ${...}), NOT raw text.
+    expect(childKinds(ch)).toEqual(["logic"]);
+    expect((ch.children ?? []).some(c => c && c.kind === "text")).toBe(false);
+    // The V5-strict cell is registered structurally.
+    expect(channelStateDeclNames(ch)).toContain("messages");
+  });
+
+  test("multiple bare cells + a function — all parse structurally", () => {
+    const { ast, errors } = build(`export <channel name="chat">
+  <messages> = []
+  <count> = 0
+  function postMessage(author, body) {
+    @messages = [...@messages, { author, body }]
+    @count = @count + 1
+  }
+</>
+`);
+    expect(errors.filter(e => !e.code.startsWith("W-"))).toEqual([]);
+    const ch = (ast.channelDecls || [])[0];
+    const cells = channelStateDeclNames(ch);
+    expect(cells).toContain("messages");
+    expect(cells).toContain("count");
+    // No raw-text collapse of the body.
+    expect((ch.children ?? []).some(c => c && c.kind === "text")).toBe(false);
+  });
+
+  test("export bare body matches the NON-export channel body shape exactly", () => {
+    const EXPORT = `export <channel name="chat">
+  <messages> = []
+</>
+`;
+    const NON_EXPORT = `<program>
+<channel name="chat">
+  <messages> = []
+</>
+</program>
+`;
+    const expAst = build(EXPORT).ast;
+    const nonAst = build(NON_EXPORT).ast;
+    const expCh = (expAst.channelDecls || [])[0];
+    const nonCh = (nonAst.channelDecls || [])[0];
+    // Same child-kind sequence and the same structural cell set.
+    expect(childKinds(expCh)).toEqual(childKinds(nonCh));
+    expect(channelStateDeclNames(expCh)).toEqual(channelStateDeclNames(nonCh));
+  });
+});

@@ -1282,15 +1282,16 @@ function _compileFixture(src) {
   return { result, file };
 }
 
-// v0.3 Wave 1 (2026-05-12) — `.skip`'d. These tests use the pre-v0.3
-// file-top `<channel>` pattern (sibling of `<program>`). Under v0.3 the
-// new walker fires `E-CHANNEL-OUTSIDE-PROGRAM` on file-top channels.
-// The broadcast/disconnect injection contract is unchanged; the fixtures
-// need updating to wrap channels inside `<program>`. Filed for the wave
-// that rewrites channel test fixtures against v0.3 canonical shape.
-describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped server fns (v0.3-deferred)", () => {
+// v0.3 canonical placement (migrated sPA-ss5, 2026-06-19). These fixtures
+// originally used the pre-v0.3 file-top `<channel>` pattern (sibling of
+// `<program>`), which under v0.3 fires `E-CHANNEL-OUTSIDE-PROGRAM`. Channels
+// now live INSIDE `<program>` (sibling of `<page>`, §38.1); the channel
+// blocks below were moved inside `<program>`. The broadcast/disconnect
+// injection contract is unchanged (verified: byte-identical serverJs output).
+describe("§26 (C18): broadcast/disconnect injection in channel-scoped server fns", () => {
   test("server fn inside channel body gets `broadcast` injected as local", () => {
-    const src = `<channel name="chat" topic="lobby">
+    const src = `<program>
+<channel name="chat" topic="lobby">
 \${ <messages> = [] }
 
 \${
@@ -1300,7 +1301,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=postMessage("u","x")>send</button>
 <p>\${@messages.length}</p>
 </program>
@@ -1315,7 +1315,8 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
   });
 
   test("server fn inside channel body gets `disconnect` injected as local", () => {
-    const src = `<channel name="notifs">
+    const src = `<program>
+<channel name="notifs">
 \${ <count> = 0 }
 
 \${
@@ -1326,7 +1327,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=ping()>p</button>
 <p>\${@count}</p>
 </program>
@@ -1339,11 +1339,11 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
   });
 
   test("server fn OUTSIDE channel body does NOT get broadcast injected", () => {
-    const src = `<channel name="chat">
+    const src = `<program>
+<channel name="chat">
 \${ <messages> = [] }
 </>
 
-<program>
 \${
   server function someFn(x) {
     return x + 1
@@ -1367,7 +1367,8 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
   });
 
   test("each channel-scoped fn publishes to its OWN topic (multi-channel disambiguation)", () => {
-    const src = `<channel name="chat" topic="lobby">
+    const src = `<program>
+<channel name="chat" topic="lobby">
 \${ <messages> = [] }
 \${
   server function fnChat() {
@@ -1385,7 +1386,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=fnChat()>c</button>
 <button onclick=fnUpdates()>u</button>
 <p>\${@messages.length}</p>
@@ -1403,7 +1403,8 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
   });
 
   test("topic= defaults to channel name when absent (broadcast publishes to name)", () => {
-    const src = `<channel name="myChannel">
+    const src = `<program>
+<channel name="myChannel">
 \${ <count> = 0 }
 \${
   server function bump() {
@@ -1412,7 +1413,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=bump()>b</button>
 <p>\${@count}</p>
 </program>
@@ -1426,7 +1426,8 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
   });
 
   test("broadcast helper guards against missing _scrml_active_server (no crash)", () => {
-    const src = `<channel name="ch1">
+    const src = `<program>
+<channel name="ch1">
 \${ <m> = 0 }
 \${
   server function go() {
@@ -1435,7 +1436,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=go()>g</button>
 <p>\${@m}</p>
 </program>
@@ -1455,7 +1455,8 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
     // This is the surface integration test for the type-system.ts allowlist
     // change: a channel-scoped server fn calling broadcast() / disconnect()
     // must compile clean — no E-SCOPE-001 from the typer.
-    const src = `<channel name="chat">
+    const src = `<program>
+<channel name="chat">
 \${ <m> = 0 }
 \${
   server function go() {
@@ -1465,7 +1466,6 @@ describe.skip("§26 (C18): broadcast/disconnect injection in channel-scoped serv
 }
 </>
 
-<program>
 <button onclick=go()>g</button>
 <p>\${@m}</p>
 </program>
@@ -1511,18 +1511,24 @@ describe("§27 (S83 B4): V5-strict structural decls at channel body top level", 
     expect(codes).not.toContain("E-CHANNEL-001");
   });
 
-  test.skip("multiple V5-strict decls + server fn (canonical SPEC §38.4 pattern) — v0.3-deferred (file-top channel fires E-CHANNEL-OUTSIDE-PROGRAM)", () => {
-    const src = `<channel name="chat" topic="lobby">
+  // Migrated sPA-ss5 (2026-06-19): besides the v0.3 file-top→inside-<program>
+  // placement fix, the publisher was `server function` mutating channel cells,
+  // which post-S189 RULING-A fires `E-CHANNEL-SERVER-CELL-READ` (channel cells
+  // are client-held). The canonical publisher is a PLAIN client `function`
+  // whose cell write is a client-side sync-emit (PRIMER §9.1 / §38.4) — so the
+  // `server` keyword was dropped to match current canon.
+  test("multiple V5-strict decls + channel publisher fn (canonical SPEC §38.4 / PRIMER §9.1 pattern)", () => {
+    const src = `<program>
+<channel name="chat" topic="lobby">
     <messages> = []
     <count> = 0
 
-    server function postMessage(body) {
+    function postMessage(body) {
         @messages = [...@messages, { body, ts: Date.now() }]
         @count = @count + 1
     }
 </>
 
-<program>
 <ul>
     \${ for (let m of @messages) {
         lift <li>\${m.body}</li>

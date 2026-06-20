@@ -1214,8 +1214,33 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         });
 
         // (c) Push the channel markup block, tagged with isExport flag.
+        //
+        // g-export-channel-body-text (S-ss5 item 2, Option 2b): an
+        // `export <channel>` body MUST parse STRUCTURALLY at TAB exactly like
+        // a NON-export `<channel>` body. The non-export channel reaches the
+        // `block.type === "markup"` branch above (line ~920), where
+        // `isChannelRoot` makes `childContext === "state"` and recurses
+        // liftBareDeclarations over the channel's children so a bare
+        // `<messages> = []` text line lifts into a synthetic `${...}` logic
+        // block (a structural state-decl). The P3.A export path bypasses that
+        // branch (it is reached from the `block.type === "text"` bare-`export`
+        // trailer), so without this the exported channel's body collapsed to a
+        // single RAW TEXT child — cells never registered through the normal
+        // MOD/SYM structural path until a deep codegen reparse in emit-channel.
+        // Apply the SAME channel-root structural lift here so the inlined
+        // consumer node (deep-cloned by CHX, §38.12.2 — "match the shape of
+        // locally-declared channels exactly") carries structural cells.
+        const exportChannelChildren = liftBareDeclarations(
+          next.children || [],
+          errors,
+          filePath,
+          "state",           // channel-root context — same as isChannelRoot path
+          _p3aSynthCounter,
+          true,              // channel body is a §40.8 default-logic-mode surface
+        );
         result.push({
           ...next,
+          children: exportChannelChildren,
           _p3aIsExport: true,
           _p3aExportName: channelName,
         });
