@@ -1,9 +1,9 @@
-<!-- @digest head=41422726 delta-seq=31 -->
+<!-- @digest head=51600f0b delta-seq=31 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `41422726`** + delta-log **[31]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `41422726`
+> **HEAD `51600f0b`** + delta-log **[31]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `51600f0b`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `41422726`
+## Board — from `@gap` tokens @ `51600f0b`
 - **HIGH 0** · MED 11 · LOW 17 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -33,7 +33,7 @@
 - `[30]` disp · **External-backend DD dispatched** (scrml-deep-dive `a7fe7a80`, bg no-worktree; user "DD it"). Q: should scrml have a first-class bring-your-own-backend story (… → DD doc (status:current)
 
 ## State
-- Version: 0.7.0 · maps: 21 commits behind HEAD (watermark 85d9e958, HEAD 41422726)
+- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 41422726, HEAD 51600f0b)
 - Recent wraps:
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
