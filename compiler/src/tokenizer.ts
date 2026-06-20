@@ -1513,7 +1513,13 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
   // 2-char window. (In practice they're disjoint — `+=` vs `++` differ in
   // the second char — but list-order is the documented contract.)
   const MULTI_OPS = [
-    "...", "===", "!==", "**=", "&&=", "||=", "??=", "=>", ":>",
+    // ss4 item 7 — shift compound-assigns MUST precede the bare shift ops
+    // (`<<`/`>>`/`>>>` below) so `@x <<= 1` lexes `<<=` as ONE OPERATOR token.
+    // Without them the longest match was `<<`, leaving `=` a separate PUNCT;
+    // joinWithNewlines then reassembled `<< =`, which broke
+    // rewriteReactiveAssign's contiguous-op regex -> E-CODEGEN-INVALID-JS.
+    // (`>>>=`/`>>=` are mutually non-conflicting; both precede `>>>`/`>>`.)
+    "...", "===", "!==", "**=", "&&=", "||=", "??=", ">>>=", "<<=", ">>=", "=>", ":>",
     "==", "!=", "<=", ">=", "**", "&&", "||", "??",
     "++", "--",
     "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",

@@ -3602,7 +3602,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // Bitwise compound assigns (`<<=`, `>>=`, `&=`, `|=`, `^=`,
             // `**=`, `&&=`, `||=`, `??=`, `>>>=`) are NOT listed in SPEC
             // §50.13 — excluded conservatively per scope rules.
-            const COMPOUND_OPS = new Set(["+=", "-=", "*=", "/=", "%=", "++", "--"]);
+            // ss4 item 7 — the FULL compound-assignment set (SPEC §6.6.18,
+            // mirrors derived-mutation-ops.ts COMPOUND_ASSIGNMENT_OPS) + the
+            // `++`/`--` updates. The prior set listed only `+= -= *= /= %=`,
+            // so a newline-separated second `@x <op>= n` for ANY other compound
+            // op (`**= &= |= ^= &&= ||= ??= <<= >>= >>>=`) did NOT trigger this
+            // boundary break — collectExpr swallowed the trailing statements
+            // into one bare-expr; parseExpressionAt then parsed only the first
+            // and SILENTLY DROPPED the rest (console.warn only). Completing the
+            // set closes that silent-data-loss class (shift ops = item-7 scope;
+            // the rest share the identical root + fix).
+            const COMPOUND_OPS = new Set([
+              "+=", "-=", "*=", "/=", "%=", "**=",
+              "<<=", ">>=", ">>>=",
+              "&=", "|=", "^=",
+              "&&=", "||=", "??=",
+              "++", "--",
+            ]);
             const isCompoundOrUpdate = next1 && next1.kind === "OPERATOR" && COMPOUND_OPS.has(next1.text);
             if (isCompoundOrUpdate && tok.kind === "AT_IDENT" && lastPart !== "=") break;
             // S25 — S22 §6 bug fix: `@name :` at depth 0 begins a typed
@@ -5393,6 +5409,41 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // even though logic-block usually strips).
         while (peek().kind === "COMMENT") consume();
         const t = peek();
+        // ss4 item 7 (b) — in-compound derived child `const <derived> = expr`
+        // (SPEC §6.6.16). Per §6.6.16 these are "syntactically children of the
+        // compound block, just like regular `<field>` declarations" and carry
+        // `isConst:true`/`shape:"derived"`. The child opener starts with the
+        // `const` KEYWORD token, not a `<` PUNCT, so the generic `<`-opener
+        // dispatch below cannot see it. Consume `const`, then recurse with
+        // `isConst:true` (the recursive call's caller-invariant: peek() is the
+        // `<` PUNCT after the `const` keyword is consumed — see ~line 5061).
+        // Note: §S11A.8 forbids a const PARENT (declined ~line 5377); this is a
+        // const CHILD and does NOT make the parent isConst.
+        if (t && t.kind === "KEYWORD" && t.text === "const") {
+          const constNext = peek(1);
+          if (constNext && constNext.kind === "PUNCT" && constNext.text === "<") {
+            const childCursor = i;
+            const constTok = consume(); // consume `const`
+            const childNode = tryParseStructuralDecl(constTok, true, { inCompoundBody: true });
+            if (!childNode) {
+              // Const-child couldn't be parsed as a derived state-decl. Decline
+              // entire compound (per §6.3.2: body must be structural-children).
+              i = cursorBeforeConsume;
+              return null;
+            }
+            // Defensive infinite-loop guard (mirrors the `<`-opener branch).
+            if (i === childCursor) {
+              i = cursorBeforeConsume;
+              return null;
+            }
+            children.push(childNode);
+            continue;
+          }
+          // `const` not followed by `<` is not an in-compound derived child —
+          // decline the whole compound (body must be structural-children only).
+          i = cursorBeforeConsume;
+          return null;
+        }
         // Anonymous close `</>` or named close `</NAME>`. Both are
         // recognized; if NAME differs from parent, no error here.
         if (t && t.kind === "PUNCT" && t.text === "<") {

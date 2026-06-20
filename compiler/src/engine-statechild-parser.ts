@@ -1359,6 +1359,27 @@ function skipCommentOrString(s: string, i: number): number {
     return s.length; // unterminated — consume to EOF
   }
 
+  // HTML markup comment: `<!-- ... -->` (§27.2 — the markup-context native
+  // comment). The whole span MUST be opaque: an odd quote / apostrophe /
+  // backtick OR a `</Variant>` / `<tag>` mention inside a comment must not open
+  // a phantom string or be read as a structural opener/closer by the walker.
+  // Before this branch the walker fell through `<` and then tripped on a
+  // comment-interior quote, opening a phantom string that swallowed the
+  // subsequent state-children → a spurious E-ENGINE-STATE-CHILD-MISSING
+  // (g-blocksplitter-comment-span-not-opaque, ss4 item 2). Pairs with
+  // `skipHtmlComment` in block-splitter.js; `computeCommentRegions` records the
+  // returned span as a comment region automatically.
+  if (c === "<" && c2 === "!" && s[i + 2] === "-" && s[i + 3] === "-") {
+    let j = i + 4;
+    while (j < s.length) {
+      if (s[j] === "-" && s[j + 1] === "-" && s[j + 2] === ">") {
+        return j + 3;
+      }
+      j++;
+    }
+    return s.length; // unterminated — consume to EOF
+  }
+
   // String literals (single / double quote) — honor backslash escape.
   if (c === '"' || c === "'") {
     const quote = c;
@@ -2078,6 +2099,18 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
     // Find next `<` followed by an uppercase letter (state-child opener).
     const lt = rulesRaw.indexOf("<", i);
     if (lt < 0) break;
+    // ss4 item 2 — a `<!-- -->` HTML comment beginning EXACTLY at `lt` would
+    // otherwise fall through the `next`-is-uppercase check below (`next` ===
+    // `!`) and step INTO the comment at `lt + 1`, past the `<` that
+    // `skipCommentOrString` needs to recognize the comment — so a comment-
+    // interior quote / apostrophe / backtick then opens a phantom string that
+    // swallows the following state-children. Skip the whole skippable span
+    // here. (The inner re-scan below handles a comment / string that STARTS
+    // before `lt` but engulfs it; this handles one that starts AT `lt`.)
+    {
+      const skAtLt = skipCommentOrString(rulesRaw, lt);
+      if (skAtLt !== lt) { i = skAtLt; continue; }
+    }
     // Comment / string regions between `i` and `lt` may contain stray `<X`
     // tokens that aren't real openers — re-scan from `i` to `lt` and bail
     // back to the top of the loop if we hit one. (Cheap: most rulesRaw

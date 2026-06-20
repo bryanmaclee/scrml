@@ -403,14 +403,14 @@ function tokenizeWithNative(source) {
 // -----------------------------------------------------------------------------
 const BENCH_DISPOSITION = {
     "decl-class.js":          "M1.2-string", // class body has "computed_" + "method"
-    "decl-destructure.js":    "M1.2-string",
+    "decl-destructure.js":    "full",          // S209 ss4: byte-identical gate now passes (M1.3/M1.5 normalizers landed)
     // M1.3 flips the 3 prior-smoke files to "full": comment-aware lexing
     // now matches Acorn's drop-comments tokenizer surface; the M1.3
     // normalizer extension below (binary +/- label, 4-form ==/!=/===/!==
     // label, contextual-keyword `let/async/await/of` re-classification)
     // closes the residual byte-identical gap for these three files.
     "expr-arrow.js":          "full",        // arrow functions; mostly InCode + line-comments
-    "expr-async-await.js":    "M1.2-string",
+    "expr-async-await.js":    "full",          // S209 ss4: byte-identical gate now passes
     // M1.5 — template-mode tracking in tokenizeWithAcorn lifts expr-literals
     // to byte-identical Acorn-vs-native parity. Acorn's opening backtick is
     // dropped, in-template ${ } pairs are re-classified as
@@ -423,10 +423,10 @@ const BENCH_DISPOSITION = {
     "expr-optional-chain.js": "M1.2-string",
     "expr-spread-rest.js":    "full",        // spread/rest + line-comments
     "expr-template-literal.js":"M1.2-template",
-    "expr-yield-generator.js":"M1.2-string",
+    "expr-yield-generator.js":"full",          // S209 ss4: byte-identical gate now passes
     "stmt-control-flow.js":   "full",        // control flow + line-comments
-    "stmt-import-export.js":  "M1.2-string",
-    "stmt-try-catch.js":      "M1.2-string",
+    "stmt-import-export.js":  "full",          // S209 ss4: byte-identical gate now passes
+    "stmt-try-catch.js":      "full",          // S209 ss4: byte-identical gate now passes
 };
 
 // -----------------------------------------------------------------------------
@@ -579,8 +579,14 @@ describe("M1.1 lexer conformance — bench corpus", () => {
                 });
             } else {
                 test.skip(`(M1.3+) byte-identical token stream vs Acorn`, () => {
-                    // Pending: M1.3 (comments — already dropped like Acorn so close),
-                    // M1.4 (regex). Plus the Acorn-template-token-shape normalizer.
+                    // S209 ss4: most M1.2-* dispositions FLIPPED to "full" (the
+                    // M1.3/M1.5 normalizers landed and they now pass the gate).
+                    // RESIDUAL genuine byte-identical gaps (still skipped here):
+                    //   - decl-class.js          (class-body token shape)
+                    //   - expr-optional-chain.js (`?.` token split)
+                    //   - expr-template-literal.js (template token shape)
+                    // Closing these is native-lexer (lex.js/token.js) work in the
+                    // M2-M6 native-parser arc (ss4 item 6) — not flip-able yet.
                 });
             }
         });

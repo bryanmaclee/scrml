@@ -118,21 +118,20 @@ describe("§B8.1 case 1 — array mutating methods on `const`-derived cell", () 
 // §B8.2 — Case 2: object property writes (plain `=` + 14 compound + delete)
 // ===========================================================================
 
-// All 14 compound-assignment operators per SPEC §6.6.18 normative.
-// Note: bit-shift forms (`<<=`, `>>=`, `>>>=`) currently round-trip through
-// the parser as escape-hatch ExprNodes when used inside ${...} due to a
-// tokenizer interaction with markup `<` / `>` boundaries — they parse as
-// `<< =` rather than `<<=`. Tests for them are noted as `.todo`-style
-// markers. The walker DOES handle these ops correctly — see
-// `derived-mutation-ops.ts COMPOUND_ASSIGNMENT_OPS` — but exercising them
-// end-to-end requires the parser to settle. When parser support lands,
-// flip these from `.skip` to active tests.
+// All 15 compound-assignment operators per SPEC §6.6.18 normative.
+// S209 ss4: the bit-shift forms (`<<=`, `>>=`, `>>>=`) PARSE end-to-end now.
+// Two front-end fixes landed: (1) tokenizer MULTI_OPS gained `<<=`/`>>=`/`>>>=`
+// (previously `<<=` lexed as `<<` + `=` -> `<< =`); (2) ast-builder.js
+// COMPOUND_OPS was completed so a newline-separated second `@x <op>= n` for
+// these ops triggers a statement boundary (previously merged + silently
+// dropped). The walker already handled them (derived-mutation-ops.ts
+// COMPOUND_ASSIGNMENT_OPS); all 15 are now active below.
 const COMPOUND_OPS_PARSED = [
   "+=", "-=", "*=", "/=", "%=", "**=",
+  "<<=", ">>=", ">>>=",
   "&=", "|=", "^=",
   "??=", "||=", "&&=",
 ];
-const COMPOUND_OPS_PARSER_DEFERRED = ["<<=", ">>=", ">>>="];
 
 describe("§B8.2a case 2 plain `=` — `@derived.foo = x`", () => {
   test("fires on plain `=` property write on derived object", () => {
@@ -158,7 +157,7 @@ describe("§B8.2a case 2 plain `=` — `@derived.foo = x`", () => {
   });
 });
 
-describe("§B8.2b case 2 compound-assigns — 12 parser-supported ops on derived", () => {
+describe("§B8.2b case 2 compound-assigns — 15 parser-supported ops on derived", () => {
   for (const op of COMPOUND_OPS_PARSED) {
     test(`fires on \`@derived.foo ${op} x\``, () => {
       const src = `<program>\${
@@ -171,24 +170,6 @@ describe("§B8.2b case 2 compound-assigns — 12 parser-supported ops on derived
       expect(fires.length).toBe(1);
       expect(fires[0].message).toContain("@copy");
       expect(fires[0].message).toContain(op);
-    });
-  }
-
-  // Bit-shift forms (`<<=`, `>>=`, `>>>=`) are deferred — parser today
-  // splits `<<= ` into `<<` ` = ` due to markup `<` / `>` boundary
-  // interaction inside `${...}`. The walker logic IS exercised by the 12
-  // ops above (same code path); when parser support lands, these flip
-  // from `.skip` to active assertions.
-  for (const op of COMPOUND_OPS_PARSER_DEFERRED) {
-    test.skip(`(parser-deferred) fires on \`@derived.foo ${op} x\``, () => {
-      const src = `<program>\${
-        <data> = { a: 1 }
-        const <copy> = { ...@data }
-        function f() { @copy.a ${op} 1 }
-      }</program>`;
-      const { sym } = buildAndRun(src);
-      const fires = errsByCode(sym, "E-DERIVED-VALUE-MUTATE");
-      expect(fires.length).toBe(1);
     });
   }
 });
@@ -243,10 +224,11 @@ describe("§B8.2c case 2 delete — `delete @derived.foo`", () => {
 // shaped as spec'd: `walkDerivedValueMutate` descends compound `_scope`,
 // `findDeepestRegisteredOnPrefix` walks `["form", "derivedField"]` and
 // matches the deepest registered record, and `record.isConst` discriminates.
-// When parser support for in-compound `const <derived>` lands (B7/parser
-// follow-up), these tests flip from `.skip` to active assertions with no
-// walker change.
-describe.skip("§B8.3 case 3 — in-compound derived sub-cell (parser-deferred)", () => {
+// ss4 item 7 (b) — parser support for in-compound `const <derived>` LANDED
+// (ast-builder.js compound child-loop now dispatches a leading `const` opener
+// into tryParseStructuralDecl with isConst:true; SPEC §6.6.16). These tests are
+// now active assertions with NO walker change.
+describe("§B8.3 case 3 — in-compound derived sub-cell", () => {
   test("fires on method call: `@form.derivedField.push(x)`", () => {
     const src = `<program>\${
       <form>
@@ -365,8 +347,8 @@ describe("§B8.5 computed-index — `@derived[i] = x`", () => {
 // §B8.6 — Compound-receiver method call (multi-segment receiver chain)
 // ===========================================================================
 
-// §B8.6 multi-segment — see §B8.3 rationale for parser deferral.
-describe.skip("§B8.6 multi-segment receiver (parser-deferred — see §B8.3)", () => {
+// §B8.6 multi-segment — parser support landed with ss4 item 7 (b); see §B8.3.
+describe("§B8.6 multi-segment receiver", () => {
   test("fires on multi-segment receiver where leaf is in-compound derived", () => {
     const src = `<program>\${
       <form>
