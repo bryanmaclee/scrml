@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 11 |
-| LOW | 18 |
+| LOW | 17 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
@@ -1214,8 +1214,9 @@ The S192 stage-2 dispatch PROTOTYPED the read-side fire at SYM (`symbol-table.ts
 
 ---
 
-### Bug 12.b — `export <channel>` body collapses to raw text pre-codegen — `Option 2b root fix that would retire the Class-B scan`
-<!-- @gap id=g-export-channel-body-text sev=LOW status=open -->
+### Bug 12.b — `export <channel>` body collapses to raw text pre-codegen — `RESOLVED S209 (sPA ss5 item2, Option 2b)`
+**RESOLVED S209 (sPA ss5 item2, `a67f04a4`):** `export <channel>` bodies now parse STRUCTURALLY at TAB — `ast-builder.js` P3.A export path runs the same channel-root `liftBareDeclarations(..., "state", ..., true)` recursion the non-export path uses. `emit-channel` needed NO change (its collectors already walk structural nodes; they silently returned empty for bare-body export channels pre-fix); CHX deep-clone propagates the now-structural node (§38.12.2). The S192 `getCrossFileChannelCellNames` Class-B text-scan this gap referenced was ALREADY retired (post-CE redux). +3 regression tests (existing tests used explicit `${...}` bodies, blind to the bare-body bug); R26: export channel now `["logic"]`/state-decl/no-raw-text, byte-matching the non-export form.
+<!-- @gap id=g-export-channel-body-text sev=LOW status=resolved -->
 
 The `export <channel>` body routes through `liftBareDeclarations` → collapses to raw TEXT before auto-lift (the `export` keyword path), so its cells are not STRUCTURALLY parsed until a deep codegen reparse (emit-channel). The S192 stage-2 Class-B exemption (`getCrossFileChannelCellNames`) works around this by scanning the imported channel file's source FileAST — empirically the SYM-stage tabResults FileAST DOES carry the channel body as structural `state-decl` nodes (the divergence from the SCOPE doc's text-scan assumption — the structural walk is the primary mechanism, with a `shorthandBodyRaw` text-scan fallback). **Option 2b** = parse `export <channel>` bodies STRUCTURALLY at TAB (like NON-export channels, which already parse structurally), retiring the `export`-keyword text-collapse routing. This is the proper root fix: it would let cross-file channel cells register/resolve through the normal MOD/SYM path, RETIRING the Option-1 Class-B channel-body scan entirely (and is a prerequisite-simplifier for the bug-12.a post-CE relocation). Has codegen-contract blast radius (emit-channel's reparse assumes the text form), so deferred as a separate unit. Cross-ref: stage-2 work `sym-cell-registration-completeness-2026-06-13` (Class-B mechanism + the structural-vs-text divergence).
 
