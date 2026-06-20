@@ -78,40 +78,25 @@ import { extractSelectProjection } from "./sql-projection.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
+import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 
 // ---------------------------------------------------------------------------
-// Engine state-child grammar metadata (S81 Phase A10 follow-on)
+// Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
 // ---------------------------------------------------------------------------
 //
-// These constants are duplicated from `compiler/src/codegen/emit-variant-guard.ts`
-// (`ENGINE_STATE_CHILD_RESERVED_ATTRS`, `STATE_CHILD_STRUCTURAL_TAGS`,
-// `extractPayloadBindingsFromAttrs`) because TS is upstream of codegen — TS
-// cannot import from `./codegen/*`. Both consumers describe the same grammar:
-// the set of state-child opener attrs that are reserved by the engine surface
-// (rule/history/internal:rule/effect) vs. payload-binding barewords, and the
-// set of structural-element tags that may appear inside a state-child body
-// but are NOT renderable markup.
+// The reserved-attr set (`ENGINE_STATE_CHILD_RESERVED_ATTRS`) and the
+// structural-tag set (`STATE_CHILD_STRUCTURAL_TAGS`) used by this pass are now
+// the shared single source of truth in `./engine-statechild-grammar.ts`,
+// imported above. That module lives at `compiler/src/` (NOT under `./codegen/`)
+// specifically so this upstream type-system pass can import it without an
+// upstream→downstream cycle — the same sets are consumed by codegen
+// (`./codegen/emit-variant-guard.ts`). See that module's header for the §51.0
+// provenance of each member and the noted residual copies.
 //
-// TODO (post-S81): when `EngineStateChildEntry.payloadBindings` is populated
-// by SYM PASS 11 (B15 walker) per primer §13.7, both consumers can be
-// retired in favor of reading `entry.payloadBindings` directly, and the
-// structural-tag set can move to a shared `engine-statechild-grammar.ts`
-// module. For now the duplication is deliberate + minimized.
-
-const TS_ENGINE_STATE_CHILD_RESERVED_ATTRS = new Set<string>([
-  "rule",
-  "history",
-  "internal:rule",
-  "effect",
-]);
-
-const TS_STATE_CHILD_STRUCTURAL_TAGS = new Set<string>([
-  "onTimeout",
-  "onTransition",
-  "onIdle",
-  "engine",
-  "machine",
-]);
+// RESIDUAL (ss2 item 3): retiring the reserved-attrs CONSUMER below in favor of
+// reading `EngineStateChildEntry.payloadBindings` directly (now populated by
+// SYM PASS 11 / B15 — symbol-table.ts) is a SEMANTIC inversion, not a literal
+// swap, and was deliberately left out of the zero-behavior-change dedup.
 
 // Bug `g-bare-literal-attr-value` (sPA ss3, 2026-06-19) — the family of
 // STRUCTURAL attributes spec-typed to accept a BARE numeric/duration/boolean
@@ -167,7 +152,7 @@ function extractEngineStateChildPayloadBindings(attrs: unknown): string[] {
     if (!a || typeof a !== "object") continue;
     const name = (a as { name?: unknown }).name;
     if (typeof name !== "string") continue;
-    if (TS_ENGINE_STATE_CHILD_RESERVED_ATTRS.has(name)) continue;
+    if (ENGINE_STATE_CHILD_RESERVED_ATTRS.has(name)) continue;
     const value = (a as { value?: unknown }).value;
     if (!value || typeof value !== "object") continue;
     const valueKind = (value as { kind?: unknown }).kind;
@@ -10555,7 +10540,7 @@ function annotateNodes(
       // deferred items" + hand-off-80 priority #1):
       //   1. Body-walk re-enablement: TS descends into bodyChildren and
       //      walks each state-child markup node, applying the structural-
-      //      element filter (`TS_STATE_CHILD_STRUCTURAL_TAGS` above) so
+      //      element filter (`STATE_CHILD_STRUCTURAL_TAGS`, imported) so
       //      `<onTimeout>`/`<onTransition>`/`<onIdle>`/nested engines are
       //      skipped — their non-standard attrs no longer surface.
       //   2. Payload-binding scope injection: when a state-child opener
@@ -10628,7 +10613,7 @@ function annotateNodes(
             // scope `<onIdle>` if reachable here) — skip; their attrs are
             // engine-grammar-specific, not general-markup-resolvable.
             const tag = (child as { tag?: string }).tag;
-            if (typeof tag === "string" && TS_STATE_CHILD_STRUCTURAL_TAGS.has(tag)) {
+            if (typeof tag === "string" && STATE_CHILD_STRUCTURAL_TAGS.has(tag)) {
               continue;
             }
             // State-child markup node (e.g., `<Idle>`, `<Error msg>`).
@@ -10654,7 +10639,7 @@ function annotateNodes(
                 if (!grand || typeof grand !== "object") continue;
                 const grandTag = (grand as { kind?: string; tag?: string });
                 if (grandTag.kind === "markup" && typeof grandTag.tag === "string"
-                    && TS_STATE_CHILD_STRUCTURAL_TAGS.has(grandTag.tag)) {
+                    && STATE_CHILD_STRUCTURAL_TAGS.has(grandTag.tag)) {
                   continue;
                 }
                 visitNode(grand as ASTNodeLike);

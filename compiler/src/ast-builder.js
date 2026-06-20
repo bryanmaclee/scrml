@@ -14261,6 +14261,35 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // NOT the deprecated function-PLACEMENT `server` modifier. B14 RECORDS
         // the path; B15 validates existence + type-compat + mutual-exclusion.
         const serverSourceMatch = header.match(new RegExp(`\\bserver\\s*=\\s*@(${IDENT.source}(?:\\.${IDENT.source})*)\\b`));
+        // §52 / §51.0.A (ss2 item 2, 2026-06-19) — a BARE `server` flag on the
+        // engine opener (`<engine for=T server>`, NO `=@source`). SPEC §51.0.A
+        // asserts an engine cell MAY ITSELF be `server`-authoritative (§52 Tier 2),
+        // but the §52 read/load-into-engine-cell path (the engine-hydration
+        // Approach-F E-leg) is UNBUILT. Pre-ss2 the bare token matched NOTHING (the
+        // `server=@source` regex above requires `=@`) and was parsed-and-DROPPED with
+        // ZERO diagnostics — a silent no-op of an asserted-valid attribute (worse than
+        // an error, per `feedback_dont_soft_classify_bugs`). RECORD the bare flag here
+        // so SYM (B15) can fire `W-ENGINE-SERVER-DEFERRED` (the recognized-but-not-yet-
+        // wired deferral nudge); codegen keeps the flag INERT until the E-leg lands.
+        //
+        // Attribute-aware: mask `${...}` interpolation blocks AND quoted strings
+        // before scanning so a `server` word inside an `effect=${...}` body or an
+        // attr VALUE string never trips the flag. The bare form and `server=@source`
+        // are MUTUALLY EXCLUSIVE by shape — the standalone-token regex below requires
+        // the `server` keyword NOT be followed by `=` (which would be the E-leg /
+        // any `server=value` form, already captured above as serverSourceMatch).
+        // Standalone-token discipline (preceded by start/whitespace, followed by
+        // whitespace / `>` / `/` / end) mirrors `pinnedMatch` (defense against a
+        // `.X.server`-style substring).
+        const _serverScanHeader = header
+          // Blank `${ ... }` interpolation blocks (depth-naive is adequate — the
+          // opener-effect body is the only `${}` host and bare-server detection only
+          // needs the `${}` REGION blanked, not balanced).
+          .replace(/\$\{[\s\S]*?\}/g, (m) => " ".repeat(m.length))
+          // Blank double- and single-quoted string literals.
+          .replace(/"[^"]*"/g, (m) => " ".repeat(m.length))
+          .replace(/'[^']*'/g, (m) => " ".repeat(m.length));
+        const serverFlagBareMatch = /(?:^|\s)server(?![A-Za-z0-9_$=])(?=\s|>|\/|$)/.test(_serverScanHeader);
         // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1) —
         // `accepts=MsgType` engine-OPENER attribute. Value is a bare enum-type
         // identifier (e.g. `accepts=DragMsg`) declaring the message vocabulary
@@ -14508,6 +14537,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // root cell) + type-compat + mutual-exclusion (E-ENGINE-SERVER-WITH-DERIVED,
         // E-ENGINE-SERVER-WITH-INITIAL-CELL). null when absent.
         const serverSource = serverSourceMatch ? serverSourceMatch[1] : null;
+        // §52 / §51.0.A (ss2 item 2) — record the BARE `server` flag (no `=@source`).
+        // Mutually exclusive with serverSource by shape; default false. SYM lifts it
+        // onto engineMeta.serverFlagBare and fires W-ENGINE-SERVER-DEFERRED.
+        const serverFlagBare = serverFlagBareMatch === true && serverSource === null;
 
         // §51.0.S.2.2 (S154) — record accepts=MsgType. PARSER batch 1 RECORDS
         // the raw enum-type identifier; BATCH 2 (typer) resolves + validates.
@@ -14678,6 +14711,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // lifts it onto engineMeta.serverSource; codegen emits a reactive
           // subscription to the root cell that hydrates the engine guard-free.
           serverSource,
+          // §52 / §51.0.A (ss2 item 2) — BARE `server` flag (no `=@source`). true
+          // iff a standalone `server` token appeared on the opener; false otherwise.
+          // SYM (makeEngineRecord) lifts it onto engineMeta.serverFlagBare and fires
+          // W-ENGINE-SERVER-DEFERRED (the §52 Tier-2 engine-cell READ/hydrate E-leg is
+          // UNBUILT; the flag is recognized-but-not-yet-wired). Mutually exclusive with
+          // serverSource by shape (the `=@` discriminator).
+          serverFlagBare,
           // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1):
           //   acceptsType — non-null raw enum-type identifier iff `accepts=Type`
           //                 was present on the opener; null otherwise. BATCH 2

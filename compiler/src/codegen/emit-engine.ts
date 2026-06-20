@@ -2351,7 +2351,90 @@ function buildEngineArms(
         }
       }
     }
-    const body = filterRenderableChildren(rawChildren);
+    // §51.0.I — engine state-child `:`-shorthand RENDER BODY derivation.
+    // ss2-shorthand-interp-engine-statechild (S209) — when the state-child
+    // carries its OWN `:`-shorthand display-text body (the `<Variant ...> :
+    // "text">` form, `:` after the opener attrs), the structural parser does
+    // NOT lower that body into `match.children` — they are EMPTY. The body
+    // text lives ONLY on `sc.bodyRaw` (the display-text literal WITH quotes,
+    // e.g. ` "${@count} items"`) with `sc.isColonShorthand === true`. Pre-fix
+    // the arm body was derived solely from `match.children`, so the shorthand
+    // arm rendered NOTHING (silent drop — compiles clean, empty output).
+    //
+    // The fix mirrors the RESOLVED match-arm pattern
+    // (g-shorthand-interp-match-arm-codegen, S196 Bucket 4) in emit-match.ts:
+    //   - a §4.18.3 display-text literal (`"..."`, possibly `${...}` interp per
+    //     §4.18.4) → route its INNER content through the SAME free-text fragment
+    //     lowering the bare-body form uses (nativeParseFile), so literal segments
+    //     HTML-escape (§4.18.6) and `${...}` interpolations wire (§4.18.4) —
+    //     byte-equivalent to the bare-body `<Variant ...>...</>` form.
+    //   - a markup-as-value body (`<p>x</p>`) → bare-body markup parser.
+    //   - a bare value-expression (`@label` / `fn()` / `.Variant`) →
+    //     parseExprToNode → synth `logic > bare-expr` node.
+    let body: any[];
+    if ((sc as any).isColonShorthand === true) {
+      const trimmed = ((sc as any).bodyRaw || "").trim();
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { displayTextLiteralInner } = require("./emit-match.ts") as {
+        displayTextLiteralInner: (raw: string) => string | null;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { nativeParseFile } = require("../../native-parser/parse-file.js") as {
+        nativeParseFile: (filePath: string, src: string) => { filePath: string; ast: any; errors: any[] };
+      };
+      const synthLabel = `<engine:${meta.varName}:${tag}>`;
+      if (trimmed.length === 0) {
+        body = [];
+      } else if (/^<[A-Za-z_]/.test(trimmed)) {
+        // markup-as-value shorthand body (`<p>Idle</p>`). Same shape as the
+        // match-arm `looksLikeMarkupStart` branch (emit-match.ts:805).
+        body = [];
+        try {
+          const synthResult = nativeParseFile(synthLabel, trimmed);
+          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+            body = synthResult.ast.nodes;
+          }
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure.
+        }
+      } else if (displayTextLiteralInner(trimmed) !== null) {
+        // §4.18.3 display-text literal — route INNER through nativeParseFile
+        // (emit-match.ts:825-831). Literal segments HTML-escape; `${...}` wire.
+        const inner = displayTextLiteralInner(trimmed) as string;
+        body = [];
+        try {
+          const synthResult = nativeParseFile(synthLabel, inner);
+          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+            body = synthResult.ast.nodes;
+          }
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure.
+        }
+      } else {
+        // bare value-expression shorthand body (`@label` / `fn()` / `.Variant`).
+        // Synth `logic > bare-expr` so generateHtml's interpolation handling
+        // fires unchanged (emit-match.ts:835-851).
+        body = [];
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { parseExprToNode } = require("../expression-parser.ts") as {
+            parseExprToNode: (raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }) => any;
+          };
+          const filePath = (fileAST?.filePath as string | undefined) ?? synthLabel;
+          const exprNode = parseExprToNode(trimmed, filePath, 0);
+          const span = (match as any).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          body = [{
+            kind: "logic",
+            body: [{ kind: "bare-expr", exprNode, expr: trimmed, span }],
+            span,
+          }];
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure.
+        }
+      }
+    } else {
+      body = filterRenderableChildren(rawChildren);
+    }
     // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — composite state-child post-mount JS.
     // On outer-entry into a composite state-child (one whose body contains a
     // nested `<engine>`), per spec §51.0.Q.1: "the inner engine is

@@ -239,7 +239,7 @@ describe("C1 §3 — DEFERRED: opener-effect write checked against .<initial>.ru
   // When the check lands, this `.skip` becomes the active assertion: an illegal
   // boot-effect transition (e.g. `@phase = .Saved` where .Saved ∉ .Loading.rule)
   // SHALL fire the engine invalid-transition diagnostic.
-  test.skip("illegal boot-effect transition (target ∉ .<initial>.rule) fires invalid-transition", () => {
+  test("illegal boot-effect transition (target ∉ .<initial>.rule) fires invalid-transition", () => {
     const src = `<program>
 \${ type Phase:enum = { Loading, Empty, Saved } }
 <engine for=Phase initial=.Loading effect=\${ @phase = .Saved }>
@@ -251,6 +251,83 @@ describe("C1 §3 — DEFERRED: opener-effect write checked against .<initial>.ru
     // .Saved is NOT in .Loading.rule (.Loading rule=.Empty) — illegal boot write.
     const codes = symErrorCodes(src);
     expect(codes.some((c) => /INVALID-TRANSITION|ENGINE-INVALID/.test(c))).toBe(true);
+  });
+
+  // ss2 item 1 — fire-site #11 active cases (§51.0.H Form 3 boot-write validation).
+
+  test("legal boot write (target ∈ single .<initial>.rule) passes — no INVALID-TRANSITION", () => {
+    const src = `<program>
+\${ type Phase:enum = { Loading, Empty, Saved } }
+<engine for=Phase initial=.Loading effect=\${ @phase = .Empty }>
+  <Loading rule=.Empty></>
+  <Empty rule=.Saved></>
+  <Saved></>
+</>
+</program>`;
+    // .Empty IS in .Loading.rule (.Loading rule=.Empty) — legal boot write.
+    expect(symErrorCodes(src)).not.toContain("E-ENGINE-INVALID-TRANSITION");
+  });
+
+  test("multi-target initial rule, LEGAL boot target → no fire", () => {
+    const src = `<program>
+\${ type Phase:enum = { Loading, Empty, Editing, Saved } }
+<engine for=Phase initial=.Loading effect=\${ @phase = .Editing }>
+  <Loading rule=(.Empty | .Editing)></>
+  <Empty rule=.Saved></>
+  <Editing rule=.Saved></>
+  <Saved></>
+</>
+</program>`;
+    // .Editing IS in .Loading.rule=(.Empty | .Editing) — legal.
+    expect(symErrorCodes(src)).not.toContain("E-ENGINE-INVALID-TRANSITION");
+  });
+
+  test("multi-target initial rule, ILLEGAL boot target → fires INVALID-TRANSITION", () => {
+    const src = `<program>
+\${ type Phase:enum = { Loading, Empty, Editing, Saved } }
+<engine for=Phase initial=.Loading effect=\${ @phase = .Saved }>
+  <Loading rule=(.Empty | .Editing)></>
+  <Empty rule=.Saved></>
+  <Editing rule=.Saved></>
+  <Saved></>
+</>
+</program>`;
+    // .Saved is NOT in .Loading.rule=(.Empty | .Editing) — illegal.
+    expect(symErrorCodes(src)).toContain("E-ENGINE-INVALID-TRANSITION");
+  });
+
+  test("self-write to the initial variant is a NO-OP → no INVALID-TRANSITION fire", () => {
+    const src = `<program>
+\${ type Phase:enum = { Loading, Empty } }
+<engine for=Phase initial=.Loading effect=\${ @phase = .Loading }>
+  <Loading rule=.Empty></>
+  <Empty></>
+</>
+</program>`;
+    // @phase = .Loading from the boot effect re-enters the initial variant —
+    // idempotent no-op per §51.0.F; must NOT fire even though .Loading ∉ its
+    // own rule (.Loading rule=.Empty).
+    expect(symErrorCodes(src)).not.toContain("E-ENGINE-INVALID-TRANSITION");
+  });
+
+  test("derived engine with an illegal-looking boot write fires ONLY E-ENGINE-EFFECT-ON-DERIVED (no boot-write double-fire / no crash)", () => {
+    const src = `<program>
+\${ type Phase:enum = { Loading, Empty, Saved } type Src:enum = { A, B } }
+<engine for=Src initial=.A>
+  <A rule=.B></>
+  <B rule=.A></>
+</>
+<engine for=Phase derived=@src effect=\${ @phase = .Saved }>
+  <Loading rule=.Empty></>
+  <Empty rule=.Saved></>
+  <Saved></>
+</>
+</program>`;
+    const codes = symErrorCodes(src);
+    // Derived opener effect: E-ENGINE-EFFECT-ON-DERIVED owns this; the boot-write
+    // validation MUST be skipped on derived engines (no double-fire).
+    expect(codes).toContain("E-ENGINE-EFFECT-ON-DERIVED");
+    expect(codes).not.toContain("E-ENGINE-INVALID-TRANSITION");
   });
 });
 

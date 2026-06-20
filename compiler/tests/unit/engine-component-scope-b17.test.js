@@ -41,6 +41,51 @@
 
 import { describe, expect, test } from "bun:test";
 import { runSYM } from "../../src/symbol-table.ts";
+import { splitBlocks } from "../../src/block-splitter.js";
+import { buildAST } from "../../src/ast-builder.js";
+import { compileScrml } from "../../src/api.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+// ---------------------------------------------------------------------------
+// End-to-end helpers (ss2 item 5 — activated deferred cases).
+// `runUpToSYM` mirrors b17-3-typer-diagnostics fixture style (BS -> buildAST ->
+// runSYM); `compileEndToEnd` mirrors match-block-phase2 (full compileScrml) for
+// the block-form `<match>` cases that need the match-statechild parser path.
+// ---------------------------------------------------------------------------
+function runUpToSYM(source, filePath = "b17-deferred.scrml") {
+  const bs = splitBlocks(filePath, source);
+  const { ast } = buildAST(bs);
+  return runSYM({ filePath, ast });
+}
+
+function symErrorsByCode(sym, code) {
+  return sym.errors.filter((e) => e.code === code);
+}
+
+const B17_FIXTURE_DIR = join(import.meta.dir, "__fixtures__/engine-component-scope-b17");
+
+function compileEndToEnd(source, name = "deferred.scrml") {
+  mkdirSync(B17_FIXTURE_DIR, { recursive: true });
+  const p = join(B17_FIXTURE_DIR, name);
+  writeFileSync(p, source);
+  return compileScrml({
+    inputFiles: [p],
+    outputDir: join(B17_FIXTURE_DIR, "dist"),
+    write: false,
+  });
+}
+
+// Cross-stream code lookup (feedback_diagnostic_stream_partition): E- codes land
+// in result.errors, but W-/I- partition into result.warnings. Activated cases
+// here assert on E- codes, but the helper checks BOTH streams so it stays
+// correct if a future severity reclassification moves a code.
+function diagByCode(result, code) {
+  for (const d of [...(result.errors || []), ...(result.warnings || [])]) {
+    if (d.code === code) return d;
+  }
+  return null;
+}
 
 /**
  * Build a minimal FileAST shape carrying the synthesized component-def +
@@ -256,69 +301,166 @@ describe("B17 — PASS 11 fires E-COMPONENT-ENGINE-SCOPE on engine-decl in compo
 // ---------------------------------------------------------------------------
 
 describe("B17 — DEFERRED end-to-end cases (preconditions not met)", () => {
-  test.skip("[deferred] end-to-end: engine-decl in component-def.defChildren via parser", () => {
-    // Phase 0 finding: ast-builder line 9149-9151 enforces engine-decl
-    // nodes are children of markup (program), not logic. Logic bodies
-    // (`${...}`) are where defChildren consumption happens. Engines
-    // therefore never end up in defChildren via the current parser.
-    //
-    // Activates when:
-    //   (a) component-body markup parser lands and synthesizes
-    //       walkable component bodies as AST children (not raw strings); OR
-    //   (b) the bare-form engine inside a logic body is lifted into an
-    //       engine-decl AST node.
-    //
-    // Expected: same diagnostic shape as the synthesized §B17.1 case.
+  // -------------------------------------------------------------------------
+  // PARKED (still blocked) — engine inside a component BODY.
+  //
+  // CURRENT blocker (re-verified ss2 item 5, 2026-06-19): a `component-def`
+  // stores its markup body as `component-def.raw: string` (ast-builder.js
+  // ~line 10370 — `kind: "component-def", raw: expr`). There is no
+  // component-body markup parser: the `raw` string is NEVER re-parsed into a
+  // walkable AST. `defChildren` (ast-builder.js ~line 15007) collects only the
+  // LOGIC-body siblings that FOLLOW a component-def, never markup nested inside
+  // its body. An `<engine>` written inside a component's markup body therefore
+  // lives only as substring text in `raw` — it never becomes an `engine-decl`
+  // node, never lands in `machineDecls`, and is unreachable by any AST walker
+  // (empirically: defChildren === [], machineDecls.length === 0, engine-decl
+  // NOT reachable via body/children/defChildren/bodyChildren recursion).
+  //
+  // The §51.3 placement rule (ast-builder.js ~line 15607 — "engine-decl nodes
+  // are children of markup (program), not logic") only collects engine-decls
+  // that the block-splitter already emitted as top-level/program markup
+  // children; it does not descend into a component's `raw` body.
+  //
+  // ACTIVATING cases (1)-(3) requires a FROM-SCRATCH subsystem: a component-body
+  // markup parser pass that re-parses `component-def.raw` into walkable AST
+  // children (so a nested `<engine>` becomes a walkable `engine-decl`, and a
+  // self-closing `<EngineName/>` mount tag becomes a walkable mount node). That
+  // pass is OUT of sPA scope — escalated to PA. The PASS 11 walker
+  // (`walkRejectEnginesInComponentDefChildren`) is already correct and is
+  // exercised today via SYNTHESIZED AST (§B17.1-§B17.9 above); these three
+  // end-to-end cases activate once the parser produces the shape.
+  test.skip("[deferred — needs component-body markup parser] end-to-end: engine-decl in component-def.defChildren via parser", () => {
     expect(true).toBe(true);
   });
 
-  test.skip("[deferred] end-to-end: engine-decl inside the `raw` markup body of a component-def", () => {
-    // Blocker: component-def stores body as `component-def.raw: string`.
-    // The engine inside `<button>...<engine>...</></button>` is not a
-    // walkable AST node. Activating this case requires a component-body
-    // markup parser pass.
+  test.skip("[deferred — needs component-body markup parser] end-to-end: engine-decl inside the `raw` markup body of a component-def", () => {
     expect(true).toBe(true);
   });
 
-  test.skip("[deferred] end-to-end: engine mount tag `<EngineName/>` inside a component body", () => {
-    // Blocker: same as above — component body markup not parsed. Once the
-    // parser lands, walking the body markup tree finds self-closing
-    // PascalCase tags whose binding's source export is an engine and the
-    // enclosing context is a component body.
+  test.skip("[deferred — needs component-body markup parser] end-to-end: engine mount tag `<EngineName/>` inside a component body", () => {
     expect(true).toBe(true);
   });
+});
 
-  test.skip("[deferred] `effect=` on multi-target rule= → E-ENGINE-EFFECT-AMBIGUOUS", () => {
-    // Blocker: engine state-children (`<Small rule=.Big effect=...>`) are
-    // not parsed. `engine-decl.rulesRaw` holds the body as a string and
-    // `parseMachineRules()` consumes it under the legacy `.From => .To`
-    // arrow grammar. The §51.0.F state-child syntax has no implementation.
-    // Cross-ref B15 audit §1.1 (spec-vs-primer reconciliation gate).
-    expect(true).toBe(true);
+// ---------------------------------------------------------------------------
+// §B17.activated — formerly-DEFERRED cases now reachable end-to-end.
+//
+// ss2 item 5 survey (2026-06-19) found the blocker comments on these five cases
+// STALE: the machinery they said was missing has since landed.
+//   - cases (4)-(6): S74 Phase A1b B17.3 — `engine-statechild-parser.ts` parses
+//     §51.0.F state-children (`sc.rule`, `sc.effectRaw`, `sc.onTransitionElements`),
+//     and SYM PASS 17 (`validateEngineB17Diagnostics`, symbol-table.ts ~9902)
+//     fires the §51.0.H typer diagnostics. Reachable BS -> buildAST -> runSYM.
+//   - cases (7)-(8): S107 Phase 2 — `match-statechild-parser.ts` parses block-form
+//     `<match for=Type on=expr>` arms; the §18.0.2 attribute-legality validator
+//     (symbol-table.ts ~11594) fires E-MATCH-EFFECT-FORBIDDEN /
+//     E-MATCH-ONTRANSITION-FORBIDDEN. Reachable via full compileScrml.
+//
+// All diagnostic codes pre-exist in the §34 catalog; no new codes invented and
+// no source change was needed — pure test activation.
+// ---------------------------------------------------------------------------
+describe("B17 — ACTIVATED end-to-end cases (formerly deferred; machinery landed)", () => {
+  // (4) §51.0.H fire-site #1 — `effect=` on a multi-target `rule=` is ambiguous.
+  // §34 row E-ENGINE-EFFECT-AMBIGUOUS. Was stale-blocked on "state-children have
+  // no implementation"; engine-statechild-parser.ts + PASS 17 now implement it.
+  test("(4) effect= on multi-target rule= fires E-ENGINE-EFFECT-AMBIGUOUS", () => {
+    const src = `\${ type AppMode:enum = { Idle, Active, Done } }
+<engine for=AppMode initial=.Idle>
+  <Idle rule=(.Active | .Done) effect=\${ log("leaving idle") }></>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const sym = runUpToSYM(src);
+    const errs = symErrorsByCode(sym, "E-ENGINE-EFFECT-AMBIGUOUS");
+    expect(errs.length).toBe(1);
+    expect(errs[0].severity).toBe("error");
+    expect(errs[0].message).toContain("multi-target");
+    expect(errs[0].message).toContain("Idle");
   });
 
-  test.skip("[deferred] `<onTransition to=.Variant>` placement validation", () => {
-    // Blocker: `<onTransition>` is registered in spec §4.15
-    // structural-elements registry but is not tokenized as a structural
-    // element by the block-splitter or ast-builder. No AST node kind
-    // corresponds to the element.
-    expect(true).toBe(true);
+  // (5) §51.0.H — `<onTransition to=.Variant>` placement validation. A valid
+  // outgoing target produces NO error; an unknown variant fires
+  // E-ENGINE-RULE-INVALID-VARIANT (§34). Was stale-blocked on "<onTransition>
+  // not tokenized"; PASS 17 fire-sites #2-#5 now validate it.
+  test("(5) <onTransition to=.Variant> — valid target produces no placement error", () => {
+    const src = `\${ type AppMode:enum = { Idle, Active } }
+<engine for=AppMode initial=.Idle>
+  <Idle rule=.Active>
+    <onTransition to=.Active>\${ log("ok") }</>
+  </>
+  <Active></>
+</>`;
+    const sym = runUpToSYM(src);
+    expect(symErrorsByCode(sym, "E-ENGINE-RULE-INVALID-VARIANT").length).toBe(0);
+    expect(symErrorsByCode(sym, "E-ONTRANSITION-NO-TARGET").length).toBe(0);
   });
 
-  test.skip("[deferred] `<onTransition>` direction attributes (to= / from=) — required + variant validation", () => {
-    // Blocker: same as above.
-    expect(true).toBe(true);
+  test("(5) <onTransition to=.UnknownVariant> fires E-ENGINE-RULE-INVALID-VARIANT", () => {
+    const src = `\${ type AppMode:enum = { Idle, Active } }
+<engine for=AppMode initial=.Idle>
+  <Idle rule=.Active>
+    <onTransition to=.Nope>\${ log("bad") }</>
+  </>
+  <Active></>
+</>`;
+    const sym = runUpToSYM(src);
+    const errs = symErrorsByCode(sym, "E-ENGINE-RULE-INVALID-VARIANT");
+    expect(errs.length).toBe(1);
+    expect(errs[0].severity).toBe("error");
+    expect(errs[0].message).toContain("Nope");
   });
 
-  test.skip("[deferred] `<onTransition>` inside a `<match>` arm → E-MATCH-ONTRANSITION-FORBIDDEN", () => {
-    // Blocker: block-form `<match for=Type on=expr>` is also not parsed.
-    // ast-builder produces `match-arm-block` / `match-arm-inline` AST
-    // nodes only for JS-style match expressions.
-    expect(true).toBe(true);
+  // (6) §51.0.H — `<onTransition>` requires a direction. Neither `to=` nor
+  // `from=` => the handler has no trigger => E-ONTRANSITION-NO-TARGET (§34 row
+  // added S74). Was stale-blocked on the same "not tokenized" comment.
+  test("(6) <onTransition> with neither to= nor from= fires E-ONTRANSITION-NO-TARGET", () => {
+    const src = `\${ type AppMode:enum = { Idle, Active } }
+<engine for=AppMode initial=.Idle>
+  <Idle rule=.Active>
+    <onTransition>\${ log("no trigger") }</>
+  </>
+  <Active></>
+</>`;
+    const sym = runUpToSYM(src);
+    const errs = symErrorsByCode(sym, "E-ONTRANSITION-NO-TARGET");
+    expect(errs.length).toBe(1);
+    expect(errs[0].severity).toBe("error");
+    expect(errs[0].message).toContain("neither");
   });
 
-  test.skip("[deferred] `effect=` inside a `<match>` arm → E-MATCH-EFFECT-FORBIDDEN", () => {
-    // Blocker: same as above.
-    expect(true).toBe(true);
+  // (7) §18.0.2 — `<onTransition>` is engine-only; inside a `<match>` arm body it
+  // fires E-MATCH-ONTRANSITION-FORBIDDEN (§34). Was stale-blocked on "block-form
+  // <match for=Type on=expr> not parsed"; match-statechild-parser.ts (S107 ph2)
+  // parses it. Reproducer mirrors match-block-phase2 §7.
+  test("(7) <onTransition> inside a <match> arm fires E-MATCH-ONTRANSITION-FORBIDDEN", () => {
+    const result = compileEndToEnd(`\${ type Phase:enum = { Idle, Done } @phase = .Idle }
+<match for=Phase on=@phase>
+    <Idle>
+        <onTransition to=.Done>\${ log("t") }</>
+        <p>Idle</p>
+    </>
+    <Done> : <p>Done</p>
+</match>
+`, "match-onTransition-forbidden.scrml");
+    const d = diagByCode(result, "E-MATCH-ONTRANSITION-FORBIDDEN");
+    expect(d).not.toBeNull();
+    expect(d.severity).toBe("error");
+    expect(d.message).toContain("onTransition");
+  });
+
+  // (8) §18.0.2 — `effect=` is engine-only; on a `<match>` arm it fires
+  // E-MATCH-EFFECT-FORBIDDEN (§34). Same stale block as (7). Reproducer mirrors
+  // match-block-phase2 §6.
+  test("(8) effect= inside a <match> arm fires E-MATCH-EFFECT-FORBIDDEN", () => {
+    const result = compileEndToEnd(`\${ type Phase:enum = { Idle, Done } @phase = .Idle }
+<match for=Phase on=@phase>
+    <Idle effect=\${ doIt() }> : <p>Idle</p>
+    <Done> : <p>Done</p>
+</match>
+`, "match-effect-forbidden.scrml");
+    const d = diagByCode(result, "E-MATCH-EFFECT-FORBIDDEN");
+    expect(d).not.toBeNull();
+    expect(d.severity).toBe("error");
+    expect(d.message).toContain("effect=");
   });
 });

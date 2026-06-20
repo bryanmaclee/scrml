@@ -370,6 +370,15 @@ export interface EngineMetadata {
    *  and with `initial=@cell` (E-ENGINE-SERVER-WITH-INITIAL-CELL); MAY coexist
    *  with `initial=.Literal` (the SSR/pre-load placeholder). */
   serverSource: string | null;
+  /** §52 / §51.0.A (ss2 item 2, 2026-06-19) — true iff a BARE `server` flag
+   *  (`<engine for=T server>`, NO `=@source`) appeared on the opener. §51.0.A
+   *  asserts an engine cell MAY itself be `server`-authoritative (§52 Tier 2),
+   *  but the §52 read/load-into-engine-cell path (the engine-hydration Approach-F
+   *  E-leg) is UNBUILT. B15 fires `W-ENGINE-SERVER-DEFERRED` (warning) when set —
+   *  the flag is recognized-but-not-yet-wired, so it currently has NO effect; the
+   *  wired alternative is `server=@source` (§51.0.E, S199). Mutually exclusive with
+   *  `serverSource` by shape (the parser's `=@` discriminator). Defaults `false`. */
+  serverFlagBare: boolean;
   /** Reactive expression string from `derived=expr`, when present.
    *  Stored as the raw AST shape for B16 to consume in cycle detection.
    *  Today's parser stores `engine-decl.sourceVar` (legacy single-var form)
@@ -5205,6 +5214,13 @@ function makeEngineRecord(
     typeof engineDecl.serverSource === "string" && engineDecl.serverSource.length > 0
       ? engineDecl.serverSource
       : null;
+  // §52 / §51.0.A (ss2 item 2) — the BARE `server` flag (no `=@source`). The
+  // parser records a standalone `server` token as engineDecl.serverFlagBare; B15
+  // fires W-ENGINE-SERVER-DEFERRED (the §52 Tier-2 engine-cell READ/hydrate E-leg
+  // is UNBUILT). Mutually exclusive with serverSource by shape; guard on both
+  // here so a hypothetical decl carrying both never double-counts.
+  const serverFlagBare: boolean =
+    engineDecl.serverFlagBare === true && serverSource === null;
   const isPinned: boolean = engineDecl.pinned === true;
   const isExported: boolean = engineDecl.isExported === true;
   // Derived expression — three §51.0.J / §51.9 shapes (S190 completes the set):
@@ -5274,6 +5290,7 @@ function makeEngineRecord(
     initialVariant,
     initialCell,
     serverSource,
+    serverFlagBare,
     derivedExpr,
     varName,
     isExported,
@@ -6329,6 +6346,39 @@ export function validateEngineStateChildrenAndRules(
     if (!isDerived && meta.initialCell === null) {
       validateServerSourceHydration(meta, engineDecl, errors, filePath, variants);
     }
+  } else if (meta.serverFlagBare === true) {
+    // Step 2.5b — §52 / §51.0.A (ss2 item 2, 2026-06-19) — DEFERRAL NUDGE for the
+    // BARE `server` flag (`<engine for=T server>`, NO `=@source`). §51.0.A asserts
+    // an engine cell MAY itself be `server`-authoritative (§52 Tier 2), but the §52
+    // read/load-into-engine-cell path (the engine-hydration Approach-F E-leg) is
+    // UNBUILT. Pre-ss2 the bare flag was parsed-and-DROPPED with ZERO diagnostics —
+    // a silent no-op of an asserted-valid attribute (worse than an error, per
+    // `feedback_dont_soft_classify_bugs`; known-gaps.md:196). Fire a WARNING (NOT an
+    // error — the feature is asserted-valid, just not yet wired) telling the adopter
+    // the flag is recognized-but-not-yet-wired so it currently has NO effect, and
+    // pointing to the wired alternative `server=@source` (§51.0.E, S199). The `else
+    // if` makes this mutually exclusive with the serverSource E-leg block above.
+    //
+    // Stream partition (feedback_diagnostic_stream_partition): a `W-` code +
+    // severity:"warning" routes to result.warnings (non-fatal — no CLI exit 1),
+    // mirroring the sibling W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE. fireB15Diagnostic
+    // stamps the severity; the api.js final split (W-/I- prefix OR severity
+    // warning/info -> warnings) carries it to the warning stream.
+    fireB15Diagnostic(
+      errors,
+      "W-ENGINE-SERVER-DEFERRED",
+      `W-ENGINE-SERVER-DEFERRED: \`<engine for=${forType} server>\` declares a bare ` +
+      `\`server\` flag (a server-authoritative engine cell, §51.0.A / §52 Tier 2), but the ` +
+      `§52 read/hydrate-INTO-an-engine-cell path (the engine-hydration E-leg) is NOT YET ` +
+      `WIRED — the flag is recognized but currently has NO effect (the engine compiles as a ` +
+      `plain client-side engine). For server-authoritative reactive hydration TODAY, use ` +
+      `\`server=@source\` (§51.0.E, S199): name a server-owned source cell the engine ` +
+      `hydrates from GUARD-FREE on every change (e.g. \`<engine for=${forType} server=@status>\`). ` +
+      `This is a DEFERRAL nudge, not an error; the bare-flag form lights up when the E-leg lands.`,
+      engineDecl,
+      filePath,
+      "warning",
+    );
   }
 
   // Step 3 — parse state-children. M6.6.b.2: prefer the native block-tree
@@ -9722,6 +9772,131 @@ export function validateEngineA5Extensions(
             // B15 already fired on the malformed rule=; do NOT double-fire a
             // misleading legality diagnostic. Mirrors fire-site #3 behavior.
             break;
+        }
+      }
+    }
+  }
+
+  // ----- Fire-site #11 (ss2) — opener-effect BOOT write validation
+  //       (§51.0.H Form 3, NORMATIVE SHALL). -----
+  //
+  // An engine OPENER `effect=` is a boot-only init effect: the effect of the
+  // implicit init→`initial=` transition. Per SPEC §51.0.H Form 3 (lines 25741-
+  // 25745) and the §51.0 attribute table (line 24871), the from-state of that
+  // implicit edge is STATICALLY the `initial=` variant, so a `@<engineVar> = .X`
+  // write inside the opener effect is compile-time-validated against
+  // `.<initial>.rule` EXACTLY as an in-state-child-body write is (§51.0.F /
+  // fire-site #9). The opener effect body is captured as RAW TEXT at SYM
+  // (`meta.openerEffect`), so we reuse the same `scanDirectWritesInStateChildBody`
+  // regex scan + the same `switch (r.kind)` membership check as fire-site #9.
+  //
+  // HEURISTIC SCOPE (matches fire-site #9): only writes whose RHS *starts* with
+  // a literal `.Variant` (or `.advance(.Variant)`) are validated. A boot effect
+  // like `@phase = @tasks.length == 0 ? .Empty : .Editing` (FLAGSHIP) is a
+  // ternary whose RHS does NOT begin with `.`, so the scan does not capture it —
+  // no fire. Broader RHS-expression analysis is out of scope for this dispatch.
+  //
+  // Derived engines are SKIPPED: `walkDerivedEngineDeclRejections` already fires
+  // E-ENGINE-EFFECT-ON-DERIVED on a derived opener effect (§51.0.J) — boot-write
+  // validation must NOT double-fire there.
+  {
+    const varName = typeof meta.varName === "string" ? meta.varName : "";
+    if (
+      meta.derivedExpr === null &&
+      typeof meta.openerEffect === "string" &&
+      meta.openerEffect.length > 0 &&
+      varName.length > 0 &&
+      variants.length > 0 &&
+      typeof meta.initialVariant === "string" &&
+      meta.initialVariant.length > 0
+    ) {
+      const initialSc = stateChildren.find(
+        (sc) => sc && sc.tag === meta.initialVariant,
+      );
+      // No initial state-child found → E-ENGINE-INITIAL-INVALID-VARIANT
+      // already owns that case; skip boot-write validation.
+      const r = initialSc ? initialSc.rule : null;
+      if (initialSc && r) {
+        const writes = scanDirectWritesInStateChildBody(meta.openerEffect, varName);
+        for (const dw of writes) {
+          // Non-variant tokens (e.g. `.length`) — a separate check owns those;
+          // mirror fire-site #9's variant-set gate.
+          if (!variantSet.has(dw.target)) continue;
+
+          // Self-write to the boot/initial variant is an idempotent no-op per
+          // §51.0.F — mirror fire-site #10's self-write skip. No lint needed
+          // here for this dispatch (boot effect writing the initial variant it
+          // is already entering is a structural no-op).
+          if (dw.target === meta.initialVariant) continue;
+
+          const writeRepr = dw.shape === "advance"
+            ? `@${varName}.advance(.${dw.target})`
+            : `@${varName} = .${dw.target}`;
+          const bootCtx =
+            `\`${writeRepr}\` inside the engine opener \`effect=\` (boot-only init ` +
+            `effect, §51.0.H Form 3) is invalid. The boot effect runs as the ` +
+            `implicit init→.${meta.initialVariant} transition, so writes are checked ` +
+            `against \`.${meta.initialVariant}.rule\``;
+
+          switch (r.kind) {
+            case "absent":
+              // Initial state is terminal — no legal boot transition out of it.
+              fireA5Diagnostic(
+                errors,
+                "E-ENGINE-INVALID-TRANSITION",
+                `E-ENGINE-INVALID-TRANSITION: ${bootCtx} — but \`<${meta.initialVariant}>\` ` +
+                `has no \`rule=\` attribute (terminal state per §51.0.F), so the boot ` +
+                `effect cannot transition the engine at all. Either add ` +
+                `\`rule=.${dw.target}\` (or a wider rule covering \`.${dw.target}\`) to ` +
+                `\`<${meta.initialVariant}>\`, or remove the boot write.`,
+                engineDecl,
+                filePath,
+                "error",
+              );
+              break;
+            case "wildcard":
+              // `rule=*` on the initial state — any boot target legal; no fire.
+              break;
+            case "single":
+              if (r.target !== dw.target) {
+                fireA5Diagnostic(
+                  errors,
+                  "E-ENGINE-INVALID-TRANSITION",
+                  `E-ENGINE-INVALID-TRANSITION: ${bootCtx} — \`<${meta.initialVariant}>\`'s ` +
+                  `\`rule=.${r.target}\` (single-target form per §51.0.F — only ` +
+                  `\`.${r.target}\` is reachable). Either change the boot target to ` +
+                  `\`.${r.target}\`, widen \`<${meta.initialVariant}>\`'s \`rule=\` to ` +
+                  `\`(.${r.target} | .${dw.target})\` or \`*\`, or remove the boot write.`,
+                  engineDecl,
+                  filePath,
+                  "error",
+                );
+              }
+              break;
+            case "multi":
+              if (!r.targets.includes(dw.target)) {
+                const targetsList = r.targets.map((t) => `.${t}`).join(", ");
+                const targetsPipe = r.targets.map((t) => `.${t}`).join(" | ");
+                fireA5Diagnostic(
+                  errors,
+                  "E-ENGINE-INVALID-TRANSITION",
+                  `E-ENGINE-INVALID-TRANSITION: ${bootCtx} — \`<${meta.initialVariant}>\`'s ` +
+                  `multi-target \`rule=(${targetsPipe})\` permits: ${targetsList} (per ` +
+                  `§51.0.F — only the listed targets are reachable). Either pick one of ` +
+                  `the listed targets, add \`.${dw.target}\` to the rule list, or widen ` +
+                  `to \`*\`.`,
+                  engineDecl,
+                  filePath,
+                  "error",
+                );
+              }
+              break;
+            case "legacy-arrow":
+            case "parse-error":
+              // B15 already fired on the malformed rule=; do NOT double-fire a
+              // misleading legality diagnostic. Mirrors fire-site #9.
+              break;
+          }
         }
       }
     }

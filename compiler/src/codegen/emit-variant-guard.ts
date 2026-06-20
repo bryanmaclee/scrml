@@ -83,6 +83,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1065,18 +1066,11 @@ export function emitVariantGuardedRender(
 // Helper — extract payload bindings from a state-child markup node's attrs
 // ---------------------------------------------------------------------------
 
-/**
- * Reserved attr names that are NOT payload bindings on engine state-child
- * openers (per `engine-statechild-parser.ts` recognition set). Used by
- * `extractPayloadBindingsFromAttrs` to identify bareword attrs that ARE
- * payload bindings.
- */
-const ENGINE_STATE_CHILD_RESERVED_ATTRS = new Set<string>([
-  "rule",
-  "history",
-  "internal:rule",
-  "effect",
-]);
+// `ENGINE_STATE_CHILD_RESERVED_ATTRS` (reserved engine state-child attr names —
+// rule / history / internal:rule / effect) is imported from the shared SSOT at
+// `../engine-statechild-grammar.ts` (ss2 item 3 dedup; see that module's header
+// for §51.0 provenance). Used by `extractPayloadBindingsFromAttrs` below to
+// identify which bareword attrs ARE payload bindings.
 
 /**
  * Extract payload binding names from a state-child markup node's attrs.
@@ -1110,23 +1104,12 @@ export function extractPayloadBindingsFromAttrs(attrs: any[] | undefined): strin
   return out;
 }
 
-/**
- * Tag-set of structural elements that appear inside an engine state-child
- * body but are NOT renderable markup. Used by `filterRenderableChildren`
- * to strip them before passing arm body to `generateHtml`.
- *
- * Per PHASE-0-SURVEY §8 R2: state-child bodies contain `<onTimeout>`,
- * `<onTransition>`, `<onIdle>`, nested `<engine>` siblings that aren't
- * rendered DOM but ARE part of `block.children`. Filter at the emission
- * boundary.
- */
-const STATE_CHILD_STRUCTURAL_TAGS = new Set<string>([
-  "onTimeout",
-  "onTransition",
-  "onIdle",
-  "engine",
-  "machine",
-]);
+// `STATE_CHILD_STRUCTURAL_TAGS` (structural elements inside an engine state-child
+// body that are NOT renderable markup — onTimeout / onTransition / onIdle /
+// engine / machine) is imported from the shared SSOT at
+// `../engine-statechild-grammar.ts` (ss2 item 3 dedup; see that module's header
+// for §51.0 provenance). Used by `filterRenderableChildren` to strip them before
+// passing arm body to `generateHtml`.
 
 /**
  * Emit the HTML for the initial-arm's body. Used by the file-level HTML

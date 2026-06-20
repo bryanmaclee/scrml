@@ -119,7 +119,7 @@
     "EXTRA-FIELD": 43,
     "FIELD-SHAPE": 17,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 37,
+    "MISSING-FIELD": 38,
     "SPAN-COORD": 16
   },
   "examples/06-kanban-board.scrml": {
@@ -191,7 +191,7 @@
     "EXTRA-FIELD": 34,
     "FIELD-SHAPE": 35,
     "KIND-NAME": 12,
-    "MISSING-FIELD": 118,
+    "MISSING-FIELD": 122,
     "SPAN-COORD": 130
   },
   "examples/15-channel-chat.scrml": {
@@ -566,7 +566,7 @@
   "examples/25-triage-board.scrml": {
     "KIND-NAME": 8,
     "FIELD-SHAPE": 37,
-    "MISSING-FIELD": 65,
+    "MISSING-FIELD": 67,
     "EXTRA-FIELD": 35,
     "COUNT-LENGTH": 8,
     "SPAN-COORD": 293
@@ -598,7 +598,7 @@
     "EXTRA-FIELD": 109,
     "FIELD-SHAPE": 33,
     "KIND-NAME": 21,
-    "MISSING-FIELD": 82,
+    "MISSING-FIELD": 84,
     "SPAN-COORD": 62
   },
   "examples/30-validated-form.scrml": {
@@ -614,7 +614,7 @@
     "EXTRA-FIELD": 116,
     "FIELD-SHAPE": 37,
     "KIND-NAME": 20,
-    "MISSING-FIELD": 97,
+    "MISSING-FIELD": 99,
     "SPAN-COORD": 68
   },
   "samples/admin-panel.scrml": {
@@ -1195,7 +1195,7 @@
     "EXTRA-FIELD": 51,
     "FIELD-SHAPE": 15,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 32,
+    "MISSING-FIELD": 34,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-007-cancel-timer.scrml": {
@@ -1219,7 +1219,7 @@
     "EXTRA-FIELD": 42,
     "FIELD-SHAPE": 9,
     "KIND-NAME": 8,
-    "MISSING-FIELD": 37,
+    "MISSING-FIELD": 38,
     "SPAN-COORD": 25
   },
   "samples/compilation-tests/engine-010-history.scrml": {
@@ -1227,7 +1227,7 @@
     "EXTRA-FIELD": 42,
     "FIELD-SHAPE": 9,
     "KIND-NAME": 8,
-    "MISSING-FIELD": 39,
+    "MISSING-FIELD": 40,
     "SPAN-COORD": 27
   },
   "samples/compilation-tests/engine-011-internal-rule.scrml": {
@@ -1235,7 +1235,7 @@
     "EXTRA-FIELD": 46,
     "FIELD-SHAPE": 11,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 31,
+    "MISSING-FIELD": 34,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/engine-012-hierarchy-cascade.scrml": {
@@ -1243,7 +1243,7 @@
     "EXTRA-FIELD": 96,
     "FIELD-SHAPE": 38,
     "KIND-NAME": 22,
-    "MISSING-FIELD": 66,
+    "MISSING-FIELD": 67,
     "SPAN-COORD": 46
   },
   "samples/compilation-tests/engine-013-payload-binding-bare.scrml": {
@@ -1251,7 +1251,7 @@
     "EXTRA-FIELD": 51,
     "FIELD-SHAPE": 14,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 41,
+    "MISSING-FIELD": 43,
     "SPAN-COORD": 26
   },
   "samples/compilation-tests/engine-014-payload-binding-paren.scrml": {
@@ -1267,7 +1267,7 @@
     "EXTRA-FIELD": 15,
     "FIELD-SHAPE": 7,
     "KIND-NAME": 6,
-    "MISSING-FIELD": 22,
+    "MISSING-FIELD": 23,
     "SPAN-COORD": 17
   },
   "samples/compilation-tests/engine-modern-002-effects.scrml": {
@@ -6361,7 +6361,7 @@
     "EXTRA-FIELD": 55,
     "FIELD-SHAPE": 46,
     "KIND-NAME": 18,
-    "MISSING-FIELD": 204,
+    "MISSING-FIELD": 206,
     "SPAN-COORD": 118
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {

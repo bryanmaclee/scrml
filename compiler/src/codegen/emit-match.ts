@@ -542,7 +542,7 @@ function resolveVariantFields(forType: string, fileAST: any): Map<string, string
  * value-expression, handled by parseExprToNode). Backtick / apostrophe are
  * ordinary interior chars (§4.18.3) and need no special handling here.
  */
-function displayTextLiteralInner(raw: string): string | null {
+export function displayTextLiteralInner(raw: string): string | null {
   const s = raw.trim();
   if (s.length < 2 || s[0] !== '"') return null;
   // Scan for the matching close `"`, honouring the three §4.18.3 escapes. The
