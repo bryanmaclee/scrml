@@ -23,9 +23,9 @@ The PA does NOT mark rows checked. PA's compile-tests are recorded in audit repo
 
 ---
 
-## Examples (28 files)
+## Examples (31 files)
 
-> NB — rows 23-27 are pending a VERIFIED sync (pre-existing gap); 28-flux added S193.
+> NB — rows 23-27 synced S210 (closing the pre-existing ledger gap); 28-flux added S193; 29-31 added S197. Every row is human-unverified by design — only the USER flips `[x]`.
 
 | # | Example | Verified | Verified at | Notes |
 |---|---|---|---|---|
@@ -51,6 +51,11 @@ The PA does NOT mark rows checked. PA's compile-tests are recorded in audit repo
 | 20 | `20-middleware.scrml` | [ ] | — | NEW S42 — §40 `<program>` attrs + `handle()` |
 | 21 | `21-navigation.scrml` | [ ] | — | NEW S42 — §20 `navigate()` + `route` |
 | 22 | `22-multifile/app.scrml` | [ ] | — | NEW S42 — §21 cross-file imports + pure-type files. 3 files in subdir. |
+| 23 | `23-trucking-dispatch/app.scrml` | [ ] | — | Multi-file full-stack dispatch app (channels/components/models/pages + `dispatch.db`). Added 2026-04-29. |
+| 24 | `24-tilde-pipeline.scrml` | [ ] | — | §32 `~` last-unbound-expression carry-forward (pipeline accumulator). |
+| 25 | `25-triage-board.scrml` | [ ] | — | NEW S95 — §51.0.S engine-message-dispatch worked example. |
+| 26 | `26-type-derived-schema.scrml` | [ ] | — | NEW S104 — §41.15 `schemaFor(StructType)` (L22 type-as-arg #3). |
+| 27 | `27-type-derived-table.scrml` | [ ] | — | NEW S105 — §41.16 `<tableFor for=T rows=@cell>` (L22 type-as-arg #4). |
 | 28 | `28-flux.scrml` | [ ] | — | NEW S193 — the Flux shifting-labyrinth game (dog-food; will replace 14-mario). Runtime-sim test at `compiler/tests/unit/28-flux-runtime-sim.test.js`. |
 | 29 | `29-engine-vs-flags.scrml` | [ ] | — | NEW S197 — flags→engine teaching example (gap G1). PA-R26 clean (exit 0; bare-body engine, gap-184-safe). Awaiting human verification. |
 | 30 | `30-validated-form.scrml` | [ ] | — | NEW S197 — decl-coupled validators + `@signup.isValid` + `<errors of=>` (gap G4, the "no zod" lesson). PA-R26 clean (info-only I-FN-PROMOTABLE on the persist stub). |

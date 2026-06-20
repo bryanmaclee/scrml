@@ -157,7 +157,19 @@ async function main() {
       // Wait a tick for reactive initialization
       await page.evaluate(() => new Promise((r) => setTimeout(r, 100)));
 
-      // Check 1: no JS errors (exclude server-fetch errors for full-stack examples)
+      // Check 1: no JS errors.
+      //
+      // SERVER examples fetch from a scrml server route; this harness serves the
+      // STATIC dist with NO server, so a data fetch 404s. Tolerate ONLY the
+      // literal network-absence artifact (the 404 body "Not found") — NOT
+      // `_scrml_fetch_` / `SyntaxError`. Those are the codegen-bug class
+      // (acceptance bug 2: an unbound `_scrml_fetch_` ref / invalid emitted JS);
+      // blanket-suppressing them HID real bugs of that shape. The
+      // NO-ERROR-CLASS-SUPPRESSION discipline (compiler/tests/e2e-render-map/) is
+      // the canonical, no-suppression error-class classifier for these server
+      // examples — it mounts them server-less and records their state directly
+      // (and adds an explicit needs-server cell-state). This static smoke test
+      // tolerates only the genuine missing-server network signature.
       const SERVER_EXAMPLES = new Set([
         "03-contact-book", "07-admin-dashboard", "08-chat",
       ]);
@@ -165,7 +177,7 @@ async function main() {
         (e) =>
           !e.includes("favicon") &&
           !e.includes("404") &&
-          !(SERVER_EXAMPLES.has(name) && (e.includes("Not found") || e.includes("_scrml_fetch_") || e.includes("SyntaxError")))
+          !(SERVER_EXAMPLES.has(name) && e.includes("Not found"))
       );
 
       // Check 2: page has content
