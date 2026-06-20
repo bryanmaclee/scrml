@@ -370,6 +370,15 @@ export interface EngineMetadata {
    *  and with `initial=@cell` (E-ENGINE-SERVER-WITH-INITIAL-CELL); MAY coexist
    *  with `initial=.Literal` (the SSR/pre-load placeholder). */
   serverSource: string | null;
+  /** §52 / §51.0.A (ss2 item 2, 2026-06-19) — true iff a BARE `server` flag
+   *  (`<engine for=T server>`, NO `=@source`) appeared on the opener. §51.0.A
+   *  asserts an engine cell MAY itself be `server`-authoritative (§52 Tier 2),
+   *  but the §52 read/load-into-engine-cell path (the engine-hydration Approach-F
+   *  E-leg) is UNBUILT. B15 fires `W-ENGINE-SERVER-DEFERRED` (warning) when set —
+   *  the flag is recognized-but-not-yet-wired, so it currently has NO effect; the
+   *  wired alternative is `server=@source` (§51.0.E, S199). Mutually exclusive with
+   *  `serverSource` by shape (the parser's `=@` discriminator). Defaults `false`. */
+  serverFlagBare: boolean;
   /** Reactive expression string from `derived=expr`, when present.
    *  Stored as the raw AST shape for B16 to consume in cycle detection.
    *  Today's parser stores `engine-decl.sourceVar` (legacy single-var form)
@@ -5205,6 +5214,13 @@ function makeEngineRecord(
     typeof engineDecl.serverSource === "string" && engineDecl.serverSource.length > 0
       ? engineDecl.serverSource
       : null;
+  // §52 / §51.0.A (ss2 item 2) — the BARE `server` flag (no `=@source`). The
+  // parser records a standalone `server` token as engineDecl.serverFlagBare; B15
+  // fires W-ENGINE-SERVER-DEFERRED (the §52 Tier-2 engine-cell READ/hydrate E-leg
+  // is UNBUILT). Mutually exclusive with serverSource by shape; guard on both
+  // here so a hypothetical decl carrying both never double-counts.
+  const serverFlagBare: boolean =
+    engineDecl.serverFlagBare === true && serverSource === null;
   const isPinned: boolean = engineDecl.pinned === true;
   const isExported: boolean = engineDecl.isExported === true;
   // Derived expression — three §51.0.J / §51.9 shapes (S190 completes the set):
@@ -5274,6 +5290,7 @@ function makeEngineRecord(
     initialVariant,
     initialCell,
     serverSource,
+    serverFlagBare,
     derivedExpr,
     varName,
     isExported,
@@ -6329,6 +6346,39 @@ export function validateEngineStateChildrenAndRules(
     if (!isDerived && meta.initialCell === null) {
       validateServerSourceHydration(meta, engineDecl, errors, filePath, variants);
     }
+  } else if (meta.serverFlagBare === true) {
+    // Step 2.5b — §52 / §51.0.A (ss2 item 2, 2026-06-19) — DEFERRAL NUDGE for the
+    // BARE `server` flag (`<engine for=T server>`, NO `=@source`). §51.0.A asserts
+    // an engine cell MAY itself be `server`-authoritative (§52 Tier 2), but the §52
+    // read/load-into-engine-cell path (the engine-hydration Approach-F E-leg) is
+    // UNBUILT. Pre-ss2 the bare flag was parsed-and-DROPPED with ZERO diagnostics —
+    // a silent no-op of an asserted-valid attribute (worse than an error, per
+    // `feedback_dont_soft_classify_bugs`; known-gaps.md:196). Fire a WARNING (NOT an
+    // error — the feature is asserted-valid, just not yet wired) telling the adopter
+    // the flag is recognized-but-not-yet-wired so it currently has NO effect, and
+    // pointing to the wired alternative `server=@source` (§51.0.E, S199). The `else
+    // if` makes this mutually exclusive with the serverSource E-leg block above.
+    //
+    // Stream partition (feedback_diagnostic_stream_partition): a `W-` code +
+    // severity:"warning" routes to result.warnings (non-fatal — no CLI exit 1),
+    // mirroring the sibling W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE. fireB15Diagnostic
+    // stamps the severity; the api.js final split (W-/I- prefix OR severity
+    // warning/info -> warnings) carries it to the warning stream.
+    fireB15Diagnostic(
+      errors,
+      "W-ENGINE-SERVER-DEFERRED",
+      `W-ENGINE-SERVER-DEFERRED: \`<engine for=${forType} server>\` declares a bare ` +
+      `\`server\` flag (a server-authoritative engine cell, §51.0.A / §52 Tier 2), but the ` +
+      `§52 read/hydrate-INTO-an-engine-cell path (the engine-hydration E-leg) is NOT YET ` +
+      `WIRED — the flag is recognized but currently has NO effect (the engine compiles as a ` +
+      `plain client-side engine). For server-authoritative reactive hydration TODAY, use ` +
+      `\`server=@source\` (§51.0.E, S199): name a server-owned source cell the engine ` +
+      `hydrates from GUARD-FREE on every change (e.g. \`<engine for=${forType} server=@status>\`). ` +
+      `This is a DEFERRAL nudge, not an error; the bare-flag form lights up when the E-leg lands.`,
+      engineDecl,
+      filePath,
+      "warning",
+    );
   }
 
   // Step 3 — parse state-children. M6.6.b.2: prefer the native block-tree
