@@ -1,9 +1,9 @@
-<!-- @digest head=6333fd28 delta-seq=24 -->
+<!-- @digest head=85d9e958 delta-seq=26 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `6333fd28`** + delta-log **[24]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `6333fd28`
+> **HEAD `85d9e958`** + delta-log **[26]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `85d9e958`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,8 +13,8 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `6333fd28`
-- **HIGH 0** · MED 11 · LOW 18 · Nominal 8
+## Board — from `@gap` tokens @ `85d9e958`
+- **HIGH 0** · MED 11 · LOW 17 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 4 `rule` (delta-log S209 — 2026-06-19)
@@ -24,15 +24,15 @@
 - `[22]` rule · **cPA launch→monitor CORRECTION RATIFIED + LANDED** (user "I can fire sPAs manually" + "land the edit"). Deeper point the user drove (correct): even (b)/(c) don… → cpa-scrml.md + cpa.md + DD OQ#2
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[18]` state · **DEPUTY DIED at tick 95** (~17:22; the session-only cron `e5b76890` died with the crashed PA instance — no ticks at 17:37/18:07; worktree idle). tick-95 digest… → digest + deputy-maint reset
-- `[19]` disp · DESPACE arc — Part A LANDED+PUSHED (bf390560: §4 opener prose + 5 EBNF + §51/§54 reconciled to no-space-canonical/NR-authoritative; W-MACRO-001 RETIRED; empiric… → bf390560 + a087942d
 - `[20]` disp · **sPA ss2 (engine-codegen) + ss14 (flograph-residuals) LAUNCHED IN PARALLEL** (cPA-workflow first live test). Disjoint surfaces (ss2=emit-engine.ts/engine-graph… → spa/ss2 + spa/ss14 (watch)
 - `[21]` find · **cPA MV first-live-test finding** (cpa-state tick 2, 19:16): cPA smoke-tested status✓ / stow-write-before-act✓ / passthrough-boundary✓, but **sPA-launch was a… → cpa-state tick 2
 - `[23]` disp/land · **sPA ss14 (flograph-residuals) RE-INTEGRATED** (user "14 is done"). PA-verified (S83: tip 02fa09db==reported, merge-base c734ec35, 0 file-overlap w/ main's des… → 51d7bd5a + known-gaps
 - `[24]` disp/land · **sPA ss2 (engine-codegen-statechild) RE-INTEGRATED** (user "ss2 done"). PA-verified (S83: tip 0cbc99fd, base c734ec35; ALL source files disjoint → clean auto-m… → ss2 merge + known-gaps
+- `[25]` disp/land · **sPA ss5 (channel-codegen) RE-INTEGRATED** (user "ss5 and ss6 done"). PA-verified (S83: tip a67f04a4, base b67cd6e6 = current main, FF-able clean, NO SPEC.md).… → ss5 merge + known-gaps
+- `[26]` disp/land · **sPA ss6 (type-system-lifecycle) RE-INTEGRATED — NO-EXECUTE** (user "ss5 and ss6 done"). 0 code, all 7 items parked (the spa-scrml.md "whole list stalls → repo… → ss6 merge
 
 ## State
-- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark b67cd6e6, HEAD 6333fd28)
+- Version: 0.7.0 · maps: 10 commits behind HEAD (watermark b67cd6e6, HEAD 85d9e958)
 - Recent wraps:
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
