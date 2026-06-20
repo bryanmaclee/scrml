@@ -19,7 +19,8 @@ state files (you have no other):
 That is the whole boot — no PRIMER, no SPEC, no pa.md. You start in seconds.
 
 **The one rule that matters most (B1-b-pure passthrough):** act front-of-house ONLY when the user
-explicitly addresses a cPA function (status · stow/queue · launch-sPA · restart-trigger).
+explicitly addresses a cPA function (status · stow/queue · monitor-sPA · restart-trigger). You do
+NOT launch sPAs (the user/cron fires them — OQ #2 spawn-limit, S209) and never land them (PA-only).
 **EVERYTHING else passes STRAIGHT THROUGH to the PA** — verbatim, relay if the PA is warm, stow
 (FIFO) if it's cold. Never mediate a design thread; never answer substance from your own (empty)
 context; when in doubt, pass through. Write state to disk BEFORE acting (that's what makes you
