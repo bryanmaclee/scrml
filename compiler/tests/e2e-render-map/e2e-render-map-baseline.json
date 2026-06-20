@@ -1,20 +1,21 @@
 {
   "_meta": {
-    "generated": "2026-06-17T20:40:54.550Z",
+    "generated": "2026-06-20T15:19:20.219Z",
     "apps": 434,
     "cells": 438,
     "histogram": {
       "renders-empty": 20,
-      "compiles-but-throws": 30,
-      "renders-clean": 257,
-      "smell-detected-wrong": 2,
-      "fails-compile": 128,
+      "compiles-but-throws": 31,
+      "renders-clean": 259,
+      "fails-compile": 126,
+      "smell-detected-wrong": 1,
       "HARNESS-TIMEOUT": 1
     },
     "note": "e2e L1 render known-failure map. Gaps existing is NOT a failure; the delta-gate fails only on a green->red regression. NO error-class suppression — every state is recorded."
   },
   "cells": {
     "benchmarks/fullstack-scrml/app.scrml#empty": {
+      "tier": "perf",
       "state": "renders-empty",
       "smells": [
         "NO-HTML-EMITTED"
@@ -22,6 +23,7 @@
       "seeded": false
     },
     "benchmarks/per-route-roles/routes/loads.scrml#empty": {
+      "tier": "perf",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -32,111 +34,127 @@
       }
     },
     "benchmarks/todomvc/app.scrml#empty": {
+      "tier": "perf",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/01-hello.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/02-counter.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/03-contact-book.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/03-contact-book.scrml#populated": {
-      "state": "smell-detected-wrong",
-      "smells": [
-        "S-NULLISH-TEXT"
-      ],
-      "seeded": true,
-      "detail": {
-        "nullishText": "undefined"
-      }
+      "tier": "flagship",
+      "state": "renders-clean",
+      "smells": [],
+      "seeded": true
     },
     "examples/04-live-search.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/05-multi-step-form.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/06-kanban-board.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/06-kanban-board.scrml#populated": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": true
     },
     "examples/07-admin-dashboard.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/08-chat.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/09-error-handling.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/10-inline-tests.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/11-meta-programming.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/12-snippets-slots.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/13-worker.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/14-mario-state-machine.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/15-channel-chat.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/16-remote-data.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/16-remote-data.scrml#populated": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": true
     },
     "examples/17-schema-migrations.scrml#empty": {
+      "tier": "flagship",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -147,26 +165,31 @@
       }
     },
     "examples/18-state-authority.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/19-lin-token.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/20-middleware.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/21-navigation.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/22-multifile/app.scrml#empty": {
+      "tier": "flagship",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -177,6 +200,7 @@
       }
     },
     "examples/23-trucking-dispatch/app.scrml#empty": {
+      "tier": "flagship",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -187,51 +211,61 @@
       }
     },
     "examples/24-tilde-pipeline.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/25-triage-board.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/25-triage-board.scrml#populated": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": true
     },
     "examples/26-type-derived-schema.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "examples/27-type-derived-table.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/28-flux.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/29-engine-vs-flags.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/30-validated-form.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "examples/31-reach-discipline.scrml#empty": {
+      "tier": "flagship",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/api-dashboard.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -257,11 +291,13 @@
       }
     },
     "samples/compilation-tests/channel-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/component-scoped-css.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -284,6 +320,7 @@
       }
     },
     "samples/compilation-tests/css-scope-01.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -306,66 +343,79 @@
       }
     },
     "samples/compilation-tests/engine-005-ontimeout-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-006-ontimeout-computed.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-007-cancel-timer.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-008-onidle-watchdog.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-009-hierarchy-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-010-history.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-011-internal-rule.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-012-hierarchy-cascade.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-013-payload-binding-bare.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-014-payload-binding-paren.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-modern-001-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/engine-modern-002-effects.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -376,11 +426,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-r10-react-wizard.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-r10-rust-orders.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW",
@@ -392,6 +444,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -407,21 +460,18 @@
       }
     },
     "samples/compilation-tests/gauntlet-r10-svelte-dashboard.scrml#empty": {
-      "state": "fails-compile",
+      "tier": "probe",
+      "state": "compiles-but-throws",
       "smells": [
-        "D0-COMPILE-ERROR"
+        "D1-MOUNT-THROW"
       ],
       "seeded": false,
       "detail": {
-        "compileErrorCodes": [
-          "E-SCOPE-001"
-        ],
-        "compileErrorMessages": [
-          "E-SCOPE-001: Unquoted identifier `1000` in attribute `interval` cannot be resolved in the current scope. Did you mean to quote it as a string (`\"1000\"`), or use `@` for a reactive variable (`@1000`)?"
-        ]
+        "throwMessage": "Cannot access 'barIndex' before initialization."
       }
     },
     "samples/compilation-tests/gauntlet-r10-ts-components.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -447,6 +497,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -462,11 +513,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-program-009.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-sql-004.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -482,21 +535,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-server-prefix-013.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-server-005.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-function-with-sql-002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-navigate-server-003.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -514,16 +571,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-file-level-003.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-bare-006.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-derived-from-local-009.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -539,21 +599,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-not-007.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-optimistic-008.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-server-reactive-typed-010.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-type-enum-inside-program-013.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -569,11 +633,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-bare-011.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-named-012.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -589,6 +655,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-use-vendor-013.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -604,6 +671,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-in-element-091.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -621,6 +689,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-no-scope-092.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -642,6 +711,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-non-fn-094.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -659,6 +729,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-zero-args-093.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -676,6 +747,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-break-outside-loop-056.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -691,6 +763,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-label-108.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -701,6 +774,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-outside-loop-057.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -716,6 +790,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-064.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -726,6 +801,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-assign-expr-106.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -736,6 +812,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-double-020.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -753,6 +830,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-attr-orphan-018.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -768,6 +846,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-else-if-orphan-019.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -785,11 +864,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-failable-fn-076.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-fail-in-non-failable-077.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -805,6 +886,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-failable-unhandled-call-078.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -820,11 +902,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-break-054.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-continue-055.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -835,6 +919,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-cstyle-047.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -845,6 +930,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -860,6 +946,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-in-jsobj-053.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -875,11 +962,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -895,11 +984,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -915,16 +1006,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-without-key-primitive-100.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-object-iteration-052.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-bare-044.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -935,6 +1029,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-const-046.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -945,6 +1040,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-of-let-045.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -955,11 +1051,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-multi-088.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-old-syntax-089.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -970,6 +1068,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-property-path-090.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -985,11 +1084,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-given-single-087.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-and-else-same-elem-021.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1005,41 +1106,49 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-else-008.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-in-markup-interp-105.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-intermediate-014.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-multi-lift-011.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-009.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-no-else-narrow-010.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-complete-013.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-partial-012.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW",
@@ -1051,16 +1160,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-union-types-015.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-bare-016.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-chain-after-unrelated-099.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1076,61 +1188,73 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-attr-show-compose-110.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-003.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-attr-chain-017.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-chain-004.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-else-if-long-chain-005.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-nested-deep-107.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-single-line-no-braces-006.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-bare-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-multi-002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-reactive-write-096.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-stmt-sql-in-body-097.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-triple-equals-007.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1146,6 +1270,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-arm-after-else-extra-101.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1161,6 +1286,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-block-arm-034.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW",
@@ -1172,16 +1298,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-colon-arrow-024.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-dash-arrow-023.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-duplicate-arm-030.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1197,11 +1326,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-default-027.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-not-last-029.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1217,11 +1348,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-fat-arrow-022.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-given-in-arm-104.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1241,6 +1374,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-guard-clause-035.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1262,11 +1396,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-for-lift-098.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-markup-direct-040.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1282,11 +1418,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-mixed-arrows-025.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-non-exhaustive-026.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1302,6 +1440,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-asIs-103.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1317,6 +1456,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-struct-037.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1332,6 +1472,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-optional-039.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1349,41 +1490,49 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-arity-033.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-named-032.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-payload-positional-031.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-redundant-else-102.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-return-038.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-type-mismatch-arms-036.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-underscore-default-028.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-nested-if-in-for-in-while-095.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -1394,11 +1543,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-all-covered-042.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-in-lift-043.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1418,16 +1569,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-stmt-041.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-bare-079.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-top-level-080.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1443,11 +1597,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-void-081.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-fallthrough-072.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1467,6 +1623,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-statement-071.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1486,6 +1643,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-throw-statement-075.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1501,6 +1659,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-catch-073.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1516,6 +1675,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-try-finally-074.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1531,21 +1691,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-multi-083.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-changes-single-082.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-empty-body-084.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW",
@@ -1557,11 +1721,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-self-write-085.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-as-expr-bare-063.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1577,16 +1743,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-double-paren-060.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-assign-single-paren-059.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-bare-058.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -1597,6 +1766,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-crosses-fn-068.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1612,6 +1782,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-missing-label-066.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1627,6 +1798,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-duplicate-label-067.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1642,6 +1814,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-labeled-break-outer-065.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -1652,11 +1825,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-061.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lift-in-fn-062.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1672,6 +1847,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-lin-consume-inside-069.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1687,6 +1863,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-nested-if-070.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -1697,16 +1874,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-decimal-046.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-div-044.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-match-arm-cond-118.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1722,6 +1902,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-sql-interp-048.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D2-CONSOLE-ERROR"
@@ -1735,66 +1916,79 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-minus-042.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mod-045.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-mul-043.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-negative-047.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-plus-041.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-bare-061.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-empty-063.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-array-literal-mixed-062.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-block-body-070.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-expr-body-069.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-multi-params-072.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arrow-no-params-071.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-chained-080.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1810,6 +2004,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-declaration-083.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1825,21 +2020,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-double-paren-078.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-in-array-literal-112.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-single-paren-079.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-to-const-081.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1855,6 +2054,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-undeclared-082.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1870,46 +2070,55 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-while-077.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gt-051.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-gte-052.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lt-049.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-lte-050.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-cmp-string-053.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-deep-method-chain-113.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-asis-warn-104.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-cross-type-022.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1925,11 +2134,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-enum-var-103.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-function-field-119.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1947,11 +2158,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-in-sql-bound-024.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-not-rewrite-019.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1967,6 +2180,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-null-forbidden-020.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -1982,11 +2196,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-numeric-014.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-strict-rewrite-017.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2002,16 +2218,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-string-015.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-struct-deep-023.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-undefined-forbidden-021.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2029,11 +2248,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-fn-arg-expr-091.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-for-arith-iterable-090.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2049,11 +2270,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-multi-095.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-property-path-096.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2069,31 +2292,37 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-given-single-094.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-attribute-quoted-111.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-markup-as-attr-value-108.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-when-guard-093.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-is-not-not-105.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-non-enum-004.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2109,6 +2338,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-none-bare-008.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2124,26 +2354,31 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-006.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-bare-compound-012.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-fn-return-116.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-logic-interp-013.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-sql-098.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D2-CONSOLE-ERROR"
@@ -2157,31 +2392,37 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-method-call-paren-010.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-on-sql-get-114.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-reactive-009.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-bare-007.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-some-paren-call-011.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-unknown-variant-005.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2197,61 +2438,73 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-bare-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-class-attr-003.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-variant-reactive-002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-054.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-is-057.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-and-with-optchain-115.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-bang-056.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-or-055.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-logical-short-circuit-optional-099.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-arrow-variant-073.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-arm-dash-arrow-074.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-given-arm-075.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2269,21 +2522,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-is-expr-117.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-arm-101.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-no-wildcard-102.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-optional-no-arms-076.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2303,21 +2560,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-chain-087.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-in-attr-089.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-on-optchain-109.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-sql-088.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D2-CONSOLE-ERROR"
@@ -2331,11 +2592,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-numeric-016.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-strict-rewrite-018.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2351,11 +2614,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-025.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-assign-to-non-optional-026.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2371,11 +2636,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-in-array-literal-120.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-prefix-negation-027.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2391,46 +2658,55 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-basic-033.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-chained-035.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-in-interp-034.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-is-some-107.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-nullish-with-not-literal-036.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-bare-064.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-object-literal-shorthand-065.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-old-presence-guard-097.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -2441,11 +2717,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-deep-040.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-method-call-039.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2461,106 +2739,127 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-property-037.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-reactive-038.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-paren-grouping-arith-100.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-computed-085.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-dotted-084.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-prop-access-reactive-086.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-return-expr-092.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-array-066.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-as-fn-args-110.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-object-067.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-spread-reactive-068.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-mixed-type-059.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-strconcat-plus-058.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-template-literal-060.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-bare-029.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-in-interp-030.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-condition-032.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-is-not-106.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-ternary-nested-031.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-braces-ghost-020.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-component-sql-071.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2578,36 +2877,43 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-fn-non-event-023.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-interpolated-019.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-attr-reactive-018.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-checked-030.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-conflict-035.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-group-031.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-non-reactive-033.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2625,11 +2931,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-path-032.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-unsupported-attr-034.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2647,11 +2955,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-bind-value-text-029.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-bare-ident-039.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2667,21 +2977,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-directive-036.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-class-multiple-037.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-className-ghost-040.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-extra-prop-054.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2697,16 +3011,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-inline-def-052.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-jsx-brace-ghost-057.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2722,6 +3039,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-missing-prop-053.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2739,6 +3057,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-props-dup-055.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2754,41 +3073,49 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-reactive-prop-056.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-dynamic-class-template-076.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-jsx-arrow-ghost-027.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-logic-wrapper-028.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onclick-024.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-oninput-026.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-event-onsubmit-025.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-for-markup-044.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2808,6 +3135,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-else-043.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2825,46 +3153,55 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-if-attr-static-042.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-jsx-logical-and-ghost-073.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-duplicate-keys-050.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-keyed-049.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-lift-outside-accumulation-072.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-onclick-tilde-decl-074.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-basic-059.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-default-children-060.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-in-lift-062.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2880,26 +3217,31 @@
       }
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-no-spread-061.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-slot-non-snippet-063.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-text-interp-064.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-textarea-no-closer-068.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2915,6 +3257,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-channels/channel-multiple-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2932,6 +3275,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-channels/channel-shared-state-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2947,16 +3291,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-after-markup-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-bindings-capture-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-bun-eval-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2978,11 +3325,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-cleanup-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-compile-time-pure-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -2998,21 +3347,25 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-emit-raw-002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-empty-block-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-in-component-001.scrml#empty": {
+      "tier": "probe",
       "state": "smell-detected-wrong",
       "smells": [
         "S-NULLISH-TEXT"
@@ -3023,11 +3376,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-in-function-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-lift-006.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3043,11 +3398,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-lin-capture-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-lin-double-consume-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3063,16 +3420,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-match-in-meta-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-multiple-blocks-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-nested-deep-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3088,6 +3448,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-phase-sep-005.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3103,16 +3464,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-hybrid-002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-outside-008.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3128,6 +3492,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-reflect-unknown-003.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3147,16 +3512,19 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-runtime-reactive-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-scopeid-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-sql-runtime-007.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3172,6 +3540,7 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-type-registry-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3187,26 +3556,35 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-sql/server-var-001.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
-        "D1-MOUNT-THROW"
+        "D2-CONSOLE-ERROR"
       ],
       "seeded": false,
       "detail": {
-        "throwMessage": "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
+        "consoleErrors": [
+          "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')",
+          "[window.onerror] undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
+        ]
       }
     },
     "samples/compilation-tests/gauntlet-s20-sql/server-var-multiple-001.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
-        "D1-MOUNT-THROW"
+        "D2-CONSOLE-ERROR"
       ],
       "seeded": false,
       "detail": {
-        "throwMessage": "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
+        "consoleErrors": [
+          "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')",
+          "[window.onerror] undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
+        ]
       }
     },
     "samples/compilation-tests/gauntlet-s20-styles/css-flat-and-scoped-001.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3226,11 +3604,13 @@
       }
     },
     "samples/compilation-tests/gauntlet-s20-styles/css-global-program-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/helpers/dnd-setup.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3252,16 +3632,19 @@
       }
     },
     "samples/compilation-tests/library-mode-types.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/lin-001-basic-linear.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/lin-002-double-use.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3277,68 +3660,67 @@
       }
     },
     "samples/compilation-tests/machine-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/match-pipe-alternation.scrml#empty": {
-      "state": "fails-compile",
-      "smells": [
-        "D0-COMPILE-ERROR"
-      ],
-      "seeded": false,
-      "detail": {
-        "compileErrorCodes": [
-          "E-SYNTAX-011",
-          "E-TYPE-020"
-        ],
-        "compileErrorMessages": [
-          "E-SYNTAX-011: Match arm guard clauses (`| cond` or `if cond`) are not supported in v1 (§18.10). Arm: `. Red |...`. Use a plain pattern and move the condition into an `if` inside the arm body.",
-          "E-TYPE-020: Non-exhaustive match over enum type `Color`. Missing variants: ::Green. Add arms for the missing variants, or add an `else` arm to handle them all."
-        ]
-      }
+      "tier": "probe",
+      "state": "renders-clean",
+      "smells": [],
+      "seeded": false
     },
     "samples/compilation-tests/meta-001-emit-html.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-001-reflect-enum.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-002-reflect-struct.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-002-reflect.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-011-for-of-loop.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-012-reflect-callback-param.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-013-runtime-meta-dg002.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-component-gen.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-conditional-markup.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3356,26 +3738,31 @@
       }
     },
     "samples/compilation-tests/meta-data-table.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-loop-gen.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/meta-style-gen.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/modern-004-canary-pattern.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/modern-007-dnd-with-helpers.scrml#empty": {
+      "tier": "probe",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3386,26 +3773,30 @@
           "E-IMPORT-006"
         ],
         "compileErrorMessages": [
-          "E-IMPORT-006: Cannot resolve import `./helpers/dnd-setup.scrml` — no file found at `/tmp/scrml-e2e-render-map/case-mqijc5mr-9sbefyp3/helpers/dnd-setup.scrml`. Check the path and file name. Relative imports are resolved against the importing file's directory."
+          "E-IMPORT-006: Cannot resolve import `./helpers/dnd-setup.scrml` — no file found at `/tmp/scrml-e2e-render-map/case-mqmi63wp-kokgjnfo/helpers/dnd-setup.scrml`. Check the path and file name. Relative imports are resolved against the importing file's directory."
         ]
       }
     },
     "samples/compilation-tests/multi-meta-source-order.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/payload-variants-001.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/postgres-program-driver.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/protect-001-basic-auth.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW"
@@ -3416,21 +3807,25 @@
       }
     },
     "samples/compilation-tests/schemaFor-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/snippet-001-basic-slot.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/snippet-002-parametric.scrml#empty": {
+      "tier": "probe",
       "state": "renders-empty",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/state-type-001-custom.scrml#empty": {
+      "tier": "probe",
       "state": "compiles-but-throws",
       "smells": [
         "D1-MOUNT-THROW",
@@ -3442,21 +3837,25 @@
       }
     },
     "samples/compilation-tests/tableFor-basic.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/when-001-basic-effect.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/compilation-tests/when-002-message-handler.scrml#empty": {
+      "tier": "probe",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/debate-async-dashboard-react-perspective.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3481,6 +3880,7 @@
       }
     },
     "samples/debate-lin-lift-edge-cases.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3498,6 +3898,7 @@
       }
     },
     "samples/debate-lin-lift-pipeline.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3513,6 +3914,7 @@
       }
     },
     "samples/expense-tracker.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3530,6 +3932,7 @@
       }
     },
     "samples/file-manager-r11.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3545,6 +3948,7 @@
       }
     },
     "samples/gauntlet-r11-elixir-chat.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3560,11 +3964,13 @@
       }
     },
     "samples/gauntlet-r11-task-dashboard.scrml#empty": {
+      "tier": "stress",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/gauntlet-r11-zig-buildconfig.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3582,6 +3988,7 @@
       }
     },
     "samples/gauntlet-r11/rust-state-machine.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3607,6 +4014,7 @@
       }
     },
     "samples/gauntlet-r14/go-api-service.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3618,12 +4026,13 @@
           "E-CPS-NONIDEM-NO-STORAGE"
         ],
         "compileErrorMessages": [
-          "E-PA-002: Database file `/tmp/scrml-e2e-render-map/case-mqijcbaw-opkmk2p4/api.db` does not exist and no CREATE TABLE statement was found in any `?{}` block for table `entries`. Either create the database file first, or add a CREATE TABLE statement in a `?{}` block so the compiler can validate the schema at compile time.",
+          "E-PA-002: Database file `/tmp/scrml-e2e-render-map/case-mqmi6b6g-0ivf1ghm/api.db` does not exist and no CREATE TABLE statement was found in any `?{}` block for table `entries`. Either create the database file first, or add a CREATE TABLE statement in a `?{}` block so the compiler can validate the schema at compile time.",
           "E-CPS-NONIDEM-NO-STORAGE: CPS-eligible function `updateEntry` has a non-monotone server batch (per SPEC §19.9.6 classifier), but no idempotency-key storage backend is configured. Resolution: declare `<program idempotency-store=>` matching the `db=` driver, import `scrml:redis`, or annotate the function with `.idempotent()` (§19.9.7) if the batch is monotone-by-construction."
         ]
       }
     },
     "samples/gauntlet-r15/stress-bun-eval-markup.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3639,6 +4048,7 @@
       }
     },
     "samples/gauntlet-r15/stress-meta-for-of-emit.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3664,6 +4074,7 @@
       }
     },
     "samples/gauntlet-r18/go-dev.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3689,6 +4100,7 @@
       }
     },
     "samples/gauntlet-r18/rails-dev.scrml#empty": {
+      "tier": "stress",
       "state": "HARNESS-TIMEOUT",
       "smells": [
         "MOUNT-HANG"
@@ -3700,6 +4112,7 @@
       }
     },
     "samples/gauntlet-r18/react-dev.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3725,11 +4138,13 @@
       }
     },
     "samples/gauntlet-r18/svelte-dev.scrml#empty": {
+      "tier": "stress",
       "state": "renders-clean",
       "smells": [],
       "seeded": false
     },
     "samples/gauntlet-r18/vue-dev.scrml#empty": {
+      "tier": "stress",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3755,6 +4170,7 @@
       }
     },
     "samples/kanban-r11.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3774,6 +4190,7 @@
       }
     },
     "samples/quiz-app.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3784,18 +4201,18 @@
           "E-STYLE-001",
           "E-CTRL-001",
           "E-CTRL-002",
-          "E-SCOPE-001",
           "E-TYPE-025"
         ],
         "compileErrorMessages": [
           "E-STYLE-001: <style> blocks are not supported in scrml. Use #{} for CSS.\n  Hint: Run `scrml compile --convert-legacy-css` to auto-convert. (line 251, col 1)",
           "E-CTRL-001: `else` on line 143 has no preceding `if=` element at the same level. (line 143, col 5)",
           "E-CTRL-002: `else-if=` on line 96 has no preceding `if=` element at the same level. (line 96, col 5)",
-          "E-SCOPE-001: Unquoted identifier `1000` in attribute `interval` cannot be resolved in the current scope. Did you mean to quote it as a string (`\"1000\"`), or use `@` for a reactive variable (`@1000`)?"
+          "E-TYPE-025: Cannot match on `asIs`-typed subject. `match` requires a typed subject (enum, union, or primitive). Narrow the type first via a type annotation (`let x: SomeType = ...`) before matching."
         ]
       }
     },
     "samples/react-dev-lin-lift-edge-cases.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3813,6 +4230,7 @@
       }
     },
     "samples/react-dev-lin-lift-pipeline.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3828,6 +4246,7 @@
       }
     },
     "samples/rust-dev-debate-dashboard.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3849,6 +4268,7 @@
       }
     },
     "samples/rust-dev-lin-lift-edge-cases.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
@@ -3874,6 +4294,7 @@
       }
     },
     "samples/rust-dev-lin-lift-pipeline.scrml#empty": {
+      "tier": "sample",
       "state": "fails-compile",
       "smells": [
         "D0-COMPILE-ERROR"
