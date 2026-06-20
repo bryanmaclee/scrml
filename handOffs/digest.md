@@ -1,9 +1,9 @@
-<!-- @digest head=b9fcf825 delta-seq=26 -->
+<!-- @digest head=c2f8f1fd delta-seq=29 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `b9fcf825`** + delta-log **[26]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `b9fcf825`
+> **HEAD `c2f8f1fd`** + delta-log **[29]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `c2f8f1fd`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,26 +13,27 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `b9fcf825`
+## Board — from `@gap` tokens @ `c2f8f1fd`
 - **HIGH 0** · MED 11 · LOW 17 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 4 `rule` (delta-log S209 — 2026-06-19)
+## Recent rulings — last 5 `rule` (delta-log S209 — 2026-06-19)
 - `[6]` rule · GRAFT RATIFIED (user "record pa direct") — ship a-A(reason-death list)+b-B(footprint surface) as INVESTIGATION-SURFACES-WITH-CONTEXT not scores; gate b-A(dock-r… → design-insights.md
 - `[9]` rule · sPA AUTONOMY CORRECTION (user "they need to run autonomously. I had to nudge 1 along" + "Im still answering Qs for 11"). ENCODED: spa-scrml.md §"Standing autono… → spa-scrml.md + spa.md
 - `[11]` rule · WORK-PER-TOKEN tracking directive (user pushback) — PA gaining wrap-timing autonomy → START tracking wrap + session-start context draws across sessions; optimiz… → cPA DD curation
 - `[22]` rule · **cPA launch→monitor CORRECTION RATIFIED + LANDED** (user "I can fire sPAs manually" + "land the edit"). Deeper point the user drove (correct): even (b)/(c) don… → cpa-scrml.md + cpa.md + DD OQ#2
+- `[29]` rule/land · **ss6 flags B + C TAKEN** (user "take B and C"). **B:** §54.6.5 NEW code `E-STATE-TRANSITION-NO-RETURN` (spec-ahead/Nominal — enforcement deferred to the §54 su… → SPEC §54.6.5 + REGISTRY.md
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[20]` disp · **sPA ss2 (engine-codegen) + ss14 (flograph-residuals) LAUNCHED IN PARALLEL** (cPA-workflow first live test). Disjoint surfaces (ss2=emit-engine.ts/engine-graph… → spa/ss2 + spa/ss14 (watch)
-- `[21]` find · **cPA MV first-live-test finding** (cpa-state tick 2, 19:16): cPA smoke-tested status✓ / stow-write-before-act✓ / passthrough-boundary✓, but **sPA-launch was a… → cpa-state tick 2
-- `[23]` disp/land · **sPA ss14 (flograph-residuals) RE-INTEGRATED** (user "14 is done"). PA-verified (S83: tip 02fa09db==reported, merge-base c734ec35, 0 file-overlap w/ main's des… → 51d7bd5a + known-gaps
 - `[24]` disp/land · **sPA ss2 (engine-codegen-statechild) RE-INTEGRATED** (user "ss2 done"). PA-verified (S83: tip 0cbc99fd, base c734ec35; ALL source files disjoint → clean auto-m… → ss2 merge + known-gaps
 - `[25]` disp/land · **sPA ss5 (channel-codegen) RE-INTEGRATED** (user "ss5 and ss6 done"). PA-verified (S83: tip a67f04a4, base b67cd6e6 = current main, FF-able clean, NO SPEC.md).… → ss5 merge + known-gaps
 - `[26]` disp/land · **sPA ss6 (type-system-lifecycle) RE-INTEGRATED — NO-EXECUTE** (user "ss5 and ss6 done"). 0 code, all 7 items parked (the spa-scrml.md "whole list stalls → repo… → ss6 merge
+- `[27]` disp/land · **sPA ss9 (server-authority-keyword) RE-INTEGRATED** (user "ss9 and ss10 finished"). PA-verified (S83: tip 03d5d938, base 85d9e958 = current main, clean, no SPE… → ss9 merge + known-gaps
+- `[28]` disp/land · **sPA ss10 (e2e-render-map-test-hygiene) RE-INTEGRATED** (user "ss9 and ss10 finished"). PA-verified (S83: tip 070480b7, base 85d9e958, clean, disjoint from ss9… → ss10 merge
+- `[29]` rule/land · **ss6 flags B + C TAKEN** (user "take B and C"). **B:** §54.6.5 NEW code `E-STATE-TRANSITION-NO-RETURN` (spec-ahead/Nominal — enforcement deferred to the §54 su… → SPEC §54.6.5 + REGISTRY.md
 
 ## State
-- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 85d9e958, HEAD b9fcf825)
+- Version: 0.7.0 · maps: 15 commits behind HEAD (watermark 85d9e958, HEAD c2f8f1fd)
 - Recent wraps:
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
