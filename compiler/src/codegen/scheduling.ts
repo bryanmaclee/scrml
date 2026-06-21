@@ -307,6 +307,58 @@ export function extractInitExpr(stmt: ASTNode): string {
 }
 
 /**
+ * S212 g-lift-concurrent-transitive-exclusion-tdz (Repro B) — collect the names
+ * of every plain local that is REASSIGNED anywhere in `body`, recursing into
+ * nested control-flow bodies (loop / branch / match bodies). A declaration
+ * whose name appears here must not be lifted into a `const [...]` Promise.all
+ * destructure — the later reassignment would crash with "Assignment to constant
+ * variable".
+ *
+ * Two reassignment representations are collected:
+ *   1. A `bare-expr` whose `exprNode` is an `assign` with a bare-ident target
+ *      (`acc = acc.concat(x)` at the top level).
+ *   2. A `tilde-decl` / `lin-decl` re-using an already-declared name — this is
+ *      how the pipeline represents a reassignment of an existing local (e.g. a
+ *      `let acc = []` followed by `acc = …` inside a `for` body lowers the
+ *      `acc = …` to a `tilde-decl` carrying `name: "acc"`). The decl's OWN name
+ *      is added only by this rule (a `let`/`const` decl is NOT counted as a
+ *      reassignment of itself), so `declIsReassignedLater` flags exactly the
+ *      decls that a later statement mutates.
+ *
+ * `@`-prefixed (reactive) targets are skipped: a reactive cell is not a
+ * batch-eligible local decl, so it needs no entry here.
+ */
+function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>): void {
+  if (!Array.isArray(body)) return;
+  for (const stmt of body) {
+    if (!stmt || typeof stmt !== "object") continue;
+    const node = stmt as Record<string, unknown>;
+    const kind = node.kind;
+
+    if (kind === "bare-expr") {
+      const exprNode = node.exprNode as Record<string, unknown> | undefined;
+      if (exprNode && exprNode.kind === "assign") {
+        const target = exprNode.target as Record<string, unknown> | undefined;
+        if (target && target.kind === "ident" && typeof target.name === "string" && target.name) {
+          if (!target.name.startsWith("@")) sink.add(target.name);
+        }
+      }
+    } else if (kind === "tilde-decl" || kind === "lin-decl") {
+      // A `~`/`lin` decl re-binding an existing local IS a reassignment.
+      const name = node.name;
+      if (typeof name === "string" && name && !name.startsWith("@")) sink.add(name);
+    }
+
+    // Recurse into nested control-flow bodies — the reassignment commonly
+    // lives inside a `for` / `while` / `if` / `match` body.
+    for (const field of ["body", "consequent", "alternate"]) {
+      const nested = node[field];
+      if (Array.isArray(nested)) collectReassignedNames(nested as ASTNode[], sink);
+    }
+  }
+}
+
+/**
  * Schedule statements in a function body using dependency graph information.
  *
  * Identifies groups of independent operations and wraps them in Promise.all.
@@ -513,6 +565,56 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     return k === "let-decl" || k === "const-decl";
   }
 
+  // S212 g-lift-concurrent-transitive-exclusion-tdz (Repro B — the let-
+  // accumulator facet) — a Promise.all batch destructures its members with a
+  // `const [...]` binding. A `let acc = []` that is REASSIGNED later in the
+  // body (e.g. `acc = acc.concat(x)` inside a `for` loop) would be lifted into
+  // that const-destructure and then crash at the reassignment with "Assignment
+  // to constant variable". A declaration whose name is reassigned anywhere
+  // later in the body therefore MUST stay sequential (it emits its own
+  // `let`/`const` line, preserving the binding form). Scan the WHOLE body —
+  // including nested control-flow bodies — for assignment targets, since the
+  // reassignment commonly lives inside a loop/branch body.
+  const reassignedNames = new Set<string>();
+  collectReassignedNames(body, reassignedNames);
+  function declIsReassignedLater(stmt: ASTNode): boolean {
+    const name = (stmt as ASTNode).name;
+    return typeof name === "string" && name.length > 0 && reassignedNames.has(name);
+  }
+
+  // S212 g-lift-concurrent-transitive-exclusion-tdz — transitive dependency
+  // closure for the batch-eligibility test below.
+  //
+  // `depSets[k]` carries DIRECT dependencies of statement `k` (every body-DG
+  // `reads`/`writes`/`awaits`/`invalidates` edge folds `from`→`to` as
+  // `depSets[from].add(to)`, and the module-DG `awaits` loop the same). Because
+  // every such edge runs `to` BEFORE `from`, `depSets[k]` only ever contains
+  // indices strictly less than `k`. The Bug-56 fix uses these direct edges to
+  // force a batch boundary when a candidate reads a group member directly.
+  //
+  // The gap that fix left open: a Promise.all batch destructures ALL its
+  // members simultaneously, so a member may depend ONLY on statements already
+  // declared BEFORE the batch — never on another member (TDZ) and never on a
+  // statement emitted AFTER the batch. The direct check missed the TRANSITIVE
+  // chain: a candidate `j` that reads a SYNC local `e` which itself depends on
+  // an await-bound local got batched ahead of `e`'s declaration → TDZ at the
+  // member's read of `e`. Fixpoint the direct edges into a full transitive
+  // closure so excluded-ness propagates through any chain of intervening
+  // locals.
+  const depClosure: Set<number>[] = body.map(() => new Set<number>());
+  for (let k = 0; k < body.length; k++) {
+    const seen = depClosure[k];
+    const stack = [...depSets[k]];
+    while (stack.length > 0) {
+      const d = stack.pop()!;
+      if (seen.has(d)) continue;
+      seen.add(d);
+      for (const dd of depSets[d]) {
+        if (!seen.has(dd)) stack.push(dd);
+      }
+    }
+  }
+
   // Group independent statements (those with no inter-dependencies among the group)
   const visited = new Set<number>();
   let i = 0;
@@ -528,7 +630,10 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     const seedIsStatementShape = isStatementShapeStmt(body[i] as ASTNode);
     // S139 Bug 56 — if the seed stmt is not a decl, group stays size-1.
     // See isDeclShapeStmt comment above for the rationale.
-    const seedIsNonDecl = !isDeclShapeStmt(body[i] as ASTNode);
+    // S212 — a decl whose binding is reassigned later (a `let` accumulator)
+    // also forces the group to stay size-1: a multi-member batch would const-
+    // destructure it, breaking the later reassignment.
+    const seedIsNonDecl = !isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode);
 
     for (let j = i + 1; j < body.length; j++) {
       if (visited.has(j)) continue;
@@ -538,10 +643,20 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // S139 Bug 56 — non-decl stmts (reactive writes, expr-stmts) never join
       // multi-stmt groups. Their emit shape isn't safe as a Promise.all entry.
       if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) continue;
-      // Check if j is independent of all current group members
+      // S212 — a reassigned-later decl (`let acc = []`) never joins a multi-
+      // member batch: the const-destructure would break its later reassignment.
+      if (declIsReassignedLater(body[j] as ASTNode)) continue;
+      // S212 — a Promise.all member may only depend on statements declared
+      // BEFORE the batch (index < the seed `i`). The batch is emitted as a
+      // unit at the seed's position, and all prior groups (indices < i) are
+      // already emitted, so a transitive dependency at an index >= i is either
+      // another member (TDZ — both destructure simultaneously) or a statement
+      // emitted AFTER the batch (forward-reference). Either way `j` cannot join.
+      // depClosure[j] only contains indices < j, so the single guard "every
+      // transitive dep < i" subsumes the prior direct group-member check.
       let independent = true;
-      for (const gi of group) {
-        if (depSets[j].has(gi) || depSets[gi].has(j)) {
+      for (const dep of depClosure[j]) {
+        if (dep >= i) {
           independent = false;
           break;
         }

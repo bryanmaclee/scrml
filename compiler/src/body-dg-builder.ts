@@ -63,7 +63,7 @@
  *   - monotonicity-analyzer.ts — comparable analyzer-scale module.
  */
 
-import type { LogicStatement, ExprNode } from "./types/ast.ts";
+import type { LogicStatement, ExprNode, LambdaExpr } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 
 // ---------------------------------------------------------------------------
@@ -554,15 +554,192 @@ function addAssignTargetWrites(target: ExprNode | undefined, facts: StatementFac
 
 /**
  * Walk an ExprNode tree and add every identifier reference to `sink`.
- * Reuses `forEachIdentInExprNode` (expression-parser.ts) — no surgery there.
+ *
+ * Reuses `forEachIdentInExprNode` (expression-parser.ts — no surgery there) for
+ * the surface idents, then ALSO descends lambda/arrow bodies to collect the
+ * FREE-variable reads inside them (excluding each lambda's own params).
+ *
+ * S212 g-lift-concurrent-transitive-exclusion-tdz — why lambda bodies matter
+ * here: `forEachIdentInExprNode` deliberately stops at a `lambda` (it is a new
+ * lin scope boundary — correct for lin tracking). But for the body-DG's `reads`
+ * facts a captured free variable is a REAL eager read whenever the lambda is
+ * invoked at array-build time — e.g. `profiles.map(pr => f(n))` calls the arrow
+ * synchronously, so `n` is read the moment the enclosing statement's init
+ * expression is evaluated. Missing that read let the lift-concurrent scheduler
+ * batch such a statement ahead of `n`'s declaration → TDZ. Per §19.9.9.1 a
+ * lambda-body free read is conservatively recorded as a dependency (a spurious
+ * edge — for a stored-not-immediately-called lambda — only over-constrains the
+ * schedule, which is sound).
  */
 function collectExprFacts(exprNode: ExprNode | undefined, sink: Set<string>): void {
   if (!exprNode) return;
+  // Surface idents (everything outside lambda bodies).
   forEachIdentInExprNode(exprNode, (ident) => {
     if (ident && typeof ident.name === "string" && ident.name) {
       sink.add(reactiveName(ident.name));
     }
   });
+  // Lambda-body free reads (the surface walk above skips lambda bodies).
+  collectLambdaBodyReads(exprNode, sink, new Set<string>());
+}
+
+/**
+ * Descend into every lambda body reachable from `node` and collect its
+ * free-variable reads into `sink`. `bound` carries names that are NOT free at
+ * this point (enclosing lambda params + block-local declarations); a captured
+ * read is a name that is neither in `bound` nor a param of the lambda it
+ * appears in.
+ *
+ * Conservative + drift-safe: this routine enumerates only the container kinds
+ * that can lexically CONTAIN a lambda. Any unmodelled / future ExprNode kind
+ * contributes nothing here (its surface idents were already collected by the
+ * shared `forEachIdentInExprNode` walk in `collectExprFacts`), so the worst
+ * case is a missed lambda-body read — which the `reads` edge on the lambda's
+ * ENCLOSING statement's receiver already partially compensates.
+ */
+function collectLambdaBodyReads(
+  node: ExprNode | undefined,
+  sink: Set<string>,
+  bound: Set<string>,
+): void {
+  if (!node || typeof node !== "object") return;
+  const n = node as unknown as Record<string, unknown>;
+  switch (n.kind) {
+    case "lambda": {
+      const lam = node as LambdaExpr;
+      const innerBound = new Set(bound);
+      for (const p of lam.params ?? []) {
+        if (p && typeof p.name === "string" && p.name) innerBound.add(p.name);
+        // Param default values are evaluated in the OUTER scope.
+        if (p && p.defaultValue) collectFreeReadsInto(p.defaultValue, sink, bound);
+      }
+      const body = lam.body as
+        | { kind: "expr"; value: ExprNode }
+        | { kind: "block"; stmts: unknown[] }
+        | undefined;
+      if (!body) return;
+      if (body.kind === "expr") {
+        collectFreeReadsInto(body.value, sink, innerBound);
+      } else if (body.kind === "block") {
+        // Block-local declarations shadow outer names within the body.
+        const blockBound = new Set(innerBound);
+        for (const stmt of body.stmts ?? []) {
+          if (stmt && typeof stmt === "object") {
+            const s = stmt as { kind?: string; name?: unknown };
+            if ((s.kind === "let-decl" || s.kind === "const-decl") && typeof s.name === "string") {
+              blockBound.add(s.name);
+            }
+          }
+        }
+        for (const stmt of body.stmts ?? []) {
+          collectBlockStmtFreeReads(stmt as LogicStatement, sink, blockBound);
+        }
+      }
+      return;
+    }
+    // Container kinds — recurse into ExprNode children to reach nested lambdas.
+    case "array":
+      for (const el of (n.elements as ExprNode[]) ?? []) collectLambdaBodyReads(el, sink, bound);
+      return;
+    case "object":
+      for (const prop of (n.props as Array<Record<string, unknown>>) ?? []) {
+        if (prop.kind === "prop") {
+          if (typeof prop.key !== "string") collectLambdaBodyReads(prop.key as ExprNode, sink, bound);
+          collectLambdaBodyReads(prop.value as ExprNode, sink, bound);
+        } else if (prop.kind === "spread") {
+          collectLambdaBodyReads(prop.argument as ExprNode, sink, bound);
+        }
+      }
+      return;
+    case "spread":
+    case "unary":
+    case "cast":
+    case "reset-expr":
+      collectLambdaBodyReads((n.argument ?? n.expression ?? n.target) as ExprNode, sink, bound);
+      return;
+    case "binary":
+      collectLambdaBodyReads(n.left as ExprNode, sink, bound);
+      collectLambdaBodyReads(n.right as ExprNode, sink, bound);
+      return;
+    case "assign":
+      collectLambdaBodyReads(n.target as ExprNode, sink, bound);
+      collectLambdaBodyReads(n.value as ExprNode, sink, bound);
+      return;
+    case "ternary":
+      collectLambdaBodyReads(n.condition as ExprNode, sink, bound);
+      collectLambdaBodyReads(n.consequent as ExprNode, sink, bound);
+      collectLambdaBodyReads(n.alternate as ExprNode, sink, bound);
+      return;
+    case "member":
+      collectLambdaBodyReads(n.object as ExprNode, sink, bound);
+      return;
+    case "index":
+      collectLambdaBodyReads(n.object as ExprNode, sink, bound);
+      collectLambdaBodyReads(n.index as ExprNode, sink, bound);
+      return;
+    case "call":
+    case "new":
+      collectLambdaBodyReads(n.callee as ExprNode, sink, bound);
+      for (const arg of (n.args as ExprNode[]) ?? []) collectLambdaBodyReads(arg, sink, bound);
+      return;
+    case "match-expr":
+      collectLambdaBodyReads(n.subject as ExprNode, sink, bound);
+      return;
+    case "map-lit":
+      for (const entry of (n.entries as Array<Record<string, unknown>>) ?? []) {
+        collectLambdaBodyReads(entry.key as ExprNode, sink, bound);
+        collectLambdaBodyReads(entry.value as ExprNode, sink, bound);
+      }
+      return;
+    default:
+      // Leaf / unmodelled kinds — no nested lambda to reach.
+      return;
+  }
+}
+
+/**
+ * Collect free-variable reads from an arbitrary ExprNode (used inside a lambda
+ * body). A name is free iff it is not in `bound`. This walks the WHOLE tree
+ * (surface idents AND further-nested lambda bodies), excluding bound names.
+ */
+function collectFreeReadsInto(
+  node: ExprNode | undefined,
+  sink: Set<string>,
+  bound: Set<string>,
+): void {
+  if (!node) return;
+  forEachIdentInExprNode(node, (ident) => {
+    if (ident && typeof ident.name === "string" && ident.name) {
+      const canon = reactiveName(ident.name);
+      if (!bound.has(ident.name) && !bound.has(canon)) sink.add(canon);
+    }
+  });
+  collectLambdaBodyReads(node, sink, bound);
+}
+
+/**
+ * Collect free reads from a single statement inside a lambda BLOCK body. Only
+ * the shapes that can appear in such a block and that carry reads are handled;
+ * everything else contributes its surface ExprNode reads conservatively.
+ */
+function collectBlockStmtFreeReads(
+  stmt: LogicStatement,
+  sink: Set<string>,
+  bound: Set<string>,
+): void {
+  if (!stmt || typeof stmt !== "object") return;
+  const s = stmt as Record<string, unknown>;
+  const candidates: Array<ExprNode | undefined> = [
+    s.initExpr as ExprNode | undefined,
+    s.exprNode as ExprNode | undefined,
+    s.condExpr as ExprNode | undefined,
+    s.iterExpr as ExprNode | undefined,
+    s.headerExpr as ExprNode | undefined,
+    s.valueExpr as ExprNode | undefined,
+  ];
+  for (const c of candidates) {
+    if (c) collectFreeReadsInto(c, sink, bound);
+  }
 }
 
 /**
