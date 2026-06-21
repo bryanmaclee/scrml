@@ -32894,3 +32894,119 @@ A map round-trips losslessly across every value boundary: the §57 wire format (
 §6.5 (reactive arrays — the reassignment-canonical / COW sibling) · §14 (type system — `[KeyT:ValT]` registration) · §42 (`not` — bracket-read `V|not`, union-`not` normalization) · §45 (equality — key comparability, order-independent map `==`, cross-type `E-EQ-001`, `E-EQ-003`) · §47.1.3/§47.1.4/§47.1.5 (the canonical-string discipline §59.5 mirrors at the value level; the §47.1.5 collision disposition §59.5 contrasts with) · §57 (wire format — lossless serialization, absence-envelope for stored `not`) · §17.7 (`<each>` — iteration over `.entries()`) · the cycles-prereq (scrml `8d9db4e1` — the acyclic-keys precondition).
 
 ---
+
+## 60. Typed External API — `<api>`
+
+**Added:** S210, 2026-06-20. **Source:** debate `external-backend-A-vs-B-vs-C-2026-06-20.md` (A-vs-B-vs-C, dpa-001) + W0 deep-dive `api-primitive-decl-site-epistemics-2026-06-20.md` (F1 = A). **Authority:** A2 ratified S210 (user "ratify ship A2"); F1 = A ratified S210 (user "A"). Design-insight: `~/.claude/design-insights.md` "External-boundary typing — owned vs unowned."
+
+> **Nominal section.** This section describes the `<api>` primitive **as designed** (A2 — the thin, declared-shape form). It is **spec-ahead-of-implementation** — W1 of the A2 build arc (`docs/changes/api-primitive-a2-2026-06-20/`). No `<api>` implementation exists in the compiler as of S210; this section is the normative target the later impl waves (W2 parser · W3 type-system · W4 codegen · W5 tests) wire. The `E-API-*` error codes are enumerated in §60.9 as **planned** codes; their §34 catalog rows land **with** the implementation that fires each (Rule 4). **A1 (OpenAPI / contract ingest) is OUT of scope of this section** — see §60.8.
+
+### 60.1 Overview — the bring-your-own-backend boundary
+
+`<api>` types an **external HTTP boundary** that scrml does **not** own — an existing Rust / Go / Python / etc. backend an adopter keeps while using scrml on the front end (the "bring-your-own-backend," BYOB, model). This is deliberately distinct from scrml's owned data boundary (`<db>` / `<schema>`, §8 / §39): there scrml controls both ends and the disappearing-server-boundary promise holds; here the backend is foreign and that promise does not apply.
+
+A BYOB frontend is expressible in scrml today as a pure client: a raw `fetch()` is not a §12.2 server-placement trigger, so a `<request>`/`<poll>` + `parseVariant` (§41.13) flow stays client-side and compiles to a pure client bundle. What that flow **lacks** is a typed, co-located declaration of the request/endpoint surface — the URL, method, path, and request shape are untyped string territory. `<api>` closes exactly that gap, and **only** that gap: the response half is already covered by `parseVariant` (§41.13).
+
+**The identity reframe.** scrml's pitch is "no API layer to drift out of sync," which holds where scrml owns both ends. BYOB is precisely the case where it does not — the foreign backend has *already* built the API layer. So the real choice for the BYOB adopter is not "API layer or none" but **untyped-silent-drift vs typed-compile-loud-drift**: `<api>` converts a silent runtime failure (a backend shape change) into a compile-time mismatch against the declared shape — the identity's own value (boundary-typing) applied to the one boundary scrml otherwise ships naked.
+
+### 60.2 The `<api>` declaration
+
+`<api>` mirrors the shape of `<db src= tables>` (§4.12.6): a block element declaring a connection plus the typed surface reachable through it.
+
+```
+api-decl       ::= '<api' api-attrs '>' endpoint-decl+ '</api>'
+api-attrs      ::= src-attr? base-attr
+base-attr      ::= 'base=' string-literal
+src-attr       ::= 'src=' string-literal          // A2: a declared-shape source; A1 ingest is §60.8 (out of scope)
+
+endpoint-decl  ::= identifier '(' req-shape? ')' '->' http-method string-literal ':' response-type
+http-method    ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+req-shape      ::= type-ref                        // a §53 / §14 struct or refinement type
+response-type  ::= type-ref                        // a §53 type; decoded via parseVariant (§41.13)
+```
+
+```scrml
+<api base="https://api.example.com">
+  getUser(UserQuery)      -> GET    "/users/${id}"   : User
+  createOrder(OrderInput) -> POST   "/orders"        : Order
+  deleteOrder(OrderId)    -> DELETE "/orders/${id}"  : Deleted
+</api>
+```
+
+**Normative statements:**
+- An `<api>` declaration SHALL declare a `base=` URL and one or more endpoint declarations. Each endpoint binds a name, an optional request shape (a §53/§14 type), an HTTP method, a path template, and a response type.
+- The request shape and response type SHALL reference declared types (§53 / §14). `<api>` introduces no new type machinery — it types the *boundary*, reusing the existing type surface.
+- An `<api>` declaration emits no HTML and no server bundle (§60.6); it is a compile-time typing surface plus client-side typed-callable codegen.
+
+### 60.3 The owned-vs-unowned distinction — F1 = A (the must-not-lie principle)
+
+`<db>` types a boundary scrml controls end-to-end; its declared types are a **guarantee** (scrml owns the schema and can reconcile it). `<api>` types a **belief** about a boundary scrml does not control; its declared types are a **claim about a foreign contract**, true only as of the moment they were written. The type system MUST make this epistemic difference visible at the declaration site so an adopter's "what the compiler guarantees" model cannot silently extend to cover what the compiler cannot reach.
+
+**The marker is the element name (F1 = A, ratified S210).** `<api>` is categorically not `<db>`; the distinct element is itself the type-system-visible signal that the typed boundary is unowned. scrml deliberately does **not**:
+- require an `unverified:` / `external:` annotation on the declaration (option B) — the element name already carries the distinction; a redundant token is surface the language does not need (LIMIT-PRIMITIVES, §60.7);
+- propagate an "externally-sourced" taint *through the type system* to use sites (option C) — a viral taint trains reflexive discharge and destroys its own signal (the Rust-`unsafe` lesson), and it is unnecessary because the decode is the proof: a value enters the program only through `parseVariant` (§41.13), which is total and failable.
+
+**The asymmetry, made concrete.** A `<db>`/`<schema>` whose declared types drift from the live database is reconcilable — `bun scrml migrate` brings the database in line, and `W-SCHEMA-003` (§39.12) names exactly that lever. **`<api>` has no such lever** (scrml cannot migrate a foreign backend). That *missing* reconciliation lever IS the owned-vs-unowned difference. An `<api>` contract is therefore an **edit-time snapshot**: drift is detected *loud* at compile time as a mismatch against the declared shape (and at runtime as a `parseVariant` failure routed to `.error`), never silently trusted.
+
+### 60.4 Binding to `<request>` — the `api=` mode
+
+A declared endpoint is invoked through `<request>` (§6.7.7), which gains an `api=` mode:
+
+```scrml
+<api base="https://api.example.com">
+  getUser(UserQuery) -> GET "/users/${id}" : User
+</api>
+
+<request id="profile" api="getUser" args=@query>
+  // request shape checked against UserQuery; response decoded via parseVariant against User
+</>
+
+${ @name = <#profile>.data.name }      // .data : User (decoded)
+```
+
+**Normative statements:**
+- `<request api="endpointName" args=...>` SHALL resolve `endpointName` against the in-scope `<api>` endpoints (unknown → `E-API-ENDPOINT-UNKNOWN`, §60.9). The `args` value SHALL type-check against the endpoint's request shape (mismatch → `E-API-REQ-SHAPE-MISMATCH`).
+- The response SHALL be decoded via `parseVariant` (§41.13) against the endpoint's declared response type **automatically** — the author does not re-state the decode. A decode failure routes to `<#id>.error` (and the `::ParseError` arm where a consuming site matches on it), exactly as a manual `parseVariant` flow would.
+- The §6.7.7 `loading` / `data` / `error` / `stale` state model applies unchanged; `<#id>.data` carries the decoded response type.
+- The `api=` mode is **automatic-but-visible**: the decode is driven by the endpoint's declared `: ResponseT` (no hidden inference), surfaced through the existing failable state surface. (The §6.7.7 `api=` attribute amendment lands with the impl wave; this section is its normative source.)
+
+### 60.5 Response typing reuses `parseVariant` (§41.13)
+
+`<api>` adds **no** response-decoding machinery. The endpoint's `: ResponseT` is the type argument to `parseVariant` (§41.13): the boundary-parse is total and failable, a malformed/unexpected response surfaces as a `parseVariant` failure (→ `.error` / `::ParseError`), and refinement types (§53) on the response shape are enforced at the decode. This is the load-bearing reason A2's net-new surface is *only* the request/endpoint half.
+
+### 60.6 Client-only — no server placement (§12.2)
+
+`<api>` is a pure-client surface. An external `fetch()` to a foreign backend is **not** a §12.2 server-placement trigger, and `<api>` SHALL NOT introduce one: an `<api>`-backed app compiles to a pure client bundle with no scrml server tier.
+
+**SSR-of-external-data is structurally gapped** and out of scope: server-side rendering of foreign-backend data would require a scrml BFF/proxy tier, which re-introduces a scrml server and contradicts the BYOB premise. An `<api>` app is client-rendered with respect to that data; this limit SHALL be stated plainly in adopter documentation (the B-docs half of the A2 ratification).
+
+### 60.7 LIMIT-PRIMITIVES boundary (S174)
+
+`<api>` is a thin typed-callable declaration **only**. It SHALL NOT own retry, caching, pagination, rate-limiting, request deduplication, or auth-flow orchestration. Those concerns stay in userspace — an adopter composes them in a helper in their own scrml (the framework-gives-pieces / app-wires-its-own-client pattern, as TanStack Core / SvelteKit `load` / htmx do). The primitive types the boundary; it does not become a data-fetching framework. A proposal to add any gravity-well concern to `<api>` contradicts this section.
+
+### 60.8 A1 (contract ingest) — gated, deferred, NOT this section
+
+The `src=` attribute reserves space for a FUTURE, separate, gated arc (**A1**) in which `<api>` ingests a *published* external contract (e.g. an OpenAPI document) as a read-only observer rather than an author-declared shape. A1 is **explicitly deferred** and is **not** part of A2 / this section. It is gated to **first-party + CI-enforced contracts**, because an ingested contract is a frozen snapshot that drifts on the vendor's schedule — type-safety against the snapshot, not the running backend (the F#-type-provider read-only-observer lesson). For third-party / externally-owned contracts the honest answer remains the declared-shape A2 form (or plain docs). A1 SHALL NOT ship without its own ratification.
+
+### 60.9 Error codes (planned — §34 rows land with the impl, Rule 4)
+
+The implementation waves will fire (and add to §34 with the production that emits each):
+- `E-API-ENDPOINT-UNKNOWN` — `<request api="X">` names an endpoint not declared in any in-scope `<api>`.
+- `E-API-REQ-SHAPE-MISMATCH` — the `args` value does not type-check against the endpoint's request shape.
+- `E-API-RESPONSE-TYPE-UNDECLARED` — an endpoint declaration omits its `: ResponseT`.
+- `E-API-METHOD-INVALID` — the endpoint method is not a recognized HTTP method.
+- `E-API-BASE-MISSING` — an `<api>` declaration with no `base=`.
+- `E-API-PATH-PARAM-UNBOUND` — a `${...}` path-template parameter has no corresponding request-shape field.
+- (informational) `W-API-A1-SRC-DEFERRED` — a `src=` form requesting A1 ingest, not yet implemented (§60.8).
+
+The exact set is refined during W2/W3; this is the planned surface, not a frozen catalog.
+
+### 60.10 Out of scope / known limits
+- **SSR-of-external-data** — structurally gapped (§60.6); needs a BFF, which contradicts BYOB.
+- **retry / cache / pagination / auth-flow** — userspace, not the primitive (§60.7).
+- **A1 contract ingest** — gated + deferred (§60.8).
+- **The serve-side raw-route axis** (a scrml app *serving* a raw wire to foreign clients) is the dual of this consume-side boundary and a **separate** open design question (flogence raw-route ask, PA-tracked), not part of §60.
+
+### 60.11 Cross-references
+
+§8 / §4.12.6 (`<db>` — the owned-boundary sibling `<api>` is shaped against) · §39.12 `W-SCHEMA-003` (the `scrml migrate` reconciliation lever `<api>` deliberately lacks — the must-not-lie asymmetry, §60.3) · §6.7.7 `<request>` (the `api=` bind target, §60.4) · §41.13 `parseVariant` (response decode, §60.5) · §53 / §14 (the request/response type surface) · §12.2 (escalation triggers — `<api>` stays client-only, §60.6) · §1.1 (the "no API layer to drift" identity — the reframe, §60.1). Build arc: `docs/changes/api-primitive-a2-2026-06-20/`. Design: the dpa-001 debate + the W0 decl-site-epistemics deep-dive.

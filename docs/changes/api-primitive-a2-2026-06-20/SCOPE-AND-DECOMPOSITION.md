@@ -83,9 +83,11 @@ compile error = the identity's own value applied to the one boundary scrml ships
 
 - **W0 — resolve F1-F4** (design). F1 likely a DD/debate or a focused AskUserQuestion; F2-F4 fall out
   once F1 lands. Output: a ratified surface + placement. **GATES W1+.**
-- **W1 — SPEC §-authoring (Nominal / spec-ahead).** Author the `<api>` section (per F3 placement) + the
-  owned-vs-unowned type semantics (per F1) + §34 error codes, as a Nominal banner section (the §58/§59
-  precedent: SPEC-ahead, impl waves flip the banner). SPEC-only landing.
+- **W1 — SPEC §-authoring ✅ DONE (S210).** SPEC **§60** authored (`<api>`, Nominal/spec-ahead, §60.1-§60.11):
+  BYOB overview + reframe · `<api src= base=>` decl + endpoint grammar (F2) · owned-vs-unowned must-not-lie /
+  F1=A element-name marker · `<request api=>` bind (F4) · parseVariant response reuse · client-only §12.2 +
+  SSR-gap · LIMIT-PRIMITIVES · A1-deferred · planned E-API-* codes (§60.9 — §34 rows land WITH the impl, Rule 4).
+  SPEC-INDEX §60 row + section count 59→60. **W2 (parser) is next.**
 - **W2 — parser** (BS / TAB / ast-builder): recognize the `<api>` element + endpoint sub-declarations +
   attrs; emit `E-API-*` codes for malformed declarations.
 - **W3 — type-system**: the declared-shape request typing + the F1 unowned-boundary tier/annotation +
