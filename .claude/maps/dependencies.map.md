@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-06-20T00:00:00-06:00  commit: 5c68e87e
+# updated: 2026-06-20  commit: 0a605d3e
 
 ## Runtime Dependencies (root package.json — v0.7.0)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for scrml MCP integration
@@ -38,20 +38,22 @@ bun>=1.3.13 — required runtime; no Node support (Bun-specific APIs used throug
 | codegen/emit-server.ts | codegen/emit-*.ts, codegen/emit-channel.ts |
 | codegen/emit-error-boundary.ts | block-splitter.js, ast-builder.js (re-parse pipeline) |
 | codegen/emit-variant-guard.ts | **engine-statechild-grammar.ts** (ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS — ss2 item 3 SSOT dedup; replaces inline literal sets) |
+| codegen/emit-expr.ts | codegen/rewrite.js (rewriteExpr/rewriteServerExpr chain), codegen/emit-parse-variant.ts, codegen/emit-control-flow.ts, symbol-table.ts (SYNTH_PROPERTY_NAMES), codegen/srcmap-provenance.ts, codegen/log-loc.ts (resolveLogLoc), emit-lift.js (emitMarkupValueExpr); **S210 ss3: paren-grouping preservation case added (BinaryExpr/TernaryExpr/AssignExpr wrapped in paren-receiver position — no new external deps)** |
+| codegen/rewrite.ts | codegen/var-counter.ts (genVar), codegen/compat/parser-workarounds.js (splitBareExprStatements), expression-parser.ts (rewriteReactiveRefsAST/rewriteServerReactiveRefsAST), codegen/errors.ts (CGError), codegen/code-segments.ts (rewriteCodeSegments/regexAllowedAfter); **S210 ss3: parenthesized receiver preservation — paren-group before .method()/(args)/[idx] chains (no new external deps)** |
 | codegen/build-source-map.ts | codegen/srcmap-provenance.ts, codegen/source-map.ts |
 | engine-statechild-grammar.ts | (standalone — NO imports; pure constant exports: ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS; placed at compiler/src/ NOT codegen/ to be importable by both type-system and codegen layers without cycle) |
 | engine-graph.ts | types/ast.ts (FileAST shapes via unknown); standalone — no codegen/ imports |
 | auth-graph.ts | types/ast.ts, symbol-table.ts |
 | type-system.ts | types/ast.ts, dependency-graph.ts, protect-analyzer.ts, **engine-statechild-grammar.ts** (ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS — ss2 item 3; type-system.ts:81) |
 | reachability/*.ts | types/reachability.ts, types/ast.ts |
-| expression-parser.ts | acorn, astring, codegen/code-segments.ts (GITI-017 rewriteCodeSegments fence); **S210: acornNodeToExprNode regex-literal branch uses node.raw (not outer rawSource) — prevents wrong-span serializer bug in call-arg position** |
+| expression-parser.ts | acorn, astring, codegen/code-segments.ts (GITI-017 rewriteCodeSegments fence); **S210: acornNodeToExprNode regex-literal branch uses node.raw (not outer rawSource) — prevents wrong-span serializer bug in call-arg position**; **S210 ss3: @. sigil structuring — each-sigil `IdentExpr` leaf production (no new external imports; internal AST shape change only)** |
 | native-parser/*.js | (self-contained; no compiler/src imports) |
 | commands/compile.js | api.js (compileScrml), engine-graph sidecar write site (--emit-engine-graph) |
 | commands/dev.js | api.js (compileScrml); Bun.serve + per-file fs.watch (rewritten S152 — no recursive-dir) |
 | commands/migrate.js | api.js (compileScrml), block-splitter.js, ast-builder.js (buildAST — for rewriteMatchArmArrows AST-driven walk) |
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #lsp #mcp #engine-graph #source-map #s149 #s152 #s209 #ss2 #engine-statechild-grammar #ssot-dedup #s210 #engine-name-dual-table #dual-table-fix #symbol-table-governed-cell #emit-reactive-wiring-modern-engine-skip #code-segments-template-hybrid #rewrite-code-segments #expression-parser-regex-literal-raw #ast-builder-collect-braced-body #tokenizer-shift-compound-assign #engine-statechild-comment-opacity
+#scrmlts #map #dependencies #bun #acorn #lsp #mcp #engine-graph #source-map #s149 #s152 #s209 #ss2 #engine-statechild-grammar #ssot-dedup #s210 #engine-name-dual-table #dual-table-fix #symbol-table-governed-cell #emit-reactive-wiring-modern-engine-skip #code-segments-template-hybrid #rewrite-code-segments #expression-parser-regex-literal-raw #ast-builder-collect-braced-body #tokenizer-shift-compound-assign #engine-statechild-comment-opacity #a2-api-decl #api-decl-node #ss3-paren-group #emit-expr-paren-receiver #rewrite-ts-paren-group #ss8-tailwind #ring-offset-arbitrary #tw-arbitrary-string
 
 ## Links
 - [primary.map.md](./primary.map.md)
