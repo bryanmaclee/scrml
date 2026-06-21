@@ -16,3 +16,4 @@ while IFS=$'\t' read -r f actual; do
 done < "$OUT"
 { echo "RESULT now_pass=$np still_fail=$sf"; sort "$RES.tmp"; } > "$RES"
 echo "SWEEP-COMPLETE" >> "$RES"
+rm -f "$RES.tmp"
