@@ -1,9 +1,9 @@
-<!-- @digest head=6d8a47ab delta-seq=10 -->
+<!-- @digest head=cb107142 delta-seq=10 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `6d8a47ab`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `6d8a47ab`
+> **HEAD `cb107142`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `cb107142`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `6d8a47ab`
+## Board — from `@gap` tokens @ `cb107142`
 - **HIGH 0** · MED 10 · LOW 14 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -29,7 +29,7 @@
 - `[10]` state · **ss11 escalations PARKED (5).** #1 compiler-bug batch — built-in scope-resolver E-SCOPE-001 (navigate/animationFrame/cleanup/transaction) + anon fn(x){} expr +… → docs/changes/phase-b2-samples-curate/
 
 ## State
-- Version: 0.7.0 · maps: 21 commits behind HEAD (watermark 0a605d3e, HEAD 6d8a47ab)
+- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark 6d8a47ab, HEAD cb107142)
 - Recent wraps:
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
