@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-21  commit: a9c2108f
+# updated: 2026-06-21  commit: 8569f774
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -15,7 +15,7 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | Category | Location | Count |
 |----------|----------|-------|
 | Unit | compiler/tests/unit/ | find-count at c48c4f71; +S169 value-native-map arc; +S170 native-parser regression set; +S173 export-reject/fn-field; +S174 log()/any-reject; **+S175: sql-projection-extract, sql-row-typing, sql-row-tranche2-width-subtype, sql-row-tranche3-typeflow, struct-fn-field-reject**; **+S177 unit: bare-slash-before-close-tag-bug4, closer-on-shorthand-body-e-closer-001-bug74, formfor-nested-in-engine-statechild-r27-c6, inline-map-assign-handler-s169, opener-arrow-truncation-bug48, schemafor-predicated-base-nullable-r28-7b; **+S184 unit: lifecycle-field-comment-leak, lifecycle-shape1-variant-initializer, lint-ghost-snippet-fill-exempt, lint-w-each-promotable-tablefor-exempt, error-arm-multifield-payload-binding, match-block-form-payload-binding (+integration: lifecycle-etype001-doublefire)****); **+S185 unit: errarm-refail-lowering, validator-inline-colon**; **+S190 unit: derived-engine-expression-form (16 cases), cluster-c-decl-boundary (19 cases); extended: derived-engine-rejections (B16 NO-RULES rule= reword), c14-derived-engines (+2 boundary cases)**; **+S191 unit: attr-if-fn-call-conditional (12), attr-if-fn-condition-followup (5), bug-1-tailwind-filter-family (28), bug-1-tailwind-gradient-family (14); extended: bug-1-tailwind-ring-family/transform-shorthand/minor-families/unrecognized-class/arbitrary-value-emit/tailwind-classes** |
-| Browser (DOM) | compiler/tests/browser/ | 37 files (+1 S169 each-as-tuple-destructure-d2c.browser; +1 S170 browser-structural-compound-deepset) |
+| Browser (DOM) | compiler/tests/browser/ | 39 files (+1 S169 each-as-tuple-destructure-d2c.browser; +1 S170 browser-structural-compound-deepset; +2 S212 flogence/W4: g-bare-ref-event-handler + g-match-arm-reactive-attr-effects) |
 | Conformance | compiler/tests/conformance/ | ~40 files |
 | Integration | compiler/tests/integration/ | 109 files (+1 S169: value-native-map-e2e-d4; +1 S196: render-expr-primitive) |
 | Parser conformance | compiler/tests/parser-conformance*.test.js | 10 files |
@@ -24,9 +24,22 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | CLI commands | compiler/tests/commands/ | ~5 files |
 | **Total** | compiler/tests/ | **1032 .test.js files** at `a9c2108f` (verified `find compiler/tests -name '*.test.js' | wc -l` = 1032); was **1029 at `6d8a47ab`** (S211); **+3 S212: g-tailwind-markup-block-scan.test.js integration, g-nested-each-no-own-subscription.browser.test.js browser, lift-concurrent-transitive-tdz.test.js unit** — see S212 New Test Files section below. Previous entry: **+5 S211: lint-w-interp-in-raw-content.test.js unit, api-decl-typer.test.js unit, api-decl-parser.test.js unit, g-paren-receiver-group-dropped.test.js integration, each-sigil-expr-parser.test.js unit** — see S211 New Test Files section below. Previous total: **992 .test.js files (verified `find compiler/tests -name '*.test.js' | wc -l` = 992 on `471cbb34`; +5 S196: render-expr-primitive [integration, 6 cases] + the 4 render-expr prereq-bug unit files [g-failable-arm-nested-constructor-crash 6, g-match-arm-apostrophe-bs 8, g-shorthand-interp-match-arm-codegen 8, h1-steer-markup-in-value-match 8]; +1 S195: match-arm-void-element-scanner [13 cases / 46 expects]; +4 S191: attr-if-fn-call-conditional [12 cases], attr-if-fn-condition-followup [5 cases], bug-1-tailwind-filter-family [28 cases], bug-1-tailwind-gradient-family [14 cases] — also extended bug-1-tailwind-ring-family/transform-shorthand/minor-families/unrecognized-class/arbitrary-value-emit/tailwind-classes); +2 S198-S199: engine-hydration-initial-cell [unit, 16 cases] (A-leg `initial=@cell`) + engine-hydration-server-source [unit, 18 cases] (E-leg `server=@source`); +3 S200: g-each-component-helper-hoist [browser], g-each-component-transitive-helper [browser], g-each-peritem-if-predicate [browser] — find-count = 997 at `b1f5f8bf`; +3 S201: markup-value-render.browser, g-markup-value-in-expression, g-nested-component-member-arg (+ each-block extended) → find-count = 1000 at `fa2edccf`; +4 S202: each-over-arm-payload-binding-unbound [browser, 10], g-each-inline-prop-member [browser, 14], e2e-render-map [4 describe], detector-validation [3 describe] → **find-count = 1004 at `60d547e1`** (verified `find compiler/tests -name '*.test.js' | wc -l` = 1004; repo-wide all-suffix = 1019); +1 S204; +2 S205; +2 S206; +2 S206-block-analysis; +2 S207; +2 S208 → **1016 at `9afc746e`**; **+4 S209-ss2 → 1020 at `b67cd6e6`** (verified)**; **+4 S210 → 1024 at `5c68e87e`** (verified `find compiler/tests -name '*.test.js' | wc -l` = 1024)** |
 
-## S212 New Test Files (flogence dogfood: Tailwind block scan + nested-each subscription + lift-concurrent TDZ)
+## S212 New Test Files (A2 W4 + flogence Bug A/B + Tailwind block scan + nested-each subscription + lift-concurrent TDZ)
 
-3 NEW `.test.js` across S212 landings (find-count 1029→1032 at `a9c2108f`).
+5 NEW + 1 EXTENDED `.test.js` across S212 landings (find-count 1029→1034 at `8569f774`).
+
+### S212 flogence Bug A + Bug B + A2 W4 (find-count 1032→1034, commits `3d311fc9` + `93e02b35` + `914029dc`)
+
+| File | Category | Cases | What it covers |
+|---|---|---|---|
+| compiler/tests/browser/g-bare-ref-event-handler.browser.test.js | browser | 8 | g-bare-ref-event-handler-emits-literal-not-wired (MED, now CLOSED). `onclick=handler` (bare identifier, no parens, no `${}`) was emitting a literal `onclick="bump"` HTML attribute instead of wiring `handler` as the event listener. §5.2.2 row 5: the bare-ref form SHALL wire the resolved `_scrml_<name>_N` DIRECTLY as the listener (no `function(event){ fn(); }` wrap). Pre-fix: `onclick="bump"` → ReferenceError on click (dead handler). Post-fix: `data-scrml-bind-onclick="<id>"` + `addEventListener` in client.js wires the resolved reference. Tests: 8 cases (compile-clean, data-attr present, literal-attr gone, listener fires, event arg passed, call-form unaffected, expr-form unaffected, no-parens vs paren-call distinction). `3d311fc9`. |
+| compiler/tests/browser/g-match-arm-reactive-attr-effects.browser.test.js | browser | 8 | g-match-arm-drops-reactive-attr-class-effects (HIGH, now CLOSED). A reactive `style="...${@cell}..."` attribute template OR a `class:foo=(cond)` directive INSIDE a `<match>` arm body compiled green but never wired its `_scrml_effect` (dead binding). Root: `collectMarkupNodes` (collect.ts) descends only `node.children`, never arm bodies. Fix: arm-body class:/attr-tpl directives are registered as arm-tagged registry logic-bindings (kinds `"class-directive"` / `"attr-template"`) carrying the lowered JS expr; `emitArmWireFunction` (emit-variant-guard.ts) re-emits `classList.toggle` / `setAttribute` + `_scrml_effect` per-mount, disposed on variant change. Tests: 8 cases (class: inside arm toggles post-cell-write, style attr-tpl inside arm updates, outside-arm bindings unaffected, teardown on variant change). `93e02b35`. |
+
+EXTENDED: `compiler/tests/unit/api-decl-typer.test.js` +3 cases (19 total at `914029dc`): W-API-RESPONSE-NOT-VARIANT non-fatal lint — struct ResponseT fires Info, `:enum` ResponseT clean, `asIs` ResponseT clean (deliberate raw-pass escape hatch).
+
+### S212 prior batch (find-count 1029→1032 at `a9c2108f`)
+
+3 NEW `.test.js` across S212 landings.
 
 | File | Category | Cases | What it covers |
 |---|---|---|---|
@@ -34,7 +47,7 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | compiler/tests/browser/g-nested-each-no-own-subscription.browser.test.js | browser | — | A nested `<each>` inside an outer `<each>` per-item body re-renders when its source cell changes post-mount (Approach C `_scrml_effect` wrapper on inner reconcile); covers Tier-1 and Tier-0 paths (g-nested-each-no-own-subscription) |
 | compiler/tests/unit/lift-concurrent-transitive-tdz.test.js | unit | — | Lift-concurrent scheduler does not batch a statement ahead of a declaration it transitively depends on; also covers reassigned-`let` exclusion from const-destructure batches (g-lift-concurrent-transitive-exclusion-tdz) |
 
-NOTE: S212 adds ZERO new diagnostic codes (all three are behavior-only codegen fixes — no new §34 E-/W- entries).
+NOTE: S212 prior batch adds ZERO new diagnostic codes (all three are behavior-only codegen fixes — no new §34 E-/W- entries). S212 A2 W4 adds +1 NEW code: W-API-RESPONSE-NOT-VARIANT (Info, non-fatal). See error.map.md.
 
 ## S211 New Test Files (W-INTERP-IN-RAW-CONTENT lint + A2 W3 api-decl typer + ss3 parser fixes)
 
