@@ -25,6 +25,11 @@
 5. **stdlib Phase 3** — needs a §40.4 `fail`/`!{}`/bun-import ruling.
 6. **AA lint-fire regression** — `W-MATCH-VALUE-UNUSED` (S144, `emit-functions.ts:1021`) no longer fires on the v0.7.0 bare-tail-`match` repro. Not yet board-filed; investigation-worthy.
 
+## CORPUS IDIOMATIC-IFICATION (S210 — in flight)
+- **Goal:** extend the example-corpus idiomatic sweep to ALL scrml-written projects (user directive). Mechanism RATIFIED: **scrml-PA runs read-only audits, sibling-PAs rewrite** (per-repo scope). Portable rubric = `scrml-support/docs/idiomatic-audit-kit.md` (S210).
+- **scrml's own LIGHT-EDIT tier** — CONFIRMED owed (7/9 examples still `${for/lift}`, 0 `<each>`; +13 try/catch +17 null). It's `ss11` item b1 (phase-b1-examples-rewrite) backlog — waves 1-3 did the REWRITE tier only. Fire ss11 to sweep it (eligible items 1/3/5/7/8).
+- **Sibling audits IN FLIGHT** (read-only, no-worktree): giti `acafe0a5` (52f, WORST — 0 each/0 engine/8 null) · 6nz `a01ba38d` (11f — engines-yes/each-no) · flogence `ae88b4a5` (7f — cleanest). → per-repo audit DDs in `scrml-support/docs/deep-dives/<repo>-idiomatic-audit-2026-06-20.md`. **NEXT: on completion, draft + send (confirm-first) the 3 sibling-PA rewrite directives via each `<repo>/handOffs/incoming/`; route any compiler-gap workarounds back to scrml as bugs.** delta-log [28].
+
 ## OPEN escalations carried (S209)
 - ss5 item3 `g-channel-server-keyword-auto-migrate` (Enhanced-A, DEFERRED S189) · ss9 §20.5 SPEC examples (migrate vs carve-out) · ss10 item7 render-gap-ingestion + item8 L2/L3 oracle-strategy · ss6 b17 cases 1-3 (gated on `g-component-body-markup-parser-absent`) · §58 build-story re-bucket · §20.5+despace residual (ss11 items 4-8, partly Rule-1 marketing-gated).
 
