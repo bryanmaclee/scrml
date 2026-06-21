@@ -38,7 +38,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T133** · last-absorbed **[S210 25]** ([24-25] absorbed; digest regen'd `1a4a3fec` seq 25; T132/T133 collapsed) · deputy-maint @`1a4a3fec`+ (PA integrated my batch at the pre-push gate). F3: **A2 build IN FLIGHT** — ss3 paren-group fix (`aae34c26`) + A2 W2 parser agent `a0761f89`. main `1a4a3fec`.
+- **heartbeat:** tick **T134** · last-absorbed **[S210 25]** (ss3-paren merge `d84e85d2` git-INFERRED — 2 expression-serializer fixes; reconcile [26+] PENDING) · deputy-maint rebased onto `d84e85d2`. F3: ss3-paren LANDED+cleaned; **A2 W2 parser `a0761f89` still WIP**. Digest current. main `d84e85d2`.
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -84,9 +84,10 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 ## In-flight dispatches (F3 watch list)
 
 **T123 watch — S210 PA ACTIVE (just landed a burst + dispatched more) → WATCH ONLY, no `(deputy) state` entries.**
-- **A2 BUILD IN FLIGHT (2 compiler/src dispatches):** (1) **ss3 re-run** `../scrml-spa-ss3` @`aae34c26` ("preserve grouping parens before member/call" = fixing the [19] paren-group HIGH); (2) **A2 W2 parser** `agent-a0761f89` (BS recognizes `<api>...</api>`). Both touch compiler/src → **the deferred ss3-prior-3-files + these BATCH into ONE project-mapper refresh when the A2 build settles** (structural-refresh shape, T125). A2 W1 [24] was SPEC §60 only (no compiler/src).
-- **DONE/cleaned:** ss3-prior/AE-b/ss4/ss13 landed; list-rebuild [11] + dPA dpa-001 [12]→A2-ratified [13] complete.
-- **(maps consumer note):** maps current as of `5c68e87e`; the A2-build compiler/src is the next refresh batch.
+- **ss3-paren LANDED** (`d84e85d2`, 2 expression-serializer fixes for the [19] paren-group HIGH; +`emit-expr.ts`/`rewrite.ts`/`expression-parser.ts`; cleaned). Reconcile [26+] pending (will flip HIGH→resolved).
+- **A2 W2 parser `agent-a0761f89` STILL WIP** (`143a73b2`, "implementation + deferred") — BS recognizes `<api>`. The LAST in-flight compiler/src dispatch → **its landing is the batched-maps-refresh trigger.**
+- **OWED-BATCH maps set so far** (distinct mapped-src files since watermark `5c68e87e`): `codegen/emit-expr.ts` · `codegen/rewrite.ts` · `expression-parser.ts` · `tokenizer.ts` (+ A2 W2's BS/parser files when it lands). One project-mapper refresh covers all (T125 shape).
+- **DONE/cleaned:** ss3-prior + ss3-paren/AE-b/ss4/ss13 landed; list-rebuild [11] + dPA [12]→A2-ratified [13]; A2 W1 [24] SPEC §60.
 - **External-backend DD** (`a7fe7a80`) — S210 PA reads its output.
 - **Board HIGH 0→1** (S210 triaged 3 HIGH AD/AE/AF; 2 dispatched-fixed; net 1 open).
 - **On the S210 burst settling → fire the DEFERRED maps refresh** (5 structural mapped-src files; real project-mapper run).
@@ -94,9 +95,9 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 - F3 reminder: record a `(deputy) state` entry ONLY if an sPA COMPLETES CLEANLY *while the PA is absent/rebooting*.
 - (Prior S205-S209 agents landed + cleaned: ss1 `37a9a8c9` [7], ss3 `f9ccd275` [14], ss11 `b2a63c70` [16].)
 
-## Currency snapshot (@ tick 133 — S210 active)
+## Currency snapshot (@ tick 134 — S210 active)
 
-- **maps:** watermark **`5c68e87e`** — owed-BATCHING (ss3's 3 codegen files + A2-build compiler/src now in flight). **digest:** current (`1a4a3fec`, seq 25). **§0:** PASS. **§3c:** PASS (454n/168e). board **HIGH 1 · MED 11 · LOW 17 · Nom 8**. main `1a4a3fec`. **A2 build IN FLIGHT (ss3 paren-fix + A2 W2 parser) → batched maps refresh fires on settle. (ROUTE-TO-PA wrap-digest miss still open.)** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
+- **maps:** watermark **`5c68e87e`** — owed-BATCHING (4 distinct codegen/parser files: emit-expr/rewrite/expression-parser/tokenizer + A2 W2's BS files coming). **digest:** current (`1a4a3fec`, seq 25 — ss3-paren merge touched no digest source). **§0:** PASS. **§3c:** PASS (454n/168e). board **HIGH 1 · MED 11 · LOW 17 · Nom 8**. main `d84e85d2`. **A2 W2 parser still WIP → its landing fires the batched refresh. (ROUTE-TO-PA wrap-digest miss still open.)** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
 
 ## Maintenance seams (Function 2)
 
