@@ -38,7 +38,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T134** (long: T134→134b→A2-W2-land) · last-absorbed **[S210 27]** ([26] ss3 reconcile board HIGH 1→0/MED→10 · [27] A2 W2 parser LANDED [ast-builder api-decl + 4 E-API codes]; digest regen'd `a3b08cbb` seq 27) · deputy-maint @`a3b08cbb` (= main, my T134/134b integrated, 0/0+). F3: A2 W2 done+cleaned; **A2 W3/W4/W5 coming → maps batch DEFERRED to A2-settle.** main `a3b08cbb`.
+- **heartbeat:** tick **T135** · last-absorbed **[S210 27]** (no new entries — parallel wave in own worktrees, not delta-logged) · deputy-maint @`c3ab0ac5`+. F3: NEW wave in flight — ss2 re-run + ss8 + tw-arb (`aa1ba07f`); A2 paused after W2. Digest current, maps owed-batch growing (DEFER). main `a3b08cbb`.
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -83,6 +83,10 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## In-flight dispatches (F3 watch list)
 
+**T135 watch — S210 PA ACTIVE, parallel wave (A2 paused after W2) → WATCH ONLY.**
+- **IN FLIGHT (all touch compiler/src → owed-batch grows):** `spa/ss2` re-run @`ba689e56` (item1 landed-on-branch) · `spa/ss8` @`a3b08cbb` (fresh-provisioned) · `agent-aa1ba07f` "tw-arb" (Tailwind-arbitrary fix, WIP). NONE is A2 W3 — A2 paused after W2; PA running this wave in parallel.
+- **MAPS owed-batch now spans A2-W2 (5 files + 4 E-API) + ss2/tw-arb's compiler/src (coming).** Still DEFER (active compiler/src dispatches → not quiescent; ~5 ticks owed, <10). Fire one T125-shape refresh when the wave + A2 settle, OR at ≥10 ticks owed, OR at wrap — whichever first.
+- ---- (older watch context below) ----
 **T123 watch — S210 PA ACTIVE (just landed a burst + dispatched more) → WATCH ONLY, no `(deputy) state` entries.**
 - **A2 W2 parser LANDED + cleaned** ([27] `8d4e96ae` — ast-builder api-decl +252 + **4 new E-API-* codes**). ss3-prior + ss3-paren ([26], board HIGH 1→0) landed+cleaned.
 - **A2 BUILD CONTINUES — DEFER the batch (W3/W4/W5 coming):** SCOPE-AND-DECOMPOSITION = W0✅ W1✅(SPEC §60) W2✅(parser) **W3 type-system · W4 codegen · W5 tests + `examples/NN-external-api`** — all WILL touch compiler/src + a NEW mapped example. Firing now re-runs 3×. **Batch the WHOLE A2 build into ONE project-mapper refresh when A2 SETTLES (W5 done / A2-complete delta).**
