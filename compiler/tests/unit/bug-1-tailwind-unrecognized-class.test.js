@@ -171,12 +171,21 @@ describe("§2 Arbitrary-value class engine doesn't handle — warning fires", ()
   });
 
   // S109 update: `ring-[length]` / `ring-[color]` / `ring-[var()]` /
-  // `ring-[keyword]` are now SHIPPED via ARBITRARY_DECL_TRANSFORM. See
-  // `bug-1-tailwind-ring-family.test.js`. `ring-offset-*` remains deferred
-  // (needs preflight `*, ::before, ::after` custom-property machinery).
-  test("`ring-offset-[2px]` fires (still-unsupported — needs preflight)", () => {
+  // `ring-[keyword]` are SHIPPED via ARBITRARY_DECL_TRANSFORM. See
+  // `bug-1-tailwind-ring-family.test.js`. S210 sub-arc 3: arbitrary
+  // `ring-offset-[<len>]` / `ring-offset-[<color>]` are now ALSO shipped,
+  // mirroring the named ring-offset-{w}/{color} utilities under the same
+  // inline-fallback compose model (no preflight block — the prior "needs
+  // preflight machinery" framing was incorrect; Approach C never needed it).
+  test("`ring-offset-[2px]` is now RECOGNIZED — does not fire (S210 sub-arc 3)", () => {
     const diags = scan('<div class="ring-offset-[2px]"></div>');
-    expect(firedOn(diags, "ring-offset-[2px]")).toBe(true);
+    expect(firedOn(diags, "ring-offset-[2px]")).toBe(false);
+  });
+
+  test("`bare skew-[10deg]` (no axis) still fires (no bare-skew utility)", () => {
+    // Sanity control — a genuinely-unsupported arbitrary family still lints.
+    const diags = scan('<div class="skew-[45deg]"></div>');
+    expect(firedOn(diags, "skew-[45deg]")).toBe(true);
   });
 
   test("`bg-gradient-to-r` is now RECOGNIZED — does not fire (S191 Phase 2 gradient family)", () => {

@@ -40,6 +40,7 @@ import {
   getTailwindCSS,
   getTailwindCSSWithDiagnostic,
   findUnrecognizedClasses,
+  findUnsupportedTailwindShapes,
 } from "../../src/tailwind-classes.js";
 
 // ---------------------------------------------------------------------------
@@ -392,16 +393,12 @@ describe("§12 W-TAILWIND-UNRECOGNIZED-CLASS lint sync — engine + lint single 
     expect(diags).toHaveLength(0);
   });
 
-  test("still-unsupported family (`ring-offset-[2px]`) DOES trigger", () => {
-    // Sanity check — the lint still works for families NOT shipped.
-    // S108 v2 added transition/duration/delay/ease + rotate/scale/translate +
-    // outline. S109 added `ring-[length|color|var|keyword]`. S191 §26.7 landed
-    // the ring/shadow (Phase 1) and gradient (Phase 2) COMPOSING families via
-    // Approach C (inline var() fallbacks, no global preflight block) — so
-    // `bg-gradient-*` / `from-*` / `to-*` / `via-*` and named `ring-offset-{w}`
-    // are now RECOGNIZED. The ARBITRARY-width `ring-offset-[<len>]` is the
-    // last genuinely-deferred member (no arbitrary-width offset utility).
-    const diags = findUnrecognizedClasses('<div class="ring-offset-[2px]"></div>');
+  test("still-unsupported family (`skew-[45deg]`) DOES trigger", () => {
+    // Sanity check — the lint still works for families NOT shipped. The bare
+    // axis-less `skew-[<angle>]` has no utility (use skew-x-* / skew-y-*),
+    // §26.7. (Was `ring-offset-[2px]` here — that is now RECOGNIZED as of
+    // S210 sub-arc 3; see §21 below for its emit + lint-regression coverage.)
+    const diags = findUnrecognizedClasses('<div class="skew-[45deg]"></div>');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
   });
@@ -495,5 +492,155 @@ describe("§15 Grid-track function support — repeat/minmax/fit-content", () =>
     expect(r.css).toBeNull();
     expect(r.diagnostic.code).toBe("E-TAILWIND-001");
     expect(r.diagnostic.message).toContain("unknown CSS function");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §16 content-[<string>] arbitrary-value emit (S210, sub-arc 1)
+//
+// A bracket value quoted with matching `'`/`"` is a literal CSS string. The
+// `content` prefix is a DIRECT map (any value-kind -> `content` property). The
+// underscore-as-space convention applies inside the string (one token).
+// ---------------------------------------------------------------------------
+
+describe("§16 content-[<string>] arbitrary-value emit", () => {
+  test("content-['hello'] -> content: 'hello' (single quote)", () => {
+    const css = getTailwindCSS("content-['hello']");
+    expect(css).toBe(".content-\\[\'hello\'\\] { content: 'hello' }");
+  });
+
+  test("content-[\"hello\"] -> content: \"hello\" (double quote)", () => {
+    const css = getTailwindCSS('content-["hello"]');
+    expect(css).toBe('.content-\\["hello"\\] { content: "hello" }');
+  });
+
+  test("content-['hello_world'] -> underscore-as-space inside the string", () => {
+    const css = getTailwindCSS("content-['hello_world']");
+    expect(css).toBe(".content-\\[\'hello_world\'\\] { content: 'hello world' }");
+  });
+
+  test("content-[''] -> content: '' (empty string is a defined value)", () => {
+    const css = getTailwindCSS("content-['']");
+    expect(css).toBe(".content-\\[\'\'\\] { content: '' }");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §17 font-[<value>] overloaded arbitrary-value emit (S210, sub-arc 1)
+//
+// Overloaded: a numeric value is a font-weight (Tailwind v3 `font-[550]`);
+// everything else (bare ident / quoted family / keyword) is a font-family.
+// ---------------------------------------------------------------------------
+
+describe("§17 font-[<value>] overloaded arbitrary-value emit", () => {
+  test("font-[Inter] -> font-family: Inter (bare ident family)", () => {
+    const css = getTailwindCSS("font-[Inter]");
+    expect(css).toBe(".font-\\[Inter\\] { font-family: Inter }");
+  });
+
+  test("font-[ui-monospace] -> font-family: ui-monospace (hyphenated ident)", () => {
+    const css = getTailwindCSS("font-[ui-monospace]");
+    expect(css).toBe(".font-\\[ui-monospace\\] { font-family: ui-monospace }");
+  });
+
+  test("font-['Helvetica_Neue'] -> font-family: 'Helvetica Neue' (quoted, underscore-as-space)", () => {
+    const css = getTailwindCSS("font-['Helvetica_Neue']");
+    expect(css).toBe(".font-\\[\'Helvetica_Neue\'\\] { font-family: 'Helvetica Neue' }");
+  });
+
+  test("font-[550] -> font-weight: 550 (numeric -> weight)", () => {
+    const css = getTailwindCSS("font-[550]");
+    expect(css).toBe(".font-\\[550\\] { font-weight: 550 }");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §18 string/font variant-prefix integration (S210, sub-arc 1)
+// ---------------------------------------------------------------------------
+
+describe("§18 string/font arbitrary values integrate with variant prefixes", () => {
+  test("md:font-[Inter] wraps in @media (min-width: 768px)", () => {
+    const css = getTailwindCSS("md:font-[Inter]");
+    expect(css).toContain("@media (min-width: 768px)");
+    expect(css).toContain("font-family: Inter");
+  });
+
+  test("hover:content-['x'] applies :hover", () => {
+    const css = getTailwindCSS("hover:content-['x']");
+    expect(css).toContain(":hover");
+    expect(css).toContain("content: 'x'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §19 string-value rejections (S210, sub-arc 1)
+//
+// RULE: reject only when the interior contains the SAME quote char (ambiguous
+// / unterminated). A DIFFERENT quote inside is valid CSS and is ACCEPTED
+// (`'a"b'` is a single-quoted string containing a literal double-quote). The
+// pre-existing whitespace + injection-vector checks still reject `;`/`{`/etc.
+// ---------------------------------------------------------------------------
+
+describe("§19 string-value rejections + accepted different-quote", () => {
+  test("content-['a'b'] -> E-TAILWIND-001 (embedded same quote)", () => {
+    const r = getTailwindCSSWithDiagnostic("content-['a'b']");
+    expect(r.css).toBeNull();
+    expect(r.diagnostic.code).toBe("E-TAILWIND-001");
+    expect(r.diagnostic.message).toContain("'");
+  });
+
+  test("content-['a;b'] -> E-TAILWIND-001 (injection vector — `;` rejected pre-string)", () => {
+    const r = getTailwindCSSWithDiagnostic("content-['a;b']");
+    expect(r.css).toBeNull();
+    expect(r.diagnostic.code).toBe("E-TAILWIND-001");
+  });
+
+  test("content-[\"a\"b\"] -> E-TAILWIND-001 (embedded same double-quote)", () => {
+    const r = getTailwindCSSWithDiagnostic('content-["a"b"]');
+    expect(r.css).toBeNull();
+    expect(r.diagnostic.code).toBe("E-TAILWIND-001");
+  });
+
+  test("content-['a\"b'] -> ACCEPTED (different quote inside is valid CSS)", () => {
+    // Single-quoted string containing a literal double-quote — no ambiguity,
+    // no injection (the `\"` is not in the /[;{}<>]/ vector set). This is the
+    // CSS-correct behavior; the same-quote-only reject rule is normative-shaped.
+    const css = getTailwindCSS("content-['a\"b']");
+    expect(css).toContain("content: 'a\"b'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §20 lint regression — content-/font- strings now resolve (S210, sub-arc 1)
+// ---------------------------------------------------------------------------
+
+describe("§20 W-TAILWIND-UNRECOGNIZED-CLASS lint sync for content-/font-", () => {
+  test("content-['hello'] + font-[Inter] no longer trigger the lint", () => {
+    const diags = findUnrecognizedClasses(
+      "<div class=\"content-['hello'] font-[Inter]\"></div>",
+    );
+    expect(diags).toHaveLength(0);
+  });
+
+  test("control typo `fontt-[Inter]` STILL fires (no over-suppression)", () => {
+    const diags = findUnrecognizedClasses('<div class="fontt-[Inter]"></div>');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+  });
+
+  test("control typo `contentt-['x']` STILL fires (no over-suppression)", () => {
+    const diags = findUnrecognizedClasses("<div class=\"contentt-['x']\"></div>");
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+  });
+
+  test("findUnsupportedTailwindShapes no longer fires W-TAILWIND-001 on content-/font-", () => {
+    const diags = findUnsupportedTailwindShapes(
+      "<div class=\"content-['hello'] font-[Inter]\"></div>",
+    );
+    const offending = diags.filter(
+      (d) => d.className === "content-['hello']" || d.className === "font-[Inter]",
+    );
+    expect(offending).toHaveLength(0);
   });
 });

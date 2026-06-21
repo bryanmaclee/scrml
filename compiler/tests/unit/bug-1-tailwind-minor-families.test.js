@@ -18,10 +18,11 @@
  * Out of v2 scope at authoring; ring/shadow + gradient NOW LANDED (S191, §26.7):
  *   ring-* / ring-offset-* named (box-shadow compose)  — Phase 1
  *   bg-gradient-* / from-* / to-* / via-* (gradient compose) — Phase 2
+ * Landed since (S210):
+ *   font-* / content-*                            — string-shaped values (sub-arc 1)
+ *   arbitrary ring-offset-[<len>] / [<color>]     — sub-arc 3
  * Still genuinely deferred:
  *   transform-* shorthand                         — needs transform-function-list validation
- *   arbitrary ring-offset-[<len>]                  — no arbitrary-width offset utility
- *   font-* / content-*                            — string-shaped values (font-family quoted; pseudo content)
  *
  * Coverage:
  *   §1  transition shorthand + transition-* sub-properties
@@ -229,12 +230,21 @@ describe("§9: lint regression — minor families now recognized (do NOT fire li
 // §10: still-deferred families STILL fire the lint
 // ---------------------------------------------------------------------------
 
-describe("§10: arbitrary ring-offset STILL fires; gradient from-[…] now recognized (S191 Phase 2)", () => {
-  // S109 update: ring-[length|color|var|keyword] now ships single-property
-  // emit (see bug-1-tailwind-ring-family.test.js). ring-offset-* remains
-  // deferred (needs preflight `*, ::before, ::after` custom-property layer).
-  test("ring-offset-[2px] STILL fires the lint (deferred — needs preflight machinery)", () => {
+describe("§10: arbitrary ring-offset now recognized (S210); gradient from-[…] recognized (S191 Phase 2)", () => {
+  // S109: ring-[length|color|var|keyword] ships via ARBITRARY_DECL_TRANSFORM
+  // (see bug-1-tailwind-ring-family.test.js). S210 sub-arc 3: arbitrary
+  // ring-offset-[<len>] / ring-offset-[<color>] now ship too, mirroring the
+  // named ring-offset-{w}/{color} under the inline-fallback compose model
+  // (no preflight layer — the prior "needs preflight" framing was incorrect).
+  test("ring-offset-[2px] is now RECOGNIZED — no lint (S210 sub-arc 3)", () => {
     const src = `<div class="ring-offset-[2px]">x</div>`;
+    const lints = findUnrecognizedClasses(src);
+    expect(lints).toEqual([]);
+  });
+
+  test("bare skew-[45deg] (no axis) STILL fires the lint (no bare-skew utility)", () => {
+    // Sanity control — a genuinely-unsupported arbitrary family still lints.
+    const src = `<div class="skew-[45deg]">x</div>`;
     const lints = findUnrecognizedClasses(src);
     expect(lints.length).toBeGreaterThan(0);
     expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");

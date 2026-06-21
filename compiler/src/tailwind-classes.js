@@ -1634,6 +1634,11 @@ const ARBITRARY_PREFIX_MAP = {
   // Typography
   "leading": "line-height",
   "tracking": "letter-spacing",
+  // Content (S210) — `content-['hello']` -> `content: 'hello'`. Direct map:
+  // any value-kind (string / ident / number / list) passes through to the
+  // `content` property. (`content-[attr(...)]` is a SEPARATE normative change
+  // — `attr` is not in VALID_MATH_FUNCTIONS, so it is NOT in scope here.)
+  "content": "content",
   // Effects
   "opacity": "opacity",
   "shadow": "box-shadow",
@@ -1791,6 +1796,29 @@ const ARBITRARY_DECL_TRANSFORM = {
     // are rejected upstream by the single-token requirement).
     return `box-shadow: 0 0 0 ${v.css} currentColor`;
   },
+  // Ring-offset (arbitrary value, S210) — kind-dispatched, MIRRORING the named
+  // ring-offset-{w} (registerRing) and ring-offset-{color} utilities exactly.
+  // `parseArbitraryValue("ring-offset-[2px]")` splits on the FIRST `-[`, so the
+  // prefix is `ring-offset` (exact key here), NOT `ring` — the exact-key
+  // declTransform lookup hits this entry. The declTransform list-rejection
+  // (single-token requirement) already rejects a list value upstream
+  // (ring-offset-width is a single token).
+  //
+  //   `ring-offset-[2px]`      -> width form (offset width + offset shadow var + compose)
+  //   `ring-offset-[#ff0000]`  -> color form (--tw-ring-offset-color only)
+  //   `ring-offset-[var(--c)]` -> color form
+  //   `ring-offset-[red]`      -> color form (ident/keyword)
+  "ring-offset": (v) => {
+    if (v.kind === "color" || v.kind === "var" || v.kind === "keyword") {
+      // Color form — mirror the named ring-offset-{color}-{shade}: set ONLY the
+      // offset color var (a color alone draws no offset; pairing with a ring does).
+      return `--tw-ring-offset-color: ${v.css}`;
+    }
+    // Length / number — mirror the named ring-offset-{w}: set the offset width,
+    // the offset shadow var, and emit the composing box-shadow shorthand so the
+    // offset composes with a ring / shadow on the same element.
+    return `--tw-ring-offset-width: ${v.css}; --tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 ${v.css} var(--tw-ring-offset-color, #fff); ${BOX_SHADOW_COMPOSE}`;
+  },
   // Gradient color stops (arbitrary value) — Approach C (§26.7). The bracket
   // value is a single color token (hex / keyword / var / color-fn). For a HEX
   // from/via color the transparent twin is derived (hexToTransparentRgb);
@@ -1861,6 +1889,11 @@ const ARBITRARY_OVERLOADED_PREFIXES = {
     if (v.kind === "keyword") return "border-color";
     return null;
   },
+  // Font (S210) — overloaded: a numeric arbitrary value is a font-weight
+  // (Tailwind v3: `font-[550]` -> `font-weight: 550`); everything else
+  // (bare ident `font-[Inter]`, quoted family `font-['Helvetica_Neue']`,
+  // CSS keyword) is a font-family.
+  "font": (v) => (v.kind === "number" ? "font-weight" : "font-family"),
 };
 
 // CSS length units accepted in arbitrary values. (Time/angle/freq/resolution
@@ -1990,6 +2023,37 @@ function validateArbitraryCss(raw) {
   // Backtick is never a CSS value.
   if (raw.indexOf("`") >= 0) {
     return { error: { code: "E-TAILWIND-001", reason: `invalid character (backtick) in \`${raw}\`` } };
+  }
+
+  // String-shaped value (S210). A bracket value that begins AND ends with the
+  // SAME quote char (`'` or `"`), length >= 2, is a literal CSS string — e.g.
+  // `content-['hello']`, `font-['Helvetica_Neue']`. It is detected HERE,
+  // BEFORE the top-level-underscore list-split below, so a quoted value keeps
+  // its underscores as ONE token (underscore-as-space within the string)
+  // rather than being split into invalid `''` segments.
+  //
+  // The whitespace check (above) and injection-vector check (`/[;{}<>]/`,
+  // above) already ran, so `content-['a;b']` and actual-whitespace strings are
+  // already rejected before reaching here.
+  if (raw.length >= 2) {
+    const q = raw.charCodeAt(0);
+    if ((q === 0x27 /* ' */ || q === 0x22 /* " */) && raw.charCodeAt(raw.length - 1) === q) {
+      const quote = raw[0];
+      const interior = raw.slice(1, -1);
+      // An embedded same-quote char is ambiguous / unterminated — reject and
+      // name the offending quote (`content-['a'b']`, `font-['a"b']` mixed where
+      // the value starts and ends with `'` but contains `"` is fine; only the
+      // SAME quote embedded is the ambiguity).
+      if (interior.indexOf(quote) >= 0) {
+        return { error: { code: "E-TAILWIND-001", reason: `embedded ${quote} quote in string value \`${raw}\`` } };
+      }
+      // Underscore-as-space within a quoted string: a literal `.replace(/_/g, " ")`
+      // on the interior is correct (a quoted string is literal text — no
+      // paren-depth splitting). NOTE: `\_` escape (literal underscore) is NOT
+      // supported, consistent with the list-split path which also doesn't
+      // handle `\_`.
+      return { kind: "string", css: quote + interior.replace(/_/g, " ") + quote };
+    }
   }
 
   // Multi-token list value (S109 Bug 1 full fix). Tailwind's

@@ -23,9 +23,10 @@
  *   - `bg-gradient-*` / `from-*` / `to-*` / `via-*` (gradient compose) — Phase 2
  *   - translate/scale/rotate/skew directional + named (transform compose) — Phase 3
  *   - filter / backdrop-filter families (§26.7.3) — Phase 4 (S191, NET-NEW)
+ * Landed since (separate bug-1 sub-items):
+ *   - `content-["..."]` / `font-[Inter]` (string-shaped values) — S210 sub-arc 1
+ *   - arbitrary `ring-offset-[<len>]` / `ring-offset-[<color>]`     — S210 sub-arc 3
  * Still genuinely deferred (separate bug-1 sub-items):
- *   - arbitrary `ring-offset-[<len>]` (no arbitrary-width offset utility)
- *   - `content-["..."]` / `font-[Inter]` (string-shaped values)
  *   - Safelist / `@apply` mechanism
  *
  * Coverage:
@@ -340,11 +341,10 @@ describe("§11: lint regression — directional families no longer fire W-TAILWI
 // ---------------------------------------------------------------------------
 
 describe("§12: gradient/transform-named now recognized (S191); still-deferred STILL fire", () => {
-  test("ring-offset-[2px] STILL fires the lint (Tailwind needs preflight machinery)", () => {
+  test("ring-offset-[2px] is RECOGNIZED — no lint (S210 sub-arc 3 arbitrary ring-offset landed)", () => {
     const src = `<div class="ring-offset-[2px]">x</div>`;
     const lints = findUnrecognizedClasses(src);
-    expect(lints.length).toBeGreaterThan(0);
-    expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+    expect(lints).toEqual([]);
   });
 
   test("from-[#ff0000] is RECOGNIZED — no lint (S191 Phase 2 gradient family landed)", () => {
@@ -360,10 +360,9 @@ describe("§12: gradient/transform-named now recognized (S191); still-deferred S
     expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
   });
 
-  test("font-[Inter] STILL fires the lint (string-shaped value; not yet supported)", () => {
+  test("font-[Inter] is RECOGNIZED — no lint (S210 sub-arc 1 string/font support landed)", () => {
     const src = `<div class="font-[Inter]">x</div>`;
     const lints = findUnrecognizedClasses(src);
-    expect(lints.length).toBeGreaterThan(0);
-    expect(lints[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+    expect(lints).toEqual([]);
   });
 });

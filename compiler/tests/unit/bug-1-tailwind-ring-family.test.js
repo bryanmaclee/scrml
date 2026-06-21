@@ -26,7 +26,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { getAllUsedCSS, findUnrecognizedClasses } from "../../src/tailwind-classes.js";
+import { getAllUsedCSS, getTailwindCSS, findUnrecognizedClasses } from "../../src/tailwind-classes.js";
 
 function cssFor(classNames) {
   return getAllUsedCSS(classNames.split(" "));
@@ -353,5 +353,69 @@ describe("§12: ring-{color} and ring-offset-{color} named utilities", () => {
   test("ring-offset-white sets --tw-ring-offset-color", () => {
     const css = cssFor("ring-offset-white");
     expect(css).toContain("--tw-ring-offset-color: #ffffff");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §13: ARBITRARY ring-offset-[<len>] / [<color>] (S210, sub-arc 3)
+//
+// Mirrors the named ring-offset-{w} (width + offset shadow var + compose
+// shorthand) and ring-offset-{color} (offset color var only). The exact-key
+// declTransform lookup for prefix `ring-offset` hits these, NOT `ring`.
+// Escaped selectors computed by running the engine (not hand-guessed).
+// ---------------------------------------------------------------------------
+
+describe("§13: arbitrary ring-offset-[<len>] / [<color>] (S210)", () => {
+  test("ring-offset-[2px] — width form: offset width + offset shadow var + compose shorthand", () => {
+    const css = getTailwindCSS("ring-offset-[2px]");
+    expect(css).toBe(
+      ".ring-offset-\\[2px\\] { --tw-ring-offset-width: 2px; --tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 2px var(--tw-ring-offset-color, #fff); box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000) }",
+    );
+  });
+
+  test("ring-offset-[#ff0000] — color form: sets only the offset color var", () => {
+    const css = getTailwindCSS("ring-offset-[#ff0000]");
+    expect(css).toBe(".ring-offset-\\[\\#ff0000\\] { --tw-ring-offset-color: #ff0000 }");
+  });
+
+  test("ring-offset-[var(--c)] — var color form", () => {
+    const css = getTailwindCSS("ring-offset-[var(--c)]");
+    expect(css).toBe(".ring-offset-\\[var\\(--c\\)\\] { --tw-ring-offset-color: var(--c) }");
+  });
+
+  test("ring-offset-[red] — keyword/ident color form", () => {
+    const css = getTailwindCSS("ring-offset-[red]");
+    expect(css).toBe(".ring-offset-\\[red\\] { --tw-ring-offset-color: red }");
+  });
+
+  test("composition — ring-[3px] ring-offset-[2px] both resolve, no single-property collision", () => {
+    const css = cssFor("ring-[3px] ring-offset-[2px]");
+    // ring half: width accounts for the offset width via calc
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
+    // offset half: its own width var
+    expect(css).toContain("--tw-ring-offset-width: 2px");
+    // both emit the shared composing shorthand — no bare single-property box-shadow
+    expect(css).toContain(
+      "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)",
+    );
+    expect(css).not.toContain("box-shadow: 0 0 0 ");
+  });
+
+  test("lint regression — ring-offset-[2px] no longer fires W-TAILWIND-UNRECOGNIZED-CLASS", () => {
+    const diags = findUnrecognizedClasses('<div class="ring-offset-[2px]">x</div>', "test.scrml");
+    expect(diags).toEqual([]);
+  });
+
+  test("variant integration — md:ring-offset-[2px] wraps in @media", () => {
+    const css = getTailwindCSS("md:ring-offset-[2px]");
+    expect(css).toContain("@media (min-width: 768px)");
+    expect(css).toContain("--tw-ring-offset-width: 2px");
+  });
+
+  test("decl-transform rejects a list value (ring-offset width is single-token)", () => {
+    // A list value (`ring-offset-[1px_2px]`) is rejected upstream by the
+    // declTransform single-token requirement.
+    const css = getTailwindCSS("ring-offset-[1px_2px]");
+    expect(css).toBeNull();
   });
 });
