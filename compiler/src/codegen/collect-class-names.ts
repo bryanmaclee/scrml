@@ -50,6 +50,10 @@
  *   - function-decl.body (function bodies CAN contain lift-exprs)
  *   - engine-decl arms (state-machine arm bodies contain markup that
  *     emit-engine renders at runtime)
+ *   - match-block arm bodies (the MARKUP block-form `<match>` — walkable
+ *     markup lives in `bodyChildren` + `armBodyChildren`, NOT children/body)
+ *   - each-block per-item body (the MARKUP block-form `<each>` — walkable
+ *     markup lives in `bodyChildren`, NOT children/body)
  *   - component-decl bodies (component def bodies expand inline via CE
  *     before codegen; but if any unexpanded shape leaks through, we'd
  *     still scan)
@@ -200,6 +204,35 @@ function visitNode(node: LooseNode, out: Set<string>): void {
     }
     if (Array.isArray(node.children)) walk(node.children, out);
     if (Array.isArray(node.body)) walk(node.body, out);
+    return;
+  }
+
+  // MARKUP block-form `<match>` (built ast-builder.js ~:13541). The walkable
+  // arm-body markup does NOT live in `children`/`body`; it lives in
+  // `bodyChildren` (a mirror of block.children — additive, engine-decl
+  // precedent) and `armBodyChildren` (the per-arm bare bodies for the
+  // g-formfor expansion passes, S177; `undefined` when no bare-body arms).
+  // The generic fallback below never reaches those, so a utility class used
+  // ONLY inside a `<match>` arm gets no CSS rule (silent unstyled render).
+  // Recursion is uniform via `walk`, so a nested block-form inside an arm
+  // (e.g. `<each>` in an arm body) falls out automatically.
+  if (node.kind === "match-block") {
+    const bodyChildren = (node as Record<string, unknown>).bodyChildren;
+    if (Array.isArray(bodyChildren)) walk(bodyChildren as LooseNode[], out);
+    const armBodyChildren = (node as Record<string, unknown>).armBodyChildren;
+    if (Array.isArray(armBodyChildren)) walk(armBodyChildren as LooseNode[], out);
+    return;
+  }
+
+  // MARKUP block-form `<each>` (built ast-builder.js ~:14142). The walkable
+  // per-item body lives in `bodyChildren` (a full mirror of block.children,
+  // INCLUDING the optional `<empty>` sub-element). `templateChildren` and
+  // `emptyChild` are subsets/members of `bodyChildren`, so walking
+  // `bodyChildren` alone reaches every class-bearing node. As with
+  // `match-block`, the generic fallback never reaches `bodyChildren`.
+  if (node.kind === "each-block") {
+    const bodyChildren = (node as Record<string, unknown>).bodyChildren;
+    if (Array.isArray(bodyChildren)) walk(bodyChildren as LooseNode[], out);
     return;
   }
 
