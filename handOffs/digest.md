@@ -1,9 +1,9 @@
-<!-- @digest head=671a79d3 delta-seq=26 -->
+<!-- @digest head=a3b08cbb delta-seq=27 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `671a79d3`** + delta-log **[26]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `671a79d3`
+> **HEAD `a3b08cbb`** + delta-log **[27]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `a3b08cbb`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `671a79d3`
+## Board — from `@gap` tokens @ `a3b08cbb`
 - **HIGH 0** · MED 10 · LOW 17 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -25,15 +25,15 @@
 - `[22]` rule/land · **6nz AF RULED by-design + confirmed (user "confirm AF").** §36.6 normative: input-state reads set up NO reactive subscriptions (intentional) → `${<#id>.x}` ren… → SPEC §36.1/§36.6 + known-gaps
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[20]` disp/land · **A2 W0 decl-site-epistemics DD LANDED** (user "go on A2"; scrml-deep-dive bg, pure-research). **C ELIMINATED** (propagating external type-tier — Rust rejected… → scrml-support/docs/deep-dives/api-primitive-decl-site-epistemics-2026-06-20.md
 - `[22]` rule/land · **6nz AF RULED by-design + confirmed (user "confirm AF").** §36.6 normative: input-state reads set up NO reactive subscriptions (intentional) → `${<#id>.x}` ren… → SPEC §36.1/§36.6 + known-gaps
 - `[23]` state · **ss3 list REFRESHED + fire-ready (user "refresh ss3").** spa-lists/ss3-codegen-expr-attr.md: prior 3 items marked integrated (2eea9d4e); re-clustered to the op… → spa-lists/ss3-codegen-expr-attr.md
 - `[24]` disp/land · **A2 W1 LANDED — SPEC §60 `<api>` authored (user "go A2").** New top-level Nominal section §60.1-§60.11 (PA-direct; appended at SPEC end → NO range-shifts below… → SPEC §60 + docs/changes/api-primitive-a2-2026-06-20/
 - `[25]` disp · **A2 W2 (parser) DISPATCHED (user "go").** scrml-js-codegen-engineer, isolation:worktree, opus — agent **a0761f89e7066e52a**. Scope: BS recognizes `<api>...</ap… → docs/changes/api-primitive-a2-2026-06-20/BRIEF-W2.md + agent a0761f89e7066e52a
 - `[26]` disp/land · **sPA ss3 (paren/span cluster) RE-INTEGRATED** (user "ss3 is done integrate it"). S83-verified (tip a99962d9==reported, base 8c27805e, 5 source files disjoint m… → d84e85d2 + known-gaps
+- `[27]` disp/land · **A2 W2 (parser) LANDED** (S67 file-delta, agent a0761f89e7066e52a @143a73b2). S83 + clobber-safe (tip==reported; base 4c740ec5; main untouched ast-builder.js/S… → ast-builder.js + SPEC §34/§60.9 + api-decl-parser.test.js
 
 ## State
-- Version: 0.7.0 · maps: 33 commits behind HEAD (watermark 5c68e87e, HEAD 671a79d3)
+- Version: 0.7.0 · maps: 35 commits behind HEAD (watermark 5c68e87e, HEAD a3b08cbb)
 - Recent wraps:
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
