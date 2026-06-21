@@ -134,6 +134,48 @@ describe("not keyword — codegen rewrite", () => {
     expect(rewriteNotKeyword("@arr[i] is not")).toBe("(@arr[i] === null || @arr[i] === undefined)");
   });
 
+  // g-isop-call-tail-lhs-paren-miscompile (ss3, S210) — an is-op whose LHS ends
+  // in a CALL (`re.exec(s) is some`). The pre-fix `_rewriteParenthesizedIsOp`
+  // matched the call's `)` and grabbed only its OWN arg-parens (`(s)`), emitting
+  // `re.exec((s) != null)` — the receiver `re.exec` was swallowed into the
+  // comparison (valid JS, silent-WRONG). The call-vs-grouping guard now captures
+  // the WHOLE call chain as the LHS (single-eval), emitting `(re.exec(s) != null)`.
+  test("§5k `is some` with a call-tail LHS (the bug repro)", () => {
+    expect(rewriteNotKeyword("re.exec(s) is some")).toBe("(re.exec(s) != null)");
+  });
+
+  test("§5l `is not` (absence) with a call-tail LHS", () => {
+    expect(rewriteNotKeyword("re.exec(s) is not")).toBe("(re.exec(s) == null)");
+  });
+
+  test("§5m `is not not` with a call-tail LHS", () => {
+    expect(rewriteNotKeyword("re.exec(s) is not not")).toBe("(re.exec(s) != null)");
+  });
+
+  test("§5n nested-call LHS `f(g(x))`", () => {
+    expect(rewriteNotKeyword("f(g(x)) is some")).toBe("(f(g(x)) != null)");
+  });
+
+  test("§5o member-chain call LHS `o.a.b(x)`", () => {
+    expect(rewriteNotKeyword("o.a.b(x) is some")).toBe("(o.a.b(x) != null)");
+  });
+
+  test("§5p index+member+call chain LHS `arr[i].f(x)`", () => {
+    expect(rewriteNotKeyword("arr[i].f(x) is some")).toBe("(arr[i].f(x) != null)");
+  });
+
+  test("§5q explicit-grouping form `(re.exec(s)) is some` still works (keyword not swallowed)", () => {
+    // `(...)` whose `(` is preceded by the `return` keyword must be read as a
+    // GROUPING paren, not a call — else the keyword is swallowed into the LHS.
+    expect(rewriteNotKeyword("(re.exec(s)) is some")).toBe("((re.exec(s)) != null)");
+    expect(rewriteNotKeyword("return re.exec(s) is some")).toBe("return (re.exec(s) != null)");
+  });
+
+  test("§5r call-tail fix does NOT disturb the bare-ident / dotted regex path", () => {
+    expect(rewriteNotKeyword("x is some")).toBe("(x !== null && x !== undefined)");
+    expect(rewriteNotKeyword("obj.prop is some")).toBe("(obj.prop !== null && obj.prop !== undefined)");
+  });
+
   test("§8 no-op when no `not` keyword present", () => {
     expect(rewriteNotKeyword("a + b")).toBe("a + b");
   });

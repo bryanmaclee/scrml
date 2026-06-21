@@ -712,6 +712,70 @@ export function rewriteNotKeyword(expr: string, errors?: any[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Keywords that may appear immediately left of a `(` where the `(` is a GROUPING
+// paren, not a call (`return (x)`, `typeof (x)`, `await (x)`, `not (x)`). Used by
+// _rewriteParenthesizedIsOp's call-vs-grouping disambiguation so a keyword is
+// never mistaken for a callee. (scrml word-operators `not`/`and`/`or` may still
+// be present at Phase A, before the not-rewrite pass below.)
+const PAREN_PRECEDING_KEYWORDS = new Set<string>([
+  "return", "typeof", "void", "delete", "await", "yield", "new", "throw",
+  "in", "of", "instanceof", "case", "do", "else", "if", "while", "for",
+  "switch", "catch", "with", "not", "and", "or",
+]);
+
+// _findMatchingOpenLeft — given the index of a closing bracket, walk left to its
+// balanced matching open. Returns the open index or -1 (unbalanced).
+function _findMatchingOpenLeft(s: string, closeIdx: number, open: string, close: string): number {
+  let depth = 0;
+  for (let k = closeIdx; k >= 0; k--) {
+    if (s[k] === close) depth++;
+    else if (s[k] === open) { depth--; if (depth === 0) return k; }
+  }
+  return -1;
+}
+
+// _scanChainStartLeft — given `endIdx` at the LAST char of a member/call/index
+// primary chain (a `)`, `]`, or identifier char), walk left to the chain's start
+// index. Whitespace-tolerant: the block-splitter tokenizer space-pads tokens, so
+// a real LHS reaches this string-rewrite path as `re . exec ( s )`. This is the
+// string-rewrite twin of expression-parser.ts `scanLhsLeft` (the AST path's
+// balanced-bracket leftward scanner). Returns the start index, or -1.
+function _scanChainStartLeft(s: string, endIdx: number): number {
+  let pos = endIdx;
+  let chainStart = endIdx;
+  let more = true;
+  while (pos >= 0 && more) {
+    while (pos >= 0 && /\s/.test(s[pos])) pos--;
+    if (pos < 0) break;
+    const c = s[pos];
+    if (c === ')' || c === ']') {
+      // Call / index tail — skip its balanced body and continue the chain left.
+      const o = c === ')' ? _findMatchingOpenLeft(s, pos, '(', ')')
+                          : _findMatchingOpenLeft(s, pos, '[', ']');
+      if (o === -1) return -1;
+      chainStart = o;
+      pos = o - 1;
+    } else if (/[A-Za-z0-9_$]/.test(c)) {
+      while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
+      chainStart = pos + 1;
+      // A `.` (ws-tolerant) to the left makes this ident a member tail — keep
+      // walking; otherwise it is the chain BASE (optionally `@`-sigiled).
+      let scan = pos;
+      while (scan >= 0 && /\s/.test(s[scan])) scan--;
+      if (scan >= 0 && s[scan] === '.') {
+        pos = scan - 1;
+        chainStart = scan;
+        continue;
+      }
+      if (scan >= 0 && s[scan] === '@') chainStart = scan;
+      more = false;
+    } else {
+      more = false;
+    }
+  }
+  return chainStart;
+}
+
 // _rewriteParenthesizedIsOp — Phase A: (expr) is not / is some / is not not
 // ---------------------------------------------------------------------------
 // Scans `segment` for patterns: `) is not not`, `) is some`, `) is not`
@@ -766,22 +830,68 @@ function _rewriteParenthesizedIsOp(segment: string): string {
         continue;
       }
 
-      // Extract the full parenthesized expression (including the outer parens).
-      const parenExpr = segment.slice(parenStart, opIdx + 1); // e.g. "(regex.exec(str))"
+      // g-isop-call-tail-lhs-paren-miscompile (ss3, S210): distinguish a GROUPING
+      // paren (`(expr) is some`) from a CALL paren (`re.exec(s) is some`). The
+      // matching `(` of a call / computed-call is immediately preceded
+      // (whitespace-tolerant) by an identifier char, `)`, or `]` — that's the
+      // callee. The pre-fix code blindly captured `(...)` as the LHS, so a
+      // call-tail `re.exec(s) is some` grabbed only the call's OWN arg-parens
+      // (`(s)`) and emitted `re.exec((s) != null)` — `re.exec` was swallowed into
+      // the comparison (valid JS, silent-WRONG: the call argument became the
+      // null-check, the receiver vanished). For a call paren the real LHS is the
+      // WHOLE call/member chain ending at opIdx; capture it (single-eval) so the
+      // emit is `(re.exec(s) != null)`. (The AST/client path already handles this
+      // via rewriteIsPredicates' scanLhsLeft; this is the string-rewrite sibling.)
+      let pre = parenStart - 1;
+      while (pre >= 0 && /\s/.test(segment[pre])) pre--;
+      let isCallParen = false;
+      if (pre >= 0) {
+        const pc = segment[pre];
+        if (pc === ')' || pc === ']') {
+          // A call/index tail immediately left of the `(` — a curried/chained
+          // call (`f()()`, `arr[i]()`). Always a call paren.
+          isCallParen = true;
+        } else if (/[A-Za-z0-9_$]/.test(pc)) {
+          // An identifier left of the `(` is a callee — UNLESS it is a keyword
+          // that introduces a grouped expression (`return (x)`, `typeof (x)`,
+          // `await (x)`, `not (x)`, …). A keyword `(` is GROUPING, not a call;
+          // mis-reading it as a call swallows the keyword into the LHS
+          // (`(return (re.exec(s)) != null)` — malformed).
+          let idStart = pre;
+          while (idStart >= 0 && /[A-Za-z0-9_$]/.test(segment[idStart])) idStart--;
+          const ident = segment.slice(idStart + 1, pre + 1);
+          isCallParen = !PAREN_PRECEDING_KEYWORDS.has(ident);
+        }
+      }
+
+      let lhsStart: number;
+      let lhsExpr: string;
+      if (isCallParen) {
+        // Call-tail LHS — capture the whole receiver chain ending at opIdx (NOT
+        // re-wrapped: the chain is already a single primary, no extra parens
+        // needed for the `!= null` comparison to bind correctly).
+        lhsStart = _scanChainStartLeft(segment, opIdx);
+        if (lhsStart === -1) { searchFrom = opIdx + 1; continue; }
+        lhsExpr = segment.slice(lhsStart, opIdx + 1); // e.g. "re.exec(s)"
+      } else {
+        // Grouping paren — the captured LHS is the `(expr)` itself (verbatim).
+        lhsStart = parenStart;
+        lhsExpr = segment.slice(parenStart, opIdx + 1); // e.g. "(regex.exec(str))"
+      }
 
       // Build the replacement: compare expr to null directly.
-      // Single-evaluation is intrinsic — parenExpr appears once on the LHS.
+      // Single-evaluation is intrinsic — lhsExpr appears once on the LHS.
       const cmp = op === "absence" ? "==" : "!=";
-      const replacement = `(${parenExpr} ${cmp} null)`;
+      const replacement = `(${lhsExpr} ${cmp} null)`;
 
       // Splice the replacement into the segment.
-      const fullMatch = parenExpr + suffix;
-      const before = segment.slice(0, parenStart);
-      const after  = segment.slice(parenStart + fullMatch.length);
+      const fullMatch = lhsExpr + suffix;
+      const before = segment.slice(0, lhsStart);
+      const after  = segment.slice(lhsStart + fullMatch.length);
       segment = before + replacement + after;
 
       // Advance past the replacement to avoid re-processing it.
-      searchFrom = parenStart + replacement.length;
+      searchFrom = lhsStart + replacement.length;
     }
   }
 
