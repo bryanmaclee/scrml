@@ -18019,6 +18019,333 @@ function walkAndExpandTableForNodes(
 }
 
 // ---------------------------------------------------------------------------
+// §60 — `<api>` typed-external-API resolution + checks (A2 W3 — the typer wave,
+// api-primitive-a2-2026-06-20). RESOLVE + CHECK only; NO codegen (the fetch
+// callable + parseVariant wiring + the `<request>` runtime integration land in
+// W4). A typed-and-checked `<api>` + `<request api=>` STILL emits nothing at W3.
+//
+// W2 (ast-builder.js) parsed `<api base=>...</api>` into an `api-decl` node
+// carrying `{ base, src?, endpoints: [{ name, reqShape?, method, path,
+// responseType, span }] }` where `reqShape`/`responseType` are RAW type-ref
+// TEXT (W2 did NOT resolve them — that is THIS pass). `<request api="X"
+// args=...>` already lands its `api=`/`args=` as generic markup `attrs` (api=
+// → string-literal value; args= → variable-ref) — no new PARSE code is needed;
+// this pass READS those existing attrs.
+//
+// W3 fires three NEW §34 codes (§60.9 PLANNED → wired here):
+//   E-API-PATH-PARAM-UNBOUND — a `${param}` in an endpoint's path template has
+//     no corresponding field in that endpoint's resolved request shape (an
+//     api-decl-level check; no `<request>` needed).
+//   E-API-ENDPOINT-UNKNOWN  — a `<request api="X">` whose `X` resolves to no
+//     declared `<api>` endpoint in scope.
+//   E-API-REQ-SHAPE-MISMATCH — a `<request api="X" args=V>` whose `args` value
+//     type does not type-check against endpoint `X`'s declared request shape.
+//
+// Undeclared endpoint type-refs (reqShape / responseType) reuse the EXISTING
+// §14.1.2 `E-TYPE-UNKNOWN-NAME` machinery (forEachTypeNameLeaf +
+// isUnrecognizedTypeNameAtom) — `<api>` introduces NO new type machinery
+// (§60.2); it types the boundary reusing the existing §53/§14 type surface.
+//
+// §60.6 client-only: `<api>` (and `<request api=>`) are confirmed NOT to
+// escalate to a server placement — there is no §12.2 trigger here and this
+// pass adds none. (route-inference.ts already excludes `<api>`; a confirming
+// test asserts an `<api>`-only app emits a pure client bundle.)
+function checkApiDeclarations(
+  topNodes: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+  exemptTypeNames: Set<string>,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  // ---- Pass 1: collect api-decl nodes + build the endpoint registry --------
+  // A file may declare more than one `<api>`; endpoints across all in-scope
+  // `<api>` blocks share one name space (the §60.4 "in-scope `<api>` endpoints"
+  // surface a `<request api=>` resolves against).
+  interface ApiEndpoint {
+    name: string;
+    reqShape: string | null;
+    method: string;
+    path: string;
+    responseType: string | null;
+    span: Span;
+  }
+  const apiDecls: ASTNodeLike[] = [];
+  // Walk top-level nodes only — `<api>` is a top-level declaration (§60.2); it
+  // does not nest inside markup. (A defensive deep walk would also pick up a
+  // stray nested form, but the W2 parser only produces api-decl at the top.)
+  for (const n of topNodes) {
+    if (n && typeof n === "object" && n.kind === "api-decl") apiDecls.push(n);
+  }
+  if (apiDecls.length === 0) return; // nothing api-shaped in this file
+
+  const endpointRegistry = new Map<string, ApiEndpoint>();
+  for (const decl of apiDecls) {
+    const eps = (decl.endpoints as ApiEndpoint[] | undefined) ?? [];
+    for (const ep of eps) {
+      if (!ep || typeof ep.name !== "string" || ep.name.length === 0) continue;
+      // First declaration of a name wins (a duplicate is a W2-shape concern;
+      // W3 resolves against the first-declared endpoint).
+      if (!endpointRegistry.has(ep.name)) endpointRegistry.set(ep.name, ep);
+    }
+  }
+
+  // ---- helper: resolve an endpoint type-ref + fire E-TYPE-UNKNOWN-NAME ------
+  // `<api>` types the boundary reusing the §53/§14 type surface (§60.2). An
+  // undeclared reqShape/responseType is an UNRECOGNIZED type name — the SAME
+  // class `checkUnknownTypeNames` (§14.1.2) covers elsewhere — so reuse its
+  // per-leaf classifier rather than inventing a new code.
+  const seenTypeRefKeys = new Set<string>();
+  function checkEndpointTypeRef(
+    typeText: string | null,
+    where: string,
+    span: Span,
+  ): void {
+    if (typeof typeText !== "string" || typeText.trim() === "") return;
+    forEachTypeNameLeaf(typeText, (leafName) => {
+      if (!isUnrecognizedTypeNameAtom(leafName, typeRegistry, exemptTypeNames)) return;
+      const key = `${span.start}:${span.end}:${where}:${leafName}`;
+      if (seenTypeRefKeys.has(key)) return;
+      seenTypeRefKeys.add(key);
+      errors.push(new TSError(
+        "E-TYPE-UNKNOWN-NAME",
+        `E-TYPE-UNKNOWN-NAME: ${where} is annotated with an unrecognized type ` +
+        `name '${leafName}'. No type with that name is defined — it is not a ` +
+        `built-in, not declared in this file, and not imported. Define the type, ` +
+        `fix the spelling, import it, or use 'asIs' for a deliberate untyped ` +
+        `escape hatch. See SPEC §14.1.2 / §60.2.`,
+        span,
+        "error",
+      ));
+    }, { emitMapKeys: false });
+  }
+
+  // ---- helper: collect path-template `${param}` names ----------------------
+  // §60.2 path templates carry verbatim `${id}` params (W2 preserved them as
+  // literal text — NOT interpolations). Extract the bare identifier of each.
+  function pathParamNames(path: string): string[] {
+    const out: string[] = [];
+    if (typeof path !== "string") return out;
+    const re = /\$\{\s*([^}]*?)\s*\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(path)) !== null) {
+      const inner = (m[1] ?? "").trim();
+      if (inner === "") continue;
+      // A path param is a request-shape FIELD reference. Take the leading
+      // identifier (so `${user.id}` keys on `user`, the field, per the
+      // §60.4 args-shape contract); a non-identifier expression is left as-is
+      // and will simply not match any field (→ UNBOUND, the honest result).
+      const lead = inner.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+      out.push(lead ? lead[0] : inner);
+    }
+    return out;
+  }
+
+  // ---- Pass 2: per-endpoint resolution + E-API-PATH-PARAM-UNBOUND ----------
+  for (const decl of apiDecls) {
+    const eps = (decl.endpoints as ApiEndpoint[] | undefined) ?? [];
+    for (const ep of eps) {
+      if (!ep) continue;
+      const epSpan = (ep.span as Span | undefined) ?? fileSpan;
+
+      // 1. Resolve the endpoint type-refs (reqShape + responseType). An
+      //    undeclared type-ref fires E-TYPE-UNKNOWN-NAME (§14.1.2 reuse).
+      if (ep.reqShape) {
+        checkEndpointTypeRef(ep.reqShape, `\`<api>\` endpoint \`${ep.name}\` request shape`, epSpan);
+      }
+      if (ep.responseType) {
+        checkEndpointTypeRef(ep.responseType, `\`<api>\` endpoint \`${ep.name}\` response type`, epSpan);
+      }
+
+      // 2. E-API-PATH-PARAM-UNBOUND — each `${param}` in the path template MUST
+      //    correspond to a field of the endpoint's request shape.
+      const params = pathParamNames(ep.path);
+      if (params.length === 0) continue;
+
+      // Resolve the request-shape struct's field set (if any). A null reqShape
+      // means the endpoint declared NO request shape, so EVERY path param is
+      // unbound. A reqShape that resolves to a struct exposes its field names; a
+      // reqShape that resolves to a non-struct (or `asIs`) cannot supply named
+      // fields, so the params it would need are unbound. (An UNKNOWN reqShape
+      // type already fired E-TYPE-UNKNOWN-NAME above; we still report the
+      // unbound params so the author sees the full picture.)
+      let fieldNames: Set<string> | null = null;
+      if (ep.reqShape) {
+        const resolved = resolveTypeExpr(ep.reqShape, typeRegistry);
+        if (resolved && resolved.kind === "struct") {
+          fieldNames = new Set((resolved as StructType).fields.keys());
+        }
+      }
+      for (const p of params) {
+        const bound = fieldNames !== null && fieldNames.has(p);
+        if (bound) continue;
+        const reqShapeLabel = ep.reqShape
+          ? `request shape \`${ep.reqShape}\``
+          : `request shape (none declared — \`${ep.name}()\`)`;
+        errors.push(new TSError(
+          "E-API-PATH-PARAM-UNBOUND",
+          `E-API-PATH-PARAM-UNBOUND: \`<api>\` endpoint \`${ep.name}\` path template ` +
+          `\`${ep.path}\` references \`\${${p}}\` but the endpoint's ${reqShapeLabel} ` +
+          `declares no field \`${p}\`. Per SPEC §60.2 every path-template parameter ` +
+          `SHALL correspond to a field of the endpoint's request shape — the param ` +
+          `is the value substituted into the URL at the call boundary. Add a \`${p}\` ` +
+          `field to the request shape, or remove the param.`,
+          epSpan,
+          "error",
+        ));
+      }
+    }
+  }
+
+  // ---- Pass 3: <request api="X" args=...> recognition + checks -------------
+  // Build a cell-name -> resolved-type map from top-level state-decl nodes so
+  // `args=@cell` can be type-checked against the endpoint's request shape. The
+  // map keys on the BARE cell name (the `@` sigil stripped). This is the W3
+  // request-side surface; W4 wires the actual runtime <request> integration.
+  const cellTypeByName = new Map<string, ResolvedType>();
+  const seenCellWalk = new WeakSet<object>();
+  function collectCellTypes(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) collectCellTypes(c); return; }
+    if (seenCellWalk.has(node as object)) return;
+    seenCellWalk.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (n.kind === "state-decl" && typeof n.name === "string" && n.name) {
+      const ann = n.typeAnnotation as string | undefined;
+      if (typeof ann === "string" && ann.trim() !== "" && !cellTypeByName.has(n.name)) {
+        cellTypeByName.set(n.name, resolveTypeExpr(ann, typeRegistry));
+      }
+    }
+    // Cells live inside the top-level `logic` block body (and other container
+    // shapes after CE), not at the file top — deep-walk the standard arrays.
+    if (Array.isArray(n.body)) collectCellTypes(n.body);
+    if (Array.isArray(n.children)) collectCellTypes(n.children);
+    if (Array.isArray(n.bodyChildren)) collectCellTypes(n.bodyChildren);
+    if (Array.isArray(n.branches)) collectCellTypes(n.branches);
+  }
+  collectCellTypes(topNodes);
+
+  // Resolve the type of an `args=` attribute VALUE expression. Only a
+  // `variable-ref` (`args=@cell`) is statically resolvable at W3 without a full
+  // expression-type pass; everything else (an inline object literal, a call,
+  // etc.) returns null → the mismatch check conservatively SKIPS (no false
+  // E-API-REQ-SHAPE-MISMATCH on a shape W3 cannot resolve). W4's codegen +
+  // expression-type threading can tighten this.
+  function resolveArgsValueType(attrVal: unknown): ResolvedType | null {
+    if (!attrVal || typeof attrVal !== "object") return null;
+    const v = attrVal as Record<string, unknown>;
+    if (v.kind === "variable-ref" && typeof v.name === "string") {
+      const bare = (v.name as string).replace(/^@/, "");
+      return cellTypeByName.get(bare) ?? null;
+    }
+    return null;
+  }
+
+  // Deep-walk for `<request>` markup nodes carrying an `api=` attr.
+  const seenReq = new WeakSet<object>();
+  function walkRequests(nodes: unknown): void {
+    if (!nodes) return;
+    if (Array.isArray(nodes)) { for (const c of nodes) walkRequests(c); return; }
+    if (typeof nodes !== "object") return;
+    if (seenReq.has(nodes as object)) return;
+    seenReq.add(nodes as object);
+    const n = nodes as Record<string, unknown>;
+
+    const tag = (n.tag ?? n.name) as string | undefined;
+    if (n.kind === "markup" && tag === "request" && Array.isArray(n.attrs)) {
+      let apiAttr: Record<string, unknown> | null = null;
+      let argsAttr: Record<string, unknown> | null = null;
+      for (const a of (n.attrs as unknown[])) {
+        if (!a || typeof a !== "object") continue;
+        const an = (a as Record<string, unknown>).name;
+        if (an === "api") apiAttr = a as Record<string, unknown>;
+        else if (an === "args") argsAttr = a as Record<string, unknown>;
+      }
+      if (apiAttr) {
+        // Endpoint name: the `api=` value is a string-literal (api="getUser").
+        const apiValObj = apiAttr.value as Record<string, unknown> | undefined;
+        const endpointName = (apiValObj && apiValObj.kind === "string-literal" && typeof apiValObj.value === "string")
+          ? (apiValObj.value as string)
+          : (typeof apiAttr.value === "string" ? (apiAttr.value as string) : null);
+        const reqSpan = ((apiAttr.span as Span | undefined)
+          ?? (n.span as Span | undefined)
+          ?? fileSpan);
+
+        if (typeof endpointName === "string" && endpointName.length > 0) {
+          const endpoint = endpointRegistry.get(endpointName) ?? null;
+
+          // E-API-ENDPOINT-UNKNOWN — `api="X"` names no declared endpoint.
+          if (!endpoint) {
+            const known = [...endpointRegistry.keys()];
+            const knownList = known.length > 0
+              ? ` Declared endpoints: ${known.map(k => `\`${k}\``).join(", ")}.`
+              : ` No \`<api>\` endpoints are declared in scope.`;
+            errors.push(new TSError(
+              "E-API-ENDPOINT-UNKNOWN",
+              `E-API-ENDPOINT-UNKNOWN: \`<request api="${endpointName}">\` names an ` +
+              `endpoint that is not declared in any in-scope \`<api>\`.${knownList} ` +
+              `Per SPEC §60.4 \`api="endpointName"\` SHALL resolve against a declared ` +
+              `\`<api>\` endpoint. Fix the name, or declare the endpoint.`,
+              reqSpan,
+              "error",
+            ));
+          } else if (argsAttr) {
+            // E-API-REQ-SHAPE-MISMATCH — the args value type-checks against the
+            // endpoint's request shape. Only fire when BOTH sides resolve to a
+            // concrete struct (a conservative W3 check — an unresolvable args
+            // expr, an `asIs`, or a no-reqShape endpoint SKIPS, never a false
+            // positive). Width: the args struct SHALL supply every field the
+            // endpoint's request shape declares (the request will not be
+            // well-formed otherwise); extra fields are tolerated (a superset is
+            // a safe over-supply at the wire boundary).
+            const reqShapeText = endpoint.reqShape;
+            const argsType = resolveArgsValueType(argsAttr.value);
+            if (reqShapeText && argsType && argsType.kind === "struct") {
+              const reqType = resolveTypeExpr(reqShapeText, typeRegistry);
+              if (reqType && reqType.kind === "struct") {
+                const reqFields = (reqType as StructType).fields;
+                const argFields = (argsType as StructType).fields;
+                const missing: string[] = [];
+                for (const fname of reqFields.keys()) {
+                  if (!argFields.has(fname)) missing.push(fname);
+                }
+                if (missing.length > 0) {
+                  const argsSpan = ((argsAttr.span as Span | undefined) ?? reqSpan);
+                  errors.push(new TSError(
+                    "E-API-REQ-SHAPE-MISMATCH",
+                    `E-API-REQ-SHAPE-MISMATCH: \`<request api="${endpointName}">\` \`args\` ` +
+                    `value does not satisfy endpoint \`${endpointName}\`'s request shape ` +
+                    `\`${reqShapeText}\` — missing field(s): ` +
+                    `${missing.map(f => `\`${f}\``).join(", ")}. Per SPEC §60.4 the \`args\` ` +
+                    `value SHALL type-check against the endpoint's request shape. Supply ` +
+                    `the missing field(s), or correct the \`args\` value.`,
+                    argsSpan,
+                    "error",
+                  ));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Recurse into the standard container fields.
+    const children = n.children;
+    if (Array.isArray(children)) walkRequests(children);
+    const body = n.body;
+    if (Array.isArray(body)) walkRequests(body);
+    const bodyChildren = n.bodyChildren;
+    if (Array.isArray(bodyChildren)) walkRequests(bodyChildren);
+    const armBodyChildren = n.armBodyChildren;
+    if (Array.isArray(armBodyChildren)) walkRequests(armBodyChildren);
+    const branches = n.branches;
+    if (Array.isArray(branches)) walkRequests(branches);
+  }
+  walkRequests(topNodes);
+}
+
+
+// ---------------------------------------------------------------------------
 // Per-file processor
 // ---------------------------------------------------------------------------
 
@@ -18566,6 +18893,25 @@ function processFile(
   // collected here (all positions + bare/paren forms; single source of truth).
   if (allNodes.length > 0) {
     harvestNotPrefixNegation(allNodes, errors, filePath);
+  }
+
+  // TS-API: §60 — `<api>` typed-external-API resolution + checks (A2 W3). RESOLVE
+  // the endpoint reqShape/responseType type-refs against §53/§14 (undeclared →
+  // E-TYPE-UNKNOWN-NAME reuse) + fire E-API-PATH-PARAM-UNBOUND / -ENDPOINT-UNKNOWN
+  // / -REQ-SHAPE-MISMATCH. NO codegen — a typed-and-checked `<api>` + `<request
+  // api=>` still emits nothing at W3 (the fetch callable + parseVariant wiring is
+  // W4). Short-circuits when the file declares no `<api>`. The exempt set mirrors
+  // the checkUnknownTypeNames block (imported specifier names — single-file-mode
+  // guard — plus machine names) so a reqShape/responseType referencing an imported
+  // type does not false-fire E-TYPE-UNKNOWN-NAME.
+  if (allNodes.length > 0) {
+    const apiExemptTypeNames = collectImportSpecifierNames(allNodes);
+    for (const machine of machineRegistry.values()) {
+      if (typeof machine.name === "string" && machine.name.length > 0) {
+        apiExemptTypeNames.add(machine.name);
+      }
+    }
+    checkApiDeclarations(allNodes, typeRegistry, apiExemptTypeNames, errors, fileSpan);
   }
 
   // Assemble TypedFileAST.

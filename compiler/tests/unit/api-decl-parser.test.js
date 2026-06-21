@@ -258,7 +258,15 @@ describe("<api> parser — E-API-ENDPOINT-MALFORMED (§60.9, NEW S210 W2)", () =
 // ===========================================================================
 describe("<api> parser — no codegen / no emission (W2 contract)", () => {
   test("a valid <api> compiles exit-clean and emits no api-decl content", () => {
+    // W3 (the typer wave) RESOLVES the endpoint type-refs against §53/§14 and
+    // checks the `${id}` path param binds a request-shape field — so a genuinely
+    // valid fixture declares the request/response types (UserQuery carries the
+    // `id` field the path template references). (The pre-W3 fixture omitted these
+    // declarations; that is now correctly an E-TYPE-UNKNOWN-NAME +
+    // E-API-PATH-PARAM-UNBOUND, not a clean compile.)
     const r = compile(
+      `type UserQuery :struct = { id: number }\n` +
+      `type User :struct = { id: number, name: string }\n` +
       `<api base="https://api.example.com">\n` +
       `  getUser(UserQuery) -> GET "/users/\${id}" : User\n` +
       `</api>\n` +

@@ -1,53 +1,49 @@
-# A2 W2 — parser recognition of `<api>` — progress
+# A2 W3 — `<api>` TYPER wave — progress
 
-(append-only, timestamped)
+change-id: api-primitive-a2-2026-06-20 · wave W3 (type-system; resolve + CHECK, NO codegen)
 
 ## 2026-06-20 — startup
-- pwd: /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a0761f89e7066e52a
-- startup verification PASS: toplevel==pwd, tree clean, merge main "already up to date",
-  bun install OK, bun run pretest OK (13 test samples compiled).
-- SPEC §60 verified present (line 32898). Read §60.1-§60.11 in full.
-- SCOPE doc read: W2 = parser recognition of `<api>` element + endpoint sub-decls +
-  parse-level `E-API-*` diagnostics. NO codegen, NO server/HTML emission.
-- Maps: primary.map.md Task-Shape Routing (parser/new-feature) → ast-builder.js +
-  block-splitter.js, model on `<db>`/`<schema>`/`match-block`.
+- Worktree verified at .claude/worktrees/agent-a80f17c2cb0c3c4bc; git clean; merge main already up to date.
+- W2 api-decl node present (ast-builder.js, 3 hits); SPEC §60 present (line 32909).
+- bun install + bun run pretest green.
+- SPEC §60 read in full. SCOPE doc read (W3 is the type-system wave).
+- W2 node shape confirmed via probe: ast.nodes carries `{kind:"api-decl", base, src, endpoints:[{name,reqShape?,method,path,responseType,span}]}`.
+  reqShape/responseType are RAW type-ref text (null when absent).
+- `<request api=X args=...>` ALREADY captures api=/args= in the generic markup `attrs` array
+  (api= → string-literal value; args= → variable-ref w/ exprNode). No new PARSE code needed — typer reads existing attrs.
+- api-decl survives CE into the typer (post-CE top kinds include "api-decl").
+- §60.6 client-only ALREADY satisfied: a valid <api>+<request api=> app compiles exit-0 with NO serverJs
+  (probe confirmed serverJs absent). <api> is not a §12.2 escalation trigger.
 
-## Findings (empirical probes)
-- BS already produces `type=markup name=api` with FULL `<api>...</api>` text in
-  block.raw (closer included). Body lines (endpoint decls) are non-tag, so the
-  compound-scan does NOT misclassify. No BS change strictly needed.
-- emit-html.ts emitNode: unrecognized node kinds fall through emitting NOTHING
-  (ends at ~:2328). So a NEW `api-decl` node emits no HTML by default.
-- type-system.ts ~:10741: "Unknown node kinds — conservatively asIs, no error."
-  So an `api-decl` node will not choke TS.
-- Plan: dispatch `block.name === "api"` in ast-builder `case "markup"` (mirror
-  match-block); parse opener attrs (base= req, src= opt); slice body raw; parse
-  endpoint lines per §60.2 grammar; fire E-API-BASE-MISSING / -METHOD-INVALID /
-  -RESPONSE-TYPE-UNDECLARED / -ENDPOINT-MALFORMED at parse time. Build kind:"api-decl".
+## Plan (TS-API pass in processFile, after TS-J)
+1. Resolve endpoint reqShape/responseType via resolveTypeExpr; fire E-TYPE-UNKNOWN-NAME on undeclared type-refs
+   (reuse forEachTypeNameLeaf + isUnrecognizedTypeNameAtom).
+2. E-API-PATH-PARAM-UNBOUND — each `${param}` in path must be a field of the resolved reqShape struct.
+3. <request api=X args=...>: E-API-ENDPOINT-UNKNOWN (X not declared); E-API-REQ-SHAPE-MISMATCH (args type vs reqShape).
+4. §12.2 client-only confirming test.
+5. §34 rows for the 3 new codes; §60.9 mark wired.
 
-## 2026-06-20 — implementation
-- ast-builder.js: added `block.name === "api"` dispatch in `case "markup"`
-  (mirrors match-block / each-block). Brace-aware opener-end finder; parse
-  base= (req) + src= (opt) string attrs; slice body raw; parse endpoint lines
-  per §60.2 grammar (ENDPOINT_RE full + ENDPOINT_PREFIX_RE head-only). Builds
-  `kind: "api-decl"` { base, src, endpoints:[{name,reqShape,method,path,
-  responseType,span}] }. Per-line spans computed by newline-counting in apiRaw.
-  Committed 8880f699.
-- Diagnostics (parse-time, push TABError into errors[]):
-  E-API-BASE-MISSING (opener, no base=), E-API-METHOD-INVALID (method not in
-  GET/POST/PUT/PATCH/DELETE), E-API-RESPONSE-TYPE-UNDECLARED (head matches
-  prefix but no `: ResponseT`; RECOVERS with responseType=null), and the NEW
-  E-API-ENDPOINT-MALFORMED (catch-all body line). All four exit-1; valid → exit-0.
-- SPEC: §34 +4 E-API-* rows; §60.9 marked the 4 as "wired S210 W2" + added
-  E-API-ENDPOINT-MALFORMED; planned codes (UNKNOWN/REQ-SHAPE-MISMATCH/PATH-
-  PARAM-UNBOUND/A1-SRC) kept as planned (W3/W4). Committed (SPEC commit).
-- Unit test compiler/tests/unit/api-decl-parser.test.js — 20 tests / 58 expects:
-  AST shape (base/src/endpoints, verbatim path templates, per-line spans),
-  optional src=, optional req-shape, the 4 diagnostics each (+ result.errors
-  partition cross-check), comment/blank-line skip, no-emission contract.
+## 2026-06-20 — implementation DONE
+- c89925a5 — checkApiDeclarations TS-API pass in type-system.ts (after TS-J in processFile):
+  - Pass 1: collect api-decl nodes → per-file endpoint registry (first-name-wins).
+  - Pass 2: resolve reqShape/responseType via resolveTypeExpr; undeclared → E-TYPE-UNKNOWN-NAME
+    (reuse forEachTypeNameLeaf + isUnrecognizedTypeNameAtom, exempt = imported + machine names).
+    E-API-PATH-PARAM-UNBOUND: each ${param} must be a field of the resolved reqShape struct
+    (no-reqShape / non-struct reqShape → every param unbound).
+  - Pass 3: deep-walk <request> markup; read EXISTING api=/args= attrs.
+    E-API-ENDPOINT-UNKNOWN (api=X not in registry); E-API-REQ-SHAPE-MISMATCH (args=@cell struct
+    missing a reqShape field; superset tolerated; unresolvable args → conservative skip).
+  - Cell-type map deep-walks logic.body (state-decls live inside top-level logic, not file-top).
+  - W2 test fixture updated (valid <api> now declares its types — W3 resolves them).
+- 7976e61c — api-decl-typer.test.js (16 tests): one per code + valid-clean + §60.6 client-only.
+- 56d01723 — §34 rows (3 W3 codes) + §60.9 wired + SPEC-INDEX line-range regen. §60 Nominal banner KEPT.
 
-## DEFERRED to W3 (NOT implemented this wave)
-- E-API-ENDPOINT-UNKNOWN, E-API-REQ-SHAPE-MISMATCH, E-API-PATH-PARAM-UNBOUND
-  (need §53/§14 type resolution + path-param↔reqShape binding).
-- The `<request api=>` consumption mode (W4).
-- reqShape / responseType are captured as RAW type-ref text — NOT resolved.
+## Compile-verify (CLI)
+- VALID  (/tmp/api-cv/valid.scrml):   `bun run compiler/src/cli.js compile valid.scrml -o out`   → exit 0;
+  emits valid.client.js + valid.html + runtime; NO .server.js (pure client §60.6); NO base-URL leak.
+- INVALID (/tmp/api-cv/invalid.scrml): same cmd → exit 1; fires E-API-PATH-PARAM-UNBOUND + E-API-ENDPOINT-UNKNOWN.
+
+## DEFERRED to W4 (NOT in W3)
+- The thin typed fetch callable codegen; automatic parseVariant(response, ResponseT) decode wiring;
+  the actual <request> runtime integration (loading/data/error/stale + .data:ResponseT). A typed-and-
+  checked <api> + <request api=> STILL emits nothing runtime at W3 (confirmed by compile-verify).
