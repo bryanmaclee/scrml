@@ -1,0 +1,347 @@
+diff --git a/compiler/src/codegen/emit-parse-variant.ts b/compiler/src/codegen/emit-parse-variant.ts
+index 87a8cf36..2e34a264 100644
+--- a/compiler/src/codegen/emit-parse-variant.ts
++++ b/compiler/src/codegen/emit-parse-variant.ts
+@@ -179,7 +179,29 @@ export function emitParseVariantCall(node: CallExpr, ctx: EmitExprContext): stri
+   }
+   const rawExpr = emitExpr(node.args[0] as ExprNode, ctx);
+ 
+-  // Build the IIFE.
++  return emitParseVariantDecodeIIFE(enumType, rawExpr);
++}
++
++/**
++ * Emit the §41.13 parseVariant decode IIFE for an already-resolved enum type and
++ * an already-emitted raw-value JS expression.
++ *
++ * This is the single source of the boundary-decode shape — both the call-site
++ * monomorphizer (`emitParseVariantCall` above) and the §60.5 `<api>`/`<request
++ * api=>` automatic response decode (emit-reactive-wiring.ts) call through here so
++ * there is exactly ONE parseVariant decode surface (§60.5: "`<api>` adds **no**
++ * response-decoding machinery").
++ *
++ * `rawExpr` is a JS expression that evaluates to the wire value (a JSON string or
++ * an already-parsed object); the IIFE JSON-parses-or-passes-through, validates the
++ * tagged-variant shape, dispatches per-variant, and returns either the constructed
++ * enum value or a `::ParseError` fail object (routed by the caller's failable
++ * handling — for `<api>`, the fail lands in `<#id>.error`, §60.4).
++ */
++export function emitParseVariantDecodeIIFE(
++  enumType: ParseVariantEnumLike,
++  rawExpr: string,
++): string {
+   const lines: string[] = [];
+   lines.push(`((_raw) => {`);
+   lines.push(`  let _v;`);
+diff --git a/compiler/src/codegen/emit-reactive-wiring.ts b/compiler/src/codegen/emit-reactive-wiring.ts
+index 5172bf0c..45499c60 100644
+--- a/compiler/src/codegen/emit-reactive-wiring.ts
++++ b/compiler/src/codegen/emit-reactive-wiring.ts
+@@ -14,6 +14,7 @@ import {
+ import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
+ import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
+ import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad } from "./emit-sync.ts";
++import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
+ import type { EncodingContext } from "./type-encoding.ts";
+ import type { CompileContext } from "./context.ts";
+ 
+@@ -712,12 +713,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
+     }
+   }
+ 
+-  // Step 5c: Generate <request> single-shot async fetch initialization (§6.7.7)
++  // Step 5c: Generate <request> single-shot async fetch initialization (§6.7.7).
++  // §60.4 — also handles `<request api="endpointName">` (typed external API);
++  // the endpoint registry is built once from the file's `<api>` decls.
+   if (requestNodes.length > 0) {
++    const apiEndpoints = buildApiEndpointRegistry(getNodes(fileAST));
+     lines.push("");
+     lines.push("// --- request async fetch initialization (§6.7.7, compiler-generated) ---");
+     for (const rqNode of requestNodes) {
+-      const rqLines = emitRequestNode(rqNode, errors, fileAST.filePath ?? "");
++      const rqLines = emitRequestNode(rqNode, errors, fileAST.filePath ?? "", apiEndpoints);
+       for (const l of rqLines) lines.push(l);
+     }
+   }
+@@ -1037,11 +1041,92 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
+   return lines;
+ }
+ 
++// ---------------------------------------------------------------------------
++// <api> endpoint registry (§60.2 / §60.4) — read by emitRequestNode's api= mode
++// ---------------------------------------------------------------------------
++
++/**
++ * A single `<api>` endpoint, flattened for codegen: the base URL it inherits
++ * from its enclosing `<api base=>` block plus the endpoint's own method / path /
++ * request-shape / resolved response enum (the W3 typer annotation, §60.5).
++ */
++interface ApiEndpointForEmit {
++  base: string;
++  method: string;
++  path: string;            // verbatim path template; `${param}` substituted at runtime
++  reqShape: string | null;
++  responseEnum: ParseVariantEnumLike | null; // null -> no parseVariant decode (raw body)
++}
++
++/**
++ * Build the file's `<api>` endpoint registry (§60.4 "in-scope `<api>` endpoints").
++ * Endpoints across every top-level `api-decl` node share one name space; the
++ * first declaration of a name wins (matching the W3 typer's endpointRegistry).
++ * `base` is carried down from the endpoint's `<api>` block opener.
++ */
++function buildApiEndpointRegistry(topNodes: any[]): Map<string, ApiEndpointForEmit> {
++  const registry = new Map<string, ApiEndpointForEmit>();
++  for (const node of topNodes) {
++    if (!node || typeof node !== "object" || node.kind !== "api-decl") continue;
++    const base: string | null = typeof node.base === "string" ? node.base : null;
++    if (base === null) continue; // E-API-BASE-MISSING already fired (W2); skip
++    const eps: any[] = Array.isArray(node.endpoints) ? node.endpoints : [];
++    for (const ep of eps) {
++      if (!ep || typeof ep.name !== "string" || ep.name.length === 0) continue;
++      if (registry.has(ep.name)) continue;
++      const responseEnum =
++        ep.responseEnum && ep.responseEnum.kind === "enum"
++          ? (ep.responseEnum as ParseVariantEnumLike)
++          : null;
++      registry.set(ep.name, {
++        base,
++        method: typeof ep.method === "string" ? ep.method : "GET",
++        path: typeof ep.path === "string" ? ep.path : "",
++        reqShape: typeof ep.reqShape === "string" ? ep.reqShape : null,
++        responseEnum,
++      });
++    }
++  }
++  return registry;
++}
++
++/**
++ * Lower a §60.2 endpoint path template (verbatim `${param}` markers) into a JS
++ * string expression that concatenates `base` with the path, substituting each
++ * `${param}` for the corresponding field of the args object.
++ *
++ * Each `${id}` references a field of the endpoint's request shape (§60.2 — the
++ * value substituted into the URL at the call boundary; W3's
++ * E-API-PATH-PARAM-UNBOUND already verified each param is a declared field).
++ * `argsVar` is the local holding the runtime args object bound by
++ * `<request args=@cell>`. The field value is URL-encoded so a path segment
++ * cannot break the URL.
++ */
++function emitApiUrlExpr(base: string, path: string, argsVar: string): string {
++  const parts: string[] = [];
++  const re = /\$\{\s*([^}]*?)\s*\}/g;
++  let last = 0;
++  let m: RegExpExecArray | null;
++  while ((m = re.exec(path)) !== null) {
++    const literal = path.slice(last, m.index);
++    parts.push(JSON.stringify(literal));
++    const inner = (m[1] ?? "").trim();
++    // A path param keys on the leading identifier of the `${...}` (e.g.
++    // `${user.id}` -> field `user`), mirroring the W3 pathParamNames rule.
++    const lead = inner.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
++    const field = lead ? lead[0] : inner;
++    parts.push(`encodeURIComponent(String(${argsVar}[${JSON.stringify(field)}]))`);
++    last = m.index + m[0].length;
++  }
++  parts.push(JSON.stringify(path.slice(last)));
++  return `${JSON.stringify(base)} + ${parts.join(" + ")}`;
++}
++
+ // ---------------------------------------------------------------------------
+ // Request node emission (§6.7.7)
+ // ---------------------------------------------------------------------------
+ 
+-function emitRequestNode(node: any, errors: CGError[], filePath: string): string[] {
++function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
+   const lines: string[] = [];
+   const attrs: any[] = node.attrs ?? node.attributes ?? [];
+ 
+@@ -1058,6 +1143,116 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string): string
+ 
+   if (!requestId) return lines;
+ 
++  // ----------------------------------------------------------------------
++  // §60.4 — `<request api="endpointName" args=@cell>` mode. The endpoint's
++  // declared base/method/path/responseType drive a thin typed fetch + an
++  // automatic parseVariant decode (§60.5). This is a PURE-CLIENT fetch
++  // (§60.6) — no server bundle, no .server.js. LIMIT-PRIMITIVES (§60.7): a
++  // single fetch + decode, NO retry / cache / pagination / interceptors.
++  // ----------------------------------------------------------------------
++  const apiAttr = attrMap.get("api");
++  if (apiAttr) {
++    const av = apiAttr.value;
++    const endpointName =
++      av?.kind === "string-literal" ? av.value
++      : typeof av === "string" ? av
++      : typeof av?.value === "string" ? av.value
++      : null;
++    const endpoint = endpointName ? apiEndpoints.get(endpointName) : null;
++    // An unknown endpoint already fired E-API-ENDPOINT-UNKNOWN (W3); emit
++    // nothing rather than a broken fetch.
++    if (!endpoint) return lines;
++
++    // args=@cell — the request shape value. Bound by reference to a reactive
++    // cell so the URL path-params + (body-method) request body read its
++    // fields at call time.
++    const argsAttr = attrMap.get("args");
++    let argsVarName: string | null = null;
++    if (argsAttr) {
++      const va = argsAttr.value;
++      if (va?.kind === "variable-ref") argsVarName = (va.name ?? "").replace(/^@/, "");
++      else if (typeof va === "string") argsVarName = va.replace(/^@/, "");
++    }
++
++    const stateVar = `_scrml_request_${requestId}`;
++    const fetchFn = `_scrml_request_${requestId}_fetch`;
++    const seqVar = `_scrml_request_${requestId}_seq`;
++    const mountedVar = `_scrml_request_${requestId}_mounted`;
++    const method = endpoint.method;
++    const carriesBody = method === "POST" || method === "PUT" || method === "PATCH";
++
++    lines.push(`// <request id="${requestId}" api="${endpointName}"> (§60.4 — typed external API)`);
++    lines.push(`var ${stateVar} = { loading: true, data: null, error: null, stale: false };`);
++    lines.push(`var ${seqVar} = 0;`);
++    lines.push(`var ${mountedVar} = true;`);
++    lines.push(`async function ${fetchFn}() {`);
++    lines.push(`  var _seq = ++${seqVar};`);
++    // Read the args object once per call (the path-param / body source).
++    if (argsVarName !== null) {
++      lines.push(`  var _args = _scrml_reactive_get(${JSON.stringify(argsVarName)});`);
++    } else {
++      lines.push(`  var _args = {};`);
++    }
++    const urlExpr = emitApiUrlExpr(endpoint.base, endpoint.path, "_args");
++    lines.push(`  ${stateVar}.loading = true;`);
++    lines.push(`  ${stateVar}.error = null;`);
++    lines.push(`  if (${stateVar}.data !== null) { ${stateVar}.stale = true; }`);
++    lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
++    lines.push(`  try {`);
++    // Request init: method always; body for body-carrying methods (the args
++    // object serialized as JSON, §60.4 — the args value IS the request shape).
++    if (carriesBody) {
++      lines.push(`    var _res = await fetch(${urlExpr}, {`);
++      lines.push(`      method: ${JSON.stringify(method)},`);
++      lines.push(`      headers: { "Content-Type": "application/json" },`);
++      lines.push(`      body: JSON.stringify(_args),`);
++      lines.push(`    });`);
++    } else {
++      lines.push(`    var _res = await fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
++    }
++    lines.push(`    if (!_res.ok) throw new Error("HTTP " + _res.status);`);
++    lines.push(`    var _body = await _res.json();`);
++    lines.push(`    if (!${mountedVar} || _seq !== ${seqVar}) return;`);
++    if (endpoint.responseEnum) {
++      // §60.5 — decode the wire body via parseVariant against the endpoint's
++      // declared `: ResponseT`. A decode failure is a `::ParseError` fail
++      // object; route it to `.error` so a consuming `::ParseError` arm sees it.
++      const decoded = emitParseVariantDecodeIIFE(endpoint.responseEnum, "_body");
++      lines.push(`    var _decoded = ${decoded};`);
++      lines.push(`    if (_decoded && _decoded.__scrml_error === true) {`);
++      lines.push(`      ${stateVar}.error = _decoded;`);
++      lines.push(`    } else {`);
++      lines.push(`      ${stateVar}.data = _decoded;`);
++      lines.push(`    }`);
++    } else {
++      // Non-enum response type (or none resolved): land the raw JSON body. A
++      // struct/refinement response is decoded by the §53.4 SPARK boundary at
++      // the consuming assignment, not here (§60.5).
++      lines.push(`    ${stateVar}.data = _body;`);
++    }
++    lines.push(`  } catch (_e) {`);
++    lines.push(`    if (!${mountedVar} || _seq !== ${seqVar}) return;`);
++    lines.push(`    ${stateVar}.error = _e;`);
++    lines.push(`  }`);
++    lines.push(`  ${stateVar}.loading = false;`);
++    lines.push(`  ${stateVar}.stale = false;`);
++    lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
++    lines.push(`}`);
++    lines.push(`${stateVar}.refetch = ${fetchFn};`);
++    lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
++    // Re-fetch when the args cell changes (the request's reactive dependency,
++    // §6.7.7 — mirrors the url-mode deps= effect, but the dep is the args cell).
++    if (argsVarName !== null) {
++      lines.push(`_scrml_effect(function() {`);
++      lines.push(`  var _d = _scrml_reactive_get(${JSON.stringify(argsVarName)});`);
++      lines.push(`  if (${mountedVar}) ${fetchFn}();`);
++      lines.push(`});`);
++    } else {
++      lines.push(`${fetchFn}();`);
++    }
++    return lines;
++  }
++
+   const urlAttr = attrMap.get("url");
+   let urlExpr = '""';
+   let hasUrl = false;
+diff --git a/compiler/tests/unit/api-decl-typer.test.js b/compiler/tests/unit/api-decl-typer.test.js
+index 6491045c..92059790 100644
+--- a/compiler/tests/unit/api-decl-typer.test.js
++++ b/compiler/tests/unit/api-decl-typer.test.js
+@@ -284,28 +284,42 @@ describe("<api> typer — §60.6 client-only confirmation (no §12.2 server plac
+     expect(hasServerBundle(r)).toBe(false);
+   });
+ 
+-  test("W3 emits NO runtime for <api> — base URL / endpoint name do not leak into any artifact", () => {
++  // W4 SUPERSEDES the W3-era "zero-emission" assertion (this test previously
++  // checked that NOTHING — not even the base URL — reached any artifact, the
++  // W3 milestone). W4's whole purpose (§60.4 codegen) is to emit a thin
++  // client-side fetch, so the base URL now CORRECTLY lands in the client bundle
++  // (it is the fetch target — a client fetch, not server-only data). §60.6's
++  // actual security guarantee is the SERVER side: an <api>-only app emits NO
++  // server bundle (the previous test in this describe block) — the base URL is
++  // a public client-fetch target, not a secret.
++  test("W4 emits the client fetch — base URL lands in the CLIENT bundle (the fetch target), still NO server bundle (§60.4/§60.6)", () => {
+     const r = compile(
+       `type Q :struct = { id: number }\n` +
+       `type User :struct = { id: number }\n` +
+       `<query>: Q = { id: 0 }\n` +
+-      `<api base="https://secret-backend.example.com">\n` +
++      `<api base="https://api.example.com">\n` +
+       `  getUser(Q) -> GET "/users/\${id}" : User\n` +
+       `</api>\n` +
+       `<request id="r" api="getUser" args=@query></>\n` +
+       `<p>hi</p>\n`
+     );
+-    let checkedAnArtifact = false;
++    // §60.6 — the actual client-only guarantee: NO server bundle.
++    expect(hasServerBundle(r)).toBe(false);
++    // §60.4 — the base URL DOES appear in the client artifact (it is the fetch
++    // target of the emitted thin typed callable).
++    let clientHasBase = false;
++    let sawHtml = false;
+     for (const [, entry] of (r.outputs ?? new Map())) {
+-      const fields = entry && typeof entry === "object" ? entry : { v: entry };
+-      for (const v of Object.values(fields)) {
+-        if (typeof v !== "string") continue;
+-        checkedAnArtifact = true;
+-        // W3 wires NO codegen — the api-decl contributes nothing to any artifact.
+-        expect(v).not.toContain("secret-backend.example.com");
++      const clientJs = entry && typeof entry === "object" ? entry.clientJs : null;
++      if (typeof clientJs === "string" && clientJs.includes("https://api.example.com")) {
++        clientHasBase = true;
++        // The emitted fetch uses the endpoint's method + the path template.
++        expect(clientJs).toContain("fetch(");
++        expect(clientJs).toContain("/users/");
+       }
+-      if (typeof entry?.html === "string") expect(entry.html).toContain("hi");
++      if (typeof entry?.html === "string") { expect(entry.html).toContain("hi"); sawHtml = true; }
+     }
+-    expect(checkedAnArtifact).toBe(true);
++    expect(clientHasBase).toBe(true);
++    expect(sawHtml).toBe(true);
+   });
+ });
+diff --git a/docs/changes/api-primitive-a2-2026-06-20/progress.md b/docs/changes/api-primitive-a2-2026-06-20/progress.md
+index 8382eeea..9453bacb 100644
+--- a/docs/changes/api-primitive-a2-2026-06-20/progress.md
++++ b/docs/changes/api-primitive-a2-2026-06-20/progress.md
+@@ -16,3 +16,8 @@ worktree: .claude/worktrees/agent-adc513f2f54817b2d
+ 4. R26 empirical verify on a real .scrml; full `bun run test`; within-node re-baseline if needed.
+ 
+ ## Steps (append-only)
++
++- [step1] DONE — typer responseEnum annotation committed 0380ec96 (pre-commit PASS).
++- [step2] DONE — emit-parse-variant.ts: extracted emitParseVariantDecodeIIFE (exported) from emitParseVariantCall (pure refactor, single decode surface §60.5).
++- [step3] DONE — emit-reactive-wiring.ts: buildApiEndpointRegistry + emitApiUrlExpr + emitRequestNode api= branch (fetch base+path, ${param} substitution, POST/PUT/PATCH body, parseVariant decode into .data/.error). Call site at Step 5c builds registry from getNodes(fileAST).
++- [R26] PASS — /tmp/w4-r26 (GET enum) + /tmp/w4-r26b (POST body + no-arg GET): real fetch base+path+method, parseVariant decode into .data, NO .server.js, no raw ${} leak, no empty URL, node --check OK on every emitted .js.
