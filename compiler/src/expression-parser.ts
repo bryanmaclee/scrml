@@ -2505,6 +2505,31 @@ function exprPrec(node: ExprNode): number {
   return 99; // atomic / tighter-binding (ident · lit · member · call · index · unary · array · object)
 }
 
+// g-paren-binary-group-dropped-before-method (ss3, S210) — receiver-paren guard,
+// the round-trip twin of emit-expr.ts:receiverNeedsParens. Member/index/call/new
+// all bind tighter than every operator, so a receiver/callee whose top form is a
+// looser operator (binary, ternary, assign, unary, arrow) needs re-wrapping —
+// else `(a + b).m()` round-trips as `a + b.m()` (method binds to `b` alone).
+// Sibling of the S205 g-emit-string-tree-paren-drop binary-OPERAND fix above.
+// `exprPrec` lumps `unary` in with the atomics (99), so kind-match instead.
+function receiverNeedsParensRT(node: ExprNode): boolean {
+  switch (node.kind) {
+    case "binary":
+    case "ternary":
+    case "assign":
+    case "unary":
+    case "lambda":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function emitReceiverRT(node: ExprNode): string {
+  const s = emitStringFromTree(node);
+  return receiverNeedsParensRT(node) ? `(${s})` : s;
+}
+
 export function emitStringFromTree(node: ExprNode): string {
   switch (node.kind) {
     case "ident":
@@ -2591,27 +2616,27 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "member": {
-      const obj = emitStringFromTree(node.object);
+      const obj = emitReceiverRT(node.object);
       const sep = node.optional ? "?." : ".";
       return `${obj}${sep}${node.property}`;
     }
 
     case "index": {
-      const obj = emitStringFromTree(node.object);
+      const obj = emitReceiverRT(node.object);
       const idx = emitStringFromTree(node.index);
       const sep = node.optional ? "?." : "";
       return `${obj}${sep}[${idx}]`;
     }
 
     case "call": {
-      const callee = emitStringFromTree(node.callee);
+      const callee = emitReceiverRT(node.callee);
       const args = node.args.map(a => emitStringFromTree(a as ExprNode)).join(", ");
       const sep = node.optional ? "?." : "";
       return `${callee}${sep}(${args})`;
     }
 
     case "new": {
-      const callee = emitStringFromTree(node.callee);
+      const callee = emitReceiverRT(node.callee);
       const args = node.args.map(a => emitStringFromTree(a as ExprNode)).join(", ");
       return `new ${callee}(${args})`;
     }

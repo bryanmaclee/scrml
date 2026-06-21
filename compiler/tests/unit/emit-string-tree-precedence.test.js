@@ -25,6 +25,17 @@ const cases = [
   ["a / (b / c)", "a / (b / c)"],
   // ternary / lower-prec operand of a binary
   ["a + (b ? c : d)", "a + (b ? c : d)"],
+  // g-paren-binary-group-dropped-before-method (ss3, S210) — receiver-position
+  // parens: a looser-binding receiver/callee under a member/index/call/new must
+  // keep its grouping, else `(a + b).m()` → `a + b.m()` (method binds to `b`).
+  ["(a + b).toUpperCase()", "(a + b).toUpperCase()"],
+  ["(a + b)[c]", "(a + b)[c]"],
+  ["(a ? b : c)()", "(a ? b : c)()"],
+  ["(a || b).x", "(a || b).x"],
+  // no spurious parens when the receiver is already a primary / tight chain
+  ["arr.map(x).join(y)", "arr.map(x).join(y)"],
+  ["obj.a.b", "obj.a.b"],
+  ["f().g", "f().g"],
 ];
 
 test("emitStringFromTree preserves precedence parens (g-emit-string-tree-paren-drop)", () => {

@@ -858,6 +858,44 @@ function isTrivialIsLhs(left: ExprNode): boolean {
 const IS_OP_IIFE_LOCAL = "__scrml_is_v";
 
 // ---------------------------------------------------------------------------
+// g-paren-binary-group-dropped-before-method (ss3, S210) — receiver-paren guard.
+//
+// Member access (`.`), computed index (`[…]`), call (`(…)`) and `new` all bind
+// TIGHTER than every JS operator. A receiver/callee whose top-level form is a
+// looser-binding operator (binary, ternary, assignment, unary, arrow) MUST be
+// re-wrapped in grouping parens on emission — Acorn discards the source's
+// ParenthesizedExpression node (no `preserveParens`), so `(a + b).m()` parsed to
+// `MemberExpr{ object: Binary(a + b) }` and the un-guarded printer re-serialized
+// it as `a + b.m()` — the method binds to `b` alone, a SILENT precedence
+// miscompile (green compile, `node --check` clean). Killed a flogence TF-IDF
+// router. This is the receiver-position sibling of Bug W (binary-OPERAND paren
+// insertion in emitBinary) and S205 g-emit-string-tree-paren-drop (the
+// emitStringFromTree twin). Idents, literals, array/object literals and
+// member/call/index/new chains are PRIMARIES (bind tighter-or-equal) and never
+// need wrapping; is-op binaries already emit self-bracketed forms so the extra
+// wrap is harmless-redundant, never wrong.
+function receiverNeedsParens(node: ExprNode): boolean {
+  switch (node.kind) {
+    case "binary":   // a + b, a && b, a is some — looser than member access
+    case "ternary":  // c ? a : b
+    case "assign":   // x = y
+    case "unary":    // -x, !x, typeof x, await x, x++  (`-x.foo` === `-(x.foo)`)
+    case "lambda":   // (x) => y / fn — `(() => f).call()`
+      return true;
+    default:
+      // ident · lit · array · object · member · index · call · new · cast ·
+      // match-expr · sql-ref · input-state-ref · escape-hatch · map-lit ·
+      // markup-value · reset-expr · spread — primaries or self-bracketed.
+      return false;
+  }
+}
+
+function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
+  const s = emitExpr(node, ctx);
+  return receiverNeedsParens(node) ? `(${s})` : s;
+}
+
+// ---------------------------------------------------------------------------
 // Bug W — precedence-aware paren insertion for the flat binary printer.
 //
 // Acorn parses `(2 + 3) * 4` into the structurally-correct tree
@@ -1280,7 +1318,7 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
     return `_scrml_map_size(${emitExpr(node.object, ctx)})`;
   }
 
-  const obj = emitExpr(node.object, ctx);
+  const obj = emitReceiver(node.object, ctx);
   const dot = node.optional ? "?." : ".";
   return `${obj}${dot}${node.property}`;
 }
@@ -1356,7 +1394,7 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
     return `_scrml_map_get(${receiver}, ${key})`;
   }
 
-  const obj = emitExpr(node.object, ctx);
+  const obj = emitReceiver(node.object, ctx);
   const idx = emitExpr(node.index, ctx);
   const bracket = node.optional ? "?.[" : "[";
   return `${obj}${bracket}${idx}]`;
@@ -1659,7 +1697,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // error.
   }
 
-  const callee = emitExpr(node.callee, ctx);
+  const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
 
   // navigate() → client-side routing
@@ -1726,7 +1764,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {
-  const callee = emitExpr(node.callee, ctx);
+  const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
   return `new ${callee}(${args})`;
 }
