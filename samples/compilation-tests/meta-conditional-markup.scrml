@@ -21,11 +21,11 @@
     }
 
     if (featureDebug) {
-        emit("<div id=debug-panel>\n<p>Debug mode active/\n</div>\n");
+        emit("<div id=debug-panel>\n<p>Debug mode active</p>\n</div>\n");
     }
 
     const theme = featureDark ? "dark" : "light";
-    emit("<div class=app-" + theme + ">\n  <h1>App/\n</div>\n");
+    emit("<div class=app-" + theme + ">\n  <h1>App</h1>\n</div>\n");
 }
 
 </>

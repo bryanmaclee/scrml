@@ -15,6 +15,48 @@ Partition rule: CLI exit 0 = PASS (`still-compiles`); exit 1 = FAIL (>=1 fatal `
 
 PASS files are left untouched (no churn on green). The FAIL set below is the Phase-2 triage scope.
 
+## Phase-2 disposition summary (the 177-file FAIL set)
+
+The FAIL set is NOT all curation targets. Two structural sub-partitions matter:
+
+**Sidecar / header intent.** Each gauntlet-s19 `.scrml` is paired with a `.expected.json` sidecar; gauntlet-s20 files use a `// EXPECTED: E-...` header convention. Many FAIL files are **negative tests** whose intent is to fail-to-compile (`expectedOutcome: error`). A negative test that correctly produces an error is doing its job — it is NOT a curation target.
+
+| Bucket | Count | Disposition |
+|--------|-------|-------------|
+| **Negative tests (correctly failing)** | ~114 | KEEP as-is. `expectedOutcome:error` (sidecar) or `// EXPECTED: E-` (header) → the sample is supposed to fail. 69 actual-code MATCH the pinned `expectedCodes`; the rest expected `["UNKNOWN"]` or drifted to a different specific code (diagnostic-drift, not sample-curation — surfaced in NOTES). Includes 3 mis-detected ones documented below. |
+| **Positive-test fails (real triage)** | 63 | The curation scope. `expectedOutcome:clean`/`warning` or no negative marker, yet fails. Sub-classified below. |
+
+**Positive-test triage (the 63):**
+
+| Disposition | Count | Meaning |
+|-------------|-------|---------|
+| **EDIT/REWRITE — applied, recompiles clean** | 27 | Legacy/deprecated FORM migrated to canonical; intent preserved; exit 0 after fix. |
+| **DROP candidate** | 9 | Tests a RETIRED/REMOVED/SPEC-forbidden shape with no current analog, or a dead gauntlet friction artifact. Listed in `DROP-DRYRUN.md`. NOTHING deleted. |
+| **BLOCKED-ON-COMPILER** | 26 | Sample is CORRECT canonical scrml per SPEC; the failure is a compiler bug/limitation. Editing would mask the bug (Rule 2/3). KEPT as-is; surfaced to PA. Listed below. |
+| **Reclassified NEGATIVE (mis-detected)** | 1 | `channel-shared-state-001` — comment deliberately preserves the RETIRED `@shared` modifier "for documentation"; correctly fails E-CHANNEL-SHARED-MODIFIER. KEEP. |
+
+### EDIT/REWRITE applied (27 — all exit 0)
+
+REWRITE → `<each>` (§17.7) [10]: `reactive-encoded-001`, `channel-basic-001`, `channel-multiple-001`, `sql-all-001`, `sql-in-for-loop-001` (raw `for`-in-markup, E-CONTROL-FLOW-IN-MARKUP); `phase4-for-markup-044`, `phase3-for-arith-iterable-090`, `phase1-const-array-type-005`, `phase1-let-multiline-008`, `phase1-fn-multiline-011` (legacy `<li for/lift>` markup-for, E-CTX-001/E-SCOPE-001).
+
+EDIT [17]: `_helper-types` (+cascade `phase1-export-reexport-008`, `phase1-import-aliased-002`), `phase1-lin-match-arms-012`, `test-008-test-enum` (typed match-subject param, E-TYPE-025); `match-as-expression`, `match-colon-arrow` (drop `<page route=>`, E-PAGE-ROUTE-ATTR-FORBIDDEN); `phase1-type-enum-inside-program-013`, `phase1-import-named-001` (type bare variants, E-VARIANT-AMBIGUOUS); `phase1-reactive-inside-component-018` (structural `<localCount>`, E-STATE-UNDECLARED); `phase1-import-stdlib-scrml-005` (`scrml:utils`→`scrml:format`, E-IMPORT-006); `phase4-if-attr-else-043` (`else if`→`else-if=`, E-CTRL-003); `phase4-attr-special-chars-077` (single-quote attr→`&quot;`, E-ATTR-001); `phase1-lin-lift-014` (`function`→`fn` for `lift`, E-SYNTAX-002); `phase1-fn-inside-meta-016` (`fn`→`function` in `^{}`, E-PARSE-002); `phase2-if-triple-equals-007` (`===`→`==`, E-EQ-004; +sidecar currency); `meta-conditional-markup` (close malformed emit-string tags, E-META-EVAL-002).
+
+### BLOCKED-ON-COMPILER (26 — KEPT; sample correct per SPEC, compiler bug/limitation)
+
+| File | Code | Why the sample is correct |
+|------|------|---------------------------|
+| `phase1-navigate-bare-001`, `phase1-navigate-explicit-hard-002`, `phase1-navigate-server-003` | E-SCOPE-001 | `navigate()` is a compiler-recognized built-in "valid inside any function in any context" (§20.1). Scope resolver does not whitelist it. |
+| `phase2-animationframe-in-element-091` | E-SCOPE-001 | `animationFrame()` is a compiler-recognized built-in (§6.7.9). Minimal repro of the §6.7.9 worked example also fails. |
+| `helpers/dnd-setup`, `modern-007-dnd-with-helpers` | E-SCOPE-001 | `cleanup()` is a built-in (§6.7.3). |
+| `sql-transaction-001` | E-SCOPE-001 | `transaction` block is a built-in (§8.5.3). |
+| `phase1-fn-anonymous-010` | E-SCOPE-001 | Anonymous `fn(x){}` expression bound to `const` is canonical (§48.2.1); parser does not recognize it in expr position. |
+| `error-004-in-logic`, `phase1-let-bare-001`, `phase2-for-lift-else-empty-049`, `phase3-arith-in-match-arm-cond-118`, `phase3-assign-expr-chained-080`, `meta-type-registry-001`, `match-001-nested-with-call` | E-CODEGEN-INVALID-JS | Compiler emits unparseable JS for trivially-valid scrml (e.g. `phase1-let-bare-001` is `let counter=0; counter=counter+1; ${counter}`). §2.2.1: emitting unparseable JS is a compiler defect, full stop. |
+| `phase2-match-given-in-arm-104`, `phase2-match-optional-039`, `phase3-match-given-arm-075` | E-MATCH-012 | `match` on `T \| not` with a `not` arm present still fires "lacks a `not` arm"; `=>`→`:>` migration does not help. Checker does not recognize `not`/`given` arms over union-`not`. |
+| `gauntlet-s79-signup-form`, `gauntlet-s79-theme-settings` | E-TYPE-025 | `match @formState` / `match @theme` on a typed reactive enum cell (`<formState> = FormState.Editing`) with markup-`lift` arms. Minimal repro compiles; the markup-lift-arm + reactive-enum combination breaks type inference. Explicit `<formState>: FormState` annotation makes it WORSE (E-CODEGEN-INVALID-JS). |
+| `component-scoped-css`, `css-scope-01`, `css-flat-and-scoped-001`, `gauntlet-r10-ts-components` | E-COMPONENT-021 | Component body uses the `${...}` children-slot; CE Phase 1 "supports self-closing and simple open-tag component definitions only" and cannot re-parse the slot. The `${...}` children slot is valid scrml. |
+| `phase1-use-named-012` | E-COMPONENT-035 | Cross-file component import via `use scrml:chart { LineChart }` — "not yet supported in this consumption shape" (F-COMPONENT-001 deep-dive). |
+| `meta-compile-time-pure-001` | E-META-EVAL-001 | `reflect(Theme).variants[i].name` is the SPEC-mandated shape (§22.5.4: `variants: [{ name: "..." }]`); compile-time `reflect()` returns variants WITHOUT `.name`, diverging from §22.5.4. |
+
 ## FAIL set by top error code
 
 | Error code | Count |

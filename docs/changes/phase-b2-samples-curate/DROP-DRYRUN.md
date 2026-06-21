@@ -1,59 +1,37 @@
-# DROP-DRYRUN — phase-b2-samples-curate (sPA ss11 item 8)
+# DROP-DRYRUN — phase-b2-samples-curate
 
-**LIST-ONLY. NOTHING IS DELETED BY THIS DOCUMENT.** Per the destructive-ops directive
-(S56) + PA bash-cleanup rule, sample drops require **explicit user authorization** AND a
-**pre-drop SPEC re-verification** of each candidate's "retired surface" claim before any `rm`.
-This file is the dry-run target list the user/PA reviews. Authored by the sPA from the
-crash-recovered item-8 agent's findings (agent died mid-finalize after a connection error;
-its Phase-1/2 work + EDIT/REWRITE commits landed; this Phase-3 list was the owed remainder).
+Change-id: `phase-b2-samples-curate` (sPA ss11 item 8).
 
-## Candidate drops (5) — tests of RETIRED user-facing surfaces
+**DRY-RUN ONLY. NOTHING IS DELETED IN THIS DISPATCH.** Per §D.2, drops require explicit user
+authorization. This file lists DROP candidates with full paths + a one-line reason. The sPA
+escalates this list to the user; the actual `rm` happens ONLY after the user authorizes, in a
+separate dispatch.
 
-| # | Sample | Fails with | Retired-surface claim (VERIFY before drop) |
-|---|--------|-----------|---------------------------------------------|
-| 1 | `gauntlet-s20-meta/meta-bun-eval-001.scrml` | E-META-001 | `bun.eval()` user-facing surface RETIRED S130 Approach C F-003 — moved compiler-internal-only; `^{}` is a closed primitive set (reflect / emit / emit.raw). SPEC §30.1 note. |
-| 2 | `meta-004-clean-config.scrml` | E-SCOPE-001 | same — uses retired `bun.eval()` meta surface. |
-| 3 | `meta-005-nested-meta.scrml` | E-SCOPE-001 | same — retired `bun.eval()` nested-meta surface. |
-| 4 | `meta-010-reflect-with-config.scrml` | E-SCOPE-001 | same — retired `bun.eval()` reflect-with-config surface. |
-| 5 | `gauntlet-r10-solid-spreadsheet.scrml` | E-SCOPE-001 | raw JS `eval()` — never a scrml surface; §22.12 Approach C closes JS-host `eval`. |
+A DROP candidate is a positive-framed sample that tests an OBSOLETE / REMOVED / SPEC-FORBIDDEN
+shape with no current analog, OR a dead gauntlet friction artifact testing nothing currently
+meaningful. (Negative tests that correctly fail are NOT drop candidates — they are doing their
+job and are kept. Samples that are correct-per-SPEC but fail on a compiler bug are NOT drop
+candidates either — they are kept and surfaced as BLOCKED-ON-COMPILER; see CLASSIFICATION.md.)
 
-**Why DROP not EDIT:** these test a primitive/surface that was deliberately removed from the
-language. There is no canonical analog to rewrite them to — editing would invent a test for a
-non-feature. Unlike the BLOCKED-ON-COMPILER set below (correct scrml, keep), these are
-genuinely obsolete.
+## DROP candidates (9)
 
-## NOT drops — KEEP (recorded so they aren't mistaken for drop candidates)
+| # | Full path | Reason |
+|---|-----------|--------|
+| 1 | `samples/compilation-tests/gauntlet-s20-meta/meta-bun-eval-001.scrml` | Tests user-facing `bun.eval()` inside `^{}` — RETIRED S130 Approach C (F-003); `bun.eval()` is compiler-internal only (§30.1 note). Canonical replacement is the closed `^{}` primitive set (`reflect`/`emit`/`emit.raw`). No current analog for the user-facing surface this file tests. |
+| 2 | `samples/compilation-tests/meta-004-clean-config.scrml` | Uses `bun.eval()` inside `^{}` to build a config object referenced in markup — RETIRED user-facing surface (S130 F-003). The `E-SCOPE-001` is now-correct behavior (the binding `bun.eval` produced no longer exists). |
+| 3 | `samples/compilation-tests/meta-005-nested-meta.scrml` | Uses `bun.eval()` inside `^{}` (RETIRED, S130 F-003) AND nests `^{}` inside `^{}` (forbidden, §22.11 E-META-009). Two removed/forbidden shapes; no current analog. |
+| 4 | `samples/compilation-tests/meta-010-reflect-with-config.scrml` | Uses `bun.eval()` inside `^{}` to set `APP_CONFIG` (RETIRED user-facing surface, S130 F-003). |
+| 5 | `samples/compilation-tests/gauntlet-r10-zig-buildconfig.scrml` | Emits `bun.eval(` into CLIENT JS → `E-CG-006` server-only-pattern security gate. Depends on the retired user-facing `bun.eval()` surface (S130 F-003). Large gauntlet port built around the removed primitive. |
+| 6 | `samples/compilation-tests/gauntlet-r10-solid-spreadsheet.scrml` | Calls raw JS `eval(resolved)` at runtime for formula evaluation. JS-host `eval` is not a scrml surface (§22.12 Approach C closes JS-host eval). The file's own comment notes "scrml has no compile-time safe eval." No clean migration without authoring a safe expression parser; gauntlet friction artifact. |
+| 7 | `samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-method-call-039.scrml` | The subject (`?.()` optional-chain method call) is built on `type Handler:struct = { onFire: () => void }` — a struct with a function-typed field, which is REJECTED at declaration (S174 ruling; `E-STRUCT-FUNCTION-FIELD`, §14.3/§34). The entire test setup hinges on the now-forbidden shape. (NOTE: the bare `?.()` optional-chain-method intent could be re-tested with a non-function-field subject in a fresh fixture — surfaced for the author.) |
+| 8 | `samples/compilation-tests/gauntlet-s20-meta/meta-nested-deep-001.scrml` | Tests nested `^{}` inside a compile-time `^{}` and claims "Should compile clean" — but SPEC §22.11 normatively makes this `E-META-009` (Error; "not supported in this revision"). Tests a SPEC-forbidden shape it expected to pass; no current analog (flattening into one block destroys the "deeply nested" subject). |
+| 9 | `samples/compilation-tests/gauntlet-r10-bun-admin.scrml` | `E-RI-002` — a server-escalated function assigns to a `@` reactive cell (server cannot mutate client state). A gauntlet friction artifact documenting a real architectural constraint (its own FRICTION NOTE headers describe the dev hitting it); it tests no passing feature. Restructuring to satisfy the constraint would rewrite the file's premise. |
 
-### BLOCKED-ON-COMPILER (correct canonical scrml; the sample is RIGHT, the compiler is wrong)
-These FAIL today but the `.scrml` is valid per SPEC — editing them would MASK the bug (Rule 2/3).
-They are a **compiler-bug batch for the PA**, NOT curation targets:
-- **Built-in scope-resolver gaps** (`E-SCOPE-001` on compiler-recognized built-ins): `navigate`
-  (§20.1), `animationFrame` (§6.7.9 — minimal repro of the §6.7.9 worked example FAILS), `cleanup`
-  (§6.7.3), `transaction` (§8.5.3). Files incl. phase1-navigate-bare/explicit-hard/server-00{1,2,3},
-  phase2-animationframe-in-element-091, sql-transaction-001, helpers/dnd-setup, modern-007-dnd-with-helpers.
-- **Anonymous `fn(x){}` expression** (§48.2.1 canonical) not recognized in expr position →
-  `E-SCOPE-001` (phase1-fn-anonymous-010).
-- **`E-CODEGEN-INVALID-JS` on trivially-valid scrml** — e.g. phase1-let-bare-001 (`let counter=0`),
-  phase2-for-lift-else-empty-049, phase3-arith-in-match-arm-cond-118, phase3-assign-expr-chained-080,
-  match-001-nested-with-call, meta-type-registry-001, error-004-in-logic. (Valid scrml emitting
-  unparseable JS = codegen bug.)
-- **`E-MATCH-012`** on `match` with `given`/`not` arms over `T|not` (phase2-match-given-in-arm-104,
-  phase2-match-optional-039, phase3-match-given-arm-075).
-- **`E-COMPONENT-021`** — `${...}` ellipsis children-slot in a component body can't reparse under
-  CE-Phase-1 (component-scoped-css, css-scope-01, gauntlet-r10-ts-components, css-flat-and-scoped-001).
-- Misc: gauntlet-r10-bun-admin (E-RI-002), gauntlet-r10-zig-buildconfig (E-CG-006),
-  phase3-optchain-method-call-039 (E-STRUCT-FUNCTION-FIELD), channel-shared-state-001
-  (E-CHANNEL-SHARED-MODIFIER), phase1-use-named-012 (E-COMPONENT-035, cross-file component import).
+## Borderline — NOT dropped, flagged for author judgment
 
-### NEGATIVE TESTS (correctly fail — KEEP, not targets)
-Of the 177 Phase-1 fails, **96 carry an `expected:error` sidecar** = negative tests that are
-SUPPOSED to fail-to-compile. 69 match their pinned code (working). The 27 "mismatch" + the broader
-**78 gauntlet-s19 sidecar mismatches** (see `gauntlet-s19-verify.mjs`) are **diagnostic drift**
-(the compiler emits a different/UNKNOWN code than the sidecar pins) — a separate diagnostic-currency
-concern, NOT sample curation, and OUT OF item-8 scope. Flagged to PA.
+- `samples/compilation-tests/gauntlet-s20-channels/channel-shared-state-001.scrml` (E-CHANNEL-SHARED-MODIFIER) — comment EXPLICITLY says the retired `@shared total = 0` line is "a deliberate v0.2 shape preserved for documentation." It correctly fails (the modifier is retired). This is effectively a documentary/negative test; KEPT. If the author wants it gone, it is a clean drop, but its preserved-for-documentation intent argues KEEP.
 
-## Status
-- DROP candidates: **5**, list-only, awaiting user authorization + pre-drop SPEC re-verify.
-- Fixed this dispatch (EDIT/REWRITE, recompile clean): **26** of the 63 positive-test fails
-  (sPA-verified resweep: now_pass=26 / still_fail=37 at agent HEAD `11c5fc40`).
-- KEEP/BLOCKED + negative tests: the remainder.
+## Companion docs
+
+- `CLASSIFICATION.md` — full pass/fail counts + the 177 FAIL list + Phase-2 disposition summary (EDIT/REWRITE applied, BLOCKED-ON-COMPILER table).
+- `progress.md` — append-only working log.
