@@ -1,9 +1,9 @@
-<!-- @digest head=10bf4616 delta-seq=34 -->
+<!-- @digest head=2a8e969f delta-seq=7 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `10bf4616`** + delta-log **[34]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `10bf4616`
+> **HEAD `2a8e969f`** + delta-log **[7]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `2a8e969f`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,27 +13,23 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `10bf4616`
-- **HIGH 0** · MED 9 · LOW 17 · Nominal 8
+## Board — from `@gap` tokens @ `2a8e969f`
+- **HIGH 0** · MED 10 · LOW 15 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 5 `rule` (delta-log S210 — 2026-06-20)
-- `[13]` rule/land · **dpa-001 external-backend A2 RATIFIED (user "ratify ship A2").** Accepted the dPA advisory verdict: ship A2 (thin declared-shape `<api>`, request/endpoint half… → design-insights.md + dpa-queue.md#dpa-001 + debate artifact
-- `[21]` rule · **A2 W0 F1 RATIFIED = A (user "A").** The element name `<api>` (vs `<db>`) IS the type-system-visible decl-site marker — no `unverified` token (B), no propagati… → docs/changes/api-primitive-a2-2026-06-20/SCOPE-AND-DECOMPOSITION.md §3
-- `[22]` rule/land · **6nz AF RULED by-design + confirmed (user "confirm AF").** §36.6 normative: input-state reads set up NO reactive subscriptions (intentional) → `${<#id>.x}` ren… → SPEC §36.1/§36.6 + known-gaps
-- `[28]` rule/disp · **Idiomatic-ification EXTENDED to scrml-written siblings (user "extend to giti 6nz flogence" + chose "I audit, sibling-PAs rewrite").** (1) LIGHT-EDIT tier CONF… → idiomatic-audit-kit.md + 3 audit agents
-- `[33]` rule/disp · **Ruling B RATIFIED + A2 W3 (typer) DISPATCHED (user "B, and fire W3").** (B) bug-20: **DROP `W-MATCH-TRANSITIONS-ACCRUING` as redundant** (it overlaps the SHIP… → BRIEF-W3.md + agent a80f17c2cb0c3c4bc
+## Recent rulings — last 0 `rule` (delta-log S211 — 2026-06-20)
+- _(none in the latest session)_
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[28]` rule/disp · **Idiomatic-ification EXTENDED to scrml-written siblings (user "extend to giti 6nz flogence" + chose "I audit, sibling-PAs rewrite").** (1) LIGHT-EDIT tier CONF… → idiomatic-audit-kit.md + 3 audit agents
-- `[29]` disp/land · **sPA ss2 (engine-codegen) RE-INTEGRATED** (user "ss2 completed"). S83 + clobber-safe (tip ba689e56==reported, base cf950bab, symbol-table.ts untouched main-sid… → 63c6b277 + known-gaps
-- `[30]` disp/state · **3 sibling idiomatic audits COMPLETE + rewrite directives SENT (user "send the directives").** All read-only (scrml-PA-run, per the ratified split); DDs commit… → 3 sibling inboxes + 3 audit DDs
-- `[31]` find/state · **Compiler-gap triage COMPLETE (user "triage the gaps") — all 5 NEW flags NOT-REPRODUCED on current main (S138 verify-before-claim; silent-miscompiles so emitte… → 6nz/giti inboxes + /tmp/gaptriage R26
-- `[32]` disp/land · **sPA ss8 (promotion-tailwind) RE-INTEGRATED** (user "ss8 is done") — last of the ss2/ss8 pair. S83 + clobber-safe (tip 81a46d36==reported, base a3b08cbb, tailw… → 115dabe3 + SPEC §26 + known-gaps
-- `[33]` rule/disp · **Ruling B RATIFIED + A2 W3 (typer) DISPATCHED (user "B, and fire W3").** (B) bug-20: **DROP `W-MATCH-TRANSITIONS-ACCRUING` as redundant** (it overlaps the SHIP… → BRIEF-W3.md + agent a80f17c2cb0c3c4bc
+- `[2]` land · **A2 W3 (typer) LANDED + PUSHED `612f92e6`** (origin 0a605d3e..612f92e6; pre-push full-suite + TodoMVC PASS). S67 file-delta (agent a80f17c2cb0c3c4bc @2ff87850)… → 612f92e6
+- `[3]` disp · **A2 W4 (codegen) DISPATCHED** (user "fire W4"). scrml-js-codegen-engineer, isolation:worktree, opus, agent **adc513f2f54817b2d**, base 612f92e6. Scope: per-end… → BRIEF-W4.md + agent adc513f2f54817b2d
+- `[4]` state · **S205 merge-before-push gate MISS (self-caught, benign) + DEPUTY ACTIVE (contra S210 hand-off).** deputy-maint advanced 0→2 during S211 (fdc20cd7 S210-wrap map… → deputy-maint 82d9a486
+- `[5]` find · **sPA ss7 (meta-reflect-l22) RE-INTEGRATION received** (inbox). Branch spa/ss7 tip 7927fb40 (base origin/main 0a605d3e, 0/2, clean). item1 g-reflect-variant-sha… → spa/ss7 + ss7 inbox msg
+- `[6]` disp/land · **sPA ss7 (meta-reflect-l22) RE-INTEGRATED + PUSHED `f97a5fba`** (user "ss7 complete"). S67 file-delta (tip 7927fb40==reported, S83-verified, clobber-safe — 0 m… → f97a5fba + known-gaps
+- `[7]` state · **ss11 ALSO in-flight** (worktree-list discovery): spa/ss11 advanced 0a605d3e→c2211661 — user fired it (doc-currency-corpus, fattest list) in parallel; awaiting… → worktree-list
 
 ## State
-- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 0a605d3e, HEAD 10bf4616)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 0a605d3e, HEAD 2a8e969f)
 - Recent wraps:
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
