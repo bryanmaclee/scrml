@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -170,6 +170,15 @@ interface IfOpts {
   engineMessageVariants?: Map<string, Set<string>> | null;
   machineBindings?: Map<string, MachineBindingInfo> | null;
   /**
+   * S213 ss15 item 4 — `<request>` id set, threaded so a bare
+   * `if (<#feed>.loading) { lift … }` condition (and the lift bodies it guards)
+   * routes the `<#feed>` ref to the reactive `_scrml_request_feed` object rather
+   * than the §36 `_scrml_input_state_registry` (which `<request>` never
+   * populates). Mirrors the inline-path Seam-2 routing (emit-expr.ts:541-549).
+   * null/empty = no `<request>` in the file → byte-identical pre-fix emission.
+   */
+  requestIds?: Set<string> | null;
+  /**
    * Bug 72 (S158) — enclosing `for`-loop variable name, threaded so a nested
    * `<each>` inside an `if`/`else` body that sits inside a lifted `for` lowers
    * its inner `@.` to the inner each's iter var (§17.7.3 innermost-scope rule).
@@ -281,8 +290,21 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
  * Emit an if statement.
  */
 export function emitIfStmt(node: any, opts: IfOpts = {}): string {
+  // S213 ss15 item 4 — make the file's `<request>` id set active for this if's
+  // condition + lift bodies so a `<#feed>.loading` ref routes to the reactive
+  // `_scrml_request_feed` object (Seam 2). The set is file-global; nested pushes
+  // of the same set are harmless (top-of-stack always wins). popped on exit.
+  pushLiftRequestIds(opts.requestIds ?? null);
+  try {
+    return _emitIfStmtInner(node, opts);
+  } finally {
+    popLiftRequestIds();
+  }
+}
+
+function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
   const lines: string[] = [];
-  const _ifExprCtx: EmitExprContext = { mode: "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null };
+  const _ifExprCtx: EmitExprContext = { mode: "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
   lines.push(`if (${_ifCond}) {`);
 
@@ -316,6 +338,13 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
     ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
     ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
     ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
+    // S213 ss15 item 4 — thread requestIds into the if/else body so a NESTED
+    // `else if (<#profile>.error)` (which lowers via emitLogicBody ->
+    // emitLogicNode -> emitIfStmt) still routes its condition + lift body to
+    // the request state object. Without this the inner if loses requestIds and
+    // falls back to the §36 registry (the SPEC §6.7.7 Example 1 else-if arm).
+    ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
+    scopeVar: opts.scopeVar ?? null,
   };
 
   if (hasFragmentedLiftBody(consequent)) {
@@ -372,7 +401,27 @@ export function emitForStmt(
     enginesWithHooks?: Set<string> | null; enginesWithOnTimeout?: Set<string> | null;
     enginesWithIdleWatchdog?: Set<string> | null; enginesWithInternalRules?: Set<string> | null;
     enginesWithHistory?: Set<string> | null; enginesWithMessageArms?: Set<string> | null;
-    engineMessageVariants?: Map<string, Set<string>> | null },
+    engineMessageVariants?: Map<string, Set<string>> | null;
+    // S213 ss15 item 3 — `<request>` id set, threaded so a `${ for (…) { lift
+    // <h1>${<#feed>.data}</h1> } }` body routes the `<#feed>` ref to the
+    // reactive `_scrml_request_feed` object (Seam 2) rather than the §36
+    // input-state registry. Mirrors the if-stmt threading. null = no request.
+    requestIds?: Set<string> | null },
+): string {
+  // S213 ss15 item 3 — activate the file's `<request>` id set for the loop's
+  // lift bodies + iterable expr (Seam 2). File-global; nested same-set pushes
+  // are harmless. Popped on every exit via the finally.
+  pushLiftRequestIds(opts?.requestIds ?? null);
+  try {
+    return _emitForStmtInner(node, opts);
+  } finally {
+    popLiftRequestIds();
+  }
+}
+
+function _emitForStmtInner(
+  node: any,
+  opts: any,
 ): string {
   const lines: string[] = [];
   // Bug 65 (S157) — assemble the engine codegen ctx ONCE from the threaded

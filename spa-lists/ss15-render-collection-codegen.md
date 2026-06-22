@@ -35,5 +35,14 @@ render-bridge model scopes every item here; nothing needs the type-system or the
 ## Disposition
 *(filled by the sPA during the run — per-item: landed-on-branch SHA / parked + reason / NOT-REPRODUCED / dropped.)*
 
+- **[1]** `g-tailwind-lint-false-fires-on-scoped-class` — **LANDED** spa/ss15 @ `6ad31d8b` (R26-verified).
+- **[2]** `g-on-mount-bare-call-render-slot` — **LANDED** spa/ss15 @ `c13bbc48` (positional fix + lift/nested-arm carve-outs; R26-verified).
+- **[3]** `g-request-lift-nested-interp-mangle` — **LANDED** (pending commit) — parse-bug span-shift fix; R26 clean (0 mangle-leak).
+- **[4]** `g-request-lift-bare-if-reads-input-registry` — **LANDED** (pending commit) — requestIds threaded; R26 clean.
+- **[5]** `spec-677-worked-example-1-doc-migrate` — **LANDED** (pending commit) — §6.7.7 ex.1+2 `${}`-wrapped; silent raw-text ship stopped. `not`/`==not` body defects deferred → PA.
+- **DEFERRED→PA (1):** E-CONTROL-FLOW-IN-MARKUP diagnostic hole (bare control-flow w/ `lift` body evades gate → silent raw-text ship).
+- **DEFERRED→PA (2):** §6.7.7 example currency — `not`-as-negation (E-TYPE-045) + `==not` (E-EQ-002) + pseudo-code body; recommend a sweep.
+
+
 ## Progress
 `ss15.progress.md`. Land on `spa/ss15`; ping the PA inbox (`scrml/handOffs/incoming/`) when a batch is ready. Do not advance main / do not push.

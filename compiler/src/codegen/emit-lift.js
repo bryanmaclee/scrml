@@ -42,6 +42,83 @@ function currentLiftReconcileCtx() {
   return n > 0 ? _scrml_lift_reconcile_ctx_stack[n - 1] : null;
 }
 
+// ---------------------------------------------------------------------------
+// S213 ss15 items 3+4 — `<request>` `<#id>` LIFT-PATH render bridge.
+//
+// The S213 inline path (emit-expr.ts:541-549 + emitInputStateRef:1981) routes a
+// `<#id>` ref whose id names a `<request>` to the reactive `_scrml_request_<id>`
+// object (deep-reactive, effect-wrapped) instead of the §36 `_scrml_input_state_
+// registry` (which `<request>` never populates). The lift path lowers its `${…}`
+// interpolations through `emitExprField` directly, with NO `requestIds` in the
+// EmitExprContext — so a `<#feed>.data` inside `lift <h1>${<#feed>.data}</h1>`
+// fell through to the registry (undefined at runtime). To route it correctly we
+// must hand `emitExprField` the file's request-id set.
+//
+// `requestIds` is a FILE-GLOBAL fact (the set of `<request id=…>` declared in
+// the file), not a nesting context. Codegen is synchronous + single-threaded and
+// re-entrant only via the component-expander's nested re-parse — so we keep a
+// STACK (same justification as the reconcile-ctx stack above) and read the top.
+// Each lift-emission entry point pushes the current opts' `requestIds` and pops
+// on exit; the `emitExprField` ctx-builder reads `currentLiftRequestIds()`.
+const _scrml_lift_request_ids_stack = [];
+export function pushLiftRequestIds(set) {
+  _scrml_lift_request_ids_stack.push(set && set.size > 0 ? set : null);
+}
+export function popLiftRequestIds() { _scrml_lift_request_ids_stack.pop(); }
+function currentLiftRequestIds() {
+  const n = _scrml_lift_request_ids_stack.length;
+  return n > 0 ? _scrml_lift_request_ids_stack[n - 1] : null;
+}
+
+/**
+ * S213 ss15 items 3+4 — build the EmitExprContext for a lift-body expression,
+ * folding in the current file's `<request>` id set (Seam 2 routing). Centralises
+ * the `{ mode: "client" }` ctx that the many `emitExprField` call sites in
+ * this module construct, so the request-id routing is applied uniformly. A
+ * null/empty request-id set yields a ctx byte-identical to the prior
+ * `{ mode: "client" }`.
+ *
+ * @param {object} [extra] — additional ctx fields to merge (rare).
+ * @returns {object} the EmitExprContext.
+ */
+function liftExprCtx(extra) {
+  const requestIds = currentLiftRequestIds();
+  const base = { mode: "client" };
+  if (requestIds) base.requestIds = requestIds;
+  return extra ? { ...base, ...extra } : base;
+}
+
+/**
+ * S213 ss15 items 3+4 — Seam 3 (reactivity). A lift-body `${…}` interpolation
+ * that reads a `<request>`'s `_scrml_request_<id>` object must re-render when the
+ * fetch resolves (loading → data). `_scrml_request_<id>` is `_scrml_deep_reactive`,
+ * so wrapping the text-node write in `_scrml_effect` auto-tracks the member read
+ * and re-fires on resolve — mirroring the inline path's
+ * `_scrml_effect(function() { _scrml_render_value(el, _scrml_request_<id>.data); })`.
+ *
+ * Detect whether the lowered (already request-routed) expression reads any of the
+ * active file's `_scrml_request_<id>` objects. Returns true only when a request
+ * read is present AND no reconcile ctx is active (the reconcile path already
+ * effect-wraps via `maybeWrapLiftPerItemEffect`).
+ *
+ * @param {string} rewritten — the lowered JS expression for the interpolation.
+ * @returns {boolean}
+ */
+function liftExprReadsRequestState(rewritten) {
+  if (typeof rewritten !== "string" || rewritten.indexOf("_scrml_request_") === -1) return false;
+  const requestIds = currentLiftRequestIds();
+  if (!requestIds || requestIds.size === 0) return false;
+  for (const id of requestIds) {
+    // Match `_scrml_request_<id>` as a whole identifier token (not a prefix of a
+    // longer name) — the request state object read. The fetch/seq/mounted
+    // sidecars (`_scrml_request_<id>_fetch`, `…_seq`, `…_mounted`) end in `_…`
+    // and are never interpolated, but the boundary guard keeps the match tight.
+    const re = new RegExp("_scrml_request_" + id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9_$])");
+    if (re.test(rewritten)) return true;
+  }
+  return false;
+}
+
 /**
  * Wrap a per-item binding's JS body in a live-keyed `_scrml_effect` IF a
  * reconcile ctx is active; otherwise return the body lines unchanged (a lift
@@ -758,7 +835,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // The for-loop iterable identifier (e.g. `item` in `if=@editingId == item.id`)
       // is captured by the per-item factory closure — no subscription needed
       // because the factory rebuilds per item.
-      const exprJS = emitExprField(null, attr.value, { mode: "client" });
+      const exprJS = emitExprField(null, attr.value, liftExprCtx());
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
       lines.push(`${updaterVar}();`);
@@ -790,7 +867,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // closure-captured identifiers (loop iterables) through unchanged.
       const className = attr.name.slice(6);
       const raw = (attr.value ?? "").trim();
-      const condExpr = emitExprField(null, raw, { mode: "client" });
+      const condExpr = emitExprField(null, raw, liftExprCtx());
       // Bug 64 (S159) — inside a reconciled per-item factory, make class: LIVE-
       // KEYED (re-resolve the item by key on every reconcile; track item-field
       // reads for in-place mutation). Outside a reconcile ctx, the original
@@ -848,11 +925,11 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
         ? (() => {
             const parts = [];
             parseLiftContentParts(handlerSource, parts);
-            return parts.map(p => p.type === "expr" ? emitExprField(null, p.value, { mode: "client" }) : p.value).join("");
+            return parts.map(p => p.type === "expr" ? emitExprField(null, p.value, liftExprCtx()) : p.value).join("");
           })()
         : isSynthCallableHandlerSource
           ? rewriteExprArrowBody(handlerSource)
-          : emitExprField(null, handlerSource, { mode: "client" });
+          : emitExprField(null, handlerSource, liftExprCtx());
       // S96 Bug 11+12 fix — when handlerExpr is already a callable (arrow
       // function `(x) => ...` / `x => ...` / function expression
       // `function(...) {...}`), emit it DIRECTLY as the handler. The
@@ -890,7 +967,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
         let tpl = "`";
         for (const p of parts) {
           if (p.type === "expr") {
-            tpl += "${" + emitExprField(null, rewriteRenderCall(p.value), { mode: "client" }) + "}";
+            tpl += "${" + emitExprField(null, rewriteRenderCall(p.value), liftExprCtx()) + "}";
           } else {
             tpl += p.value.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
           }
@@ -928,7 +1005,7 @@ function emitSetContent(elVar, parts) {
   let tpl = "`";
   for (const p of parts) {
     if (p.type === "expr") {
-      tpl += "${" + emitExprField(null, rewriteRenderCall(p.value), { mode: "client" }) + "}";
+      tpl += "${" + emitExprField(null, rewriteRenderCall(p.value), liftExprCtx()) + "}";
     } else {
       tpl += p.value.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
     }
@@ -946,6 +1023,17 @@ function emitSetContent(elVar, parts) {
     out.push(`${elVar}.appendChild(${tnVar});`);
     for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = ${tpl};`])) out.push(l);
     return out;
+  }
+  // S213 ss15 items 3+4 (Seam 3) — when the template reads a `<request>`
+  // deep-reactive object, wrap the textContent write in `_scrml_effect` so it
+  // re-renders on fetch-resolve (mirrors the bare-expr interpolation path).
+  if (liftExprReadsRequestState(tpl)) {
+    const tnVar = genVar('lift_tn');
+    return [
+      `const ${tnVar} = document.createTextNode("");`,
+      `${elVar}.appendChild(${tnVar});`,
+      `_scrml_effect(function() { ${tnVar}.textContent = ${tpl}; });`,
+    ];
   }
   return [`${elVar}.appendChild(document.createTextNode(${tpl}));`];
 }
@@ -1011,7 +1099,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const raw = val.kind === "variable-ref"
         ? (val.name || "").replace(/^@/, "")
         : (val.raw || "");
-      const exprJS = emitExprField(val.exprNode, raw, { mode: "client" });
+      const exprJS = emitExprField(val.exprNode, raw, liftExprCtx());
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
       lines.push(`${updaterVar}();`);
@@ -1050,15 +1138,15 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       let condExpr;
       if (val.kind === "variable-ref") {
         const rawRef = (val.name || "").replace(/^@/, "");
-        condExpr = emitExprField(val.exprNode, rawRef, { mode: "client" });
+        condExpr = emitExprField(val.exprNode, rawRef, liftExprCtx());
       } else if (val.kind === "expr") {
         const raw = val.raw ?? "";
-        condExpr = emitExprField(val.exprNode, raw, { mode: "client" });
+        condExpr = emitExprField(val.exprNode, raw, liftExprCtx());
       } else {
         const rawArgs = val.argExprNodes
-          ? val.argExprNodes.map(n => emitExprField(n, "", { mode: "client" })).join(", ")
-          : (val.args || []).map(a => emitExprField(null, a.trim(), { mode: "client" })).join(", ");
-        const rewrittenName = emitExprField(null, val.name, { mode: "client" });
+          ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
+          : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
+        const rewrittenName = emitExprField(null, val.name, liftExprCtx());
         condExpr = `${rewrittenName}(${rawArgs})`;
       }
       // Bug 64 (S159) — inside a reconciled per-item factory, make class: LIVE-
@@ -1097,7 +1185,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         let tpl = "`";
         for (const pt of parts) {
           if (pt.type === "expr") {
-            tpl += "${" + emitExprField(null, rewriteRenderCall(pt.value), { mode: "client" }) + "}";
+            tpl += "${" + emitExprField(null, rewriteRenderCall(pt.value), liftExprCtx()) + "}";
           } else {
             tpl += pt.value.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
           }
@@ -1118,7 +1206,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // transitions arrive as `call-ref` (`.advance(.X)`) or `expr` (`@e = .X` /
       // `@e.advance(.X)`), handled below. No engine path needed here.
       const varName = (val.name || "").replace(/^@/, "");
-      const rewritten = emitExprField(val.exprNode, varName, { mode: "client" });
+      const rewritten = emitExprField(val.exprNode, varName, liftExprCtx());
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
@@ -1136,9 +1224,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // that per Rule 4 + user decision. See companion fix at line ~480 (the
       // legacy-attrs path) for the same restoration.
       const rewrittenArgs = val.argExprNodes
-        ? val.argExprNodes.map(n => emitExprField(n, "", { mode: "client" })).join(", ")
-        : (val.args || []).map(a => emitExprField(null, a.trim(), { mode: "client" })).join(", ");
-      const rewrittenName = emitExprField(null, val.name, { mode: "client" });
+        ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
+        : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
+      const rewrittenName = emitExprField(null, val.name, liftExprCtx());
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
         // Bug 65 (S157) — engine `.advance(.X)` parses as a call-ref
@@ -1207,7 +1295,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
             /^\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(raw));
         const rewritten = isSynthCallableSource
           ? rewriteExprArrowBody(raw)
-          : emitExprField(val.exprNode, raw, { mode: "client" });
+          : emitExprField(val.exprNode, raw, liftExprCtx());
         // S96 Bug 11+12 fix — if the expression IS a callable (arrow
         // function or function expression), use it directly per SPEC §5.2.2:
         //   `onclick=${(e) => fn(e, arg)}` — `${}` expression used as-is.
@@ -1236,7 +1324,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
         }
       } else {
-        const rewritten = emitExprField(val.exprNode, raw, { mode: "client" });
+        const rewritten = emitExprField(val.exprNode, raw, liftExprCtx());
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
       }
     } else if (val && val.kind) {
@@ -1287,7 +1375,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
             if (!logicChild) continue;
             // Phase 4d Step 8: ExprNode-only (bare-expr.expr deleted)
             if (logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
-              const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), { mode: "client" }));
+              const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), liftExprCtx()));
               // gate-found-invalid-js-fix-wave (S141): a `${...}` interpolation whose
               // expression lowers to the EMPTY string emits `String(() ?? "")` — invalid
               // JS (`()` is empty parens, the gate's E-CODEGEN-INVALID-JS). This happens
@@ -1310,6 +1398,16 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 lines.push(`const ${tnVar} = document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
                 for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = String((${rewritten}) ?? "");`])) lines.push(l);
+              } else if (liftExprReadsRequestState(rewritten)) {
+                // S213 ss15 items 3+4 (Seam 3) — the interpolation reads a
+                // `<request>` deep-reactive object; wrap the text-node write in
+                // `_scrml_effect` so it re-renders when the fetch resolves
+                // (loading → data). Stable text node + effect mirrors the
+                // inline-path render bridge.
+                const tnVar = genVar('lift_tn');
+                lines.push(`const ${tnVar} = document.createTextNode("");`);
+                lines.push(`${elVar}.appendChild(${tnVar});`);
+                lines.push(`_scrml_effect(function() { ${tnVar}.textContent = String((${rewritten}) ?? ""); });`);
               } else {
                 lines.push(`${elVar}.appendChild(document.createTextNode(String((${rewritten}) ?? "")));`);
               }
@@ -1670,7 +1768,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     }
   }
 
-  const rewrittenIterable = emitExprField(forNode.iterExpr, iterable, { mode: "client" });
+  const rewrittenIterable = emitExprField(forNode.iterExpr, iterable, liftExprCtx());
 
   // S96 Issue C — Option A nested-in-lift reactive emit.
   //
@@ -1803,7 +1901,7 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   // Bug 65 (S157) — engine codegen ctx threaded to inner lifted handlers.
   const engineCtx = opts.engineCtx ?? null;
   const cond = ifNode.condition ?? ifNode.test ?? "true";
-  const rewrittenCond = emitExprField(ifNode.condExpr, cond, { mode: "client" });
+  const rewrittenCond = emitExprField(ifNode.condExpr, cond, liftExprCtx());
 
   const emitBody = (body) => {
     const out = [];
@@ -2107,7 +2205,7 @@ export function emitConsolidatedLift(body, opts = {}) {
               if (elVar) {
                 const attrName = pendingAttrName;
                 pendingAttrName = null;
-                const rewritten = emitExprField(logicChild.exprNode, logicChild.expr ?? "", { mode: "client" });
+                const rewritten = emitExprField(logicChild.exprNode, logicChild.expr ?? "", liftExprCtx());
                 if (/^on[a-z]/.test(attrName)) {
                   const eventName = attrName.replace(/^on/, "");
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
@@ -2370,7 +2468,7 @@ export function emitLiftExpr(node, opts = {}) {
     }
 
     // No tag pattern at all — emit as text node
-    const rewritten = emitExprField(liftExpr.exprNode, expr, { mode: "client" });
+    const rewritten = emitExprField(liftExpr.exprNode, expr, liftExprCtx());
     if (containerVar) {
       return `${containerVar}.appendChild(document.createTextNode(String(${rewritten} ?? "")));`;
     }

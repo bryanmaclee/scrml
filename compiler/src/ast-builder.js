@@ -361,18 +361,80 @@ let tokenizePassthrough = _defaultTokenizePassthrough;
  *
  * Order matters: worker refs (<#name>.send) must be replaced BEFORE input state
  * refs (<#name>) to avoid partial matches.
+ *
+ * S213 ss15 items 3+4 — CONTENT-SPLIT CORRUPTION fix. These replacements are
+ * LENGTH-CHANGING (`<#feed>` is 7 chars; `_scrml_input_feed_` is 18 — a +11
+ * shift). `tokenizeLogic` locates the body's BLOCK_REF children by their
+ * ORIGINAL absolute spans (`childByStart`, tokenizer.ts:1168). When a `${...}`
+ * interpolation lives INSIDE a lift markup body — e.g.
+ * `lift <h1>${<#feed>.data}</h1>` — the interpolation IS a BLOCK_REF child of
+ * this logic block, AND it preprocesses its own `<#feed>` recursively. A blind
+ * outer `String.replace` here ALSO expanded that inner `<#feed>`, shifting every
+ * later child off its `childByStart` key. The tokenizer then mis-sliced: it
+ * consumed `_scrml_input_` where it expected the BLOCK_REF and leaked the
+ * residual `feed_.data}` as a literal text node (the `g-request-lift-nested-
+ * interp-mangle` bug). Fix: walk the raw body and SKIP any `<#...>` that falls
+ * inside a BLOCK_REF child's span (it preprocesses itself); for replacements in
+ * non-child text, bump every following child span by the byte delta so
+ * `childByStart` stays aligned. Returns `{ text, childShift(absStart) }` when
+ * given children context; falls back to the plain-string contract otherwise.
  */
-function preprocessWorkerAndStateRefs(raw) {
-  if (!raw || !raw.includes("<#")) return raw;
-  // <#name>.send( → _scrml_worker_name.send(
-  raw = raw.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, '_scrml_worker_$1.send(');
-  // when message from <#name> → when message from _scrml_worker_name
-  raw = raw.replace(/when\s+message\s+from\s+<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, 'when message from _scrml_worker_$1');
-  // when error from <#name> → when error from _scrml_worker_name
-  raw = raw.replace(/when\s+error\s+from\s+<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, 'when error from _scrml_worker_$1');
-  // <#name> (standalone state ref) → _scrml_input_$1_
-  raw = raw.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, '_scrml_input_$1_');
-  return raw;
+function preprocessWorkerAndStateRefs(raw, childRanges) {
+  if (!raw || !raw.includes("<#")) {
+    return childRanges ? { text: raw, shifts: [] } : raw;
+  }
+
+  // Combined matcher — ORDER preserved (worker .send / when-message / when-error
+  // before the standalone state ref) so a `<#w>.send(` is not eaten by the bare
+  // `<#name>` arm. Each alternative carries its own replacement builder.
+  const RULES = [
+    { re: /<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, build: (m) => `_scrml_worker_${m[1]}.send(` },
+    { re: /when\s+message\s+from\s+<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, build: (m) => `when message from _scrml_worker_${m[1]}` },
+    { re: /when\s+error\s+from\s+<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, build: (m) => `when error from _scrml_worker_${m[1]}` },
+    { re: /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, build: (m) => `_scrml_input_${m[1]}_` },
+  ];
+
+  // No child context — preserve the original simple sequential-replace contract.
+  if (!childRanges || childRanges.length === 0) {
+    for (const rule of RULES) raw = raw.replace(rule.re, (...args) => rule.build(args));
+    return childRanges ? { text: raw, shifts: [] } : raw;
+  }
+
+  // Span-aware path. childRanges is an array of { start, end } in BODY-RELATIVE
+  // coordinates (already mapped from absolute by the caller). We replace
+  // left-to-right, tracking the byte delta, recording each (atRelPos, delta) so
+  // the caller can re-shift the absolute child spans that follow.
+  const shifts = [];
+  let out = "";
+  let i = 0;
+  function inChildRange(relPos) {
+    for (const r of childRanges) {
+      if (relPos >= r.start && relPos < r.end) return true;
+    }
+    return false;
+  }
+  while (i < raw.length) {
+    if (raw[i] === "<" && raw[i + 1] === "#" && !inChildRange(i)) {
+      let matched = null;
+      for (const rule of RULES) {
+        rule.re.lastIndex = i;
+        const m = rule.re.exec(raw);
+        if (m && m.index === i) { matched = { m, rep: rule.build(m) }; break; }
+      }
+      if (matched) {
+        const consumed = matched.m[0].length;
+        const delta = matched.rep.length - consumed;
+        // Record the shift at the ORIGINAL relative position (start of match).
+        if (delta !== 0) shifts.push({ at: i, delta });
+        out += matched.rep;
+        i += consumed;
+        continue;
+      }
+    }
+    out += raw[i];
+    i++;
+  }
+  return { text: out, shifts };
 }
 
 // ---------------------------------------------------------------------------
@@ -15326,7 +15388,57 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // Regular `${...}` blocks use a 2-char opener; §54.3 transition bodies
       // (Phase 4a) push a `logic` frame on a bare `{` — 1-char opener.
       const prefixLen = block.raw && block.raw.startsWith("${") ? 2 : 1;
-      const bodyRaw = preprocessWorkerAndStateRefs(block.raw.slice(prefixLen, block.raw.length - 1));
+      // S213 ss15 items 3+4 — span-aware preprocessing. We must skip `<#...>`
+      // refs that live inside a BLOCK_REF child's span (those children
+      // preprocess themselves recursively) and re-shift the absolute child
+      // spans for any `<#...>` we DO expand in non-child text, so the
+      // length-changing `<#name>` → `_scrml_input_name_` replacement keeps
+      // `tokenizeLogic`'s `childByStart` alignment intact. Child ranges are
+      // mapped to body-relative coordinates: a child at absolute span.start
+      // sits at (span.start - bodyOffset) in the body slice. We pre-compute
+      // bodyOffset locally (it is recomputed below for the tokenizer call).
+      const _ppBodyShift = block._bareDeclLift === true ? 0 : prefixLen;
+      const _ppBodyOffset = block.span.start + _ppBodyShift;
+      const _rawBody = block.raw.slice(prefixLen, block.raw.length - 1);
+      const _childBlocksForPP = Array.isArray(block.children) ? block.children : [];
+      const _BLOCKREF_PP_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta"]);
+      const _childRanges = [];
+      for (const _c of _childBlocksForPP) {
+        if (!_c || !_BLOCKREF_PP_TYPES.has(_c.type) || !_c.span) continue;
+        const _relStart = _c.span.start - _ppBodyOffset;
+        const _relEnd = _c.span.end - _ppBodyOffset;
+        if (_relStart >= 0 && _relStart < _rawBody.length) {
+          _childRanges.push({ start: _relStart, end: _relEnd });
+        }
+      }
+      let bodyRaw;
+      if (_childRanges.length > 0) {
+        const _ppResult = preprocessWorkerAndStateRefs(_rawBody, _childRanges);
+        bodyRaw = _ppResult.text;
+        // Re-shift each child block's absolute span by the cumulative byte
+        // delta of all replacements that occurred BEFORE the child's
+        // body-relative start. A replacement at body-relative `at` pushes every
+        // child starting at or after `at` rightward by `delta`.
+        if (_ppResult.shifts.length > 0 && _childBlocksForPP.length > 0) {
+          function _ppShiftSpans(n, cumByOrigStart) {
+            if (!n || typeof n !== "object") return;
+            if (n.span && typeof n.span.start === "number") {
+              const _origRelStart = n.span.start - _ppBodyOffset;
+              let _cum = 0;
+              for (const s of _ppResult.shifts) {
+                if (s.at <= _origRelStart) _cum += s.delta;
+              }
+              if (_cum !== 0) {
+                n.span = { ...n.span, start: n.span.start + _cum, end: n.span.end + _cum };
+              }
+            }
+            if (Array.isArray(n.children)) for (const c of n.children) _ppShiftSpans(c);
+          }
+          for (const _c of _childBlocksForPP) _ppShiftSpans(_c);
+        }
+      } else {
+        bodyRaw = preprocessWorkerAndStateRefs(_rawBody);
+      }
       // S180 D3.1 — `_bareDeclLift` blocks (liftBareDeclarations 4 sites) PREPEND
       // a FICTIONAL `${` to `raw` but keep `span` at body[0] (the original text).
       // For a REAL `${...}` block, span.start points at the `$`, so the body
