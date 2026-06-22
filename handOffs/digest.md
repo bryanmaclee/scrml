@@ -1,9 +1,9 @@
-<!-- @digest head=b5fbfa24 delta-seq=15 -->
+<!-- @digest head=dcee8a7f delta-seq=15 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `b5fbfa24`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `b5fbfa24`
+> **HEAD `dcee8a7f`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `dcee8a7f`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `b5fbfa24`
+## Board — from `@gap` tokens @ `dcee8a7f`
 - **HIGH 1** · MED 9 · LOW 13 · Nominal 8
 - Named open HIGHs: `g-request-id-render-bridge-unwired`
 
@@ -29,7 +29,7 @@
 - `[14]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED (user "integrate ss4").** S83-verified (tip 17c559c4==reported, base 3d311fc9, 3 source/test files DISJOI… → 09f30e00 + known-gaps
 
 ## State
-- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark fec0a054, HEAD b5fbfa24)
+- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark fec0a054, HEAD dcee8a7f)
 - Recent wraps:
   - ca712295 chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
