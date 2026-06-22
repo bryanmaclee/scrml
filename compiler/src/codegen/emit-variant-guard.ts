@@ -277,7 +277,14 @@ function emitArmRenderFunction(
   // line 259 for prior art).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { generateHtml } = require("./emit-html.ts") as {
-    generateHtml: (nodes: any[], ctx: CompileContext) => string;
+    generateHtml: (
+      nodes: any[],
+      ctx: CompileContext,
+      csrfEnabledLegacy?: boolean,
+      registryLegacy?: any,
+      fileASTLegacy?: any,
+      nestedMarkupContext?: boolean,
+    ) => string;
   };
 
   // Phase A10 (S78, 2026-05-10) — push/pop arm context so logic + event
@@ -289,7 +296,9 @@ function emitArmRenderFunction(
   if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId);
   let html: string;
   try {
-    html = generateHtml(arm.body, ctx);
+    // ss15 item-2 (S214) -- an arm body is a NESTED markup-render subtree, not
+    // a §40.8 default-logic root; its `${...}` interpolations render.
+    html = generateHtml(arm.body, ctx, undefined, undefined, undefined, true);
   } finally {
     if (armContextId && ctx.registry) ctx.registry.popArmContext();
   }
@@ -1182,7 +1191,14 @@ export function emitInitialArmHtmlForMount(
   if (!arm || !arm.body || arm.body.length === 0) return "";
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { generateHtml } = require("./emit-html.ts") as {
-    generateHtml: (nodes: any[], ctx: CompileContext) => string;
+    generateHtml: (
+      nodes: any[],
+      ctx: CompileContext,
+      csrfEnabledLegacy?: boolean,
+      registryLegacy?: any,
+      fileASTLegacy?: any,
+      nestedMarkupContext?: boolean,
+    ) => string;
   };
   // Phase A10 (S78, 2026-05-10) — push/pop arm context so bindings created
   // during initial-arm body generation are tagged. The dispatcher will
@@ -1190,7 +1206,8 @@ export function emitInitialArmHtmlForMount(
   // wire function, which restores the wiring inside the mount.
   if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId);
   try {
-    return generateHtml(arm.body, ctx);
+    // ss15 item-2 (S214) -- initial-arm body is a NESTED markup-render subtree.
+    return generateHtml(arm.body, ctx, undefined, undefined, undefined, true);
   } finally {
     if (armContextId && ctx.registry) ctx.registry.popArmContext();
   }
