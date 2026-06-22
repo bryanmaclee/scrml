@@ -108,3 +108,13 @@ Keeps par 36 render-once semantics intact (only <request> ids become reactive).
       condition reads the §36 registry. emit-lift.js does not thread requestIds; the lift
       string-rewrite has a separate `_s`-clip. The `${...}`-wrapped lift form is the §6.7.7
       canonical shape — SURFACE to PA as a follow-on (lift-path, distinct seam).
+
+- const <x> = <#id>.data MODULE-INIT ORDERING FIX DONE (brief item 4):
+  emit-reactive-wiring.ts hoists `var _scrml_request_<id> = _scrml_deep_reactive({...})`
+  to BEFORE top-level logic (a pre-pass using classifyMarkupNodes().requestNodes +
+  extractRequestId). The late Step-5c emit no longer redeclares the var (collapsed to a
+  comment) — keeps the SAME deep-reactive proxy so effect subscriptions stay valid; the
+  fetch fn + seq/mounted + invocation stay late. VERIFIED: `${ const <snapshot> =
+  <#feed>.data }` emits `var _scrml_request_feed = _scrml_deep_reactive(...)` (hoisted)
+  THEN `const snapshot = _scrml_request_feed.data` — no `undefined.data` module-init throw.
+  Request tests 11/0; interp+match+if= all green + valid JS.

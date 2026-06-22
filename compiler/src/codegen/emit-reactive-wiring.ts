@@ -397,6 +397,32 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // Always re-collect (don't use pre-computed analysis.topLevelLogic) because
   // generateHtml annotates logic nodes with _placeholderId which must be propagated
   // to children for lift-target routing.
+  // §6.7.7 — HOIST the `<request>` state-object declarations to BEFORE top-level
+  // logic. The render bridge routes a file-scope `const <x> = <#id>.data` (and
+  // interpolation/match/if reads) to `_scrml_request_<id>`, but the full request
+  // init (Step 5c) is emitted AFTER top-level logic. Since `var` hoists only the
+  // binding (not the assignment), a module-init read of `_scrml_request_<id>.data`
+  // before its assignment would throw `undefined.data`. Emit the deep-reactive
+  // state object early so the binding is initialized before any file-scope read.
+  // The fetch fn + invocation + seq/mounted vars stay in Step 5c (they are only
+  // read by the late-emitted fetch fn, and the deps=/args= effect must run after
+  // the cells it reads are set by top-level logic).
+  const _hoistRequestNodes = classifyMarkupNodes(getNodes(fileAST)).requestNodes;
+  if (_hoistRequestNodes.length > 0) {
+    const hoistedIds = new Set<string>();
+    for (const rqNode of _hoistRequestNodes) {
+      const rqId = extractRequestId(rqNode);
+      if (rqId && !hoistedIds.has(rqId)) {
+        hoistedIds.add(rqId);
+        if (hoistedIds.size === 1) {
+          lines.push("");
+          lines.push("// --- request state objects (§6.7.7, hoisted for module-init reads) ---");
+        }
+        lines.push(`var _scrml_request_${rqId} = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });`);
+      }
+    }
+  }
+
   const topLevel = collectTopLevelLogicStatements(fileAST);
 
   // Group statements by placeholder ID so sibling statements from the same logic
@@ -1130,6 +1156,19 @@ function emitApiUrlExpr(base: string, path: string, argsVar: string): string {
 // Request node emission (§6.7.7)
 // ---------------------------------------------------------------------------
 
+function extractRequestId(node: any): string | null {
+  const attrs: any[] = node.attrs ?? node.attributes ?? [];
+  for (const a of attrs) {
+    if (a?.name !== "id") continue;
+    const v = a.value;
+    if (v?.kind === "string-literal" && typeof v.value === "string") return v.value;
+    if (v?.kind === "variable-ref") return (v.name ?? "").replace(/^@/, "");
+    if (typeof v === "string") return v;
+    if (typeof v?.value === "string") return v.value;
+  }
+  return null;
+}
+
 function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
   const lines: string[] = [];
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
@@ -1186,7 +1225,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     const carriesBody = method === "POST" || method === "PUT" || method === "PATCH";
 
     lines.push(`// <request id="${requestId}" api="${endpointName}"> (§60.4 — typed external API)`);
-    lines.push(`var ${stateVar} = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });`);
+    lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
     lines.push(`var ${seqVar} = 0;`);
     lines.push(`var ${mountedVar} = true;`);
     lines.push(`async function ${fetchFn}() {`);
@@ -1303,7 +1342,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   const mountedVar = `_scrml_request_${requestId}_mounted`;
 
   lines.push(`// <request id="${requestId}">`);
-  lines.push(`var ${stateVar} = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });`);
+    lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
   lines.push(`var ${seqVar} = 0;`);
   lines.push(`var ${mountedVar} = true;`);
   lines.push(`async function ${fetchFn}() {`);
