@@ -1,9 +1,9 @@
-<!-- @digest head=b3a8c9fd delta-seq=15 -->
+<!-- @digest head=9a4950f3 delta-seq=15 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `b3a8c9fd`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `b3a8c9fd`
+> **HEAD `9a4950f3`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `9a4950f3`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,9 +13,9 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `b3a8c9fd`
-- **HIGH 0** · MED 9 · LOW 13 · Nominal 8
-- Named open HIGHs: _none_
+## Board — from `@gap` tokens @ `9a4950f3`
+- **HIGH 1** · MED 9 · LOW 13 · Nominal 8
+- Named open HIGHs: `g-request-id-render-bridge-unwired`
 
 ## Recent rulings — last 1 `rule` (delta-log S212 — 2026-06-21)
 - `[15]` rule · **g-block-match-in-lift RULED (b) targeted diagnostic (user "(b) targeted diagnostic, steer to <each>").** Block-`<match>` inside `${for…lift}` → emit a NEW tar… → known-gaps g-block-match-in-lift
@@ -29,7 +29,7 @@
 - `[14]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED (user "integrate ss4").** S83-verified (tip 17c559c4==reported, base 3d311fc9, 3 source/test files DISJOI… → 09f30e00 + known-gaps
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 8ddc8448, HEAD b3a8c9fd)
+- Version: 0.7.0 · maps: 13 commits behind HEAD (watermark 8ddc8448, HEAD 9a4950f3)
 - Recent wraps:
   - ca712295 chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
