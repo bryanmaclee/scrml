@@ -1009,6 +1009,16 @@ export function splitBlocks(filePath, source) {
     // the inner `<p>`'s `>` and shredded the engine/match body (the documented
     // gap in the scanAttributes header comment, now closed).
     let shorthandAngleDepth = 0;
+    // §36 / §6.7.7 (request-id-render-bridge, 2026-06-22) — a `<#id>` input-state
+    // OR `<request>` ref used in an UNQUOTED attribute value (`if=<#feed>.loading`,
+    // `show=<#cursor>.pressed(0)`) carries an embedded `>` (the `<#id>` close) that
+    // must NOT be read as the opener terminator — otherwise the trailing `.member`
+    // (`.loading`/`.data`) is shredded into body content and lost (the attr value
+    // captures only the bare `<#id>`, so `if=<#feed>.loading` lowered to a bare base
+    // read of the wrong thing). Track a hash-ref angle depth: a `<#` increments, its
+    // matching `>` decrements and is consumed as part of attrRaw (NOT a terminator).
+    // This is the `<#id>` analogue of the §4.13 `shorthandAngleDepth` markup-tag rule.
+    let hashRefAngleDepth = 0;
     // §51.0.J derived-engine EXPRESSION form (S190) — once the scanner passes a
     // depth-0 `derived=` attribute name, the value is a scrml EXPRESSION (the
     // ternary `derived=@n > 5 ? .A : .B`, call `derived=classify(@n)`, or
@@ -1068,6 +1078,22 @@ export function splitBlocks(filePath, source) {
       }
 
       if (!localDouble && !localSingle) {
+        // §36 / §6.7.7 — a `<#id>` ref token inside an unquoted attr value. The
+        // `<#` opens a hash-ref whose `>` is part of the token, not the opener
+        // close. Consume `<#` and bump the depth so the matching `>` (handled just
+        // below) is absorbed into attrRaw with the trailing `.member` preserved.
+        if (c === "<" && ch(1) === "#") {
+          hashRefAngleDepth++;
+          attrRaw += "<#";
+          advance(2);
+          continue;
+        }
+        if (c === ">" && hashRefAngleDepth > 0) {
+          hashRefAngleDepth--;
+          attrRaw += c;
+          step();
+          continue;
+        }
         // g-colon-shorthand-markup-misparse (2026-06-18) — SPEC §4.13 angleDepth
         // tracking inside a `:`-shorthand markup-as-value body (§4.14:985/:990).
         // Active ONLY once the `:`-shorthand introducer has been recognized

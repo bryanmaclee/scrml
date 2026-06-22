@@ -965,11 +965,26 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           conditionCode = `(${compiled})`;
         } else if (binding.varName) {
           const condVarName = binding.varName;
-          const encodedCondVar = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(condVarName) : condVarName;
-          if (binding.dotPath) {
-            conditionCode = `(_scrml_reactive_get(${JSON.stringify(encodedCondVar)}).${binding.dotPath.slice(condVarName.length + 1)})`;
+          // §6.7.7 — `if=<#id>.loading` lowers (TAB) to varName `_scrml_input_<id>_`
+          // with dotPath `_scrml_input_<id>_.loading`. When <id> names a `<request>`,
+          // route to the reactive `_scrml_request_<id>` object (the deep-reactive
+          // Proxy the `_scrml_effect` controller auto-tracks), NOT a nonexistent
+          // reactive cell named `_scrml_input_<id>_`. Non-request ids fall through
+          // to the §36 input-state registry below (handled by the dotPath form on a
+          // genuine input ref is itself non-reactive by design — §36.6 — but the
+          // mount toggle never fires for those since the registry value is stable).
+          const reqRefMatch = condVarName.match(/^_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*)_$/);
+          if (reqRefMatch && requestIds.has(reqRefMatch[1])) {
+            const reqId = reqRefMatch[1];
+            const tail = binding.dotPath ? binding.dotPath.slice(condVarName.length + 1) : "";
+            conditionCode = tail ? `(_scrml_request_${reqId}.${tail})` : `(_scrml_request_${reqId})`;
           } else {
-            conditionCode = `_scrml_reactive_get(${JSON.stringify(encodedCondVar)})`;
+            const encodedCondVar = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(condVarName) : condVarName;
+            if (binding.dotPath) {
+              conditionCode = `(_scrml_reactive_get(${JSON.stringify(encodedCondVar)}).${binding.dotPath.slice(condVarName.length + 1)})`;
+            } else {
+              conditionCode = `_scrml_reactive_get(${JSON.stringify(encodedCondVar)})`;
+            }
           }
         }
 

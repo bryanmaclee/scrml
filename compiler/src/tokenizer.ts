@@ -1051,8 +1051,30 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
               tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: `_scrml_worker_${refName}.send`, args }), vs, absOff(), vl, vc));
             }
           } else {
-            // Standalone <#name> — input state ref
-            tokens.push(makeToken("ATTR_IDENT", `_scrml_input_${refName}_`, vs, absOff(), vl, vc));
+            // Standalone <#name>[.member.chain] — input-state (§36) OR request
+            // (§6.7.7) ref. PRE-FIX this branch dropped any trailing `.member`
+            // (e.g. `if=<#feed>.loading` captured only `_scrml_input_feed_`, losing
+            // `.loading` → the if= condition read the wrong thing). Consume the
+            // trailing member-access chain (`.loading` / `.data` / `.error` /
+            // `.stale`) so it survives into the ATTR_IDENT. (`.send(` is the worker
+            // form, handled above; the optional-spaces skip at :1036 already ran, so
+            // a `.send(` never reaches here.) Member-access only — a trailing call
+            // (`.refetch()`) is not a valid condition/attr-value shape and is left
+            // for the §6.7.7 logic-body form.
+            let memberChain = "";
+            while (
+              ch() === '.' &&
+              pos + 1 < raw.length &&
+              /[A-Za-z_$]/.test(raw[pos + 1])
+            ) {
+              memberChain += '.';
+              advance(); // consume '.'
+              while (pos < raw.length && /[A-Za-z0-9_$]/.test(raw[pos])) {
+                memberChain += raw[pos];
+                advance();
+              }
+            }
+            tokens.push(makeToken("ATTR_IDENT", `_scrml_input_${refName}_${memberChain}`, vs, absOff(), vl, vc));
           }
         }
         // (Other value forms not currently handled — fallthrough skips them)

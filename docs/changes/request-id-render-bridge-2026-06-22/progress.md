@@ -87,3 +87,24 @@ Keeps par 36 render-once semantics intact (only <request> ids become reactive).
       the §36 registry, not _scrml_request_<id> — emit-lift.js condition lowering does
       not thread requestIds (the string rewriteRequestRefs ordering should cover it, but
       the lift path mangles before reach).
+
+- if=<#id>.member PARSE FIX DONE (was: brief item (a)):
+  (1) block-splitter.js scanAttributes — `hashRefAngleDepth` so a `<#id>`'s embedded
+      `>` in an UNQUOTED attr value is not read as the opener terminator (the `.member`
+      survives into attrRaw). Analogue of §4.13 shorthandAngleDepth.
+  (2) tokenizer.ts tokenizeAttributes — the standalone `<#name>` ATTR_IDENT branch now
+      consumes the trailing `.member.chain` (was: dropped it; only `.send(` handled).
+      ATTR_IDENT becomes `_scrml_input_<id>_<.member.chain>`.
+  (3) emit-event-wiring.ts if= mount-toggle controller — a varName `_scrml_input_<id>_`
+      whose <id> is a request id routes to `_scrml_request_<id>.<path>` (reactive Proxy);
+      non-request ids fall through to the prior reactive-cell form (§36 unchanged).
+  VERIFIED: `if=<#feed>.loading|.error|.data` → `_scrml_effect`-wrapped controller reading
+  `(_scrml_request_feed.loading|.error|.data)`. Input-state `if=<#cursor>.pressed` now
+  PRESERVES `.pressed` (was dropped) — strictly better; §36.6 render-once form unchanged.
+  Unit 14906/0, conformance+integration 2632/0 local.
+- REMAINING SURFACED (separate, NOT codegen render-bridge):
+  (b) `${<#id>.data}` NESTED in a lifted element + the bare markup-`if (<#id>) { lift }`
+      condition: emit-lift path mangles `_scrml_input_<id>_` (clips `_s`) AND the lift-if
+      condition reads the §36 registry. emit-lift.js does not thread requestIds; the lift
+      string-rewrite has a separate `_s`-clip. The `${...}`-wrapped lift form is the §6.7.7
+      canonical shape — SURFACE to PA as a follow-on (lift-path, distinct seam).
