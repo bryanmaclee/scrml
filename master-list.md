@@ -87,6 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `01fd172f` — wrap(s212): close — 5 flogence dogfood bugs fixed + A2 W4 external-<api> codegen + ss4 re-integrated — **LOCAL-ONLY**
 - `0a605d3e` — chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb — **pushed**
 - `28de9c81` — wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA — **pushed**
 - `d0c5a96a` — chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD — **pushed**
@@ -94,7 +95,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `6512b592` — wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename — **pushed**
 - `74d7d0e2` — wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3) — **pushed**
 - `e723de04` — chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519 — **pushed**
-- `69172d25` — wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

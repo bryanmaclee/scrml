@@ -1,9 +1,9 @@
-<!-- @digest head=8aae995c delta-seq=14 -->
+<!-- @digest head=e4c33498 delta-seq=15 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `8aae995c`** + delta-log **[14]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `8aae995c`
+> **HEAD `e4c33498`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `e4c33498`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,12 +13,12 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `8aae995c`
+## Board — from `@gap` tokens @ `e4c33498`
 - **HIGH 0** · MED 9 · LOW 14 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 0 `rule` (delta-log S212 — 2026-06-21)
-- _(none in the latest session)_
+## Recent rulings — last 1 `rule` (delta-log S212 — 2026-06-21)
+- `[15]` rule · **g-block-match-in-lift RULED (b) targeted diagnostic (user "(b) targeted diagnostic, steer to <each>").** Block-`<match>` inside `${for…lift}` → emit a NEW tar… → known-gaps g-block-match-in-lift
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
 - `[9]` land · **A2 W4 (codegen) FINISHED + (b) honesty-lint (user "finish W4" → "b, then commit and push").** PA-direct salvage apply off current main (zero drift, 3-way clea… → SPEC §60 + type-system.ts + emit-reactive-wiring.ts
@@ -29,11 +29,11 @@
 - `[14]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED (user "integrate ss4").** S83-verified (tip 17c559c4==reported, base 3d311fc9, 3 source/test files DISJOI… → 09f30e00 + known-gaps
 
 ## State
-- Version: 0.7.0 · maps: current
+- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 8ddc8448, HEAD e4c33498)
 - Recent wraps:
+  - 01fd172f wrap(s212): close — 5 flogence dogfood bugs fixed + A2 W4 external-<api> codegen + ss4 re-integrated
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
-  - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
