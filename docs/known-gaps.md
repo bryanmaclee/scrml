@@ -345,6 +345,17 @@ A per-item block `<match for=T on=expr>` placed inside a `${ for (…) { lift <l
 
 ---
 
+### g-request-id-render-bridge-unwired — `<request>` fetches+decodes but the `<#id>` markup render bridge is unwired (data unreachable from markup) — `NEW S213; HIGH; open`
+A `<request id="x" ...>` (§6.7.7; `url=` OR `api=` mode) emits a fetch into a `var _scrml_request_<id> = { loading, data, error, stale }` object and correctly mutates `.data`/`.loading`/`.error` on resolve — BUT the markup `<#id>` ref does NOT read that object; the two halves are disconnected and every `<#id>` consumption form is broken:
+- **`${<#id>.data}` interpolation** → emits `_scrml_input_state_registry.get("<id>").data`, but the request NEVER `.set("<id>", _scrml_request_<id>)` into `_scrml_input_state_registry` → `.get(...)` is `undefined` → runtime throw / silent static shell (compiles GREEN, `node --check` OK — the dangerous "compiled-green ≠ runs" silent class).
+- **`<match for=T on=<#id>.data>`** → `E-CODEGEN-INVALID-JS` (the bare `<#id>` token leaks into the match dispatch call). `on=${<#id>.data}` (wrapped) compiles but reads the empty registry.
+- **`if=<#id>.X`** → `E-SCOPE-001` (the ref lowers to a bare unresolvable `_scrml_input_<id>_` ident).
+- **`const <x> = <#id>.data`** at file scope → broken (parse / module-init level).
+- **No reactivity** — even once bridged, `_scrml_request_<id>.data = …` is a plain object mutation (not a reactive cell, no `_scrml_effect` subscription on the markup binding), so post-fetch renders would not update.
+**Net:** `<request>` (the whole §6.7.7 surface, not just `<api>`) can fetch + parseVariant-decode but the RESULT cannot be reactively rendered — the canonical "fetch → `<match>`/`<engine>` over loading/data/error" flow is dead. This is the `<api>` arc's real adopter blocker (the A2 W4 fetch+decode codegen IS correct + R26-verified; only the §6.7.7 render-display is gapped — so the §60 Nominal→Implemented flip + the worked example + B-docs are HELD until this lands, user ruling S213). **Empirically confirmed on HEAD `9d30ee93` (S213):** the byob `api=` emit reads `_scrml_input_state_registry.get("user").data` with no matching `.set`; `if=<#user>.loading` → E-SCOPE-001; `<match on=<#user>.data>` → E-CODEGEN-INVALID-JS. **Fix direction (SCOPE-FIRST — possibly architectural):** connect the `<#id>` ref to `_scrml_request_<id>` (register into the input-state registry OR lower the ref to read the request object directly) AND make the request state reactive so the markup binding `_scrml_effect`-subscribes + re-renders on fetch resolve AND fix the `<#id>` ref lowering across the interpolation / `if=` attr / `<match on=>` contexts. Reporter: PA `<api>` dog-food + A2-W5 agent (deferred #1), S213; affects `<request url=>` too. <!-- @gap id=g-request-id-render-bridge-unwired sev=HIGH status=open -->
+
+---
+
 ## §S212 — gaps filed S212 (2026-06-21, flogence dogfood: first browser-render surface)
 
 > Both verified empirically on HEAD `59c15b1e` per the S138 reverse-direction doctrine (reproduce on real source + cross-check the reporter's described reproducer before claiming-open). Both are the compile-clean-but-runtime-broken / silent class, surfaced by flogence's FIRST real browser-render of its cockpit (Surface 2) — prior sessions verified "via the data layer" only, so neither surfaced. The third flogence note (`<each>` in a hidden multi-consumer subtree, MED, lower-confidence/not-minimized) is NOT yet filed — pending minimization.
