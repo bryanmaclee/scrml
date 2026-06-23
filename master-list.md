@@ -87,6 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `27900a6c` — chore(s215): wrap — close + bookkeeping (hand-off, changelog, gaps §0, delta-log, dpa-queue, inbox) — **LOCAL-ONLY**
 - `cab2cca0` — wrap(s214): integrate sPA ss15 + close — render-collection cluster + reconciliation — **pushed**
 - `d4d489bf` — chore(s213): wrap bookkeeping — hand-off close + delta-log + gaps + §0/digest + BRIEFs — **pushed**
 - `ca712295` — chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498 — **pushed**
@@ -94,7 +95,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `28de9c81` — wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA — **pushed**
 - `d0c5a96a` — chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD — **pushed**
 - `916fe3ae` — wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight) — **pushed**
-- `6512b592` — wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

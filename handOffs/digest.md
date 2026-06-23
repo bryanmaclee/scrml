@@ -1,9 +1,9 @@
-<!-- @digest head=9cd5ae81 delta-seq=12 -->
+<!-- @digest head=27900a6c delta-seq=27 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `9cd5ae81`** + delta-log **[12]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `9cd5ae81`
+> **HEAD `27900a6c`** + delta-log **[27]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `27900a6c`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,24 +13,29 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `9cd5ae81`
-- **HIGH 0** · MED 10 · LOW 16 · Nominal 8
-- Named open HIGHs: _none_
+## Board — from `@gap` tokens @ `27900a6c`
+- **HIGH 1** · MED 13 · LOW 14 · Nominal 8
+- Named open HIGHs: `g-bindvalue-wiring-dropped-in-match-arm`
 
-## Recent rulings — last 0 `rule` (delta-log S214)
-- _(none in the latest session)_
+## Recent rulings — last 3 `rule` (delta-log S215 — 2026-06-23)
+- `[16]` state/rule · **S215 verification-doctrine RATIFIED → pa.md S215 addendum** (Part 1 adversarial-gate for non-PA fixes + Part 2 random-sample-10× audit, knobs: per-wrap cadenc… → pa-scrml.md
+- `[24]` rule · **dPA batch RATIFIED + in-Q DDs banked (user "Ok, lets go. tread softly, DD anything even at all in Q").** **dpa-004 RATIFIED** — SCOPED-RETIRE the S199 boundar… → dpa-queue.md + design-insights.md
+- `[25]` rule/state · **`_{}` design-conv (user) — "Inline all the way" RULED + dpa-009 banked.** dpa-003 narrowed to the INLINE value-returning form (`const out = _={…}=`) NOT the §… → dpa-queue.md
 
-## Recent activity — last 3 `disp`/`land`/`find`/`state`
-- `[10]` land · **S214 doc/sPA push `1ce8de34`** — PRIMER §9.8 scoped-CSS (verified @scope) · known-gaps §S214 css-papercut (LOW) · sPA ss15+ss16 BUILT · S214 hand-off + S213 r… → origin 1ce8de34
-- `[11]` land · **sPA ss16 RE-INTEGRATED `6650f1eb` (FF-merge spa/ss16, user "integrate ss16").** PongAI cluster, agent a58f1b20: C5 ctor-arg contextual typing (§14.10) · C4 W-… → 6650f1eb + known-gaps §S214
-- `[12]` land · **sPA ss15 RE-INTEGRATED `1ff06eae` (3-way merge spa/ss15 over ss16 stale-base, user "integrate 15").** render-collection cluster, 5/5: tailwind-scoped-class li… → 1ff06eae + known-gaps §S214
+## Recent activity — last 6 `disp`/`land`/`find`/`state`
+- `[17]` state · **giti 3-findings TRIAGED + dPA batch BANKED (user "file F3, fold in queued DDs").** giti: **F1** E-RI-002-on-engine-server-write = WORKING-AS-SPEC → server-aut… → dpa-queue.md
+- `[18]` state · **dPA roster FORGED + PRE-STAGED (user "yes forge and pre-stage") — dPA HOT on first boot.** Forged 3 new debate experts directly into `flogence/.claude/agents/… → flogence/.claude/agents/ + dpa-queue.md
+- `[19]` state · **dPA flogence-homing smell FLAGGED + DEFERRED (user "just note the rationale for now").** User questioned scrml DDs firing in flogence dir; rationale = mechani… → dpa-scrml.md
+- `[25]` rule/state · **`_{}` design-conv (user) — "Inline all the way" RULED + dpa-009 banked.** dpa-003 narrowed to the INLINE value-returning form (`const out = _={…}=`) NOT the §… → dpa-queue.md
+- `[26]` state · **ss1 REFRESHED for the buildable-now push (user "lets go on what we can... use spa.md to knock out what it can").** Routed the buildable (ratified-direction, n… → ss1-server-emit-route-inference.md + INDEX
+- `[27]` land · **(a) currency + (b) 2 residuals LANDED `0d4ba428` (user "a and b"; user already fired ss1).** **(b)** g-typer-render-call-not-in-builtin-allowlist RESOLVED — `… → 0d4ba428
 
 ## State
-- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 1ff06eae, HEAD 9cd5ae81)
+- Version: 0.7.0 · maps: 7 commits behind HEAD (watermark 1ff06eae, HEAD 27900a6c)
 - Recent wraps:
+  - 27900a6c chore(s215): wrap — close + bookkeeping (hand-off, changelog, gaps §0, delta-log, dpa-queue, inbox)
   - cab2cca0 wrap(s214): integrate sPA ss15 + close — render-collection cluster + reconciliation
   - d4d489bf chore(s213): wrap bookkeeping — hand-off close + delta-log + gaps + §0/digest + BRIEFs
-  - ca712295 chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
