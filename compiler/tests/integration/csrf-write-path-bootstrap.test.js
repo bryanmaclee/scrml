@@ -104,8 +104,9 @@ describe("Issue #2 — CSRF write-path bootstrap", () => {
     const { clientJs, errors } = compile(MUTATION_SRC, "bootstrap", ITEMS_SEED);
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const helper = clientJs.match(/function _scrml_get_csrf_token\(\)[\s\S]+?\n\}/)[0];
-    // The helper must plant a token when the cookie is absent.
-    expect(helper).toContain("if (!match)");
+    // The helper returns the existing cookie token up front, then mints + plants
+    // one as the fallback when the cookie is absent.
+    expect(helper).toContain("if (match) return decodeURIComponent");
     expect(helper).toContain("document.cookie =");
     expect(helper).toContain("scrml_csrf=");
     expect(helper).toContain("SameSite=Strict");

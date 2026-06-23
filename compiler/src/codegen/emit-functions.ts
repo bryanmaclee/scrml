@@ -682,8 +682,15 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // absent) — the SAME source the non-idempotency retry helper uses. The
         // previous `meta[name="csrf-token"]` read targeted a tag emit-html.ts
         // never emits, so the write path always sent an empty token and BOTH the
-        // initial fetch and the retry 403'd. The auth-managed path keeps the
-        // meta read (its token is server-rendered for the session).
+        // initial fetch and the retry 403'd.
+        //
+        // KNOWN GAP (auth-managed path): when an auth middleware is in scope we
+        // still read the meta tag, which is ALSO never emitted today — so an
+        // auth-protected non-monotone CPS mutation still 403s. Fixing that means
+        // wiring the session-based CSRF token into the SSR HTML (or switching the
+        // auth path to the same cookie scheme), which is out of scope for this
+        // baseline-CSRF fix and tracked separately. Left as-is so this change
+        // does not alter auth-path behavior.
         const _csrfTokenExpr = ctx.authMiddleware
           ? `(typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '') : ''`
           : `_scrml_get_csrf_token()`;

@@ -1617,7 +1617,8 @@ export function generateClientJs(ctx: CompileContext): string {
   if (csrfEnabled && !authMiddlewareEntry) {
     lines.push("// --- CSRF token helper (compiler-generated, double-submit cookie) ---");
     lines.push("function _scrml_get_csrf_token() {");
-    lines.push("  let match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+    lines.push("  const match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+    lines.push("  if (match) return decodeURIComponent(match[1]);");
     // Issue #2 (parent scrmlTS): bootstrap a same-origin double-submit token
     // when none is present so the FIRST request — read OR write — carries a
     // cookie that matches its X-CSRF-Token header. The baseline server gate only
@@ -1626,13 +1627,12 @@ export function generateClientJs(ctx: CompileContext): string {
     // mint-on-403 retry (which the write path previously could not recover from).
     // SameSite=Strict keeps the cookie off cross-site requests, so an attacker's
     // forged cross-origin POST sends no cookie and is still rejected — the
-    // double-submit CSRF guarantee is preserved.
-    lines.push("  if (!match) {");
-    lines.push("    const _scrml_t = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));");
-    lines.push("    document.cookie = `scrml_csrf=${_scrml_t}; Path=/; SameSite=Strict`;");
-    lines.push("    match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
-    lines.push("  }");
-    lines.push("  return match ? decodeURIComponent(match[1]) : '';");
+    // double-submit CSRF guarantee is preserved. The token is plain
+    // (UUID / base36), so we return it directly rather than round-tripping
+    // through document.cookie a second time.
+    lines.push("  const _scrml_t = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));");
+    lines.push("  document.cookie = `scrml_csrf=${_scrml_t}; Path=/; SameSite=Strict`;");
+    lines.push("  return _scrml_t;");
     lines.push("}");
     lines.push("");
     // GITI-010: fetch-with-retry wrapper. Only emitted when at least one
