@@ -2955,6 +2955,85 @@ export function findUnsupportedTailwindShapes(source) {
  */
 
 /**
+ * Build the set of class names the author DEFINES in their own in-scope CSS —
+ * every `.identifier` class selector inside an inline `#{ … }` CSS block or a
+ * `<style> … </style>` block in `source`. Used by `findUnrecognizedClasses` to
+ * suppress the W-TAILWIND-UNRECOGNIZED-CLASS lint on classes the adopter wrote
+ * CSS for (these emit real CSS via the @scope/collectCssBlocks path), while
+ * still firing on typos, unsupported arbitrary values, and genuinely-unknown
+ * classes.
+ *
+ * This is a deliberate TEXT pre-pass — `findUnrecognizedClasses` runs in the
+ * api.js lint loop BEFORE Block-Splitter/parse, so NO AST is available. The set
+ * derived here mirrors the selector set the `@scope` emitter resolves
+ * (collect.ts:collectCssBlocks + emit-css.ts:generateCss — both inline `#{}`
+ * and `<style>` blocks, program-scope AND component-scope), but is computed
+ * purely by scanning the same `source` string.
+ *
+ * Class-selector extraction inside the block bodies covers:
+ *   - comma-grouped   `.a, .b { … }`
+ *   - compound        `.card.active`
+ *   - descendant      `.card .title`
+ *   - child/sibling   `.card > .row`, `.a + .b`
+ *   - pseudo-suffixed  `.card:hover`, `.card::before`
+ * A class name starts with `[A-Za-z_-]` after the leading `.` (so CSS numeric
+ * fractions like `0.5rem` / `1.5px` are NOT mistaken for class selectors), and
+ * runs while the char is in `[A-Za-z0-9_-]`.
+ *
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+function collectAuthorDefinedClasses(source) {
+  const classes = new Set();
+  if (!source || typeof source !== "string") return classes;
+
+  // Class selector inside a CSS body: a `.` followed by an identifier whose
+  // first char is a letter / underscore / hyphen (NOT a digit — `.5rem` is a
+  // numeric value, not a selector), then `[A-Za-z0-9_-]*`.
+  const selectorRe = /\.([A-Za-z_-][A-Za-z0-9_-]*)/g;
+
+  const addFromBody = (body) => {
+    let m;
+    selectorRe.lastIndex = 0;
+    while ((m = selectorRe.exec(body)) !== null) {
+      classes.add(m[1]);
+    }
+  };
+
+  // --- Inline `#{ … }` CSS blocks (brace-balanced) ---
+  // `#{` opens an inline CSS block; it closes at the matching `}`. Bodies may
+  // themselves contain `{ … }` for grouped rules (`.card { … }`), so the scan
+  // tracks brace depth from the opening `{`.
+  let i = 0;
+  while (i < source.length) {
+    if (source[i] === "#" && source[i + 1] === "{") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < source.length && depth > 0) {
+        if (source[j] === "{") depth++;
+        else if (source[j] === "}") depth--;
+        if (depth === 0) break;
+        j++;
+      }
+      const body = source.slice(i + 2, j);
+      addFromBody(body);
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+
+  // --- `<style> … </style>` blocks (literal delimiters) ---
+  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let sm;
+  while ((sm = styleRe.exec(source)) !== null) {
+    addFromBody(sm[1]);
+  }
+
+  return classes;
+}
+
+/**
  * Scan a source string for class names inside `class="..."` attributes that
  * do NOT resolve via `getTailwindCSS()`. Returns one diagnostic per offending
  * `(offset, class)` pair. Within a single `class="..."` value duplicate
@@ -2968,9 +3047,14 @@ export function findUnsupportedTailwindShapes(source) {
  *
  * This function is intentionally permissive about what is a "class" — every
  * whitespace-separated non-empty token in the attribute value is checked.
- * Custom user-defined CSS classes (e.g. `counter-app`, `my-card`) will
- * trigger the lint as false positives; adopters wanting them silenced
- * should suppress via the compiler-settings opt-out (see api.js).
+ * Class names the author DEFINES in their own in-scope `#{}` / `<style>` CSS
+ * (e.g. a `.card` selector used as `class="card"`) are excluded via
+ * `collectAuthorDefinedClasses(source)` — these emit real scoped CSS, so a
+ * lint would be a false positive (ss15 item-1,
+ * g-tailwind-lint-false-fires-on-scoped-class). Custom classes with NO
+ * defining CSS block in scope (e.g. an externally-styled `counter-app`) still
+ * fire; adopters wanting those silenced suppress via the compiler-settings
+ * opt-out (see api.js).
  *
  * Sibling `findUnsupportedTailwindShapes` (W-TAILWIND-001) keeps firing on
  * Tailwind-shaped-but-unsupported classes (`group-hover:p-4`,
@@ -2985,6 +3069,10 @@ export function findUnrecognizedClasses(source) {
   if (!source || typeof source !== "string") return [];
 
   const diagnostics = [];
+  // Classes the author DEFINES in their own in-scope #{} / <style> CSS draw no
+  // lint — they emit real CSS via the @scope path. Derived by text-scan (no
+  // AST available at this lint stage); see collectAuthorDefinedClasses.
+  const authorDefinedClasses = collectAuthorDefinedClasses(source);
   const attrRe = /\bclass="([^"]*)"/g;
   let attrMatch;
 
@@ -3030,6 +3118,11 @@ export function findUnrecognizedClasses(source) {
       // `hover:bg-blue-500`), and supported arbitrary values
       // (`w-[420px]`, `p-[1.5rem]`).
       if (getTailwindCSS(cls) !== null) continue;
+
+      // Author-defined class selector (from an in-scope #{} / <style> CSS
+      // block) -> no diagnostic. These emit real scoped CSS, so a lint here is
+      // a false positive (ss15 item-1, g-tailwind-lint-false-fires-on-scoped-class).
+      if (authorDefinedClasses.has(cls)) continue;
 
       // Unresolved -> emit the lint. The message names the three legitimate
       // causes so adopters can self-triage without consulting docs.

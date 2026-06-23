@@ -285,14 +285,29 @@ describe("emit-html meta §9: no text interference", () => {
 // ---------------------------------------------------------------------------
 
 describe("emit-html meta §10: logic node regression", () => {
-  test("logic nodes still emit data-scrml-logic placeholders", () => {
-    const logicNode = {
+  // ss15 item-2 (S214): a `${...}` logic node emits a data-scrml-logic render
+  // slot only in a MARKUP-INTERPOLATION position (nested inside a real markup
+  // element). A bare-expr logic node at the file top-level / <program>-body is
+  // a §40.8 default-logic EFFECT (no render slot) per SPEC §17.3. These
+  // regression tests verify the logic-vs-meta ROUTING (logic -> data-scrml-
+  // logic, NOT data-scrml-meta), so the logic node is wrapped in a <div> to put
+  // it in render position -- preserving the test's intent under the corrected
+  // default-logic semantics.
+  const markupLogicNode = () => ({
+    kind: "markup",
+    tag: "div",
+    attrs: [],
+    children: [{
       kind: "logic",
       body: [{ kind: "bare-expr", expr: "@count" }],
       span: { file: "/test/app.scrml", start: 0, end: 10, line: 1, col: 1 },
-    };
+    }],
+    span: { file: "/test/app.scrml", start: 0, end: 12, line: 1, col: 1 },
+  });
+
+  test("logic nodes still emit data-scrml-logic placeholders", () => {
     const errors = [];
-    const html = generateHtml([logicNode], errors, false, null, null);
+    const html = generateHtml([markupLogicNode()], errors, false, null, null);
     expect(html).toContain("data-scrml-logic");
     // Must NOT use data-scrml-meta for logic nodes
     expect(html).not.toContain("data-scrml-meta");
@@ -300,13 +315,8 @@ describe("emit-html meta §10: logic node regression", () => {
 
   test("meta and logic nodes can coexist in the same node list", () => {
     const metaNode = makeSyntheticMetaNode(11);
-    const logicNode = {
-      kind: "logic",
-      body: [{ kind: "bare-expr", expr: "@count" }],
-      span: { file: "/test/app.scrml", start: 0, end: 10, line: 1, col: 1 },
-    };
     const errors = [];
-    const html = generateHtml([metaNode, logicNode], errors, false, null, null);
+    const html = generateHtml([metaNode, markupLogicNode()], errors, false, null, null);
     expect(html).toContain('data-scrml-meta="_scrml_meta_11"');
     expect(html).toContain("data-scrml-logic");
   });

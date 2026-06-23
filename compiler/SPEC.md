@@ -4314,14 +4314,16 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
     </>
 
     <div>
-        if (<#profile>.loading && not <#profile>.stale) {
-            lift <p>Loading...</>
-        } else if (<#profile>.error) {
-            lift <p>Error: ${<#profile>.error.message}</>
-            lift <button onclick=${<#profile>.refetch()}>Retry</>
-        } else {
-            lift <h1>${@user.name}</>
-            lift <p>${@user.email}</>
+        ${
+            if (<#profile>.loading && not <#profile>.stale) {
+                lift <p>Loading...</>
+            } else if (<#profile>.error) {
+                lift <p>Error: ${<#profile>.error.message}</>
+                lift <button onclick=${<#profile>.refetch()}>Retry</>
+            } else {
+                lift <h1>${@user.name}</>
+                lift <p>${@user.email}</>
+            }
         }
     </>
 </>
@@ -4336,12 +4338,14 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
     </>
 
     <div>
-        if (@appConfig == not) {
-            lift <p>Loading config...</>
-        } else {
-            lift <div class="app">
-                /* render using @appConfig *</>
-            </>
+        ${
+            if (@appConfig == not) {
+                lift <p>Loading config...</>
+            } else {
+                lift <div class="app">
+                    /* render using @appConfig *</>
+                </>
+            }
         }
     </>
 </>

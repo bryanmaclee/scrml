@@ -61,6 +61,25 @@ const BIND_VALID_TAGS: Record<string, Set<string>> = {
 // Lifecycle elements that emit no HTML — handled by emit-reactive-wiring.js
 const LIFECYCLE_SILENT_TAGS = new Set(["timer", "poll"]);
 
+// ss15 item-2 (S214, 2026-06-22) -- SPEC section 40.8 default-logic-mode parent tags.
+// Per SPEC.md:10347 (normative): "the section-40.8 default-logic auto-lift
+// fires only at `<program>`/`<page>`/`<channel>` direct-child roots, never
+// inside nested markup." A bare expression in such a default-logic body is an
+// EFFECT at initial mount (SPEC sections 17.3 + 6.7.1a) -- it executes once; it
+// does NOT render its return as a text node. So the logic-node markup-walker
+// MUST NOT allocate a `<span data-scrml-logic>` render slot or an
+// addLogicBinding for a logic node whose enclosing markup parent is one of
+// these (or for a logic node at the file top-level, which is likewise a
+// default-logic root). A `${...}` interpolation nested inside ANY OTHER markup
+// element (`<div>`, `<span>`, a component root, etc.) is a markup-interpolation
+// that DOES render -- unchanged.
+//
+// Closes g-on-mount-bare-call-render-slot: `on mount { val() }` (which desugars
+// to a bare-expr at the program-body, ast-builder.js:8573/11968) and a bare
+// program-body `${ val() }` previously each emitted a spurious render slot
+// printing the call return ("[object Promise]" for async fns) at page top.
+const DEFAULT_LOGIC_MODE_TAGS = new Set(["program", "page", "channel"]);
+
 // R25-Bug-41 (S138, 2026-05-27) — Server-side-only state-block types whose body
 // content MUST NOT appear in the HTML render-tree. `<schema>` (SPEC §39) and
 // `<seeds>` (per block-splitter `COMPOUND_LIFT_EXEMPT_TAGS` document-root list)
@@ -117,6 +136,34 @@ function stmtContainsRenderableLogic(node: any): boolean {
     if (Array.isArray(node[key])) {
       for (const child of node[key]) {
         if (stmtContainsRenderableLogic(child)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * ss15 item-2 (S214) — lift-only recursive classifier (a narrowing of
+ * stmtContainsRenderableLogic that excludes the bare-expr shortcut).
+ *
+ * A `lift-expr` is a DOM-positioning target consumed by lift-target wiring
+ * (e.g. a `${ for (...) { lift <li/> } }` block). Unlike a bare-expr (which
+ * RENDERS its return as a text node only in a markup-interpolation position),
+ * a lift-expr emits a positioned DOM subtree and is legitimate in ANY context
+ * — INCLUDING a §40.8 default-logic body (`<program>`-body iteration is the
+ * canonical Tier-0 `${ for/lift }` form, §17.4). So the default-logic-mode
+ * guard MUST NOT suppress a logic node that contains a lift-expr; it only
+ * suppresses the spurious bare-expr render slot. This helper lets the guard
+ * distinguish "purely bare-expr renderable" (suppress) from "contains lift"
+ * (keep the placeholder + lift wiring).
+ */
+function stmtContainsLiftExpr(node: any): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (node.kind === "lift-expr") return true;
+  for (const key of ["body", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) {
+      for (const child of node[key]) {
+        if (stmtContainsLiftExpr(child)) return true;
       }
     }
   }
@@ -476,6 +523,14 @@ export function generateHtml(
   csrfEnabledLegacy?: boolean,
   registryLegacy?: BindingRegistry | null,
   fileASTLegacy?: any,
+  // ss15 item-2 (S214) -- when true, this generateHtml invocation lowers a
+  // NESTED markup-render subtree (an engine/match arm body) rather than the
+  // top-level file. The subtree is NOT a §40.8 default-logic root: its bare-
+  // expr / `${...}` children RENDER. Seeding the parent-tag stack with a non-
+  // default-logic sentinel makes the logic-node default-logic guard NOT fire
+  // on arm-body interpolations. Top-level callers omit it (default false) so
+  // a file-root bare-expr is correctly classified as a default-logic effect.
+  nestedMarkupContext?: boolean,
 ): string {
   // Support both new (nodes, ctx) and legacy (nodes, errors, csrfEnabled, registry, fileAST) signatures
   let errors: CGError[];
@@ -645,6 +700,20 @@ export function generateHtml(
   }
   const boundaryStack: ActiveBoundary[] = [];
 
+  // ss15 item-2 (S214) -- enclosing-markup-element tag stack. The logic-node
+  // branch keys on the immediate parent tag to decide render-slot vs effect:
+  // an empty stack means file top-level (a default-logic root); a top-of-stack
+  // in DEFAULT_LOGIC_MODE_TAGS (<program>/<page>/<channel>) means a default-
+  // logic body -- a bare-expr there is a mount EFFECT, not a render. Any other
+  // top-of-stack is a real markup element -- a `${...}` child renders. Pushed
+  // around the generic markup-element children walk only (the one walk that can
+  // legitimately contain a default-logic root or a markup-interpolation child).
+  // When this is a nested markup-render subtree (engine/match arm body), seed
+  // the stack with a non-default-logic sentinel so arm-body `${...}` children
+  // render (the file-root empty-stack default-logic semantics apply ONLY to
+  // the top-level file compilation).
+  const markupParentStack: string[] = nestedMarkupContext ? ["__nested-markup__"] : [];
+
   // Bug 60 (S157) — the active compound-parent wrapper nesting stack. When the
   // markup walker enters a BLOCK element whose tag resolves (via lookupStateCell
   // → getCellKind) to a `compound-parent` cell, it pushes that cell's name so a
@@ -700,9 +769,15 @@ export function generateHtml(
       if (SERVER_ONLY_STATE_TYPES.has(stateType)) {
         return;
       }
+      // ss15 item-2 (S214) -- a <db>/<state> block body is markup context, NOT
+      // a §40.8 default-logic root (E-WRITE-NOT-IN-LOGIC-CONTEXT: "<db>/<state>
+      // STATE-block bodies are NOT default-logic-mode loci"). Push a non-default-
+      // logic marker so a logic child keeps its pre-fix (markup) classification.
+      markupParentStack.push("state");
       for (const child of node.children ?? []) {
         emitNode(child);
       }
+      markupParentStack.pop();
       return;
     }
 
@@ -870,9 +945,15 @@ export function generateHtml(
           hasFallback,
           variantRenders: allVariantRenderExprs,
         });
+        // ss15 item-2 (S214) -- the boundary emits a real <div> wrapper; its
+        // `${...}` children are markup-interpolations that render (NOT a
+        // default-logic body). Push a non-default-logic tag so a logic child
+        // nested directly under a <program>-level boundary keeps its slot.
+        markupParentStack.push("errorBoundary");
         for (const child of children) {
           emitNode(child);
         }
+        markupParentStack.pop();
         boundaryStack.pop();
 
         parts.push("</div>");
@@ -919,9 +1000,15 @@ export function generateHtml(
         const wrapperKind = wrapperDecl ? getCellKind(wrapperDecl.declNode as any) : undefined;
         if (wrapperDecl && wrapperKind === "compound-parent") {
           enclosingCompoundStack.push(tag);
+          // ss15 item-2 (S214) -- the compound-parent wrapper is a markup
+          // namespace element (its tag is never a default-logic tag); its
+          // children render. Push the tag so a logic child resolves to
+          // markup-interpolation mode, not the enclosing default-logic root.
+          markupParentStack.push(tag);
           for (const child of children) {
             emitNode(child);
           }
+          markupParentStack.pop();
           enclosingCompoundStack.pop();
           return;
         }
@@ -1203,9 +1290,15 @@ export function generateHtml(
         // Only emit children for the unnamed/root program.
         const nameAttr = attrs.find((a: any) => a.name === "name");
         if (nameAttr) return;
+        // ss15 item-2 (S214) -- the unnamed <program> is a DEFAULT-LOGIC root
+        // (§40.8). Push its tag so a bare-expr logic child resolves to effect
+        // mode (no render slot); a `${...}` nested in a real markup descendant
+        // still renders (that descendant pushes its own tag in the generic walk).
+        markupParentStack.push(tag);
         for (const child of children) {
           emitNode(child);
         }
+        markupParentStack.pop();
         return;
       }
 
@@ -1217,9 +1310,13 @@ export function generateHtml(
       // emit-html left the literal `<page>` tag in output HTML, which the
       // browser ignored but cluttered the rendered DOM.
       if (tag === "page") {
+        // ss15 item-2 (S214) -- <page> body is a DEFAULT-LOGIC root (§40.8),
+        // same as <program>. Push its tag so bare-expr children are effects.
+        markupParentStack.push(tag);
         for (const child of children) {
           emitNode(child);
         }
+        markupParentStack.pop();
         return;
       }
 
@@ -2169,9 +2266,16 @@ export function generateHtml(
         parts.push(`<input type="hidden" name="_csrf" value="" data-scrml-csrf="${csrfId}" />`);
       }
 
+      // ss15 item-2 (S214) -- record this element as the enclosing markup
+      // parent so a `${...}` logic-node child can tell whether it sits in a
+      // default-logic body (<program>/<page>/<channel> -> mount effect, no
+      // render slot) or inside a real markup element (-> markup-interpolation,
+      // renders). See the logic-node branch below + DEFAULT_LOGIC_MODE_TAGS.
+      markupParentStack.push(tag);
       for (const child of children) {
         emitNode(child);
       }
+      markupParentStack.pop();
 
       parts.push(`</${tag}>`);
       return;
@@ -2179,6 +2283,39 @@ export function generateHtml(
 
     // For logic blocks embedded in markup, emit a placeholder span for client JS
     if (node.kind === "logic") {
+      // ss15 item-2 (S214) -- DEFAULT-LOGIC-MODE GUARD.
+      //
+      // A logic node whose enclosing markup parent is <program>/<page>/<channel>
+      // -- or which sits at the file top-level (empty stack: also a default-logic
+      // root) -- is a default-logic body per SPEC section 40.8 (SPEC.md:10347).
+      // Its bare expressions are mount EFFECTS (sections 17.3 + 6.7.1a): they run
+      // once at initial mount and do NOT render their return as a text node.
+      // `on mount { val() }` desugars to exactly such a bare-expr.
+      //
+      // In this position we MUST NOT allocate a `<span data-scrml-logic>` render
+      // slot, MUST NOT call addLogicBinding, and MUST NOT constant-fold the
+      // expression to inline text (folding is observationally a render). We
+      // return early WITHOUT stamping `_placeholderId`; emit-reactive-wiring.ts
+      // then classifies the node as a file-scope/mount-effect group and emits
+      // its body as the effect call (the `_scrml_val_2();` line) -- exactly the
+      // pre-S107 path for declaration-only logic bodies.
+      //
+      // A `${...}` logic node nested inside ANY OTHER markup element (a <div>, a
+      // <span>, a component root, etc.) is a markup-interpolation that DOES
+      // render -- it falls through this guard to the unchanged path below.
+      const enclosingMarkupTag = markupParentStack.length > 0
+        ? markupParentStack[markupParentStack.length - 1]
+        : null;
+      const inDefaultLogicMode = enclosingMarkupTag === null
+        || DEFAULT_LOGIC_MODE_TAGS.has(enclosingMarkupTag);
+      // A lift-expr (`${ for (...) { lift <li/> } }`, the Tier-0 iteration form
+      // §17.4) is a DOM-positioning target that renders in ANY context, default-
+      // logic bodies included. The guard suppresses ONLY the spurious bare-expr
+      // render slot; a logic node that contains a lift-expr keeps its placeholder
+      // + lift wiring and falls through to the normal path below.
+      const bodyHasLift = (node.body ?? []).some((child: any) => stmtContainsLiftExpr(child));
+      if (inDefaultLogicMode && !bodyHasLift) return;
+
       if (node.body?.length === 1 && node.body[0]?.kind === "bare-expr") {
         const bareExpr = node.body[0];
         // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)

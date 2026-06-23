@@ -66,6 +66,8 @@ function parses(js) {
 }
 
 let urlInterpFx, apiInterpFx, matchOnFx, ifAttrFx, constFx, inputStateFx;
+// S213 ss15 items 3+4+5 — lift-path fixtures.
+let liftForInterpFx, liftBareIfFx, liftInputStateFx, liftSpecEx1Fx;
 
 beforeAll(() => {
   mkdirSync(FIXTURE_DIR, { recursive: true });
@@ -138,6 +140,66 @@ beforeAll(() => {
   inputStateFx = fix("input-state.scrml", `<program>
     <mouse id="cursor"/>
     <div>\${<#cursor>.x}</>
+</>
+`);
+
+  // S213 ss15 item 3 — ${ for (…) { lift <h1>${<#id>.data}</h1> } } LIFT-PATH
+  // interpolation. The nested ${…} interpolation must NOT content-split (no
+  // leaked "feed_.data}" literal text node), must route to _scrml_request_feed,
+  // and must be _scrml_effect-wrapped.
+  liftForInterpFx = fix("lift-for-interp.scrml", `<program>
+    \${ for (x of [1,2,3]) { lift <h1>\${<#feed>.data}</h1> } }
+    <request id="feed" url="/api/feed">
+    </>
+</>
+`);
+
+  // S213 ss15 item 4 — bare ${ if (<#id>.loading) { lift } } LIFT-PATH if
+  // condition. The condition must route to _scrml_request_feed (NOT the §36
+  // registry).
+  liftBareIfFx = fix("lift-bare-if.scrml", `<program>
+    \${ if (<#feed>.loading) { lift <p>Loading...</p> } }
+    <request id="feed" url="/api/feed">
+    </>
+</>
+`);
+
+  // S213 ss15 — §36 input-state regression IN A LIFT body. A <#cursor> control
+  // (NOT a <request>) inside a for/lift MUST keep the registry lowering.
+  liftInputStateFx = fix("lift-input-state.scrml", `<program>
+    <mouse id="cursor"/>
+    \${ for (x of [1,2,3]) { lift <h1>\${<#cursor>.x}</h1> } }
+</>
+`);
+
+  // S213 ss15 item 5 — migrated SPEC §6.7.7 Worked Example 1 (the ${ }-wrapped
+  // if/else-if/else chain in a <div>). End-to-end check the lift path is fixed:
+  // compiles clean + routes <#profile> to _scrml_request_profile.
+  //
+  // NB: the verbatim SPEC example uses `not <#profile>.stale` for boolean
+  // negation, which fires E-TYPE-045 (`not` is the §42 absence VALUE, not a
+  // logical-negation operator) — a SECOND latent defect in the example, surfaced
+  // to PA separately. This fixture uses the canonical `!<#profile>.stale` so the
+  // lift-PATH fix can be verified end-to-end without the unrelated `not` defect
+  // masking it.
+  liftSpecEx1Fx = fix("lift-spec-ex1.scrml", `<program>
+    <userId> = 42
+
+    <request id="profile" url="/api/user/42">
+    </>
+
+    <div>
+        \${
+            if (<#profile>.loading && !<#profile>.stale) {
+                lift <p>Loading...</>
+            } else if (<#profile>.error) {
+                lift <p>Error: \${<#profile>.error.message}</>
+                lift <button onclick=\${<#profile>.refetch()}>Retry</>
+            } else {
+                lift <h1>\${<#profile>.data}</>
+            }
+        }
+    </>
 </>
 `);
 });
@@ -290,6 +352,72 @@ describe("§6: §36 input-state refs keep the input-state registry lowering", ()
 });
 
 // ---------------------------------------------------------------------------
+// §8: LIFT-PATH render bridge (S213 ss15 items 3+4) — `<#id>` refs inside a
+//     `lift` body route to _scrml_request_<id> (not the §36 registry), the
+//     nested ${…} interpolation does NOT content-split, and request reads are
+//     _scrml_effect-wrapped. §36 input-state lift refs are UNCHANGED.
+// ---------------------------------------------------------------------------
+
+describe("§8: lift-path <#id> request refs route + reactive (items 3+4)", () => {
+  test("item 3: ${ for(){ lift <h1>${<#feed>.data}</h1> } } routes to _scrml_request_feed", () => {
+    const result = compile(liftForInterpFx);
+    expect(result.errors).toEqual([]);
+    const js = clientJs(result, liftForInterpFx);
+    // routed to the request state object, NOT the §36 input-state registry
+    expect(js).toMatch(/_scrml_request_feed\.data/);
+    expect(js).not.toMatch(/_scrml_input_state_registry\.get\("feed"\)/);
+  });
+
+  test("item 3: no content-split corruption (no leaked \"feed_.data}\" literal text node)", () => {
+    const result = compile(liftForInterpFx);
+    const js = clientJs(result, liftForInterpFx);
+    // The g-request-lift-nested-interp-mangle bug leaked a literal text node
+    // `createTextNode("feed_.data}")`. It must be GONE.
+    expect(js).not.toMatch(/feed_\.data\}/);
+    expect(js).not.toMatch(/createTextNode\("feed/);
+    // exactly ONE request-state binding for the interpolation
+    const matches = js.match(/_scrml_request_feed\.data/g) || [];
+    // (>=1 in the lift body; the fetch sidecar also references .data, so just
+    // assert the lift body produced a binding — not the leak.)
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("item 3: the lift-body request read is _scrml_effect-wrapped (Seam 3)", () => {
+    const result = compile(liftForInterpFx);
+    const js = clientJs(result, liftForInterpFx);
+    expect(js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent = String\(\(_scrml_request_feed\.data\) \?\? ""\); \}\)/);
+  });
+
+  test("item 4: bare ${ if(<#feed>.loading){ lift } } condition routes to _scrml_request_feed", () => {
+    const result = compile(liftBareIfFx);
+    expect(result.errors).toEqual([]);
+    const js = clientJs(result, liftBareIfFx);
+    expect(js).toMatch(/if \(_scrml_request_feed\.loading\)/);
+    expect(js).not.toMatch(/_scrml_input_state_registry\.get\("feed"\)/);
+  });
+
+  test("§36 regression: a <#cursor> input-state lift ref STILL uses the registry (not routed to request)", () => {
+    const result = compile(liftInputStateFx);
+    expect(result.errors).toEqual([]);
+    const js = clientJs(result, liftInputStateFx);
+    expect(js).toMatch(/_scrml_input_state_registry\.get\("cursor"\)/);
+    expect(js).not.toMatch(/_scrml_request_cursor/);
+    // a §36 render-once ref is NOT effect-wrapped
+    expect(js).not.toMatch(/_scrml_effect\(function\(\)[^)]*_scrml_input_state_registry\.get\("cursor"\)/);
+  });
+
+  test("item 5: migrated SPEC §6.7.7 Example 1 compiles CLEAN and routes <#profile> to _scrml_request_profile", () => {
+    const result = compile(liftSpecEx1Fx);
+    expect(result.errors).toEqual([]);
+    const js = clientJs(result, liftSpecEx1Fx);
+    expect(js).toMatch(/_scrml_request_profile/);
+    expect(js).not.toMatch(/_scrml_input_state_registry\.get\("profile"\)/);
+    // no content-split leak from the nested ${<#profile>.error.message} interp
+    expect(js).not.toMatch(/profile_\./);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §7: every emitted form parses as a module
 // ---------------------------------------------------------------------------
 
@@ -300,6 +428,10 @@ describe("§7: emitted JS parses for every bridged form", () => {
     ["<match on=>", () => matchOnFx],
     ["if= attr", () => ifAttrFx],
     ["file-scope const", () => constFx],
+    ["lift for-interp (item 3)", () => liftForInterpFx],
+    ["lift bare-if (item 4)", () => liftBareIfFx],
+    ["lift §36 input-state regression", () => liftInputStateFx],
+    ["lift SPEC §6.7.7 Example 1 (item 5)", () => liftSpecEx1Fx],
   ]) {
     test(`${name} output parses`, () => {
       const fx = getFx();

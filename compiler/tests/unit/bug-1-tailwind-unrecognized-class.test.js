@@ -461,3 +461,126 @@ describe("§10 ${...} interpolation masking — no false positives on JS expr co
     expect(diags).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11 Author-defined `#{}` / `<style>` class selectors — excluded
+// (ss15 item-1, g-tailwind-lint-false-fires-on-scoped-class)
+//
+// A scoped-CSS component that defines `.card` / `.card-title` in a `#{}` block
+// and uses `class="card"` previously drew a spurious lint on every
+// author-defined class. The lint now text-scans the SAME source for class
+// selectors the author defines in their own in-scope CSS and skips them. Typos,
+// unsupported arbitrary values, Tailwind utilities, and externally-styled
+// classes with NO defining CSS block are UNAFFECTED.
+// ---------------------------------------------------------------------------
+
+describe("§11 Author-defined #{}/<style> class selectors — excluded", () => {
+  test("class defined in a #{} block used in class=\"\" does NOT fire", () => {
+    const source =
+      '#{\n' +
+      '  .card { padding: 16px; }\n' +
+      '  .card-title { font-weight: 600; }\n' +
+      '}\n' +
+      '<div class="card"><span class="card-title">x</span></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "card")).toBe(false);
+    expect(firedOn(diags, "card-title")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("Tailwind utility still resolves alongside author-defined classes", () => {
+    const source =
+      '#{ .card { padding: 16px; } }\n' +
+      '<div class="card flex p-4"></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "card")).toBe(false);
+    expect(firedOn(diags, "flex")).toBe(false);
+    expect(firedOn(diags, "p-4")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("typo still fires even when sibling classes are author-defined", () => {
+    const source =
+      '#{ .card { padding: 16px; } }\n' +
+      '<div class="card crad"></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "card")).toBe(false);
+    // `crad` is neither a Tailwind utility nor an author-defined selector.
+    expect(firedOn(diags, "crad")).toBe(true);
+    expect(diags).toHaveLength(1);
+  });
+
+  test("class defined in a <style> block is excluded", () => {
+    const source =
+      '<style>\n' +
+      '  .hero { background: navy; }\n' +
+      '  .hero-title { color: white; }\n' +
+      '</style>\n' +
+      '<div class="hero"><h1 class="hero-title">x</h1></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "hero")).toBe(false);
+    expect(firedOn(diags, "hero-title")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("comma-grouped, compound, descendant, child, and pseudo selectors all register", () => {
+    const source =
+      '#{\n' +
+      '  .alpha, .beta { color: red; }\n' +
+      '  .gamma.active { color: blue; }\n' +
+      '  .parent .child { color: green; }\n' +
+      '  .grid > .row { display: flex; }\n' +
+      '  .link:hover { text-decoration: underline; }\n' +
+      '  .badge::before { content: ""; }\n' +
+      '}\n' +
+      '<div class="alpha"></div>' +
+      '<div class="beta"></div>' +
+      '<div class="gamma"></div>' +
+      '<div class="active"></div>' +
+      '<div class="parent"></div>' +
+      '<div class="child"></div>' +
+      '<div class="grid"></div>' +
+      '<div class="row"></div>' +
+      '<div class="link"></div>' +
+      '<div class="badge"></div>';
+    const diags = scan(source);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("CSS numeric fractions (`0.5rem`) are NOT mistaken for class selectors", () => {
+    // `.5rem` / `0.5rem` start with a digit after the dot — not a class
+    // selector. A genuinely-unrecognized class alongside them must still fire.
+    const source =
+      '#{ .box { margin: 0.5rem; padding: .25rem; } }\n' +
+      '<div class="box flexx"></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "box")).toBe(false);
+    expect(firedOn(diags, "flexx")).toBe(true);
+    expect(diags).toHaveLength(1);
+  });
+
+  test("externally-styled class with NO defining CSS block STILL fires", () => {
+    // No #{}/<style> defines `.counter-app` -> the acknowledged false-positive
+    // floor behavior is preserved; only IN-SOURCE author-defined selectors are
+    // excluded.
+    const source = '<div class="counter-app"></div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "counter-app")).toBe(true);
+  });
+
+  test("component-scope #{} (inside a const X = <div>) is also excluded", () => {
+    // Mirrors the R26 repro: a #{} living inside a component definition.
+    const source =
+      'const Card = <div props={ label: string }>\n' +
+      '    #{\n' +
+      '        .card { padding: 16px; }\n' +
+      '        .card-title { font-weight: 600; }\n' +
+      '    }\n' +
+      '    <div class="card"><span class="card-title">x</span></div>\n' +
+      '</div>';
+    const diags = scan(source);
+    expect(firedOn(diags, "card")).toBe(false);
+    expect(firedOn(diags, "card-title")).toBe(false);
+    expect(diags).toHaveLength(0);
+  });
+});
