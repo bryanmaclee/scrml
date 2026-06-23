@@ -2149,9 +2149,18 @@ export function generateServerJs(
       }
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
       lines.push(`async function ${_peerName}(${_peerInfo.paramNames.join(", ")}) {`);
-      // Server-mode `@cell` reads lower to `_scrml_body["cell"]`; an in-process
-      // peer call has no HTTP request body, so define an empty fallback (mirrors
-      // the §38.6.1 onserver-handler precedent) to avoid a ReferenceError.
+      // F4 (documented limitation per upstream review): a server-mode `@cell`
+      // read lowers to `_scrml_body["cell"]`. The HTTP handler binds `_scrml_body`
+      // from the request, but an in-process peer call has no request — so we bind
+      // an empty `_scrml_body = {}` fallback (mirrors the §38.6.1 onserver-handler
+      // precedent) to avoid a ReferenceError. This does NOT diverge from the HTTP
+      // path in practice: the client wire protocol sends only the fn's PARAMS
+      // (which the peer receives as named arguments here), never arbitrary
+      // reactive cells — so a non-param `@cell` read is `undefined` on BOTH paths.
+      // If a future protocol change starts shipping reactive cells in the request
+      // body, a peer reading such a cell would need either a diagnostic or
+      // explicit parameter-passing; flagged here so that change can't slip by
+      // silently.
       if (_peerBodyLines.some((l) => l.includes("_scrml_body"))) {
         lines.push(`  const _scrml_body = {};`);
       }
