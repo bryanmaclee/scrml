@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-23 (S216 — giti Bug-51 P0 fixed+verified; the open HIGH closed; ss1 re-integrated; §52 Pattern-C server-cell LOAD; 2 ratifications)
+
+A high-throughput execution session: a giti P0, the only open HIGH, a 4-item sPA re-integration, and a SPEC-amendment feature, plus two design ratifications.
+
+- **giti Bug-51 (P0) — page-local enums now emitted into the server bundle.** A `type X:enum` referenced in a `server function` emitted its frozen def into `*.client.js` only → server-side `ReferenceError` (compile exit-0; silent miscompile). Now emitted (reachability-gated, byte-identical to the client) into `*.server.js`, with a new `E-CG-016` collision guard for the rare enum-name-collides-with-an-injected-server-binding edge. giti verified all 7 UI pages. `83afdcdb`.
+- **The open HIGH closed — bind:value wiring in `<match>` arms + `<engine>` state-child bodies.** A `bind:value` inside a match arm / engine body emitted the attribute but never the input wiring (silent data loss). Family-A convergence Half-1: a root-agnostic bind-directive emitter is now shared between the whole-file path and the per-arm wire locus — one fix covers both match arms and engine bodies. `f4bef40f`.
+- **ss1 re-integrated (4 items):** E-ROUTE-001 over-fire on pure-fn-local writes (flux 1→0); value-only `.server.js` for const-only modules; the §52 server-cell parser leak-stop (also closes a server-SQL-leaking-into-client.js security leak); the E-RI-002 diagnostic now steers to the canonical server-authoritative patterns.
+- **§52 server-cell decl-RHS `?{}` LOAD (Pattern C).** `<var server> = ?{select…}` now IS the cell's mount load — builds the `/__serverLoad/<var>` route + client fetch-on-mount; unblocks server-authoritative engines (`<engine server=@source>`). SPEC §52.6.5 Pattern C + §52.4.3 reword + `W-AUTH-004` (param-bearing queries are a bounded follow-on). `3df57a32`.
+- **Ratified:** author `route=` on a `server function*` (SSE) in application mode (a narrow stable-URL carve-out for foreign consumers; not a new raw-route primitive); and the foreign-code `_{}` inline OUT-typing model (annotate-and-decode hybrid; inline and sidecar coexist by process-lifetime). Both build downstream.
+- **+E-CG-016, +W-AUTH-004** error codes; **+22** §52 unit tests + **+9** browser tests; full suite **24968/0**.
+
 ### 2026-06-23 (S215 — first external adopter; verification-doctrine ratified; dPA boundary-retirement batch; residual fixes)
 
 A first-external-adopter + design-deliberation session — light on landed code, heavy on direction and a methodology correction. **rjantz3 (Ryan)** filed the first external GitHub issues (#1 server-fn→server-fn, #2 CSRF first-write) *and submitted fixes* on a fork; PA adopted them (`b9f7aabb`, happy-path verified) — then Ryan's own `/code-review` surfaced two defects PA's confirmatory verify missed, PA reverse-R26 confirmed both, and reverted (unpushed, clean). That miss (plus a parallel one in the flogence triage) drove a ratified **verification doctrine** (adversarial / constructed-edge review for non-PA-pipeline fixes + a random-sample-10× audit — pa.md S215 addendum). A dPA deliberation batch ran and **ratified SCOPED-RETIRE of the S199 "scrml can't drive instances" boundary** (the `_{}` foreign-code door, under 4 conditions). The buildable server-codegen work was staged as sPA ss1 (running at close).
