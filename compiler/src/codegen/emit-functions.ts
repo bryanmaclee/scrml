@@ -677,7 +677,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // required, so the header rides along with the body. Mirrors the
         // !usesCsrfRetry branch with manual CSRF retry semantics.
         lines.push(`  // A9 Ext 5: bypass _scrml_fetch_with_csrf_retry to add Idempotency-Key header`);
-        lines.push(`  const _scrml_csrf_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
+        // Issue #2 (parent scrmlTS): in baseline CSRF mode read the token from
+        // the cookie via `_scrml_get_csrf_token()` (which bootstraps one when
+        // absent) — the SAME source the non-idempotency retry helper uses. The
+        // previous `meta[name="csrf-token"]` read targeted a tag emit-html.ts
+        // never emits, so the write path always sent an empty token and BOTH the
+        // initial fetch and the retry 403'd. The auth-managed path keeps the
+        // meta read (its token is server-rendered for the session).
+        const _csrfTokenExpr = ctx.authMiddleware
+          ? `(typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '') : ''`
+          : `_scrml_get_csrf_token()`;
+        lines.push(`  const _scrml_csrf_token = ${_csrfTokenExpr};`);
         lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`    method: ${JSON.stringify(httpMethod)},`);
         lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key },`);
@@ -686,7 +696,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`  let _scrml_resp;`);
         lines.push(`  if (_scrml_resp_initial.status === 403) {`);
         lines.push(`    // CSRF token may have been minted on the 403; retry with the freshly-planted token.`);
-        lines.push(`    const _scrml_csrf_retry_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
+        lines.push(`    const _scrml_csrf_retry_token = ${_csrfTokenExpr};`);
         lines.push(`    _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`      method: ${JSON.stringify(httpMethod)},`);
         lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key },`);
