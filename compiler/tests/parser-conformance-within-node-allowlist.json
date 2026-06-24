@@ -6369,9 +6369,9 @@
   "samples/rust-dev-debate-dashboard.scrml": {
     "COUNT-LENGTH": 1,
     "EXTRA-FIELD": 55,
-    "FIELD-SHAPE": 46,
+    "FIELD-SHAPE": 47,
     "KIND-NAME": 18,
-    "MISSING-FIELD": 206,
+    "MISSING-FIELD": 212,
     "SPAN-COORD": 118
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {

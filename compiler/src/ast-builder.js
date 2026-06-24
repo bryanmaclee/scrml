@@ -550,6 +550,34 @@ const TOPLEVEL_AT_WRITE_RE =
   /^\s*@[A-Za-z_][A-Za-z0-9_]*\s*=(?!=)/;
 
 /**
+ * GITI-029 — bare `on mount {` / `on dismount {` lifecycle directive at a
+ * <program> / <page> / <channel> default-logic-body direct-child TEXT position.
+ *
+ * The §6.7.1a/§6.7.1b on-mount/on-dismount directives are recognised by the
+ * logic-body parser (parseLogicBody @8662 / the top-level loop @12066), which
+ * is reached only after a text run is lifted into a synthetic `${...}` logic
+ * block. The lift normally happens because the on-mount line shares its BS text
+ * block with a preceding canonical decl (e.g. `<a> = 0\non mount {...}`), which
+ * matches TOPLEVEL_STATE_DECL_RE / BARE_DECL_RE and lifts the WHOLE run.
+ *
+ * But a JS line comment (`// ...`) immediately preceding the directive is
+ * extracted by BS as a separate `comment` child, FLUSHING the preceding text.
+ * The on-mount line is then a standalone text block whose leading token is
+ * `on` — it matches NONE of the decl-shape lift gates above (BARE_DECL_RE is
+ * keyword-led; `on` is a contextual IDENT, not a decl keyword), so it fell
+ * through to `result.push(block)` and SHIPPED RAW into the DOM as literal text,
+ * silently defeating the lifecycle hook. A blank line (no `comment` child) does
+ * NOT flush, so the legacy shared-block lift kept it working.
+ *
+ * Lift on this signal at the default-logic surface so the directive reaches its
+ * parser regardless of a preceding comment. Conservative: the regex requires
+ * the leading non-whitespace token to be `on` + `mount`/`dismount` + `{`, so
+ * prose like `on Monday` or an identifier never matches.
+ */
+const TOPLEVEL_ON_LIFECYCLE_RE =
+  /^\s*on\s+(?:mount|dismount)\s*\{/;
+
+/**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
  *
  * A text run inside a MARKUP body whose leading non-whitespace token is a bare
@@ -1560,6 +1588,41 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       });
       continue;
     }
+
+    // GITI-029 — bare `on mount {` / `on dismount {` lifecycle directive at a
+    // <program>/<page>/<channel> default-logic-body direct-child TEXT position.
+    // Reached when a `//` line comment immediately precedes the directive: BS
+    // extracts the comment as its own `comment` child, FLUSHING the preceding
+    // text so the on-mount line is a STANDALONE text block. Its leading token is
+    // `on` (a contextual IDENT, not a decl keyword), so it matched NONE of the
+    // decl-shape lift gates above and fell through to `result.push(block)`,
+    // shipping the whole `on mount { ... }` block RAW into the DOM as literal
+    // text and silently defeating the lifecycle hook. Wrap it in a synthetic
+    // `${...}` so the logic-body parser observes the directive (parseLogicBody
+    // @8662 desugars `on mount {...}` to a mount bare-expr / `on dismount {...}`
+    // to a cleanup call). Gated `isDefaultLogicBody` — the precise §40.8 surface
+    // (a directive only desugars at a default-logic root); the regex requires
+    // `on` + `mount`/`dismount` + `{` so prose never matches.
+    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw)) {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        isComponent: false,
+        _synthetic: true,
+        _onLifecycleLift: true,  // diagnostic marker — GITI-029 lift origin
+        // S180 D3.1 — synthetic block PREPENDS a fictional `${` to raw while
+        // keeping span at body[0]; the `case "logic"` handler keys on this flag
+        // to NOT advance bodyOffset past the (non-existent) `${`.
+        _bareDeclLift: true,
+      });
+      continue;
+    }
+
 
     // change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203) —
     // reject + recover: a bare control-flow STATEMENT (`for`/`if`/`while` +
@@ -8668,7 +8731,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume();                  // consume 'mount'
       consume();                  // consume '{'
       const { body, span: bodySpan } = collectBracedBody();
-      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), span: spanOf(startTok, peek()) };
+      // _onMountEffect (S217, g-onmount-async): a desugared `on mount {}` is a
+      // fire-and-forget mount effect per SPEC §6.7.1a — it runs ONCE at mount
+      // and NEVER renders its return into the DOM, in ANY enclosing context
+      // (including a `<program db=>` / `<db>` state-block body). emit-html keys
+      // on this flag to skip the render-slot + addLogicBinding unconditionally.
+      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), _onMountEffect: true, span: spanOf(startTok, peek()) };
     }
 
     // §6.7.1b: ON DISMOUNT — `on dismount { body }` desugars to cleanup(() => { body })
@@ -8680,7 +8748,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume();                  // consume '{'
       const { body, span: bodySpan } = collectBracedBody();
       const _dm1 = `cleanup(() => { ${body} })`;
-      return { id: ++counter.next, kind: "bare-expr", expr: _dm1, exprNode: safeParseExprToNode(_dm1, 0), span: spanOf(startTok, peek()) };
+      // _onMountEffect (S217) — `on dismount {}` is also a non-rendering lifecycle
+      // effect; same emit-html skip as `on mount {}`.
+      return { id: ++counter.next, kind: "bare-expr", expr: _dm1, exprNode: safeParseExprToNode(_dm1, 0), _onMountEffect: true, span: spanOf(startTok, peek()) };
     }
 
     // Phase A1a Step 2 — V5-strict structural state-decl: `<NAME> = expr` (Shape 1).
@@ -12072,7 +12142,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume();                  // consume 'mount'
       consume();                  // consume '{'
       const { body, span: bodySpan } = collectBracedBody();
-      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), span: spanOf(startTok, peek()) });
+      // _onMountEffect (S217) — see the parseOneStatement on-mount site above.
+      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), _onMountEffect: true, span: spanOf(startTok, peek()) });
       continue;
     }
 
@@ -12085,7 +12156,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume();                  // consume '{'
       const { body, span: bodySpan } = collectBracedBody();
       const _dm2 = `cleanup(() => { ${body} })`;
-      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: _dm2, exprNode: safeParseExprToNode(_dm2, 0), span: spanOf(startTok, peek()) });
+      // _onMountEffect (S217) — `on dismount {}` non-rendering lifecycle effect.
+      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: _dm2, exprNode: safeParseExprToNode(_dm2, 0), _onMountEffect: true, span: spanOf(startTok, peek()) });
       continue;
     }
 

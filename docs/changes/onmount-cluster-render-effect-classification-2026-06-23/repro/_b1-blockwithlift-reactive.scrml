@@ -1,0 +1,10 @@
+<program>
+<items> = [1, 2, 3]
+${
+  function boot() { return @items.length }
+  for (let x of @items) {
+    lift <li>${x}</li>
+  }
+  on mount { boot() }
+}
+</program>

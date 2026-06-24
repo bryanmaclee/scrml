@@ -168,6 +168,22 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // field; a live-pipeline-internal codegen-support
                               // field with no native analogue, NOT a semantic
                               // divergence (both routes render identically).
+  "_onMountEffect",           // S217 (g-onmount-async) — LIVE-only marker on a
+                              // bare-expr desugared from `on mount {}` /
+                              // `on dismount {}`. emit-html keys on it to skip
+                              // the render-slot + addLogicBinding so the
+                              // lifecycle body is a fire-and-forget effect
+                              // (SPEC §6.7.1a/b) in ANY enclosing context. The
+                              // native parser desugars on-mount via its own
+                              // route and never carries this flag; a live-
+                              // pipeline-internal codegen-support field, NOT a
+                              // semantic divergence (both routes emit the same
+                              // mount-effect call).
+  "_onLifecycleLift",         // S217 (GITI-029) — LIVE-only diagnostic marker on
+                              // a synthetic ${...} that liftBareDeclarations
+                              // built for a comment-flushed `on mount {}` text
+                              // run. Same live-only lift-origin metadata class
+                              // as _bareDeclLift / _atWriteLift / _tildeBearingLift.
 ]);
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+<program>
+${ function refresh() { return 1 } }
+<count> = 0
+on mount { refresh() }
+<div><p>${@count}</p></div>
+</program>

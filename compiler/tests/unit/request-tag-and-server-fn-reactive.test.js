@@ -102,21 +102,26 @@ beforeAll(() => {
 
   // §6 fixture: `server <var>` + `on mount { @var = serverFn() }` + `${@var}` render.
   //
-  // This minimal pattern reproduces the 18-state-authority emit path. The
-  // `on mount` block somehow generates a reactive-display wiring whose
-  // expression is `@var = serverFn()` (the assignment, not just `@var`).
+  // This is the 18-state-authority emit path: an `on mount { @data = loadValue() }`
+  // inside the `<program db=>` body (which parses to a `<db>` state-block whose
+  // enclosing markup tag is "state").
   //
-  // That wiring lives at emit-event-wiring.ts:854-855 and wraps the rewritten
-  // expression in `el.textContent = await (...)`. The rewritten expression is
-  // `_scrml_reactive_set("var", _scrml_fetch_X_N())` — and GITI-001 then
-  // converts it to an async IIFE wrap.
+  // HISTORY: pre-S217 the `on mount` block was MIS-CLASSIFIED as a reactive
+  // DISPLAY wiring whose expression was `@var = serverFn()` — it allocated a
+  // render slot and emitted `el.textContent = await ((async () => ...)())`. That
+  // was the g-onmount-async bug (a desugared `on mount {}` is a fire-and-forget
+  // mount effect per SPEC §6.7.1a, it NEVER renders its return). The S84 GITI-001
+  // `;`-context fix that this describe-block originally guarded was a downstream
+  // well-formedness patch ON TOP of that bug shape.
   //
-  // BEFORE S84 fix: GITI-001 always appended a trailing `;` even in
-  // expression context, producing `await ((async () => ...)();)` which is
-  // invalid JS (`;)` token sequence).
-  //
-  // AFTER S84 fix: GITI-001 detects statement vs expression context via
-  // the source's trailing `;` and only appends `;` when present.
+  // AFTER S217 (g-onmount-async): the on-mount is correctly a file-scope mount
+  // effect — `(async () => _scrml_reactive_set("data", await _scrml_fetch_loadValue_N()))();`
+  // at module init (the GITI-001 statement-context wrap), with NO render slot and
+  // NO `el.textContent`/`_scrml_render_value` of the on-mount call. The `${@data}`
+  // inside `<div><p>` is the ONLY genuine display binding (it reads the cell the
+  // mount effect populated). This describe-block now asserts that CORRECT shape;
+  // the GITI-001 well-formedness invariant (no `;)`) is preserved by the
+  // statement-context wrap.
   exprCtxFx = fix("expr-ctx.scrml", `<program db="./fixture.db">
 
 \${
@@ -259,11 +264,23 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     expect(js).not.toMatch(/\)\(\);\s*\)/);
   });
 
-  test("the wrap inside `el.textContent = await (...)` ends with `)())` not `)();)`", () => {
+  test("the on-mount runs as a file-scope mount effect, NOT a display slot (g-onmount-async S217)", () => {
     const result = compile(exprCtxFx);
     const js = result.outputs.get(exprCtxFx).clientJs;
-    // Must contain the well-formed expression wrap
-    expect(js).toMatch(/el\.textContent\s*=\s*await\s*\(\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\s*\)/);
+    // CORRECT: the on-mount `@data = loadValue()` is the GITI-001 STATEMENT-context
+    // wrap at module init (well-formed, ends with `();`).
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\);/);
+    // The on-mount's call must NOT be rendered into the DOM (the former bug shape).
+    expect(js).not.toMatch(/el\.textContent\s*=\s*await\s*\(\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data"/);
+    expect(js).not.toMatch(/_scrml_render_value\(el, _scrml_fetch_loadValue_\d+\(\)\)/);
+  });
+
+  test("the `${@data}` display binding (the cell read, not the on-mount) still renders", () => {
+    const result = compile(exprCtxFx);
+    const js = result.outputs.get(exprCtxFx).clientJs;
+    // The genuine markup interpolation inside <div><p> reads the cell the mount
+    // effect populated — this is the ONLY display binding in the fixture.
+    expect(js).toMatch(/_scrml_render_value\(el, _scrml_reactive_get\("data"\)\)/);
   });
 
   test("statement-context wrap (top-level or in fn body) still ends with `();`", () => {

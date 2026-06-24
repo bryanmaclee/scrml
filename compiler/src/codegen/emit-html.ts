@@ -2451,6 +2451,33 @@ export function generateHtml(
       parts.push(`<span data-scrml-logic="${placeholderId}"></span>`);
       if (registry && node.body) {
         for (const child of node.body) {
+          // g-onmount-async (S217) — DEFAULT-LOGIC-MODE BARE-EXPR IS AN EFFECT.
+          //
+          // We only reach this binding loop in default-logic mode when the EARLY
+          // RETURN above was skipped because a sibling `lift-expr` forced the
+          // placeholder (bodyHasLift). The lift gets its DOM position via
+          // `_placeholderId` + lift-target wiring (emit-reactive-wiring.ts); a
+          // bare-expr sharing the SAME logic node is STILL a mount effect (SPEC
+          // §17.3 + §6.7.1a — `on mount { boot() }` desugars to such a bare-expr).
+          // Registering it as a logic-binding made emit-event-wiring.ts emit
+          // `_scrml_render_value(el, boot())` (the call's RETURN renders to the
+          // DOM — `[object Promise]` for an async/CPS call) plus, when the body
+          // reads a reactive cell, a re-running `_scrml_effect` wrapper. In a
+          // default-logic body a bare-expr NEVER renders and NEVER re-runs; skip
+          // the binding so it falls to the file-scope/mount-effect emit path —
+          // exactly the early-return semantics, just without the placeholder the
+          // sibling lift legitimately needs. A `${...}` nested in a real markup
+          // descendant (inDefaultLogicMode === false) is UNCHANGED (it renders).
+          // A desugared `on mount {}` / `on dismount {}` (SPEC §6.7.1a/b) is a
+          // fire-and-forget lifecycle effect: it runs ONCE at mount and NEVER
+          // renders its return, in ANY enclosing context — including a
+          // `<program db=>` / `<db>` state-block body, where the enclosing tag
+          // is "state" so inDefaultLogicMode is false. Skip its binding so it
+          // falls to the file-scope/mount-effect emit path. (The flogence shape:
+          // `on mount { boot() }` as the tail statement of the big program-body
+          // `${...}` block that the `<db>` context wraps.)
+          if (child && child.kind === "bare-expr" && (child as any)._onMountEffect) continue;
+          if (inDefaultLogicMode && child && child.kind === "bare-expr") continue;
           // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
           if (child && child.kind === "bare-expr" && (child.exprNode || child.expr)) {
             const exprStr = child.exprNode ? emitStringFromTree(child.exprNode) : child.expr;

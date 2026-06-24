@@ -1,0 +1,7 @@
+<program>
+${ function f() { return 1 } }
+<a> = 0
+
+on mount { @a = f() }
+<div><p>${@a}</p></div>
+</program>
