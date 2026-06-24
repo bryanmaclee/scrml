@@ -13,7 +13,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
-import { parseExprToNode, exprNodeCollectCallees } from "../expression-parser.ts";
+import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames } from "./scheduling.ts";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
@@ -1316,6 +1316,10 @@ export function generateServerJs(
   // program that never composes server fns is byte-unchanged.
   const _peerCallableInfo = new Map<string, { fnNode: any; paramNames: string[] }>();
   const _serverFnPeerNames = new Set<string>();
+  // Issue #1 — bare-peer-call sites recorded by emit-expr during body emission
+  // (a peer call in a non-awaitable position). Diagnosed AFTER all bodies are
+  // emitted. Threaded into every server-mode emit context below.
+  const _syncPeerCalls: Array<{ name: string; span: unknown }> = [];
   for (const { fnNode: _pfn, route: _proute } of serverFns) {
     const _pn = _pfn?.name;
     if (typeof _pn !== "string" || _pn.length === 0) continue;
@@ -1327,47 +1331,44 @@ export function generateServerJs(
     _peerCallableInfo.set(_pn, { fnNode: _pfn, paramNames: _pparamNames });
   }
 
-  // Which simple peers are ACTUALLY called by some server-fn body, and which
-  // calls sit in a position we cannot lower? Resolve BOTH from one deep AST walk
-  // over every server-fn body. The walk is the single source of truth that keeps
-  // the load-bearing invariant: every call `emit-expr` lowers to `await <peer>()`
-  // has a corresponding emitted `async function <peer>` — OR a diagnostic fires.
-  //
   // EMISSION (`_calledPeerNames`): collect a peer from EVERY call site, structured
-  //   or raw, at any depth — including INSIDE lambda bodies and param defaults.
-  //   `exprNodeCollectCallees`/`forEachCallInExprNode` deliberately stop at
-  //   `case "lambda"`, and a block-body callback parses as an `escape-hatch` whose
-  //   call lives only in its `.raw` text — so a peer reached solely through a
-  //   lambda (sync OR async) would otherwise be invisible to emission while
-  //   emit-expr still references it → silent runtime ReferenceError. The generic
-  //   object walk below descends through everything; raw escape-hatch callees are
-  //   recovered with `extractCalleeNames`. Over-collecting (emitting a peer that
-  //   is only reached through a SYNC callback, which also gets a diagnostic) is
-  //   harmless dead code; under-collecting is a crash.
+  // or raw, at any depth — including INSIDE lambda bodies and param defaults — so
+  // the load-bearing invariant holds: every call emit-expr lowers (to `await
+  // <peer>()` or a bare `<peer>()`) has a corresponding emitted `async function
+  // <peer>`. `exprNodeCollectCallees`/`forEachCallInExprNode` deliberately stop at
+  // `case "lambda"`, and a block-body callback parses as an `escape-hatch` whose
+  // call lives only in its `.raw` text — so a peer reached solely through a lambda
+  // would otherwise be invisible to emission while emit-expr still references it →
+  // silent ReferenceError. The generic object walk below descends through
+  // everything; raw escape-hatch callees are recovered with `extractCalleeNames`.
+  // Over-collecting (a peer reached only through a SYNC callback, which is also
+  // diagnosed) is harmless dead code; under-collecting is a crash.
   //
-  // DIAGNOSTIC (E-SERVER-FN-IN-SYNC-CALLBACK): a peer call in a SYNCHRONOUS
-  //   callback cannot be lowered (`await` is illegal in a non-async lambda; an
-  //   async lambda would yield Promises from `.map`/`.forEach`). Fire for a
-  //   non-async structured lambda (body-expr OR a param default) and for a
-  //   non-async block-body callback (an `escape-hatch` arrow whose source does
-  //   not start with `async`). Async lambdas are legitimate — `await peer()` is
-  //   valid there and the peer is emitted — so they get no diagnostic.
+  // DIAGNOSTIC (E-SERVER-FN-IN-SYNC-CALLBACK): a peer call in a synchronous
+  // callback returns an unawaited Promise. For STRUCTURED lambdas the position is
+  // decided by emit-expr's `peerAwaitable` lowering, which records each bare call
+  // into `_syncPeerCalls` (diagnosed after body emission — single source of
+  // truth, no second classifier). The ONE shape emit-expr can't see is a
+  // block-body callback (emitted as raw escape-hatch text); the walk diagnoses
+  // those here.
+  // Shared E-SERVER-FN-IN-SYNC-CALLBACK emitter — used by the escape-hatch walk
+  // below AND by the post-emission `_syncPeerCalls` drain (structured lambdas).
+  const _diagSyncCb = (peerName: string, span: any): void => {
+    const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+    errors.push(new CGError(
+      "E-SERVER-FN-IN-SYNC-CALLBACK",
+      `E-SERVER-FN-IN-SYNC-CALLBACK: server function \`${peerName}\` is called inside a ` +
+      `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
+      `not valid in a non-async callback (and making the callback async would make ` +
+      `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
+      `so the call runs in the server function's async body, e.g. ` +
+      `\`for (const x of xs) { ... ${peerName}(x) ... }\`.`,
+      { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
+      "error",
+    ));
+  };
   const _calledPeerNames = new Set<string>();
   {
-    const _diagSyncCb = (peerName: string, span: any): void => {
-      const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
-      errors.push(new CGError(
-        "E-SERVER-FN-IN-SYNC-CALLBACK",
-        `E-SERVER-FN-IN-SYNC-CALLBACK: server function \`${peerName}\` is called inside a ` +
-        `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
-        `not valid in a non-async callback (and making the callback async would make ` +
-        `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
-        `so the call runs in the server function's async body, e.g. ` +
-        `\`for (const x of xs) { ... ${peerName}(x) ... }\`.`,
-        { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
-        "error",
-      ));
-    };
     const _seen = new WeakSet<object>();
     const _walk = (n: any): void => {
       if (!n || typeof n !== "object" || _seen.has(n)) return;
@@ -1387,25 +1388,17 @@ export function generateServerJs(
         }
       }
 
-      // DIAGNOSTIC — structured non-async lambda: peer call in body-expr or a
-      // param default (minus the lambda's own params, which shadow a peer name).
-      if (n.kind === "lambda" && !n.isAsync) {
-        const _shadow = new Set<string>(
-          (Array.isArray(n.params) ? n.params : []).map((p: any) => p?.name).filter(Boolean),
-        );
-        const _hits: string[] = [];
-        if (n.body && n.body.kind === "expr" && n.body.value) _hits.push(...exprNodeCollectCallees(n.body.value));
-        for (const p of (Array.isArray(n.params) ? n.params : [])) {
-          if (p && p.defaultValue) _hits.push(...exprNodeCollectCallees(p.defaultValue));
-        }
-        const _hit = _hits.find((c) => _serverFnPeerNames.has(c) && !_shadow.has(c));
-        if (_hit) _diagSyncCb(_hit, n.span);
-      }
-      // DIAGNOSTIC — non-async block-body callback (escape-hatch arrow). A *sync*
-      // block-body lambda's bare peer call still can't run correctly (unawaited
-      // Promise), so it must be diagnosed; an `async`-prefixed one is fine.
+      // DIAGNOSTIC — non-async block-body callback. Structured lambdas are
+      // diagnosed from `_syncPeerCalls` (recorded by emit-expr's position-accurate
+      // lowering — see below), but a BLOCK-body callback parses as an
+      // `escape-hatch` whose body is raw text emitted VERBATIM (emit-expr never
+      // sees the inner call), so its sync-callback peer calls are diagnosed here.
+      // Covers BOTH arrow (`x => { … }`) and `function(){ … }` callbacks; an
+      // `async`-prefixed one is legitimate (the bare call resolves to a Promise
+      // the async body awaits) and is left alone.
       if (n.kind === "escape-hatch" && typeof n.raw === "string"
-          && /=>/.test(n.raw) && !/^\s*async\b/.test(n.raw)) {
+          && (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression")
+          && !/^\s*async\b/.test(n.raw)) {
         const _hit = extractCalleeNames(n.raw).find((c) => _serverFnPeerNames.has(c));
         if (_hit) _diagSyncCb(_hit, n.span);
       }
@@ -1486,6 +1479,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        syncPeerCalls: _syncPeerCalls,
       };
 
       for (const stmt of body) {
@@ -1826,6 +1820,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        syncPeerCalls: _syncPeerCalls,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -1845,7 +1840,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -1854,7 +1849,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -1989,6 +1984,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        syncPeerCalls: _syncPeerCalls,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -2038,7 +2034,7 @@ export function generateServerJs(
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -2047,7 +2043,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -2152,21 +2148,51 @@ export function generateServerJs(
   // Collision guard (Defect A / E-CG-016): a peer is emitted as an UNMANGLED
   // `async function <name>`, so a server fn named like a compiler-synthesized
   // top-level binding — `routes` / `fetch` (the WinterCG aggregate + handler), a
-  // page-local enum, or anything already declared in the assembled body (e.g. the
-  // `import { SQL } from "bun"` handle) — would emit the same identifier twice and
-  // fail the emit-validation gate with a cryptic "compiler defect" SyntaxError.
-  // Detect the clash up front and fail closed with the adopter-actionable E-CG-016
-  // (the same code the enum path uses), skipping the peer so the bundle stays
-  // single-declared. (`topLevelBindingExists` was also taught to see `async
-  // function`, so the enum-injection guard below catches the reverse direction.)
-  const _reservedServerBindings = new Set<string>(["routes", "fetch"]);
-  for (const _decl of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
-    if (_decl && _decl.kind === "type-decl" && _decl.typeKind === "enum" && typeof _decl.name === "string") {
-      _reservedServerBindings.add(_decl.name);
-    }
-  }
-  const _emittedBeforePeers = lines.join("\n");
+  // page-local enum, a module value-export (`export const`/`export function`,
+  // emitted AFTER this loop), or anything already declared in the assembled body
+  // (e.g. the `import { SQL } from "bun"` handle) — would emit the same identifier
+  // twice and either fail the emit-validation gate with a cryptic "compiler
+  // defect" SyntaxError or get silently dropped by the value-export already-
+  // declared guard. Detect the clash up front and fail closed with the adopter-
+  // actionable E-CG-016, skipping the peer so the bundle stays single-declared.
+  // (`topLevelBindingExists` was also taught to see `async function`, so the
+  // enum-injection guard below catches the reverse direction.)
   if (_calledPeerNames.size > 0) {
+    const _reservedServerBindings = new Set<string>(["routes", "fetch"]);
+    for (const _decl of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
+      if (_decl && _decl.kind === "type-decl" && _decl.typeKind === "enum" && typeof _decl.name === "string") {
+        _reservedServerBindings.add(_decl.name);
+      }
+    }
+    // Module value-export names that collide with a peer (Cand5). Only a
+    // plain-value `export const X = <value>` is emitted as a top-level binding by
+    // `emitModuleValueExportLines` (AFTER this loop, so `_emittedBeforePeers`
+    // can't see it) AND can clash with a peer. Exported FUNCTIONS never collide:
+    // a pure exported fn is not a server fn (not a peer), and an exported SERVER
+    // fn (body does `?{}`) is skipped by the value-export path — reserving those
+    // would false-positive (e.g. trucking-dispatch's `driverNextStates`). Markup
+    // (`<…>` = component) and `?{}` (server-only) const inits are likewise not
+    // emitted as runtime values, so we mirror those skips.
+    const _collectExportNames = (nodeList: any[]): void => {
+      for (const node of (Array.isArray(nodeList) ? nodeList : [])) {
+        if (!node || typeof node !== "object") continue;
+        if (node.kind === "logic" && Array.isArray(node.body)) {
+          for (const stmt of node.body) {
+            if (stmt && stmt.kind === "export-decl" && stmt.exportKind === "const"
+                && typeof stmt.exportedName === "string") {
+              const _m = String(stmt.raw ?? "").match(/=\s*([\s\S]+)$/);
+              const _init = _m ? _m[1].trim() : "";
+              if (_init && !_init.startsWith("<") && !_init.includes("?{")) {
+                _reservedServerBindings.add(stmt.exportedName);
+              }
+            }
+          }
+        }
+        if (Array.isArray(node.children)) _collectExportNames(node.children);
+      }
+    };
+    _collectExportNames(getNodes(fileAST));
+    const _emittedBeforePeers = lines.join("\n");
     for (const _peerName of _calledPeerNames) {
       const _peerInfo = _peerCallableInfo.get(_peerName);
       if (!_peerInfo) continue;
@@ -2190,6 +2216,7 @@ export function generateServerJs(
         declaredNames: new Set<string>(_peerInfo.paramNames),
         insideFunctionBody: true,
         serverFnNames: _serverFnPeerNames,
+        syncPeerCalls: _syncPeerCalls,
       };
       const _peerBodyLines: string[] = [];
       for (const stmt of (_peerInfo.fnNode.body ?? [])) {
@@ -2218,6 +2245,25 @@ export function generateServerJs(
       for (const l of _peerBodyLines) lines.push(l);
       lines.push(`}`);
       lines.push("");
+    }
+  }
+
+  // Issue #1 — drain the bare-peer-call record. emit-expr recorded every sibling
+  // server-fn call it lowered to a BARE `<peer>()` because the position was not
+  // awaitable (a synchronous callback body or a parameter default). Each is a
+  // bug — a server fn returns a Promise — so raise E-SERVER-FN-IN-SYNC-CALLBACK.
+  // This runs AFTER both the handler loop and the peer-body loop, so it captures
+  // sync-callback peer calls anywhere a server-fn body was emitted. (Block-body
+  // callbacks are raw escape-hatch text emit-expr never sees; those were already
+  // diagnosed by the AST walk above.)
+  {
+    const _seenSync = new Set<string>();
+    for (const _spc of _syncPeerCalls) {
+      const _sp = (_spc.span ?? {}) as { start?: number };
+      const _key = `${_spc.name}@${_sp.start ?? -1}`;
+      if (_seenSync.has(_key)) continue;
+      _seenSync.add(_key);
+      _diagSyncCb(_spc.name, _spc.span);
     }
   }
 
@@ -2365,6 +2411,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        syncPeerCalls: _syncPeerCalls,
       };
       const wsBody: any[] = fnNode.body ?? [];
       const _wsBodyLines: string[] = [];

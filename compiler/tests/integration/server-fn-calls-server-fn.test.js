@@ -361,3 +361,72 @@ ${body}
     expect(js).toMatch(/async function helper\(/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round-3 self-review — the lambda/callback matrix, closed uniformly by the
+// position-accurate `peerAwaitable` lowering + bare-call recording.
+// ---------------------------------------------------------------------------
+
+describe("Issue #1 — round-3 hardening (callback matrix)", () => {
+  const ITEMS = { "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, ord INTEGER, name TEXT)"] };
+  const L = "server function lookup(x) { const r = ?{`SELECT name FROM items WHERE id = ${x}`}.get(); return r.name }";
+  const wrap = (decls, body) => `
+${decls}
+<db src="./items.db" tables="items">
+  \${
+${body}
+  }
+  <button onclick=caller([1])>Go</button>
+</>
+`;
+  const prog = (decls, body) => `<program>${wrap(decls, body)}</program>`;
+  const codesOf = (errors) => errors.map((e) => e.code);
+
+  // Bug1: a peer call in an ASYNC lambda's param default — `await` is illegal in
+  // a parameter default even in an async fn → must diagnose, not emit invalid JS.
+  test("async lambda param-default peer call → diagnostic, not invalid JS", () => {
+    const { errors } = compileToFiles(
+      prog("", `    ${L}\n    server function caller(ids) { const run = async (x, y = lookup(0)) => x; return run(1) }`),
+      "async-param-default", ITEMS);
+    expect(codesOf(errors)).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Cand4: a sync ES5 `function(x){...}` callback (not an arrow) must diagnose.
+  test("sync function() callback peer call → diagnostic (not a silent bare call)", () => {
+    const { errors } = compileToFiles(
+      prog("", `    ${L}\n    server function caller(ids) { ?{\`INSERT INTO items (ord,name) VALUES (0,'x')\`}.run(); return ids.map(function(x){ return lookup(x) }) }`),
+      "sync-function-callback", ITEMS);
+    expect(codesOf(errors)).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Bug2: a lambda param that shadows a peer name is a LOCAL — a call to it is a
+  // bare call to the param, not lowered to `await` → must compile clean.
+  test("lambda param shadowing a peer name compiles clean (bare call to the param)", () => {
+    const { errors } = compileToFiles(
+      prog("", `    ${L}\n    server function caller(ids) { ?{\`INSERT INTO items (ord,name) VALUES (0,'x')\`}.run(); return ids.map((lookup) => lookup(1)) }`),
+      "param-shadow", ITEMS);
+    expect(codesOf(errors).filter((c) => !c?.startsWith("W-"))).toEqual([]);
+  });
+
+  // Cand5: a peer colliding with a module value-export (`export const X`) must
+  // raise E-CG-016 (the export is otherwise silently dropped).
+  test("peer colliding with an exported value binding → E-CG-016", () => {
+    const { errors } = compileToFiles(
+      prog("", `    export const lookup = 5\n    ${L}\n    server function caller(ids) { ?{\`INSERT INTO items (ord,name) VALUES (0,'x')\`}.run(); return lookup(ids[0]) }`),
+      "export-collision", ITEMS);
+    expect(codesOf(errors)).toContain("E-CG-016");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Legit: an async block-body lambda calling a peer compiles clean with the
+  // peer emitted (the bare call is a Promise the async body flattens).
+  test("async block-body lambda calling a peer compiles clean with peer emitted", () => {
+    const { errors, serverJsPath } = compileToFiles(
+      prog("", `    ${L}\n    server function caller(ids) { const run = async () => { return lookup(ids[0]) }; return run() }`),
+      "async-block-legit", ITEMS);
+    expect(codesOf(errors).filter((c) => !c?.startsWith("W-"))).toEqual([]);
+    expect(readFileSync(serverJsPath, "utf-8")).toMatch(/async function lookup\(/);
+  });
+});

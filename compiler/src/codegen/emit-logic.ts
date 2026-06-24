@@ -163,6 +163,14 @@ export interface EmitLogicOpts {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * Issue #1 (parent scrmlTS): accumulator for sibling server-fn calls emitted
+   * BARE in a non-awaitable position (sync callback body / parameter default).
+   * Forwarded to `EmitExprContext.syncPeerCalls` so emit-server can raise
+   * `E-SERVER-FN-IN-SYNC-CALLBACK` from the lowering decision (single source of
+   * truth). NULL → not collecting (e.g. client emission).
+   */
+  syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
+  /**
    * §59.8 (S169): the STRICT subset of `mapVarNames` whose `state-decl` type
    * annotation is an `@ordered` map (`[KeyT: ValT]@ordered`). Used by
    * `emit-expr.ts:emitAssign` to lower a reassignment `@m = [...]` to an
@@ -747,6 +755,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // Issue #1 (parent scrmlTS) — sibling server-fn names so emit-expr lowers an
     // in-process server-fn → server-fn call to `await <name>(...)`.
     serverFnNames: opts.serverFnNames ?? null,
+    // Issue #1 — forward the bare-peer-call accumulator so emit-expr can record
+    // sync-callback sites for the E-SERVER-FN-IN-SYNC-CALLBACK diagnostic.
+    syncPeerCalls: opts.syncPeerCalls ?? null,
     // §59.8 (S169) — ordered-map cell names so emit-expr:emitAssign lowers a
     // reassignment `@m = [...]` to an ordered cell with the ordered flag set.
     orderedMapVarNames: opts.orderedMapVarNames ?? null,

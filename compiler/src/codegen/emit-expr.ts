@@ -45,7 +45,6 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { resolveLogLoc } from "./log-loc.ts";
-import { exprNodeCollectCallees } from "../expression-parser.ts";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -309,6 +308,25 @@ export interface EmitExprContext {
    * fires for `mode === "client"`.
    */
   serverFnNames?: Set<string> | null;
+  /**
+   * Issue #1 (parent scrmlTS) — is the CURRENT position one where `await <peer>()`
+   * is syntactically valid? `true`/undefined at the top of a server-fn handler
+   * body or an async lambda body; `false` inside a synchronous callback body or
+   * ANY parameter default (`await` is illegal in a default even in an async fn).
+   * `emitLambda` sets it for the body/param contexts it builds; `emitCall` emits
+   * `await <peer>()` when awaitable and a bare `<peer>()` (recorded for diagnosis)
+   * when not.
+   */
+  peerAwaitable?: boolean;
+  /**
+   * Issue #1 — accumulator for sibling server-fn ("peer") calls emitted BARE
+   * because the position was not awaitable (`peerAwaitable === false`). A bare
+   * peer call returns an unawaited Promise, so emit-server reads this list AFTER
+   * body emission and raises `E-SERVER-FN-IN-SYNC-CALLBACK` for each — making the
+   * lowering decision (here) the single source of truth for the diagnostic.
+   * Threaded from `EmitLogicOpts.syncPeerCalls` via `_makeExprCtx`.
+   */
+  syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1769,6 +1787,18 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     ctx.serverFnNames.has(node.callee.name) &&
     !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
   ) {
+    // The peer is async, so it must be `await`ed — but ONLY where `await` is
+    // valid. `ctx.peerAwaitable === false` marks a non-awaitable position (a
+    // synchronous callback body, or ANY parameter default — `await` is illegal
+    // in a default even in an async function). There we emit a bare call and
+    // RECORD the site: a bare server-fn call returns an unawaited Promise, which
+    // is a bug, so emit-server raises E-SERVER-FN-IN-SYNC-CALLBACK from this
+    // record. This single `peerAwaitable` decision is the source of truth for
+    // BOTH the lowering and the diagnostic (no second classifier to drift).
+    if (ctx.peerAwaitable === false) {
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      return `${callee}(${args})`;
+    }
     return `await ${callee}(${args})`;
   }
 
@@ -1917,40 +1947,27 @@ export function arrowBodyStringNeedsParens(body: string): boolean {
 function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
   const asyncPrefix = node.isAsync ? "async " : "";
 
-  // Issue #1 (parent scrmlTS) — a sibling server-fn call inside a SYNCHRONOUS
-  // callback (`xs.map(x => peer(x))`, `.filter`, `.forEach`, a sort comparator,
-  // OR a parameter DEFAULT like `(x, y = peer()) => …`) cannot be lowered:
-  // `await` is illegal in a non-async lambda, and silently making the lambda
-  // `async` would hand `.map`/`.forEach` an array of Promises instead of values.
-  // So we DON'T lower the call here — clearing `serverFnNames` for BOTH the
-  // param defaults and the body emits a bare `peer(...)` (parseable JS) instead
-  // of an `await` the compiler's own validator would reject. emit-server.ts
-  // detects the same shape (body + param defaults) against the AST and raises the
-  // actionable `E-SERVER-FN-IN-SYNC-CALLBACK` there (it owns the clean
-  // diagnostics accumulator; wiring one through expression emission would
-  // surface unrelated previously-swallowed errors — e.g. latent `E-CG-003`).
-  let bodyCtx = ctx;
-  if (!node.isAsync && ctx.mode === "server" && ctx.serverFnNames != null) {
-    const _collect = exprNodeCollectCallees as (n: unknown) => string[];
-    const _shadow = new Set<string>(
-      node.params.map((p) => (p as { name?: string }).name).filter(Boolean) as string[],
-    );
-    const _hits: string[] = [];
-    if (node.body.kind === "expr") _hits.push(..._collect(node.body.value));
-    for (const p of node.params) {
-      const _dv = (p as { defaultValue?: unknown }).defaultValue;
-      if (_dv) _hits.push(..._collect(_dv));
-    }
-    const hit = _hits.find(
-      (c) => ctx.serverFnNames!.has(c) && !_shadow.has(c)
-        && !(ctx.declaredNames != null && ctx.declaredNames.has(c)),
-    );
-    if (hit) bodyCtx = { ...ctx, serverFnNames: null };
+  // Issue #1 (parent scrmlTS) — position-accurate lowering of sibling server-fn
+  // ("peer") calls inside a lambda. A peer is async, so `await <peer>()` is only
+  // valid in an awaitable position; elsewhere `emitCall` emits a bare call and
+  // records it for the E-SERVER-FN-IN-SYNC-CALLBACK diagnostic. Two things are
+  // set on the child contexts:
+  //   - `declaredNames` gains this lambda's own param names, so a param that
+  //     shadows a peer name is treated as a local (a bare call to the PARAM),
+  //     not lowered to `await`.
+  //   - `peerAwaitable`: the BODY of an async lambda is awaitable (it's its own
+  //     async function); a SYNC lambda body is not. A PARAMETER DEFAULT is never
+  //     awaitable — `await` is illegal in a default even in an async function —
+  //     so param defaults always emit a bare call.
+  const _childDeclared = new Set<string>(ctx.declaredNames ?? []);
+  for (const p of node.params) {
+    const nm = (p as { name?: string }).name;
+    if (typeof nm === "string" && nm) _childDeclared.add(nm);
   }
+  const paramCtx: EmitExprContext = { ...ctx, declaredNames: _childDeclared, peerAwaitable: false };
+  const bodyCtx: EmitExprContext = { ...ctx, declaredNames: _childDeclared, peerAwaitable: node.isAsync };
 
-  // Param defaults are emitted with `bodyCtx` too, so a peer call in a default
-  // of a sync lambda lowers to a bare call rather than an illegal `await`.
-  const params = node.params.map(p => emitLambdaParam(p, bodyCtx)).join(", ");
+  const params = node.params.map(p => emitLambdaParam(p, paramCtx)).join(", ");
 
   if (node.fnStyle === "function") {
     // function(x) { ... }
