@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 13 |
-| LOW | 13 |
+| MED | 15 |
+| LOW | 15 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
@@ -2448,3 +2448,15 @@ Surfaced by the escalation-2 SSE-author-route build (agent a08dc0f5). A `server 
 
 ### g-each-item-hidden-text-stale-flogence — flogence-reported: loop-var `${p.*}` text in an initially-HIDDEN `<each>`-item subtree renders STALE / never reconciles on `@arr` replace — `NOT-REPRODUCED S217; MED; needs flogence LIVE repro`
 flogence S11 report (cockpit fleet drawer: `p.deltas`=11 in the cell but `0` in the hidden-then-revealed drawer DOM). The each-cluster agent (a296c101) could NOT reproduce across 5 faithful shapes × 2 set-paths (deep-reactive AND the raw server-load `_scrml_reactive_set(name, rawArray)` flogence emits) × all sequences; even flogence's pre-workaround `app.scrml` shape is byte-identical to a working minimal. The S158 Bug64/R28-1c fix (`af3175e2`, ~3 wks before the report) appears to have already closed this class; `_scrml_reconcile_list` re-fires per-item effects on reconcile. Per R26 discipline: NO fabricated fix — shipped a 6-test GUARD CANARY (`g-each-item-hidden-subtree-text-reconcile.browser.test.js`) locking the current-correct behavior; a future regression of this exact shape goes red. **Owed: flogence LIVE repro** (the trigger may be a flogence-specific runtime condition — SSE/channel-driven `@fleet` set, or a stale dist flogence ran). <!-- @gap id=g-each-item-hidden-text-stale-flogence sev=MED status=not-reproduced -->
+
+### g-each-peritem-markup-value-ternary — `${ @. ? <markup> : "" }` (markup-as-value ternary) in an `<each>` per-item body renders nothing — `NEW S218 (GITI-032 follow-on); MED; OPEN`
+The GITI-032 fix routed markup-as-value nested in a ternary through the live `markup-value` node for `<match>`/`<engine>` arm bodies, but the `<each>` per-item path was DEFERRED with a non-regressing skip marker (clean-compile, non-render — same outcome as pre-fix, NOT a loud regression). Needs the `@.` iter-var scope threaded into the markup→DOM build (emit-each `emitCreateElementFromMarkup`/`emitMarkupValueExpr`) so nested refs bind to the iteration item. Dedicated dispatch. <!-- @gap id=g-each-peritem-markup-value-ternary sev=MED status=open -->
+
+### g-nested-interp-in-markup-value-literal — a nested `${@cell}` INSIDE a markup-value consequent (`? <p>${@count}</p> :`) renders LITERAL on both the top-level S201 path AND the arm path — `NEW S218 (GITI-032 pre-existing parity); LOW; OPEN`
+Pre-existing (NOT introduced by GITI-032): a `${@cell}` interpolation inside a markup-value ternary branch renders as literal text rather than wiring reactively, on BOTH the top-level S201 markup-value-in-expression path AND the new arm-body path — exact parity. §4.18.4-adjacent. Flag if giti files a follow-up (their status.scrml `<section>` bodies may carry interpolation). <!-- @gap id=g-nested-interp-in-markup-value-literal sev=LOW status=open -->
+
+### g-nested-each-outer-key-reuse-inner-frozen — a nested `<each>` does NOT re-render when its OUTER item node is REUSED on an outer keyed reconcile (same outer key); the inner mount stays frozen at create-time — `NEW S218 (6nz Bug-AI adversarial); MED; OPEN`
+Distinct from the S212-RESOLVED `g-nested-each-no-own-subscription` (inner had NO subscription on post-mount cell update): here the inner each HAS its S212 per-item `_scrml_effect`, but when an outer row's node is REUSED on a keyed reconcile (same outer key) and the outer item's iterated field changes (array-replace / field-mutation / push), the inner mount is not re-created/re-bound → stays frozen at its create-time value. Bug-72 / S212 Approach-C residual. Surfaced (verified independent) by the 6nz Bug-AI fix's nested-each adversarial test, which exercised FRESH inner mounts on NEW outer keys (where the bulk-create clear governs). <!-- @gap id=g-nested-each-outer-key-reuse-inner-frozen sev=MED status=open -->
+
+### g-foreign-inline-crossing-shadow — an inline `_{}` `in:{x}` crossing name that shadows a slice-local `const x` emits self-contradictory JS caught as a misleading "compiler defect" E-CODEGEN-INVALID-JS — `NEW S218 (_{} build deferral); LOW; OPEN`
+The inline `_{}` codegen emits `(async (x) => { const x = ... })(...)` when an `in:{}` crossing name shadows a slice-local `const` of the same name → invalid JS → validate-emit fires E-CODEGEN-INVALID-JS with the "compiler defect, please report it" message, but it is AUTHOR error (a self-contradictory slice). Recommend a future pre-emit syntactic scan → a clear `W-FOREIGN-CROSSING-SHADOW` / `E-FOREIGN-006`. Surfaced by the dpa-003 build's S215 adversarial pass. <!-- @gap id=g-foreign-inline-crossing-shadow sev=LOW status=open -->
