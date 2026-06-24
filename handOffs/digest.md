@@ -1,9 +1,9 @@
-<!-- @digest head=8a78442b delta-seq=64 -->
+<!-- @digest head=162564f3 delta-seq=64 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `8a78442b`** + delta-log **[64]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `8a78442b`
+> **HEAD `162564f3`** + delta-log **[64]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `162564f3`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `8a78442b`
+## Board — from `@gap` tokens @ `162564f3`
 - **HIGH 0** · MED 15 · LOW 15 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -29,9 +29,9 @@
 - `[64]` state · **S218 WRAP.** Full suite **25050/0/213**. **6 commits this session** (d34e473a boot-gate+bookkeeping · e493bace GITI-032 · e64c4095 6nz · 85e0d687 `_{}` · 82f7… → S218 close
 
 ## State
-- Version: 0.7.0 · maps: 16 commits behind HEAD (watermark 489951aa, HEAD 8a78442b)
+- Version: 0.7.0 · maps: current
 - Recent wraps:
-  - 7adae6fb chore(s218): wrap — close + bookkeeping
+  - 162564f3 chore(s218): wrap-finalize — digest regen at settled HEAD (post deputy-maint merge, delta-seq 64)
   - 489951aa chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried
   - 6c5c0d58 chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read)
 

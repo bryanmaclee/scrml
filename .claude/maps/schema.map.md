@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-09T23:35:55Z  commit: c48c4f71
+# updated: 2026-06-24  commit: 162564f3
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (~2054L, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
@@ -55,6 +55,12 @@ kind: "state-def"; name: string; attrs: TypedAttrDecl[]; body: ASTNode[]
 
 ### LogicNode extends BaseNode
 kind: "logic"; body: LogicStatement[]; exports: ExportDeclNode[]; ... +3 more fields
+
+### ForeignBlock  [compiler/src/ast-builder.js:15896 — NEW S218 dpa-003]
+kind: "foreign"; level: number; lang: string|null; raw: string; body: string; crossings: string[]; span: Span
+**dpa-003 (S218) note:** The FIRST producer is `buildBlock case "foreign"` in ast-builder.js (~:15896). Emitted when Block Splitter recognizes a `_=*{ … }=*` opaque context (SPEC §23.2.2). Fields: `level` = count of `=` markers in the opener (`_{}`=0, `_={}`=1, …); `lang` = null at parse time, resolved downstream from the enclosing `<program lang=>` attribute by `checkForeignBlocks` (type-system.ts ~:18614); `raw` = verbatim interior (incl. optional header); `body` = verbatim foreign code (header stripped — what codegen splices); `crossings` = the `in:{ name, name }` named values that cross IN (NO free lexical capture). **NOT in FileAST types/ast.ts** — a live-pipeline-only node shape produced by ast-builder.js and consumed by emit-logic.ts (`case "foreign"` ~:2749) + route-inference.ts (server escalation) + type-system.ts (`checkForeignBlocks`). **Stamp pattern:** `foreignNode` is ATTACHED onto the enclosing decl/return node rather than appearing standalone: `let-decl.foreignNode`, `const-decl.foreignNode`, `return-stmt.foreignNode` (ast-builder.js ~:6947/:7054/:7705); emit-logic.ts routes through `case "foreign"` when `node.foreignNode?.kind === "foreign"`. A bare standalone `kind:"foreign"` statement (not bound, not returned) triggers E-FOREIGN-004 (type-system.ts). BLOCKREF_TYPES += `"foreign"` in tokenizer.ts (~:1166) so the block-ref placeholder is emitted for the logic token stream.
+
+---
 
 ### SQLNode extends BaseNode
 kind: "sql"; query: string; params: ExprNode[]; chain: SQLChainedCall[]; ... +5 more fields
@@ -304,7 +310,7 @@ Whitespace-tolerant parser for `"EnumName oneOf([.A,.B])"` / `"notIn([.C])"` ann
 ---
 
 ## Tags
-#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #each-reconcile-ctx #each-engine-ctx #s154 #s155 #s156 #s157 #s158 #s159 #s169 #s170 #value-native-maps #map-type #map-lit #bug64 #bug71 #bug73 #r28-1c #s172 #s173 #s174 #log-loc #logloc-span #no-any-hard-line #no-anytype #export-decl #s175 #function-type #fn-return-sentinel #e-struct-function-field #typed-sql-row #sql-projection #projected-column #select-projection #f-schema-001 #column-def #width-subtyping #s177 #arm-body-children #match-arm-body-form #g-formfor #walkable-arm-body
+#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #each-reconcile-ctx #each-engine-ctx #s154 #s155 #s156 #s157 #s158 #s159 #s169 #s170 #value-native-maps #map-type #map-lit #bug64 #bug71 #bug73 #r28-1c #s172 #s173 #s174 #log-loc #logloc-span #no-any-hard-line #no-anytype #export-decl #s175 #function-type #fn-return-sentinel #e-struct-function-field #typed-sql-row #sql-projection #projected-column #select-projection #f-schema-001 #column-def #width-subtyping #s177 #arm-body-children #match-arm-body-form #g-formfor #walkable-arm-body #s218 #dpa-003 #foreignblock #foreign-node #foreign-code #inline-foreign #blockref-types-foreign #_-opaque-brace #e-foreign-003 #e-foreign-004 #e-foreign-005 #check-foreign-blocks #foreign-server-escalation
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -87,6 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `162564f3` — chore(s218): wrap-finalize — digest regen at settled HEAD (post deputy-maint merge, delta-seq 64) — **pushed**
 - `489951aa` — chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried — **pushed**
 - `6c5c0d58` — chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read) — **pushed**
 - `a2137214` — chore(s215): wrap-finalize — recent-sessions + digest regen at settled HEAD 27900a6c — **pushed**
@@ -94,7 +95,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `d4d489bf` — chore(s213): wrap bookkeeping — hand-off close + delta-log + gaps + §0/digest + BRIEFs — **pushed**
 - `ca712295` — chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498 — **pushed**
 - `0a605d3e` — chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb — **pushed**
-- `28de9c81` — wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
