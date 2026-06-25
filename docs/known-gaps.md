@@ -2059,7 +2059,7 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 ### Nominal-4 — `_{}` foreign code — `nominal`
 <!-- @gap id=nominal-4 sev=NOMINAL status=nominal -->
 
-§23 — embed non-JS code inline with level-marked braces (`_{}`/`_={...}=`). Enables inline Rust, Python, SQL extensions. Specced, not yet implemented.
+§23 — embed non-JS code inline with level-marked braces (`_{}`/`_={...}=`). **PARTIAL (S218 `85e0d687`, dpa-003):** the inline value-returning form `const x = _={ in:{…} … }=` (ts/js, **in-app**, server-fn body) is BUILT end-to-end — BS-gate logic-context recognition + `ForeignBlock` AST + emit-logic async-IIFE + OUT-typing (`<api>`-hybrid) + SPEC §23.2.4/§23.2.4a. **Remaining (still nominal):** standalone / library-mode-db `?{}` (OQ-F1) · arbitrary-lang inline marshaling (dpa-009) · build-story×`_{}` (dpa-006) · capability-gating (dpa-008). The §-block opaque-passthrough form + non-ts/js inline (Rust/Python/etc.) untouched. The §23.4 sidecar form = Nominal-6.
 
 ### Nominal-5 — WASM call-char sigils — `nominal`
 <!-- @gap id=nominal-5 sev=NOMINAL status=nominal -->
