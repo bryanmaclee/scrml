@@ -1059,9 +1059,13 @@ function binaryOpEmitsFlat(op: BinaryExpr["op"]): boolean {
  * parent flat operator (`parentOp`) and whether the child is the RIGHT operand.
  *
  * Rules:
- *   - Only binary children whose own operator emits flat can mis-associate; all
- *     other children (literals, idents, calls, self-bracketed equality/is forms,
- *     etc.) already emit as self-contained primaries.
+ *   - Non-binary LOOSE forms (a conditional `?:`, an assignment, an arrow/lambda)
+ *     bind looser than EVERY binary operator and are emitted flat (never
+ *     self-bracketed), so as a binary operand they always need wrapping — the
+ *     g-paren-ternary-operand-paren-dropped class (see the kind switch below).
+ *   - Otherwise only binary children whose own operator emits flat can
+ *     mis-associate; all other children (literals, idents, calls, self-bracketed
+ *     equality/is forms, etc.) already emit as self-contained primaries.
  *   - Wrap when the child binds strictly looser than the parent: prec(child) < prec(parent).
  *   - At equal precedence, left-associative parents keep their natural grouping
  *     on the LEFT but must re-paren a same-precedence RIGHT child (e.g.
@@ -1076,6 +1080,25 @@ function binaryOperandNeedsParens(
   parentOp: BinaryExpr["op"],
   isRightChild: boolean,
 ): boolean {
+  // g-paren-ternary-operand-paren-dropped (S220) — a conditional (`?:`),
+  // assignment, or arrow/lambda child binds LOOSER than every binary operator
+  // and is emitted as a flat (never self-bracketed) form, so as a binary operand
+  // it MUST be re-wrapped. Without the wrap, `(@a > 0 ? "x" : "") + @b`
+  // re-serialized as `@a > 0 ? "x" : "" + @b` — the `+ @b` was silently
+  // swallowed into the ternary's else-branch (a SILENT precedence miscompile:
+  // green compile, `node --check` clean, wrong runtime value). The
+  // binary-OPERAND-position sibling of receiverNeedsParens (S210) and
+  // emitStringFromTree's exprPrec wrap (S205); both already treat these three
+  // kinds as loose. (`unary` is NOT here: a prefix unary binds TIGHTER than the
+  // flat binary ops, so `@a + -@b` needs no wrap; the lone `-x ** 2` edge is a
+  // separate, LOUD E-CODEGEN-INVALID-JS, not a silent drop.)
+  switch (child.kind) {
+    case "ternary":
+    case "assign":
+    case "lambda":
+      return true;
+  }
+
   if (child.kind !== "binary") return false;
   const childOp = (child as BinaryExpr).op;
 
