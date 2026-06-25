@@ -1,9 +1,9 @@
-<!-- @digest head=2111f9a5 delta-seq=68 -->
+<!-- @digest head=9713d703 delta-seq=68 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `2111f9a5`** + delta-log **[68]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `2111f9a5`
+> **HEAD `9713d703`** + delta-log **[68]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `9713d703`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `2111f9a5`
+## Board — from `@gap` tokens @ `9713d703`
 - **HIGH 0** · MED 16 · LOW 15 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -29,7 +29,7 @@
 - `[68]` land · **6nz B2(HIGH)+B1 FIXED+LANDED `d71a6dcc`.** Agent `ab69a222` (iso:worktree) STALLED on the stream watchdog right before its full-suite gate (>600s no-output ki… → PA commit + push pending
 
 ## State
-- Version: 0.7.0 · maps: 6 commits behind HEAD (watermark 162564f3, HEAD 2111f9a5)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 162564f3, HEAD 9713d703)
 - Recent wraps:
   - 162564f3 chore(s218): wrap-finalize — digest regen at settled HEAD (post deputy-maint merge, delta-seq 64)
   - 489951aa chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried
