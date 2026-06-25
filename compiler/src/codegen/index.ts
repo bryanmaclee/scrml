@@ -92,6 +92,19 @@ export interface CgRouteEntry {
 export interface CgRouteMap {
   functions: Map<string, CgRouteEntry>;
   authMiddleware?: Map<string, CgAuthMiddleware | null>;
+  /**
+   * §61 `<endpoint>` private-arm reachability — fnNodeIds RI's server-
+   * reachability closure says to RETAIN server-side (emit-server emits each as a
+   * plain `function`; the endpoint handler runs server-side, §61.6). Empty for a
+   * non-endpoint app. Mirrors `RouteMap.endpointServerHelperIds`.
+   */
+  endpointServerHelperIds?: Set<string>;
+  /**
+   * §61 — the server-ONLY subset (not client-reachable). emit-functions SKIPS
+   * the client body for these so a private endpoint helper never leaks to
+   * `.client.js`. Mirrors `RouteMap.endpointClientSkipIds`.
+   */
+  endpointClientSkipIds?: Set<string>;
 }
 
 export interface CgAuthMiddleware {

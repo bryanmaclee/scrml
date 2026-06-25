@@ -659,6 +659,84 @@ function emitModuleValueExportLines(
 }
 
 /**
+ * §61 `<endpoint>` private-arm reachability — emit a LOCAL, non-exported pure
+ * `fn` referenced (directly or transitively) from an `<endpoint>` arm body
+ * (§61.2 — the canonical `<FleetStatus : fleetStatus()>` form) as a plain
+ * SERVER-side `function NAME(...) { <body> }`. Without this the fn tree-shakes
+ * out of the `.server.js` and the endpoint handler's `await fleetStatus()`
+ * (§61.5) references an undefined symbol at runtime.
+ *
+ * The fnNodeIds come from `RouteMap.endpointServerHelperIds` (route-inference's
+ * server-reachability closure). The matching `.client.js` SKIP is
+ * `RouteMap.endpointClientSkipIds` (emit-functions, §61.6) — a server-ONLY
+ * helper never leaks to the client bundle.
+ *
+ * Bodies are lowered with `boundary:"client"` — a SYNCHRONOUS pure body,
+ * identical to `emitModuleValueExportLines`' rationale (a `boundary:"server"`
+ * `match`-helper wraps in `await (async function(){...})()`, which makes a plain
+ * `function` non-async-but-`await`ing — a SyntaxError — and silently turns a
+ * synchronous helper into a Promise-returning one). The handler `await`s the
+ * return value, and `await` of a non-Promise is a no-op, so sync emit is correct.
+ */
+function emitEndpointServerHelperLines(
+  fnNodes: any[],
+  filePath: string,
+  helperIds: Set<string>,
+  assembledBody: string,
+): string[] {
+  if (!helperIds || helperIds.size === 0) return [];
+  // Already-declared guard (mirrors emitModuleValueExportLines) — a helper that
+  // is ALSO an exported value fn was already emitted by the value-export path.
+  const isAlreadyDeclared = (name: string): boolean => {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(
+      `^(?:export\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var)\\s+${esc}\\b`,
+      "m",
+    );
+    return re.test(assembledBody);
+  };
+  const blocks: string[] = [];
+  for (const fnNode of fnNodes) {
+    const start = (fnNode?.span as any)?.start;
+    if (typeof start !== "number") continue;
+    if (!helperIds.has(`${filePath}::${start}`)) continue;
+    const name: string = fnNode.name;
+    if (!name || !Array.isArray(fnNode.body)) continue;
+    if (isAlreadyDeclared(name)) continue;
+    const params: any[] = fnNode.params ?? [];
+    const paramSigs = params.map((p: any, i: number) => paramSignature(p, i));
+    const asyncPrefix: string = fnNode.isAsync ? "async " : "";
+    const declaredNames = new Set<string>(
+      params.map((p: any) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
+    );
+    // Client-boundary lowering → synchronous body (see fn-doc rationale).
+    const bodyCodes = emitFnShortcutBody(
+      fnNode.body,
+      { boundary: "client", declaredNames, insideFunctionBody: true },
+      fnNode.fnKind,
+      fnNode.hasReturnType,
+    );
+    const out: string[] = [];
+    out.push(`${asyncPrefix}function ${name}(${paramSigs.join(", ")}) {`);
+    for (const code of bodyCodes) {
+      for (const line of code.split("\n")) out.push(`  ${line}`);
+    }
+    out.push(`}`);
+    blocks.push(out.join("\n"));
+  }
+  if (blocks.length === 0) return [];
+  const out: string[] = [];
+  out.push("");
+  out.push("// --- §61 <endpoint> private server-side arm helpers (server-only; NOT bundled to client, §61.6) ---");
+  for (let i = 0; i < blocks.length; i++) {
+    out.push(blocks[i]);
+    if (i < blocks.length - 1) out.push("");
+  }
+  out.push("");
+  return out;
+}
+
+/**
  * g-const-only-module-no-server-emit (sPA ss1 item 2) — emit a MINIMAL,
  * value-only `.server.js` for a module that has NO server content (no server
  * fns / no `?{}` / no channels / no auth-middleware / etc.) but DOES export
@@ -2768,6 +2846,30 @@ export function generateServerJs(
     const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"));
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
+  }
+
+  // §61 <endpoint> private-arm reachability — retain endpoint-only private server
+  // helpers. A `<FleetStatus : fleetStatus()>` arm (§61.2) calls a LOCAL pure
+  // `fn` the handler runs server-side; without this it tree-shakes out and the
+  // handler ReferenceErrors. Emitted AFTER the value-export block so the
+  // helper-inline scans below also see any `_scrml_structural_eq` / `not` the
+  // helper bodies introduce; the var-counter is snapshotted/restored (additive —
+  // no other file's `_scrml_*_<N>` suffix shifts). Server-ONLY: the matching
+  // .client.js skip is RouteMap.endpointClientSkipIds (emit-functions, §61.6).
+  if (
+    _hasEndpointDecls &&
+    routeMap.endpointServerHelperIds &&
+    routeMap.endpointServerHelperIds.size > 0
+  ) {
+    const _epSnapshot = getVarCounter();
+    const _epHelperLines = emitEndpointServerHelperLines(
+      fnNodes,
+      filePath,
+      routeMap.endpointServerHelperIds,
+      lines.join("\n"),
+    );
+    setVarCounter(_epSnapshot);
+    for (const _l of _epHelperLines) lines.push(_l);
   }
 
   // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When

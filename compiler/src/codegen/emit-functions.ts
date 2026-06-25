@@ -958,6 +958,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const route = routeMap.functions.get(fnNodeId);
     if (route && route.boundary === "server") continue; // handled by server JS + fetch stub
     if (fnNode.isHandleEscapeHatch) continue; // handle() is server-only middleware — no client body
+    // §61 <endpoint> private-arm reachability (§61.6 client-codegen SKIP): a
+    // LOCAL pure `fn` referenced ONLY from an `<endpoint>` arm body is a server-
+    // ONLY private handler helper — retained server-side (emit-server) and NOT
+    // bundled into `.client.js`. (A helper ALSO used client-side is not in this
+    // set, so it still emits here.)
+    if ((routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds?.has(fnNodeId)) continue;
 
     const name = (fnNode.name as string) ?? "anon";
     const params = (fnNode.params as Param[]) ?? [];

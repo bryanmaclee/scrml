@@ -296,6 +296,26 @@ export interface RouteMap {
   functions: Map<string, FunctionRoute>;
   pages: Map<string, PageRoute>;
   authMiddleware: Map<string, AuthMiddleware>;
+  /**
+   * §61 `<endpoint>` private-arm reachability
+   * (endpoint-private-arm-reachability-2026-06-25). The fnNodeIds of LOCAL,
+   * non-exported pure `fn`s that an `<endpoint>` arm body (§61.2 — the canonical
+   * `<FleetStatus : fleetStatus()>` form) reaches directly or transitively. The
+   * endpoint handler runs server-side (§61.6), so codegen MUST RETAIN these in
+   * the `.server.js` (emit-server emits each as a plain `function`) or the
+   * handler's call references an undefined symbol. Empty when no file declares an
+   * `<endpoint>` (gated — non-endpoint apps are byte-identical).
+   */
+  endpointServerHelperIds?: Set<string>;
+  /**
+   * The subset of `endpointServerHelperIds` that is NOT also client-reachable
+   * (no markup / client-fn reference) — a server-ONLY endpoint helper.
+   * emit-functions SKIPS the client body for these so a private endpoint helper
+   * never leaks into `.client.js` (§61.6 client-codegen skip). A helper ALSO
+   * used client-side stays in `endpointServerHelperIds` (emitted server-side for
+   * the handler) but NOT here (still emitted client-side for the markup use).
+   */
+  endpointClientSkipIds?: Set<string>;
 }
 
 /** Per-function analysis record (used during transitive escalation). */
@@ -3456,6 +3476,58 @@ export function runRI(input: RIInput): RIOutput {
     for (const top of nodes) walkMarkupContext(top);
   }
 
+  // ------------------------------------------------------------------
+  // §61 <endpoint> private-arm reachability seed
+  // (endpoint-private-arm-reachability-2026-06-25).
+  //
+  // An `<endpoint>` arm body — the §61.2 canonical form `<FleetStatus :
+  // fleetStatus()>` — calls a LOCAL pure `fn`. The endpoint handler runs
+  // server-side (§61.6), so that fn is SERVER-reachable. But the W-DEAD /
+  // tree-shake analysis here only sees markup refs + fn-body callers, and an
+  // endpoint arm body is neither — so a fn referenced ONLY from an arm (a)
+  // false-fires W-DEAD-FUNCTION below and (b) is never emitted into the
+  // `.server.js` the handler calls it from → runtime ReferenceError. Collect the
+  // arm-body callee idents to (1) suppress W-DEAD for the DIRECT roots (D4
+  // below), and (2) drive the post-Step-6 server-retain / client-skip closure
+  // (the RouteMap endpoint sets).
+  //
+  // GATED on `<endpoint>` presence — `endpointDeclsByFile` stays empty when no
+  // file declares one, so every endpoint set below stays empty and the W-DEAD /
+  // placement behavior is byte-identical for a non-endpoint app.
+  // ------------------------------------------------------------------
+  const endpointArmReferencedNames = new Set<string>();
+  const endpointDeclsByFile = new Map<string, Record<string, unknown>[]>();
+  {
+    const EP_IDENT_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    const collectEndpointDeclsDeep = (node: unknown, out: Record<string, unknown>[]): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const c of node) collectEndpointDeclsDeep(c, out); return; }
+      const n = node as Record<string, unknown>;
+      if (n.kind === "endpoint-decl") out.push(n);
+      if (Array.isArray(n.children)) collectEndpointDeclsDeep(n.children, out);
+      if (Array.isArray(n.body)) collectEndpointDeclsDeep(n.body, out);
+      if (Array.isArray(n.bodyChildren)) collectEndpointDeclsDeep(n.bodyChildren, out);
+      if (Array.isArray(n.branches)) collectEndpointDeclsDeep(n.branches, out);
+    };
+    for (const fileAST of files) {
+      const nodes = fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+      const decls: Record<string, unknown>[] = [];
+      collectEndpointDeclsDeep(nodes, decls);
+      if (decls.length === 0) continue;
+      endpointDeclsByFile.set(fileAST.filePath, decls);
+      for (const ep of decls) {
+        const arms = (ep as Record<string, unknown>).arms;
+        for (const arm of (Array.isArray(arms) ? arms : [])) {
+          const bodyRaw = (arm as Record<string, unknown>)?.bodyRaw;
+          if (typeof bodyRaw !== "string") continue;
+          EP_IDENT_RE.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = EP_IDENT_RE.exec(bodyRaw)) !== null) endpointArmReferencedNames.add(m[0]);
+        }
+      }
+    }
+  }
+
   // (S93's `hasLiftInFunctionBody` lift-suppression helper was removed in S180
   // D3.1 — see the D5 fire-path comment below. `lift` is now valid in an
   // inferred-server plain `function` body, so a lift-bearing escalating
@@ -3483,11 +3555,16 @@ export function runRI(input: RIInput): RIOutput {
     const isExplicitServer = record.fnNode.isServer === true;
     const isMarkupReferenced = markupReferencedNames.has(fnName);
 
+    // §61 <endpoint> private-arm reachability: a fn referenced from an
+    // `<endpoint>` arm body (§61.2) is SERVER-reachable (the handler runs
+    // server-side, §61.6) — not dead. Suppress the W-DEAD-FUNCTION false-fire.
+    const isEndpointReferenced = endpointArmReferencedNames.has(fnName);
+
     // Functions that are also generators (SSE) are explicitly intended as
     // entry points; never dead-warn.
     const isGenerator = (record.fnNode as any).isGenerator === true;
 
-    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isGenerator) {
+    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator) {
       const warn = new RIError(
         "W-DEAD-FUNCTION",
         `W-DEAD-FUNCTION: Function \`${fnName}\` has no callers, is not exported, ` +
@@ -3963,8 +4040,101 @@ export function runRI(input: RIInput): RIOutput {
     }
   }
 
+  // ------------------------------------------------------------------
+  // §61 <endpoint> private-arm reachability — server-retain / client-skip sets
+  // (endpoint-private-arm-reachability-2026-06-25). Computed AFTER Step 6 so the
+  // per-fn `functions` boundary classification is final.
+  //
+  // For each file declaring an `<endpoint>`: the arm-body callees resolving to a
+  // LOCAL, NON-exported, client-boundary pure `fn` are SERVER-reachability
+  // ROOTS. Their transitive pure-fn closure must be RETAINED server-side
+  // (`endpointServerHelperIds`). The subset NOT also reachable from a CLIENT root
+  // (markup ref / exported fn) is server-ONLY and is SKIPPED from the client
+  // bundle (`endpointClientSkipIds`, §61.6). A helper used by BOTH an endpoint
+  // AND client markup is retained server-side AND kept client-side.
+  // ------------------------------------------------------------------
+  const endpointServerHelperIds = new Set<string>();
+  const endpointClientSkipIds = new Set<string>();
+  if (endpointDeclsByFile.size > 0) {
+    const EP_IDENT_RE2 = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    for (const [epFilePath, decls] of endpointDeclsByFile) {
+      // Local fn name → fnNodeId(s) for THIS file.
+      const localFnIdsByName = new Map<string, string[]>();
+      for (const [fnNodeId, rec] of analysisMap) {
+        if (rec.filePath !== epFilePath) continue;
+        const nm = rec.fnNode.name;
+        if (!nm) continue;
+        if (!localFnIdsByName.has(nm)) localFnIdsByName.set(nm, []);
+        localFnIdsByName.get(nm)!.push(fnNodeId);
+      }
+      // Eligible to be emitted as a private server-side helper: a local,
+      // non-exported, client-boundary, non-generator pure fn. An exported fn is
+      // emitted by the value-export path; a server/middleware fn has its own
+      // route/peer emit; a generator is an SSE entry point.
+      const isEligibleHelper = (id: string): boolean => {
+        const rec = analysisMap.get(id);
+        if (!rec || rec.filePath !== epFilePath) return false;
+        const nm = rec.fnNode.name;
+        if (!nm || exportedFnNames.has(nm)) return false;
+        if ((rec.fnNode as Record<string, unknown>).isGenerator === true) return false;
+        const route = functions.get(id);
+        if (route && route.boundary !== "client") return false;
+        return true;
+      };
+      // BFS over local-fn callees from a seed set.
+      const closeOver = (seedIds: Iterable<string>): Set<string> => {
+        const seen = new Set<string>();
+        const stack: string[] = [...seedIds];
+        while (stack.length > 0) {
+          const id = stack.pop()!;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const rec = analysisMap.get(id);
+          if (!rec) continue;
+          for (const calleeName of rec.callees) {
+            const ids = localFnIdsByName.get(calleeName);
+            if (!ids) continue;
+            for (const cid of ids) if (!seen.has(cid)) stack.push(cid);
+          }
+        }
+        return seen;
+      };
+      // Endpoint roots: arm-body callee idents ∩ local fn names.
+      const endpointRootIds = new Set<string>();
+      for (const ep of decls) {
+        const arms = (ep as Record<string, unknown>).arms;
+        for (const arm of (Array.isArray(arms) ? arms : [])) {
+          const bodyRaw = (arm as Record<string, unknown>)?.bodyRaw;
+          if (typeof bodyRaw !== "string") continue;
+          EP_IDENT_RE2.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = EP_IDENT_RE2.exec(bodyRaw)) !== null) {
+            const ids = localFnIdsByName.get(m[0]);
+            if (ids) for (const id of ids) endpointRootIds.add(id);
+          }
+        }
+      }
+      const endpointReachable = closeOver(endpointRootIds);
+      // Client roots: local fns referenced from markup / top-level logic
+      // (markupReferencedNames) OR exported (client-emittable). Their pure-fn
+      // closure is client-reachable.
+      const clientRootIds = new Set<string>();
+      for (const [nm, ids] of localFnIdsByName) {
+        if (markupReferencedNames.has(nm) || exportedFnNames.has(nm)) {
+          for (const id of ids) clientRootIds.add(id);
+        }
+      }
+      const clientReachable = closeOver(clientRootIds);
+      for (const id of endpointReachable) {
+        if (!isEligibleHelper(id)) continue;
+        endpointServerHelperIds.add(id);
+        if (!clientReachable.has(id)) endpointClientSkipIds.add(id);
+      }
+    }
+  }
+
   return {
-    routeMap: { functions, pages, authMiddleware },
+    routeMap: { functions, pages, authMiddleware, endpointServerHelperIds, endpointClientSkipIds },
     errors,
   };
 }
