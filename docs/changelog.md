@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-25 (S219 — PA primary-goal directive; AF + `<endpoint>` ratified + W1; AF lint; vPA deputy ELIMINATED → flogence digest-boot)
+
+A PA-role-redefinition + design-deliberation session: the **PA primary-goal directive** (finish-the-project-in-a-session; orchestrate-don't-grind; default-GO; only-a-blocking-Q-pauses; recovery is the 4th irreducible), four ratifications across three reopened design questions, then the **vPA deputy eliminated** for flogence's programmatic digest-boot.
+
+- **6nz B1/B2/B3 triaged + fixed.** B2 (HIGH, silent empty render) — a state-engine `<engine>` with a legacy whole-body arrow body now fires `E-ENGINE-RULE-LEGACY-SYNTAX` instead of half-compiling (`d71a6dcc`; a crashed dispatch recovered PA-direct). B1 — `W-INTERP-IN-RAW-CONTENT` promoted info→warning + the missing §34 row added. B3 — by-design (bare-variant→string-tag is uniform, not ternary-specific). +1 residual gap (named-machine arrow).
+- **6nz AF ratified + lint landed (`45182694`).** Render-once input-state-in-markup is the defensible limit (the universal cross-framework norm — every reactive framework bridges raw input through state). NEW `W-INPUT-STATE-MARKUP-NONREACTIVE` info-lint nudges to the @cell-bridge; the @cell-bridge sugar deferred.
+- **`<endpoint>` primitive ratified + W1 SPEC §61 landed (`a78ea133`, Nominal).** The typed-INBOUND endpoint — the `<api>` mirror: `accepts=Enum` decodes via parseVariant → exhaustive arm dispatch → JSON envelope; an un-handled variant is a compile error (the inbound-edge honesty). a+b typed-default + `raw`-escape PAIR, `<endpoint>` first (flogence's FSP need is typed); `raw` deferred. W2-W5 = ss18 (in-flight).
+- **vPA deputy ELIMINATED.** Net-negative (no ctx win, per measurement). Replaced by flogence's programmatic digest-boot (`bridge.ts` + `digest.ts`, ~1k tokens vs ~64k delta-log re-read). The S205 merge-before-push gate retired; maintenance reverts to PA-at-wrap; `docs/graph` gitignored.
+
 ### 2026-06-24 (S218 — GITI-032 + 6nz Bug-AI render fixes; the `_{}` inline foreign-code primitive built; BOOT GATE + CLAUDE.md trim)
 
 A two-adopter-bug + new-primitive + PA-infrastructure session: two render bugs fixed and PA-verified, a ratified foundational primitive built end-to-end, and the PA boot path hardened.
