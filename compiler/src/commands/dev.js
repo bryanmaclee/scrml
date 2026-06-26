@@ -447,6 +447,12 @@ export function resolveRootEntryCandidate(opts, serveDir) {
 function buildServeConfig(opts, serveDir) {
   const config = {
     port: opts.port,
+    // S221 (g-dev-server-idletimeout-default-10s, flogence S15 Finding B): Bun's
+    // default idleTimeout is 10s, which truncates legitimate >10s data-layer routes
+    // (a heavy ?{} query, a _{} foreign slice spawning a subprocess, or ~20 mount-time
+    // load routes contending) mid-flight → ERR_INCOMPLETE_CHUNKED_ENCODING on the
+    // client even though the server work completed. Raise to 120s.
+    idleTimeout: 120,
     async fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;

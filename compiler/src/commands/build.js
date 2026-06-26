@@ -340,6 +340,10 @@ export function generateServerEntry(serverModules, mcpOpts = null) {
     lines.push("Bun.serve({");
   }
   lines.push("  port: PORT,");
+  // S221 (g-dev-server-idletimeout-default-10s, flogence S15 Finding B): same 10s→120s
+  // raise for the emitted production server — a legitimate >10s server route must not be
+  // truncated by Bun's default idleTimeout.
+  lines.push("  idleTimeout: 120,");
   lines.push("  async fetch(req, server) {");
   lines.push("    const url = new URL(req.url);");
   lines.push("");
