@@ -363,3 +363,48 @@ status: candidate     # banked S219 2026-06-25 (user "this makes me kinda want t
 banked: S219 2026-06-25
 scope: **DESIGN re-examination — surfaced by the `<endpoint>`/`raw` ratification.** With the typed-inbound surface re-sorting (`<endpoint>` = typed inbound · `server function* route=` = SSE leg [landed] · `raw` = path-bound raw escape [DEFERRED] · §60 `<api>` = typed outbound), `handle()` (§40 — the GLOBAL middleware raw escape) is the one inbound surface NOT re-examined. Questions: is `handle()`'s shape right (global interceptor + `return not` fall-through)? Does it OVERLAP the deferred `raw` path-handler (global-middleware vs path-bound — Express `app.use` vs `app.post('/x')`)? With `<endpoint>` owning typed inbound, is `handle()` still the right home for the remaining raw/middleware cases (auth, logging, rewriting, path-bound-raw), or does it want a cleaner split? Does it compose cleanly with `<endpoint>` (ordering: does `handle()` see an `<endpoint>` request first)? Is its honesty story coherent (no typed guarantee — same footgun class the `<endpoint>` lint addresses)?
 why-in-Q: the `<endpoint>`/`raw` pair is being built typed-first; `handle()` is the existing raw escape that pair leans on (it covers the interim raw case). Re-examining it ensures the whole inbound-surface family (`<endpoint>` / `raw` / `handle()` / `<api>` / SSE / channels) is coherent rather than accreted. NOT blocking the `<endpoint>` build — bank + fire when the build settles or the user wants the family rationalized.
+
+---
+
+## [dpa-014] debate — W4 chunk model: chunk-as-BUNDLE (A) vs chunk-as-LOAD-PLAN (B) vs HYBRID (C)
+status: banked     # banked → running → complete → ratified(by PA)
+banked: S222 2026-06-26
+voices: code-splitting-bundler-expert · in-browser-compilation-expert · threejs-webgl-integration-expert
+source: handOffs/incoming/2026-06-26-from-spa-ss30-w3w4-fork-FOR-PA-RULING.md (sPA-developed fork) + the feel-of-performance arc SCOPE (docs/changes/feel-of-performance-approach-a-impl-2026-06-26/SCOPE.md)
+output-path: scrml-support/docs/debates/w4-chunk-model-bundle-vs-loadplan-2026-06-26.md (dPA writes)
+
+### Scope-lock (COMPLETE framing — do NOT re-derive)
+Question: The feel-of-performance splitter (Approach A) already COMPUTES the per-route/per-role/interaction-tiered
+  reachable set and EMITS it as a descriptor — but **nothing loads that descriptor** (the `_scrml_chunk_mount`
+  markers are 100% inert / adopter-debug only; the page still ships its full monolithic `<script src>` fragment
+  list, all eager). **W4 is the wave that makes the browser ACT on the split. What IS the chunk when the runtime
+  acts on it?**
+  - **A — inline BUNDLE:** the initial chunk becomes a self-contained compiled bundle (page-shell + N=0 factories +
+    reactive inits inlined); HTML loads only `<script src=initial-chunk>` + runtime. Best cold first-paint, no
+    registry waterfall. BUT fights scrml's existing registry (shared components duplicated per-bundle unless a
+    shared-chunk dedup layer is added — re-inventing `_scrml_modules`); high codegen lift.
+  - **B — LOAD-PLAN (sPA-recommended):** chunk stays a manifest/descriptor; components stay the separate
+    self-registering `_scrml_modules` files they already are; the W4 runtime reads the manifest, eager-loads the
+    N=0 fragments, defers tier1/tier2 to idle/hover. Cohesive with what scrml already IS, no duplication tax,
+    limit-primitives-correct (chunk stays a sharp descriptor), wins on navigation; lowest codegen lift (a clean
+    standalone W4 wave). Cost: more requests (HTTP/2 multiplex + per-file caching mitigate).
+  - **C — HYBRID:** inline N=0 for first-paint + fragment-load the tiers. Best raw critical-path TTI, no dup on the
+    cold tail; BUT two delivery mechanisms + N=0 inline still dups shared components across routes.
+In scope: the A/B/C chunk-model fork + the cold-first-paint-vs-warm-navigation access-pattern axis that decides it.
+Out of scope: building W4; role projection + Component-3 (upstream RS, separate); the chunk-graph optimizer impl detail.
+
+### Grounding facts (empirically verified on trucking, post-W2 — do NOT re-litigate)
+- scrml is ALREADY a content-addressed self-registering module registry (`_scrml_modules["components/x.client.js"]`).
+- The page already loads only its route's import-graph fragments, not the whole app.
+- The splitter computes a set FINER than the static import graph (N=0 reactive-reachability, role-keyed).
+- **Sequencing caveat (load-bearing):** TODAY `serverFnNodeIds=0` + tiers empty + `_anonymous`-only role → the N=0
+  set ≈ the whole route, so the split buys LITTLE until Component-3 (N≥1 interaction projection) + role projection
+  land. W4's payoff is gated on Component-3 REGARDLESS of chunk model. The debate decides the model; the wave timing
+  is gated separately.
+
+### Why a debate (not a quick ruling)
+Foundational / axiom-level (limit-primitives + co-location + no-batch-ratify-foundational-axioms). The bundler voice
+argues "delivery is a graph-optimization problem the toolchain should own (shared-chunk extraction dissolves the
+duplication objection; critical-path waterfall is the lever B can't pull)"; the in-browser-compilation + threejs
+voices test it from the live-loop / playground-funnel / render-loop angles. The judge lands the access-pattern-decides
+synthesis. PA brings the verdict to the user as a RULING (RUN-not-RATIFY).

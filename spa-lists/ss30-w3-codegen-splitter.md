@@ -24,3 +24,27 @@ The **A-4 codegen consumption seam**: where codegen consumes the RS `Reachabilit
 
 ## Progress
 `ss30.progress.md`. Land on `spa/ss30`; ping PA inbox. Do NOT advance main / push. **This list will likely come back mostly-SURVEY + a small bounded build + a fork-list for PA/user** — that's the expected + valuable shape (W1/W2 taught us the estimates are stale; survey-first is the discipline). PA re-integrates the bounded part + brings the design forks to the user. Feature flag stays OFF until W3 fully lands.
+
+---
+
+## CONTINUATION (S222) — continue the splitter arc (user: "continue W3")
+
+**Re-fire `read spa.md ss30`.** W3-codegen is verified-built (the survey finding) → "continue W3" = the genuine
+remaining UNBLOCKED splitter work that makes the emitted chunks MEANINGFUL. This is upstream **RS-solver** work
+(`compiler/src/reachability/` + the Component projections) — NOT parser work (so NOT held by the #1 parser fork) and
+NOT the W4 delivery/chunk-model (that is going to a separate dPA debate [dpa-014] — do NOT touch chunk delivery).
+
+**Scope (SURVEY-FIRST — estimates in this arc have been stale 3×):**
+1. **Component-3 — N≥1 server-fn interaction projection.** `serverFnNodeIds=0` everywhere today → all prefetch
+   tiers (tier1/tier2) are empty. This is the analytical wave that makes the interaction-tiered closures non-empty.
+   Survey: where the RS solver would key server-fn interaction reachability (the §40.9 interaction-tier model);
+   scope the build; park design forks for the PA.
+2. **Role projection.** Only `_anonymous` is split today; driver/dispatcher/customer surfaces aren't keyed.
+   Upstream RS (Component-3/4 role keying). Survey + scope; this + Component-3 together make the split buy something.
+3. **Empty-tier manifest disposition** (smaller): `chunks.json` references tier1/tier2 URLs that aren't written
+   (empty payload) → a 404 risk once W4 follows them. Omit-from-manifest vs runtime-guard. NOTE: couples lightly to
+   the W4 chunk-model debate — survey + recommend, do NOT build until [dpa-014] rules (or build the omit-from-manifest
+   conservative half if it's debate-independent).
+
+**Do NOT touch:** W4 runtime loader / chunk delivery model (dPA debate [dpa-014]); native-parser internals.
+**Acceptance:** survey doc + per-item scope + fork-list. Expect mostly-survey (design-laden, like the W3 survey).

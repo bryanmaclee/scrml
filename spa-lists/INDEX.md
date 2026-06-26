@@ -13,6 +13,18 @@ applied. The sPA consumes; it does not edit the clustering. Contract: `../../scr
 
 **REBUILT S221** (2026-06-25, this rebuild) over the post-S220 open board (51 `@gap` entries; **HIGH 0 · MED 24 · LOW 17 · Nom 7**). The S220 lanes (ss17/ss18/ss19/ss20) DRAINED; the ~40 buildable open gaps re-clustered into **8 live Bucket-A lists `ss21`–`ss28`**; the prior ss1–ss16 rows are integrated/superseded (numbers reserved). ss5/ss6/ss7 open items folded into the new clusters — see the **supersession map** below the Bucket-A table. ss11 (doc) + ss12 (self-host) stay live (distinct ingestion).
 
+**REBUILT S222** (2026-06-26, this rebuild) over the post-S221 open board (**HIGH 0 · MED 17 · LOW 14**). The S221 lanes ss21-ss30 DRAINED (re-integrated S221 + ss30/W3 S222). The remaining buildable gaps re-cluster into **5 new lanes ss31-ss35**, with the parser surface HELD pending the #1 fork ruling:
+
+| Lane | Speciality | n | Fire-status | Shared ingestion |
+|---|---|---|---|---|
+| **ss31** | codegen-expr-validity | 3 (2 MED·1 LOW) | ✅ **FIREABLE** | emit-expr serializers + enum lowering (invalid-JS emits) |
+| **ss32** | auto-await-reactive-hardening | 2 (1 MED·1 LOW) | ✅ **FIREABLE** (item-2 survey-first) | emit-client per-stmt auto-await IIFE (flogence) |
+| **ss33** | runtime-minimality + test-stability | 3 LOW | ✅ **FIREABLE** | emit-client prune · dev/build idleTimeout · smoke-flake |
+| **ss34** | endpoint + SSR/server-render | 3+1 (2 MED·2 LOW) | ✅ **FIREABLE — SURVEY-FIRST** (HOLD lifted now W3 done) | emit-server/endpoint + §52.8 SSR + rendermap |
+| **ss35** | native-parser + markup internals | 8 (7 MED·1 LOW) | ⛔ **HELD** (parser-fork ruling) | native-parser/ast-builder; `g-mount-hang-rails-dev` = fire-anyway candidate |
+
+**Recommended fire order:** ss31 + ss32 + ss33 are disjoint-surface → **safe to fire in parallel**. ss34 is survey-first (SSR design surface). ss35 HELD. **Bucket B (design-track → PA/dPA, NOT sPA):** the W4 chunk-model debate (`dpa-queue` [dpa-014]); bug-1 @apply (needs a scoping pass — user lean @apply); `g-library-mode-sql-no-db-context` (W5b, ~13-22h + SPEC micro-ruling, PA own-list); `g-sql-row-protect-leak` (T1/T2/T3 deferred tail); the parser fork itself (#1). **Deferred-parked (leave):** a5, bug-14, bug-20, bug-21, bug-22, r28-c2, r28-2b, g-const-collides-state (GH#13 by-design).
+
 **Three buckets by shape:** **A** = sPA execution lists (bounded ingestion, buildable). **B** =
 design-track (debates / DDs / from-scratch subsystems / axiom Qs / rulings) → PA/dPA, **not** the sPA.
 **C** = closed/non-work (integrated/resolved/already-done/verify-then-close).
