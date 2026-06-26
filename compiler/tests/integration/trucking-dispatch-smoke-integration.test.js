@@ -348,8 +348,24 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // this corpus, so the code is REMOVED from the baseline (a 0-count entry
     // would trip the "no UNEXPECTED codes" inverse). Aggregate 59 -> 39.
     "W-AUTH-LOGIN-MISSING": 1,
-    "W-CG-CHUNK-EMPTY": 1,
-    "W-CG-CHUNK-PREFETCH-UNRESOLVED": 1,
+    // W2 (rs-entrypoint-routemap, §40.9.2 S221 ruling): the Reachability
+    // Solver now enumerates the 20 filesystem-routed `pages/**` files as
+    // entry points (previously ONLY app.scrml#program was enumerated), and
+    // Component-1 descends the `<db>` connection-scope wrapper to reach each
+    // page's render surface. Two route-splitter chunk diagnostics shift as a
+    // direct, justified consequence of the 20 new NON-EMPTY route closures:
+    //   - W-CG-CHUNK-EMPTY 1 -> 0, REMOVED: previously the lone
+    //     app.scrml#program EP produced a zero-admission chunk (its Welcome
+    //     landing-page markup was wrongly dropped — the §40.9.2 descent gap).
+    //     With the descent fix ALL 21 EPs (app shell + 20 pages) carry
+    //     non-empty closures, so W-CG-CHUNK-EMPTY fires nowhere. (A 0-count
+    //     entry would trip the "no UNEXPECTED codes" inverse, so it is
+    //     removed, not zeroed.)
+    //   - W-CG-CHUNK-PREFETCH-UNRESOLVED 1 -> 3: more multi-route entry
+    //     points whose tier-1/2 prefetch targets are not yet resolved at the
+    //     splitter (A-4 codegen splitter is a later wave).
+    // Aggregate 39 -> 40.
+    "W-CG-CHUNK-PREFETCH-UNRESOLVED": 3,
     "W-DEAD-FUNCTION": 1,
     // S199 — the HOS `<engine for=DriverStatus server=@currentDriver.current_status>`
     // showcase (pages/driver/hos.scrml, the E-leg dog-food): @currentDriver is a

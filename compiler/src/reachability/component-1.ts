@@ -132,6 +132,21 @@ function walkAndCollect(root: ASTNode, env: ConstFoldEnv, acc: Set<NodeId>): voi
  */
 function visit(node: ASTNode, env: ConstFoldEnv, acc: Set<NodeId>): void {
   if (!node || typeof node !== "object") return;
+  // §40.9.2 (S221 W2 ruling) — non-rendering state/scope wrappers are
+  // TRANSPARENT to Component-1's first-render descent. A `<db src>`
+  // connection-scope block (kind:"state") instantiates a CONNECTION, not
+  // a rendered component; the components that paint on first render are
+  // its markup children. Descend through such a wrapper to reach the
+  // render surface (a leaf state-decl with no markup children descends to
+  // nothing — harmless). Stopping at the wrapper left every db-backed
+  // page's closure empty — the gap §40.9.2 normatively excludes.
+  if ((node as { kind?: string }).kind === "state") {
+    const sm = node as unknown as { children?: ASTNode[] };
+    if (Array.isArray(sm.children)) {
+      for (const child of sm.children) visit(child, env, acc);
+    }
+    return;
+  }
   if (node.kind !== "markup") return;
 
   const m = node as MarkupNode;

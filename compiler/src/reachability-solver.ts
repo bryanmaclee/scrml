@@ -167,7 +167,10 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
 
   // Component 1 — entry-point enumeration + initially-rendered set.
   const c1Start = debugPerf ? performance.now() : 0;
-  const entryPoints = enumerateEntryPoints(files);
+  // W2 (rs-entrypoint-routemap) — thread the RI RouteMap so standalone
+  // filesystem-routed page files (no `<program>` root) are enumerated as
+  // `page` entry points with their filesystem-inferred URL (§40.8).
+  const entryPoints = enumerateEntryPoints(files, input.routeMap);
   const env: ConstFoldEnv = { constBindings: new Map() };
   const irc = computeInitiallyRenderedComponents(entryPoints, files, env);
   const c1Ms = debugPerf ? performance.now() - c1Start : 0;

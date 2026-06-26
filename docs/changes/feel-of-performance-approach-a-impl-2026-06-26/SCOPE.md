@@ -26,7 +26,7 @@
 | `W-AUTH-RUNTIME-FALLBACK` / `E-CLOSURE-001/002` static-vs-runtime instrumentation | ✅ **BUILT** | the diagnostic vocabulary that records conservative fallbacks |
 | §40 AuthGraph derivation | ✅ **BUILT** | `compiler/src/auth-graph.ts` + `types/auth-graph.ts` |
 | **DG markup-context `reads` edge-lift (§40.9.3)** | ✅ **BUILT** (S88, A-1.2..A-1.6; verified S221) | `dependency-graph.ts:2340` hardcoded ON; Component 2 consumes; end-to-end verified — was the *assumed* W1, turns out done |
-| **Live-pipeline activation** (Stage 7.6 wired active; DG+AuthGraph fed to RS) | ❌ **NOT done** — Stage 7.6 INACTIVE | `--emit-reachability` produces EMPTY closures today (DG+AuthGraph not wired into the emit path) |
+| **Live-pipeline activation / entry-points (W2)** | ✅ **DONE S221** (W2, agent a6c38d4) | RouteMap threaded into `enumerateEntryPoints` (filesystem `pages/` now enumerate) + Component-1 descends `<db>` state-wrappers (§40.9.2 ruling) → **trucking: 1→21 entry points, all non-empty** (board=45, load-detail=127, app-Welcome=23). api.js already fed DG+AuthGraph (the "emit-path gap" hypothesis was wrong). `serverFnNodeIds=0` everywhere — that's Component-3 N≥1 interaction projection, a later wave. |
 | **A-4 codegen splitter** (consume ChunkPlans → emit tiered chunks) | ❌ **NOT built** | `codegen/index.ts:962` "Empty until A-2.2+"; `:190/:201` A-4 wave + feature-flag notes |
 | Runtime tiered-chunk loader (initialChunk + prefetchTier1/2/N progressive load) | ❌ **NOT built** | depends on A-4 |
 
