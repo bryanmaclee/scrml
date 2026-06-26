@@ -244,6 +244,24 @@ export interface EmitExprContext {
    */
   mapVarNames?: Set<string> | null;
   /**
+   * §59.12 (D4) — value-native SET variable names in scope (bare, no `@`).
+   * Populated by `collectSetVarNames(fileAST)` and threaded ALONGSIDE
+   * `mapVarNames` (a set IS a map — every set cell is ALSO in `mapVarNames`, so
+   * `.has`/`.remove`/`.size`/bracket-read already lower via the `_scrml_map_*`
+   * surface). This strict-subset name-set keys ONLY the set-NATIVE vocabulary
+   * `emitCall` intercepts BEFORE the map-method path (§59.12):
+   *
+   *   - `.add(k)`        → `_scrml_map_insert(s, k, true)`  (membership marker)
+   *   - `.elements()`    → `_scrml_map_keys(s)`            (ELEMENTS, not markers)
+   *   - `.union(t)`      → set(`_scrml_stdlib.data.union(keys(s), keys(t))`)
+   *   - `.intersect(t)`  → set(`…data.intersection(…)`)
+   *   - `.difference(t)` → set(`…data.difference(…)`)
+   *
+   * NULL/empty → no set interception (set-native spellings fall through to the
+   * map-method path or to ordinary call emission).
+   */
+  setVarNames?: Set<string> | null;
+  /**
    * §59.8 (S169) — file-level set of cell names whose `state-decl` type
    * annotation is an `@ordered` value-native map (`[KeyT: ValT]@ordered`).
    * Mirrors `mapVarNames` (bare names, no `@`). The ordered-ness of a map
@@ -1719,6 +1737,67 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       const typeName = (node.args[0] as IdentExpr).name;
       const argExpr = emitExpr(node.args[1] as ExprNode, ctx);
       return `(${typeName}_toEnum[${argExpr}] ?? null)`;
+    }
+  }
+
+  // §59.12 (D4) — SET METHOD interception. A set is a map `[K: bool]` (a set
+  // cell is ALSO in `mapVarNames`), so the SHARED methods `.has` / `.remove` and
+  // the `.size` member already lower via the `_scrml_map_*` surface. This block
+  // handles ONLY the set-NATIVE vocabulary, and FIRES BEFORE the map-method
+  // interception below so the set spellings win for a set cell. The shared
+  // methods are intentionally NOT handled here — they fall through to the map
+  // path (which lowers them identically). §59.12 surface:
+  //
+  //   .add(k)        → _scrml_map_insert(s, k, true)   (the `true` membership
+  //                    marker is compiler-internal — never author-visible)
+  //   .elements()    → _scrml_map_keys(s)              (the ELEMENTS = map keys,
+  //                    NOT the markers)
+  //   .union/.intersect/.difference(t) → DELEGATE to the shipped `scrml:data`
+  //                    value-canonical algebra (plain-array in/out; struct-
+  //                    correct via §59.5), then rebuild a set: each result
+  //                    element → `[k, true]` and `_scrml_map_from_entries`. ONE
+  //                    algebra implementation — surfaced as methods, not
+  //                    re-implemented (limit-primitives).
+  if (
+    ctx.mode === "client" &&
+    ctx.setVarNames && ctx.setVarNames.size > 0 &&
+    node.callee.kind === "member" &&
+    !node.callee.optional &&
+    typeof node.callee.property === "string" &&
+    node.callee.object.kind === "ident" &&
+    typeof (node.callee.object as IdentExpr).name === "string" &&
+    (node.callee.object as IdentExpr).name.startsWith("@")
+  ) {
+    const setBareName = (node.callee.object as IdentExpr).name.slice(1);
+    if (ctx.setVarNames.has(setBareName)) {
+      const method = node.callee.property as string;
+      const receiver = emitExpr(node.callee.object, ctx);
+      const args = node.args.map(a => emitExpr(a as ExprNode, ctx));
+      switch (method) {
+        case "add":
+          // `.add(k)` → map `.insert(k, true)`. The marker value is always
+          // `true`; the set surface never exposes it.
+          return `_scrml_map_insert(${receiver}, ${args[0]}, true)`;
+        case "elements":
+          // `.elements()` → the map's keys (the set elements, NOT the markers).
+          return `_scrml_map_keys(${receiver})`;
+        case "union":
+        case "intersect":
+        case "difference": {
+          // Delegate to the shipped `scrml:data` value-canonical algebra
+          // (`_scrml_stdlib.data.<fn>`), operating on the two sets' ELEMENT
+          // arrays, then rebuild a set (map `[K: bool]`) from the result.
+          const dataFn = method === "union" ? "union"
+            : method === "intersect" ? "intersection"
+            : "difference";
+          const other = args[0];
+          return `_scrml_map_from_entries(_scrml_stdlib.data.${dataFn}(` +
+            `_scrml_map_keys(${receiver}), _scrml_map_keys(${other})` +
+            `).map(function(_e) { return [_e, true]; }), false)`;
+        }
+        // `.has` / `.remove` / anything else — fall through to the map-method
+        // interception (identical lowering for a set's shared surface).
+      }
     }
   }
 

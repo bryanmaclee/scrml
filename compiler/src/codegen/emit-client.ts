@@ -405,6 +405,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     chunks.add("map");
   }
 
+  // §59.12 (D4) — `stdlib-data` chunk gate for SET ALGEBRA. A set's `.union` /
+  // `.intersect` / `.difference` DELEGATE to the shipped `scrml:data`
+  // value-canonical algebra (`_scrml_stdlib.data.union/intersection/difference`),
+  // so the chunk that populates `_scrml_stdlib.data` must ship even though the
+  // author never wrote a `scrml:data` import (the normal activation path above,
+  // line ~524). Precise: only a file that actually calls a set-algebra method
+  // lights it up — a set that only uses `.add`/`.has`/`.size`/`.elements` rides
+  // the `map` chunk alone (minimal-runtime discipline). The post-emit stdlib
+  // prune (line ~1859) leaves this chunk intact: it only strips chunks reached
+  // via a lowered `const { … } = _scrml_stdlib.data;` read line, which a set
+  // build never emits (the set methods emit a direct `_scrml_stdlib.data.<fn>`).
+  {
+    const { collectSetVarNames, fileHasSetAlgebraUsage } = require("./reactive-deps.ts");
+    const astForSet = fileAST?.ast ?? fileAST ?? {};
+    const setVarNamesForChunk: Set<string> = collectSetVarNames(astForSet);
+    if (setVarNamesForChunk.size > 0 && fileHasSetAlgebraUsage(astForSet, setVarNamesForChunk)) {
+      chunks.add("stdlib-data");
+    }
+  }
+
   // A-4.3 + A-4.5 — `prefetch` chunk lights up when the Stage 7.6 RS has
   // produced EITHER:
   //   (i)  at least one non-empty tier-1 ChunkContents (A-4.3 — idle prefetch

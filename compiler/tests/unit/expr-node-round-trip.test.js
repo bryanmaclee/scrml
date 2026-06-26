@@ -255,6 +255,14 @@ describe("ExprNode round-trip — §2 operator/form coverage", () => {
   test("{ a: 1 }", () => { const n = expectIdempotent("{ a: 1 }"); expect(n.kind).toBe("object"); });
   test("{ ...a, b: 2 }", () => { const n = expectIdempotent("{ ...a, b: 2 }"); expect(n.kind).toBe("object"); });
 
+  // §59.3 / §59.12 — value-native map literals (also a set's empty seed `[:]`).
+  // Before the `deepEqualExprNode` map-lit case landed (S222 set arc), these
+  // round-tripped to a structurally-correct re-parse but compared UNEQUAL (the
+  // map-lit branch fell through to `default: return false`).
+  test("[:]", () => { const n = expectIdempotent("[:]"); expect(n.kind).toBe("map-lit"); });
+  test('["a": 1]', () => { const n = expectIdempotent('["a": 1]'); expect(n.kind).toBe("map-lit"); });
+  test('["a": 1, "b": 2]', () => { const n = expectIdempotent('["a": 1, "b": 2]'); expect(n.kind).toBe("map-lit"); });
+
   // Arrow functions (expression body)
   test("x => x + 1", () => {
     const n = parseExprToNode("x => x + 1", "<test>", 0);
@@ -526,6 +534,32 @@ describe("deepEqualExprNode — §4 helper unit tests", () => {
     const a = parseExprToNode("{ a: 1, b: 2 }", "<test>", 0);
     const b = parseExprToNode("{ a: 1, b: 2 }", "<test>", 10);
     expect(deepEqualExprNode(a, b)).toBe(true);
+  });
+
+  // §59.3 / §59.12 — map-lit (the gap the set arc closed).
+  test("equal empty map-lit: [:]", () => {
+    const a = parseExprToNode("[:]", "<test>", 0);
+    const b = parseExprToNode("[:]", "<test>", 30);
+    expect(a.kind).toBe("map-lit");
+    expect(deepEqualExprNode(a, b)).toBe(true);
+  });
+
+  test('equal map-lit: ["a": 1, "b": 2]', () => {
+    const a = parseExprToNode('["a": 1, "b": 2]', "<test>", 0);
+    const b = parseExprToNode('["a": 1, "b": 2]', "<test>", 40);
+    expect(deepEqualExprNode(a, b)).toBe(true);
+  });
+
+  test('unequal map-lit value: ["a": 1] vs ["a": 2]', () => {
+    const a = parseExprToNode('["a": 1]', "<test>", 0);
+    const b = parseExprToNode('["a": 2]', "<test>", 0);
+    expect(deepEqualExprNode(a, b)).toBe(false);
+  });
+
+  test('unequal map-lit entry count: [:] vs ["a": 1]', () => {
+    const a = parseExprToNode("[:]", "<test>", 0);
+    const b = parseExprToNode('["a": 1]', "<test>", 0);
+    expect(deepEqualExprNode(a, b)).toBe(false);
   });
 
   test("escape-hatch nodes: equal raw content", () => {

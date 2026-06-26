@@ -633,6 +633,13 @@
     "COUNT-LENGTH": 1,
     "SPAN-COORD": 33
   },
+  "examples/34-value-native-set.scrml": {
+    "EXTRA-FIELD": 11,
+    "FIELD-SHAPE": 30,
+    "KIND-NAME": 3,
+    "MISSING-FIELD": 63,
+    "SPAN-COORD": 84
+  },
   "samples/admin-panel.scrml": {
     "COUNT-LENGTH": 6,
     "EXTRA-FIELD": 103,

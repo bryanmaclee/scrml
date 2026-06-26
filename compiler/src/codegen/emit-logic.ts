@@ -144,6 +144,14 @@ export interface EmitLogicOpts {
    */
   mapVarNames?: Set<string> | null;
   /**
+   * §59.12 (D4): file-level set of value-native SET cell names (strict subset of
+   * `mapVarNames`). Forwarded into `EmitExprContext.setVarNames` so `emit-expr.ts`
+   * intercepts the set-native vocabulary (`.add`/`.elements`/`.union`/`.intersect`/
+   * `.difference`). Computed once per file via `collectSetVarNames`
+   * (reactive-deps.ts). Sibling to `mapVarNames`.
+   */
+  setVarNames?: Set<string> | null;
+  /**
    * §6.7.7 / §60.4: file-level set of `<request>` `id` values. Forwarded into
    * `EmitExprContext.requestIds` so `emit-expr.ts` routes a `<#id>` markup ref
    * whose id names a `<request>` to the reactive `_scrml_request_<id>` object
@@ -749,6 +757,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // §59 (D4) — map variable name set so emit-expr can intercept `@m[k]`
     // reads / `@m.<method>(…)` calls / `@m.size` and lower them to `_scrml_map_*`.
     mapVarNames: opts.mapVarNames ?? null,
+    // §59.12 (D4) — set variable name set so emit-expr intercepts the set-native
+    // vocabulary (`.add`/`.elements`/`.union`/`.intersect`/`.difference`).
+    setVarNames: opts.setVarNames ?? null,
     // §6.7.7 / §60.4 — request id set so emit-expr routes `<#id>` request refs
     // to the reactive `_scrml_request_<id>` object instead of the §36 registry.
     requestIds: opts.requestIds ?? null,

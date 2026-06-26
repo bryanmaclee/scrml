@@ -2375,8 +2375,12 @@ export function emitEachBodyRenderForFile(
   // map object has no `.entries`/`.keys`/`.values`/`.sorted` methods). Computed
   // once per file; empty Set when the file declares no maps (the iterable then
   // takes the byte-identical pre-D4 `rewriteAtCellAccess` path).
-  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectSetVarNames } = require("./reactive-deps.ts");
   const eachMapVarNames: Set<string> = collectMapVarNames(ctx.fileAST ?? fileAST);
+  // §59.12 (D4) — value-native SET cell names (strict subset of eachMapVarNames).
+  // A bare `<each in=@s>` yields the set's ELEMENTS (the map's keys, NOT the
+  // markers), and `<each in=@s.elements()>` lowers `.elements()` → map `.keys()`.
+  const eachSetVarNames: Set<string> = collectSetVarNames(ctx.fileAST ?? fileAST);
 
   const eachBlocks = collectEachBlocks(fileAST);
   for (const node of eachBlocks) {
@@ -2436,7 +2440,8 @@ export function emitEachBodyRenderForFile(
       const inExpr = node.inExprRaw ?? "[]";
       // Rewrite `@cell` to `_scrml_reactive_get("cell")` for V5-strict reactivity.
       // §59.8 (D4) — map-aware: `@m.entries()` etc. lower to `_scrml_map_*`.
-      itemsExpr = rewriteMapAwareIterable(inExpr, eachMapVarNames);
+      // §59.12 (D4) — set-aware: bare `@s` / `@s.elements()` → `_scrml_map_keys`.
+      itemsExpr = rewriteMapAwareIterable(inExpr, eachMapVarNames, eachSetVarNames);
     } else if (node.iterShape === "of") {
       const ofExpr = node.ofExprRaw ?? "0";
       // The expression may be a literal (`10`) or a cell (`@daysLeft`).
@@ -2519,10 +2524,23 @@ function rewriteAtCellAccess(text: string): string {
  * chains correctly). Otherwise fall back to the plain `rewriteAtCellAccess`
  * regex path (byte-identical to pre-D4 for non-map iterables).
  */
-function rewriteMapAwareIterable(inExpr: string, mapVarNames: Set<string>): string {
+function rewriteMapAwareIterable(
+  inExpr: string,
+  mapVarNames: Set<string>,
+  setVarNames: Set<string> = new Set(),
+): string {
   if (!inExpr || mapVarNames.size === 0) return rewriteAtCellAccess(inExpr);
+  // §59.12 — a BARE set iterable `<each in=@s>` yields the set's ELEMENTS (the
+  // map's keys). The bare `@s` ident alone lowers to the map OBJECT (not
+  // iterable), so wrap it explicitly: `_scrml_map_keys(_scrml_reactive_get("s"))`.
+  // (The `.elements()` form is handled by the structured emit below — it lowers
+  // via emit-expr's set interception when setVarNames is threaded.)
+  const bareSet = /^@([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(inExpr.trim());
+  if (bareSet && setVarNames.has(bareSet[1])) {
+    return `_scrml_map_keys(_scrml_reactive_get(${JSON.stringify(bareSet[1])}))`;
+  }
   // Cheap pre-filter: only attempt the structured path when the expression
-  // mentions a known map cell (`@<mapName>`). Avoids parsing every iterable.
+  // mentions a known map/set cell (`@<name>`). Avoids parsing every iterable.
   let mentionsMap = false;
   for (const name of mapVarNames) {
     if (inExpr.includes("@" + name)) { mentionsMap = true; break; }
@@ -2537,7 +2555,7 @@ function rewriteMapAwareIterable(inExpr: string, mapVarNames: Set<string>): stri
     const { emitExprField } = require("./emit-expr.ts") as {
       emitExprField: (n: any, fallback: string, ctx: Record<string, unknown>) => string;
     };
-    return emitExprField(node, inExpr, { mode: "client", mapVarNames });
+    return emitExprField(node, inExpr, { mode: "client", mapVarNames, setVarNames });
   } catch {
     // Parse failure → conservative fallback (the iterable is then non-map or
     // a shape the parser can't structure; the regex path preserves behavior).

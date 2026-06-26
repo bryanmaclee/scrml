@@ -299,6 +299,16 @@ interface MapType {
   key: ResolvedType;
   value: ResolvedType;
   ordered: boolean;
+  // §59.12 — value-native SET (`set[K]`). A set is a THIN DESUGAR over the §59
+  // map: it lowers to the map `[K: bool]` with a fixed compiler-internal
+  // membership marker (the value is always `true`, never author-visible). This
+  // flag carries the set-ness through the shared `MapType` so (a) diagnostics
+  // can render `set[K]` instead of `[K: bool]` and (b) the codegen collectors
+  // can recognize a set cell for the set-vocabulary lowering. ALL other map
+  // machinery (key comparability §59.4, the `E-MAP-BRACKET-WRITE` gate §59.7,
+  // order-independent `==` §59.9, the §57 codec) is inherited UNCHANGED — a set
+  // IS a map. `undefined`/absent ≡ a plain map (additive, non-breaking).
+  set?: boolean;
 }
 
 interface UnionType {
@@ -845,6 +855,15 @@ function tArray(element: ResolvedType): ArrayType {
 // decl-binding sites run `checkMapKeyComparability` against the span+errors.
 function tMap(key: ResolvedType, value: ResolvedType, ordered: boolean): MapType {
   return { kind: "map", key, value, ordered };
+}
+
+// §59.12 — value-native SET constructor. `set[K]` is a TYPE that desugars to the
+// §59 map `[K: bool]` with a fixed membership marker (`value` is always `bool`,
+// the runtime stores `true`). The `set` flag distinguishes it for diagnostics +
+// codegen; otherwise it is a `MapType` and rides ALL map machinery unchanged.
+// Never `@ordered` (a set has no insertion-ordered iteration surface in v1).
+function tSet(key: ResolvedType): MapType {
+  return { kind: "map", key, value: tPrimitive("boolean"), ordered: false, set: true };
 }
 
 /**
@@ -2553,6 +2572,21 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
   if (trimmed.endsWith("[]")) {
     const elementExpr = trimmed.slice(0, -2).trim();
     return tArray(resolveTypeExpr(elementExpr, typeRegistry));
+  }
+
+  // §59.12 — Value-native SET type: `set[K]`. A set is a THIN DESUGAR over the
+  // §59 map: it resolves to the map `[K: bool]` carrying the `set` flag (the
+  // membership marker `true` is compiler-internal, never author-visible). The
+  // element type `K` recurses through `resolveTypeExpr`. Slotted BEFORE the
+  // generic map branch — `set[K]` begins with the `set` identifier, not `[`, so
+  // it would otherwise fall through. Key comparability (§59.4) is enforced at
+  // the decl-binding sites (NOT here — `resolveTypeExpr` is error-free), exactly
+  // as for the map. A set is never `@ordered` (no insertion-order surface in v1).
+  if (trimmed.startsWith("set[") && trimmed.endsWith("]")) {
+    const elemExpr = trimmed.slice("set[".length, -1).trim();
+    if (elemExpr.length > 0) {
+      return tSet(resolveTypeExpr(elemExpr, typeRegistry));
+    }
   }
 
   // §59.2/§59.3 — Value-native map type: `[KeyT: ValT]` (optionally suffixed
@@ -4529,6 +4563,19 @@ function forEachTypeNameLeaf(
     return;
   }
 
+  // §59.12 — Value-native set `set[K]` — the element `K` is the map KEY
+  // position (the set desugars to `[K: bool]`). Mirror the map-key treatment
+  // below: the `set` leading token is NOT a type-name leaf (it is the set affix,
+  // like `snippet`); the element `K` is owned by E-MAP-KEY-NOT-COMPARABLE
+  // (§59.4) so it is scanned only when `emitMapKeys` is set (default) — exactly
+  // as for a map key — to avoid a double-fire. Slotted BEFORE the map branch
+  // (mirrors resolveTypeExpr's ordering).
+  if (trimmed.startsWith("set[") && trimmed.endsWith("]")) {
+    const elemExpr = trimmed.slice("set[".length, -1);
+    if (emitMapKeys) forEachTypeNameLeaf(elemExpr, visit, opts, depth + 1);
+    return;
+  }
+
   // Value-native map `[KeyT: ValT]` (optional trailing `@ordered`) — recurse
   // key + value. Slotted after the `[]` array branch (mirrors resolveTypeExpr).
   {
@@ -4974,7 +5021,10 @@ function formatTypeForDiagnostic(t: ResolvedType | null | undefined): string {
     case "array":     return formatTypeForDiagnostic((t as ArrayType).element) + "[]";
     case "map": {
       // §59.2 — `[Key: Value]`, suffixed `@ordered` when the map is order-aware.
+      // §59.12 — a set renders as `set[K]` (its author-facing spelling), NOT the
+      // `[K: bool]` desugar (the `bool` marker is compiler-internal).
       const mt = t as MapType;
+      if (mt.set) return "set[" + formatTypeForDiagnostic(mt.key) + "]";
       return "[" + formatTypeForDiagnostic(mt.key) + ": " + formatTypeForDiagnostic(mt.value) + "]" +
         (mt.ordered ? "@ordered" : "");
     }
@@ -10513,12 +10563,21 @@ function annotateNodes(
             const mapEntry = scopeChain.lookup(mapTarget);
             const mapRt = mapEntry?.resolvedType;
             if (mapRt && mapRt.kind === "map") {
+              // §59.12 — a set cell reuses E-MAP-BRACKET-WRITE (a set IS a map);
+              // the message names the set-native write (`.add(k)`, lowering to
+              // the map `.insert(k, true)`) rather than the map's `.insert(k,v)`.
+              const isSet = (mapRt as MapType).set === true;
               errors.push(new TSError(
                 "E-MAP-BRACKET-WRITE",
-                `E-MAP-BRACKET-WRITE: cannot write to map cell \`@${mapTarget}\` by index — ` +
-                `\`@${mapTarget}[k] = v\` is not valid (§59.7). Map writes are method-native and ` +
-                `reassignment-canonical: use \`@${mapTarget} = @${mapTarget}.insert(k, v)\` instead. ` +
-                `(Bracket READS \`@${mapTarget}[k]\` are fine — read is bracket, write is method.)`,
+                isSet
+                  ? `E-MAP-BRACKET-WRITE: cannot write to set cell \`@${mapTarget}\` by index — ` +
+                    `\`@${mapTarget}[k] = v\` is not valid (§59.12/§59.7). Set writes are method-native and ` +
+                    `reassignment-canonical: use \`@${mapTarget} = @${mapTarget}.add(k)\` instead. ` +
+                    `(Membership reads \`@${mapTarget}.has(k)\` are fine — read is method, write is method.)`
+                  : `E-MAP-BRACKET-WRITE: cannot write to map cell \`@${mapTarget}\` by index — ` +
+                    `\`@${mapTarget}[k] = v\` is not valid (§59.7). Map writes are method-native and ` +
+                    `reassignment-canonical: use \`@${mapTarget} = @${mapTarget}.insert(k, v)\` instead. ` +
+                    `(Bracket READS \`@${mapTarget}[k]\` are fine — read is bracket, write is method.)`,
                 rnaSpan,
               ));
             }
@@ -23187,6 +23246,7 @@ export {
   tEnum,
   tArray,
   tMap,
+  tSet,
   tUnion,
   tAsIs,
   tUnknown,
@@ -23230,4 +23290,6 @@ export {
   // §14.1.2 — unknown-type-name reject helpers (exported for typer-unit tests)
   isUnrecognizedTypeNameAtom,
   forEachTypeNameLeaf,
+  // diagnostic type rendering (exported for typer-unit tests)
+  formatTypeForDiagnostic,
 };

@@ -1,0 +1,115 @@
+// Example 34: Value-native set — `set[K]` (§59.12).
+//
+// THE ONE LESSON: a set is the MAP. There is no separate set collection, no
+// new literal, no new runtime — `set[K]` is a thin desugar over the §59
+// value-native map `[K: bool]` with a fixed (never-visible) membership marker.
+// You get everything the map gives you, for free:
+//   - VALUE-NATIVE: two sets are `==` iff they hold the same elements, in any
+//     order. No identity, no insertion-order surprises.
+//   - DEDUP BY CONSTRUCTION: `.add` an element twice and the set still holds it
+//     once. Membership is the whole point; duplicates cannot exist.
+//   - STRUCT-CORRECT FOR FREE: a `set[Stop]` dedups and tests membership BY
+//     VALUE (the map's structural key-hash, §59.5) — not by reference. A plain
+//     JS `Set` of objects gets this wrong; `set[Stop]` gets it right.
+//   - REASSIGNMENT-CANONICAL (COW): every write returns a NEW set —
+//     `@certified = @certified.add(lane)` — exactly like reactive arrays (§6.5).
+//
+// THE SURFACE (set vocabulary; lowers to the map underneath):
+//   .add(k)     add an element        (→ map .insert(k, marker))
+//   .has(k)     membership test → bool
+//   .remove(k)  drop an element
+//   .size       element count
+//   .elements() the elements as an array   (also: <each in=@set> directly)
+//   .union(t) / .intersect(t) / .difference(t)
+//               set algebra — delegates to the ONE shipped value-canonical
+//               implementation in scrml:data (no second algebra to drift).
+//
+// THE EMPTY SET is the map's empty literal `[:]`. There is no distinct set
+// literal — you seed a set by `.add`. (A set is the map; the map's empty is the
+// set's empty.) Membership writes are method-native: `@s[k] = v` is rejected
+// (E-MAP-BRACKET-WRITE) — use `.add(k)`.
+//
+// THE DOMAIN: a dispatcher tracks which freight lanes a driver is CERTIFIED for
+// and which lanes a load REQUIRES. Set algebra answers the real questions:
+//   eligible  = certified ∩ required   (lanes the driver can legally run)
+//   gaps      = required ∖ certified    (certifications still needed)
+//   inPlay    = certified ∪ required    (every lane this assignment touches)
+
+<div class="dispatch-board">
+    ${
+        // Both the driver's certifications and the load's requirements are sets
+        // of lane codes. Seed empty with the map's `[:]`, then `.add`.
+        <certified>: set[string] = [:]
+        <required>: set[string] = [:]
+
+        function certify(lane: string) {
+            // .add is reassignment-canonical (COW) and dedups by construction —
+            // certifying the same lane twice leaves the set unchanged.
+            @certified = @certified.add(lane)
+        }
+
+        function revoke(lane: string) {
+            @certified = @certified.remove(lane)
+        }
+
+        function requireLane(lane: string) {
+            @required = @required.add(lane)
+        }
+
+        // Set algebra, derived. Each is itself a set (the map underneath), so
+        // `.size` / `.has` / iteration all work on the results too.
+        const <eligible>: set[string] = @certified.intersect(@required)
+        const <gaps>: set[string] = @required.difference(@certified)
+        const <inPlay>: set[string] = @certified.union(@required)
+
+        const <readyToRoll>: bool = @gaps.size == 0
+    }
+
+    <h1>Dispatch board</>
+
+    <section>
+        <h2>Certified lanes (${@certified.size})</>
+        <ul>
+            // Iterate the set directly — `<each in=@set>` yields the ELEMENTS,
+            // never the internal markers.
+            <each in=@certified as lane>
+                <li>${lane}</li>
+            </each>
+        </ul>
+    </section>
+
+    <section>
+        <h2>Required lanes (${@required.size})</>
+        <ul>
+            <each in=@required.elements() as lane>
+                <li>${lane}</li>
+            </each>
+        </ul>
+    </section>
+
+    <section>
+        <h2>Assignment</>
+        <p>Eligible to run: ${@eligible.size} of ${@required.size} required</>
+        <p>Missing certifications: ${@gaps.size}</>
+        <p>Lanes in play: ${@inPlay.size}</>
+        <p if=@readyToRoll>Driver is cleared for this load.</>
+        <ul>
+            <each in=@gaps as lane>
+                <li>Needs certification: ${lane}</li>
+            </each>
+        </ul>
+    </section>
+
+    <section>
+        <h2>Quick checks</>
+        <p>Certified for DAL-HOU: ${@certified.has("DAL-HOU")}</>
+    </section>
+
+    <section class="controls">
+        <button onclick=certify("DAL-HOU")>Certify DAL-HOU</>
+        <button onclick=certify("HOU-SAT")>Certify HOU-SAT</>
+        <button onclick=revoke("DAL-HOU")>Revoke DAL-HOU</>
+        <button onclick=requireLane("DAL-HOU")>Require DAL-HOU</>
+        <button onclick=requireLane("SAT-ELP")>Require SAT-ELP</>
+    </section>
+</div>

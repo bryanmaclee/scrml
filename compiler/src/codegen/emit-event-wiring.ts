@@ -528,8 +528,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // `onclick=@m.insert(k, v)` in a map-only file (no `<engine>`) still needs
   // the map interception. Merged into the extras spread so direct
   // `emitExprField(..., { ...engineExprCtxExtras })` calls below see it.
-  const { collectMapVarNames, collectOrderedMapVarNames, collectRequestIds } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames, collectRequestIds, collectSetVarNames } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
+  // §59.12 (D4) — value-native SET cell names (strict subset of mapVarNames), so
+  // an event handler like `onclick=@s.add(k)` / `onclick=@s = @s.union(@t)`
+  // lowers the set-native vocabulary. Threaded UNCONDITIONALLY, like mapVarNames.
+  const setVarNames: Set<string> = collectSetVarNames(ctx.fileAST);
   // §6.7.7 / §60.4 — `<request>` id set so a `${<#id>.data}` / `if=<#id>.loading`
   // binding lowers its `<#id>` ref to the reactive `_scrml_request_<id>` object.
   const requestIds: Set<string> = collectRequestIds(ctx.fileAST);
@@ -539,6 +543,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   const engineExprCtxExtras = {
     ...(engineRewriteCtx?.exprCtxExtras ?? {}),
     ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+    ...(setVarNames.size > 0 ? { setVarNames } : {}),
     ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
     ...(requestIds.size > 0 ? { requestIds } : {}),
   };

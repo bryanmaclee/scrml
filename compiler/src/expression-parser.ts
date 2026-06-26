@@ -3060,6 +3060,20 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
       return deepEqualExprNode(a.target, bNode.target);
     }
 
+    case "map-lit": {
+      // §59.3 / §59.12 — a map literal (`[:]` / `[k: v, …]`; also a set's empty
+      // seed `[:]`). Compare structurally on the ordered entry list (key + value
+      // ExprNodes). The `diagnostics` sidecar is a parse-time annotation —
+      // ignored (a round-tripped re-parse-from-emit tree carries it differently),
+      // mirroring the `reset-expr` diagnostic-field treatment above.
+      const bNode = b as typeof a;
+      if (a.entries.length !== bNode.entries.length) return false;
+      return a.entries.every((e, i) =>
+        deepEqualExprNode(e.key, bNode.entries[i].key) &&
+        deepEqualExprNode(e.value, bNode.entries[i].value)
+      );
+    }
+
     default: {
       const _never: never = a;
       return false;

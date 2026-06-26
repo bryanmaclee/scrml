@@ -327,6 +327,26 @@ export function isMapTypeAnnotation(annotation: string): boolean {
 }
 
 /**
+ * §59.12 — Recognise whether a raw type-annotation string is a value-native SET
+ * type `set[K]`. A set is a THIN DESUGAR over the §59 map (`[K: bool]`), so a
+ * set cell rides ALL the map machinery (`_scrml_map_*`, the `map` runtime chunk,
+ * bracket-read, `.size`, `.has`, `.remove`); this recognizer is what makes a set
+ * cell ALSO a map cell in `collectMapVarNames`, and it backs the strict-subset
+ * `collectSetVarNames` used by the set-vocabulary lowering (`.add`/`.elements`/
+ * `.union`/`.intersect`/`.difference`) in emit-expr / emit-each.
+ *
+ * MIRRORS the typer's `set[K]` branch in `type-system.ts:resolveTypeExpr`:
+ * leading `set[` affix, trailing `]`, non-empty element. A set is never
+ * `@ordered` (no insertion-order surface in v1), so there is no affix to strip.
+ */
+export function isSetTypeAnnotation(annotation: string): boolean {
+  if (!annotation) return false;
+  const body = annotation.trim();
+  if (!body.startsWith("set[") || !body.endsWith("]")) return false;
+  return body.slice("set[".length, -1).trim().length > 0;
+}
+
+/**
  * §59 (D4) — Collect the names of every cell that holds a value-native MAP, so
  * `emit-expr.ts` can intercept `@m[k]` reads, `@m.<method>(…)` calls, and the
  * `@m.size` member and lower them to the `_scrml_map_*` runtime (§59.6/§59.7/
@@ -372,8 +392,13 @@ export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string
         n.name.length > 0
       ) {
         // (a) typed `[KeyT: ValT]` annotation (state-decl only carries it).
+        // §59.12 — a `set[K]` annotation ALSO makes the cell a map cell (a set
+        // desugars to `[K: bool]`), so it rides the full `_scrml_map_*` surface
+        // (bracket-read / `.size` / `.has` / `.remove` / the `map` runtime
+        // chunk). The set-SPECIFIC vocabulary is keyed on `collectSetVarNames`
+        // (a strict subset) separately.
         const anno = (n as any).typeAnnotation;
-        if (typeof anno === "string" && isMapTypeAnnotation(anno)) {
+        if (typeof anno === "string" && (isMapTypeAnnotation(anno) || isSetTypeAnnotation(anno))) {
           names.add(n.name as string);
         }
         // (b) `map-lit` initializer RHS — including the `[:]` empty map. This
@@ -395,6 +420,71 @@ export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string
       if (n.kind === "match-stmt" && Array.isArray((n as any).body)) {
         visit((n as any).body as unknown[]);
       }
+      if (n.kind === "if-stmt") {
+        if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
+        if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+        if ((n as any).catchNode && Array.isArray((n as any).catchNode.body)) visit((n as any).catchNode.body as unknown[]);
+        if (Array.isArray((n as any).finallyBody)) visit((n as any).finallyBody as unknown[]);
+      }
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return names;
+}
+
+/**
+ * §59.12 (D4) — Collect the names of every cell declared as a value-native SET
+ * (`set[K]`), so `emit-expr.ts` / `emit-each.ts` can intercept the set-SPECIFIC
+ * vocabulary and lower it: `.add(k)` → map `.insert(k, true)`; `.elements()` /
+ * `<each in=@s>` → map `.keys()`; `.union` / `.intersect` / `.difference` →
+ * the shipped `scrml:data` value-canonical algebra (rebuilt into a set). Names
+ * are bare (no `@`), mirroring `collectMapVarNames`.
+ *
+ * This is the STRICT SUBSET of `collectMapVarNames` whose `state-decl` type
+ * annotation is `set[K]`. The shared methods (`.has` / `.remove` / `.size`) and
+ * bracket-read need NO set-specific handling — a set IS a map (in
+ * `collectMapVarNames`), so they already lower via the `_scrml_map_*` surface.
+ * Only the set-NATIVE spellings key on this name-set. A set with NO annotation
+ * cannot exist (the empty seed `[:]` is a bare map without the `set[K]` type),
+ * so set-ness comes SOLELY from the annotation — unlike maps, there is no
+ * literal-RHS inference path (a `[:]` RHS makes a bare MAP, not a set).
+ *
+ * The fileAST walk mirrors `collectMapVarNames` exactly (logic bodies, children,
+ * control-flow bodies) so set cells declared inside `${…}` / control flow are
+ * found.
+ */
+export function collectSetVarNames(fileAST: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return names;
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as ASTNode;
+
+      if (
+        (n.kind === "state-decl" || n.kind === "let-decl" || n.kind === "const-decl") &&
+        typeof n.name === "string" &&
+        n.name.length > 0
+      ) {
+        const anno = (n as any).typeAnnotation;
+        if (typeof anno === "string" && isSetTypeAnnotation(anno)) {
+          names.add(n.name as string);
+        }
+      }
+
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body as unknown[]);
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+      if (n.kind === "match-stmt" && Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
       if (n.kind === "if-stmt") {
         if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
         if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
@@ -607,6 +697,62 @@ export function fileHasMapUsage(fileAST: Record<string, unknown>): boolean {
       }
     }
     // Recurse arrays + child objects (logic bodies, children, control flow).
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) { walk(c); if (found) return; } }
+      else if (v && typeof v === "object") { walk(v); if (found) return; }
+    }
+  }
+  const nodes = getNodes(fileAST);
+  for (const node of nodes as unknown[]) { walk(node); if (found) break; }
+  return found;
+}
+
+/**
+ * §59.12 (D4) — Does this file invoke a set-ALGEBRA method (`.union` /
+ * `.intersect` / `.difference`) on a known set cell? Drives the `stdlib-data`
+ * runtime chunk gate in `emit-client.ts:detectRuntimeChunks`: those three
+ * methods DELEGATE to the shipped `scrml:data` value-canonical algebra
+ * (`_scrml_stdlib.data.union/intersection/difference`), so the chunk that
+ * populates `_scrml_stdlib.data` must ship even though the author never wrote a
+ * `scrml:data` import. The other set methods (`.add`/`.has`/`.remove`/`.size`/
+ * `.elements`) lower to the `map` chunk's `_scrml_map_*` helpers and need NO
+ * data chunk — so this gate is PRECISE (a set that never uses algebra ships no
+ * data chunk; minimal-runtime discipline).
+ *
+ * Detection is shallow-receiver: a `CallExpr` whose callee is a `MemberExpr`
+ * with property ∈ {union, intersect, difference} and immediate object `@<set>`
+ * (`<set>` ∈ `setVarNames`). A CHAINED algebra call (`@s.union(@t).intersect(…)`)
+ * is covered because its FIRST link is on the set var `@s`.
+ */
+export function fileHasSetAlgebraUsage(
+  fileAST: Record<string, unknown>,
+  setVarNames: Set<string>,
+): boolean {
+  if (!fileAST || typeof fileAST !== "object" || setVarNames.size === 0) return false;
+  const ALGEBRA = new Set(["union", "intersect", "difference"]);
+  let found = false;
+  const seen = new WeakSet<object>();
+  function walk(node: unknown): void {
+    if (found || !node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (n.kind === "call") {
+      const callee = n.callee as Record<string, unknown> | undefined;
+      if (
+        callee && callee.kind === "member" &&
+        typeof callee.property === "string" && ALGEBRA.has(callee.property) &&
+        callee.object && typeof callee.object === "object"
+      ) {
+        const obj = callee.object as Record<string, unknown>;
+        if (obj.kind === "ident" && typeof obj.name === "string" && obj.name.startsWith("@") &&
+            setVarNames.has(obj.name.slice(1))) {
+          found = true;
+          return;
+        }
+      }
+    }
     for (const key in n) {
       const v = n[key];
       if (Array.isArray(v)) { for (const c of v) { walk(c); if (found) return; } }
