@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 17 |
-| LOW | 14 |
+| LOW | 13 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2245,8 +2245,8 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
-### G-CHANNEL-SERVER-KEYWORD-AUTO-MIGRATE — `bun scrml migrate` does not auto-strip a deprecated `server function` channel-cell-write publisher → client under RULING A (it fires E-CHANNEL-SERVER-CELL-READ + leaves it for manual fix) — `NEW S189; LOW; migration ergonomics (Enhanced-A deferred)`
-<!-- @gap id=g-channel-server-keyword-auto-migrate sev=LOW status=open -->
+### G-CHANNEL-SERVER-KEYWORD-AUTO-MIGRATE — `bun scrml migrate` does not auto-strip a deprecated `server function` channel-cell-write publisher → client under RULING A (it fires E-CHANNEL-SERVER-CELL-READ + leaves it for manual fix) — `NEW S189; LOW; migration ergonomics (Enhanced-A — RESOLVED S221)`
+**RESOLVED S221 (ss27 #5, `bun scrml migrate --fix`; user-ratified Enhanced-A):** Migration 5 in `migrate.js` strips the `server` keyword from a deprecated channel-cell-write publisher → canonical client-side `function` (onclient §38.10 form). R4-verified RULING A against live SPEC §12.2 Trigger 7 + §38.4; precise discriminator (E-CHANNEL fires AND W-DEPRECATED does NOT → keyword is the sole server reason; generators + broadcast/disconnect/SQL-escalated readers EXCLUDED → those stay MANUAL payload-rewrite per §38.6.1). sPA R26 26/0 (red→green + adversarial + idempotent). **Tooling-ergonomics producing the canonical form — the RULING A language semantics (E-CHANNEL-SERVER-CELL-READ / §38.6.1) are UNCHANGED** (SPEC.md normative text never referenced auto-migration; only the SPEC-INDEX S189 "Enhanced-A deferred" changelog note was stale → flipped S221). User ratified "land + flip enhanced A" S221. <!-- @gap id=g-channel-server-keyword-auto-migrate sev=LOW status=resolved -->
 
 **Filed S189 as the deferred Enhanced-A half of [[g-channel-publisher-server-cell-read]] (the user ruled "land min A").** Under RULING A (S189), a channel-cell WRITE is a CLIENT-side operation (Trigger 7a dropped). The `server`-keyword migration (`rewriteServerFunctionKeyword`, S180) strips `server` only where it is *redundant* (the function escalates anyway). A deprecated `server function` channel publisher that ONLY writes a channel cell does NOT self-escalate under A → `server` is load-bearing → the migration KEEPS it. The author is instead steered by the new `E-CHANNEL-SERVER-CELL-READ` hard error (the server-side cell read) to drop `server` → client by hand. **Enhanced-A would** teach the migration (+ the `W-DEPRECATED-SERVER-MODIFIER` lint fire conditions) to recognize a pure-cell-write `server function` channel publisher as "belongs on the client under A" → auto-strip `server` → client (smoother UX; no hard error). **Severity LOW** — ZERO corpus demand (no real app has a `server function` channel publisher; all corpus publishers are the canonical no-`server` form, already client-side per Part 1); the minimal-A diagnostic is a clear, guided fix. **Re-trigger:** an adopter reports friction migrating a legacy `server function` channel publisher, OR a corpus `server function` channel publisher appears. **Fix loci:** `compiler/src/commands/migrate.js rewriteServerFunctionKeyword` (the redundancy/strip decision) + the `W-DEPRECATED-SERVER-MODIFIER` fire conditions (route-inference / type-system) — recognize channel-cell-write publishers as strip-to-client.
 

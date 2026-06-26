@@ -26,6 +26,16 @@
  *     `server function*` (deferred) and never `server fn`. Diagnostic-driven —
  *     see `rewriteServerFunctionKeyword` below.
  *
+ *   5. `server` keyword on a `server function` CHANNEL PUBLISHER
+ *     (E-CHANNEL-SERVER-CELL-READ, channel-cell-write-client-side-A RULING A):
+ *     strip the deprecated `server` keyword from a `server function NAME(`
+ *     channel publisher that read-modify-writes a channel cell, where the
+ *     keyword is the SOLE server-placement reason (E-CHANNEL fires AND
+ *     W-DEPRECATED does NOT) — the strip flips it to a client-side `function`
+ *     that syncs via `__sync` (§38.4), clearing the error. Excludes generators
+ *     and broadcast/SQL-escalated publishers (those need a manual payload
+ *     rewrite, §38.6.1). Diagnostic-driven — see `rewriteChannelServerPublisher`.
+ *
  * Migration gated by `--program-shape` (v0.3 Wave 2 — S86):
  *   - Program-shape rewrite per SPEC §40.8 (one-program-per-application).
  *      File classified as entry / route / module / schema-anchor / ambiguous;
@@ -871,6 +881,254 @@ export function rewriteServerFunctionKeyword(source, filePath) {
 
   // Apply right-to-left so earlier offsets stay valid. Fail-safe: confirm the
   // slice we're about to delete still reads `server` + whitespace.
+  edits.sort((a, b) => b.delStart - a.delStart);
+  let rewritten = source;
+  let count = 0;
+  for (const { delStart, delEnd } of edits) {
+    const slice = rewritten.slice(delStart, delEnd);
+    if (!/^server\s+$/.test(slice)) continue; // moved/clobbered — skip
+    rewritten = rewritten.slice(0, delStart) + rewritten.slice(delEnd);
+    count++;
+  }
+
+  return { rewritten, changed: rewritten !== source, count };
+}
+
+
+// ---------------------------------------------------------------------------
+// Migration 5 (channel-server-publisher-eliminate — RULING A / Enhanced-A) —
+// strip the deprecated `server` keyword from a `server function NAME(` CHANNEL
+// PUBLISHER that read-modify-writes a channel-declared cell, so the publisher
+// runs CLIENT-side (§38.4) and syncs via the auto-`__sync` reactive effect.
+//
+// Background (change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A,
+// S189): §12.2 Trigger 7a (channel-cell-WRITE escalation) was DROPPED — a
+// channel-cell write is a CLIENT-side sync-emit (§38.4, §38.10). A legacy
+// `server function` publisher that read-modify-writes a channel cell is
+// therefore server-PLACED by the `server` keyword ALONE, and its server-side
+// READ of the client-held cell fires E-CHANNEL-SERVER-CELL-READ (§34, §38.4).
+// The canonical fix is to drop `server` → the publisher becomes a plain
+// client-side `function` (exactly the onclient Bug-2b shape, §38.10) → the cell
+// read is a valid client-held read → the error clears. Minimal-A (S189) left
+// this MANUAL (Enhanced-A deferred); THIS migration is Enhanced-A.
+//
+// SAFETY — strip ONLY where dropping `server` actually FIXES the error, i.e.
+// where the `server` keyword is the SOLE server-placement reason. The
+// discriminator is the INVERSE of Migration 4's W-DEPRECATED signal:
+//   - E-CHANNEL-SERVER-CELL-READ fires on the fn (a channel-cell read in a
+//     server-context body), AND
+//   - W-DEPRECATED-SERVER-MODIFIER does NOT fire on the fn.
+// W-DEPRECATED fires iff a NON-keyword escalation reason exists (T1/T2/T3 body,
+// T5 caller-context, T7 broadcast/disconnect, T8 reserved-name handle). Its
+// ABSENCE on an E-CHANNEL-firing `server function` proves the keyword is the
+// sole reason → stripping declassifies the fn to the client → the read becomes
+// a valid client-held read → the error clears. If W-DEPRECATED DOES fire (a
+// broadcast()/disconnect()- or SQL-escalated publisher that ALSO reads a cell),
+// stripping leaves the fn server (Migration 4 handles the now-redundant
+// keyword) and the E-CHANNEL error PERSISTS — that case needs a manual payload
+// rewrite (§38.6.1), NOT a keyword strip. Generators (`server function*`, SSE)
+// are excluded, mirroring Migration 4.
+//
+// Like Migration 4 this is a `--fix`-tier, DIAGNOSTIC-driven migration (it
+// staged-compiles to collect the fire-sites) — a pure-text regex cannot tell a
+// keyword-sole channel publisher from a broadcast/SQL-escalated one and would
+// leave a dangling error or mis-strip.
+// ---------------------------------------------------------------------------
+
+/**
+ * Staged-compile the source IN PLACE (mirrors `gatherDeprecatedServerWarnings`)
+ * and return BOTH the E-CHANNEL-SERVER-CELL-READ fire-sites (the channel-cell
+ * READ spans, inside the offending function body) AND the
+ * W-DEPRECATED-SERVER-MODIFIER fire-sites (the decl-anchored spans) from ONE
+ * compile, so Migration 5 can apply the keyword-sole discriminator without a
+ * second staged compile. On any read/stage/compile failure, returns empty
+ * arrays (fail closed — strip nothing rather than strip blindly).
+ *
+ * @param {string} source — the (already W-* `:>`-migrated) source to analyse
+ * @param {string} filePath — real on-disk path (for the import graph)
+ * @returns {{ chanSites: Array<{ span: { start: number } | null }>,
+ *             wdepSites: Array<{ span: { start: number } | null }> }}
+ */
+function gatherChannelServerCellReadSites(source, filePath) {
+  let originalContent;
+  try {
+    originalContent = readFileSync(filePath, "utf8");
+  } catch {
+    return { chanSites: [], wdepSites: [] };
+  }
+
+  let result;
+  let stagingError = null;
+  try {
+    try {
+      writeFileSync(filePath, source, "utf8");
+    } catch (err) {
+      stagingError = err;
+    }
+    if (!stagingError) {
+      try {
+        result = compileScrml({
+          inputFiles: [filePath],
+          write: false,
+          gather: true,
+          log: () => {},
+        });
+      } catch {
+        return { chanSites: [], wdepSites: [] };
+      }
+    }
+  } finally {
+    try {
+      writeFileSync(filePath, originalContent, "utf8");
+    } catch (restoreErr) {
+      // Restoration failed; surface loudly — same contract as sanityCheckParse.
+      throw new Error(
+        `Migration 5 harness: failed to restore original content at ${filePath} ` +
+        `(file may be left in staged state): ${restoreErr.message}`,
+      );
+    }
+  }
+
+  if (stagingError || !result) return { chanSites: [], wdepSites: [] };
+
+  // E-CHANNEL is an Error (result.errors); W-DEPRECATED is a Warning
+  // (result.warnings). Scan both streams defensively (cross-stream partition).
+  const streams = [];
+  if (Array.isArray(result.warnings)) streams.push(...result.warnings);
+  if (Array.isArray(result.errors)) streams.push(...result.errors);
+
+  const chanSites = [];
+  const wdepSites = [];
+  for (const d of streams) {
+    if (!d) continue;
+    if (d.code === "E-CHANNEL-SERVER-CELL-READ") chanSites.push({ span: d.span ?? null });
+    else if (d.code === "W-DEPRECATED-SERVER-MODIFIER") wdepSites.push({ span: d.span ?? null });
+  }
+  return { chanSites, wdepSites };
+}
+
+/**
+ * Migration 5 — strip the deprecated `server` keyword from a `server function
+ * NAME(` channel publisher whose server-side channel-cell READ fires
+ * E-CHANNEL-SERVER-CELL-READ AND on which W-DEPRECATED-SERVER-MODIFIER does NOT
+ * fire (i.e. the keyword is the SOLE server-placement reason — stripping
+ * declassifies the fn to the client and CLEARS the error). See the block
+ * comment above for the safety rationale.
+ *
+ * Per declaration, the strip predicate is:
+ *   1. Enumerate every `[pure|async] server function [*]NAME(...) { ... }` decl
+ *      with its header range `[headerStart, bodyOpen)` and body range
+ *      `[bodyOpen, bodyEnd)` (via brace matching).
+ *   2. EXCLUDE a generator (`server function*`) — SSE is deferred (Migration 4
+ *      parity).
+ *   3. readsCell: an E-CHANNEL read span falls within `[headerStart, bodyEnd)`
+ *      (the read statement is in the body; the `record.fnNode.span` fallback is
+ *      at the header — both covered).
+ *   4. keywordRedundant: a W-DEPRECATED span falls within `[headerStart,
+ *      bodyOpen)` (the decl header). If so, this is a Migration-4 site (another
+ *      escalation reason present) — stripping would NOT clear the channel read
+ *      error → skip.
+ *   5. Strip `[serverStart, functionStart)` — the `server` keyword + the single
+ *      whitespace run that follows it, leaving `function NAME(`.
+ *
+ * Applied right-to-left so earlier offsets stay valid, with a `^server\s+$`
+ * fail-safe on each slice. A re-run on the stripped `function NAME(` finds no
+ * E-CHANNEL (it is now client-side) → no edit (idempotent). The rewritten
+ * source is re-verified by the `sanityCheckParse` gate in `migrateFile`.
+ *
+ * @param {string} source — raw source text (post W-* `:>` migration)
+ * @param {string} filePath — real on-disk path (for the import graph)
+ * @returns {{ rewritten: string, changed: boolean, count: number }}
+ */
+export function rewriteChannelServerPublisher(source, filePath) {
+  const { chanSites, wdepSites } = gatherChannelServerCellReadSites(source, filePath);
+  if (chanSites.length === 0) {
+    return { rewritten: source, changed: false, count: 0 };
+  }
+
+  const isWordChar = (ch) => /[A-Za-z0-9_$]/.test(ch);
+
+  // Enumerate every `[pure|async] server function [*]NAME(...) { ... }` decl.
+  const decls = [];
+  let scan = 0;
+  while (true) {
+    const idx = source.indexOf("server", scan);
+    if (idx === -1) break;
+    scan = idx + "server".length;
+
+    // `server` must be a standalone word (not a substring like `myserver`).
+    const before = idx > 0 ? source[idx - 1] : "";
+    if (before && isWordChar(before)) continue;
+    if (isWordChar(source[idx + "server".length] || "")) continue;
+
+    // The next word must be the `function` keyword.
+    let i = idx + "server".length;
+    while (i < source.length && /\s/.test(source[i])) i++;
+    const fnStart = i;
+    let j = i;
+    while (j < source.length && isWordChar(source[j])) j++;
+    if (source.slice(fnStart, j) !== "function") continue;
+
+    // EXCLUDE a generator `server function*` (SSE — deferred, Migration 4 parity).
+    let k = j;
+    while (k < source.length && /\s/.test(source[k])) k++;
+    if (source[k] === "*") continue;
+
+    // Skip NAME, then the param list `(...)`, then locate the body `{`.
+    while (k < source.length && isWordChar(source[k])) k++; // NAME
+    while (k < source.length && /\s/.test(source[k])) k++;
+    if (source[k] !== "(") continue;
+    let depth = 0;
+    let q = k;
+    for (; q < source.length; q++) {
+      const ch = source[q];
+      if (ch === "(") depth++;
+      else if (ch === ")") { depth--; if (depth === 0) { q++; break; } }
+    }
+    while (q < source.length && /\s/.test(source[q])) q++;
+    if (source[q] !== "{") continue;
+    const bodyOpen = q;
+    const bodyEnd = skipBracedBlock(source, bodyOpen);
+    if (bodyEnd === -1) continue;
+
+    // Header start: walk back over a preceding `pure`/`async` modifier word so a
+    // W-DEPRECATED span anchored on the modifier still maps to this decl.
+    let headerStart = idx;
+    for (let hops = 0; hops < 2; hops++) {
+      let b = headerStart - 1;
+      while (b >= 0 && /\s/.test(source[b])) b--;
+      const wordEnd = b + 1;
+      while (b >= 0 && isWordChar(source[b])) b--;
+      const w = source.slice(b + 1, wordEnd);
+      if (w === "pure" || w === "async") headerStart = b + 1;
+      else break;
+    }
+
+    decls.push({ serverStart: idx, functionStart: fnStart, headerStart, bodyOpen, bodyEnd });
+  }
+
+  const within = (pos, lo, hi) =>
+    typeof pos === "number" && pos >= lo && pos < hi;
+
+  const edits = [];
+  for (const decl of decls) {
+    const readsCell = chanSites.some(
+      (s) => s.span && within(s.span.start, decl.headerStart, decl.bodyEnd),
+    );
+    if (!readsCell) continue;
+    const keywordRedundant = wdepSites.some(
+      (s) => s.span && within(s.span.start, decl.headerStart, decl.bodyOpen),
+    );
+    if (keywordRedundant) continue; // Migration-4 site — a strip won't clear the read error.
+    edits.push({ delStart: decl.serverStart, delEnd: decl.functionStart });
+  }
+
+  if (edits.length === 0) {
+    return { rewritten: source, changed: false, count: 0 };
+  }
+
+  // Apply right-to-left so earlier offsets stay valid; confirm each slice still
+  // reads `server` + whitespace before deleting.
   edits.sort((a, b) => b.delStart - a.delStart);
   let rewritten = source;
   let count = 0;
@@ -2398,6 +2656,16 @@ Optional migrations (opt-in flags):
                             find the redundant-keyword sites. Excludes the SSE
                             generator \`server function*\` (deferred) and never
                             touches \`server fn\` (pure-server pin).
+  - channel publisher     (--fix, E-CHANNEL-SERVER-CELL-READ, RULING A): strips
+                            the deprecated \`server\` keyword from a \`server
+                            function NAME(\` CHANNEL PUBLISHER that read-modify-
+                            writes a channel cell, so it runs client-side and
+                            syncs via \`__sync\` (SPEC §38.4). Diagnostic-driven —
+                            strips ONLY where E-CHANNEL-SERVER-CELL-READ fires and
+                            W-DEPRECATED-SERVER-MODIFIER does NOT (the keyword is
+                            the sole server-placement reason). A broadcast/SQL-
+                            escalated publisher (keyword redundant) is left for
+                            the manual payload rewrite (§38.6.1).
 
 Arguments:
   <file>                  A single .scrml file
@@ -2418,7 +2686,11 @@ Options:
                           \`server\`-keyword strip (W-DEPRECATED-SERVER-MODIFIER,
                           S180): \`server function NAME(\` → \`function NAME(\` where
                           the function still escalates server (excludes
-                          \`server function*\` SSE + \`server fn\`).
+                          \`server function*\` SSE + \`server fn\`); and the
+                          channel-publisher \`server\`-strip
+                          (E-CHANNEL-SERVER-CELL-READ, RULING A): a deprecated
+                          \`server function\` channel publisher that writes a
+                          channel cell → client-side \`function\` (SPEC §38.4).
   --report                With --dry-run --program-shape, emit a structured
                           advisory report listing every in-scope file's bucket,
                           evidence, and proposed action (REWRITE / SKIP /
@@ -2676,6 +2948,26 @@ export function migrateFile(filePath, opts, cwd) {
       changed = true;
     }
     migrations.serverFnKeyword = sfResult.count;
+
+    // Step 1f: Migration 5 (channel-server-publisher-eliminate, RULING A /
+    // Enhanced-A) — strip the deprecated `server` keyword from a `server
+    // function NAME(` CHANNEL PUBLISHER whose server-side channel-cell READ
+    // fires E-CHANNEL-SERVER-CELL-READ AND on which W-DEPRECATED-SERVER-MODIFIER
+    // does NOT fire (the keyword is the SOLE server-placement reason → stripping
+    // it declassifies the publisher to the client per §38.4 / RULING A, where
+    // the cell-write syncs via `__sync` and the read is valid → the error
+    // clears). DIAGNOSTIC-driven (staged compile → discriminator → span-strip).
+    // Runs AFTER Migration 4 on the post-`server`-strip text: Migration 4 has
+    // already removed the redundant keyword from broadcast/SQL-escalated
+    // publishers (W-DEPRECATED fire-sites), so the only `server function`
+    // channel publishers left for Migration 5 are the keyword-sole ones it can
+    // safely flip to the client. See `rewriteChannelServerPublisher`.
+    const cpResult = rewriteChannelServerPublisher(rewritten, filePath);
+    if (cpResult.changed) {
+      rewritten = cpResult.rewritten;
+      changed = true;
+    }
+    migrations.channelServerPublisher = cpResult.count;
   }
 
   // Step 2: optionally apply v0.3 program-shape migration.
@@ -2832,6 +3124,7 @@ export function runMigrate(args) {
   let totalGivenGuardArrow = 0;
   let totalColonShorthandPlacement = 0;
   let totalServerFnKeyword = 0;
+  let totalChannelServerPublisher = 0;
   let totalConstAt = 0;
   const failures = [];
   const reportRows = []; // for --report aggregation
@@ -2859,6 +3152,7 @@ export function runMigrate(args) {
         totalGivenGuardArrow += r.migrations.givenGuardArrow ?? 0;
         totalColonShorthandPlacement += r.migrations.colonShorthandPlacement ?? 0;
         totalServerFnKeyword += r.migrations.serverFnKeyword ?? 0;
+        totalChannelServerPublisher += r.migrations.channelServerPublisher ?? 0;
         totalConstAt += r.migrations.constAt ?? 0;
       }
       if (dryRun && r.diff && !report) {
@@ -2896,6 +3190,7 @@ export function runMigrate(args) {
     if (totalGivenGuardArrow > 0) console.log(`    ${c.dim(`given-guard \`:>\` migrations:`)} ${totalGivenGuardArrow}`);
     if (totalColonShorthandPlacement > 0) console.log(`    ${c.dim(`\`:\`-shorthand inside-opener migrations:`)} ${totalColonShorthandPlacement}`);
     if (totalServerFnKeyword > 0) console.log(`    ${c.dim(`\`server\` keyword strips (\`server function\` -> \`function\`):`)} ${totalServerFnKeyword}`);
+    if (totalChannelServerPublisher > 0) console.log(`    ${c.dim(`channel-publisher \`server\` strips (RULING A, client-side cell-write):`)} ${totalChannelServerPublisher}`);
     if (totalConstAt > 0) console.log(`    ${c.dim(`\`const @name\` -> \`const <name>\` migrations:`)} ${totalConstAt}`);
   }
   if (unchangedCount > 0) {

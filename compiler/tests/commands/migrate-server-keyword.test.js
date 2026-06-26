@@ -203,8 +203,10 @@ describe("§5 channel cell-write publisher → `server` NOT stripped (RULING A)"
     // W-DEPRECATED-SERVER-MODIFIER does NOT fire → Migration 4 does NOT strip it
     // (stripping would flip the boundary server→client). The deprecated form is
     // separately flagged: the server-side cell READ fires E-CHANNEL-SERVER-CELL-READ
-    // (§34), which steers the author to drop `server` → client by hand. (Auto-
-    // migrating it to client is the deferred Enhanced-A enhancement.)
+    // (§34). Migration 4 (this function) leaves it; the auto-migration to client
+    // is Migration 5 (`rewriteChannelServerPublisher`, Enhanced-A, change-id
+    // `ss27-5-channel-migrate-autostrip-2026-06-25`) — see
+    // migrate-channel-publisher.test.js.
     const source = `<program>
   <channel name="chat" topic="lobby">
     <count> = 0
@@ -413,7 +415,9 @@ describe("§9 no-client-flip — stripped server stays server-side", () => {
     // therefore stays server, and its server-side READ of the channel cell
     // `@count` (the `@count = @count + 1` read-modify-write) is flagged
     // E-CHANNEL-SERVER-CELL-READ (§34) — channel cells are client-held (§38.4),
-    // so there is no server-side value. The author drops `server` → client.
+    // so there is no server-side value. Migration 4 (this function) leaves it;
+    // Migration 5 (`rewriteChannelServerPublisher`, Enhanced-A) auto-drops
+    // `server` → client — see migrate-channel-publisher.test.js.
     const source = `<program>
   <channel name="chat" topic="lobby">
     <count> = 0
