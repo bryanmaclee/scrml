@@ -12,7 +12,8 @@
 
 ## Items
 
-1. **HAMT map runtime swap** (FBIP increment 1 + S94 blow-up fix) `[status=open]` **SURVEY-FIRST**
+1. **HAMT map runtime swap** (FBIP increment 1 + S94 blow-up fix) `[status=landed-on-branch SHA=9787078a]` **SURVEY-FIRST**
    - Swap §59 map internal rep COW → HAMT (persistent structural sharing); O(n) clone-per-insert → O(log n) shared-path. Preserve value-canonical hashing, order-independent `==`, lossless codec, method surface, source-COW form.
    - Differential-test vs current COW map (observably identical). Then sequence ss37 (Set) on the HAMT template.
    - Footprint: runtime map structure + hasher; codegen lowering (likely unchanged — source form is stable); test-suite preservation.
+   - **LANDED ss38** (crash-recovery: prior session dispatched + agent committed `f30d61bf`, died pre-land; this session rebased onto origin/main + verified + landed): Strategy A (lazily-materialized memoized `.entries` compat view) → zero edits to the 3 direct-`.entries` readers + 2 replicas (the instance getter keeps `==` self-contained). Differential gate `value-native-map-hamt-differential-ss38` green (4729 assertions, observably identical to inline COW over randomized + adversarial sequences). Perf: insert-loop 4x-N ratio 3.9x (near-linear) vs COW 12.2x; ~988x faster at N=8000 (S94 blow-up fixed). **Set came for FREE** — `set[K]` is a thin desugar over the §59 map (reactive-deps.ts:331), no separate `_scrml_set_*` structure → the map swap covers set automatically; `value-native-set-e2e` green. Files: `compiler/src/runtime-template.js`, `value-native-map-e2e-d4.test.js`, `value-native-set-e2e.test.js`, new `value-native-map-hamt-differential-ss38.test.js`. Blocking gate (unit+integration+conformance) green; only browser-todomvc dist env-gap failed (S209, excluded from gate).

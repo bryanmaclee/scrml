@@ -4174,30 +4174,56 @@ function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table) {
 //
 //   {
 //     __scrml_map: true,
-//     entries: { [canonicalKeyString]: { k: <keyValue>, v: <value> } },
+//     _root:  <HAMT node>,   // persistent hash-array-mapped trie (entries live here)
+//     _count: <int>,         // entry count (O(1) .size)
+//     _seq:   <int>,         // next insertion sequence number (drives iteration order)
 //     ordered: <bool>,
-//     order:   [canonicalKeyString, ...]   // present iff ordered === true
-//   }
+//     entries: <lazy view>   // NON-stored: a memoized { ck: { k, v } } accessor
+//   }                        //            derived from _root (see below)
 //
-// Why key by the FULL value-canonical string (not an FNV bucket): the canonical
-// string is collision-free for DISTINCT values (two §45-structurally-equal
-// values produce byte-identical strings — §59.5 keystone), so a plain-object
-// lookup IS the §45 == identity. No in-bucket == disambiguation is needed
-// (simpler than FNV-bucketing). The FNV-1a hash (_scrml_fnv1a) is transcribed
-// here per §59.5 (it is the §47.1.3-normative codec the spec names) and is
-// available, but v1 uses direct canonical-string keying rather than hashing.
+// Internal storage is a HAMT (hash-array-mapped trie / persistent structural-
+// sharing) keyed on _scrml_fnv1a(_scrml_value_canonical(k)). A "write" copies
+// only the O(log n) path from root to the touched leaf and SHARES every
+// untouched subtree — so insert/remove/update are O(log n), not the O(n)
+// whole-object copy of the prior COW representation (the standing fix for the
+// S94 super-linear insert blow-up). It is STILL pure/immutable: subtrees are
+// shared, never mutated in place, so every method returns a NEW map value
+// (reassignment-canonical, §59.7) with zero soundness risk — no uniqueness
+// analysis needed (FBIP increment 1, "structural sharing not in-place").
 //
-// @ordered (§59.8): JS objects iterate INTEGER-LIKE string keys in NUMERIC
-// order, not insertion order — so an [int: V] map would silently reorder. The
-// UNORDERED default therefore makes NO order promise (it relies on unspecified
-// JS iteration — "unordered + loud", §59.8) and carries NO order sidecar (zero
-// cost). An @ordered map maintains an explicit \`order\` array on every
-// insert/remove (the "visibly costs more") and iterates via it.
+// Why the canonical STRING (not just the hash) is the identity: the FNV-1a hash
+// (_scrml_fnv1a, §47.1.3 / §59.5) only ROUTES the trie path; the full value-
+// canonical string (_scrml_value_canonical) is the collision-free key identity
+// (two §45-structurally-equal values produce byte-identical strings — the §59.5
+// keystone). A leaf stores { ck, k, v, seq, h }: the canonical string ck IS the
+// key-equality test (h is its routing hash); genuine hash collisions (distinct
+// ck, identical h) collapse into a collision bucket, where ck still decides.
 //
-// Clone-on-write: every method returns a NEW map (reassignment-canonical,
-// §59.7); the caller hands the result to _scrml_reactive_set exactly as array
-// updates reassign (\`@arr = [...@arr, x]\`). v1 uses a plain shallow clone of
-// the entries object (HAMT / structural-sharing deferred).
+// The \`entries\` view (compatibility accessor): the §45 == (§59.9), the value-
+// canonical walker (§59.5, nested-map branch), the §20.6 log renderer, and the
+// REPLICATED data.js / log-loc.ts copies all read \`m.entries\` as a
+// { ck: { k, v } } object. Rather than route every (cross-chunk, cross-realm,
+// standalone-replica) reader through a shared accessor, the map object SELF-
+// DESCRIBES its view: \`entries\` is a lazily-materialized, MEMOIZED accessor
+// (_scrml_map_define_entries) that walks _root once on first read and redefines
+// itself as a plain data property. The hot write path (insert/get/has/remove/
+// size/keys/values/entries) reads _root DIRECTLY and NEVER touches \`entries\`, so
+// it never materializes — the structural-sharing win is preserved. Only the
+// inherently-O(n) value-walkers pay the one-time O(n) materialization, and the
+// accessor keeps the map a plain JSON-serializable value (the §57 raw round-trip
+// stays lossless, alongside the §59.10 codec).
+//
+// @ordered (§59.8) + iteration order: every leaf carries a monotonic insertion
+// \`seq\` (new key -> next seq; overwrite/update REUSES the existing key's seq so
+// position is preserved; a removed-then-reinserted key gets a fresh seq and so
+// appends — exactly JS object-key semantics). keys()/values()/entries() and the
+// \`entries\` view iterate leaves sorted by seq, reproducing the prior
+// representation's insertion order BYTE-FOR-BYTE (all canonical-key strings are
+// non-integer-index strings, so the prior \`Object.keys\` also yielded insertion
+// order). The \`ordered\` FLAG is preserved for the §59.10 codec round-trip and as
+// the §59.8 iteration PROMISE; == ignores it (§59.9). The unordered default stays
+// "unordered + loud" with zero order sidecar — seq is one int per leaf, not an
+// O(n) sidecar array.
 //
 // Acyclic precondition (the cycles-prereq, scrml 8d9db4e1): value-cycles are
 // forbidden in scrml source by construction, so _scrml_value_canonical needs
@@ -4295,53 +4321,237 @@ function _scrml_value_canonical(v) {
 }
 
 // ---------------------------------------------------------------------------
-// Map construction + clone-on-write helpers
+// HAMT primitives (persistent, structural-sharing) — keyed on canonical strings
 // ---------------------------------------------------------------------------
+//
+// Node shapes (all plain JSON-safe objects — no class, no identity):
+//   leaf      : { ck, k, v, seq, h }     (a single entry; ck is the identity)
+//   bitmap    : { bitmap, nodes }        (sparse 32-way branch; nodes ordered by
+//                                          popcount of bitmap, children are leaf
+//                                          / bitmap / collision)
+//   collision : { collision: true, leaves: [leaf, ...] }   (full-hash ties)
+// The root is ALWAYS a bitmap node (empty root === { bitmap: 0, nodes: [] }).
 
-// Build an empty map. ordered === true allocates the order sidecar.
-function _scrml_map_empty(ordered) {
-  var m = { __scrml_map: true, entries: {}, ordered: ordered === true };
-  if (m.ordered) m.order = [];
+// Route a canonical key string to its uint32 trie path. Reuses the §59.5 /
+// §47.1.3 normative _scrml_fnv1a (base36 string) parsed back to its uint32 —
+// so there is ONE hash codec, with the constants defined exactly once.
+function _scrml_map_hash(ck) {
+  return parseInt(_scrml_fnv1a(ck), 36) >>> 0;
+}
+
+// Population count (number of set bits) of a uint32 — the child index within a
+// bitmap node is the popcount of the bits below the target fragment's bit.
+function _scrml_popcount(x) {
+  x = x - ((x >>> 1) & 0x55555555);
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  x = (x + (x >>> 4)) & 0x0f0f0f0f;
+  return (x * 0x01010101) >>> 24;
+}
+
+// A leaf is the only node carrying a string \`ck\`; bitmap/collision nodes do not.
+function _scrml_map_is_leaf(n) {
+  return n && typeof n.ck === "string";
+}
+
+// Find the leaf for canonical key \`ck\` (routing by \`hash\`); returns the leaf or
+// null. \`node\` is a bitmap node (root). 5-bit fragments => 32-way branching.
+function _scrml_hamt_find(node, hash, ck, shift) {
+  while (true) {
+    var frag = (hash >>> shift) & 31;
+    var bit = 1 << frag;
+    if ((node.bitmap & bit) === 0) return null;
+    var idx = _scrml_popcount(node.bitmap & (bit - 1));
+    var child = node.nodes[idx];
+    if (child.collision === true) {
+      for (var i = 0; i < child.leaves.length; i++) {
+        if (child.leaves[i].ck === ck) return child.leaves[i];
+      }
+      return null;
+    }
+    if (_scrml_map_is_leaf(child)) return child.ck === ck ? child : null;
+    node = child; // descend into the bitmap sub-node
+    shift += 5;
+  }
+}
+
+// Merge two DISTINCT-ck leaves into a sub-node, descending until their hash
+// fragments diverge; identical 32-bit hashes (distinct ck) become a collision
+// bucket. Returns a bitmap or collision node.
+function _scrml_hamt_merge_leaves(a, b, shift) {
+  var fa = (a.h >>> shift) & 31;
+  var fb = (b.h >>> shift) & 31;
+  if (fa !== fb) {
+    return { bitmap: (1 << fa) | (1 << fb), nodes: fa < fb ? [a, b] : [b, a] };
+  }
+  if (shift >= 30) {
+    // All 32 hash bits consumed and still equal: a genuine hash collision.
+    return { collision: true, leaves: [a, b] };
+  }
+  return { bitmap: 1 << fa, nodes: [_scrml_hamt_merge_leaves(a, b, shift + 5)] };
+}
+
+// Insert/replace \`leaf\` (by its ck) into a collision bucket — path-copies the
+// leaves array (structural sharing of the bucket's siblings).
+function _scrml_hamt_put_collision(node, leaf) {
+  var leaves = node.leaves.slice();
+  for (var i = 0; i < leaves.length; i++) {
+    if (leaves[i].ck === leaf.ck) { leaves[i] = leaf; return { collision: true, leaves: leaves }; }
+  }
+  leaves.push(leaf);
+  return { collision: true, leaves: leaves };
+}
+
+// Insert/replace \`leaf\` into a bitmap node, returning a NEW node that SHARES
+// every untouched child (only the O(log n) root->leaf path is copied). The
+// caller has already decided \`leaf.seq\` (reuse-on-overwrite, next-on-insert).
+function _scrml_hamt_put(node, leaf, shift) {
+  var frag = (leaf.h >>> shift) & 31;
+  var bit = 1 << frag;
+  var idx = _scrml_popcount(node.bitmap & (bit - 1));
+  if ((node.bitmap & bit) === 0) {
+    var nodes = node.nodes.slice();
+    nodes.splice(idx, 0, leaf);
+    return { bitmap: node.bitmap | bit, nodes: nodes };
+  }
+  var child = node.nodes[idx];
+  var newChild;
+  if (child.collision === true) {
+    newChild = _scrml_hamt_put_collision(child, leaf);
+  } else if (_scrml_map_is_leaf(child)) {
+    newChild = child.ck === leaf.ck ? leaf : _scrml_hamt_merge_leaves(child, leaf, shift + 5);
+  } else {
+    newChild = _scrml_hamt_put(child, leaf, shift + 5);
+  }
+  var nodes2 = node.nodes.slice();
+  nodes2[idx] = newChild;
+  return { bitmap: node.bitmap, nodes: nodes2 };
+}
+
+// Remove the leaf for \`ck\` (routing by \`hash\`), returning a NEW node (path-
+// copied) or the SAME node if absent (so callers can detect a no-op). Empty
+// sub-nodes may linger (harmless: find/iterate skip them) — correctness does
+// not depend on canonical-minimal trees, so collapse is intentionally omitted.
+function _scrml_hamt_remove(node, hash, ck, shift) {
+  var frag = (hash >>> shift) & 31;
+  var bit = 1 << frag;
+  if ((node.bitmap & bit) === 0) return node; // not present
+  var idx = _scrml_popcount(node.bitmap & (bit - 1));
+  var child = node.nodes[idx];
+  var newChild;
+  if (child.collision === true) {
+    var leaves = [];
+    for (var i = 0; i < child.leaves.length; i++) {
+      if (child.leaves[i].ck !== ck) leaves.push(child.leaves[i]);
+    }
+    if (leaves.length === child.leaves.length) return node; // not found
+    newChild = leaves.length === 1 ? leaves[0] : { collision: true, leaves: leaves };
+  } else if (_scrml_map_is_leaf(child)) {
+    if (child.ck !== ck) return node; // not found
+    var droppedNodes = node.nodes.slice();
+    droppedNodes.splice(idx, 1);
+    return { bitmap: node.bitmap & ~bit, nodes: droppedNodes };
+  } else {
+    newChild = _scrml_hamt_remove(child, hash, ck, shift + 5);
+    if (newChild === child) return node; // not found below
+  }
+  var nodes = node.nodes.slice();
+  nodes[idx] = newChild;
+  return { bitmap: node.bitmap, nodes: nodes };
+}
+
+// Collect every leaf reachable from \`node\` into \`out\` (traversal order). The
+// single iteration primitive behind .size-independent walks, keys/values/
+// entries, the == compare, the codec, and the \`entries\` view.
+function _scrml_hamt_collect(node, out) {
+  if (!node) return;
+  if (_scrml_map_is_leaf(node)) { out.push(node); return; }
+  if (node.collision === true) {
+    for (var i = 0; i < node.leaves.length; i++) out.push(node.leaves[i]);
+    return;
+  }
+  for (var j = 0; j < node.nodes.length; j++) _scrml_hamt_collect(node.nodes[j], out);
+}
+
+// All leaves of a map (unordered traversal).
+function _scrml_map_leaves(m) {
+  var out = [];
+  _scrml_hamt_collect(m._root, out);
+  return out;
+}
+
+// All leaves in ITERATION order (by insertion \`seq\`). This is the single source
+// of POSITIONAL CORRESPONDENCE: keys() / values() / entries() and the \`entries\`
+// view all derive from it, so observation index i agrees across them (§59.8).
+// seq order reproduces the prior representation's Object.keys insertion order
+// byte-for-byte (canonical-key strings are never integer-index-like, so the old
+// plain-object also iterated in insertion order). For unordered maps this order
+// is still "unspecified" per §59.8 — it just HAPPENS to be insertion order, as
+// it always has been.
+function _scrml_map_leaves_ordered(m) {
+  var ls = _scrml_map_leaves(m);
+  ls.sort(function (a, b) { return a.seq - b.seq; });
+  return ls;
+}
+
+// Attach the lazily-materialized, MEMOIZED \`entries\` compatibility view. The
+// §45 == (§59.9), _scrml_value_canonical's nested-map branch (§59.5), the §20.6
+// log renderer, and the REPLICATED data.js / log-loc.ts copies all read
+// \`m.entries\` as a { ck: { k, v } } object. The map object self-describes that
+// view here so those (cross-chunk / cross-realm / standalone) readers need NO
+// change and NO cross-chunk function reference. On first read the getter walks
+// _root once and REDEFINES \`entries\` as a plain data property, so repeated reads
+// (e.g. the canonical walker's per-key loop) are O(1) — no O(n^2). It is
+// enumerable + plain-data after materialization, so JSON.stringify(map) keeps a
+// lossless §57 raw round-trip; the hot write path never reads it, so it never
+// materializes (the structural-sharing win stands).
+function _scrml_map_define_entries(m) {
+  Object.defineProperty(m, "entries", {
+    configurable: true,
+    enumerable: true,
+    get: function () {
+      var ls = _scrml_map_leaves_ordered(this);
+      var view = {};
+      for (var i = 0; i < ls.length; i++) view[ls[i].ck] = { k: ls[i].k, v: ls[i].v };
+      Object.defineProperty(this, "entries", {
+        value: view, enumerable: true, configurable: true, writable: false,
+      });
+      return view;
+    },
+  });
+}
+
+// Internal constructor: a fresh map value over the given root/count/seq.
+function _scrml_map_new(root, count, seq, ordered) {
+  var m = { __scrml_map: true, _root: root, _count: count, _seq: seq, ordered: ordered === true };
+  _scrml_map_define_entries(m);
   return m;
 }
 
-// Shallow clone-on-write: copy the entries map (one level) + the order sidecar
-// (if ordered). The { k, v } entry objects are SHARED (values are immutable
-// scrml values; never mutated in place). Returns a fresh map ready to mutate.
-function _scrml_map_clone(m) {
-  var entries = {};
-  var keys = Object.keys(m.entries);
-  for (var i = 0; i < keys.length; i++) entries[keys[i]] = m.entries[keys[i]];
-  var out = { __scrml_map: true, entries: entries, ordered: m.ordered === true };
-  if (out.ordered) out.order = m.order ? m.order.slice() : [];
-  return out;
+// ---------------------------------------------------------------------------
+// Map construction
+// ---------------------------------------------------------------------------
+
+// Build an empty map. The \`ordered\` flag governs §59.8 iteration PROMISE (==
+// ignores it, §59.9) and round-trips through the §59.10 codec.
+function _scrml_map_empty(ordered) {
+  return _scrml_map_new({ bitmap: 0, nodes: [] }, 0, 0, ordered === true);
 }
 
 // _scrml_map_from_entries(pairs, ordered) — build a map from an array of
 // [key, value] pairs (the literal-lowering entry point; D4 emits this for a
-// map literal). Last-wins on duplicate keys (§59.3). pairs MAY be empty ([:]).
+// map literal). Last-wins on duplicate keys (§59.3); the FIRST occurrence fixes
+// the key's iteration position (seq), the LAST occurrence fixes its value —
+// exactly the prior set-in-place semantics. pairs MAY be empty ([:]).
 function _scrml_map_from_entries(pairs, ordered) {
   var m = _scrml_map_empty(ordered);
   if (pairs) {
-    for (var i = 0; i < pairs.length; i++) {
-      _scrml_map_set_inplace(m, pairs[i][0], pairs[i][1]);
-    }
+    for (var i = 0; i < pairs.length; i++) m = _scrml_map_insert(m, pairs[i][0], pairs[i][1]);
   }
   return m;
 }
 
-// Internal: set k -> v ON the given map (mutating; used only on a freshly
-// cloned/empty map). Maintains the order sidecar for ordered maps (append on
-// first insert of a key; existing key keeps its position — last-wins on value).
-function _scrml_map_set_inplace(m, k, v) {
-  var ck = _scrml_value_canonical(k);
-  var isNew = !Object.prototype.hasOwnProperty.call(m.entries, ck);
-  m.entries[ck] = { k: k, v: v };
-  if (m.ordered && isNew) m.order.push(ck);
-}
-
 // ---------------------------------------------------------------------------
-// Map method surface — all PURE (clone-on-write; reassignment-canonical §59.7)
+// Map method surface — all PURE (structural sharing; reassignment-canonical §59.7)
 // ---------------------------------------------------------------------------
 
 // _scrml_map_get(m, k) — bracket-read lowering target (§59.6). A key-MISS
@@ -4350,120 +4560,107 @@ function _scrml_map_set_inplace(m, k, v) {
 // !== undefined). A STORED \`not\` value is ALSO null; .has(k) disambiguates.
 function _scrml_map_get(m, k) {
   if (!m || m.__scrml_map !== true) return null; // graceful on non-map receiver
-  var e = m.entries[_scrml_value_canonical(k)];
-  return e === undefined ? null : e.v;
+  var ck = _scrml_value_canonical(k);
+  var leaf = _scrml_hamt_find(m._root, _scrml_map_hash(ck), ck, 0);
+  return leaf ? leaf.v : null;
 }
 
 // _scrml_map_has(m, k) -> bool (§59.6). The disambiguator: a stored \`not\`
 // value reads as null via _scrml_map_get, same as an absent key; .has decides.
 function _scrml_map_has(m, k) {
   if (!m || m.__scrml_map !== true) return false;
-  return Object.prototype.hasOwnProperty.call(m.entries, _scrml_value_canonical(k));
+  var ck = _scrml_value_canonical(k);
+  return _scrml_hamt_find(m._root, _scrml_map_hash(ck), ck, 0) !== null;
 }
 
 // _scrml_map_get_or(m, k, d) — fallback read in one expression (§59.6).
 function _scrml_map_get_or(m, k, d) {
   if (!m || m.__scrml_map !== true) return d;
-  var e = m.entries[_scrml_value_canonical(k)];
-  return e === undefined ? d : e.v;
+  var ck = _scrml_value_canonical(k);
+  var leaf = _scrml_hamt_find(m._root, _scrml_map_hash(ck), ck, 0);
+  return leaf ? leaf.v : d;
 }
 
 // _scrml_map_insert(m, k, v) — new map with k -> v, overwriting any prior k
-// (§59.7). Pure: returns a NEW map.
+// (§59.7). Pure: returns a NEW map that SHARES every untouched subtree of m.
+// Overwrite REUSES the key's seq (iteration position preserved); a new key
+// takes the next seq (appended).
 function _scrml_map_insert(m, k, v) {
-  var out = _scrml_map_clone(m);
-  _scrml_map_set_inplace(out, k, v);
-  return out;
+  var ck = _scrml_value_canonical(k);
+  var h = _scrml_map_hash(ck);
+  var existing = _scrml_hamt_find(m._root, h, ck, 0);
+  var seq = existing ? existing.seq : m._seq;
+  var leaf = { ck: ck, k: k, v: v, seq: seq, h: h };
+  var root = _scrml_hamt_put(m._root, leaf, 0);
+  return _scrml_map_new(root, existing ? m._count : m._count + 1, existing ? m._seq : m._seq + 1, m.ordered);
 }
 
 // _scrml_map_remove(m, k) — new map without k; no-op if absent (§59.7). This is
-// the ONLY removal — \`=not\` is NOT a remove (M6); a stored \`not\` survives.
+// the ONLY removal — \`=not\` is NOT a remove (M6); a stored \`not\` survives. The
+// _seq counter is monotonic (never reused), so a remove-then-reinsert of the
+// same key appends at a fresh position — matching JS delete-then-readd order.
 function _scrml_map_remove(m, k) {
   var ck = _scrml_value_canonical(k);
-  if (!Object.prototype.hasOwnProperty.call(m.entries, ck)) {
-    return _scrml_map_clone(m); // no-op, but still returns a fresh value
+  var h = _scrml_map_hash(ck);
+  if (_scrml_hamt_find(m._root, h, ck, 0) === null) {
+    return _scrml_map_new(m._root, m._count, m._seq, m.ordered); // no-op, fresh value
   }
-  var out = _scrml_map_clone(m);
-  delete out.entries[ck];
-  if (out.ordered) {
-    var idx = out.order.indexOf(ck);
-    if (idx !== -1) out.order.splice(idx, 1);
-  }
-  return out;
+  var root = _scrml_hamt_remove(m._root, h, ck, 0);
+  return _scrml_map_new(root, m._count - 1, m._seq, m.ordered);
 }
 
 // _scrml_map_update(m, k, fn) — upsert: new map with k -> fn(currentOrNot)
 // (§59.7). fn receives the current value or \`not\` (null) — no read-modify-write
-// race, since this is a single pure expression.
+// race, since this is a single pure expression. Overwrite preserves position.
 function _scrml_map_update(m, k, fn) {
   var ck = _scrml_value_canonical(k);
-  var e = m.entries[ck];
-  var current = e === undefined ? null : e.v;
-  var out = _scrml_map_clone(m);
-  _scrml_map_set_inplace(out, k, fn(current));
-  return out;
+  var h = _scrml_map_hash(ck);
+  var existing = _scrml_hamt_find(m._root, h, ck, 0);
+  var current = existing ? existing.v : null;
+  var seq = existing ? existing.seq : m._seq;
+  var leaf = { ck: ck, k: k, v: fn(current), seq: seq, h: h };
+  var root = _scrml_hamt_put(m._root, leaf, 0);
+  return _scrml_map_new(root, existing ? m._count : m._count + 1, existing ? m._seq : m._seq + 1, m.ordered);
 }
 
-// _scrml_map_insert_all(m, other) — BULK insert in ONE clone (defuses the
-// O(n^2) insert-in-a-loop, §59.7). scrml has no tuple, so \`other\` is ANOTHER
-// map of the same key/value types; all of its entries are inserted (last-wins
-// on key collision). Ordered semantics: other's keys append in other's
-// iteration order (insertion order for ordered other; canonical-string order
-// otherwise) — only keys NEW to m append to m's order sidecar.
+// _scrml_map_insert_all(m, other) — bulk merge (§59.7). scrml has no tuple, so
+// \`other\` is ANOTHER map of the same key/value types; all of its entries are
+// inserted (last-wins on key collision). other's keys are visited in other's
+// iteration order, so keys NEW to m append to m in that order. Each fold step is
+// an O(log n) structural-sharing insert (no O(n^2) — the prior bulk-clone
+// optimization is no longer needed once writes are sub-linear).
 function _scrml_map_insert_all(m, other) {
-  var out = _scrml_map_clone(m);
-  if (other && other.__scrml_map === true) {
-    var oKeys = _scrml_map_key_order(other);
-    for (var i = 0; i < oKeys.length; i++) {
-      var ck = oKeys[i];
-      var entry = other.entries[ck];
-      _scrml_map_set_inplace(out, entry.k, entry.v);
-    }
+  if (!other || other.__scrml_map !== true) {
+    return _scrml_map_new(m._root, m._count, m._seq, m.ordered); // fresh value, no change
   }
+  var ls = _scrml_map_leaves_ordered(other);
+  var out = m;
+  for (var i = 0; i < ls.length; i++) out = _scrml_map_insert(out, ls[i].k, ls[i].v);
+  if (out === m) out = _scrml_map_new(m._root, m._count, m._seq, m.ordered); // other empty -> still fresh
   return out;
 }
 
-// _scrml_map_size(m) -> int (§59.6). Note: the map count member is \`.size\`,
-// diverging from \`.length\` on arrays — intentional (§59.6).
+// _scrml_map_size(m) -> int (§59.6). O(1) via the maintained _count. Note: the
+// map count member is \`.size\`, diverging from \`.length\` on arrays — intentional.
 function _scrml_map_size(m) {
   if (!m || m.__scrml_map !== true) return 0;
-  return Object.keys(m.entries).length;
-}
-
-// Internal: the canonical-key iteration order for a map. Ordered maps iterate
-// via the explicit \`order\` sidecar (insertion order); unordered maps fall back
-// to JS object key order (UNSPECIFIED — §59.8). This single helper is the
-// source of POSITIONAL CORRESPONDENCE: keys() / values() / entries() all read
-// it, so keys()[i] / values()[i] / entries()[i] agree within an observation
-// (§59.8).
-function _scrml_map_key_order(m) {
-  if (m.ordered && m.order) {
-    // Defensive: filter any order entry that lost its backing entry (should
-    // not happen — insert/remove keep them in lockstep — but never iterate a
-    // dangling key).
-    var live = [];
-    for (var i = 0; i < m.order.length; i++) {
-      if (Object.prototype.hasOwnProperty.call(m.entries, m.order[i])) live.push(m.order[i]);
-    }
-    return live;
-  }
-  return Object.keys(m.entries);
+  return m._count;
 }
 
 // _scrml_map_keys(m) -> [KeyT] (§59.8). Positionally corresponds to values() /
-// entries().
+// entries() (all derive from _scrml_map_leaves_ordered).
 function _scrml_map_keys(m) {
-  var order = _scrml_map_key_order(m);
+  var ls = _scrml_map_leaves_ordered(m);
   var out = [];
-  for (var i = 0; i < order.length; i++) out.push(m.entries[order[i]].k);
+  for (var i = 0; i < ls.length; i++) out.push(ls[i].k);
   return out;
 }
 
 // _scrml_map_values(m) -> [ValT] (§59.8).
 function _scrml_map_values(m) {
-  var order = _scrml_map_key_order(m);
+  var ls = _scrml_map_leaves_ordered(m);
   var out = [];
-  for (var i = 0; i < order.length; i++) out.push(m.entries[order[i]].v);
+  for (var i = 0; i < ls.length; i++) out.push(ls[i].v);
   return out;
 }
 
@@ -4471,12 +4668,9 @@ function _scrml_map_values(m) {
 // a two-field STRUCT (scrml has no tuple), NOT a [k, v] tuple. Composes with
 // <each in=@m.entries() as e> + e.key / e.value.
 function _scrml_map_entries(m) {
-  var order = _scrml_map_key_order(m);
+  var ls = _scrml_map_leaves_ordered(m);
   var out = [];
-  for (var i = 0; i < order.length; i++) {
-    var e = m.entries[order[i]];
-    out.push({ key: e.k, value: e.v });
-  }
+  for (var i = 0; i < ls.length; i++) out.push({ key: ls[i].k, value: ls[i].v });
   return out;
 }
 
@@ -4484,12 +4678,10 @@ function _scrml_map_entries(m) {
 // key string (the cheap, explicit determinism, §59.8). NOTE: returns an entries
 // array (an observation), not a new map.
 function _scrml_map_sorted(m) {
-  var keys = Object.keys(m.entries).sort();
+  var ls = _scrml_map_leaves(m);
+  ls.sort(function (a, b) { return a.ck < b.ck ? -1 : a.ck > b.ck ? 1 : 0; });
   var out = [];
-  for (var i = 0; i < keys.length; i++) {
-    var e = m.entries[keys[i]];
-    out.push({ key: e.k, value: e.v });
-  }
+  for (var i = 0; i < ls.length; i++) out.push({ key: ls[i].k, value: ls[i].v });
   return out;
 }
 
@@ -4526,13 +4718,13 @@ function _scrml_map_sorted_by(m, fn) {
 // is lossless at the VALUE level (== holds across the round-trip).
 function _scrml_map_encode(m) {
   if (!m || m.__scrml_map !== true) return m; // not a map — pass through
-  var keys = Object.keys(m.entries).sort(); // canonical key-string order
+  var ls = _scrml_map_leaves(m);
+  ls.sort(function (a, b) { return a.ck < b.ck ? -1 : a.ck > b.ck ? 1 : 0; }); // canonical key-string order
   var entries = [];
-  for (var i = 0; i < keys.length; i++) {
-    var e = m.entries[keys[i]];
+  for (var i = 0; i < ls.length; i++) {
     // Reuse the §57 absence-envelope at the leaf for a stored \`not\` value.
-    var encV = e.v == null ? { __scrml_absent: true } : e.v;
-    entries.push([e.k, encV]);
+    var encV = ls[i].v == null ? { __scrml_absent: true } : ls[i].v;
+    entries.push([ls[i].k, encV]);
   }
   return { __scrml_map_enc: true, ordered: m.ordered === true, entries: entries };
 }
@@ -4540,7 +4732,9 @@ function _scrml_map_encode(m) {
 // _scrml_map_decode(x) — reconstruct a tagged map from its encoded form.
 // Accepts the canonical { __scrml_map_enc: true, ... } envelope; passes any
 // other value through unchanged. Decodes the §57 absence-envelope back to
-// \`not\` (null) at the value leaf.
+// \`not\` (null) at the value leaf. Entries arrive in canonical key order (encode
+// sorts them), so the rebuilt map's iteration order is canonical — matching the
+// §59.10 "post-decode order is canonical" contract.
 function _scrml_map_decode(x) {
   if (!x || x.__scrml_map_enc !== true) return x; // not an encoded map
   var m = _scrml_map_empty(x.ordered === true);
@@ -4554,7 +4748,7 @@ function _scrml_map_decode(x) {
       } else if (v !== null && typeof v === "object" && v.__scrml_absent === true) {
         v = null;
       }
-      _scrml_map_set_inplace(m, pair[0], v);
+      m = _scrml_map_insert(m, pair[0], v);
     }
   }
   return m;

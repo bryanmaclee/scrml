@@ -115,10 +115,19 @@ describe("§59 value-native map — END-TO-END", () => {
       }
       return src.slice(i, k) + "\n";
     }
+    // Full §59 map runtime helper set (HAMT representation, ss38). Listed in
+    // full so a future internal-helper tweak does not re-break this extraction.
     const names = [
-      "_scrml_fnv1a", "_scrml_value_canonical", "_scrml_map_empty", "_scrml_map_clone",
-      "_scrml_map_from_entries", "_scrml_map_set_inplace", "_scrml_map_get", "_scrml_map_size",
-      "_scrml_map_key_order", "_scrml_map_insert", "_scrml_map_entries",
+      "_scrml_fnv1a", "_scrml_value_canonical",
+      "_scrml_map_hash", "_scrml_popcount", "_scrml_map_is_leaf",
+      "_scrml_hamt_find", "_scrml_hamt_merge_leaves", "_scrml_hamt_put_collision",
+      "_scrml_hamt_put", "_scrml_hamt_remove", "_scrml_hamt_collect",
+      "_scrml_map_leaves", "_scrml_map_leaves_ordered", "_scrml_map_define_entries",
+      "_scrml_map_new", "_scrml_map_empty", "_scrml_map_from_entries",
+      "_scrml_map_get", "_scrml_map_has", "_scrml_map_get_or",
+      "_scrml_map_insert", "_scrml_map_remove", "_scrml_map_update", "_scrml_map_insert_all",
+      "_scrml_map_size", "_scrml_map_keys", "_scrml_map_values", "_scrml_map_entries",
+      "_scrml_map_sorted", "_scrml_map_sorted_by",
     ];
     let bundle = "";
     for (const n of names) bundle += extractFn(out.runtimeJs, n);
