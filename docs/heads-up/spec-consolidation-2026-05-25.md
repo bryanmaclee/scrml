@@ -371,6 +371,7 @@ Now that `server` is a bare flag attribute alongside `pinned` + validators, comp
   - (b) On server-fetch + on client-side write (defense-in-depth)
   - (c) On client-side write + AFTER server fetch confirms (both points)
   Audit / DD likely needed before HU-3 ratifies.
+  **[Currency — 2026-06-14:** option (a)'s "client-side optimistic update" premise was RETRACTED (§52.6.2 / §52.6.3) — §52 is read-authority only (no compiler optimistic-update/rollback). When HU-3 takes this up, reframe (a) as "client-side instant-local write"; the validator-timing question stands, but its premise is the read-authority model.**]**
 - **Q5.B.3 — Tier 1 `< Type authority="server" table="...">` vs Tier 2 `<x server>` relationship.** Per §52 the two tiers have distinct semantics (type-level vs instance-level). Q5.B (b) ratification doesn't change Tier 1; Tier 1 remains `<TypeName authority="server" ...>`. But the keyword overlap (`server` in two distinct positions) carries a documentation burden — heads-up may want to clarify the Tier-1 vs Tier-2 distinction in PRIMER + kickstarter post-F-023/044 catch-up.
 
 ### Banked methodology from Q5

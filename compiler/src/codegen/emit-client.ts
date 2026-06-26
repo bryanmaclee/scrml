@@ -1828,6 +1828,85 @@ export function generateClientJs(ctx: CompileContext): string {
     }
   }
 
+  // ss27-4 (runtime-minimality) — POST-EMIT tree-shake of client-SAFE stdlib
+  // runtime chunks used ONLY in server code. A `scrml:NAME` capability lowers
+  // to `const { ... } = _scrml_stdlib.NAME;` at emit-imports and lights up the
+  // `stdlib-NAME` runtime chunk in `detectRuntimeChunks` purely from IMPORT
+  // PRESENCE. When every bound name is referenced ONLY inside a server-fn body,
+  // the GITI-003 / ss19 #5 post-prune (below) strips the lowered read LINE from
+  // client.js — but the chunk (which defines `_scrml_stdlib.NAME`) still ships,
+  // leaving `_scrml_stdlib.NAME` defined-but-unused dead weight in the client
+  // runtime. `emitFunctions` above already lowered server-fn bodies to fetch
+  // stubs, so the emitted `lines` here are the SAME ground-truth client body
+  // ss19 #5 keys on: a bound name's absence from the body (excluding its own
+  // lowered read decl) proves it is server-only. Pruning `ctx.usedRuntimeChunks`
+  // HERE — before BOTH the per-file embed splice (`assembleRuntime` below) and
+  // the cross-file shared-runtime union (index.ts) — tree-shakes the dead chunk
+  // from both runtime-assembly paths with a single deletion.
+  //
+  // Consistency with ss19 #5: gated on `!ctx.testMode` so the chunk and the
+  // lowered read LINE are pruned together (in testMode BOTH are kept, so the
+  // surviving read resolves against a shipped chunk; in real builds BOTH go).
+  //
+  // Conservative — never over-strip a chunk a client reference needs:
+  //   * only modules with an active `stdlib-NAME` chunk AND a lowered read line
+  //     are candidates;
+  //   * a bound LOCAL name present anywhere in the client body keeps the chunk;
+  //   * a direct `_scrml_stdlib.NAME` access keeps the chunk (defensive — the
+  //     lowering always destructures, but a future direct-access emitter would
+  //     still need the chunk).
+  if (!ctx.testMode) {
+    clientStage(ctx, "prune-server-only-stdlib-chunks", () => {
+      const chunks = ctx.usedRuntimeChunks;
+      let anyStdlibChunk = false;
+      for (const c of chunks) { if (c.startsWith("stdlib-")) { anyStdlibChunk = true; break; } }
+      if (!anyStdlibChunk) return;
+
+      const strLines: string[] = lines.filter((ln: any) => typeof ln === "string");
+      // Lowered stdlib read: `const { a, b: c } = _scrml_stdlib.<mod>;` (mirrors
+      // the ss19 #5 `stdlibRe` shape — one emitted line per `scrml:` import).
+      const readRe = /^\s*const\s+\{([^}]*)\}\s*=\s*_scrml_stdlib\.([A-Za-z_$][A-Za-z0-9_$]*)\s*;?\s*$/;
+      const moduleNames = new Map<string, string[]>();
+      const readLineIdx = new Set<number>();
+      for (let i = 0; i < strLines.length; i++) {
+        const m = readRe.exec(strLines[i]);
+        if (!m) continue;
+        readLineIdx.add(i);
+        const mod = m[2];
+        if (!chunks.has(`stdlib-${mod}`)) continue;
+        // Each destructure entry is `local` or `imported: local`; client code
+        // reads the LOCAL (post-`:`) binding.
+        const locals = m[1]
+          .split(",")
+          .map((s) => s.trim().split(":").pop()!.trim())
+          .filter(Boolean);
+        moduleNames.set(mod, (moduleNames.get(mod) ?? []).concat(locals));
+      }
+      if (moduleNames.size === 0) return;
+
+      // Client body view: every emitted line EXCEPT the lowered read decls, so a
+      // bound name is never counted as used by its own declaration.
+      const body = strLines.filter((_, i) => !readLineIdx.has(i)).join("\n");
+
+      for (const [mod, locals] of moduleNames) {
+        // Defensive: a direct `_scrml_stdlib.<mod>` registry access keeps the chunk.
+        const directRe = new RegExp(`_scrml_stdlib\\.${escapeRegex(mod)}(?![\\w$])`, "");
+        if (directRe.test(body)) continue;
+        const usedInClient = locals.some((name) => {
+          // Same member-access + word-boundary lookbehind as ss19 #5 (g-spread):
+          // a genuine `obj.NAME` member access does not count; a spread call
+          // `...NAME` does.
+          const useRe = new RegExp(
+            `(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`,
+            "",
+          );
+          return useRe.test(body);
+        });
+        if (!usedInClient) chunks.delete(`stdlib-${mod}`);
+      }
+    });
+  }
+
   // PGO P3.B (S102) — splice the assembled runtime into the placeholder slot
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now

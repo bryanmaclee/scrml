@@ -302,4 +302,128 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
     // sortBy is client-used → the whole read is kept (both names), not pruned.
     expect(clientJs).toContain("const { sortBy, groupBy } = _scrml_stdlib.data;");
   });
+
+  // -------------------------------------------------------------------------
+  // ss27-4 — client-SAFE stdlib runtime chunk must NOT ship when the module
+  // is imported + used ONLY inside a server fn (runtime-minimality).
+  // -------------------------------------------------------------------------
+  //
+  // A client-safe capability (`scrml:data`/`format`/`math`) imported and used
+  // ONLY inside a server-fn body lit up its `stdlib-<name>` runtime chunk from
+  // IMPORT PRESENCE alone (detectRuntimeChunks), so `_scrml_stdlib.<name>` was
+  // defined-but-unused dead weight in the client runtime. The chunk is now
+  // tree-shaken at the post-emit / pre-assembly point: server-fn bodies are
+  // already lowered to fetch stubs there, so a bound name's absence from the
+  // emitted client body proves it is server-only. Pruning the chunk BEFORE
+  // assembly fixes BOTH the shared-runtime union (index.ts) and the embed-mode
+  // splice (emit-client.ts).
+  //
+  // Interaction note: pre-fix, the embedded `stdlib-data` chunk carries
+  // `function sortBy(...)`, which falsely satisfied the GITI-003/ss19#5 read
+  // prune's body-reference check (that pass scans client code WITH the runtime
+  // spliced), so the lowered read leaked into client.js too. Removing the chunk
+  // first ALSO un-blocks the read-line strip for client-safe modules.
+
+  const SERVER_ONLY_DATA = `<program title="ss27-4 server-only client-safe">
+    \${
+        import { sortBy } from 'scrml:data'
+
+        <msg> = ""
+
+        server function load() ! string {
+            const sorted = sortBy([3, 1, 2], "")
+            return "ok"
+        }
+
+        on mount { @msg = load() }
+    }
+    <p>\${@msg}</p>
+</program>
+`;
+
+  test("§10 client-safe stdlib used only in a server fn — chunk tree-shaken from shared runtime", () => {
+    const src = fx("c10/server-only.scrml", SERVER_ONLY_DATA);
+    const outDir = join(TMP, "c10/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const runtimeFile = findRuntimeFile(outDir);
+    expect(runtimeFile).toBeDefined();
+    const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
+    // The fix: the dead stdlib-data chunk must not ship to the client runtime.
+    expect(runtimeJs).not.toContain("--- chunk: stdlib-data ---");
+    expect(runtimeJs).not.toContain("_scrml_stdlib.data =");
+    // Server keeps the capability (server bundle uses the shim route).
+    const serverJs = readFileSync(join(outDir, "server-only.server.js"), "utf8");
+    expect(serverJs).toContain("sortBy");
+  });
+
+  test("§11 client-safe stdlib used only in a server fn — no dangling read in client.js, parses clean", () => {
+    const src = fx("c11/server-only.scrml", SERVER_ONLY_DATA);
+    const outDir = join(TMP, "c11/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const clientJs = readFileSync(join(outDir, "server-only.client.js"), "utf8");
+    // With the chunk gone, the GITI-003/ss19#5 post-prune also strips the
+    // lowered read — client.js carries no `_scrml_stdlib.data`.
+    expect(clientJs).not.toContain("_scrml_stdlib.data");
+    // The client bundle must still parse (no dangling destructure of undefined).
+    expect(() => new Function(clientJs)).not.toThrow();
+  });
+
+  test("§12 adversarial — client-USED stdlib chunk preserved (no over-strip)", () => {
+    const src = fx("c12/repro.scrml", REPRO);
+    const outDir = join(TMP, "c12/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const runtimeFile = findRuntimeFile(outDir);
+    const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
+    // sortBy drives the client render loop — chunk + read both survive.
+    expect(runtimeJs).toContain("--- chunk: stdlib-data ---");
+    expect(clientJs).toContain("const { sortBy } = _scrml_stdlib.data;");
+  });
+
+  test("§13 adversarial — mixed import, one name client-used → chunk preserved", () => {
+    const mixed = `<program title="ss27-4 mixed">
+    \${
+        import { sortBy, groupBy } from 'scrml:data'
+
+        <items> = [{ name: "b", order: 2 }, { name: "a", order: 1 }]
+        <buckets> = ""
+
+        server function bucketize() ! string {
+            const g = groupBy(@items, "name")
+            return "ok"
+        }
+
+        on mount { @buckets = bucketize() }
+    }
+    <ul>
+        \${ for (let it of sortBy(@items, "order")) {
+            lift <li>\${it.name}</li>
+        } }
+    </ul>
+</program>
+`;
+    const src = fx("c13/mixed.scrml", mixed);
+    const outDir = join(TMP, "c13/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const runtimeFile = findRuntimeFile(outDir);
+    const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
+    // sortBy is client-used → the chunk is kept even though groupBy is server-only.
+    expect(runtimeJs).toContain("--- chunk: stdlib-data ---");
+  });
+
+  test("§14 embed mode — server-only client-safe chunk tree-shaken from per-file bundle", () => {
+    const src = fx("c14/server-only.scrml", SERVER_ONLY_DATA);
+    const outDir = join(TMP, "c14/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, embedRuntime: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    // embed mode inlines the runtime into client.js — the dead chunk must not appear.
+    const clientJs = readFileSync(join(outDir, "server-only.client.js"), "utf8");
+    expect(clientJs).not.toContain("--- chunk: stdlib-data ---");
+    expect(clientJs).not.toContain("_scrml_stdlib.data =");
+    expect(() => new Function(clientJs)).not.toThrow();
+  });
 });

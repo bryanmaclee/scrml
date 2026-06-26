@@ -75,10 +75,17 @@ function fx(relPath, source) {
 
 // Minimal stdlib-importing source. The `${...}` block is a server expression
 // (per §53) that lifts `import` declarations to the file's import set. The
-// file must compile cleanly through the full pipeline; the actual function
-// usage doesn't matter for OQ-2 — we only care about the emitted import shape.
+// file must compile cleanly through the full pipeline.
+// ss27-4 (runtime-minimality): the consumer must actually USE the imported
+// binding in CLIENT code. A `scrml:NAME` import with no client reference is now
+// tree-shaken — both the lowered `_scrml_stdlib.<name>` read AND the
+// `stdlib-<name>` runtime chunk are elided — so a bare unused import would emit
+// an empty client body. `<hash> = hashPassword(...)` is a top-level (client-
+// reachable) state init that exercises the §2 client-lowering + chunk-shipping
+// path this test verifies.
 const FIXTURE_SCRML = `\${
     import { hashPassword } from 'scrml:auth'
+    <hash> = hashPassword("demo")
 }
 h1 "OQ-2 smoke"
 `;
