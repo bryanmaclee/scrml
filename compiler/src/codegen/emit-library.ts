@@ -59,6 +59,90 @@ function stripInlineMeta(text: string): string {
 }
 
 /**
+ * Collect every `guarded-expr` node reachable from a logic block, descending
+ * into function bodies / nested blocks. The library whole-block extraction path
+ * (below) slices raw source text and regex-transforms it; it does NOT route
+ * function bodies through emitLogicNode, so the §19 host-containment call-site
+ * handler (`EXPR !{ | ::Variant(...) :> ... }`, the public try/catch
+ * replacement) survives as VERBATIM scrml `!{}` and trips the §2.2.1 emit gate
+ * (E-CODEGEN-INVALID-JS). Browser mode lowers it via emit-logic.ts's
+ * `case "guarded-expr"`. This collector lets the library path reuse that SAME
+ * lowering by span-splicing the emitted JS over the raw `!{}` source.
+ *
+ * Only TOP-LEVEL guarded-expr nodes are returned: the lowering emitted by
+ * emitLogicNode for an outer guarded-expr already recurses into its own arm
+ * bodies (nested `!{}` lower there), so collecting a nested guarded-expr
+ * separately would double-splice an overlapping span. The walk therefore stops
+ * descending once it captures a guarded-expr.
+ */
+function collectGuardedExprs(node: unknown, out: ASTNode[]): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) collectGuardedExprs(child, out);
+    return;
+  }
+  const n = node as ASTNode;
+  if (n.kind === "guarded-expr") {
+    out.push(n);
+    return; // do not descend — emitLogicNode lowers nested arm bodies itself
+  }
+  for (const k of Object.keys(n)) {
+    const v = (n as Record<string, unknown>)[k];
+    if (v && typeof v === "object") collectGuardedExprs(v, out);
+  }
+}
+
+/**
+ * Splice the AST-lowered emission of every `guarded-expr` node over its raw
+ * `!{}` source within a logic block's text. `blockSource` is the UNTRIMMED raw
+ * slice `sourceText.slice(logicSpan.start, logicSpan.end)`; guarded-expr spans
+ * are absolute into `sourceText`, so block-relative offset = `span.x -
+ * blockStart`. Splices are applied in reverse start-order so each earlier
+ * replacement does not shift a later span's offsets.
+ *
+ * The lowered JS is valid JS already and contains no scrml `not`/`is`/`fn`/
+ * `type` keywords (the §19 arm `not` literal lowers to `null`, etc.), so it
+ * passes through the downstream regex-transform pipeline (fn→function, type-decl
+ * strip, not/is rewrite) untouched — verified against the host-containment
+ * lowering shape.
+ */
+function lowerGuardedExprsInBlock(
+  blockSource: string,
+  blockStart: number,
+  logicBody: unknown,
+): string {
+  const guarded: ASTNode[] = [];
+  collectGuardedExprs(logicBody, guarded);
+  if (guarded.length === 0) return blockSource;
+
+  // Splice highest-start-first so earlier offsets stay valid as we mutate.
+  const ordered = guarded
+    .filter((g) => {
+      const sp = g.span as Span | undefined;
+      return sp && typeof sp.start === "number" && typeof sp.end === "number";
+    })
+    .sort((a, b) => (b.span as Span).start - (a.span as Span).start);
+
+  let text = blockSource;
+  for (const g of ordered) {
+    const sp = g.span as Span;
+    const relStart = sp.start - blockStart;
+    const relEnd = sp.end - blockStart;
+    if (relStart < 0 || relEnd > text.length || relStart >= relEnd) continue;
+    // A guarded-expr at library scope is always inside a function body (a bare
+    // top-level `${...}` host-containment call is a program-mode shape); emit
+    // with insideFunctionBody so an unhandled-variant arm escalates via `return`.
+    const lowered = emitLogicNode(
+      g as Parameters<typeof emitLogicNode>[0],
+      { insideFunctionBody: true } as Parameters<typeof emitLogicNode>[1],
+    );
+    if (lowered == null) continue;
+    text = text.slice(0, relStart) + lowered + text.slice(relEnd);
+  }
+  return text;
+}
+
+/**
  * Generate ES module output for a scrml file in library mode.
  *
  * Library mode emits importable ES modules — no browser runtime, no IIFE,
@@ -151,6 +235,15 @@ export function generateLibraryJs(
       const logicSpan = logic.span as Span | undefined;
       if (logicSpan && typeof logicSpan.start === "number" && typeof logicSpan.end === "number") {
         let blockText = sourceText.slice(logicSpan.start, logicSpan.end);
+        // §19 host-containment — lower every `EXPR !{ | ::Variant(...) :> ... }`
+        // call-site handler (the public try/catch replacement) by span-splicing
+        // the AST-lowered emission over its raw `!{}` source. The library
+        // whole-block path below only regex-transforms text; without this splice
+        // the `!{}` survives verbatim and trips the §2.2.1 emit gate
+        // (E-CODEGEN-INVALID-JS). blockStart === logicSpan.start since the splice
+        // runs on the UNTRIMMED slice (guarded-expr spans are absolute into
+        // sourceText). Reuses browser mode's emit-logic.ts `case "guarded-expr"`.
+        blockText = lowerGuardedExprsInBlock(blockText, logicSpan.start, logic.body);
         // Strip the ${ prefix and } suffix
         if (blockText.startsWith("${")) blockText = blockText.slice(2);
         if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);

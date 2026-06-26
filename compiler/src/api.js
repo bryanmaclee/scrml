@@ -612,13 +612,20 @@ export function compileScrml(options = {}) {
   let {
     inputFiles = [],
   } = options;
+  // W5a (g-library-mode-sql-no-db-context, ss23) — `mode` is `let` so the
+  // auto-detect-library pass below MAY flip the default 'browser' to 'library'
+  // for a no-<program>, exports-bearing pure-fn module (SPEC §21.5). The flip
+  // fires ONLY when the caller did NOT pass `mode` explicitly — an explicit
+  // `mode:` (either 'browser' or 'library') is authoritative and never
+  // overridden. `_modeWasExplicit` records that distinction.
+  const _modeWasExplicit = options.mode !== undefined;
+  let mode = options.mode ?? 'browser';
   const {
     verbose = false,
     convertLegacyCss = false,
     embedRuntime = false,
     write = true,
     sourceMap = false,
-    mode = 'browser',
     emitMachineTests = false,
     /**
      * Phase A8 / A6-5 (S76): emit `<base>.test.js` from `~{}` test blocks
@@ -1120,6 +1127,56 @@ export function compileScrml(options = {}) {
       // the generated _server.js.
       fileAST.mcpConfig = cfg.mcpConfig;
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // W5a (g-library-mode-sql-no-db-context, ss23) — auto-detect-library.
+  //
+  // SPEC §21.5: a `.scrml` file with NO `<program>` root whose top-level
+  // content is exclusively declarations (it `export`s functions/types/consts)
+  // is a pure-fn / library module — "library files, not pages". Such a file
+  // SHALL compile in library mode (emit an importable ES module `<base>.js`,
+  // no HTML, no browser client bundle, no runtime chunk) WITHOUT requiring the
+  // explicit `--mode library` flag.
+  //
+  // The library shaping itself already exists (S145
+  // library-mode-suppress-body-escalated-server-js / SPEC §12.6); W5a just
+  // SETS the build-wide `mode` the existing codegen + write path already
+  // honors. `mode` is build-wide (it drives both codegen/index.ts:runCG and
+  // the api.js write loop), so we flip it iff EVERY input file is a pure-fn
+  // module: a mixed build (any page / any `<program>`) stays browser. A bare
+  // markup fragment with no exports is NOT a library (it has nothing to import)
+  // — auto-detect keys on the §21.5 shape (no <program> + has exports).
+  //
+  // Guards:
+  //   - fires only when `mode` was NOT passed explicitly (`_modeWasExplicit`);
+  //     an explicit `mode:` (browser or library) is authoritative.
+  //   - requires at least one input file (an empty build is left as 'browser').
+  if (!_modeWasExplicit && mode === 'browser' && tabResults.length > 0) {
+    const allPureFnModules = tabResults.every((tabResult) => {
+      const fileAST = tabResult?.ast;
+      if (!fileAST) return false;
+      const nodes = fileAST.nodes ?? [];
+      const exportsList = fileAST.exports ?? [];
+      // §21.5 pure-fn-module shape: no <program> root, content is exclusively
+      // declarations (no top-level markup node — after liftBareDeclarations
+      // has wrapped bare decls into synthetic logic blocks), and the file
+      // bears at least one export. Mirrors the `isPureModuleFile` predicate
+      // in ast-builder.js (W-PROGRAM-001 suppression) + the export presence
+      // that distinguishes an importable library from a bare fragment.
+      return (
+        fileAST.hasProgramRoot !== true &&
+        nodes.length > 0 &&
+        nodes.every((n) => n && n.kind !== "markup") &&
+        exportsList.length > 0
+      );
+    });
+    if (allPureFnModules) {
+      mode = 'library';
+      if (verbose) {
+        log(`  [MODE] auto-detected library mode (no <program>, exports-bearing pure-fn module — SPEC §21.5)`);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------

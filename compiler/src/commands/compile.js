@@ -93,7 +93,12 @@ function parseArgs(args) {
   let convertLegacyCss = false;
   let embedRuntime = false;
   let watchMode = false;
-  let mode = 'browser';
+  // W5a (g-library-mode-sql-no-db-context, ss23) — `mode` starts UNSET so
+  // compileScrml can distinguish "caller passed no --mode" (auto-detect-library
+  // is eligible: a no-<program> exports-bearing pure-fn module compiles as a
+  // library without the flag, SPEC §21.5) from an explicit `--mode browser`
+  // (authoritative; auto-detect suppressed). Only set when `--mode` is parsed.
+  let mode = undefined;
   let selfHost = false;
   let emitBatchPlan = false;
   let emitReachability = false;
@@ -415,7 +420,10 @@ function runOnce(opts, selfHostModules = null) {
   const cwd = process.cwd();
 
   if (verbose) {
-    const modeLabel = mode + (selfHostModules ? " [self-host]" : "");
+    // W5a — `mode` is undefined when no `--mode` was passed; show the
+    // pre-auto-detect default (`browser (auto)`) so the label is honest
+    // before compileScrml's auto-detect-library pass may flip it.
+    const modeLabel = (mode ?? "browser (auto)") + (selfHostModules ? " [self-host]" : "");
     console.log(c.dim(`scrml compile — ${inputFiles.length} input file(s) [mode: ${modeLabel}]`));
     for (const f of inputFiles) {
       console.log(c.dim(`  ${relative(cwd, f)}`));

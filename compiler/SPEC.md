@@ -15680,6 +15680,17 @@ const out = await (async (prompt, path) => {
 
 This mirrors the `?{}` `case "sql"` lowering — the await is the boundary, not source vocabulary.
 
+**Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names become the async-IIFE
+PARAMETERS, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
+`var`, `function`, or `class` of the same name — redeclares the parameter, which is invalid JS
+(`(async (x) => { const x = … })(x)`). This SHALL be a compile error (E-FOREIGN-006) that NAMES the
+shadowed binding. The check is a pre-emit SYNTACTIC scan (brace/string/comment/template-aware; it
+inspects only top-level binding keywords and never type-checks or rewrites the interior, so §23.2.3
+opacity is preserved): a same-named binding NESTED inside an arrow body, a block, or any `{}`/`()`/`[]`
+is NOT a top-level collision and does NOT fire. The author resolves it by renaming the crossing name
+or the slice-local binding. (Without this guard the redeclaration surfaces post-emit as the misleading
+E-CODEGEN-INVALID-JS "compiler defect — please report it", even though the cause is author choice.)
+
 **Opacity (§23.2.3).** The slice interior is OPAQUE: the TS / RI / DG stages SKIP it (no type
 checking, no route analysis, no dependency tracking of foreign code). scrml's guarantees end at the
 brace (dpa-004 C3). Only the `in:{}` crossing names and the OUT value are visible to scrml analysis.
@@ -15775,6 +15786,7 @@ ancestor `<program>`. Add `lang="go"` (or the appropriate language) to the enclo
 | E-FOREIGN-003 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | `_{}` block in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (the admitted forms are the §23.4 sidecar and the §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body) | Error |
 | E-FOREIGN-005 | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (arbitrary-language inline value-flow not yet supported — use a `use foreign:` sidecar §23.4) | Error |
+| E-FOREIGN-006 | inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice — the crossing becomes an async-IIFE parameter, so the slice-local redeclares it (invalid JS). Author error; rename the crossing or the slice-local | Error |
 | W-FOREIGN-001 | Level-0 `_{` used; `_={}=` recommended | Warning |
 
 ### 23.3 Call-Char Sigils for WASM
@@ -16986,6 +16998,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-FOREIGN-003 | §23.2 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | §23.2.4 | `_{}` in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (admitted: §23.4 sidecar + §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body) | Error |
 | E-FOREIGN-005 | §23.2.4a | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (use a `use foreign:` sidecar §23.4 for an out-of-process service) | Error |
+| E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing becomes an async-IIFE parameter (§23.2.4a codegen), so the slice-local redeclares it — invalid JS. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaring IIFE fall through to the misleading post-emit E-CODEGEN-INVALID-JS "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |

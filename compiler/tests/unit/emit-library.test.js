@@ -16,6 +16,8 @@
  *   §7b type-decl exclusion from source-text node-by-node path (Bug R18)
  *   §8  rewriteNotKeyword rewrites scrml keywords in whole-block path
  *   §9  type-decl exclusion from whole-block extraction path (Bug R18 — actual syntax)
+ *   §11 §19 host-containment `!{}` call-site handler lowered in library mode
+ *       (ss23 item 1 — was E-CODEGEN-INVALID-JS, verbatim `!{}` survived)
  */
 
 import { describe, test, expect } from "bun:test";
@@ -784,5 +786,191 @@ describe("emit-library §11: GITI-018 — all scrml: imports rewritten (not firs
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11 — §19 host-containment `!{}` call-site handler lowered in library mode
+//
+// ss23 item 1 (g-safecall-bang-handler-not-lowered-in-library-mode): the
+// `safeCall(...) !{ | ::Thrown(...) :> ... }` host-containment handler (the
+// public try/catch replacement) lowered correctly in BROWSER mode (via
+// emit-logic.ts `case "guarded-expr"`) but the library whole-block extraction
+// path only regex-transformed source text — so the `!{}` survived VERBATIM and
+// tripped the §2.2.1 emit gate (E-CODEGEN-INVALID-JS, byte 238). The fix wires
+// the SAME emit-logic.ts lowering into the library path via span-splicing
+// (collectGuardedExprs + lowerGuardedExprsInBlock in emit-library.ts).
+//
+// These are full-pipeline tests (write-to-disk + compileScrml) so they exercise
+// the real AST → whole-block path the CLI uses — the synthetic-AST §8/§9 helpers
+// carry an empty logic.body and cannot reach the guarded-expr nodes.
+// ---------------------------------------------------------------------------
+
+describe("emit-library §11: §19 host-containment `!{}` lowered in library mode", () => {
+  async function compileLibToDisk(source, basename = "probe") {
+    const { resolve } = await import("path");
+    const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { compileScrml } = await import("../../src/api.js");
+
+    const dir = mkdtempSync(resolve(tmpdir(), "ss23-safecall-"));
+    try {
+      const srcPath = resolve(dir, `${basename}.scrml`);
+      writeFileSync(srcPath, source, "utf8");
+      const outDir = resolve(dir, "out");
+      const result = compileScrml({
+        inputFiles: [srcPath],
+        outputDir: outDir,
+        mode: "library",
+        write: true,
+      });
+      const emitted = readFileSync(resolve(outDir, `${basename}.js`), "utf8");
+      return { result, emitted };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // `new Function` rejects a SyntaxError exactly like `node --check`; the body
+  // is the ESM-stripped emitted module — `import` lines removed and the `export`
+  // keyword dropped (both are module-only; `new Function` compiles a script
+  // body). What's left is the lowered function bodies, which must parse cleanly.
+  function assertParsesAsJs(emitted) {
+    const body = emitted
+      .replace(/^\s*import\b[^\n]*$/gm, "")
+      .replace(/\bexport\s+/g, "");
+    expect(() => new Function(body)).not.toThrow();
+  }
+
+  const REPRO = [
+    "${",
+    '    import { safeCall, HostError } from "scrml:host"',
+    "",
+    "    export function tryParse(raw) {",
+    "        return safeCall(() => JSON.parse(raw)) !{",
+    "            | ::Thrown(message, name) :> not",
+    "        }",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+
+  test("RED→GREEN: the giti repro lowers to valid JS (no verbatim `!{}`, no E-CODEGEN)", async () => {
+    const { result, emitted } = await compileLibToDisk(REPRO);
+
+    // No E-CODEGEN-INVALID-JS (the byte-238 verbatim-`!{}` failure).
+    expect(result.errors.map((e) => e.code)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(result.errors).toHaveLength(0);
+
+    // The `!{}` host-containment shape is GONE — lowered to the sentinel guard.
+    expect(emitted).not.toContain("!{");
+    expect(emitted).toContain("__scrml_error");
+    expect(emitted).toContain('.variant === "Thrown"');
+    // The arm's payload binding lowers from `.data` (single-field bare value).
+    expect(emitted).toContain(".data.message");
+    expect(emitted).toContain(".data.name");
+    assertParsesAsJs(emitted);
+  });
+
+  test("adversarial: multiple `!{}` in one library file both lower", async () => {
+    const src = [
+      "${",
+      '    import { safeCall, HostError } from "scrml:host"',
+      "",
+      "    export function tryParseTwo(a, b) {",
+      "        let first = safeCall(() => JSON.parse(a)) !{",
+      "            | ::Thrown(message, name) :> not",
+      "        }",
+      "        let second = safeCall(() => JSON.parse(b)) !{",
+      "            | ::Thrown(message, name) :> not",
+      "        }",
+      "        return first",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const { result, emitted } = await compileLibToDisk(src, "two");
+
+    expect(result.errors).toHaveLength(0);
+    expect(emitted).not.toContain("!{");
+    // Both call sites lowered → two sentinel guards.
+    const guardCount = (emitted.match(/&& [\w$]+\.__scrml_error\)/g) ?? []).length;
+    expect(guardCount).toBe(2);
+    // Each guarded value is wired to its `let` binding.
+    expect(emitted).toContain("first");
+    expect(emitted).toContain("second");
+    assertParsesAsJs(emitted);
+  });
+
+  test("adversarial: `!{}` with a wildcard arm lowers (Thrown + `_`)", async () => {
+    const src = [
+      "${",
+      '    import { safeCall, HostError } from "scrml:host"',
+      "",
+      "    export function tryParse(raw) {",
+      "        return safeCall(() => JSON.parse(raw)) !{",
+      "            | ::Thrown(message, name) :> message",
+      "            | _ :> not",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const { result, emitted } = await compileLibToDisk(src, "wild");
+
+    expect(result.errors).toHaveLength(0);
+    expect(emitted).not.toContain("!{");
+    expect(emitted).toContain('.variant === "Thrown"');
+    // Wildcard arm lowers to the trailing `else { ... }` branch.
+    expect(emitted).toContain("else {");
+    assertParsesAsJs(emitted);
+  });
+
+  test("regression: program-mode (`!{}` browser) lowering unaffected", async () => {
+    // Browser mode already lowered correctly — assert the fix did not perturb it.
+    const { resolve } = await import("path");
+    const { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { compileScrml } = await import("../../src/api.js");
+
+    const dir = mkdtempSync(resolve(tmpdir(), "ss23-safecall-br-"));
+    try {
+      const srcPath = resolve(dir, "br.scrml");
+      writeFileSync(srcPath, REPRO.replace("br.scrml", ""), "utf8");
+      const outDir = resolve(dir, "out");
+      const result = compileScrml({
+        inputFiles: [srcPath],
+        outputDir: outDir,
+        mode: "browser",
+        write: true,
+      });
+      expect(result.errors).toHaveLength(0);
+      const clientFile = readdirSync(outDir).find((f) => f.endsWith(".client.js"));
+      const emitted = readFileSync(resolve(outDir, clientFile), "utf8");
+      expect(emitted).not.toContain("!{");
+      expect(emitted).toContain("__scrml_error");
+      expect(emitted).toContain('.variant === "Thrown"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("regression: a library file with NO `!{}` is unchanged (no spurious lowering)", async () => {
+    const src = [
+      "${",
+      "    export function add(a, b) {",
+      "        return a + b",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const { result, emitted } = await compileLibToDisk(src, "plain");
+
+    expect(result.errors).toHaveLength(0);
+    expect(emitted).toContain("export function add");
+    expect(emitted).toContain("return a + b");
+    // No sentinel machinery injected where there was no `!{}`.
+    expect(emitted).not.toContain("__scrml_error");
+    assertParsesAsJs(emitted);
   });
 });

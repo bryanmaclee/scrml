@@ -258,4 +258,104 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     // and the nested-arrow return is untouched.
     expect(serverJs).toContain("(x) => { return x.trim() }");
   });
+
+  // --- E-FOREIGN-006: crossing-shadow (ss23 item 3) ------------------------
+  // The `in:{}` crossing names become the async-IIFE PARAMETERS. If the
+  // verbatim slice ALSO declares a TOP-LEVEL binding of the same name, the
+  // emitted IIFE redeclares the parameter — invalid JS. Pre-fix this surfaced
+  // as the MISLEADING post-emit E-CODEGEN-INVALID-JS ("compiler defect, please
+  // report it"), even though it is AUTHOR error. A pre-emit syntactic scan now
+  // fires the clear E-FOREIGN-006 (naming the shadowed binding) instead.
+
+  test("§14 crossing-shadow — a `const x` slice-local colliding with `in:{x}` fires E-FOREIGN-006, NOT the misleading E-CODEGEN-INVALID-JS", () => {
+    const src = `<program lang="ts" db="./d.db">
+  export function shadower(x: string) {
+    const out = _={ in: { x }
+      const x = "shadowed"
+      return await Promise.resolve(x)
+    }=
+    return out
+  }
+</program>
+`;
+    const { errors } = compileSource(src, "shadow");
+    const f6 = errors.filter((e) => e.code === "E-FOREIGN-006");
+    const cg = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    expect(f6.length).toBe(1);
+    // The clear diagnostic NAMES the shadowed binding (author error) ...
+    expect(f6[0].message).toContain("`x`");
+    expect(f6[0].message).toContain("§23.2.4a");
+    // ... and the misleading "compiler defect" code does NOT cascade.
+    expect(cg.length).toBe(0);
+  });
+
+  test("§15 crossing-shadow — a `function`/`class` slice-local colliding with `in:{}` also fires E-FOREIGN-006 (naming the binding)", () => {
+    const fnSrc = `<program lang="ts" db="./d.db">
+  export function fnS(handler: string) {
+    const out = _={ in: { handler }
+      function handler() { return 1 }
+      return await Promise.resolve(handler())
+    }=
+    return out
+  }
+</program>
+`;
+    const fnRes = compileSource(fnSrc, "fnshadow");
+    expect(fnRes.errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(1);
+    expect(fnRes.errors.find((e) => e.code === "E-FOREIGN-006").message).toContain("`handler`");
+    expect(fnRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+
+    const clSrc = `<program lang="ts" db="./d.db">
+  export function clS(Widget: string) {
+    const out = _={ in: { Widget }
+      class Widget {}
+      return await Promise.resolve(new Widget())
+    }=
+    return out
+  }
+</program>
+`;
+    const clRes = compileSource(clSrc, "classshadow");
+    expect(clRes.errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(1);
+    expect(clRes.errors.find((e) => e.code === "E-FOREIGN-006").message).toContain("`Widget`");
+    expect(clRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+  });
+
+  test("§16 NON-shadow — a crossing name distinct from every slice-local compiles clean (no E-FOREIGN-006)", () => {
+    const src = `<program lang="ts" db="./d.db">
+  export function ok(y: string) {
+    const out = _={ in: { y }
+      const z = y.trim()
+      return await Promise.resolve(z)
+    }=
+    return out
+  }
+</program>
+`;
+    const { errors, serverJs } = compileSource(src, "nonshadow");
+    expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    // The non-colliding crossing still lowers to the canonical IIFE.
+    expect(serverJs).toMatch(/await \(async \(y\) =>/);
+  });
+
+  test("§17 scope-precision — a NESTED `const x` (inside an arrow/block body) is NOT a top-level collision; compiles clean", () => {
+    const src = `<program lang="ts" db="./d.db">
+  export function nest(x: string) {
+    const out = _={ in: { x }
+      const mapped = x.split(",").map((s) => { const x = s.trim(); return x })
+      return await Promise.resolve(mapped.join("|"))
+    }=
+    return out
+  }
+</program>
+`;
+    const { errors, serverJs } = compileSource(src, "nested");
+    // The slice's only TOP-LEVEL binding is `mapped` (not in the crossing set);
+    // the `const x` lives inside the `.map()` arrow body (nested), so it does
+    // NOT collide with the `x` parameter — the scan is brace-depth-aware.
+    expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(serverJs).toMatch(/await \(async \(x\) =>/);
+  });
 });

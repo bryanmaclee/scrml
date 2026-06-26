@@ -2024,6 +2024,14 @@ export function generateServerJs(
       // emit-functions.ts) so nested `@cell =` reassignments don't leak a
       // `_scrml_init_set` sidecar. `boundary` + `channelOwnedCells` thread the
       // GITI-020 broadcast-wire lowering through nested blocks.
+      // A DEDICATED, narrow sink for emit-logic's pre-emit crossing-shadow guard
+      // (E-FOREIGN-006, `case "foreign"`). Drained into the live `errors` array
+      // after this function's body emits. Scoped ON PURPOSE: threading the broad
+      // live `errors` array into emit-logic opts would also surface OTHER arms'
+      // previously-swallowed errors (e.g. E-CG-003 match-lowering) that this
+      // server-fn path never wired a sink for — a regression. This collector only
+      // ever receives E-FOREIGN-006.
+      const _foreignCrossingErrors: CGError[] = [];
       const _serverFnOpts = {
         boundary: "server" as const,
         channelOwnedCells: _channelOwnedCells,
@@ -2032,6 +2040,7 @@ export function generateServerJs(
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
+        foreignCrossingErrors: _foreignCrossingErrors,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -2097,6 +2106,9 @@ export function generateServerJs(
           }
         }
       }
+
+      // Drain the crossing-shadow guard's narrow sink into the live error stream.
+      for (const e of _foreignCrossingErrors) errors.push(e);
 
       lines.push(`  })();`);
       if (_envelope) {
@@ -2188,6 +2200,8 @@ export function generateServerJs(
 
       // S144 (GITI-021 + GITI-022): per-function shared emit-logic opts —
       // mirror of the CSRF path above (see comment there).
+      // Dedicated narrow E-FOREIGN-006 sink — see the CSRF-path comment.
+      const _foreignCrossingErrorsNonCsrf: CGError[] = [];
       const _serverFnOptsNonCsrf = {
         boundary: "server" as const,
         channelOwnedCells: _channelOwnedCellsNonCsrf,
@@ -2196,6 +2210,7 @@ export function generateServerJs(
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
+        foreignCrossingErrors: _foreignCrossingErrorsNonCsrf,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -2291,6 +2306,9 @@ export function generateServerJs(
           }
         }
       }
+
+      // Drain the crossing-shadow guard's narrow sink into the live error stream.
+      for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
       // A9 Ext 5: close the inner IIFE, store the result, return as Response.
       if (_ext5DedupNonCsrf) {

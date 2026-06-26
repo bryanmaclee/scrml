@@ -2817,6 +2817,95 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
         return { topLevelReturn, topLevelStmtSep };
       };
+      // Find TOP-LEVEL binding declarations in the opaque slice whose name is in
+      // `names` (the crossing set). Same depth/string/comment/template skipping as
+      // scanForeignSliceShape — a binding keyword inside a nested `{}`/`()`/`[]`,
+      // a string, a comment, or a template literal is NOT top-level and does not
+      // collide with the IIFE parameter (only the IIFE-body's own top level does).
+      // Recognised binding heads: `const`/`let`/`var`/`function`/`class <name>`.
+      // (`function`/`class` may carry intervening `*`/whitespace before the name.)
+      const scanForeignSliceTopLevelBindings = (src: string, names: Set<string>): string[] => {
+        const found = new Set<string>();
+        let depth = 0;
+        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
+        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
+        // Match a binding keyword starting at index `i` (whole-word, top level);
+        // returns the declared name if it is in `names`, else null.
+        const matchBinding = (i: number): string | null => {
+          for (const kw of ["const", "let", "var", "function", "class"]) {
+            if (src.slice(i, i + kw.length) === kw
+              && !isWord(src[i - 1] ?? "")
+              && !isWord(src[i + kw.length] ?? "")) {
+              // Skip past the keyword + any `*` (generator) + whitespace to the name.
+              let j = i + kw.length;
+              while (j < src.length && (src[j] === "*" || /\s/.test(src[j]))) j++;
+              let k = j;
+              while (k < src.length && isWord(src[k])) k++;
+              const name = src.slice(j, k);
+              return name && names.has(name) ? name : null;
+            }
+          }
+          return null;
+        };
+        for (let i = 0; i < src.length; i++) {
+          const ch = src[i], nx = src[i + 1];
+          if (inLine) { if (ch === "\n") inLine = false; continue; }
+          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
+          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
+          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
+          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
+          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
+          if (ch === '"' || ch === "'") { inS = ch; continue; }
+          if (ch === "`") { inTpl = true; continue; }
+          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+          if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+          if (depth === 0 && (ch === "c" || ch === "l" || ch === "v" || ch === "f")) {
+            const hit = matchBinding(i);
+            if (hit) found.add(hit);
+          }
+        }
+        return [...found];
+      };
+      // CROSSING-SHADOW guard (E-FOREIGN-006). The `in:{}` crossing names become
+      // the async-IIFE PARAMETERS (above). If the verbatim slice ALSO declares a
+      // TOP-LEVEL binding of the same name (`const`/`let`/`var`/`function`/`class`),
+      // the emitted IIFE redeclares an identifier already bound by the parameter —
+      // e.g. `(async (x) => { const x = … })(x)` — which is invalid JS. Without
+      // this guard the failure surfaces post-emit as the MISLEADING
+      // E-CODEGEN-INVALID-JS ("compiler defect — please report it"), even though
+      // it is AUTHOR error: the author chose a crossing name that collides with a
+      // name the slice itself declares. This pre-emit SYNTACTIC scan (no parse —
+      // §23.2.3 opacity preserved: it inspects only top-level binding KEYWORDS,
+      // never type-checks or rewrites the interior) names the shadowed binding so
+      // the diagnostic points at the real fix (rename the crossing OR the local).
+      if (crossings.length > 0) {
+        const shadowed = scanForeignSliceTopLevelBindings(slice, new Set(crossings));
+        // Dedicated narrow sink (`opts.foreignCrossingErrors`), NOT the broad
+        // `opts.errors`: the server-fn emit path (emit-server.ts) does not wire a
+        // general `opts.errors` sink, and threading one would surface OTHER arms'
+        // previously-swallowed errors (e.g. E-CG-003). The caller drains this
+        // sink into the live error stream after the function body emits.
+        const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
+        if (shadowed.length > 0 && sink) {
+          const span = (node as any).span ?? { start: 0, end: 0 };
+          const names = shadowed.map((n) => `\`${n}\``).join(", ");
+          const singular = shadowed.length === 1;
+          sink.push(new CGError(
+            "E-FOREIGN-006",
+            `E-FOREIGN-006: the inline foreign block crosses ${singular ? "a name" : "names"} ` +
+            `(${names}) that the slice ${singular ? "also declares" : "also declare"} ` +
+            `at its top level. The \`in:{}\` crossing ${singular ? "name becomes an async-IIFE parameter" : "names become async-IIFE parameters"}, ` +
+            `so a same-named \`const\`/\`let\`/\`var\`/\`function\`/\`class\` inside the slice ` +
+            `redeclares the parameter — invalid JS. Rename the crossing ${singular ? "name" : "names"} ` +
+            `or the slice-local binding so they do not collide. See SPEC §23.2.4a.`,
+            span,
+          ));
+          // Decline to emit the redeclaring IIFE — the error stops the build, and
+          // a defensive `null` keeps the surrounding expression syntactically
+          // well-formed (no cascade into the misleading E-CODEGEN-INVALID-JS).
+          return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
+        }
+      }
       const { topLevelReturn, topLevelStmtSep } = scanForeignSliceShape(slice);
       const singleExpression = !topLevelReturn && !topLevelStmtSep;
       const inner = singleExpression ? `return (${slice});` : slice;
