@@ -10,7 +10,7 @@
 
 ## Items
 
-1. **value-native Set §59.12 (un-defer)** (Nominal → build) `[status=parked]` **SURVEY-FIRST → PARKED (shape-fork, PA→user)**
+1. **value-native Set §59.12 (un-defer)** (Nominal → build) `[status=building]` **B2 RATIFIED → BUILD DISPATCHED (scrml-js-codegen-engineer, worktree)**
    - The Map sibling: value-canonical-hashed, COW (`@s = @s.add(x)` reassignment-canonical, bracket-write rejected à la `E-MAP-BRACKET-WRITE`), structural order-independent `==`, value-acyclic (no set-of-cyclic-keys, like maps §59.4).
    - **Why now:** the DG-builder exerciser justifies un-deferring it; it's the headline beautiful-mechanics add (set-saturated graph algorithms); serves the whole language. With value-canonical iteration it also retires the `.sorted()` determinism tax.
    - Phase 0: confirm §59.12 design completeness + park any genuine fork (e.g. set-of-structs literal vs `.add`-only, the method-surface roster). Then mirror the S169 Map landing end-to-end.
