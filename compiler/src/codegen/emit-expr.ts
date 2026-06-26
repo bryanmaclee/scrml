@@ -820,7 +820,19 @@ function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
     // typeof, void, delete, await need a space before the operand
     const needsSpace = node.op === "typeof" || node.op === "void" ||
                        node.op === "delete" || node.op === "await";
-    return needsSpace ? `${node.op} ${arg}` : `${node.op}${arg}`;
+    if (needsSpace) return `${node.op} ${arg}`;
+    // B3 (g-double-unary-minus-emit-decrement): a prefix `-`/`+` whose operand
+    // SERIALIZES starting with the same sign char would fuse into the `--`/`++`
+    // UPDATE operator — `-(-a)` -> `--a` (pre-DECREMENT: wrong value AND a stray
+    // mutation), `+(+a)` -> `++a`. Insert ONE space so the two stay distinct
+    // unary operators (`- -a`). Minimal blast radius: a space is valid JS and
+    // shifts no parens (S215). The `++`/`--` UPDATE operators (node.op is two
+    // chars) are excluded by the exact single-char `-`/`+` match; `!!a` / `~~a`
+    // are valid JS (no `!!`/`~~` token) and correctly stay fused.
+    if ((node.op === "-" || node.op === "+") && arg.charCodeAt(0) === node.op.charCodeAt(0)) {
+      return `${node.op} ${arg}`;
+    }
+    return `${node.op}${arg}`;
   }
   // Postfix: x++, x--
   return `${arg}${node.op}`;
@@ -1660,6 +1672,54 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // Dispatch to the monomorphized parser emitter (emit-parse-variant.ts).
   if (isParseVariantCall(node)) {
     return emitParseVariantCall(node, ctx);
+  }
+
+  // §14.4.3 (B2 / g-enum-toenum-client-structured-decl) — `toEnum` lowering
+  // on the AST (CLIENT) path. The string-rewrite Pass 9 (`rewriteEnumToEnum`)
+  // lowers `Enum.toEnum(raw)` / `toEnum(Enum, raw)` -> `(Enum_toEnum[raw] ?? null)`,
+  // but it only runs on the STRING-fallback emit path (`emitExprField` with no
+  // ExprNode). When a structured `initExpr` is present (the common
+  // `<cell> = Enum.toEnum(@raw)` decl, plus its `_scrml_init_set` reset-thunk,
+  // const/derived siblings, and nested-arrow bodies), the RHS is emitted via
+  // THIS AST walk, which left the call VERBATIM — the frozen enum object has no
+  // `toEnum` method, so it threw `TypeError: Enum.toEnum is not a function` at
+  // runtime (compile exit-0, SILENT). This is the AST-native twin of Pass 9.
+  //
+  // Gated to ctx.mode === "client": the server path's lowering + reachability-
+  // gated server-bundle tables are owned by emit-server.ts generateServerJs
+  // (ss22 item 5). The `Enum_toEnum` lookup table is already emitted into the
+  // client bundle (emit-client.ts emitEnumLookupTables). The lowered form is
+  // identical to rewriteEnumToEnum's output, but is built from the fully-emitted
+  // structured arg — so it is ROBUST to nested-paren args (`Enum.toEnum(f(a,b))`)
+  // that the Pass-9 `[^)]+` regex mishandles.
+  if (ctx.mode === "client") {
+    // Method form: `<PascalEnum>.toEnum(<arg>)` (single arg).
+    if (
+      node.args.length === 1 &&
+      node.callee.kind === "member" &&
+      !node.callee.optional &&
+      node.callee.property === "toEnum" &&
+      node.callee.object.kind === "ident" &&
+      typeof (node.callee.object as IdentExpr).name === "string" &&
+      /^[A-Z][A-Za-z0-9_]*$/.test((node.callee.object as IdentExpr).name)
+    ) {
+      const typeName = (node.callee.object as IdentExpr).name;
+      const argExpr = emitExpr(node.args[0] as ExprNode, ctx);
+      return `(${typeName}_toEnum[${argExpr}] ?? null)`;
+    }
+    // Function form: `toEnum(<PascalEnum>, <arg>)` (2 args, first a PascalCase ident).
+    if (
+      node.args.length === 2 &&
+      node.callee.kind === "ident" &&
+      (node.callee as IdentExpr).name === "toEnum" &&
+      node.args[0] && node.args[0].kind === "ident" &&
+      typeof (node.args[0] as IdentExpr).name === "string" &&
+      /^[A-Z][A-Za-z0-9_]*$/.test((node.args[0] as IdentExpr).name)
+    ) {
+      const typeName = (node.args[0] as IdentExpr).name;
+      const argExpr = emitExpr(node.args[1] as ExprNode, ctx);
+      return `(${typeName}_toEnum[${argExpr}] ?? null)`;
+    }
   }
 
   // §59.7/§59.8 (D4) — map METHOD interception. `@m.<method>(…args)` where `m`

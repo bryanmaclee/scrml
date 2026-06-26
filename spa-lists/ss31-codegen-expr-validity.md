@@ -10,14 +10,16 @@
 
 ## Items
 
-1. **g-unary-left-of-exponent-no-paren** (MED) `[status=open]`
+1. **g-unary-left-of-exponent-no-paren** (MED) `[status=landed-on-branch · REJECT-LOUD]`
    - Symptom: `-@a ** 2` emits `- get("a") ** 2` — a unary left-operand of `**` is invalid JS, needs parens. The `(-@a)**2` half (Bug A) landed S221; this is **Bug B** `-@a ** 2`, PARKED at S221 as an acorn parse-error → regex-fallback. NEEDS: parser accept-or-reject of the bare `-@a**2` form + a diagnostic-improve (verified-LOUD `E-CODEGEN-INVALID-JS`, not silent). This is the legacy **acorn** expr path, NOT the native parser → NOT held by the parser fork.
    - Footprint: acorn-fallback recognition + `emit-expr` paren insertion for the `**`-left-unary case (mirror the Bug-A guard).
 
-2. **g-enum-toenum-client-structured-decl** (MED) `[status=open]`
+2. **g-enum-toenum-client-structured-decl** (MED) `[status=landed-on-branch]`
    - Symptom: `Enum.toEnum()` is un-lowered CLIENT-side for a structured `<cell> = Enum.toEnum(...)` decl — same `emitExpr`-bypass root as the server case fixed in ss22. (ss22 #5 deferred.)
    - Footprint: the client decl-RHS emit path that bypasses enum lowering; mirror the server-side `toEnum` lowering.
 
-3. **g-double-unary-minus-emit-decrement** (LOW) `[status=open]`
+3. **g-double-unary-minus-emit-decrement** (LOW) `[status=landed-on-branch]`
+
+> **sPA ss31 (S222):** all 3 LANDED on `spa/ss31` (rebased onto `1ada2b3e`). See `ss31.progress.md`. **PARKED out-of-scope discovery:** `g-unary-of-exponent-arg-no-paren` — `emitUnary` drops parens around a `**` ARGUMENT (`-(@a ** 2)` → invalid JS, currently loud-but-generic); distinct AST-path bug, needs a follow-up item.
    - Symptom: `Unary(-, Unary(-, a))` serializes as `--a` (decrement token) in BOTH serializers → invalid JS for a numeric arg. (ss21 #4 deferred finding; pre-existing.)
    - Footprint: insert a space/paren between adjacent unary `-` in `emit-expr` + the `emitStringFromTree` twin.

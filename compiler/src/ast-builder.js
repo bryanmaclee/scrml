@@ -298,6 +298,19 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
         ));
       }
     }
+    // B1 (g-unary-left-of-exponent-no-paren): a unary operator immediately left
+    // of `**` (e.g. `-@a ** 2`) is invalid JS; acorn rejected it and the
+    // expression fell back to a ParseError escape-hatch that would re-emit the
+    // flat `- … ** 2` form SILENTLY. Surface a LOUD E-CODEGEN-INVALID-JS here
+    // (mirrors the SQL-diagnostic surfacing above). The author-paren `(-@a) ** 2`
+    // parses cleanly and never reaches this branch.
+    if (errors && node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.exponentDiagnostic) {
+      errors.push(new TABError(
+        node.exponentDiagnostic.code || "E-CODEGEN-INVALID-JS",
+        node.exponentDiagnostic.message,
+        node.span,
+      ));
+    }
     // §6.8.2 (Step 9, Phase A1a) — surface E-RESET-NO-ARG diagnostics
     // attached by the expression-parser when `reset(...)` is malformed
     // (zero-arg, multi-arg, or spread). Walks the full ExprNode tree so
@@ -3195,6 +3208,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         errors.push(new TABError(
           node.sqlDiagnostic.code || "E-SQL-008",
           node.sqlDiagnostic.message,
+          node.span,
+        ));
+      }
+      // B1 (g-unary-left-of-exponent-no-paren): surface a LOUD E-CODEGEN-INVALID-JS
+      // when acorn rejected a unary base of `**` (e.g. `-@a ** 2`). See the
+      // companion block in safeParseExprToNodeGlobal.
+      if (node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.exponentDiagnostic) {
+        errors.push(new TABError(
+          node.exponentDiagnostic.code || "E-CODEGEN-INVALID-JS",
+          node.exponentDiagnostic.message,
           node.span,
         ));
       }

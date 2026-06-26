@@ -53,6 +53,17 @@ export interface ParseResult {
    * error code so callers can surface it as a hard compile error (E-SQL-008).
    */
   sqlDiagnostic?: { code: string; message: string; offset: number };
+  /**
+   * B1 (g-unary-left-of-exponent-no-paren) — structured diagnostic raised when
+   * acorn REJECTS an expression because a UNARY operator sits immediately to the
+   * left of `**` (e.g. `-@a ** 2`). The JS exponentiation grammar forbids an
+   * un-parenthesized unary base (`-a ** 2` is a SyntaxError; only `(-a) ** 2` or
+   * `-(a ** 2)` parse). Such an expression fell back to the string-rewrite path,
+   * which re-emitted the flat `- … ** 2` form — SILENTLY-invalid JS. Callers
+   * surface this as a LOUD E-CODEGEN-INVALID-JS (the AST-path twin is handled by
+   * binaryOperandNeedsParens; this is the acorn-fallback complement).
+   */
+  exponentDiagnostic?: { code: string; message: string; offset: number };
 }
 
 /** Return type for rewriteReactiveRefsAST / rewriteServerReactiveRefsAST. */
@@ -309,6 +320,85 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * B1 (g-unary-left-of-exponent-no-paren) — detect the JS-grammar violation where
+ * a UNARY operator sits immediately left of `**`, which acorn rejects with the
+ * error position landing exactly on the `**` token.
+ *
+ *   ExponentiationExpression :
+ *       UnaryExpression
+ *     | UpdateExpression ** ExponentiationExpression
+ *
+ * `-a ** 2`, `!flag ** 2`, `typeof a ** 2`, `-foo.bar() ** 2` are all SyntaxErrors
+ * (only `(-a) ** 2` / `-(a ** 2)` parse). UPDATE operators (`++`/`--`) ARE valid
+ * `**` bases, so `x-- ** 2` is excluded. A parenthesized base `(...)` is skipped
+ * wholesale by the operand walk, so the author-paren form is never flagged.
+ *
+ * @param src - the EXACT string acorn parsed (post internal preprocessing).
+ * @param pos - acorn's error offset (`err.pos`).
+ * @returns the structured diagnostic, or null when this is not the unary-`**` shape.
+ */
+function detectUnaryLeftOfExponent(
+  src: string,
+  pos: number | undefined,
+): { code: string; message: string; offset: number } | null {
+  if (typeof pos !== "number" || pos < 1) return null;
+  if (src.slice(pos, pos + 2) !== "**") return null;
+
+  // Walk left from the `**` over whitespace, then over the base operand
+  // (idents / numbers / member dots / `@` sigil + balanced call/index tails).
+  let i = pos - 1;
+  while (i >= 0 && /\s/.test(src[i])) i--;
+  if (i < 0) return null; // leading `**` — a different malformed shape, out of scope
+  while (i >= 0) {
+    const c = src[i];
+    if (/[A-Za-z0-9_$.@]/.test(c)) { i--; continue; }
+    if (c === ")" || c === "]") {
+      const open = c === ")" ? "(" : "[";
+      let depth = 1;
+      i--;
+      while (i >= 0 && depth > 0) {
+        if (src[i] === c) depth++;
+        else if (src[i] === open) depth--;
+        i--;
+      }
+      continue;
+    }
+    break;
+  }
+  // `i` now sits just before the base's first char. Skip whitespace; if the
+  // preceding token is a PREFIX unary operator the base is un-parenthesized
+  // unary → the grammar violation.
+  while (i >= 0 && /\s/.test(src[i])) i--;
+  if (i < 0) return null; // base is at the expression start — no prefix unary
+  const c = src[i];
+  let isUnary = false;
+  if (c === "!" || c === "~") {
+    isUnary = true; // no binary `!`/`~` exists — always prefix
+  } else if (c === "-" || c === "+") {
+    // Exclude the update operators `--`/`++` (valid `**` bases); confirm the
+    // `-`/`+` is in PREFIX position (not a binary subtraction/addition).
+    if (i - 1 >= 0 && (src[i - 1] === "-" || src[i - 1] === "+")) isUnary = false;
+    else {
+      let j = i - 1;
+      while (j >= 0 && /\s/.test(src[j])) j--;
+      isUnary = j < 0 || !/[A-Za-z0-9_$)\].@]/.test(src[j]);
+    }
+  } else if (/(?:^|[^A-Za-z0-9_$])(?:typeof|void|delete|await)$/.test(src.slice(0, i + 1))) {
+    isUnary = true;
+  }
+  if (!isUnary) return null;
+
+  return {
+    code: "E-CODEGEN-INVALID-JS",
+    message:
+      "E-CODEGEN-INVALID-JS: a unary operator immediately left of `**` is invalid " +
+      "JavaScript \u2014 the exponentiation grammar forbids an un-parenthesized unary " +
+      "base. Parenthesize the base: write `(-@a) ** 2` (negate, then square).",
+    offset: pos,
+  };
+}
+
+/**
  * Parse a single JS expression string into an ESTree node.
  */
 export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}): ParseResult {
@@ -347,7 +437,12 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
     const trailing = processed.slice((ast as any).end).trim();
     return { ast, error: null, trailingContent: trailing || undefined, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}) };
   } catch (err) {
-    if (tolerant) return { ast: null, error: (err as Error).message, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}) };
+    const e = err as Error & { pos?: number };
+    // B1: when acorn fails specifically because a unary operator is the LEFT
+    // operand of `**`, surface a structured diagnostic so callers can fire a
+    // LOUD E-CODEGEN-INVALID-JS instead of silently emitting invalid JS.
+    const exponentDiagnostic = detectUnaryLeftOfExponent(processed, e.pos);
+    if (tolerant) return { ast: null, error: e.message, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}), ...(exponentDiagnostic ? { exponentDiagnostic } : {}) };
     throw err;
   }
 }
@@ -2384,12 +2479,14 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
 
   let trailingContent: string | undefined;
   let sqlDiagnostic: { code: string; message: string; offset: number } | undefined;
+  let exponentDiagnostic: { code: string; message: string; offset: number } | undefined;
   try {
     const result = parseExpression(processed);
     estree = result.ast;
     parseError = result.error;
     trailingContent = result.trailingContent;
     sqlDiagnostic = result.sqlDiagnostic;
+    exponentDiagnostic = result.exponentDiagnostic;
   } catch (e) {
     parseError = (e as Error).message;
   }
@@ -2422,14 +2519,17 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   }
 
   if (!estree) {
-    // Parse failed — return escape hatch
+    // Parse failed — return escape hatch. B1: when acorn rejected a unary base
+    // of `**`, carry the structured diagnostic so ast-builder surfaces a LOUD
+    // E-CODEGEN-INVALID-JS (mirrors the sqlDiagnostic escape-hatch path).
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };
     return {
       kind: "escape-hatch",
       span,
       nativeKind: "ParseError",
       raw: trimmed,
-    } satisfies EscapeHatchExpr;
+      ...(exponentDiagnostic ? { exponentDiagnostic } : {}),
+    } as EscapeHatchExpr & { exponentDiagnostic?: { code: string; message: string; offset: number } };
   }
 
   try {
@@ -2577,7 +2677,16 @@ export function emitStringFromTree(node: ExprNode): string {
       if (!node.prefix) return `${arg}${node.op}`;
       // Special keyword operators need a space
       const needsSpace = ["typeof", "void", "delete", "await"].includes(node.op);
-      return needsSpace ? `${node.op} ${arg}` : `${node.op}${arg}`;
+      if (needsSpace) return `${node.op} ${arg}`;
+      // B3 (g-double-unary-minus-emit-decrement) — round-trip twin of
+      // emit-expr.ts:emitUnary. A prefix `-`/`+` over an operand that serializes
+      // starting with the same sign char would fuse into the `--`/`++` UPDATE
+      // operator (`-(-@a)` -> `--@a`). Insert ONE space so they stay distinct
+      // unary operators (`- -@a`). `++`/`--` update ops + `!!`/`~~` are excluded.
+      if ((node.op === "-" || node.op === "+") && arg.charCodeAt(0) === node.op.charCodeAt(0)) {
+        return `${node.op} ${arg}`;
+      }
+      return `${node.op}${arg}`;
     }
 
     case "binary": {
