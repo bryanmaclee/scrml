@@ -10,7 +10,7 @@
 
 ## Items
 
-1. **value-native Set §59.12 (un-defer)** (Nominal → build) `[status=building]` **B2 RATIFIED → BUILD DISPATCHED (scrml-js-codegen-engineer, worktree)**
+1. **value-native Set §59.12 (un-defer)** (Nominal → build) `[status=landed-on-branch SHA=70b11383]` **B2 RATIFIED → BUILT → LANDED on `spa/ss37` (scrml-js-codegen-engineer, worktree)**
    - The Map sibling: value-canonical-hashed, COW (`@s = @s.add(x)` reassignment-canonical, bracket-write rejected à la `E-MAP-BRACKET-WRITE`), structural order-independent `==`, value-acyclic (no set-of-cyclic-keys, like maps §59.4).
    - **Why now:** the DG-builder exerciser justifies un-deferring it; it's the headline beautiful-mechanics add (set-saturated graph algorithms); serves the whole language. With value-canonical iteration it also retires the `.sorted()` determinism tax.
    - Phase 0: confirm §59.12 design completeness + park any genuine fork (e.g. set-of-structs literal vs `.add`-only, the method-surface roster). Then mirror the S169 Map landing end-to-end.
@@ -23,3 +23,13 @@
 User ruled **B2 (map alias)** via AskUserQuestion. **§59.12 normative text AUTHORED** (SPEC §59.12 set bullet): `set[K]` desugars to the §59 map `[K: bool]`-marker; set-vocab surface (`.add`→`.insert(k,true)` · `.has`/`.remove`/`.size` · iteration=ELEMENTS · `.union`/`.intersect`/`.difference` methods DELEGATE to the shipped `scrml:data` value-canonical helpers — don't double the surface); empty `[:]`, NO set literal (accepted seam); inherits all §59 map semantics. **Build is now MECHANICAL** — mirror the §169 Map landing (D1–D4) as a thin DESUGAR (no new runtime/literal/codec). Item 1 status: parked → **BUILD-READY (B2 locked)**.
 
 **CORRECTION (PA-verified):** the Phase-0 note's *"ss38 HAMT already landed in main"* is WRONG — only the ss38 LIST FILE is in `main` (`1ada2b3e`); there is NO HAMT in the runtime. **ss37↔ss38 sequencing is STILL LIVE** — build HAMT (ss38) + Set (ss37) in sequence (HAMT-first then Set-on-HAMT, OR Set-then-HAMT-both). Re-fire ss37 sequenced with ss38.
+
+---
+
+## LANDED (sPA, 2026-06-26) — item 1 = `landed-on-branch`
+
+Build dispatched scrml-js-codegen-engineer (worktree, opus); landed onto `spa/ss37` @ **`70b11383`** (single squash commit; 19 files, +1047/-21). Branch tip == `70b11383`; `origin/main...spa/ss37` = `0 1` (1 commit ahead, no leak).
+
+**Sequencing resolved (NOT a blocker):** B2 Set is a pure DESUGAR (`set[K]`→map `[K:bool]`; `.add`→`.insert(_,true)`; `.elements`/`<each>`→map `.keys()`; algebra→`scrml:data`). It adds NO new runtime structure → **rep-agnostic**: it rides whatever the map rep is (COW today, HAMT after ss38). Landing on COW now is explicitly sanctioned by the ss38 list ("if ss37 landed on COW, HAMT-swap map+set together"). **ss38 has NOTHING set-specific to do** — swapping the map rep automatically covers set (set is just map calls). The S25 "sequencing still live" concern is dissolved by the desugar architecture, not deferred.
+
+**sPA verify caught + fixed (R26 adversarial):** the dev-agent's full-suite run (unit+integration+conformance subdirs — the same scope as the pre-commit hook) MISSED the top-level M6.5.b.0 within-node parser-conformance gate. On the TRUE full `bun test compiler/tests/` (25,689 tests), `examples/34-value-native-set.scrml` was over-budget (residual 191, no allowlist entry). Diagnosed as ORDINARY native-vs-within-node span/field divergence (class-distribution normal for an example this size; KIND-NAME only 3 — NOT a set-specific parser divergence; the parser was a verified no-op). Re-baselined per the brief mandate ("re-baseline within-node parity if fixtures shift"): added the allowlist entry → full suite **0 fail / 25474 pass**.
