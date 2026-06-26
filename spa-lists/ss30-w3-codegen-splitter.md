@@ -16,5 +16,11 @@ The **A-4 codegen consumption seam**: where codegen consumes the RS `Reachabilit
 2. **Build the BOUNDED part** (only what the survey confirms is non-design-laden + ready): wire the A-4 consumption if it's stubbed; the mechanical chunk-set extraction from `ChunkContents`. Gate behind the feature flag (default OFF until the design forks are ruled + the wave completes). Do NOT build the runtime loader / manifest / role-serving until the forks are ruled.
 3. **(blocked on #1 forks)** chunk emission · manifest · runtime loader · role-serving — these wait on PA/user rulings from #1. Park them with the survey.
 
+## Status (S221, sPA ss30)
+- **Item 1 — SURVEY:** ✅ DONE. **Premise STALE (Rule 4): W3-codegen is BUILT, not unbuilt.** `index.ts:962` "Empty until A-2.2+" = the *ReachabilityRecord* was empty, NOT the A-4 codegen absent. The A-4 splitter (A-4.1..A-4.7, S91) emits real non-empty initial chunks + `chunks.json` on trucking TODAY (21 EPs, verified). The real frontier is **W4 (runtime loader) + role projection + Component-3 N≥1**.
+- **Item 2 — bounded build:** ✅ literal content already-built (no-op); landed a **characterization test** locking the W2→W3 baseline instead.
+- **Item 3:** PARKED — emission+manifest DONE; runtime loader + role-serving are genuine W4 work. 5 design forks parked for PA/user.
+- Full survey + forks: `ss30.progress.md`. Landed `compiler/tests/integration/w3-splitter-trucking-characterization.test.js` (4 tests green).
+
 ## Progress
 `ss30.progress.md`. Land on `spa/ss30`; ping PA inbox. Do NOT advance main / push. **This list will likely come back mostly-SURVEY + a small bounded build + a fork-list for PA/user** — that's the expected + valuable shape (W1/W2 taught us the estimates are stale; survey-first is the discipline). PA re-integrates the bounded part + brings the design forks to the user. Feature flag stays OFF until W3 fully lands.
