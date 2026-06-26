@@ -14,6 +14,10 @@
 
 **So the question is not "should we build A" — it's "finish the remaining waves to make it actually split."**
 
+> **S221 UPDATE (W1 survey-first STOP, agent ab777f6d) — W1 is ALREADY FULLY BUILT; the real first wave is W2.**
+> The DG markup-context `reads` edge-lift (§40.9.3) landed at **S88** across A-1.2..A-1.6 — hardcoded ON (`dependency-graph.ts:2340 markupContextEmitEdges=true`, flipped from false in `da786092`); Component 2 (`reachability/component-2.ts`) consumes the real edges; E-DG-002 is additive (sentinel preserved). Verified end-to-end: a tiny `${@count}` repro puts `@count` in `reactiveCellNodeIds` (only possible via a real `reads` edge). The "256-edge ceiling" was a historical S84 *pre-lift corpus count*, fulfilled by S88 — NOT an edge ceiling. The PIPELINE "~40-80h unbuilt" estimate was STALE (Rule 4: code over derived doc).
+> **The actual first-buildable wave is W2 — and it is a precise, bounded wiring fix:** `enumerateEntryPoints(files)` (`reachability/entry-points.ts:76`, called at `reachability-solver.ts:170`) is passed ONLY `files`, no RouteMap → it enumerates `<program>` roots + inline `<page>` children but SKIPS filesystem-routed page files (`pages/dispatch/board.scrml` etc., no `<program>` root → skipped at `entry-points.ts:82`). The `routeMap` IS available to RS (`api.js:2004`) but isn't threaded into the enumerator (and the `entry-points.ts:31-34` docstring falsely claims it reads RouteMap — a doc/code mismatch). **Thread RouteMap into `enumerateEntryPoints` so filesystem-routed pages become RS entry points → that's what yields non-empty trucking closures.** Smaller than the original W2 estimate.
+
 ## 1. Current build status (verified S221)
 
 | piece | status | evidence |
@@ -21,7 +25,7 @@
 | Reachability Solver core (components 1-5 + outer fixpoint + determinism serializer) | ✅ **BUILT** (A-2.x, S86-S91) | `compiler/src/reachability/` (4,399 LOC) + `reachability-solver.ts`; 21 determinism tests; component-1..4 tests |
 | `W-AUTH-RUNTIME-FALLBACK` / `E-CLOSURE-001/002` static-vs-runtime instrumentation | ✅ **BUILT** | the diagnostic vocabulary that records conservative fallbacks |
 | §40 AuthGraph derivation | ✅ **BUILT** | `compiler/src/auth-graph.ts` + `types/auth-graph.ts` |
-| **DG markup-context `reads` edge-lift (§40.9.3)** | ❌ **NOT built** — the "256-edge ceiling" | markup `@`-reads route through `MARKUP_READER_SENTINEL` (dependency-graph.ts); RS aborts/under-approximates without them |
+| **DG markup-context `reads` edge-lift (§40.9.3)** | ✅ **BUILT** (S88, A-1.2..A-1.6; verified S221) | `dependency-graph.ts:2340` hardcoded ON; Component 2 consumes; end-to-end verified — was the *assumed* W1, turns out done |
 | **Live-pipeline activation** (Stage 7.6 wired active; DG+AuthGraph fed to RS) | ❌ **NOT done** — Stage 7.6 INACTIVE | `--emit-reachability` produces EMPTY closures today (DG+AuthGraph not wired into the emit path) |
 | **A-4 codegen splitter** (consume ChunkPlans → emit tiered chunks) | ❌ **NOT built** | `codegen/index.ts:962` "Empty until A-2.2+"; `:190/:201` A-4 wave + feature-flag notes |
 | Runtime tiered-chunk loader (initialChunk + prefetchTier1/2/N progressive load) | ❌ **NOT built** | depends on A-4 |
@@ -46,9 +50,9 @@
 ### Banked coupling — block-lease conflict query falls out of W3 (S221)
 flogence's **block-lease** core inference ("can these two edits run in parallel?") = `closure(regionA) ∩ closure(regionB) == ∅` — the SAME per-region reactive touch-set the §40.9 solver computes. Once W1-W3 land, expose a near-free **`--emit-region-touch-map` / `conflictsWith(regionA, regionB)` query (W3.5)** over the closure the compiler already computes. block-lease then shrinks from "an inference engine re-deriving the dep graph (badly, at the agent layer)" to "an orchestrator consuming a compiler-emitted fact" — the S214 deterministic-layer framing (compiler owns program-inference; flogence owns process-coordination). Dividing line: program-inference (dep/reachability/conflict/dead-structural) → compiler-native; process-coordination (lease-holding, dispatch, baton-pass, reasoning provenance) → flogence-layer. NOT W1-blocking; revisit at W3.
 
-## 4. Proposed first step
+## 4. Proposed first step — REVISED S221 (W1 done → W2 is the first buildable)
 
-**W1 — the DG markup-context `reads` edge-lift.** Self-contained, ~40-80h, the prerequisite everything else needs, and independently verifiable (re-run the S84 probe → the markup reads become edge-shaped; RS stops aborting on trucking). Dispatch shape: a focused `scrml-js-codegen-engineer` worktree dispatch against `dependency-graph.ts` (the `MARKUP_READER_SENTINEL` site + the §40.9.3 contract), with the S84 diagnostic + Stage 7.6 input contract as the brief, and the probe as the acceptance test.
+**W2 — thread RouteMap into `enumerateEntryPoints`.** The W1 survey proved the DG edge-lift is done; the real first wave is the entry-point/RouteMap wiring. Bounded + precise (the agent located it exactly): `reachability/entry-points.ts:enumerateEntryPoints` takes only `files` and skips filesystem-routed pages (no `<program>` root). Thread the `routeMap` (already at `api.js:2004`) into the enumerator so each `pages/**/*.scrml` becomes an RS entry point; fix the `entry-points.ts:31-34` doc/code mismatch in the same change. **Acceptance:** `examples/23-trucking-dispatch --emit-reachability` produces NON-empty per-page closures (today the static `<program>` shell is correctly empty; the reactive `pages/` get skipped). Then re-run the role-keyed closure check. After W2, codegen still doesn't *split* (that's W3/A-4) — but the closures become real + inspectable, which is the gate for scoping W3.
 
 ## Links
 - SPEC §40.9 · PIPELINE Stage 7.6 (`compiler/PIPELINE.md` ~L2350) · Insight 29 (`~/.claude/design-insights.md`)
