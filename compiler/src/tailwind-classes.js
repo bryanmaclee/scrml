@@ -32,7 +32,10 @@
  * Variant prefixes supported (per §26.3): responsive (`sm:`–`2xl:`), state
  * pseudo-classes (`hover:`, `focus:`, `active:`, `disabled:`, `first:`,
  * `last:`, `odd:`, `even:`, `visited:`, `focus-within:`, `focus-visible:`),
+ * parent-state (`group-{state}:` for the full state-pseudo set — a
+ * descendant-combinator variant under a `group` marker class),
  * `dark:`, `print:`, `motion-safe:`, `motion-reduce:`. Stacking is permitted.
+ * (`peer-*` sibling-state remains deferred — §26.5 / SPEC-ISSUE-012.)
  *
  * Arbitrary values supported (per §26.4): `<utility-prefix>-[<value>]`. The
  * compiler validates bracket content at compile time per §26.4 and emits
@@ -877,6 +880,81 @@ function registerTransform() {
 }
 
 // ---------------------------------------------------------------------------
+// Transition / animation timing family (§26, Tailwind v3 named/scale forms).
+//
+// COVERAGE GAP (ss29 item 1 / flogence S14): the arbitrary-bracket forms
+// (`transition-[…]`, `duration-[200ms]`, `ease-[…]`, `delay-[100ms]`) already
+// resolve via ARBITRARY_PROP_MAP, but the BARE + NAMED-SCALE forms
+// (`transition`, `transition-colors`, `duration-200`, `ease-in-out`,
+// `delay-150`, …) had NO registry entry — they rendered nothing and ghost-lint
+// W-TAILWIND-UNRECOGNIZED-CLASS / W-TAILWIND-001. These are pure static
+// utilities — NOT a composing family. Each utility writes a DISTINCT CSS
+// property (transition-property / -duration / -timing-function / -delay), so
+// they coexist on one element with no last-write-wins clobber (the reason the
+// transform/filter families need the `var()`-compose model and these do not).
+// ---------------------------------------------------------------------------
+
+// Tailwind v3 default transition timing-function + duration, shared by every
+// property-bearing `transition*` utility (NOT `transition-none`).
+const TRANSITION_DEFAULT_TIMING =
+  "transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;";
+
+// The `transition-property` value list for each `transition*` variant. Bare
+// `transition` covers Tailwind v3's full animatable-property set; the suffixed
+// forms narrow it. `none` is special-cased (no timing/duration — see below).
+const TRANSITION_PROPERTY_VALUES = {
+  "transition":
+    "color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter",
+  "transition-all": "all",
+  "transition-colors":
+    "color, background-color, border-color, text-decoration-color, fill, stroke",
+  "transition-opacity": "opacity",
+  "transition-shadow": "box-shadow",
+  "transition-transform": "transform",
+};
+
+// Tailwind v3 duration / delay scale (ms). `duration-{N}` -> transition-duration,
+// `delay-{N}` -> transition-delay.
+const TRANSITION_MS_SCALE = ["75", "100", "150", "200", "300", "500", "700", "1000"];
+
+// Tailwind v3 named easing curves (`ease-{name}` -> transition-timing-function).
+const EASE_VALUES = {
+  "linear": "linear",
+  "in": "cubic-bezier(0.4, 0, 1, 1)",
+  "out": "cubic-bezier(0, 0, 0.2, 1)",
+  "in-out": "cubic-bezier(0.4, 0, 0.2, 1)",
+};
+
+function registerTransition() {
+  // transition / transition-all / transition-colors / transition-opacity /
+  // transition-shadow / transition-transform — set transition-property + the
+  // default timing-function + duration.
+  for (const [cls, property] of Object.entries(TRANSITION_PROPERTY_VALUES)) {
+    registry.set(
+      cls,
+      `.${escapeCssClass(cls)} { transition-property: ${property}; ${TRANSITION_DEFAULT_TIMING} }`,
+    );
+  }
+
+  // transition-none — disables transitions; NO timing-function / duration.
+  registry.set("transition-none", ".transition-none { transition-property: none; }");
+
+  // duration-{N} / delay-{N} (ms scale).
+  for (const n of TRANSITION_MS_SCALE) {
+    const durCls = `duration-${n}`;
+    const delayCls = `delay-${n}`;
+    registry.set(durCls, `.${escapeCssClass(durCls)} { transition-duration: ${n}ms; }`);
+    registry.set(delayCls, `.${escapeCssClass(delayCls)} { transition-delay: ${n}ms; }`);
+  }
+
+  // ease-{named} (transition-timing-function).
+  for (const [name, curve] of Object.entries(EASE_VALUES)) {
+    const cls = `ease-${name}`;
+    registry.set(cls, `.${escapeCssClass(cls)} { transition-timing-function: ${curve}; }`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Composing filter + backdrop-filter families (blur / brightness / contrast /
 // grayscale / hue-rotate / invert / saturate / sepia / drop-shadow + the
 // backdrop-* equivalents) — Approach C (§26.7.3, S191 Phase 4). Same inline-
@@ -1562,6 +1640,42 @@ const THEME_MEDIA_QUERIES = {
   "motion-safe": "(prefers-reduced-motion: no-preference)",
   "motion-reduce": "(prefers-reduced-motion: reduce)",
 };
+
+// Parent-state variant (kind: "parent-state"). `group-{state}:X` styles X only
+// when an ANCESTOR carrying the `group` marker class is in `{state}` — a
+// DESCENDANT-COMBINATOR selector, NOT a `:pseudo` suffix on X itself. The
+// canonical Tailwind v3 emission for `group-hover:p-4` is
+//   `.group:hover .group-hover\:p-4 { padding: 1rem }`
+// (the base utility's declarations, scoped under `.group:<pseudo>`). `{state}`
+// draws from the same STATE_PSEUDO_CLASSES set the single-element `hover:`/
+// `focus:`/… variants use (`group-hover`, `group-focus`, `group-active`,
+// `group-disabled`, `group-first`, …). The bare `group` token is a recognized
+// MARKER class — it's only an ancestor hook, so it emits NO CSS rule of its own
+// (Tailwind emits nothing for `.group`). `peer-*` (sibling-state, a `~`
+// combinator) remains deferred per §26.5 / SPEC-ISSUE-012.
+const PARENT_STATE_PREFIX = "group";
+
+// The bare `group` marker class: recognized (so neither tailwind lint fires) but
+// resolves to an empty CSS body — see `getTailwindCSSWithDiagnostic`, where it
+// returns `{ css: "" }` so `getAllUsedCSS` pushes no rule yet the `!== null`
+// lint guards in `findUnsupportedTailwindShapes` / `findUnrecognizedClasses`
+// clear.
+const GROUP_MARKER_CLASS = "group";
+
+/**
+ * If `prefix` is a `group-{state}` parent-state variant whose `{state}` is a
+ * recognized pseudo-class, return that `{state}` (e.g. "hover" for
+ * "group-hover"). Otherwise return null. `group-bogus` returns null so it is
+ * still treated as an unrecognized prefix (and lints fire).
+ *
+ * @param {string} prefix
+ * @returns {string|null}
+ */
+function parentStateOf(prefix) {
+  if (!prefix.startsWith(PARENT_STATE_PREFIX + "-")) return null;
+  const state = prefix.slice(PARENT_STATE_PREFIX.length + 1);
+  return STATE_PSEUDO_CLASSES[state] ? state : null;
+}
 
 // ---------------------------------------------------------------------------
 // CSS class name escaping
@@ -2294,14 +2408,19 @@ function splitClassNameSegments(className) {
  * `[...]` (e.g., `bg-[url(http://x:y)]`) are NOT treated as variant
  * separators.
  *
+ * `parentState` carries a `group-{state}` parent-state variant (e.g. "hover"
+ * for `group-hover:p-4`) — emitted via a descendant combinator, not a `:pseudo`
+ * suffix (see `wrapWithVariants`).
+ *
  * @param {string} className
- * @returns {{ breakpoint: string|null, theme: string|null, state: string|null, base: string }}
+ * @returns {{ breakpoint: string|null, theme: string|null, state: string|null, parentState: string|null, base: string, hasUnrecognizedPrefix: boolean }}
  */
 function parseClassName(className) {
   const parts = splitClassNameSegments(className);
   let breakpoint = null;
   let theme = null;
   let state = null;
+  let parentState = null;
   let hasUnrecognizedPrefix = false;
   const base = parts[parts.length - 1];
 
@@ -2313,12 +2432,14 @@ function parseClassName(className) {
       theme = prefix;
     } else if (STATE_PSEUDO_CLASSES[prefix]) {
       state = prefix;
+    } else if (parentStateOf(prefix)) {
+      parentState = parentStateOf(prefix);
     } else {
       hasUnrecognizedPrefix = true;
     }
   }
 
-  return { breakpoint, theme, state, base, hasUnrecognizedPrefix };
+  return { breakpoint, theme, state, parentState, base, hasUnrecognizedPrefix };
 }
 
 /**
@@ -2422,24 +2543,34 @@ function resolveArbitraryValue(base, escapedClassName) {
  * is rewritten so the variant-prefixed class name takes its place. The
  * descendant selectors (e.g., ` :where(p)...`) are preserved verbatim.
  *
+ * `parentState` (e.g. "hover" for `group-hover:p-4`) wraps the rule's selector
+ * in a `.group:<pseudo> ` DESCENDANT COMBINATOR — `.group:hover .group-hover\:p-4`
+ * — rather than a `:pseudo` suffix on the class itself. It composes with `state`
+ * (`.group:hover .group-hover\:hover\:p-4:hover`) and with the theme/breakpoint
+ * media wrappers (which stack outside the whole rule, unchanged). Parent-state
+ * is NOT supported for the multi-rule prose family (it has no single-class
+ * descendant slot to combinator-scope cleanly); such a class falls through to
+ * the existing prose rewrite without a parent-state prefix.
+ *
  * @param {string|null} baseRule
  * @param {string|null} arbitraryDecl    css declaration body for arbitrary values
  * @param {string} escapedClassName
- * @param {{ breakpoint, theme, state }} variants
+ * @param {{ breakpoint, theme, state, parentState }} variants
  * @param {string} [baseName]   the un-prefixed class name (e.g., "prose-lg")
  *                              — required for multi-rule rewriting
  * @returns {string|null}
  */
-function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoint, theme, state }, baseName) {
+function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoint, theme, state, parentState }, baseName) {
+  // `.group:<pseudo> ` descendant prefix for parent-state variants (trailing
+  // space is the descendant combinator). Empty for non-parent-state classes.
+  const parentPrefix = parentState
+    ? `.${PARENT_STATE_PREFIX}:${STATE_PSEUDO_CLASSES[parentState]} `
+    : "";
+  const pseudoSuffix = state ? `:${STATE_PSEUDO_CLASSES[state]}` : "";
   let rule;
   if (arbitraryDecl !== null) {
     // Arbitrary-value path: single declaration body, no descendant rules.
-    if (state) {
-      const pseudo = STATE_PSEUDO_CLASSES[state];
-      rule = `.${escapedClassName}:${pseudo} {${arbitraryDecl}}`;
-    } else {
-      rule = `.${escapedClassName} {${arbitraryDecl}}`;
-    }
+    rule = `${parentPrefix}.${escapedClassName}${pseudoSuffix} {${arbitraryDecl}}`;
   } else if (baseRule) {
     // Multi-rule detection: a registry value containing more than one
     // top-level rule (joined with `\n`) needs per-rule selector
@@ -2450,12 +2581,7 @@ function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoin
       const m = baseRule.match(/^(\.[^\s{]+)\s*\{(.+)\}$/s);
       if (!m) return baseRule;
       const declaration = m[2];
-      if (state) {
-        const pseudo = STATE_PSEUDO_CLASSES[state];
-        rule = `.${escapedClassName}:${pseudo} {${declaration}}`;
-      } else {
-        rule = `.${escapedClassName} {${declaration}}`;
-      }
+      rule = `${parentPrefix}.${escapedClassName}${pseudoSuffix} {${declaration}}`;
     }
   } else {
     return null;
@@ -2532,9 +2658,18 @@ export function getTailwindCSSWithDiagnostic(className) {
     return { css: null, diagnostic: null };
   }
 
-  const { breakpoint, theme, state, base, hasUnrecognizedPrefix } = parseClassName(className);
+  // The bare `group` marker (an ancestor hook for `group-{state}:X`
+  // descendants) is RECOGNIZED — neither tailwind lint fires — but emits NO CSS
+  // rule (Tailwind emits nothing for `.group`). Resolve it to an empty body so
+  // `getAllUsedCSS` pushes nothing yet the lints' `getTailwindCSS(cls) !== null`
+  // guards clear.
+  if (className === GROUP_MARKER_CLASS) {
+    return { css: "", diagnostic: null };
+  }
 
-  // If any prefix in the chain is unrecognized (e.g. `weird:p-4`, `group-hover:p-4`),
+  const { breakpoint, theme, state, parentState, base, hasUnrecognizedPrefix } = parseClassName(className);
+
+  // If any prefix in the chain is unrecognized (e.g. `weird:p-4`, `peer-hover:p-4`),
   // the class is unhandled by the embedded engine. Returning null prevents the
   // silent-strip pattern where `weird:p-4` would otherwise produce a `.p-4 { ... }`
   // rule with a selector that doesn't match the source class. The detector
@@ -2547,6 +2682,10 @@ export function getTailwindCSSWithDiagnostic(className) {
 
   const escapedName = escapeCssClass(className);
 
+  // A class carries variants when ANY of breakpoint/theme/state/parentState is
+  // present. parentState alone (`group-hover:p-4`) still needs the wrap path.
+  const hasVariants = breakpoint || theme || state || parentState;
+
   // Try arbitrary-value path first only if the base looks bracketed.
   if (parseArbitraryValue(base)) {
     const arb = resolveArbitraryValue(base, escapedName);
@@ -2557,10 +2696,10 @@ export function getTailwindCSSWithDiagnostic(className) {
       // arb.css is `.<name> { decl }` — extract decl and apply variants.
       const m = arb.css.match(/^(\.[^\s{]+)\s*\{(.+)\}$/s);
       const decl = m ? m[2] : null;
-      if (!breakpoint && !theme && !state) {
+      if (!hasVariants) {
         return { css: arb.css, diagnostic: null };
       }
-      const wrapped = wrapWithVariants(null, decl, escapedName, { breakpoint, theme, state });
+      const wrapped = wrapWithVariants(null, decl, escapedName, { breakpoint, theme, state, parentState });
       return { css: wrapped, diagnostic: null };
     }
   }
@@ -2570,10 +2709,10 @@ export function getTailwindCSSWithDiagnostic(className) {
   if (!baseRule) {
     return { css: null, diagnostic: null };
   }
-  if (!breakpoint && !theme && !state) {
+  if (!hasVariants) {
     return { css: baseRule, diagnostic: null };
   }
-  const wrapped = wrapWithVariants(baseRule, null, escapedName, { breakpoint, theme, state }, base);
+  const wrapped = wrapWithVariants(baseRule, null, escapedName, { breakpoint, theme, state, parentState }, base);
   return { css: wrapped, diagnostic: null };
 }
 
@@ -3165,6 +3304,7 @@ registerEffects();
 registerRing();
 registerGradient();
 registerTransform();
+registerTransition();
 registerFilters();
 registerBackdrop();
 registerLayout();

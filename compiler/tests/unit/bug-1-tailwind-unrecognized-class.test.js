@@ -312,7 +312,9 @@ describe("§6 Suppression — compilerSettings opt-out", () => {
 
   test("suppression does not affect W-TAILWIND-001 (independent code)", () => {
     // The opt-out is per-code; W-TAILWIND-001 keeps firing on its own scope.
-    const source = '<markup name="app">\n  <div class="group-hover:p-4"></div>\n</>';
+    // peer-hover: is a still-deferred sibling-state variant (group-* is now
+    // supported — ss29 item 3), so it remains a W-TAILWIND-001 fixture.
+    const source = '<markup name="app">\n  <div class="peer-hover:p-4"></div>\n</>';
     const result = compileSource(source, {
       compilerSettings: { lintTailwindUnrecognizedClass: "off" },
     });

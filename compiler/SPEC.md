@@ -16203,14 +16203,17 @@ The compiler SHALL recognize variant prefixes preceding a Tailwind utility class
 | `dark:` | `@media (prefers-color-scheme: dark)` |
 | `print:` | `@media print` |
 | `motion-safe:`, `motion-reduce:` | `@media (prefers-reduced-motion: ...)` |
+| `group-<state>:` (`<state>` ∈ the state pseudo-class set above) | `.group:<pseudo> ` descendant combinator (parent-state variant) |
 
 Stacked variants nest in this order, outermost first: responsive breakpoint → theme/feature media query → state pseudo-class. For example, `md:dark:hover:bg-red-500` emits `@media (min-width: 768px) { @media (prefers-color-scheme: dark) { .md\:dark\:hover\:bg-red-500:hover { background-color: #ef4444 } } }`.
 
+The `group-<state>:` **parent-state variant** styles an element only when an ANCESTOR carrying the `group` marker class is in the named state. It SHALL emit a descendant-combinator selector — the base utility's declarations scoped under `.group:<pseudo> `, NOT a `:pseudo` suffix on the class itself. For example, `group-hover:p-4` emits `.group:hover .group-hover\:p-4 { padding: 1rem }`. The bare `group` token is a recognized MARKER class: it produces NO CSS rule of its own (it is only an ancestor hook) and SHALL NOT fire W-TAILWIND-001 or W-TAILWIND-UNRECOGNIZED-CLASS. A `group-<state>:` variant MAY stack with responsive / theme media wrappers (which wrap the whole rule). `<state>` draws from the same state pseudo-class set as the single-element variants; an unrecognized state (e.g. `group-bogus:`) is treated as an unrecognized prefix and fires W-TAILWIND-001.
+
 Breakpoint values for v1 are fixed to Tailwind v3 defaults (640px, 768px, 1024px, 1280px, 1536px). Custom breakpoints are deferred to v2 (Section 26.5).
 
-`group-*`, `peer-*`, and `before:` / `after:` pseudo-element variants are deferred to v2 (Section 26.5).
+`peer-*` (sibling-state) and `before:` / `after:` pseudo-element variants are deferred to v2 (Section 26.5). (`group-<state>:` parent-state is SUPPORTED — see above.)
 
-When a class string contains a variant-prefix-shaped segment whose prefix matches NONE of the recognized prefixes above (e.g. `weird:p-4`, `group-hover:bg-blue-500`), the compiler SHALL NOT emit CSS for that class and SHALL emit W-TAILWIND-001. This prevents the silent-strip pattern where the compiler would otherwise emit a rule for the base utility under the wrong selector.
+When a class string contains a variant-prefix-shaped segment whose prefix matches NONE of the recognized prefixes above (e.g. `weird:p-4`, `peer-hover:bg-blue-500`), the compiler SHALL NOT emit CSS for that class and SHALL emit W-TAILWIND-001. This prevents the silent-strip pattern where the compiler would otherwise emit a rule for the base utility under the wrong selector.
 
 ### 26.4 Arbitrary Values
 
@@ -16274,10 +16277,10 @@ The variant-prefix `:` separator is bracket-aware: a `:` inside a `[...]` arbitr
 ### 26.5 Open Items
 
 - Custom theme configuration (custom colors, custom breakpoints) — TBD (SPEC-ISSUE-012).
-- `group-*` and `peer-*` parent/sibling-state variants — TBD (SPEC-ISSUE-012).
+- `peer-*` sibling-state variants — TBD (SPEC-ISSUE-012). (`group-*` parent-state variants are now SUPPORTED — see §26.3.)
 - `before:` and `after:` pseudo-element variants (require `content` property handling) — TBD (SPEC-ISSUE-012).
 - Container queries (`@container`) — TBD.
-For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `group-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
+For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `peer-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
 
 Additionally, the compiler SHALL emit `W-TAILWIND-UNRECOGNIZED-CLASS` (info-level lint, §34) for any class-name token inside a `class="..."` attribute that does NOT resolve via the embedded Tailwind registry. This widens the surface beyond W-TAILWIND-001 to also catch (a) misspellings (`flexx` vs `flex`), (b) arbitrary-value classes whose particular utility prefix is not yet supported by the embedded engine (e.g. `transition-[opacity_0.5s]`, `transform-[rotate(45deg)]` — note: `grid-cols-[auto_1fr_auto]` IS supported as of S109, see §26.4 grid family), and (c) custom user-defined CSS classes (acknowledged false-positive — S108 dogfood Bug 1). S109 landed the FULL fix for the grid/flex/aspect family arbitrary-value emission; a safelist/`@apply` mechanism to distinguish user-defined classes from typos remains deferred. Adopters whose codebases rely on extensive custom CSS class names may suppress per-project via `lint.tailwind-unrecognized-class = off` (§28).
 
@@ -17023,7 +17026,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-FOREIGN-012 | §23.4 | Sidecar function called from a client-side code path | Error |
 | W-FOREIGN-001 | §23.2 | Level-0 `_{` used; `_={}=` recommended | Warning |
 | W-PROGRAM-001 | §4.12 | Unnamed nested `<program>` with no distinguishing attributes | Warning |
-| W-TAILWIND-001 | §26.3, §26.5 | Class name in `class="..."` uses Tailwind syntax that the embedded engine does not handle (deferred prefix like `group-hover:`, custom theme prefix, etc.). The class produces no CSS. SPEC-ISSUE-012. | Warning |
+| W-TAILWIND-001 | §26.3, §26.5 | Class name in `class="..."` uses Tailwind syntax that the embedded engine does not handle (deferred prefix like `peer-hover:`, custom theme prefix, etc.). The class produces no CSS. SPEC-ISSUE-012. | Warning |
 | W-TAILWIND-UNRECOGNIZED-CLASS | §26.5, §34 | A class-name token inside a `class="..."` attribute does NOT resolve via the embedded Tailwind utility registry. The class produces no CSS. Three legitimate causes: (a) the class is misspelled (`flexx` vs `flex`); (b) the class is a Tailwind arbitrary-value class whose particular utility prefix is not yet supported by the embedded engine (`grid-cols-[auto_1fr_auto]`); (c) the class is a custom user-defined CSS class declared elsewhere (acknowledged false-positive at floor level). Workaround for arbitrary-value classes: drop a `#{}` CSS shim block. **FLOOR fix** (S108 dogfood Bug 1) — emits the lint so adopters surface compile-time friction instead of silent runtime layout breakage; the full fix (actually emitting CSS for arbitrary-value classes plus a safelist mechanism to distinguish custom user classes from misspellings) is deferred. **Fires:** emitted by the lint pre-pass at `compiler/src/tailwind-classes.js` (`findUnrecognizedClasses`) wired through `compiler/src/api.js` ahead of Stage 2 (BS). Suppress per-project via `compilerSettings.lintTailwindUnrecognizedClass = "off"` (cross-ref §28). | Info |
 | W-CASE-001 | §15.15.4 | A user-declared state-type or component name is lowercase and shadows a built-in HTML element name. Resolution still succeeds (the user declaration takes precedence). Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |
 | W-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener uses whitespace between `<` and the identifier. The canonical form is no-space (`<identifier>`); the with-space form is deprecated and becomes E-WHITESPACE-001 in P3. Migration via `scrml-migrate`. Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |

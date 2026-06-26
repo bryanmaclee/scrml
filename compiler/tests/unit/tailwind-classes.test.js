@@ -1104,15 +1104,17 @@ describe("§20 Dynamic-class fragment skip — W-TAILWIND-001 (findUnsupportedTa
     expect(diags).toHaveLength(0);
   });
 
-  test("genuinely-unsupported STATIC variant (group-hover:) STILL fires — no blanket suppression", () => {
-    // group-hover: is shape-valid (':') but unsupported by the engine; it is
-    // static (no interpolation) so it must still fire.
-    const diags = findUnsupportedTailwindShapes('<div class="group-hover:p-4"></div>');
-    expect(firedOn(diags, "group-hover:p-4")).toBe(true);
+  test("genuinely-unsupported STATIC variant (peer-hover:) STILL fires — no blanket suppression", () => {
+    // peer-hover: is shape-valid (':') but unsupported by the engine (sibling-
+    // state, deferred per §26.5); it is static (no interpolation) so it must
+    // still fire. (group-* is now supported — ss29 item 3 — so peer-* is the
+    // deferred fixture here.)
+    const diags = findUnsupportedTailwindShapes('<div class="peer-hover:p-4"></div>');
+    expect(firedOn(diags, "peer-hover:p-4")).toBe(true);
   });
 
   test("whitespace-separated unsupported variant next to an interpolation still fires", () => {
-    const diags = findUnsupportedTailwindShapes('<div class="group-hover:p-4 ${x}"></div>');
-    expect(firedOn(diags, "group-hover:p-4")).toBe(true);
+    const diags = findUnsupportedTailwindShapes('<div class="peer-hover:p-4 ${x}"></div>');
+    expect(firedOn(diags, "peer-hover:p-4")).toBe(true);
   });
 });

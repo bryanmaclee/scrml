@@ -8,8 +8,11 @@
  * like Tailwind variant or arbitrary-value syntax (contains ':' or '[') AND
  * does not match a registered utility. Supported variants (5 responsive +
  * 11 state pseudo-classes + 4 theme media queries dark/print/motion-* +
- * arbitrary values) produce CSS today; unsupported variants (`group-*:`,
- * `peer-*:`, custom prefixes) fire the warning.
+ * `group-{state}:` parent-state + arbitrary values) produce CSS today;
+ * unsupported variants (`peer-*:` sibling-state, custom prefixes) fire the
+ * warning. (`group-*` was un-deferred in ss29 item 3 — flogence S14; `peer-*`
+ * remains deferred per §26.5 / SPEC-ISSUE-012, so it is now the canonical
+ * unsupported-variant fixture in this suite.)
  *
  * Coverage:
  *   §1  Variant prefixes — supported (no fire) vs unsupported (fire)
@@ -103,9 +106,9 @@ describe("§1 Variant prefixes — supported variants do NOT fire", () => {
 });
 
 describe("§1b Variant prefixes — unsupported variants fire", () => {
-  test("group-hover:bg-blue-500 fires (group-* deferred to v2)", () => {
-    const diags = scan('<button class="group-hover:bg-blue-500">x</button>');
-    expect(fired(diags, "group-hover:bg-blue-500")).toBe(true);
+  test("peer-focus:bg-blue-500 fires (peer-* sibling-state deferred — §26.5)", () => {
+    const diags = scan('<button class="peer-focus:bg-blue-500">x</button>');
+    expect(fired(diags, "peer-focus:bg-blue-500")).toBe(true);
     expect(diags.length).toBe(1);
   });
 
@@ -244,9 +247,9 @@ describe("§5 User classes — no Tailwind shape, must NOT fire", () => {
 // ---------------------------------------------------------------------------
 
 describe("§6 Mixed attribute — fires only on offenders", () => {
-  test("p-4 group-hover:p-8 my-custom — fires once for group-hover:p-8", () => {
-    const diags = scan('<div class="p-4 group-hover:p-8 my-custom"></div>');
-    expect(fired(diags, "group-hover:p-8")).toBe(true);
+  test("p-4 peer-hover:p-8 my-custom — fires once for peer-hover:p-8", () => {
+    const diags = scan('<div class="p-4 peer-hover:p-8 my-custom"></div>');
+    expect(fired(diags, "peer-hover:p-8")).toBe(true);
     expect(diags.length).toBe(1);
   });
 
@@ -261,9 +264,9 @@ describe("§6 Mixed attribute — fires only on offenders", () => {
   });
 
   test("multiple offenders in one attribute fire once each", () => {
-    const diags = scan('<div class="p-4 group-hover:p-8 peer-hover:flex my-custom"></div>');
+    const diags = scan('<div class="p-4 peer-focus:p-8 peer-hover:flex my-custom"></div>');
     expect(diags.length).toBe(2);
-    expect(fired(diags, "group-hover:p-8")).toBe(true);
+    expect(fired(diags, "peer-focus:p-8")).toBe(true);
     expect(fired(diags, "peer-hover:flex")).toBe(true);
   });
 });
@@ -274,22 +277,22 @@ describe("§6 Mixed attribute — fires only on offenders", () => {
 
 describe("§7 Diagnostic shape", () => {
   test("diagnostic carries code, severity, message, className, line, column", () => {
-    const diags = scan('<div class="group-hover:p-4"></div>');
+    const diags = scan('<div class="peer-hover:p-4"></div>');
     expect(diags.length).toBe(1);
     const d = diags[0];
     expect(d.code).toBe("W-TAILWIND-001");
     expect(d.severity).toBe("warning");
-    expect(d.className).toBe("group-hover:p-4");
+    expect(d.className).toBe("peer-hover:p-4");
     expect(typeof d.line).toBe("number");
     expect(typeof d.column).toBe("number");
     expect(d.line).toBeGreaterThan(0);
     expect(d.column).toBeGreaterThan(0);
-    expect(d.message).toContain("group-hover:p-4");
+    expect(d.message).toContain("peer-hover:p-4");
     expect(d.message).toContain("SPEC-ISSUE-012");
   });
 
   test("message points adopters at supported variants OR custom CSS rule", () => {
-    const diags = scan('<div class="group-hover:p-4"></div>');
+    const diags = scan('<div class="peer-hover:p-4"></div>');
     const m = diags[0].message;
     expect(m).toMatch(/supported variant prefix|own CSS rule/i);
   });
@@ -302,18 +305,18 @@ describe("§7 Diagnostic shape", () => {
 describe("§8 Multi-line / multi-attribute coverage", () => {
   test("two class= attributes on different lines both report", () => {
     const source =
-      '<div class="group-hover:p-4">\n' +
+      '<div class="peer-focus:p-4">\n' +
       '  <span class="peer-hover:flex">hi</span>\n' +
       '</div>';
     const diags = scan(source);
-    expect(fired(diags, "group-hover:p-4")).toBe(true);
+    expect(fired(diags, "peer-focus:p-4")).toBe(true);
     expect(fired(diags, "peer-hover:flex")).toBe(true);
     expect(diags.length).toBe(2);
   });
 
   test("diagnostics sorted by line then column", () => {
     const source =
-      '<div class="group-hover:p-4">\n' +
+      '<div class="peer-focus:p-4">\n' +
       '  <span class="peer-hover:flex">hi</span>\n' +
       '</div>';
     const diags = scan(source);
@@ -325,8 +328,8 @@ describe("§8 Multi-line / multi-attribute coverage", () => {
   });
 
   test("dedupe within a single class= attribute (same offender twice → once)", () => {
-    const diags = scan('<div class="group-hover:p-4 group-hover:p-4"></div>');
-    const count = diags.filter(d => d.className === "group-hover:p-4").length;
+    const diags = scan('<div class="peer-hover:p-4 peer-hover:p-4"></div>');
+    const count = diags.filter(d => d.className === "peer-hover:p-4").length;
     expect(count).toBe(1);
   });
 });
@@ -337,14 +340,14 @@ describe("§8 Multi-line / multi-attribute coverage", () => {
 
 describe("§9 Integration: compileScrml lintDiagnostics field", () => {
   test("compileScrml surfaces W-TAILWIND-001 in lintDiagnostics", () => {
-    const source = '<markup name="app">\n  <div class="group-hover:p-4"></div>\n</>';
+    const source = '<markup name="app">\n  <div class="peer-hover:p-4"></div>\n</>';
     const result = compileSource(source);
     const diags = result.lintDiagnostics || [];
-    expect(diags.some(d => d.code === "W-TAILWIND-001" && d.className === "group-hover:p-4")).toBe(true);
+    expect(diags.some(d => d.code === "W-TAILWIND-001" && d.className === "peer-hover:p-4")).toBe(true);
   });
 
   test("W-TAILWIND-001 is non-fatal — compilation still produces output", () => {
-    const source = '<markup name="app">\n  <div class="group-hover:p-4">x</div>\n</>';
+    const source = '<markup name="app">\n  <div class="peer-hover:p-4">x</div>\n</>';
     const result = compileSource(source);
     expect(result.errors.length).toBe(0);
     // Output exists for the file (HTML, client JS) — compilation was not blocked
@@ -399,12 +402,12 @@ describe("§10 ${...} interpolation masking — no false positives", () => {
     expect(diags.length).toBe(0);
   });
 
-  test("static group-hover:p-4 next to a ternary interpolation fires only on group-hover:p-4", () => {
-    // The static portion has group-hover:p-4 (Tailwind shape, unsupported variant)
+  test("static peer-hover:p-4 next to a ternary interpolation fires only on peer-hover:p-4", () => {
+    // The static portion has peer-hover:p-4 (Tailwind shape, unsupported variant)
     // — should fire. The interpolation is masked so the ternary's `:` is not seen.
-    const diags = scan(`<div class="group-hover:p-4 \${cond ? 'a' : 'b'}"></div>`);
+    const diags = scan(`<div class="peer-hover:p-4 \${cond ? 'a' : 'b'}"></div>`);
     expect(diags.length).toBe(1);
-    expect(fired(diags, "group-hover:p-4")).toBe(true);
+    expect(fired(diags, "peer-hover:p-4")).toBe(true);
   });
 
   test("unclosed ${ masks to end of attribute value (no spurious diagnostics)", () => {
