@@ -14418,6 +14418,19 @@ function checkMatchDiagnostics(
     }
   }
 
+  // §18.19 — multi-scrutinee match (`match (e1, …, eN) { (p1, …, pN) :> body }`).
+  // A dedicated product-exhaustiveness + arm-arity path; it resolves each
+  // scrutinee's type itself (the single-scrutinee `resolveMatchSubjectType` /
+  // `extractArmsFromMatchNode` machinery below is breadth-1). Detected by the
+  // `scrutinees` list the ast-builder attaches (length ≥ 2).
+  {
+    const scrutinees = (node as { scrutinees?: unknown }).scrutinees;
+    if (Array.isArray(scrutinees) && scrutinees.length >= 2) {
+      checkMultiScrutineeMatch(node, scrutinees as string[], scopeChain, errors, span);
+      return;
+    }
+  }
+
   for (const guard of extracted.guardArms) {
     const trimmed = guard.armText.trim().slice(0, 60).replace(/\s+/g, " ");
     errors.push(new TSError(
@@ -14506,6 +14519,216 @@ function checkMatchDiagnostics(
       errors,
       isPartial,
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// §18.19 Multi-Scrutinee Match — product exhaustiveness + arm-arity.
+// ---------------------------------------------------------------------------
+
+interface MultiPositionPattern {
+  kind: "wildcard" | "variant" | "is" | "string" | "other";
+  name?: string;
+  binding?: string;
+}
+
+/** §18.19 — parse one per-position arm-pattern (an ordinary §18.2 pattern). */
+function parseMultiPositionPattern(text: string): MultiPositionPattern {
+  const t = (text || "").trim();
+  if (t === "_" || t === "else") return { kind: "wildcard" };
+  const isM = t.match(/^is\s+([A-Za-z_][\w]*)/);
+  if (isM) return { kind: "is", name: isM[1] };
+  const vM = t.match(/^(?:\.|::)\s*([A-Za-z_][\w]*)\s*(?:\(([\s\S]*)\))?$/);
+  if (vM) return { kind: "variant", name: vM[1], binding: vM[2] };
+  if (/^["']/.test(t)) return { kind: "string", name: t };
+  return { kind: "other", name: t };
+}
+
+/** §18.19 — the variant / member value set for one scrutinee position. */
+function positionValueSet(
+  type: ResolvedType | null,
+): { kind: "enum" | "union"; typeName: string; values: Set<string> } | null {
+  if (!type) return null;
+  if (
+    type.kind === "predicated" &&
+    (type as PredicatedType).baseType === "enum" &&
+    (type as PredicatedType).enumBase
+  ) {
+    const pred = type as PredicatedType;
+    const base = pred.enumBase as EnumType;
+    const all = new Set((base.variants ?? []).map(v => v.name));
+    return { kind: "enum", typeName: base.name, values: new Set(pred.subsetVariants ?? all) };
+  }
+  if (type.kind === "enum") {
+    return {
+      kind: "enum",
+      typeName: (type as EnumType).name,
+      values: new Set(((type as EnumType).variants ?? []).map(v => v.name)),
+    };
+  }
+  if (type.kind === "union") {
+    const names = new Set<string>();
+    for (const m of ((type as UnionType).members ?? [])) {
+      if (m.kind === "primitive") names.add((m as PrimitiveType).name);
+      else if (m.kind === "enum") names.add((m as EnumType).name);
+      else if (m.kind === "asIs") names.add("asIs");
+      else names.add(m.kind);
+    }
+    return { kind: "union", typeName: "union", values: names };
+  }
+  return null;
+}
+
+/**
+ * §18.19 — typecheck a multi-scrutinee match: arm-arity (E-MATCH-SCRUTINEE-ARITY),
+ * nested-pattern exclusion per position (E-SYNTAX-012, §18.11), and product
+ * exhaustiveness over the cross-product of the per-position §18.8.1 variant sets
+ * (E-TYPE-020 / E-TYPE-006, naming the uncovered cell). `partial match` opts out.
+ */
+function checkMultiScrutineeMatch(
+  node: ASTNodeLike,
+  scrutinees: string[],
+  scopeChain: ScopeChain,
+  errors: TSError[],
+  span: Span,
+): void {
+  const N = scrutinees.length;
+  const scrutineeExprs = (node as { scrutineeExprs?: unknown[] }).scrutineeExprs ?? [];
+  const isPartial = (node as { partial?: boolean }).partial === true;
+  const body = (node.body as ASTNodeLike[] | undefined) ?? [];
+
+  // Partition arms into product arms (per-position pattern list) and whole-
+  // product wildcard arms (`_` / `else` — cover the entire product).
+  interface ProductArm { positions: MultiPositionPattern[]; raw: string[]; }
+  const productArms: ProductArm[] = [];
+  let hasWholeWildcard = false;
+
+  for (const arm of body) {
+    if (!arm || typeof arm !== "object") continue;
+    const kind = (arm as ASTNodeLike).kind;
+    const productPatterns = (arm as { productPatterns?: unknown }).productPatterns;
+    if (Array.isArray(productPatterns)) {
+      const raw = productPatterns.map(p => String(p));
+      productArms.push({ positions: raw.map(parseMultiPositionPattern), raw });
+      continue;
+    }
+    // Whole-product wildcard: `_` / `else` (match-arm-inline test, or a block arm).
+    if (kind === "match-arm-inline") {
+      const test = String((arm as { test?: unknown }).test ?? "");
+      if (test === "else") hasWholeWildcard = true;
+    } else if (kind === "match-arm-block" && (arm as { isWildcard?: boolean }).isWildcard) {
+      hasWholeWildcard = true;
+    }
+  }
+
+  // (1) Arm-arity — each product arm MUST supply exactly N patterns.
+  for (const arm of productArms) {
+    if (arm.positions.length !== N) {
+      errors.push(new TSError(
+        "E-MATCH-SCRUTINEE-ARITY",
+        `E-MATCH-SCRUTINEE-ARITY: multi-scrutinee \`match\` arm \`(${arm.raw.join(", ")})\` has ` +
+        `${arm.positions.length} pattern(s) but the head dispatches on ${N} scrutinees ` +
+        `(\`match (${scrutinees.join(", ")})\`). Each product-pattern MUST supply exactly one ` +
+        `§18.2 arm-pattern per head position — write ${N} comma-separated patterns, or use a ` +
+        `whole-product \`_\` / \`else\` arm (§18.19).`,
+        span,
+      ));
+    }
+  }
+
+  // (2) Nested-pattern exclusion per position (§18.11 / DC-018). A binding that
+  // itself contains a `.`/`(` is a nested variant pattern — breadth, not depth.
+  for (const arm of productArms) {
+    for (let i = 0; i < arm.positions.length; i++) {
+      const p = arm.positions[i];
+      if (p.kind === "variant" && p.binding && /[.(]/.test(p.binding)) {
+        errors.push(new TSError(
+          "E-SYNTAX-012",
+          `E-SYNTAX-012: nested pattern \`${arm.raw[i]}\` in position ${i + 1} of a multi-scrutinee ` +
+          `\`match\` arm is not supported (§18.11 / DC-018). Each position is a SINGLE-LEVEL ` +
+          `pattern — multi-scrutinee widens over scrutinees (breadth), not pattern depth. ` +
+          `Decompose with an inner \`match\`.`,
+          span,
+        ));
+      }
+    }
+  }
+
+  // (3) Product exhaustiveness — cross-product of per-position variant sets.
+  if (isPartial || hasWholeWildcard) return; // `partial` opts out; `_`/`else` covers all.
+
+  // Only consider product arms with the correct arity for coverage (arity errors
+  // already reported; a wrong-arity arm cannot soundly cover cells).
+  const goodArms = productArms.filter(a => a.positions.length === N);
+
+  const valueSets: Array<{ kind: "enum" | "union"; typeName: string; values: string[] }> = [];
+  for (let i = 0; i < N; i++) {
+    const t = resolveMatchSubjectType(scrutinees[i], scrutineeExprs[i], scopeChain);
+    const vs = positionValueSet(t);
+    if (!vs || vs.values.size === 0) return; // a position is unresolvable → skip (conservative).
+    valueSets.push({ kind: vs.kind, typeName: vs.typeName, values: [...vs.values] });
+  }
+
+  // Cartesian-product cell count guard — skip absurdly large products.
+  let cellCount = 1;
+  for (const vs of valueSets) cellCount *= vs.values.length;
+  if (cellCount > 4096) return;
+
+  const anyUnion = valueSets.some(vs => vs.kind === "union");
+
+  const cellCovered = (cell: string[]): boolean => {
+    for (const arm of goodArms) {
+      let all = true;
+      for (let i = 0; i < N; i++) {
+        const p = arm.positions[i];
+        if (p.kind === "wildcard") continue;
+        if ((p.kind === "variant" || p.kind === "is") && p.name === cell[i]) continue;
+        all = false;
+        break;
+      }
+      if (all) return true;
+    }
+    return false;
+  };
+
+  // Enumerate the cross-product; collect uncovered cells.
+  const missing: string[][] = [];
+  const idx = new Array(N).fill(0);
+  for (let c = 0; c < cellCount; c++) {
+    const cell = valueSets.map((vs, i) => vs.values[idx[i]]);
+    if (!cellCovered(cell)) missing.push(cell);
+    // increment mixed-radix counter
+    for (let i = N - 1; i >= 0; i--) {
+      if (++idx[i] < valueSets[i].values.length) break;
+      idx[i] = 0;
+    }
+  }
+
+  if (missing.length === 0) return;
+
+  const renderCell = (cell: string[]): string =>
+    "(" + cell.map((v, i) => valueSets[i].kind === "enum" ? `.${v}` : v).join(" × ") + ")";
+  const shown = missing.slice(0, 8).map(renderCell).join(", ");
+  const more = missing.length > 8 ? ` (and ${missing.length - 8} more)` : "";
+
+  if (anyUnion) {
+    errors.push(new TSError(
+      "E-TYPE-006",
+      `E-TYPE-006: Non-exhaustive multi-scrutinee match over the (${valueSets.map(vs => vs.typeName).join(" × ")}) ` +
+      `product (§18.19 / §18.8.2) — a scrutinee position is a union type. Missing ` +
+      `${missing.length} combination(s): ${shown}${more}. Add arms for the uncovered cells, a ` +
+      `per-position \`_\`, or a whole-product \`else\` arm.`,
+      span,
+    ));
+  } else {
+    errors.push(new TSError(
+      "E-TYPE-020",
+      `E-TYPE-020: Non-exhaustive multi-scrutinee match over the (${valueSets.map(vs => vs.typeName).join(" × ")}) ` +
+      `product (§18.19 / §18.8.1). Missing ${missing.length} combination(s): ${shown}${more}. ` +
+      `Add arms for the uncovered cells, a per-position \`_\` (e.g. \`(_, .X)\`), or a ` +
+      `whole-product \`else\` arm.`,
+      span,
+    ));
   }
 }
 

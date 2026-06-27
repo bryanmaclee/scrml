@@ -44,7 +44,7 @@ import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.t
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { resolveLogLoc } from "./log-loc.ts";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
@@ -2321,6 +2321,46 @@ function emitCast(node: CastExpr, ctx: EmitExprContext): string {
 // Domain-specific nodes (Slice 4 targets — stubbed with fallback for now)
 // ---------------------------------------------------------------------------
 
+/**
+ * §18.19 — parse one rawArm string of an expression-position multi-scrutinee
+ * match into a structured arm node. A product arm `( p1, …, pN ) :> body`
+ * becomes `{ kind: "match-arm-inline", productPatterns, result }`; a whole-
+ * product wildcard (`_` / `else`, optional leading `|`) becomes a wildcard arm.
+ */
+function bridgeProductArm(armRaw: string): any {
+  // The expression-position preprocessor masks bare variants (`.InCode` →
+  // `__scrml_bare_variant_InCode__`) before the arm text is captured; restore
+  // the leading-dot form so the per-position pattern parser recognizes it.
+  let s = armRaw.replace(/__scrml_bare_variant_(\w+)__/g, ".$1").trim();
+  if (s.startsWith("|")) s = s.slice(1).trim(); // strip optional leading bar
+  if (s.startsWith("(")) {
+    // Find the matching close paren of the product pattern.
+    let depth = 0, str: string | null = null, closeIdx = -1;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (str) { if (c === "\\") { i++; } else if (c === str) str = null; continue; }
+      if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+      if (c === "(") depth++;
+      else if (c === ")") { depth--; if (depth === 0) { closeIdx = i; break; } }
+    }
+    if (closeIdx > 0) {
+      const inner = s.slice(1, closeIdx);
+      const positions = splitTopLevelCommas(inner);
+      const afterRaw = s.slice(closeIdx + 1).trimStart();
+      const arrowLen = afterRaw.startsWith(":>") || afterRaw.startsWith("=>") || afterRaw.startsWith("->") ? 2 : 0;
+      const result = afterRaw.slice(arrowLen).trim();
+      if (positions.length >= 1 && arrowLen > 0) {
+        return { kind: "match-arm-inline", test: "__product__", productPatterns: positions, result };
+      }
+    }
+  }
+  // Whole-product wildcard arm: `_ :> body` / `else :> body`.
+  const wM = s.match(/^(?:_|else)\s*(?:=>|:>|->)\s*([\s\S]+)$/);
+  if (wM) return { kind: "match-arm-inline", test: "else", result: wM[1].trim() };
+  // Fallback — let the structured emitter try its single-arm parse.
+  return { kind: "bare-expr", expr: armRaw };
+}
+
 function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // Bug 1 (S95) — route the expression-position MatchExpr through the
   // structured emitter in emit-control-flow.ts. The structured emitter
@@ -2365,6 +2405,22 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // structured emitter do its normal lowering — preserving `@var` →
   // `_scrml_reactive_get("var")` (or `_scrml_derived_get` for derived
   // names threaded via the inner context).
+  // §18.19 — multi-scrutinee expression-position match. The unmask attached
+  // `subjects` (ExprNodes); each rawArm is a product-pattern arm string. Build a
+  // structured node the multi-scrutinee emitter consumes (scrutineeExprs + arms
+  // carrying productPatterns), mirroring the ast-builder statement-form shape.
+  const multiSubjects = (node as { subjects?: ExprNode[] }).subjects;
+  if (Array.isArray(multiSubjects) && multiSubjects.length >= 2) {
+    const bridgedMulti = {
+      kind: "match-expr",
+      header: "",
+      scrutineeExprs: multiSubjects,
+      scrutinees: [] as string[],
+      body: node.rawArms.map((arm) => bridgeProductArm(arm)),
+    };
+    return emitStructuredMatchExpr(bridgedMulti, { errors: ctx.errors });
+  }
+
   const bridgedNode = {
     kind: "match-expr",
     header: "",

@@ -1720,6 +1720,58 @@ function preprocessMatchExprs(s: string): string {
   return result;
 }
 
+/**
+ * §18.19 — split a string by depth-0 commas, respecting nested () [] {} and
+ * string literals. Used for the scrutinee head and product-pattern positions.
+ */
+export function splitTopLevelCommas(inner: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  let str: string | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (str) {
+      cur += c;
+      if (c === "\\" && i + 1 < inner.length) { cur += inner[++i]; }
+      else if (c === str) str = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { str = c; cur += c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; cur += c; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; cur += c; continue; }
+    if (c === "," && depth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  if (cur.trim().length > 0) parts.push(cur.trim());
+  return parts;
+}
+
+/**
+ * §18.19 — does a trimmed arm-line begin a product-pattern arm `( p1, …, pN ) :>`?
+ * Requires a `(` whose matching `)` is followed (after ws) by a match arrow, and
+ * a depth-1 comma between them (≥ 2 positions). A single-scrutinee parenthesized
+ * value / presence guard never matches (no depth-1 comma).
+ */
+function looksLikeProductArmStart(t: string): boolean {
+  if (!t.startsWith("(")) return false;
+  let depth = 0;
+  let str: string | null = null;
+  let sawComma = false;
+  let closeIdx = -1;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (str) { if (c === "\\") { i++; } else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(") depth++;
+    else if (c === ")") { depth--; if (depth === 0) { closeIdx = i; break; } }
+    else if (c === "," && depth === 1) sawComma = true;
+  }
+  if (closeIdx < 0 || !sawComma) return false;
+  const after = t.slice(closeIdx + 1).trimStart();
+  return after.startsWith(":>") || after.startsWith("=>") || after.startsWith("->");
+}
+
 /** Split match arms content into individual arm strings. */
 function splitMatchArms(content: string): string[] {
   // Arms are separated by line-starts of arm-shape tokens.
@@ -1739,6 +1791,16 @@ function splitMatchArms(content: string): string[] {
   function isArmStart(t: string): boolean {
     if (t.startsWith(".")) return true;
     if (t.startsWith("else")) return true;
+    // §18.19 — a product-pattern arm `( p1, …, pN ) :>` (depth-1 comma + arrow),
+    // and a leading-`|` whole-product wildcard / product arm (`| _` / `| else` /
+    // `| ( … )`). `| .Variant` is NOT treated as a boundary — it stays a
+    // variant-pattern alternation continuation (old behavior, §51.0.J).
+    if (t.startsWith("(") && looksLikeProductArmStart(t)) return true;
+    if (t.startsWith("|")) {
+      const rest = t.slice(1).trimStart();
+      if (rest.startsWith("_") || rest.startsWith("else")) return true;
+      if (rest.startsWith("(") && looksLikeProductArmStart(rest)) return true;
+    }
     // `_` standalone followed by an arrow operator
     if (t.startsWith("_")) {
       // Look past `_` + whitespace for an arrow token.
@@ -2126,9 +2188,21 @@ export function esTreeToExprNode(
         }
         if (calleeName === "__scrml_match__") {
           // First arg is subject, rest are arm strings
-          const subject = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
+          const arg0 = rawArgs[0] as ESNode;
           const rawArmNodes = rawArgs.slice(1) as ESNode[];
           const rawArmsArr = rawArmNodes.map(a => a.value as string ?? "");
+          // §18.19 — a multi-scrutinee head `match (e1, …, eN)` parses (after the
+          // `match ` mask) as a parenthesized SequenceExpression in the subject
+          // slot. Lift each sub-expression into the `subjects` list; `subject`
+          // mirrors `subjects[0]` for single-scrutinee-compatible consumers.
+          if (arg0 && arg0.type === "SequenceExpression" && Array.isArray((arg0 as ESNode & { expressions?: ESNode[] }).expressions)) {
+            const exprs = (arg0 as ESNode & { expressions: ESNode[] }).expressions;
+            if (exprs.length >= 2) {
+              const subjects = exprs.map(e => esTreeToExprNode(e, filePath, baseOffset, rawSource));
+              return { kind: "match-expr", span, subject: subjects[0], subjects, rawArms: rawArmsArr } satisfies MatchExpr;
+            }
+          }
+          const subject = esTreeToExprNode(arg0, filePath, baseOffset, rawSource);
           return { kind: "match-expr", span, subject, rawArms: rawArmsArr } satisfies MatchExpr;
         }
 

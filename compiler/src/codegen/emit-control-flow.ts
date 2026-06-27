@@ -1699,6 +1699,92 @@ function detectInlineEngineWrite(
  * (rule= enforcement / <onTransition> hooks / timer arm-clear / history capture
  * / Option-d self-write semantics per §51.0.F.1).
  */
+/**
+ * §18.19 — emit a multi-scrutinee match `match (s1, …, sN) { (p1, …, pN) :> body }`.
+ *
+ * Desugars to nested single-scrutinee dispatch over per-scrutinee temps: each
+ * scrutinee is evaluated ONCE into a `const`, tag-normalized (`{variant,data}`
+ * → its `.variant` string), then arms are tested top-to-bottom with the arm
+ * condition being the conjunction of the per-position conditions. Payload
+ * bindings from EVERY position are in scope across the whole arm body. A
+ * whole-product `_` / `else` arm lowers to the trailing `else`. Observationally
+ * identical to a hand-written nested `match s1 { .A :> match s2 { .B :> … } }`.
+ */
+function emitMultiScrutineeMatch(
+  node: any,
+  scrutineeExprs: any[],
+  matchCtx: EmitExprContext,
+  matchMode: "client" | "server",
+): string {
+  const N = scrutineeExprs.length;
+  const rawScrutinees: string[] = Array.isArray(node.scrutinees) ? node.scrutinees : [];
+  const valVars: string[] = [];
+  const tagVars: string[] = [];
+  const lines: string[] = [];
+  lines.push(matchMode === "server" ? `await (async function() {` : `(function() {`);
+  for (let i = 0; i < N; i++) {
+    const valVar = genVar("scrut");
+    const tagVar = genVar("tag");
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    lines.push(`  const ${valVar} = ${exprText};`);
+    lines.push(`  const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
+    valVars.push(valVar);
+    tagVars.push(tagVar);
+  }
+
+  const body: any[] = node.body ?? [];
+  let conditionIndex = 0;
+  for (const child of body) {
+    if (!child || typeof child !== "object") continue;
+    const productPatterns: string[] | null = Array.isArray(child.productPatterns) ? child.productPatterns : null;
+    const test: string = child.test ?? "";
+    const isWholeWildcard = !productPatterns &&
+      (test === "else" || child.isWildcard === true || test === "_");
+    const resultStr: string = typeof child.result === "string" ? child.result : "";
+
+    if (productPatterns) {
+      // Per-position arm-pattern → reuse parseMatchArm by synthesizing
+      // `<pattern> :> 0` (the body is discarded). Skip positions whose arity is
+      // wrong (the typer already reported E-MATCH-SCRUTINEE-ARITY).
+      if (productPatterns.length !== N) continue;
+      const conds: string[] = [];
+      const preludes: string[] = [];
+      for (let i = 0; i < N; i++) {
+        const posArm = parseMatchArm(`${productPatterns[i]} :> 0`);
+        if (!posArm || posArm.kind === "wildcard") continue; // `_` position: no test.
+        conds.push(armCondition(posArm, valVars[i], tagVars[i]));
+        if (posArm.kind === "variant") {
+          const prelude = emitVariantBindingPrelude(posArm, valVars[i]);
+          if (prelude) preludes.push(prelude);
+        }
+      }
+      const condition = conds.length > 0 ? conds.join(" && ") : "true";
+      const prelude = preludes.join("");
+      const bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx);
+      const prefix = conditionIndex === 0 ? "if" : "else if";
+      lines.push(`  ${prefix} (${condition}) ${bodyEmit}`);
+      conditionIndex++;
+    } else if (isWholeWildcard) {
+      const bodyEmit = emitMultiArmBody(resultStr, "", matchCtx);
+      lines.push(`  else ${bodyEmit}`);
+    }
+  }
+
+  lines.push(`})()`);
+  return lines.join("\n");
+}
+
+/** §18.19 — emit one multi-scrutinee arm body (`{ <prelude> return <expr>; }`). */
+function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprContext): string {
+  const trimmed = resultStr.trim();
+  const isBlockBody = trimmed.startsWith("{") && trimmed.endsWith("}");
+  if (isBlockBody) {
+    const inner = trimmed.slice(1, -1).trim();
+    return inner ? `{ ${prelude}${rewriteBlockBody(inner, null, null, ctx.mode)} }` : (prelude ? `{ ${prelude.trimEnd()} }` : `{}`);
+  }
+  return `{ ${prelude}return ${emitExprField(null, trimmed, ctx)}; }`;
+}
+
 export function emitMatchExpr(node: any, opts?: any): string {
   // Bug 1.7 inline-arm (S88 v0.3) — build an engineCtx from `opts` so the
   // inline-arm result path can dispatch @engineCell writes through the
@@ -1738,6 +1824,18 @@ export function emitMatchExpr(node: any, opts?: any): string {
     mode: _matchMode,
     ...(engineCtx?.exprCtxExtras ?? {}),
   };
+
+  // §18.19 — multi-scrutinee match: desugar to nested single-scrutinee dispatch
+  // over per-scrutinee temps (observationally identical to a hand-written nested
+  // match). Detected by the `scrutinees` list / `subjects` ExprNodes the parser
+  // attaches. No new runtime.
+  const _scrutineeExprs: any[] | null =
+    Array.isArray(node.scrutineeExprs) && node.scrutineeExprs.length >= 2 ? node.scrutineeExprs
+    : (Array.isArray(node.subjects) && node.subjects.length >= 2 ? node.subjects : null);
+  if (_scrutineeExprs) {
+    return emitMultiScrutineeMatch(node, _scrutineeExprs, _matchCtx, _matchMode);
+  }
+
   const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
   const body: any[] = node.body ?? [];
 

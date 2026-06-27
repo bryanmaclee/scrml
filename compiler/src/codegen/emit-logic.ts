@@ -4056,6 +4056,13 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
  * §18.3: match is an expression — may appear on the RHS of let/const.
  */
 function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const", opts: EmitLogicOpts): string {
+  // §18.19 — multi-scrutinee match in decl position: delegate to the shared
+  // value-return emitter (emit-control-flow.ts:emitMatchExpr), which lowers the
+  // product dispatch to an IIFE that evaluates to the arm value, then bind it.
+  if (Array.isArray(matchExpr.scrutineeExprs) && matchExpr.scrutineeExprs.length >= 2) {
+    return `${keyword} ${name} = ${emitMatchExpr(matchExpr, opts)};`;
+  }
+
   const tildeVar = genVar("tilde");
   const tmpVar = genVar("match");
   const lines: string[] = [];

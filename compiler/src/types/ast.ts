@@ -1031,6 +1031,13 @@ export interface MatchExprNode extends BaseNode {
   body: LogicStatement[];
   /** Structured ExprNode form of the header. Populated by ast-builder. */
   headerExpr?: ExprNode;
+  /**
+   * §18.19 multi-scrutinee head: raw per-scrutinee source text, one entry per
+   * `match (e1, …, eN)` head position (length ≥ 2). Absent ⇒ single-scrutinee.
+   */
+  scrutinees?: string[];
+  /** §18.19 — structured ExprNode form of each scrutinee. Populated by ast-builder. */
+  scrutineeExprs?: ExprNode[];
 }
 
 /** A for loop: `for variable in iterable { body }`. */
@@ -1891,6 +1898,15 @@ export interface MatchExpr {
   kind: "match-expr";
   span: ExprSpan;
   subject: ExprNode;
+  /**
+   * §18.19 multi-scrutinee head: `match (e1, …, eN) { (p1, …, pN) :> body }`.
+   * When present (length ≥ 2) this is a multi-scrutinee match — `subject` mirrors
+   * `subjects[0]` for single-scrutinee-compatible consumers. The parens are
+   * grammar, NOT a tuple value (no-tuple, §59.7 / §14.11). Absent ⇒ ordinary
+   * single-scrutinee match (`subject` only). Each `rawArm` is a product-pattern
+   * arm string `(p1, …, pN) :> body` or a whole-product wildcard (`_` / `else`).
+   */
+  subjects?: ExprNode[];
   /** Raw arm strings for Phase 1. Replace with structured MatchArm[] in Phase 2. */
   rawArms: string[];
 }

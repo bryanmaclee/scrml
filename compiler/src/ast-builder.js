@@ -2197,6 +2197,131 @@ function matchArrowGlyphAt(peek, k = 0) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// §18.19 Multi-Scrutinee Match — shared parse helpers.
+//
+// A multi-scrutinee head is `match (e1, …, eN) { (p1, …, pN) :> body }`,
+// recognized by a `,` at paren-depth 1 in the head; each arm is a
+// `product-pattern` — one §18.2 arm-pattern per head position — or a whole-
+// product wildcard (`_` / `else`, optionally a leading `|`). The parens are
+// GRAMMAR delimiters, NOT a tuple value (no-tuple, §59.7 / §14.11).
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a string by depth-0 commas, respecting nested () [] {} and string
+ * literals. Used for both the scrutinee head and (text-side) product positions.
+ */
+function splitTopLevelCommaList(inner) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  let str = null;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (str) {
+      cur += c;
+      if (c === "\\" && i + 1 < inner.length) { cur += inner[++i]; }
+      else if (c === str) str = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { str = c; cur += c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; cur += c; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; cur += c; continue; }
+    if (c === "," && depth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  if (cur.trim().length > 0) parts.push(cur.trim());
+  return parts;
+}
+
+/**
+ * §18.19 — given a `match` head's source text, return the scrutinee list when
+ * it is a multi-scrutinee head (`( e1, …, eN )` fully wrapped, a `,` at
+ * paren-depth 1, N ≥ 2), or `null` for an ordinary single-scrutinee head.
+ * `match (e)` (no depth-1 comma) is single-scrutinee — a parenthesized expr.
+ */
+function detectMultiScrutineeHead(headerText) {
+  const t = (headerText || "").trim();
+  if (!t.startsWith("(") || !t.endsWith(")")) return null;
+  // The leading `(` MUST match the trailing `)` (the WHOLE head is wrapped).
+  // A head like `(a, b).foo` (member access on a parenthesized expr) is
+  // single-scrutinee — its close paren is not the last char.
+  let depth = 0;
+  let str = null;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (str) { if (c === "\\") { i++; } else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(") depth++;
+    else if (c === ")") { depth--; if (depth === 0 && i !== t.length - 1) return null; }
+  }
+  const parts = splitTopLevelCommaList(t.slice(1, -1));
+  return parts.length >= 2 ? parts : null;
+}
+
+/** §18.19 — does a position's leading token look like a §18.2 arm-pattern? */
+function matchPositionIsPatternShaped(toks) {
+  if (!toks || toks.length === 0) return false;
+  const t0 = toks[0];
+  if (t0.kind === "PUNCT" && t0.text === ".") return true;       // .Variant
+  if (t0.kind === "OPERATOR" && t0.text === "::") return true;   // ::Variant (legacy)
+  if (t0.kind === "IDENT" && t0.text === "_") return true;       // wildcard position
+  if (t0.kind === "KEYWORD" && (t0.text === "else" || t0.text === "not" || t0.text === "is")) return true;
+  if (t0.kind === "STRING") return true;                          // "literal"
+  return false;
+}
+
+/** §18.19 — reconstruct a per-position arm-pattern's source text from tokens. */
+function joinPatternTokens(toks) {
+  let out = "";
+  let prevWord = false;
+  for (const t of toks) {
+    const isWord = t.kind === "IDENT" || t.kind === "KEYWORD" || t.kind === "NUMBER";
+    const piece = t.kind === "STRING"
+      ? (t.text.includes('"') && !t.text.includes("'") ? `'${t.text}'` : `"${t.text}"`)
+      : t.text;
+    if (out.length > 0 && isWord && prevWord) out += " ";
+    out += piece;
+    prevWord = isWord;
+  }
+  return out;
+}
+
+/**
+ * §18.19 — scan a `product-pattern` arm starting at peek-offset `startK`
+ * (which MUST be `(`). Returns `{ positions, parenCloseK, arrow }` when the
+ * parens hold ≥ 2 pattern-shaped positions separated by a depth-1 comma and a
+ * match arrow follows the `)`; otherwise `null` (so a presence guard `(x) =>`
+ * — single bare ident, no comma — and a parenthesized value never match).
+ * `positions` is an array of token-arrays; `parenCloseK` is the peek-offset of
+ * the closing `)`; `arrow` is the `matchArrowGlyphAt` result after the `)`.
+ */
+function scanProductPatternArm(peek, startK, minPositions = 2) {
+  const open = peek(startK);
+  if (!open || open.kind !== "PUNCT" || open.text !== "(") return null;
+  let k = startK + 1;
+  let depth = 1;
+  const positions = [];
+  let cur = [];
+  while (depth > 0) {
+    const t = peek(k);
+    if (!t || t.kind === "EOF") return null;
+    if (t.kind === "PUNCT" && t.text === "(") { depth++; cur.push(t); }
+    else if (t.kind === "PUNCT" && t.text === ")") { depth--; if (depth === 0) break; cur.push(t); }
+    else if (depth === 1 && t.kind === "PUNCT" && t.text === ",") { positions.push(cur); cur = []; }
+    else cur.push(t);
+    k++;
+  }
+  positions.push(cur);
+  // `minPositions` is 1 only inside a multi-scrutinee head (so a single-position
+  // `( pat )` surfaces an arity error); 2 elsewhere (single-scrutinee untouched).
+  if (positions.length < minPositions) return null;
+  for (const p of positions) if (!matchPositionIsPatternShaped(p)) return null;
+  const arrow = matchArrowGlyphAt(peek, k + 1);
+  if (!arrow) return null;
+  return { positions, parenCloseK: k, arrow };
+}
+
 /**
  * Scan a `derived=match @VAR { ... }` engine-attribute match BODY (the raw text
  * between the outer `{` and `}` — `engine-decl.inlineMatchBody`) for its
@@ -3692,6 +3817,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             if (tok.kind === "STRING") {
               return armArrowAt(1);
             }
+            // §18.19 — `( p1, p2, … ) :>` product-pattern arm. Unambiguous:
+            // ≥ 2 pattern-shaped positions + a depth-1 comma + an arrow after
+            // `)`. A presence guard `(x) =>` (single bare ident, no comma) and
+            // a parenthesized value never match (scanProductPatternArm declines).
+            const _minPos = _multiScrutineeArity >= 2 ? 1 : 2;
+            if (tok.kind === "PUNCT" && tok.text === "(") {
+              if (scanProductPatternArm(peek, 0, _minPos)) return true;
+            }
+            // §18.19 — leading-`|` whole-product wildcard / product arm:
+            // `| _` / `| else` / `| ( p, p )`. The `|` + `_`/`else`/product-`(`
+            // is NEVER variant-pattern alternation (`.A | .B`), so it is a NEW
+            // arm boundary (fixes the latent `| _` value-arm merge). `| .Variant`
+            // is left to the existing alternation-continuation path (below).
+            if (tok.kind === "PUNCT" && tok.text === "|") {
+              const n1 = peek(1);
+              if (n1 && ((n1.kind === "IDENT" && n1.text === "_") ||
+                         (n1.kind === "KEYWORD" && n1.text === "else"))) return true;
+              if (n1 && n1.kind === "PUNCT" && n1.text === "(" && scanProductPatternArm(peek, 1, _minPos)) return true;
+            }
             return false;
           })();
           // §18 / §51.0.J variant-pattern alternation continuation. `.Small | .Big
@@ -5039,6 +5183,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // 0` even when parentBlock is synthetic. The Unit CC tag fires only when
   // (parentBlock._synthetic === true) AND (_nestedBlockDepth === 0).
   let _nestedBlockDepth = 0;
+  // §18.19 — scrutinee count of the multi-scrutinee `match` whose body is being
+  // parsed (0 when not in a multi-scrutinee match body). When ≥ 2, a SINGLE-
+  // position parenthesized arm `( pat )` is recognized as a (wrong-arity)
+  // product arm so the typer can fire E-MATCH-SCRUTINEE-ARITY; outside a multi
+  // head, only ≥ 2-position product patterns are recognized (single-scrutinee
+  // arms are untouched). Saved/restored across nested matches.
+  let _multiScrutineeArity = 0;
 
   /**
    * Parse a braced body `{ ... }` into a structured LogicNode[] tree.
@@ -5070,6 +5221,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (tok.kind === "COMMENT") { consume(); continue; }
       // Skip whitespace tokens
       if (tok.text.trim() === "" && tok.kind !== "EOF") { consume(); continue; }
+
+      // §18.19 — an optional leading `|` arm separator before a whole-product
+      // wildcard (`| _` / `| else`) or a product arm (`| ( p, p )`). The
+      // collectExpr value-arm boundary (above) now breaks BEFORE such a `|`,
+      // so it surfaces here at arm-start; consume it and let the next iteration
+      // parse the arm. Gated on the following token actually starting an arm,
+      // so a stray `|` in a non-match body is left untouched.
+      if (tok.kind === "PUNCT" && tok.text === "|") {
+        const n1 = peek(1);
+        const startsArm = n1 && (
+          (n1.kind === "IDENT" && n1.text === "_") ||
+          (n1.kind === "KEYWORD" && n1.text === "else") ||
+          (n1.kind === "PUNCT" && n1.text === "(" && scanProductPatternArm(peek, 1, _multiScrutineeArity >= 2 ? 1 : 2) != null)
+        );
+        if (startsArm) { consume(); continue; }
+      }
 
       const node = parseOneStatement();
       if (node) {
@@ -7966,12 +8133,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume(); // consume 'partial'
       const startTok = consume(); // consume 'match'
       const { expr: header } = collectExpr("{");
-      let body = [];
-      if (peek().text === "{") {
-        consume();
-        body = parseRecursiveBody();
-      }
-      return {
+      const body = parseMatchBodyWithArity(header);
+      return applyMultiScrutineeHead({
         id: ++counter.next,
         kind: "match-stmt",
         header: header.trim(),
@@ -7979,7 +8142,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         body,
         headerExpr: safeParseExprToNode(header.trim(), 0),
         span: spanOf(startTok, peek()),
-      };
+      });
     }
 
     // SWITCH / TRY / MATCH — minimal handling: store as structured node with raw body
@@ -8011,11 +8174,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ));
       }
       const { expr: header } = collectExpr("{");
-      let body = [];
-      if (peek().text === "{") {
-        consume();
-        body = parseRecursiveBody();
-      }
+      // §18.19 — `match` heads may be multi-scrutinee; arity-aware body parse
+      // (no-op for switch/try — detectMultiScrutineeHead returns null).
+      const body = parseMatchBodyWithArity(header);
       const node = {
         id: ++counter.next,
         kind: `${keyword}-stmt`,
@@ -8024,6 +8185,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         headerExpr: safeParseExprToNode(header.trim(), 0),
         span: spanOf(startTok, peek()),
       };
+      // §18.19 — attach multi-scrutinee head info for a `match`-stmt (no-op for
+      // single-scrutinee, switch, try).
+      if (keyword === "match") applyMultiScrutineeHead(node);
 
       // For try statements, look for catch/finally clauses
       if (keyword === "try") {
@@ -8513,6 +8677,41 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
 
+
+    // §18.19 MULTI-SCRUTINEE PRODUCT-PATTERN ARM: `( p1, …, pN ) :> result`.
+    // Each `pN` is an ordinary §18.2 arm-pattern (one per head position —
+    // breadth, not depth; §18.11 nested-pattern exclusion preserved at the
+    // typer). Produces a `match-arm-inline` carrying `productPatterns: string[]`
+    // (the per-position pattern text). The typer (checkMultiScrutineeMatch)
+    // products the per-position variant sets for exhaustiveness + the arity
+    // check; codegen (emit-control-flow.ts) desugars to nested single-scrutinee
+    // dispatch over per-scrutinee temps. Placed BEFORE the presence-guard
+    // detection (`(x) =>`) — scanProductPatternArm requires a depth-1 comma +
+    // ≥ 2 pattern-shaped positions, so a single-ident presence guard declines.
+    {
+      const prod = (tok.kind === "PUNCT" && tok.text === "(")
+        ? scanProductPatternArm(peek, 0, _multiScrutineeArity >= 2 ? 1 : 2)
+        : null;
+      if (prod) {
+        const startTok = tok;
+        const productPatterns = prod.positions.map(joinPatternTokens);
+        // Consume `(` … `)` (parenCloseK is the peek-offset of the `)`).
+        for (let k = 0; k <= prod.parenCloseK; k++) consume();
+        for (let _a = 0; _a < prod.arrow.len; _a++) consume(); // arm arrow
+        const { expr: result } = collectExpr();
+        const trimmedResult = result.trim();
+        return {
+          id: ++counter.next,
+          kind: "match-arm-inline",
+          test: "__product__",
+          productPatterns,
+          armArrow: prod.arrow.glyph,
+          result: trimmedResult,
+          resultExpr: safeParseExprToNode(trimmedResult, spanOf(startTok, peek())?.start ?? 0),
+          span: spanOf(startTok, peek()),
+        };
+      }
+    }
 
     // MATCH ARM BLOCK BODY: `. VariantName => { ... }`, `else => { ... }`, `not => { ... }`
     // Parse the block body as structured AST nodes rather than including `{ }` as raw text.
@@ -9420,16 +9619,51 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Assumes the `match` (or `partial match`) keyword token is next (not yet consumed).
    * Returns a match-expr node.
    */
+  // §18.19 — when a `match`/`match-stmt` node's header is a multi-scrutinee head
+  // (`( e1, …, eN )`, N ≥ 2), attach `scrutinees` (raw per-scrutinee text) +
+  // `scrutineeExprs` (structured ExprNodes). Single-scrutinee heads are left
+  // untouched (the node keeps only `header`/`headerExpr`). Mutates `node`.
+  function applyMultiScrutineeHead(node) {
+    // A genuine multi-scrutinee match body contains at least one product-pattern
+    // arm (`( p1, …, pN ) :> body`). Require one before decorating. This avoids
+    // a false positive on a user function NAMED `match` with `( a, b )` params
+    // (e.g. stdlib router/regex `match(pattern, path)`): the keyword-triggered
+    // match parser captures `function match(a,b){…}` as a match-stmt whose head
+    // looks multi-scrutinee, but its body is ordinary statements (if/const/return),
+    // NOT product-pattern arms — so it is left undecorated (no scrutinees fields,
+    // no product typecheck/desugar; pre-existing single-path behavior preserved).
+    if (!node || !Array.isArray(node.body)) return node;
+    const hasProductArm = node.body.some(
+      (c) => c && Array.isArray(c.productPatterns) && c.productPatterns.length > 0,
+    );
+    if (!hasProductArm) return node;
+    const parts = detectMultiScrutineeHead(node.header);
+    if (!parts) return node;
+    node.scrutinees = parts;
+    node.scrutineeExprs = parts.map(p => safeParseExprToNode(p, 0));
+    return node;
+  }
+
+  // §18.19 — parse a `match` body, setting `_multiScrutineeArity` to the head's
+  // scrutinee count for the duration (so a single-position `( pat )` arm is
+  // recognized as a wrong-arity product arm → E-MATCH-SCRUTINEE-ARITY). Assumes
+  // the next token is the body `{`. Restores the prior arity (nested matches).
+  function parseMatchBodyWithArity(headerText) {
+    if (peek().text !== "{") return [];
+    consume(); // consume `{`
+    const saved = _multiScrutineeArity;
+    const mh = detectMultiScrutineeHead(headerText);
+    _multiScrutineeArity = mh ? mh.length : 0;
+    try { return parseRecursiveBody(); }
+    finally { _multiScrutineeArity = saved; }
+  }
+
   function parseOneMatchAsExpr(declStartTok) {
     const isPartial = peek().text === "partial";
     if (isPartial) consume(); // consume 'partial'
     const startTok = consume(); // consume 'match'
     const { expr: header } = collectExpr("{");
-    let body = [];
-    if (peek().text === "{") {
-      consume();
-      body = parseRecursiveBody();
-    }
+    const body = parseMatchBodyWithArity(header);
     // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` VALUE-arm
     // (`::X(reason) :> fail AErr::Wrapped(reason)`). The inline-arm `result` is
     // captured as a string where `fail` is a leading ident, so it emitted
@@ -9443,7 +9677,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (failNode) armNode.failExpr = failNode;
       }
     }
-    return {
+    return applyMultiScrutineeHead({
       id: ++counter.next,
       kind: "match-expr",
       header: header.trim(),
@@ -9451,7 +9685,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       partial: isPartial || undefined,
       headerExpr: safeParseExprToNode(header.trim(), 0),
       span: spanOf(declStartTok, peek()),
-    };
+    });
   }
 
   /**
@@ -11857,12 +12091,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume(); // consume 'partial'
       const startTok = consume(); // consume 'match'
       const { expr: header } = collectExpr("{");
-      let body = [];
-      if (peek().text === "{") {
-        consume();
-        body = parseRecursiveBody();
-      }
-      nodes.push({
+      const body = parseMatchBodyWithArity(header);
+      nodes.push(applyMultiScrutineeHead({
         id: ++counter.next,
         kind: "match-stmt",
         header: header.trim(),
@@ -11870,7 +12100,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         body,
         headerExpr: safeParseExprToNode(header.trim(), 0),
         span: spanOf(startTok, peek()),
-      });
+      }));
       continue;
     }
 
@@ -11902,11 +12132,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ));
       }
       const { expr: header } = collectExpr("{");
-      let body = [];
-      if (peek().text === "{") {
-        consume();
-        body = parseRecursiveBody();
-      }
+      // §18.19 — `match` heads may be multi-scrutinee; arity-aware body parse
+      // (no-op for switch/try — detectMultiScrutineeHead returns null).
+      const body = parseMatchBodyWithArity(header);
       const node = {
         id: ++counter.next,
         kind: `${keyword}-stmt`,
@@ -11915,6 +12143,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         headerExpr: safeParseExprToNode(header.trim(), 0),
         span: spanOf(startTok, peek()),
       };
+      // §18.19 — attach multi-scrutinee head info for a `match`-stmt (no-op for
+      // single-scrutinee, switch, try).
+      if (keyword === "match") applyMultiScrutineeHead(node);
 
       // For try statements, look for catch/finally clauses
       if (keyword === "try") {
