@@ -134,6 +134,26 @@ function compileTd() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Per-test compile-timeout headroom (ss33 item 1, g-trucking-smoke-chunks-flake).
+//
+// Every assertion below drives one (or two) full multi-file (36 .scrml)
+// emitPerRoute compile of the trucking-dispatch reference app via the
+// SYNCHRONOUS `compileScrml`. `bun test` runs test FILES concurrently, so under
+// full-suite CPU/memory pressure (~15GB) a single otherwise-fast compile here is
+// STARVED and intermittently breaches the bunfig default 10s per-test timeout —
+// surfacing as a flaky timeout on the `chunks.json manifest` assertion (passes
+// isolated + in the blocking gate). It is NOT a code race (ss27 root-cause):
+// the compile is deterministic; only its WALL TIME varies with contention.
+//
+// `bun:test` has no native `test.serial` (a module-level JS mutex would not
+// cross the per-file worker boundary, and these compiles are already serial
+// WITHIN this file), so the lowest-touch deterministic fix is starvation
+// headroom — the same mechanism the S145 flake fix applied to the double-compile
+// stability case below (60s; held since). One shared knob keeps every
+// compile-heavy case uniformly robust under load.
+const COMPILE_TIMEOUT = 60000;
+
 /**
  * Cross-stream helper. Combines `result.errors` and `result.warnings`
  * into one array per api.js:1674-1675 partition logic.
@@ -177,26 +197,26 @@ describe("trucking-dispatch — pipeline-level invariants", () => {
     const result = compileTd();
     const fatal = result.errors.filter((e) => e.severity === "error");
     expect(fatal).toEqual([]);
-  });
+  }, COMPILE_TIMEOUT);
 
   test("chunks.json manifest emits — splitter pass executed", () => {
     const result = compileTd();
     expect(result.chunksManifest).toBeDefined();
     expect(result.chunksManifest).not.toBeNull();
     expect(result.chunksManifest.version).toBe(1);
-  });
+  }, COMPILE_TIMEOUT);
 
   test("manifest entryPoints map non-empty (per-app chunks emit)", () => {
     const result = compileTd();
     const epKeys = Object.keys(result.chunksManifest.entryPoints);
     expect(epKeys.length).toBeGreaterThan(0);
-  });
+  }, COMPILE_TIMEOUT);
 
   test("at least one chunk produced", () => {
     const result = compileTd();
     expect(result.chunks).toBeDefined();
     expect(result.chunks.size).toBeGreaterThan(0);
-  });
+  }, COMPILE_TIMEOUT);
 });
 
 // ---------------------------------------------------------------------------
@@ -417,7 +437,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
       0,
     );
     expect(observedTotal).toBe(expectedTotal);
-  });
+  }, COMPILE_TIMEOUT);
 
   test("every baseline code's count matches", () => {
     const result = compileTd();
@@ -425,7 +445,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     for (const [code, expected] of Object.entries(EXPECTED_BASELINE)) {
       expect(histo[code] ?? 0).toBe(expected);
     }
-  });
+  }, COMPILE_TIMEOUT);
 
   test("no UNEXPECTED diagnostic codes fire", () => {
     const result = compileTd();
@@ -434,7 +454,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
       (code) => !(code in EXPECTED_BASELINE),
     );
     expect(unexpected).toEqual([]);
-  });
+  }, COMPILE_TIMEOUT);
 
   test("W-AUTH-LOGIN-MISSING fires exactly once (canonical missing-login site)", () => {
     // S91 A-3.5 ratified W-AUTH-LOGIN-MISSING + the `scrml generate
@@ -448,7 +468,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
       (d) => d.code === "W-AUTH-LOGIN-MISSING",
     );
     expect(fires.length).toBe(1);
-  });
+  }, COMPILE_TIMEOUT);
 });
 
 // ---------------------------------------------------------------------------
@@ -464,7 +484,7 @@ describe("trucking-dispatch — chunks.json structure", () => {
     // expected to start with that token. Q-OPEN-4 sourcing is stable
     // across all compiles in the same test run.
     expect(result.chunksManifest.compiler).toMatch(/scrml/);
-  });
+  }, COMPILE_TIMEOUT);
 
   // Per-test timeout override (S145 flake fix, change-id
   // s145-test-flake-parallel-safety-2026-05-30): this case runs `compileTd()`
@@ -481,7 +501,7 @@ describe("trucking-dispatch — chunks.json structure", () => {
     const a = compileTd();
     const b = compileTd();
     expect(a.chunksManifest.compiler).toBe(b.chunksManifest.compiler);
-  }, 60000);
+  }, COMPILE_TIMEOUT);
 
   test("every chunk emits with the FNV-1a 8-char base36 hash (§47.1.3)", () => {
     const result = compileTd();
@@ -490,7 +510,7 @@ describe("trucking-dispatch — chunks.json structure", () => {
       expect(chunk.chunkHash).toMatch(/^[0-9a-z]{8}$/);
       expect(chunk.chunkHash).not.toBe("00000000");
     }
-  });
+  }, COMPILE_TIMEOUT);
 
   test("each manifest entryPoint key references chunks that exist in the chunks Map", () => {
     const result = compileTd();
@@ -504,5 +524,5 @@ describe("trucking-dispatch — chunks.json structure", () => {
         if (entry.tier2) expect(chunkKeys.has(entry.tier2)).toBe(true);
       }
     }
-  });
+  }, COMPILE_TIMEOUT);
 });

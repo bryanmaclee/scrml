@@ -42,6 +42,9 @@ Options:
   --validate-emit           Parse every emitted JS artifact (E-CODEGEN-INVALID-JS); abort on malformed output
   --no-validate-emit        Opt out of the emitted-JS parse gate (dev/CI escape hatch)
   --target <platform>       Deploy adapter: fly|railway|render|static|docker
+  --idle-timeout <n>        Bun.serve idleTimeout in seconds baked into the
+                            production server (default: 120; raises the 10s
+                            default so long server routes finish)
   --help, -h                Show this message
 
 Examples:
@@ -55,7 +58,7 @@ Examples:
  * Parse build-command arguments.
  *
  * @param {string[]} args
- * @returns {{ inputDir: string|null, outputDir: string|null, embedRuntime: boolean, minify: boolean, verbose: boolean, target: string|null }}
+ * @returns {{ inputDir: string|null, outputDir: string|null, embedRuntime: boolean, minify: boolean, verbose: boolean, target: string|null, idleTimeout: number }}
  */
 export function parseArgs(args) {
   let inputDir = null;
@@ -64,6 +67,11 @@ export function parseArgs(args) {
   let minify = false;
   let verbose = false;
   let target = null;
+  // ss33 item 3 (g-dev-server-idletimeout-not-configurable): the S221 raise to
+  // 120s is baked into the emitted production server; `--idle-timeout <seconds>`
+  // overrides the value emitted into the prod-server config. Default 120 so the
+  // emitted server.js is byte-unchanged when the flag is unset.
+  let idleTimeout = 120;
   // S142 — emitted-JS parse gate. undefined = compileScrml default; `true`
   // forces on; `false` (--no-validate-emit) is the dev/CI opt-out.
   let validateEmit = undefined;
@@ -94,6 +102,12 @@ export function parseArgs(args) {
         process.exit(1);
       }
       target = val;
+    } else if (arg === "--idle-timeout") {
+      idleTimeout = parseInt(args[++i], 10);
+      if (isNaN(idleTimeout) || idleTimeout < 0) {
+        console.error(`Invalid idle-timeout (expected non-negative seconds): ${args[i]}`);
+        process.exit(1);
+      }
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -111,7 +125,7 @@ export function parseArgs(args) {
     }
   }
 
-  return { inputDir, outputDir, embedRuntime, minify, verbose, target, validateEmit };
+  return { inputDir, outputDir, embedRuntime, minify, verbose, target, idleTimeout, validateEmit };
 }
 
 /**
@@ -201,9 +215,13 @@ export function discoverServerRoutes(outputDir) {
  *   routes array). wsHandlerNames are _scrml_ws_handlers exports (passed to websocket:).
  * @param {{ activated: boolean, mode: "dev-only" | "always" } | null} [mcpOpts]
  *   MCP V0 Sub-unit D wiring; pass null / omit for non-MCP builds.
+ * @param {number} [idleTimeout=120]
+ *   ss33 item 3 — Bun.serve idleTimeout (seconds) baked into the emitted prod
+ *   server. Defaults to 120 so the emitted server.js is byte-unchanged when the
+ *   build's `--idle-timeout` flag is not set.
  * @returns {string}
  */
-export function generateServerEntry(serverModules, mcpOpts = null) {
+export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120) {
   const lines = [];
 
   // Determine if any module exports _scrml_ws_handlers (WebSocket channels present)
@@ -342,8 +360,9 @@ export function generateServerEntry(serverModules, mcpOpts = null) {
   lines.push("  port: PORT,");
   // S221 (g-dev-server-idletimeout-default-10s, flogence S15 Finding B): same 10s→120s
   // raise for the emitted production server — a legitimate >10s server route must not be
-  // truncated by Bun's default idleTimeout.
-  lines.push("  idleTimeout: 120,");
+  // truncated by Bun's default idleTimeout. ss33 item 3: the baked value is the build's
+  // `--idle-timeout` (default 120, so this line is byte-unchanged when the flag is unset).
+  lines.push(`  idleTimeout: ${idleTimeout},`);
   lines.push("  async fetch(req, server) {");
   lines.push("    const url = new URL(req.url);");
   lines.push("");
@@ -682,7 +701,7 @@ export async function runBuild(args) {
   const mcpOpts = result.mcpAutoActivated
     ? { activated: true, mode: result.mcpMode || "dev-only" }
     : null;
-  const serverEntry = generateServerEntry(serverModules, mcpOpts);
+  const serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout);
   const serverEntryPath = join(resolvedOutputDir, "_server.js");
   writeFileSync(serverEntryPath, serverEntry);
   if (mcpOpts) {

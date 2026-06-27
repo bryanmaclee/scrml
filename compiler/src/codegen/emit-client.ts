@@ -2388,6 +2388,49 @@ export function generateClientJs(ctx: CompileContext): string {
       body = body.slice(0, r.start) + " ".repeat(r.end - r.start) + body.slice(r.end);
     }
 
+    // ss33 item 2 (g-client-read-prune-chunk-dependent): the runtime is spliced
+    // into clientCode (generateClientJs ~L1935) BEFORE this post-pass runs, so
+    // `code` here already contains the runtime chunk text. A stdlib read's bound
+    // name surfaces INSIDE its own chunk's definition (e.g. the function the
+    // `stdlib-NAME` chunk attaches to `_scrml_stdlib.NAME`), which would falsely
+    // read as a CLIENT use and defeat the server-only read-LINE strip whenever
+    // the chunk is PRESENT — the strip was latently ineffective for exactly this
+    // case. Mirror the ss27-4 chunk-prune stage, which scans the PRE-splice body:
+    // strip the runtime span (START..END markers — `core` always carries START,
+    // emit-client always pushes END; both are line comments so the fn-name mangle
+    // leaves them intact) out of the usage corpus. With the spliced runtime gone,
+    // the used/unused decision is the same one a pre-splice scan would make, so
+    // the runtime can never mask it. Genuine client uses survive (they appear
+    // OUTSIDE the runtime span); only FALSE in-runtime uses are removed.
+    //
+    // `body` is used ONLY for the regex usage scan below — the removal pass keys
+    // off `code` offsets (regions[i].start/.end), never `body`. The runtime span
+    // is replaced with a tiny NON-whitespace barrier ("\n;\n"), NOT space-filled
+    // and NOT sliced out, for two reasons:
+    //   1. A ~60KB run of spaces (space-fill) triggers pathological backtracking
+    //      in the usage regex's variable-length whitespace lookbehind
+    //      `(?<![...]\s*\.\s*)` — it retries across the whole run at every
+    //      position for any name absent from client code (the common case — what
+    //      the strip prunes); measured ~8x slower on stdlib compiles.
+    //   2. Excising outright (or space-filling) collapses the preamble and the
+    //      post-runtime client body into WHITESPACE adjacency. The same `\s*\.\s*`
+    //      lookbehind then bridges that whitespace to a `.` in the preamble
+    //      comment (e.g. "...executable browser JavaScript.") and misreads a
+    //      genuine top-level call like `registerLabels(...)` as a member access,
+    //      wrongly pruning a CLIENT-used read. The runtime's own code used to be
+    //      the non-whitespace barrier between them; the sentinel restores that
+    //      topology, so a distant `.` can never reach across the gap.
+    const RT_START_MARKER = "// --- scrml reactive runtime ---";
+    const RT_END_MARKER = "// --- end scrml reactive runtime ---";
+    const rtStart = body.indexOf(RT_START_MARKER);
+    if (rtStart !== -1) {
+      const rtEndIdx = body.indexOf(RT_END_MARKER, rtStart);
+      if (rtEndIdx !== -1) {
+        const rtEnd = rtEndIdx + RT_END_MARKER.length;
+        body = body.slice(0, rtStart) + "\n;\n" + body.slice(rtEnd);
+      }
+    }
+
     // A region drops only when NONE of its bound names appear in the remaining
     // body (whole-region grain — matches GITI-003 and the brief: strip when
     // bound name(s) are referenced ONLY server-side; KEEP if any name is used

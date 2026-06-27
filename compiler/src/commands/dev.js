@@ -36,6 +36,8 @@ Arguments:
 Options:
   --output, -o <dir>      Output directory (default: dist/ next to input)
   --port, -p <n>          HTTP port for dev server (default: 3000)
+  --idle-timeout <n>      Bun.serve idleTimeout in seconds (default: 120; raises
+                          the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --convert-legacy-css    Convert <style> blocks to #{...}
@@ -54,7 +56,8 @@ Examples:
  *
  * @param {string[]} args
  * @returns {{ inputFiles: string[], outputDir: string|null, verbose: boolean,
- *             convertLegacyCss: boolean, embedRuntime: boolean, port: number }}
+ *             convertLegacyCss: boolean, embedRuntime: boolean, port: number,
+ *             idleTimeout: number }}
  */
 function parseArgs(args) {
   const inputFiles = [];
@@ -63,6 +66,11 @@ function parseArgs(args) {
   let convertLegacyCss = false;
   let embedRuntime = false;
   let port = 3000;
+  // ss33 item 3 (g-dev-server-idletimeout-not-configurable): the S221 raise to
+  // 120s (so legitimate >10s data-layer routes are not truncated mid-flight) is
+  // now an overridable knob, mirroring `--port`. Default stays 120 so unset
+  // callers are byte-unchanged.
+  let idleTimeout = 120;
   // W2 §21.7: auto-gather defaults ON. `--no-gather` opts out.
   let gather = true;
   // S142 — emitted-JS parse gate. undefined = compileScrml default; `true`
@@ -92,6 +100,12 @@ function parseArgs(args) {
         console.error(`Invalid port: ${args[i]}`);
         process.exit(1);
       }
+    } else if (arg === "--idle-timeout") {
+      idleTimeout = parseInt(args[++i], 10);
+      if (isNaN(idleTimeout) || idleTimeout < 0) {
+        console.error(`Invalid idle-timeout (expected non-negative seconds): ${args[i]}`);
+        process.exit(1);
+      }
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -112,7 +126,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, gather, validateEmit };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit };
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +454,7 @@ export function resolveRootEntryCandidate(opts, serveDir) {
  *
  * Called initially and after each recompile to update routes/ws handlers.
  *
- * @param {{ port: number }} opts
+ * @param {{ port: number, idleTimeout?: number }} opts
  * @param {string} serveDir
  * @returns {object} Bun.serve() config
  */
@@ -451,8 +465,11 @@ function buildServeConfig(opts, serveDir) {
     // default idleTimeout is 10s, which truncates legitimate >10s data-layer routes
     // (a heavy ?{} query, a _{} foreign slice spawning a subprocess, or ~20 mount-time
     // load routes contending) mid-flight → ERR_INCOMPLETE_CHUNKED_ENCODING on the
-    // client even though the server work completed. Raise to 120s.
-    idleTimeout: 120,
+    // client even though the server work completed. Raise to 120s by default.
+    // ss33 item 3 (g-dev-server-idletimeout-not-configurable): overridable via
+    // `--idle-timeout <seconds>`; `?? 120` keeps direct callers (and tests that
+    // build opts without the flag) byte-unchanged.
+    idleTimeout: opts.idleTimeout ?? 120,
     async fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;
