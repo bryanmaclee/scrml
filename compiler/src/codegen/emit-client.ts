@@ -417,10 +417,16 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   // via a lowered `const { … } = _scrml_stdlib.data;` read line, which a set
   // build never emits (the set methods emit a direct `_scrml_stdlib.data.<fn>`).
   {
-    const { collectSetVarNames, fileHasSetAlgebraUsage } = require("./reactive-deps.ts");
+    const { collectSetVarNames, collectAllLocalMapSetNames, fileHasSetAlgebraUsage } = require("./reactive-deps.ts");
     const astForSet = fileAST?.ast ?? fileAST ?? {};
     const setVarNamesForChunk: Set<string> = collectSetVarNames(astForSet);
-    if (setVarNamesForChunk.size > 0 && fileHasSetAlgebraUsage(astForSet, setVarNamesForChunk)) {
+    // ss52 — a NON-REACTIVE LOCAL set's `.union`/`.intersect`/`.difference` ALSO
+    // delegates to `_scrml_stdlib.data.*`, so its file-wide local-set names must
+    // light the `stdlib-data` chunk too (else `_scrml_stdlib.data.union` is
+    // undefined at runtime). Conservative file-wide union — over-inclusion = KB.
+    const localSetForChunk: Set<string> = collectAllLocalMapSetNames(astForSet).set;
+    if ((setVarNamesForChunk.size > 0 || localSetForChunk.size > 0) &&
+        fileHasSetAlgebraUsage(astForSet, setVarNamesForChunk, localSetForChunk)) {
       chunks.add("stdlib-data");
     }
   }
