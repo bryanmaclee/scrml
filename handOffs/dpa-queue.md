@@ -367,7 +367,7 @@ why-in-Q: the `<endpoint>`/`raw` pair is being built typed-first; `handle()` is 
 ---
 
 ## [dpa-014] debate — W4 chunk model: chunk-as-BUNDLE (A) vs chunk-as-LOAD-PLAN (B) vs HYBRID (C)
-status: complete     # banked → running → complete → ratified(by PA)  ·  COMPLETE dPA 2026-06-26 (ADVISORY) → artifact written, staged insight CANDIDATE, NOT ratified.
+status: ratified     # banked → running → complete → ratified(by PA)  ·  RATIFIED S223 2026-06-26 (user "ratify W4"): ship B-conditional · MODEL-now/ACTIVATION-gated-on-Component-3 · OQ-2 deferred to Component-3/flux · C recorded (measured-regression-keyed) · OQ-1 modulepreload mandate = W4 wave spec · insight LANDED ~/.claude/design-insights.md [S223/dpa-014].
 banked: S222 2026-06-26
 voices: code-splitting-bundler-expert · in-browser-compilation-expert · threejs-webgl-integration-expert
 source: handOffs/incoming/2026-06-26-from-spa-ss30-w3w4-fork-FOR-PA-RULING.md (sPA-developed fork) + the feel-of-performance arc SCOPE (docs/changes/feel-of-performance-approach-a-impl-2026-06-26/SCOPE.md)

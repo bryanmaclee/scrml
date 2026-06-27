@@ -16282,7 +16282,7 @@ The variant-prefix `:` separator is bracket-aware: a `:` inside a `[...]` arbitr
 - Container queries (`@container`) — TBD.
 For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `peer-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
 
-Additionally, the compiler SHALL emit `W-TAILWIND-UNRECOGNIZED-CLASS` (info-level lint, §34) for any class-name token inside a `class="..."` attribute that does NOT resolve via the embedded Tailwind registry. This widens the surface beyond W-TAILWIND-001 to also catch (a) misspellings (`flexx` vs `flex`), (b) arbitrary-value classes whose particular utility prefix is not yet supported by the embedded engine (e.g. `transition-[opacity_0.5s]`, `transform-[rotate(45deg)]` — note: `grid-cols-[auto_1fr_auto]` IS supported as of S109, see §26.4 grid family), and (c) custom user-defined CSS classes (acknowledged false-positive — S108 dogfood Bug 1). S109 landed the FULL fix for the grid/flex/aspect family arbitrary-value emission; a safelist/`@apply` mechanism to distinguish user-defined classes from typos remains deferred. Adopters whose codebases rely on extensive custom CSS class names may suppress per-project via `lint.tailwind-unrecognized-class = off` (§28).
+Additionally, the compiler SHALL emit `W-TAILWIND-UNRECOGNIZED-CLASS` (info-level lint, §34) for any class-name token inside a `class="..."` attribute that does NOT resolve via the embedded Tailwind registry. This widens the surface beyond W-TAILWIND-001 to also catch (a) misspellings (`flexx` vs `flex`), (b) arbitrary-value classes whose particular utility prefix is not yet supported by the embedded engine (e.g. `transition-[opacity_0.5s]`, `transform-[rotate(45deg)]` — note: `grid-cols-[auto_1fr_auto]` IS supported as of S109, see §26.4 grid family), and (c) custom user-defined CSS classes (acknowledged false-positive — S108 dogfood Bug 1). S109 landed the FULL fix for the grid/flex/aspect family arbitrary-value emission; the **`@apply` utility-composition mechanism is specified at §26.8 (S223, Nominal)** (a class an author defines via `@apply` in a `#{}` / `<style>` block is author-defined → draws no lint), and a **safelist** mechanism (force-generating a utility referenced only dynamically, §26.8.4) remains deferred. Adopters whose codebases rely on extensive custom CSS class names may suppress per-project via `lint.tailwind-unrecognized-class = off` (§28).
 
 #### 26.5.1 Dynamic-class fragments (S183)
 
@@ -16509,6 +16509,67 @@ A `blur-sm brightness-50 grayscale` element resolves `--tw-blur` to `blur(4px)`,
 **Arbitrary `blur-[…]` / `brightness-[…]` / `backdrop-blur-[…]` etc.** Each wraps the bracket value in its filter function, sets the one `--tw-*` var, and emits the composing shorthand (`blur-[2px]` → `--tw-blur: blur(2px)` + shorthand), so an arbitrary filter composes with another on the same element. A multi-token (underscore-list) drop-shadow value (`drop-shadow-[0_4px_3px_red]`) is a list and follows the same single-token-only rule as the transform/gradient arbitrary forms — it fires `E-TAILWIND-001` (use the named `drop-shadow-*` scale for multi-layer shadows).
 
 **Phase status.** ring / ring-offset / shadow is **Phase 1**; the gradient family is **Phase 2**; the **transform** family (translate / scale / rotate / skew directional + named, §26.7.2) is **Phase 3**; the **filter** and **backdrop-filter** families (§26.7.3) are **Phase 4** — all landed under this inline-fallback model and their class tokens are RECOGNIZED (no `W-TAILWIND-UNRECOGNIZED-CLASS`). **All composing families are now complete** (ring/shadow · gradient · transform · filter/backdrop). The arbitrary-width `ring-offset-[<len>]` form is the lone remaining ring-family member without a utility (no arbitrary-width offset); the bare `skew-[<angle>]` axis-less form has no utility (use `skew-x-*` / `skew-y-*`).
+
+### 26.8 `@apply` — Utility Composition in Author CSS (Nominal — S223)
+
+> **Nominal — spec-ahead-of-implementation.** This section specifies the `@apply` directive; the compiler does NOT yet implement it as of S223 (W1 of the bug-1 `@apply` arc — the build wave W2 implements the expansion + the diagnostics and flips this banner). Authority: bug-1 (`docs/known-gaps.md`, the sole remaining sub-arc) + the S223 v1 ratification + SCOPE `docs/changes/bug-1-tailwind-apply-2026-06-26/SCOPE.md`.
+
+`@apply` lets an author **compose Tailwind utilities into a named class** inside their own CSS, instead of repeating utility lists across `class=` attributes or hand-writing the equivalent declarations. It is written as a declaration inside a rule body in an author CSS block (a `#{ … }` block, or its `<style> … </style>` sugar — §26.1):
+
+```scrml
+#{
+  .btn  { @apply px-4 py-2 rounded-md bg-blue-500 text-white; }
+  .card { @apply ring-2 shadow-lg; }                 /* a composing family — §26.7 */
+}
+
+<button class="btn">Save</button>
+<div class="${active ? 'card' : ''}">…</div>          /* dynamically applied — .card is a real rule */
+```
+
+emits:
+
+```css
+.btn  { padding-left:1rem; padding-right:1rem; padding-top:.5rem; padding-bottom:.5rem;
+        border-radius:.375rem; background-color:#3b82f6; color:#fff; }
+.card { --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width,0px)) var(--tw-ring-color,currentColor);
+        --tw-shadow: 0 10px 15px -3px rgb(0 0 0/.1), 0 4px 6px -4px rgb(0 0 0/.1);
+        box-shadow: var(--tw-ring-offset-shadow,0 0 #0000), var(--tw-ring-shadow,0 0 #0000), var(--tw-shadow,0 0 #0000); }
+```
+
+#### 26.8.1 Normative statements
+
+- The compiler SHALL recognize `@apply <utility-token>…;` as a declaration inside a rule body in a `#{}` / `<style>` author CSS block. Each whitespace-separated token is a Tailwind utility class name (the same surface §26.3 / §26.4 validate inside a `class=` attribute).
+- The compiler SHALL **expand** each token to the CSS declarations the embedded registry produces for that utility, and **inline those declarations into the enclosing rule** in source order. The `@apply` declaration itself produces no output; only its expansion does.
+- The enclosing selector (`.btn`, `.card`) is an **author-defined class** (§26.5) — it draws no `W-TAILWIND-UNRECOGNIZED-CLASS` wherever it is used, INCLUDING when applied dynamically (`class="${cond ? 'card' : ''}"`).
+- A **composing-family** utility (§26.7 — ring / ring-offset / shadow / gradient / transform / filter / backdrop-filter) expands to its `--tw-*` setters AND the `var()` composing shorthand, so `@apply ring-2 shadow-lg` composes the ring AND the shadow exactly as two separate `class=` tokens would — the §26.7 inline-fallback model carries through unchanged, and partial application stays valid.
+- Consistent with §26.1 / §26.2, `@apply` adds **no** global preflight block and no cost for unused utilities — only the named rule's expanded declarations are emitted.
+
+#### 26.8.2 v1 scope (S223 ratification)
+
+The v1 surface is **bare, single-rule utilities** (the limit-primitives core; the excluded forms are bounded follow-ons, not rejected-forever):
+
+- ✅ **Bare named utilities** — `px-4`, `rounded-md`, `bg-blue-500`, `text-white`, `flex`, …
+- ✅ **Arbitrary-value utilities** — `bg-[#1da1f2]`, `p-[3px]`, … (resolve via the §26.4 arbitrary path; same single-token rule).
+- ✅ **Composing-family utilities** — `ring-2`, `shadow-lg`, `blur-sm`, `translate-x-4`, … (compose via §26.7).
+- ❌ **Variant-prefixed tokens** — `hover:bg-blue-500`, `md:flex`, `group-hover:*` (§26.3) require a nested/companion selector, not flat inlining → **`E-APPLY-VARIANT-UNSUPPORTED`** (v1). Deferred follow-on (lift when variants land).
+- ❌ **Multi-rule / pseudo-element utilities** — any utility whose registry output is more than one flat rule (a `::before`/`::after`-bearing utility, or a `prose` family member §26.6) cannot be flat-inlined → **`E-APPLY-NON-INLINABLE-UTILITY`** (v1).
+- ❌ **Unknown token** — a token that does not resolve to a utility (`@apply flexx`, a typo, or a not-yet-supported arbitrary prefix) → **`E-APPLY-UNKNOWN-UTILITY`** (Error). This is an **Error**, deliberately harder than the info-level `W-TAILWIND-UNRECOGNIZED-CLASS` that fires on a `class=` token: a `class=` token may legitimately be an author or third-party class, but an unresolved `@apply` token silently drops declarations the author explicitly asked the compiler to compose — a broken named class, surfaced loudly.
+
+#### 26.8.3 Planned error codes
+
+Per Rule 4 and the §60 / §61 precedent, the `E-APPLY-*` codes are NAMED here and land in §34 **with** the W2 implementation (not before):
+
+- `E-APPLY-UNKNOWN-UTILITY` (Error) — a token in `@apply` does not resolve to a utility.
+- `E-APPLY-VARIANT-UNSUPPORTED` (Error) — a variant-prefixed token in `@apply` (v1; lift when variants land).
+- `E-APPLY-NON-INLINABLE-UTILITY` (Error) — a token whose registry output is not a single flat rule.
+
+#### 26.8.4 Relationship to safelist (NOT `@apply`)
+
+`@apply` is **composition** (the author names a reusable class). It does NOT solve **dynamic utility generation** — forcing the registry to emit CSS for a utility that appears only inside a `${…}` interpolation (`class="bg-${color}"`), where the concrete class is never statically visible (§26.5.1). That is the separate **safelist** mechanism (a project-config list of utilities to always generate), deferred independently; `@apply` neither needs nor provides it. An author CAN sidestep a dynamic-generation gap by `@apply`-ing the needed utilities into named classes and switching on the class name instead of the utility (`class="${active ? 'card-on' : 'card-off'}"`).
+
+#### 26.8.5 Cross-references
+
+§26.1 / §26.2 (the "only what's used" minimalism axiom — `@apply` adds no global block) · §26.3 / §26.4 (the utility / arbitrary surface the tokens draw from) · §26.5 (author-defined classes draw no unrecognized-class lint — the `@apply` deferral is resolved here) · §26.7 (the composing-family `var()` model `@apply` reuses) · §28 (`lint.tailwind-unrecognized-class`).
 
 ---
 
