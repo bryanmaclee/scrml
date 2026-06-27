@@ -1,5 +1,7 @@
 # ss37 — value-native Set (§59.12 un-defer) — SURVEY-FIRST feature
 
+> ✅ **DONE — VERIFIED-LANDED (do NOT re-fire).** S225 runtime check at HEAD `6ead4d7a`: `examples/34-value-native-set.scrml` compiles clean + `node --check` green + the emitted JS uses the B2 set→map desugar (`_scrml_map_insert`/`_scrml_map_has`/`_scrml_map_keys`/`_scrml_map_size`). Set landed S222 (desugar) and rides ss38's HAMT rep (S223). The "CORRECTION / sequencing STILL LIVE / re-fire" text below is **stale intermediate history** — superseded; Set is integrated in main. SPEC §59.12 confirms.
+
 **Fill-note:** un-defer **§59.12 Set** — a value-native Set type, sibling of the §59 value-native Maps. It was **design-deferred "for lack of an exerciser"**; the DG-builder de-risk slice IS the exerciser (graph algorithms are set-saturated — DFS visited/coloring, reader-sets, fixpoint membership), and it's the headline mechanics-beauty add for narrow-Road-B (kills the model-sets-as-arrays verbosity). **SURVEY-FIRST** — confirm the §59.12 design is complete enough to build, mirror the §59 Map landing (S169), **park any genuine design fork for the PA→user.**
 
 **Shared ingestion:** the §59 value-native Map machinery is the TEMPLATE — the value-canonical hasher, the COW/reassignment-canonical model, the lossless codec, order-independent `==`, the type-system recognition, the codegen lowering. Set is a one-value-per-entry sibling of Map. SEQUENTIAL within-list.

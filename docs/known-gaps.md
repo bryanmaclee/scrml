@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 12 |
-| LOW | 9 |
+| MED | 13 |
+| LOW | 10 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2619,3 +2619,11 @@ PA-triage tangential (drive3 probe): with per-statement auto-await isolation, a 
 **FIXED S223 (ss41 `e02758e9`, PA file-delta from `spa/ss41`/`619e9589`).** Seam (A) wrap-stage relocation in `emit-client.ts` — the `!{}` guard+arm now emits INSIDE the auto-await IIFE after the `await` (checks the resolved envelope `r`, not the Promise). Happy-else sets the cell; ss32's `.catch` retained for non-envelope rejections; no-error-arm form byte-identical. R26 before/after (handler was dead → fires on a server-error envelope); S215 adversarial clean; full `compiler/tests` 25489/0. Coherence 0/3.
 
 **Filed S223** (ss32 item-1 agent discovery; pre-existing, NOT a regression; PA-grounded). A reactive-server assignment with an inline error arm — `@cell = serverFn() !{ ::NetworkError :> … }` — emits `let result = (async () => …)(); if (result.__scrml_error) { <!{} dispatch> }`. The auto-await IIFE wrap leaves `result` capturing the **Promise** (not the resolved envelope), so `result.__scrml_error` is **always falsy** → the user's `!{}` handler **NEVER fires** (dead error dispatch). ss32 item-1's `.catch` (`a0559651`) safety-nets the rejection (it now surfaces via `_scrml_error_boundary_log` instead of `unhandledrejection`) but does NOT restore the `!{}` handler — the user's explicit error handling is silently dead. **Fix (structural codegen):** move the `!{}` envelope dispatch INSIDE the IIFE, after the `await`, checking the RESOLVED envelope — `(async () => { const r = await stub(args); if (r.__scrml_error) { <!{} dispatch> } else { _scrml_reactive_set(name, r); } })().catch(…)`. Fire site: `emit-client.ts` auto-await IIFE wrap (the `post-server-fn-iife-wrap` region ss32 item-1 touched) + the `!{}` arm-dispatch emission — structural, earlier than the string-rewrite stage. Shares the structural FAMILY with [[g-auto-await-read-before-resolve-race]] (sync successor reads async-deferred producer) but is a DISTINCT fix (error-routing into the async continuation; that sibling turned out NOT-A-BUG, so this does NOT bundle with it). R26 + S215 adversarial: multiple error arms, `::NetworkError` vs generic `!{}`, no-error-arm form (must stay unchanged), CPS-stub vs fetch-stub. SURVEY context: `docs/changes/g-auto-await-read-before-resolve-race/SURVEY.md` fork(g).
+
+## §S225 — gaps filed S225 (2026-06-27, S224 Ryan-agent side-findings)
+
+### g-sql-in-nested-function-client-leak — a nested `function ins(x){ ?{…} }` declared inside another function isn't server-escalated → its `?{}` SQL trips `E-CG-006` (would leak `_scrml_sql` into client JS) — `NEW S225 (S224 Ryan #12-adjacent agent side-finding); MED; verify-before-fix`
+A nested function declaration that uses a server-only resource (`?{}` SQL) does not participate in §12 server-placement inference — so its SQL is treated as client-side and the loud `E-CG-006` fires (the server `_scrml_sql` leak is CAUGHT, not silently emitted). Hoisting the same function to a sibling top-level decl escalates cleanly and compiles. So a *legal* nested-function-with-SQL pattern is rejected; the gap is server-escalation coverage for nested function decls. Loud diagnostic (no silent data leak). Surfaced by the S224 Ryan #12 (`?{}`-in-arrow-body) agent as an adjacent shape, not its named bug. **Verify-before-fix** (S138 R26 reverse): reproduce on real source at the current baseline + cross-check the described shape before dispatching a fix. <!-- @gap id=g-sql-in-nested-function-client-leak sev=MED status=open -->
+
+### g-markup-session-read-undeclared — a markup `@session` read fires `E-STATE-UNDECLARED` (the `@session` projection is now window-scoped) — `NEW S225 (S224 Ryan #15-adjacent agent side-finding); LOW; triage (design-Q)`
+After the S224 Ryan #15 fix window-anchored the `@session` projection to a singleton, a `@session` read in MARKUP context resolves to `E-STATE-UNDECLARED`. Pre-existing (NOT introduced by #15 — surfaced adjacent to it). Whether a markup `@session` read SHOULD resolve is a **DESIGN question** (the projection is window-scoped; is markup a legal read locus for it?). **Triage** — needs a PA/user ruling on the intended `@session`-in-markup semantics before any fix; not a clear-cut bug. <!-- @gap id=g-markup-session-read-undeclared sev=LOW status=open -->
