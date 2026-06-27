@@ -1,13 +1,27 @@
 import { collectCssBlocks } from "./collect.ts";
 import { replaceCssVarRefs } from "./utils.ts";
+import { resolveApplyToken } from "../tailwind-classes.js";
+import { CGError } from "./errors.ts";
+
+/** A source span (the fire site for a diagnostic). */
+interface CSSSpan {
+  file?: string;
+  start?: number;
+  end?: number;
+  line?: number;
+  col?: number;
+}
 
 /** A CSS declaration: property + value with optional reactive references. */
 interface CSSDeclaration {
-  prop: string;
-  value: string;
+  prop?: string;
+  value?: string;
   reactiveRefs?: Array<{ name: string }>;
   isExpression?: boolean;
   atRule?: string;
+  /** §26.8 `@apply` — the utility-token list to expand inline (set by the parser). */
+  apply?: string[];
+  span?: CSSSpan;
 }
 
 /** A CSS rule: either grouped (selector + declarations) or flat (prop + value). */
@@ -19,6 +33,8 @@ interface CSSRule {
   reactiveRefs?: Array<{ name: string }>;
   isExpression?: boolean;
   atRule?: string;
+  apply?: string[];
+  span?: CSSSpan;
 }
 
 /** A CSS block node (css-inline or style block) from the AST. */
@@ -76,10 +92,124 @@ export function renderFlatDeclarationAsInlineStyle(block: { rules?: unknown }): 
 }
 
 /**
+ * Split a CSS declaration-body string (`prop: v; prop: v`) into ordered
+ * `{ prop, value }` pairs, respecting `(…)` / `[…]` nesting so a `;` inside a
+ * value (degenerate but possible) does not split a declaration, and splitting
+ * prop from value at the FIRST top-level `:` (a value may carry its own colons,
+ * e.g. `url(http://…)`).
+ */
+function splitCssDeclarations(declStr: string): Array<{ prop: string; value: string }> {
+  const pieces: string[] = [];
+  let paren = 0, bracket = 0, buf = "";
+  for (const c of declStr) {
+    if (c === "(") paren++;
+    else if (c === ")") paren = paren > 0 ? paren - 1 : 0;
+    else if (c === "[") bracket++;
+    else if (c === "]") bracket = bracket > 0 ? bracket - 1 : 0;
+    if (c === ";" && paren === 0 && bracket === 0) {
+      if (buf.trim()) pieces.push(buf.trim());
+      buf = "";
+    } else {
+      buf += c;
+    }
+  }
+  if (buf.trim()) pieces.push(buf.trim());
+  const out: Array<{ prop: string; value: string }> = [];
+  for (const piece of pieces) {
+    const idx = piece.indexOf(":");
+    if (idx < 0) continue;
+    const prop = piece.slice(0, idx).trim();
+    if (prop) out.push({ prop, value: piece.slice(idx + 1).trim() });
+  }
+  return out;
+}
+
+/**
+ * Property-level last-wins dedup: keep only the LAST occurrence of each
+ * property (at its last position). Collapses the duplicate composing-family
+ * shorthands that two §26.7 utilities each emit (e.g. the identical
+ * `box-shadow: var(…)` from both `ring-2` and `shadow-lg`) into ONE, while the
+ * distinct `--tw-*` setters survive — matching the §26.8 worked example.
+ */
+function dedupeLastWins(decls: Array<{ prop: string; value: string }>): Array<{ prop: string; value: string }> {
+  const lastIdx = new Map<string, number>();
+  decls.forEach((d, i) => lastIdx.set(d.prop, i));
+  return decls.filter((d, i) => lastIdx.get(d.prop) === i);
+}
+
+/**
+ * Render a single declaration's reactive value (CSS custom-property rewrite for
+ * `@var` refs), shared by the flat and grouped paths.
+ */
+function renderDeclValue(decl: CSSDeclaration): string {
+  let value = decl.value ?? "";
+  if (decl.reactiveRefs && decl.reactiveRefs.length > 0) {
+    if (decl.isExpression) {
+      const exprPropName = `scrml-expr-${decl.reactiveRefs.map(r => r.name).join("-")}`;
+      value = `var(--${exprPropName})`;
+    } else {
+      value = replaceCssVarRefs(value);
+    }
+  }
+  return value;
+}
+
+/**
+ * §26.8 — render a grouped rule whose declaration list contains at least one
+ * `@apply` node. Each `@apply` token is classified + resolved via
+ * `resolveApplyToken`; an "ok" token's declarations are inlined in source order,
+ * and the three `E-APPLY-*` diagnostics fire (each carrying the `@apply`
+ * directive's span) for variant / non-inlinable / unknown tokens. After all
+ * declarations are collected, a property-level last-wins dedup collapses the
+ * duplicate composing-family shorthands into one.
+ */
+function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[]): string {
+  const ordered: Array<{ prop: string; value: string }> = [];
+  for (const decl of declarations) {
+    if (Array.isArray(decl.apply)) {
+      const span = decl.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 };
+      for (const token of decl.apply) {
+        const r = resolveApplyToken(token);
+        if (r.kind === "ok") {
+          if (r.decls) ordered.push(...splitCssDeclarations(r.decls));
+        } else if (r.kind === "variant") {
+          errors?.push(new CGError(
+            "E-APPLY-VARIANT-UNSUPPORTED",
+            `E-APPLY-VARIANT-UNSUPPORTED: \`@apply\` does not support the variant-prefixed utility \`${token}\` in v1 — a variant needs a nested/companion selector and cannot be flat-inlined. Apply the variant on the element's \`class=\` attribute instead, or split it into its own rule. (§26.8.2)`,
+            span,
+          ));
+        } else if (r.kind === "non-inlinable") {
+          errors?.push(new CGError(
+            "E-APPLY-NON-INLINABLE-UTILITY",
+            `E-APPLY-NON-INLINABLE-UTILITY: \`@apply ${token}\` cannot be inlined — its CSS is not a single flat \`.${token} { … }\` rule (it uses a pseudo-element, a combinator, or expands to multiple rules). Use \`${token}\` directly in a \`class=\` attribute instead. (§26.8.2)`,
+            span,
+          ));
+        } else {
+          const why = r.diagnostic ? ` (${r.diagnostic.message})` : "";
+          errors?.push(new CGError(
+            "E-APPLY-UNKNOWN-UTILITY",
+            `E-APPLY-UNKNOWN-UTILITY: \`@apply ${token}\` — \`${token}\` does not resolve to a known Tailwind utility${why}. Check the spelling, or write the equivalent CSS declarations directly. (§26.8.2)`,
+            span,
+          ));
+        }
+      }
+    } else if (decl.prop && decl.value !== undefined) {
+      ordered.push({ prop: decl.prop, value: renderDeclValue(decl) });
+    }
+  }
+  return dedupeLastWins(ordered).map(d => `${d.prop}: ${d.value};`).join(" ");
+}
+
+/**
  * Render the CSS rules from a single CSS block (inline #{} or style block)
  * into a CSS string fragment.
+ *
+ * `errors` (optional) collects the §26.8 `E-APPLY-*` diagnostics surfaced while
+ * expanding `@apply` directives; callers without a diagnostic sink (e.g. unit
+ * tests) may omit it — expansion still happens, the diagnostics are simply not
+ * collected.
  */
-function renderCssBlock(block: CSSBlock): string {
+function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
   if (block.rules && Array.isArray(block.rules)) {
     const ruleParts: string[] = [];
     for (const rule of block.rules) {
@@ -88,20 +218,23 @@ function renderCssBlock(block: CSSBlock): string {
         ruleParts.push(rule.atRule);
         continue;
       }
+      // §26.8: a stray top-level `@apply` (outside any rule body) has no
+      // enclosing rule to inline into — skip it (emits nothing).
+      if (Array.isArray(rule.apply)) {
+        continue;
+      }
       if (rule.selector && rule.declarations) {
         // Grouped rule: selector { declarations }
+        // Fast path: no `@apply` node — render declarations verbatim (unchanged).
+        const hasApply = rule.declarations.some(d => Array.isArray(d.apply));
+        if (hasApply) {
+          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors);
+          ruleParts.push(`${rule.selector} { ${declStr} }`);
+          continue;
+        }
         const declParts: string[] = [];
         for (const decl of rule.declarations) {
-          let value = decl.value;
-          if (decl.reactiveRefs && decl.reactiveRefs.length > 0) {
-            if (decl.isExpression) {
-              const exprPropName = `scrml-expr-${decl.reactiveRefs.map(r => r.name).join("-")}`;
-              value = `var(--${exprPropName})`;
-            } else {
-              value = replaceCssVarRefs(value);
-            }
-          }
-          declParts.push(`${decl.prop}: ${value};`);
+          declParts.push(`${decl.prop}: ${renderDeclValue(decl)};`);
         }
         ruleParts.push(`${rule.selector} { ${declParts.join(" ")} }`);
       } else if (rule.selector) {
@@ -149,7 +282,7 @@ function renderCssBlock(block: CSSBlock): string {
  *
  * @param nodes  — top-level AST nodes
  */
-export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }): string {
+export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[]): string {
   const { inlineBlocks, styleBlocks } = cssBlocks ?? collectCssBlocks(nodes);
 
   // Separate program-level blocks from component-scoped blocks.
@@ -162,7 +295,7 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
 
   // --- Program-level CSS (no @scope wrapping) ---
   for (const block of programInlineBlocks) {
-    const css = renderCssBlock(block);
+    const css = renderCssBlock(block, errors);
     if (css) parts.push(css);
   }
   for (const block of programStyleBlocks) {
@@ -181,7 +314,7 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     if (isFlatDeclarationBlock(block)) continue;
 
     const name = block._componentScope!;
-    const css = renderCssBlock(block);
+    const css = renderCssBlock(block, errors);
     if (!css) continue;
     if (!componentCssMap.has(name)) componentCssMap.set(name, []);
     componentCssMap.get(name)!.push(css);

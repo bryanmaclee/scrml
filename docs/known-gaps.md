@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 14 |
+| MED | 12 |
 | LOW | 9 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1261,8 +1261,8 @@ The `const <state>` deep-freeze debate (S134) ratified a **sequenced** verdict: 
 ---
 
 
-### Bug 1 — Tailwind arbitrary-value classes — `partial-impl` (SOLE remaining: @apply — **v1 SPEC'd Nominal §26.8 (S223 W1); impl = W2 sPA survey-first**; safelist a separate/deferred problem)
-<!-- @gap id=bug-1 sev=MED status=open -->
+### Bug 1 — Tailwind arbitrary-value classes — `RESOLVED` (last sub-arc @apply landed ss40 W2 §26.8; safelist a separate/deferred problem, §26.8.4)
+<!-- @gap id=bug-1 sev=MED status=resolved -->
 
 Major families shipped S108-S109: grid / flex / aspect / transition / timing / individual transforms + shorthand + directional / outline / ring (length/color/var/keyword). The `W-TAILWIND-UNRECOGNIZED-CLASS` floor lint catches typos + unsupported arbitrary-values today.
 
@@ -1282,13 +1282,14 @@ Major families shipped S108-S109: grid / flex / aspect / transition / timing / i
 
 **S210 — sub-arcs 1 + 3 LANDED (sPA ss8, `81a46d36`).** Sub-arc 1 (string-shaped arbitrary values): new `string` value-kind in `validateArbitraryCss` + `content`/`font` prefixes (`content-['hello_world']` → `content: 'hello world'`; `font-[Inter]` → `font-family`; `font-[550]` → `font-weight`). Sub-arc 3 (lone arbitrary `ring-offset-[len]`): new `ring-offset` ARBITRARY_DECL_TRANSFORM mirroring the named util, composes with `ring-[]`. `tailwind-classes.js` +64; +5 test files (230 pass). **SPEC §26.4/§26.4.1/§26.7 currency note applied in the same landing (Rule 4).** **SOLE OPEN REMAINDER = sub-arc 2 (safelist/@apply lint precision)** — SPEC §26.5-deferred, no ruled direction → PARKED to PA (design ruling: safelist config knob vs `@apply` support vs `#{}`-class-scan suppression; the `lint.tailwind-unrecognized-class=off` escape hatch already covers heavy-custom-CSS adopters). Gap stays `open` for sub-arc 2. **S221 DIRECTION-LEAN: user leans `@apply` ("I like @apply TBH").** A LEAN, not yet a ratified build-order — `@apply` (`.btn { @apply px-4 py-2 }` → expand the referenced utilities' declarations into the rule) is the most powerful + most generator-surface of the three, and the most idiomatic (Tailwind authors reach for it). Needs its own scoping pass before build: the `@apply` parse site (in the CSS/`<style>` path), the utility-resolution reuse (the generator already resolves every utility — `@apply` is "resolve + inline the declarations"), the ordering/specificity semantics, and whether it composes with the §26.7 `var()`-fallback families. Scope when the user confirms build-order. (Not blocking; the §28 lint=off escape covers adopters meanwhile.)
 
-**Still open (separate sub-arcs — NOT composing-family work):**
-- **String-shaped arbitrary values** — `content-["text"]` + `font-[Inter]` need bracket-parser extension. SEPARATE arc.
-- **Safelist / `@apply`** — lint precision for custom-vs-typo classes. SEPARATE arc.
-- Arbitrary `ring-offset-[<len>]` — the lone remaining ring-family member without a utility (named ring-offset-{w} shipped P1).
+**ss40 — @apply v1 BUILT (W2; `bug-1-tailwind-apply-2026-06-26`) → bug-1 RESOLVED.** The §26.8 directive is implemented on the default pipeline: the CSS-block parser (`ast-builder.js` `parseCSSTokens` / NEW `parseApplyAtRule`) tags a `@apply <tokens>;` CSS_AT_RULE — previously SILENTLY DROPPED inside a rule body (`else { i++ }`), confirmed via compile producing empty `.btn {  }`, NOT the SCOPE's guessed atRule-passthrough — as a `{ apply:[tokens], span }` declaration node; codegen (`emit-css.ts` NEW `renderApplyGroupedDeclarations`, reusing NEW `resolveApplyToken` in `tailwind-classes.js`) resolves each token, inlines its decls in source order, and a property-level last-wins dedup collapses the duplicate composing-family `box-shadow` (both `ring-2` + `shadow-lg` emit it) into ONE while the distinct `--tw-*` setters survive — byte-matching the §26.8 worked example. Composing composed FOR FREE (de-risk held). The 3 `E-APPLY-*` codes (variant / non-inlinable / unknown, all Error, each carrying the `@apply` span) wired + catalogued in §34; §26.8 banner flipped Implemented. R26 + adversarial verified (each E-APPLY repro fires exit-1; arbitrary `bg-[#1da1f2]` resolves; empty / multiple-@apply / @apply+hand-decl edges OK; no verbatim `@apply` survives; no spurious W-TAILWIND). **safelist** (force-generate a dynamically-referenced utility, §26.8.4) is a DIFFERENT problem (generation, not composition), deferred independently — NOT a bug-1 reopener; route as its own item if adopter friction surfaces.
 
-- **Workaround (for the separate-arc surfaces):** drop a `#{}` CSS shim block with the rules written by hand.
-- **Status:** FILED SCOPE CLOSED S191 (P1 ring/shadow + P2 gradient). **ALL composing families LANDED S191 (P1-P4).** Remaining = string-shaped + safelist + arbitrary ring-offset-[len] (separate smaller arcs). **Gap stays `open` for those three; the filed bug + the full composing-family ambition are both resolved.**
+**Prior sub-arcs (all landed):**
+- **String-shaped arbitrary values** — `content-["text"]` + `font-[Inter]` — LANDED S210 (sub-arc 1).
+- Arbitrary `ring-offset-[<len>]` — LANDED S210 (sub-arc 3).
+- **@apply** — LANDED ss40 W2 (the last remaining sub-arc).
+
+- **Status:** **RESOLVED.** FILED SCOPE CLOSED S191 (P1 ring/shadow + P2 gradient); ALL composing families LANDED S191 (P1-P4); string-shaped + ring-offset LANDED S210; @apply LANDED ss40 W2. The filed bug, the full composing-family ambition, and the @apply ergonomic are all resolved. (safelist = separate deferred problem per §26.8.4, not bug-1.)
 
 ---
 

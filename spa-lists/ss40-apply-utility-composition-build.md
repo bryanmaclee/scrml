@@ -16,7 +16,7 @@
 
 ## Items
 
-0. **SURVEY (report before building)** `[status=open]` **SURVEY-FIRST**
+0. **SURVEY (report before building)** `[status=done]` **SURVEY-FIRST**
    - (a) **Current `@apply` disposition:** does `@apply px-4 …` currently pass through `renderCssBlock` as an `atRule` verbatim (emitting invalid CSS), get rejected, or get swallowed? (SCOPE §2 hypothesis: at-rule passthrough.)
    - (b) **Parse site:** where is the `#{}`/`<style>` block parsed into `block.rules` (`{selector, declarations[]}` / `{atRule}`)? That's where `@apply <tokens>;` must be recognized as a tagged declaration node (e.g. `{apply:[...], loc}`) instead of an at-rule passthrough.
    - (c) **Declaration extraction:** `getTailwindCSSWithDiagnostic(token)` returns a full `.<sel> { <decls> }` rule — confirm the clean way to extract just `<decls>` to inline (and that multi-rule output is detectable for the F4 `E-APPLY-NON-INLINABLE-UTILITY` reject).
@@ -24,17 +24,25 @@
    - (e) **Variant detection (F1):** how to detect a variant-prefixed token (`hover:`, `md:`, `group-hover:` — §26.3) to fire `E-APPLY-VARIANT-UNSUPPORTED`.
    - Report the parse-site + the expansion shape + any surprise BEFORE building.
 
-1. **Recognize the `@apply` directive in the `#{}`/`<style>` rule parser** `[status=open]`
+1. **Recognize the `@apply` directive in the `#{}`/`<style>` rule parser** `[status=landed-on-branch SHA=875874e5]`
    - At the parse site (item 0b): a `@apply <whitespace-separated tokens>;` declaration inside a rule body → a tagged declaration node carrying the token list + `loc`. No expansion here (keep the registry dependency in codegen).
 
-2. **Expand `@apply` in `emit-css.ts:renderCssBlock`** `[status=open]`
+2. **Expand `@apply` in `emit-css.ts:renderCssBlock`** `[status=landed-on-branch SHA=875874e5]`
    - For an apply-node declaration: resolve each token via `getTailwindCSSWithDiagnostic`, extract its declarations (item 0c), inline them into the enclosing rule in source order. Composing families compose by concatenation (the §26.7 setters + shorthand are in the per-utility CSS). Mixed with hand-written decls in the same rule = both emit.
 
-3. **Wire the 3 `E-APPLY-*` diagnostics + §34 + flip the §26.8 banner** `[status=open]`
+3. **Wire the 3 `E-APPLY-*` diagnostics + §34 + flip the §26.8 banner** `[status=landed-on-branch SHA=875874e5+e0f41583]`
    - `E-APPLY-UNKNOWN-UTILITY` (token doesn't resolve) · `E-APPLY-VARIANT-UNSUPPORTED` (variant-prefixed token, v1) · `E-APPLY-NON-INLINABLE-UTILITY` (registry output is >1 flat rule). All Error, with `loc`. Add the 3 rows to §34 (regen SPEC-INDEX if ranges shift). Flip the §26.8 Nominal banner → implemented. Update the bug-1 known-gaps entry → RESOLVED (or note W2 landed) + §0 count regen (`bun scripts/state.ts --write`) if the gap flips.
 
-4. **Tests + dogfood** `[status=open]`
+4. **Tests + dogfood** `[status=landed-on-branch SHA=913bf8be]`
    - Unit: per-token expansion · composing-family `@apply ring-2 shadow-lg` (assert the var() shorthand + both setters present) · arbitrary `@apply bg-[#1da1f2]` · unknown→Error · variant→Error · multi-rule→Error · empty-`@apply` · multiple `@apply` in one rule · `@apply` + hand-written decls. A dogfood `.scrml` (a `.btn`/`.card` example, compiled, CSS inspected) + the §26.8 sample. R26 + full `bun run test`.
 
 ## Acceptance
-`@apply px-4 py-2 rounded-md bg-blue-500 text-white` in a `#{}` rule emits the inlined declarations (no verbatim `@apply` in output); `@apply ring-2 shadow-lg` composes (one `box-shadow: var(),var(),var()` + both setters); the 3 `E-APPLY-*` codes fire on their repros with a `loc`; the §26.8 Nominal banner is flipped; full suite green; bug-1 flips (W2 = the last @apply remainder).
+`@apply px-4 py-2 rounded-md bg-blue-500 text-white` in a `#{}` rule emits the inlined declarations (no verbatim `@apply` in output); `@apply ring-2 shadow-lg` composes (one `box-shadow: var(),var(),var()` + both setters); the 3 `E-APPLY-*` codes fire on their repros with a `loc`; the §26.8 Nominal banner is flipped; full suite green; bug-1 flips (W2 = the last @apply remainder). **✅ ALL MET.**
+
+## Status (sPA ss40) — ALL items DONE, landed on `spa/ss40` (tip after bookkeeping; build SHAs below)
+- **Survey (item 0) corrected the SCOPE hypothesis (Rule 4):** `@apply` is NOT at-rule-passthrough — it is **silently dropped** (tokenizer captures one `CSS_AT_RULE`; the rule-body parse loop routes non-`CSS_PROP` to `else{i++}`). **Live path is LEGACY `ast-builder.js:parseCSSTokens`** (native `parse-css-body.js` is opt-in, NOT updated — S162 feature-stale; port if `--parser=scrml-native` ever defaults). Composing-for-free de-risk HELD.
+- **Build SHAs:** `ad087b62` resolver (`resolveApplyToken`) · `875874e5` parser + expansion + 3 diagnostics (`ast-builder.js`/`emit-css.ts`/`index.ts`) · `e0f41583` SPEC §34 +3 rows + §26.8 banner→Implemented + bug-1 RESOLVED + §0 MED 14→13 · `913bf8be` 17-test integration suite.
+- **Verify:** agent full `bun run test` = **25536 pass / 0 fail / 214 skip** (1110 files); each commit hook-gated incl. browser/TodoMVC. sPA FF-merged + independently re-ran the new test (17/0) + confirmed §34/§26.8/§0 flips. Adversarial edges all pass incl. the composing assertion (ONE `box-shadow` + both `--tw-*` setters).
+- **sPA currency fix (this commit):** SPEC line ~16285 cross-reference `§26.8 (S223, Nominal)` → `(S223 spec; Implemented ss40)` — the agent flipped the §26.8 section banner but left this secondary mention stale + self-contradictory. 1-word currency, not a design ruling.
+- **Design-judgment calls the agent made (PA to ratify — see re-integration message):** (1) property-level **last-wins dedup scoped to apply-bearing rules only** (to yield the §26.8-example single `box-shadow`; non-apply rules take the byte-identical fast path); (2) combinator-selector utility (`space-x-4`) classified `E-APPLY-NON-INLINABLE-UTILITY` (spec says ">1 flat rule"; agent reads "not a single flat `.<token>{…}` rule" — satisfied in spirit); (3) dogfood lives IN the integration test, not a new `examples/35-*.scrml` (avoids perturbing the PA-owned example count).
+- **Deferred (PA awareness):** pre-existing `//`-in-`#{}`-arbitrary-value limitation (e.g. `bg-[url(http://...)]` can't round-trip a `#{}` compile — CSS-block splitter eats the `//`); `master-list.md @generated:recent-sessions` is STALE (PA-owned, wrap-refreshed — `state.ts --write` NOT run by sPA to avoid stepping on it).

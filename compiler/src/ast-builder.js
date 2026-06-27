@@ -12618,6 +12618,24 @@ function scanCSSValueForReactiveRefs(value) {
   return { refs, isExpression };
 }
 
+/**
+ * Recognize a §26.8 `@apply <utility>…;` directive in a verbatim CSS at-rule
+ * token. Returns the whitespace-separated utility-token list when `text` is an
+ * `@apply` directive (possibly empty — `@apply;`), else `null` for any other
+ * at-rule (`@media`, `@import`, `@keyframes`, …) so it stays on the verbatim
+ * passthrough path. Expansion is deferred to codegen (emit-css.ts) so the
+ * Tailwind registry dependency stays out of the parser.
+ *
+ * @param {string} text   the verbatim CSS_AT_RULE token text, e.g. "@apply px-4 py-2;"
+ * @returns {string[] | null}
+ */
+function parseApplyAtRule(text) {
+  const trimmed = String(text).trim();
+  if (!/^@apply\b/.test(trimmed)) return null;
+  const rest = trimmed.slice("@apply".length).replace(/;\s*$/, "");
+  return rest.trim().split(/\s+/).filter(t => t.length > 0);
+}
+
 function parseCSSTokens(tokens, filePath) {
   const rules = [];
   let i = 0;
@@ -12648,9 +12666,16 @@ function parseCSSTokens(tokens, filePath) {
       }
       rules.push(rule);
     } else if (tok.kind === "CSS_AT_RULE") {
-      // GITI-011: CSS at-rule — store verbatim text for passthrough emission.
       const atRuleSpan = tokenSpan(tok, filePath);
-      rules.push({ atRule: tok.text, span: atRuleSpan });
+      const applyTokens = parseApplyAtRule(tok.text);
+      if (applyTokens !== null) {
+        // §26.8 `@apply` — tag for inline expansion in codegen (no enclosing
+        // rule at top level; codegen skips a stray top-level apply node).
+        rules.push({ apply: applyTokens, span: atRuleSpan });
+      } else {
+        // GITI-011: CSS at-rule — store verbatim text for passthrough emission.
+        rules.push({ atRule: tok.text, span: atRuleSpan });
+      }
       i++;
       continue;
     } else if (tok.kind === "CSS_SELECTOR") {
@@ -12677,6 +12702,16 @@ function parseCSSTokens(tokens, filePath) {
             const decl = { prop, value, span: propSpan };
             if (refs.length > 0) { decl.reactiveRefs = refs; decl.isExpression = isExpression; }
             declarations.push(decl);
+          } else if (tokens[i].kind === "CSS_AT_RULE") {
+            // §26.8 `@apply` inside a rule body — tag as a declaration carrying
+            // the utility-token list + its span (the fire site for the
+            // E-APPLY-* diagnostics). Non-@apply at-rules inside a rule body are
+            // dropped (legacy behavior — they have no valid declaration meaning).
+            const applyTokens = parseApplyAtRule(tokens[i].text);
+            if (applyTokens !== null) {
+              declarations.push({ apply: applyTokens, span: tokenSpan(tokens[i], filePath) });
+            }
+            i++;
           } else {
             i++;
           }

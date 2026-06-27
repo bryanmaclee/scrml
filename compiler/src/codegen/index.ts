@@ -843,7 +843,7 @@ export function runCG(input: CgInput): CgOutput {
     // Generate CSS — emitted in both modes.
     // ---------------------------------------------------------------------------
     const userCss: string = codegenStage("emit-css", () =>
-      generateCss(nodes, analysis?.cssBlocks)
+      generateCss(nodes, analysis?.cssBlocks, errors)
     ) || "";
 
     // ---------------------------------------------------------------------------

@@ -2737,6 +2737,86 @@ export function getTailwindCSS(className) {
 }
 
 /**
+ * Detect whether an `@apply` token carries a variant prefix (§26.3) — a `:`
+ * outside any `[…]` arbitrary-value bracket (`hover:bg-blue-500`, `md:flex`,
+ * `group-hover:p-4`, `dark:hover:p-4`). An arbitrary value whose payload happens
+ * to contain a `:` (`bg-[url(http://x)]`) is NOT a variant — the colon there is
+ * inside the bracket and bracket-depth stays > 0.
+ *
+ * @param {string} token
+ * @returns {boolean}
+ */
+function applyTokenHasVariant(token) {
+  let depth = 0;
+  for (let i = 0; i < token.length; i++) {
+    const c = token[i];
+    if (c === "[") depth++;
+    else if (c === "]") depth = depth > 0 ? depth - 1 : 0;
+    else if (c === ":" && depth === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Classify and resolve a single `@apply` utility token (§26.8) for inline
+ * composition into an author CSS rule. Returns ONE of:
+ *
+ *   { kind: "ok", decls }       — a single flat rule whose selector is the
+ *                                 class itself; `decls` is the declaration body
+ *                                 (no selector, no braces, trailing `;` dropped),
+ *                                 ready to inline into the enclosing rule. The
+ *                                 recognized-but-empty `group` marker resolves to
+ *                                 `{ kind: "ok", decls: "" }` (emits nothing).
+ *   { kind: "variant" }         — a variant-prefixed token → E-APPLY-VARIANT-
+ *                                 UNSUPPORTED (v1; needs a nested/companion
+ *                                 selector, can't be flat-inlined).
+ *   { kind: "non-inlinable" }   — the registry output is NOT a single flat
+ *                                 `.<token> { … }` rule (the multi-rule prose
+ *                                 family, a `::before`/`::after` pseudo-element,
+ *                                 a combinator selector such as `space-x-4`, or a
+ *                                 `@media`-wrapped rule) → E-APPLY-NON-INLINABLE-
+ *                                 UTILITY.
+ *   { kind: "unknown", diagnostic } — the token does not resolve to a utility →
+ *                                 E-APPLY-UNKNOWN-UTILITY; `diagnostic` carries
+ *                                 the underlying arbitrary-value validation
+ *                                 message when one was produced (else null).
+ *
+ * Composing-family utilities (§26.7 — ring / shadow / gradient / transform /
+ * filter / …) resolve to "ok" because each emits a single flat rule carrying its
+ * `--tw-*` setters AND the `var()` composing shorthand; inlining their decls by
+ * concatenation composes them exactly as separate `class=` tokens would.
+ *
+ * @param {string} token
+ * @returns {{ kind: "ok", decls: string }
+ *          | { kind: "variant" }
+ *          | { kind: "non-inlinable" }
+ *          | { kind: "unknown", diagnostic: { code: string, message: string } | null }}
+ */
+export function resolveApplyToken(token) {
+  if (!token || typeof token !== "string") return { kind: "unknown", diagnostic: null };
+
+  // Variants need a nested/companion selector — rejected in v1 BEFORE resolution
+  // (the resolver would otherwise happily wrap them in a `:pseudo`/`@media` rule
+  // that cannot be flat-inlined).
+  if (applyTokenHasVariant(token)) return { kind: "variant" };
+
+  const { css, diagnostic } = getTailwindCSSWithDiagnostic(token);
+  if (css === null) return { kind: "unknown", diagnostic: diagnostic ?? null };
+  // The bare `group` marker is recognized but emits no CSS.
+  if (css === "") return { kind: "ok", decls: "" };
+
+  // Inlinable IFF the resolved CSS is exactly one flat rule whose selector is the
+  // class token itself: `.<escapedToken> { <brace-free-decls> }`. The selector
+  // equality check (`m[1] === escapeCssClass(token)`) rejects pseudo-elements
+  // (`.x::before`), combinator selectors (`.space-x-4 > :not(...)`), and `@media`
+  // wrappers; the brace-free body + single-rule anchor (`^…$`) rejects the
+  // multi-rule prose family.
+  const m = css.match(/^\s*\.([^\s{]+)\s*\{([^{}]*)\}\s*$/s);
+  if (!m || m[1] !== escapeCssClass(token)) return { kind: "non-inlinable" };
+  return { kind: "ok", decls: m[2].trim().replace(/;\s*$/, "") };
+}
+
+/**
  * Get combined CSS for an array of class names AND the array of
  * compile-time diagnostics produced during arbitrary-value validation.
  *
