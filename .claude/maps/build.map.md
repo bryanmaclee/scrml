@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-06-08T17:30:00Z  commit: f0b3cb04
+# updated: 2026-06-26  commit: 6988c426
 
 ## Development Commands (package.json scripts)
 
@@ -27,6 +27,12 @@
 | --parser=scrml-native | Opt-in native parser (default `null` = legacy BS+Acorn); STRICTLY OPT-IN — see structure.map.md "Native-Parser File Table" |
 | **--production / --prod** | **(S174 NEW — §20.6.5 F4=A)** Production build flag. Strips ALL `log()` builtin calls to 0 bytes (`(void 0)` no-op lowering — the emitted bundle carries NO `_scrml_log` reference and no argument-eval residue; mirrors the test-bind 0-byte clean-strip §19.12.7). Sets `production:true` [compile.js:170/172], threaded into the compile opts [compile.js:279/409/431] and on to `compileScrml(... { production })` [api.js:586/1931]. Default false (non-production builds emit the location-transparent `log()` runtime). |
 
+## `scrml build` / `scrml dev` Flags (compiler/src/commands/build.js + dev.js)
+
+| Flag | What it does |
+|------|-------------|
+| **--idle-timeout \<n\>** | **(S223 ss33 NEW — `commands/build.js` + `commands/dev.js`)** Configurable `Bun.serve` `idleTimeout` in seconds baked into the emitted production server (default 120). Previously the 120 s value was hard-coded. `scrml build --idle-timeout 300` emits `idleTimeout: 300` in the server entry. `scrml dev --idle-timeout 300` raises the dev-server timeout (useful for long-running MCP or SSE sessions under slow test runners that would otherwise be truncated by Bun's default). Parsed at `commands/build.js:105` → `generateServerEntry(..., idleTimeout)` → emitted at `lines.push(\`  idleTimeout: ${idleTimeout},\`)` [:365]. Parsed analogously in `dev.js`. ZERO compile-time diagnostics. |
+
 ## Build & Release
 
 | Script | What it does |
@@ -50,7 +56,7 @@ Location: scripts/git-hooks/ (installed via git hooks config)
 Behavior: runs the full test suite; blocks commits on failures.
 
 ## Tags
-#scrmlts #map #build #bun #scripts #precommit #s174 #production-flag #log-strip #compile-flags
+#scrmlts #map #build #bun #scripts #precommit #s223 #s174 #production-flag #log-strip #compile-flags #idle-timeout #bun-serve-idle-timeout #ss33 #runtime-minimality #scrml-build-flag #scrml-dev-flag
 
 ## Links
 - [primary.map.md](./primary.map.md)
