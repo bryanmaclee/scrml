@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 13 |
+| MED | 14 |
 | LOW | 10 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2627,3 +2627,6 @@ A nested function declaration that uses a server-only resource (`?{}` SQL) does 
 
 ### g-markup-session-read-undeclared — a markup `@session` read fires `E-STATE-UNDECLARED` (the `@session` projection is now window-scoped) — `NEW S225 (S224 Ryan #15-adjacent agent side-finding); LOW; triage (design-Q)`
 After the S224 Ryan #15 fix window-anchored the `@session` projection to a singleton, a `@session` read in MARKUP context resolves to `E-STATE-UNDECLARED`. Pre-existing (NOT introduced by #15 — surfaced adjacent to it). Whether a markup `@session` read SHOULD resolve is a **DESIGN question** (the projection is window-scoped; is markup a legal read locus for it?). **Triage** — needs a PA/user ruling on the intended `@session`-in-markup semantics before any fix; not a clear-cut bug. <!-- @gap id=g-markup-session-read-undeclared sev=LOW status=open -->
+
+### g-nonreactive-local-map-set-method-raw-emit — a non-reactive local map/set (`let m = [:]`) emits raw `m.insert(...)`/`m.size`, but the runtime map API is free functions → runtime `TypeError` (silent; compiles clean) — `NEW S225 (ss48 secondary finding, PA-verified); MED; Road-B-blocking`
+Value-native maps/sets work ONLY for reactive `@`-cells. A non-reactive local map/set emits raw `m.insert(...)` / `m.size` / `m[k]` (method/property syntax), but the runtime map API is **free functions** (`_scrml_map_insert(m,k,v)`, runtime-template.js:1890) and the HAMT struct carries `.count` not `.size` → `TypeError: m.insert is not a function` at runtime. `node --check` PASSES (valid JS *syntax*) → silent (compile exit-0, runtime crash). **Root:** the map/set method lowering keys on the `@`-cell sigil + the reactive-only `ctx.mapVarNames`/`setVarNames` registries, NOT on the type → a non-reactive local map isn't collected + the `@`-prefix gate excludes it (the reactive `@m.insert` path lowers correctly to `_scrml_map_insert(get("m"),…)`). **PA-VERIFIED S225** (emit: `let m = _scrml_map_from_entries([],false); m = m.insert("a",1); return m.size;` + the free-fn API = a deductive proof). **Gates the compiler-in-scrml Road-B pure-fold dogfood** (DG-builder color-map/reader-sets + the lexer accumulators are non-reactive local maps/sets); the §59/§59.12 "Implemented/R26-verified" banner only ever exercised reactive maps. Fix scoped → **ss52** (scope-aware non-reactive collector + relax the `emit-expr.ts` `@`-gate; set rides it). <!-- @gap id=g-nonreactive-local-map-set-method-raw-emit sev=MED status=open -->

@@ -14,17 +14,29 @@
 
 ## Items
 
-1. **Parse the multi-scrutinee head + product-pattern arms** `[status=open]` **SURVEY-FIRST**
+1. **Parse the multi-scrutinee head + product-pattern arms** `[status=landed-on-branch spa/ss43 @ 5fe08dc5]` **SURVEY-FIRST**
    - Recognize `match (e1, …, eN) { … }` (depth-1 comma in the head = multi-scrutinee; `match (e)` no-comma stays single-scrutinee §18.2). Recognize `(p1, …, pN) :> body` product-pattern arms (each `pN` a §18.2 arm-pattern; a whole-arm `_`/`else` covers the product). AST: extend MatchExpr to carry a scrutinee LIST + per-arm pattern LIST (vs the single today). Keep nested-pattern rejection (§18.11) per position.
 
-2. **Product exhaustiveness + `E-MATCH-SCRUTINEE-ARITY`** `[status=open]`
+2. **Product exhaustiveness + `E-MATCH-SCRUTINEE-ARITY`** `[status=landed-on-branch spa/ss43 @ 5fe08dc5]`
    - `type-system.ts:checkMatchDiagnostics`: extend the §18.8.1 variant-set coverage to the cross-product of the per-position scrutinee variant sets (deterministic, guard-free). Missing combination → E-TYPE-020 (enum) / E-TYPE-006 (union position), message names the uncovered `(V1 × … × VN)` cell. Per-position `_` + whole-arm `| _` both count toward coverage. `partial match (…)` opts out. Enum-subset (§53.15) narrows a position. Fire `E-MATCH-SCRUTINEE-ARITY` when an arm's pattern count ≠ head scrutinee count. Catalog the §34 row.
 
-3. **Codegen desugar** `[status=open]`
+3. **Codegen desugar** `[status=landed-on-branch spa/ss43 @ 5fe08dc5]`
    - `emit-match.ts`: lower `match (s1,…,sN) { (p1,…,pN):>body … }` to nested single-scrutinee dispatch — observationally identical to the hand-written nested form. Bindings from every position in arm-body scope. No new runtime.
 
-4. **Flip the Nominal banner + tests** `[status=open]`
+4. **Flip the Nominal banner + tests** `[status=landed-on-branch spa/ss43 @ 5fe08dc5]`
    - Unit + integration tests for all the adversarial shapes (item Brief). Flip the §18.19 "Nominal / spec-ahead" banner to landed; update the §34 catalog; note the landing in the known-gaps / changelog.
+
+## Disposition — RUN COMPLETE (sPA ss43, 2026-06-27)
+**4/4 items landed-on-branch.** All four items built in ONE coherent dispatch (they share the
+MatchExpr AST extension — splitting would conflict). Branch `spa/ss43` (base `6ead4d7a` — old
+origin/main pre-advance) · **tip `5fe08dc5`** (single squashed sPA commit of the agent's 6) ·
+full pre-commit suite GREEN (unit+integration+conformance) + gauntlet/browser post-checks green.
+**Footprint correction applied:** coreFiles named `emit-match.ts` for codegen, but JS-style
+value-return desugar lives in `emit-control-flow.ts` (+ `emit-logic.ts` decl-path + `emit-expr.ts`
+expr-position); `emit-match.ts` is block-form markup, untouched. Re-integration: `spa/ss43` merges
+into current main CLEANLY — the 2 commits main advanced by during the dispatch are docs-only
+(ss48 PARK / s225 triage), ZERO overlap with the 9 §18.19 files. See
+`handOffs/incoming/ss43-spa-reintegration-2026-06-27.md`.
 
 ## Acceptance
 The §18.19 `step` worked example compiles + `node --check` clean + runs correctly; `match (a,b)` with full product coverage is exhaustive with no `_`; a missing `(state×event)` cell fires E-TYPE-020 naming it; an arm-arity mismatch fires E-MATCH-SCRUTINEE-ARITY; `(.A(.B(x)), c)` stays E-SYNTAX-012; a union position fires E-TYPE-006 when non-exhaustive; `partial match (a,b)` opts out; `match (e)` no-comma still parses as single-scrutinee (zero regression on existing match corpus); N=3 works; full suite green + allowlist rebaselined if shifted; §18.19 Nominal banner flipped.
