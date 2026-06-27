@@ -1,0 +1,4 @@
+${
+  import { greet } from "./present-noext"
+}
+<p>${greet}</>

@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-27 (S225 — ss43 §18.19 multi-scrutinee match LANDED [Road-B dispatch shape]; FBIP inc-2 ruled-(b)-retired; the (c) non-reactive-local-map bug found→fixed→landed [ss52, Road-B unblock]; MED/LOW triaged→ss49-52; whole dPA queue [7] drained+ratified; agents 20→6)
+
+A very high-throughput orchestration session under the S219 primary-goal.
+- **ss43 §18.19 multi-scrutinee match W2** (`41438514`) — `match (e1,…,eN){(p1,…,pN):>body}` compiles in the live Acorn pipeline; product exhaustiveness extends E-TYPE-020/006 + new E-MATCH-SCRUTINEE-ARITY; §18.11 nested-pattern preserved. The compiler-reimagining Road-B dispatch shape. (+339 tests)
+- **FBIP increment-2 RULED (b) — retired, folds into inc-3.** The ss48 survey-first gate found the premise unsound (§35 `lin` = binding-level dead-after ≠ storage-level uniqueness; in scrml uniqueness is liveness, not an assertable type → no annotation adds sound in-place coverage inference can't). FBIP-in-place = HAMT (done) + inc-3 inferred (deferred); no annotated rung, no marker (Q-FIP mooted). RULING.md + fbip-feasibility-DD corrigenda.
+- **ss52 (the (c) Road-B unblock) + ss49 LANDED.** ss52 (`7ab86083`): non-reactive local maps/sets now lower through the `_scrml_map_*` free-function API (was raw `m.insert`/`m.size` → silent runtime `TypeError`); gates the compiler-in-scrml pure-fold dogfood. ss49 (`3957f38e`): nested-fn server-escalation + `@`-led `<endpoint>`-arm trailing-expr drop. (+650 tests)
+- **MED/LOW backlog triaged** → ss49/50/51/52 (~9 of 23 fireable; rest parked-with-reason).
+- **The entire dPA queue (7) drained + PA-ratified:** dpa-012 (`handle()` COLLAPSE — keep `handle()`, **KILL `raw`**, no named pipelines [AuthGraph §40 covers it]) · dpa-008 (capability-gating closing-window: typed vocabulary into dpa-006, declaration-first into dpa-003, enforcement gated at Pole-D) · dpa-015 (block-lease Q2-collapse — compiler `conflictsWith` query, conditional on 2 §40.9 facts) · dpa-006/009 (build-story toolchain-in-Merkle-closure + inline-vs-sidecar marshaling) · dpa-007→dev · dpa-016 deferred. design-insights landed (dpa-008/012/015).
+- Agents trimmed 20→6 (DD/debate roster → flogence; dormant tooling → agent-store).
+- Recovered: an ss49↔ss52 parallel-dispatch shared-file collision (`emit-logic.ts`; an sPA committed ss49 to main directly, a wholesale ss52 file-delta reverted it → reset + 3-way merge, gate 18203/0) + 4× sPA-fire branch-slips.
+
 ### 2026-06-27 (S224 — Q-MATCH + Q-FIP ratified [both compiler-reimagining design gates CLOSED]; §18.19 multi-scrutinee match W1; @apply §26.8 W2 [bug-1 RESOLVED]; Model-1 named-machine; Ryan's 4 adopter bugs fixed via parallel sub-agents)
 
 A high-throughput orchestration session under the S219 primary-goal posture. The compiler-reimagining narrow-Road-B program's two remaining foundational design questions were both ratified, a 3-lane build batch landed, and an external adopter's (Ryan/rjantz3) 4-bug v0.7.0 battery was fixed via a parallel sub-agent fan-out (4 isolated dev agents) and landed as one disjoint batch.
