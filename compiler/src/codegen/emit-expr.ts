@@ -275,6 +275,31 @@ export interface EmitExprContext {
    */
   orderedMapVarNames?: Set<string> | null;
   /**
+   * §59 (ss52) — NON-REACTIVE LOCAL value-native map names in scope (bare, NO
+   * `@` — fn/block locals, not reactive cells). Computed PER FUNCTION
+   * (collectLocalMapSetNames) so a name that is a local map in one fn and a
+   * local array in another does NOT cross-lower. The map-method / `.size` /
+   * bracket-read dispatch sites fire for a BARE receiver `m` iff `m` is in this
+   * set, emitting the receiver as the bare local (`m`, NOT
+   * `_scrml_reactive_get("m")`). The reactive `@`-path (keyed on `mapVarNames`)
+   * stays byte-identical. NULL/empty → no non-reactive-local map interception.
+   */
+  localMapVarNames?: Set<string> | null;
+  /**
+   * §59.12 (ss52) — NON-REACTIVE LOCAL value-native SET names (bare). Strict
+   * subset of `localMapVarNames` (a set IS a map). Keys the set-native
+   * vocabulary (`.add`/`.elements`/`.union`/`.intersect`/`.difference`) for a
+   * bare local set receiver; the shared methods (`.has`/`.remove`/`.size`/
+   * bracket-read) ride `localMapVarNames`. Mirrors `setVarNames`.
+   */
+  localSetVarNames?: Set<string> | null;
+  /**
+   * §59.8 (ss52) — NON-REACTIVE LOCAL `@ordered` map names (bare). Mirrors
+   * `orderedMapVarNames`: a reassignment `m = [...]` to a local ordered map
+   * lowers the literal ordered. NULL/empty → no local cell is ordered.
+   */
+  localOrderedMapVarNames?: Set<string> | null;
+  /**
    * §59.8 (S169) — TRANSIENT per-emission flag. When true, the NEXT
    * `emitMapLit` lowers its literal as `_scrml_map_from_entries([...], true)`
    * (insertion-order iteration). Set by `emitAssign` (reassignment to an
@@ -1417,9 +1442,13 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
     node.op === "=" &&
     target.kind === "ident" &&
     typeof target.name === "string" &&
-    target.name.startsWith("@") &&
-    ctx.orderedMapVarNames != null &&
-    ctx.orderedMapVarNames.has(target.name.slice(1));
+    ((target.name.startsWith("@") &&
+      ctx.orderedMapVarNames != null &&
+      ctx.orderedMapVarNames.has(target.name.slice(1))) ||
+      // ss52 — a non-reactive LOCAL `@ordered` map reassignment (expr position).
+      (!target.name.startsWith("@") &&
+        ctx.localOrderedMapVarNames != null &&
+        ctx.localOrderedMapVarNames.has(target.name)));
   const valueCtx: EmitExprContext = targetIsOrderedMap
     ? { ...ctx, emitMapLitOrdered: true }
     : ctx;
@@ -1565,21 +1594,19 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
     }
   }
 
-  // §59.6 (D4) — map `.size` MEMBER lowering. `@m.size` (m a known map) → the
-  // entry count via `_scrml_map_size(m)`. The map count member is `.size`
-  // (divergent from the array `.length` member — §59.6, intentional). This is a
-  // MEMBER access, not a call, so it lives here rather than in `emitCall`. Only
-  // the exact `.size` property on a direct `@m` map root is intercepted; any
-  // other property on a map cell, or `.size` on a non-map cell, falls through.
+  // §59.6 (D4 / ss52) — map `.size` MEMBER lowering. `@m.size` (reactive) OR
+  // `m.size` (non-reactive local) where `m` is a known map → the entry count via
+  // `_scrml_map_size(m)`. The map count member is `.size` (divergent from the
+  // array `.length` member — §59.6, intentional). This is a MEMBER access, not a
+  // call, so it lives here rather than in `emitCall`. Only the exact `.size`
+  // property on a direct map-cell root is intercepted; any other property on a
+  // map cell, or `.size` on a non-map cell, falls through. The reactive receiver
+  // lowers via `emitExpr` to `_scrml_reactive_get("m")`; the local stays bare.
   if (
     ctx.mode === "client" &&
     !node.optional &&
     node.property === "size" &&
-    ctx.mapVarNames && ctx.mapVarNames.size > 0 &&
-    node.object.kind === "ident" &&
-    typeof (node.object as IdentExpr).name === "string" &&
-    (node.object as IdentExpr).name.startsWith("@") &&
-    ctx.mapVarNames.has((node.object as IdentExpr).name.slice(1))
+    mapCellBareName(node.object, ctx) !== null
   ) {
     return `_scrml_map_size(${emitExpr(node.object, ctx)})`;
   }
@@ -1620,25 +1647,60 @@ function synthDottedKey(node: MemberExpr): string | null {
 }
 
 /**
- * §59.6 (D4) — Resolve the bare ROOT cell name of an index chain, returning it
- * only if it is a known value-native map (in `ctx.mapVarNames`). Walks through
- * nested `index` objects so a nested-map chain `@outer["a"]["b"]` reports the
- * outermost root `outer`. Returns null for any non-map root or a non-`@`-rooted
- * chain. The `@`-prefix gate matches the reactive-cell sigil; non-`@` array
- * locals are never map cells.
+ * §59 (ss52) — Classify an ident receiver as a known value-native MAP and return
+ * its BARE name, for BOTH the reactive `@m` cell (in `ctx.mapVarNames`) AND the
+ * non-reactive LOCAL `m` binding (in `ctx.localMapVarNames`). Returns null for
+ * any other ident.
+ *
+ * The reactive path is byte-identical to the pre-ss52 gate: an `@`-prefixed ident
+ * is matched IFF its bare name is in `mapVarNames` (the `.slice(1)` semantics are
+ * unchanged). The NEW non-reactive branch matches a BARE ident against
+ * `localMapVarNames`. In BOTH cases the caller emits the receiver via the SAME
+ * `emitExpr(objNode, ctx)` call — which lowers `@m` → `_scrml_reactive_get("m")`
+ * and a bare `m` → bare `m` — so no special receiver handling is needed.
+ */
+function mapCellBareName(objNode: ExprNode, ctx: EmitExprContext): string | null {
+  if (objNode.kind !== "ident") return null;
+  const name = (objNode as IdentExpr).name;
+  if (typeof name !== "string" || name.length === 0) return null;
+  if (name.startsWith("@")) {
+    const bare = name.slice(1);
+    return ctx.mapVarNames && ctx.mapVarNames.has(bare) ? bare : null;
+  }
+  return ctx.localMapVarNames && ctx.localMapVarNames.has(name) ? name : null;
+}
+
+/**
+ * §59.12 (ss52) — set-receiver twin of `mapCellBareName`: returns the bare name
+ * if `objNode` is a known value-native SET — reactive `@s` (`ctx.setVarNames`)
+ * or non-reactive local `s` (`ctx.localSetVarNames`). Keys the set-NATIVE
+ * vocabulary; the shared methods ride the map classifier.
+ */
+function setCellBareName(objNode: ExprNode, ctx: EmitExprContext): string | null {
+  if (objNode.kind !== "ident") return null;
+  const name = (objNode as IdentExpr).name;
+  if (typeof name !== "string" || name.length === 0) return null;
+  if (name.startsWith("@")) {
+    const bare = name.slice(1);
+    return ctx.setVarNames && ctx.setVarNames.has(bare) ? bare : null;
+  }
+  return ctx.localSetVarNames && ctx.localSetVarNames.has(name) ? name : null;
+}
+
+/**
+ * §59.6 (D4 / ss52) — Resolve the bare ROOT cell name of an index chain,
+ * returning it only if it is a known value-native map — reactive `@m` OR a
+ * non-reactive LOCAL `m`. Walks through nested `index` objects so a nested-map
+ * chain `@outer["a"]["b"]` (or local `outer["a"]["b"]`) reports the outermost
+ * root. Returns null for any non-map root.
  */
 function mapIndexRootName(node: IndexExpr, ctx: EmitExprContext): string | null {
-  if (!ctx.mapVarNames || ctx.mapVarNames.size === 0) return null;
   let cursor: ExprNode = node;
   // Descend through nested index objects to the chain root.
   while (cursor.kind === "index") {
     cursor = (cursor as IndexExpr).object;
   }
-  if (cursor.kind !== "ident") return null;
-  const rootName = (cursor as IdentExpr).name;
-  if (typeof rootName !== "string" || !rootName.startsWith("@")) return null;
-  const bare = rootName.slice(1);
-  return ctx.mapVarNames.has(bare) ? bare : null;
+  return mapCellBareName(cursor, ctx);
 }
 
 function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
@@ -1760,16 +1822,13 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   //                    re-implemented (limit-primitives).
   if (
     ctx.mode === "client" &&
-    ctx.setVarNames && ctx.setVarNames.size > 0 &&
     node.callee.kind === "member" &&
     !node.callee.optional &&
-    typeof node.callee.property === "string" &&
-    node.callee.object.kind === "ident" &&
-    typeof (node.callee.object as IdentExpr).name === "string" &&
-    (node.callee.object as IdentExpr).name.startsWith("@")
+    typeof node.callee.property === "string"
   ) {
-    const setBareName = (node.callee.object as IdentExpr).name.slice(1);
-    if (ctx.setVarNames.has(setBareName)) {
+    // ss52 — reactive `@s` OR non-reactive local `s` set receiver.
+    const setBareName = setCellBareName(node.callee.object, ctx);
+    if (setBareName !== null) {
       const method = node.callee.property as string;
       const receiver = emitExpr(node.callee.object, ctx);
       const args = node.args.map(a => emitExpr(a as ExprNode, ctx));
@@ -1815,16 +1874,13 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // `.sortedBy` → `_scrml_map_sorted_by`).
   if (
     ctx.mode === "client" &&
-    ctx.mapVarNames && ctx.mapVarNames.size > 0 &&
     node.callee.kind === "member" &&
     !node.callee.optional &&
-    typeof node.callee.property === "string" &&
-    node.callee.object.kind === "ident" &&
-    typeof (node.callee.object as IdentExpr).name === "string" &&
-    (node.callee.object as IdentExpr).name.startsWith("@")
+    typeof node.callee.property === "string"
   ) {
-    const bareName = (node.callee.object as IdentExpr).name.slice(1);
-    if (ctx.mapVarNames.has(bareName)) {
+    // ss52 — reactive `@m` OR non-reactive local `m` map receiver.
+    const bareName = mapCellBareName(node.callee.object, ctx);
+    if (bareName !== null) {
       const helper = MAP_METHOD_HELPERS[node.callee.property as string];
       if (helper) {
         const receiver = emitExpr(node.callee.object, ctx);

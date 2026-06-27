@@ -188,6 +188,16 @@ export interface EmitLogicOpts {
    */
   orderedMapVarNames?: Set<string> | null;
   /**
+   * §59 (ss52): NON-REACTIVE LOCAL map/set/ordered-map names (bare, per-fn
+   * scope). Forwarded into `EmitExprContext.localMapVarNames` etc. so a pure-fn
+   * local `let m = [:]; m.insert(...)`/`m.size`/`m[k]` lowers via the bare-
+   * receiver `_scrml_map_*` form. The reactive `@`-path (mapVarNames) is
+   * unchanged. Computed per-function via `collectLocalMapSetNames`.
+   */
+  localMapVarNames?: Set<string> | null;
+  localSetVarNames?: Set<string> | null;
+  localOrderedMapVarNames?: Set<string> | null;
+  /**
    * C13 (§51.0.G): Engine variable names in the file's scope. Used by
    * `emit-expr.ts:emitCall` to detect `.advance` calls on engine variables
    * (e.g., `@marioState.advance(.Big)`) and dispatch to the runtime hook.
@@ -772,6 +782,12 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // §59.8 (S169) — ordered-map cell names so emit-expr:emitAssign lowers a
     // reassignment `@m = [...]` to an ordered cell with the ordered flag set.
     orderedMapVarNames: opts.orderedMapVarNames ?? null,
+    // §59 (ss52) — NON-REACTIVE LOCAL map/set/ordered names (bare, per-fn) so
+    // emit-expr lowers a pure-fn local map/set's methods / `.size` / bracket-read
+    // via the bare-receiver `_scrml_map_*` form. Reactive `@`-path unchanged.
+    localMapVarNames: opts.localMapVarNames ?? null,
+    localSetVarNames: opts.localSetVarNames ?? null,
+    localOrderedMapVarNames: opts.localOrderedMapVarNames ?? null,
     // C13 (§51.0.G) — engine variable name set so emit-expr can detect
     // `.advance` calls on engine-bound `@vars`.
     engineVarNames: opts.engineVarNames ?? null,
@@ -2397,8 +2413,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         _declAnno.trim().endsWith("@ordered");
       const _nameIsOrderedMap =
         typeof node.name === "string" &&
-        !!opts.orderedMapVarNames &&
-        opts.orderedMapVarNames.has(node.name);
+        ((!!opts.orderedMapVarNames && opts.orderedMapVarNames.has(node.name)) ||
+          // ss52 — a NON-REACTIVE LOCAL `@ordered` map reassignment `m = [...]`
+          // lowers its literal ordered too (the local twin of orderedMapVarNames).
+          (!!opts.localOrderedMapVarNames && opts.localOrderedMapVarNames.has(node.name)));
       const _initIsOrderedMap = _declIsOrderedMap || _nameIsOrderedMap;
       const _initExprCtx = (o: EmitLogicOpts): EmitExprContext =>
         _initIsOrderedMap
@@ -2627,7 +2645,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
         ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
-        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
         ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
       } as any);
 
@@ -2663,7 +2681,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
         ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
-        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
       } as any);
 
     case "while-stmt":
@@ -2674,12 +2692,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);

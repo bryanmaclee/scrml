@@ -504,6 +504,290 @@ export function collectSetVarNames(fileAST: Record<string, unknown>): Set<string
   return names;
 }
 
+// ---------------------------------------------------------------------------
+// §59 (ss52) — NON-REACTIVE LOCAL map/set name collection (scope-aware).
+//
+// The reactive collectors above key on the `@`-cell sigil: they discover the
+// MODULE-LEVEL `@`-prefixed map/set cells, which the emit-expr dispatch sites
+// gate on `name.startsWith("@")`. A NON-REACTIVE LOCAL map/set (`let m = [:]`
+// inside a pure `fn`) carries NO `@`, lives in a FUNCTION/BLOCK scope, and is
+// absent from those file-wide registries — so its `.insert`/`.size`/`m[k]`/set
+// methods fell through to RAW emission (`m.insert is not a function` at runtime;
+// the (c) bug, PA-verified S225). These collectors discover such locals PER
+// FUNCTION SCOPE so the dispatch sites can lower them to the bare-receiver
+// `_scrml_map_*` form WITHOUT touching the reactive `@`-path (which stays
+// byte-identical — locals key on a SEPARATE `localMapVarNames` set).
+//
+// Scope-awareness is load-bearing for correctness: a name that is a local MAP
+// in one function and a local ARRAY in another must NOT cross-lower (a bare
+// `arr[i]` read would mis-lower to `_scrml_map_get`). So the local sets are
+// computed from a SINGLE function's body + params, never file-wide.
+// ---------------------------------------------------------------------------
+
+// Map methods that RETURN a new map (so `let m2 = m.insert(...)` makes m2 a map).
+// Getters (`get`/`getOr`→V, `has`→bool, `keys`/`values`/`entries`/`sorted`→array)
+// do NOT return a map and are intentionally excluded.
+const MAP_RETURNING_METHODS = new Set<string>(["insert", "remove", "update", "insertAll"]);
+// Set methods that RETURN a new set.
+const SET_RETURNING_METHODS = new Set<string>(["add", "remove", "union", "intersect", "difference"]);
+
+/**
+ * §59 (ss52) — Build a per-file registry of `functionName → "map" | "set"` from
+ * each `function-decl`'s RETURN type annotation, so a caller's
+ * `let r = makeMap()` can classify `r` as a local map/set syntactically (the
+ * "returned from a fn" case). Mirrors the typer's map/set recognizers — codegen
+ * re-parses exprs and has no resolved type, so it reads the raw annotation text.
+ */
+export function buildFnReturnMapKinds(
+  fileAST: Record<string, unknown>,
+): Map<string, "map" | "set"> {
+  const kinds = new Map<string, "map" | "set">();
+  if (!fileAST || typeof fileAST !== "object") return kinds;
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as any;
+      if (
+        n.kind === "function-decl" &&
+        typeof n.name === "string" &&
+        n.name.length > 0 &&
+        typeof n.returnTypeAnnotation === "string"
+      ) {
+        const ret = n.returnTypeAnnotation as string;
+        if (isSetTypeAnnotation(ret)) kinds.set(n.name, "set");
+        else if (isMapTypeAnnotation(ret)) kinds.set(n.name, "map");
+      }
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "function-decl" && Array.isArray(n.body)) visit(n.body);
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) visit(n.body);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray(n.consequent)) visit(n.consequent);
+        if (Array.isArray(n.alternate)) visit(n.alternate);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) visit(n.body);
+    }
+  }
+  visit(nodes as unknown[]);
+  return kinds;
+}
+
+/**
+ * §59 (ss52) — Collect the BARE names of every NON-REACTIVE LOCAL value-native
+ * map/set binding within a SINGLE function's scope. Returns three sets
+ * (mirroring the file-wide reactive trio): the local map names, the local set
+ * names (a strict subset — a set IS a map, so set names are ALSO map names),
+ * and the local `@ordered` map names.
+ *
+ * Seeded from (syntactic — SYM annotations are unreliable at codegen):
+ *   - PARAMS with a `[K:V]` / `set[K]` type annotation (`fn f(m: [string:int])`);
+ *   - `let`/`const`/`tilde`/`state` decls with a `[K:V]` / `set[K]` annotation;
+ *   - `let`/`const` decls whose init RHS is a `map-lit` (`let m = [:]`, `["a":1]`);
+ *   - decls/reassigns whose init RHS is map/set-RETURNING — a `.insert`/`.add`/
+ *     `.union`/… call on an already-known local map/set, a bare ref to a known
+ *     local, or a call to a file fn whose RETURN annotation is a map/set.
+ *
+ * The walk recurses control-flow bodies (so block-scoped `let m = [:]` inside an
+ * `if`/`for`/`match` arm is found) but STOPS at nested `function-decl`s — those
+ * are a DIFFERENT scope and get their own collection at emit time. A fixpoint
+ * over the body handles forward references (a decl classified only once an
+ * earlier-named map propagates).
+ */
+export function collectLocalMapSetNames(
+  fnNode: Record<string, unknown>,
+  fnReturnKinds?: Map<string, "map" | "set"> | null,
+): {
+  localMapVarNames: Set<string>;
+  localSetVarNames: Set<string>;
+  localOrderedMapVarNames: Set<string>;
+} {
+  const mapNames = new Set<string>();
+  const setNames = new Set<string>();
+  const orderedNames = new Set<string>();
+  const empty = {
+    localMapVarNames: mapNames,
+    localSetVarNames: setNames,
+    localOrderedMapVarNames: orderedNames,
+  };
+  if (!fnNode || typeof fnNode !== "object") return empty;
+
+  let changed = false;
+  const addMap = (nm: string): void => {
+    if (!mapNames.has(nm)) { mapNames.add(nm); changed = true; }
+  };
+  const addSet = (nm: string): void => {
+    if (!setNames.has(nm)) { setNames.add(nm); changed = true; }
+    addMap(nm);
+  };
+  const addOrdered = (nm: string): void => {
+    if (!orderedNames.has(nm)) { orderedNames.add(nm); changed = true; }
+    addMap(nm);
+  };
+
+  // Classify a name from a raw type-annotation string. Returns true if it was a
+  // map/set annotation (and registers the name accordingly).
+  function seedFromAnnotation(nm: string, anno: unknown): boolean {
+    if (typeof anno !== "string") return false;
+    if (isSetTypeAnnotation(anno)) { addSet(nm); return true; }
+    if (isMapTypeAnnotation(anno)) {
+      if (anno.trim().endsWith("@ordered")) addOrdered(nm);
+      else addMap(nm);
+      return true;
+    }
+    return false;
+  }
+
+  // Classify an init/value expression as map- or set-returning, given the
+  // names known SO FAR (the fixpoint re-runs until stable).
+  function exprMapSetKind(expr: any): "map" | "set" | null {
+    if (!expr || typeof expr !== "object") return null;
+    if (expr.kind === "map-lit") return "map";
+    if (expr.kind === "ident" && typeof expr.name === "string") {
+      const nm = expr.name.startsWith("@") ? expr.name.slice(1) : expr.name;
+      if (setNames.has(nm)) return "set";
+      if (mapNames.has(nm)) return "map";
+      return null;
+    }
+    if (expr.kind === "call" && expr.callee && typeof expr.callee === "object") {
+      const callee = expr.callee;
+      // `recv.METHOD(...)` — receiver-kind + method classifies the result.
+      if (callee.kind === "member" && typeof callee.property === "string" && callee.object) {
+        const recvKind = exprMapSetKind(callee.object);
+        if (recvKind === null) return null;
+        const method = callee.property as string;
+        if (recvKind === "set") {
+          if (SET_RETURNING_METHODS.has(method)) return "set";
+          if (MAP_RETURNING_METHODS.has(method)) return "map";
+          return null;
+        }
+        // recvKind === "map"
+        if (MAP_RETURNING_METHODS.has(method)) return "map";
+        return null;
+      }
+      // `makeMap(...)` — bare call to a file fn with a map/set return annotation.
+      if (callee.kind === "ident" && typeof callee.name === "string" && fnReturnKinds) {
+        return fnReturnKinds.get(callee.name) ?? null;
+      }
+    }
+    return null;
+  }
+
+  // (1) Params — fixed (do NOT change across passes).
+  const params = (fnNode as any).params;
+  if (Array.isArray(params)) {
+    for (const p of params) {
+      if (!p || typeof p !== "object") continue;
+      const pname = (p as any).name;
+      if (typeof pname !== "string" || pname.length === 0) continue;
+      seedFromAnnotation(pname, (p as any).typeAnnotation);
+    }
+  }
+
+  // (2) Body — a fixpoint over decls/reassigns, recursing control-flow but NOT
+  // nested function-decls (those are a separate scope).
+  function scanStatements(stmts: unknown): void {
+    if (!Array.isArray(stmts)) return;
+    for (const s of stmts) {
+      if (!s || typeof s !== "object") continue;
+      const n = s as any;
+      if (
+        (n.kind === "let-decl" ||
+          n.kind === "const-decl" ||
+          n.kind === "tilde-decl" ||
+          n.kind === "state-decl") &&
+        typeof n.name === "string" &&
+        n.name.length > 0
+      ) {
+        seedFromAnnotation(n.name, n.typeAnnotation);
+        const k = exprMapSetKind(n.initExpr);
+        if (k === "set") addSet(n.name);
+        else if (k === "map") addMap(n.name);
+      }
+      // Recurse control-flow bodies (block-scoped locals) — but NOT into nested
+      // function-decls (different scope).
+      if (n.kind === "function-decl") continue;
+      if (n.kind === "logic" && Array.isArray(n.body)) scanStatements(n.body);
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) scanStatements(n.body);
+      if (n.kind === "match-arm-block" && Array.isArray(n.body)) scanStatements(n.body);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray(n.consequent)) scanStatements(n.consequent);
+        if (Array.isArray(n.alternate)) scanStatements(n.alternate);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
+        scanStatements(n.body);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray(n.body)) scanStatements(n.body);
+        if (n.catchNode && Array.isArray(n.catchNode.body)) scanStatements(n.catchNode.body);
+        if (Array.isArray(n.finallyBody)) scanStatements(n.finallyBody);
+      }
+    }
+  }
+
+  const fnBody = (fnNode as any).body;
+  let guard = 0;
+  do {
+    changed = false;
+    scanStatements(fnBody);
+  } while (changed && guard++ < 64);
+
+  return empty;
+}
+
+/**
+ * §59 (ss52) — FILE-WIDE union of every function's non-reactive local map/set/
+ * ordered names. Used ONLY by the conservative runtime-CHUNK gates
+ * (`fileHasMapUsage` / `fileHasSetAlgebraUsage`): chunk inclusion does not need
+ * per-fn precision (over-inclusion costs a few KB; a miss is a runtime crash),
+ * so a file-wide union of local names is the right granularity there. NOT used
+ * for the per-fn emit-ctx threading (that stays scope-precise via
+ * `collectLocalMapSetNames` per function).
+ */
+export function collectAllLocalMapSetNames(
+  fileAST: Record<string, unknown>,
+): { map: Set<string>; set: Set<string>; ordered: Set<string> } {
+  const map = new Set<string>();
+  const set = new Set<string>();
+  const ordered = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return { map, set, ordered };
+  const fnReturnKinds = buildFnReturnMapKinds(fileAST);
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as any;
+      if (n.kind === "function-decl") {
+        const r = collectLocalMapSetNames(n, fnReturnKinds);
+        for (const x of r.localMapVarNames) map.add(x);
+        for (const x of r.localSetVarNames) set.add(x);
+        for (const x of r.localOrderedMapVarNames) ordered.add(x);
+        if (Array.isArray(n.body)) visit(n.body); // nested function-decls
+      }
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) visit(n.body);
+      if (n.kind === "match-arm-block" && Array.isArray(n.body)) visit(n.body);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray(n.consequent)) visit(n.consequent);
+        if (Array.isArray(n.alternate)) visit(n.alternate);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) visit(n.body);
+      if (n.kind === "try-stmt") {
+        if (Array.isArray(n.body)) visit(n.body);
+        if (n.catchNode && Array.isArray(n.catchNode.body)) visit(n.catchNode.body);
+        if (Array.isArray(n.finallyBody)) visit(n.finallyBody);
+      }
+    }
+  }
+  visit(nodes as unknown[]);
+  return { map, set, ordered };
+}
+
 /**
  * §6.7.7 / §60.4 — Collect every `<request>` `id` value in the file. A `<#id>`
  * markup ref whose id is in this set is a REQUEST-STATE ref: its `.loading` /
@@ -672,6 +956,14 @@ export function fileHasMapUsage(fileAST: Record<string, unknown>): boolean {
   if (!fileAST || typeof fileAST !== "object") return false;
   // (a) any declared map cell.
   if (collectMapVarNames(fileAST).size > 0) return true;
+  // (a2) ss52 — any NON-REACTIVE LOCAL map/set binding (a `let m = [:]`, a
+  // `m: [K:V]` / `set[K]` param/decl, a `r = makeMap()` whose fn returns a map).
+  // Covers the library-mode / param-only case where a fn does `m.size` on a map
+  // PARAM but the file contains NO map literal (so the (b) deep scan misses it).
+  {
+    const local = collectAllLocalMapSetNames(fileAST);
+    if (local.map.size > 0 || local.set.size > 0) return true;
+  }
   // (b) any map-lit ExprNode anywhere — deep walk over all exprNode-bearing
   // fields. We require the structured walker lazily to avoid a cycle at module
   // load and to keep this dependency-light.
@@ -721,15 +1013,19 @@ export function fileHasMapUsage(fileAST: Record<string, unknown>): boolean {
  * data chunk; minimal-runtime discipline).
  *
  * Detection is shallow-receiver: a `CallExpr` whose callee is a `MemberExpr`
- * with property ∈ {union, intersect, difference} and immediate object `@<set>`
- * (`<set>` ∈ `setVarNames`). A CHAINED algebra call (`@s.union(@t).intersect(…)`)
- * is covered because its FIRST link is on the set var `@s`.
+ * with property ∈ {union, intersect, difference} and immediate object a known
+ * set — REACTIVE `@<set>` (`<set>` ∈ `setVarNames`) OR a NON-REACTIVE LOCAL
+ * `<set>` (`<set>` ∈ `localSetNames`, ss52). A CHAINED algebra call
+ * (`@s.union(@t).intersect(…)`) is covered because its FIRST link is on the set.
  */
 export function fileHasSetAlgebraUsage(
   fileAST: Record<string, unknown>,
   setVarNames: Set<string>,
+  localSetNames?: Set<string> | null,
 ): boolean {
-  if (!fileAST || typeof fileAST !== "object" || setVarNames.size === 0) return false;
+  if (!fileAST || typeof fileAST !== "object") return false;
+  const _localSet = localSetNames ?? new Set<string>();
+  if (setVarNames.size === 0 && _localSet.size === 0) return false;
   const ALGEBRA = new Set(["union", "intersect", "difference"]);
   let found = false;
   const seen = new WeakSet<object>();
@@ -746,10 +1042,13 @@ export function fileHasSetAlgebraUsage(
         callee.object && typeof callee.object === "object"
       ) {
         const obj = callee.object as Record<string, unknown>;
-        if (obj.kind === "ident" && typeof obj.name === "string" && obj.name.startsWith("@") &&
-            setVarNames.has(obj.name.slice(1))) {
-          found = true;
-          return;
+        if (obj.kind === "ident" && typeof obj.name === "string") {
+          // Reactive `@s` cell OR non-reactive local `s` set.
+          if ((obj.name.startsWith("@") && setVarNames.has(obj.name.slice(1))) ||
+              (!obj.name.startsWith("@") && _localSet.has(obj.name))) {
+            found = true;
+            return;
+          }
         }
       }
     }

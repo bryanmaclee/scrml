@@ -442,7 +442,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // function-body emit path so `@m[k]` reads / `@m.<method>(…)` / `@m.size`
   // inside function bodies lower to the `_scrml_map_*` runtime. Sibling to
   // engineVarNames.
-  const { collectMapVarNames, collectOrderedMapVarNames, collectSetVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames, collectSetVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
   // §59.8 (S169): the `@ordered`-typed subset, so a reassignment `@m = [...]`
   // inside a function body lowers the literal ordered. Sibling to mapVarNames.
@@ -451,6 +451,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // so the set-native vocabulary inside a function body lowers via emit-expr's
   // set interception. Sibling to mapVarNames.
   const setVarNames: Set<string> = collectSetVarNames(ctx.fileAST);
+  // §59 (ss52): NON-REACTIVE LOCAL map/set lowering. The reactive collectors
+  // above gather only `@`-prefixed module-level cells; a pure-fn local map
+  // (`let m = [:]`) carries no `@` and is fn/block-scoped, so it lowered RAW
+  // (`m.insert is not a function` at runtime — the (c) bug). The per-function
+  // `localMapVarNames`/`localSetVarNames`/`localOrderedMapVarNames` (computed
+  // per-fn from its body+params via collectLocalMapSetNames below) thread the
+  // BARE local names into each fn-body emit ctx; emit-expr's dispatch sites
+  // lower them via the bare-receiver `_scrml_map_*` form, leaving the reactive
+  // `@`-path byte-identical. `fnReturnMapKinds` lets `let r = makeMap()`
+  // classify `r` from makeMap's RETURN annotation (the "returned from a fn" case).
+  const fnReturnMapKinds: Map<string, "map" | "set"> = buildFnReturnMapKinds(ctx.fileAST);
   // B17.4 (§51.0.H): the subset of engines that have at least one effect=/
   // <onTransition> arm. Threaded through scheduling/CPS opts to enable hook-
   // firing wraps on `.advance()` calls inside function bodies.
@@ -781,6 +792,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsSplit = route.cpsSplit;
     const body = (fnNode.body as ASTNode[]) ?? [];
     const params = (fnNode.params as Param[]) ?? [];
+    // §59 (ss52): per-fn NON-REACTIVE LOCAL map/set names for THIS function.
+    const { localMapVarNames: _cpsLocalMap, localSetVarNames: _cpsLocalSet, localOrderedMapVarNames: _cpsLocalOrdered } = collectLocalMapSetNames(fnNode, fnReturnMapKinds);
     // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
     // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
     const paramNames = params.map((p: Param, i: number) => paramName(p, i));
@@ -821,6 +834,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
           ...(setVarNames.size > 0 ? { setVarNames } : {}),
           ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
+          ...(_cpsLocalMap.size > 0 ? { localMapVarNames: _cpsLocalMap } : {}),
+          ...(_cpsLocalSet.size > 0 ? { localSetVarNames: _cpsLocalSet } : {}),
+          ...(_cpsLocalOrdered.size > 0 ? { localOrderedMapVarNames: _cpsLocalOrdered } : {}),
           ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
           ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
           ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -867,6 +883,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
       ...(setVarNames.size > 0 ? { setVarNames } : {}),
       ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
+      ...(_cpsLocalMap.size > 0 ? { localMapVarNames: _cpsLocalMap } : {}),
+      ...(_cpsLocalSet.size > 0 ? { localSetVarNames: _cpsLocalSet } : {}),
+      ...(_cpsLocalOrdered.size > 0 ? { localOrderedMapVarNames: _cpsLocalOrdered } : {}),
       ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
       ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
       ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -973,6 +992,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     const name = (fnNode.name as string) ?? "anon";
     const params = (fnNode.params as Param[]) ?? [];
+    // §59 (ss52): per-fn NON-REACTIVE LOCAL map/set names for THIS function.
+    const { localMapVarNames: _localMap, localSetVarNames: _localSet, localOrderedMapVarNames: _localOrdered } = collectLocalMapSetNames(fnNode, fnReturnMapKinds);
     // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
     // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
     const paramNames = params.map((p: Param, i: number) => paramName(p, i));
@@ -1031,6 +1052,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
         ...(setVarNames.size > 0 ? { setVarNames } : {}),
         ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
+        ...(_localMap.size > 0 ? { localMapVarNames: _localMap } : {}),
+        ...(_localSet.size > 0 ? { localSetVarNames: _localSet } : {}),
+        ...(_localOrdered.size > 0 ? { localOrderedMapVarNames: _localOrdered } : {}),
         ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
       ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
         ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
@@ -1092,7 +1116,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }
