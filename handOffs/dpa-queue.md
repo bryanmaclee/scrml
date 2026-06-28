@@ -10,6 +10,33 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 
 ---
 
+## ⚠ CURRENT STATUS (authoritative — PA-maintained; SUPERSEDES the per-item `status:` lines)
+
+**Why this exists (S228 currency-pass).** The per-item `status:` lines are dPA-owned and stop at `complete` — the dPA NEVER flips to `ratified` (RUN-not-RATIFY, above). PA ratification lives in the S215/S225 ratification BLOCKS below, NOT in the per-item lines → a `status: complete` line READS AS "open" long after the PA ratified. **Trust this table over any per-item `status:` line.** (A live instance of the doc-staleness the tier2-render / token-set work targets — this table should eventually PROJECT from the ratification record, not be hand-kept.)
+
+| item | TRUE status | authority |
+|---|---|---|
+| dpa-001 | **RATIFIED** S210 — A2-thin external-API direction; BUILD downstream | block · "ratify ship A2" |
+| dpa-002 | **RATIFIED-direction** S215 — ship B (SSE recipe over `handle()`+`route=`; csrf dropped); small dev item | S215 block |
+| dpa-003 | **RATIFIED** S215-dir + REFINEMENT S216 — Approach B logic-ctx `_{}`, inline-all-the-way; BUILD gated §23.2.4 + dpa-007 | S215/S216 |
+| dpa-004 | **RATIFIED** S215 — SCOPED-RETIRE the S199 boundary (C1–C4) | "Ok, lets go" |
+| dpa-005 | **RATIFIED-direction** S215 — adopt B `<engine server=@source>` + A as no-`rule=` view. §52 read/LOAD **BUILT** (Tier-1 S196 · Tier-2 Pattern-C S216); the flux WRITE-BACK half was **RETRACTED S194** (`fdcd7fcc`, Q2=WF — closed `g-server-sync-codegen-noop`, NOT a build). Clean fireable residual = the **targeted E-RI-002 diagnostic** (route-inference.ts ~3534, steers to the blessed recipes — ships now, read-path is built). flux G1's real residual = `g-tier1-ssr-prerender` (SSR, separate). | S215 + S194 + INDEX-L137 |
+| dpa-006 | **RATIFIED** S225 — foreign toolchain → §58 Merkle closure + dpa-008 capability vocab; BUILD = §58 amendment, post-`_{}` | S225 drain |
+| dpa-007 | **ROUTED-TO-DEV** S225 — pure-dev library-mode `?{}` codegen; not a debate | S225 drain |
+| dpa-008 | **RATIFIED** S225 — typed capability vocab; collapses into dpa-006 + dpa-003; enforcement gated Pole-D | S225 |
+| dpa-009 | **RATIFIED-direction** S225 — INLINE = ts/js + C-ABI; SIDECAR = runtime-bearing; design-record | S225 drain |
+| dpa-010 | **ADVISORY — NOT formally ratified** (reason-VCS vs executable-contracts); navigation-not-gate is DE-FACTO in force (dock) | verdict only |
+| dpa-011 | **ADVISORY — NOT ratified** (PA test-rig / flogence-domain) | verdict only |
+| dpa-012 | **RATIFIED** S225 — COLLAPSE: keep `handle()`, KILL `raw`, no named pipelines [deferred-retriggerable]; BUILD = 2 lints + §40 phase-spec | "keep handle()" |
+| dpa-013 | **BUILD-candidate** — direction-ratified S220 (configurable discriminator); flogence transport build, not a DD | line ref below |
+| dpa-014 | **RATIFIED** S223 — W4 chunk model = ship B-conditional | "ratify W4" |
+| dpa-015 | **RATIFIED** S227 — markup-lease Q2-collapse; CONDITIONAL on 2 §40.9 facts (PA-to-verify); BUILD = `conflictsWith` query | "1, ratify it" |
+| dpa-016 | **DEFERRED** S225 — maps-vs-flogence; gate not met | S225 drain |
+
+**Genuinely-open (PA action needed):** dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual build = dpa-005 §52 server-cell WRITE-BACK (= flux G1).
+
+---
+
 ## [dpa-001] debate — External-backend boundary: typed-external-API primitive (A) vs docs-only (B) vs stay-full-stack (C)
 status: ratified     # banked → running → complete → ratified(by PA)  ·  RATIFIED S210 2026-06-20 (user "ratify ship A2") → insight landed in ~/.claude/design-insights.md; A2-thin direction committed (BUILD is a downstream arc); serve-side raw-route + SSR-gap carried open
 banked: S210 2026-06-20

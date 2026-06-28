@@ -1,5 +1,12 @@
 # ss54 — token-set emit (`--emit-token-set`) — SURVEY-FIRST · flogence-coordinated
 
+> **STATUS: landed-on-branch** `spa/ss54` @ `f30f79da` (sPA ss54, 2026-06-28).
+> Survey-first complete; 3 OQs resolved (OQ-1 version=fnv1a content-fingerprint ·
+> OQ-2 per-symbol kind=YES, v1 enum = 5 decl kinds + state-cell · **OQ-3 surfaced**:
+> §34 has NO programmatic catalog → errorCodes = live source-scan of `compiler/src`).
+> Full pre-commit suite GREEN. R26 CLI-verified on `examples/02-counter.scrml`.
+> Coordination-back to flogence: drafted in the re-integration message (handOffs/incoming).
+
 **Fill-note:** the scrml-side half of the flogence docs↔code-drift DD (flogence S17, ratified — `handOffs/incoming/read/2026-06-27-2132-flogence-...-token-set-ratified.md`). flogence consumes a compiler-emitted **token-set** as a second flograph currency pass to flag a doc citing a now-dead symbol. **scrml owns ONLY the emit** (a cheap byproduct of what the compiler already computes); the consume/display/tiering lives in flogence. This was the "token-set emit contract scrml owes flogence" item carried in the S228 hand-off — now design-unblocked (flogence ratified the shape + 4 constraints).
 
 **SURVEY-FIRST** (the emit hook + the 2 OQs below need locating/deciding before the build). Single item. NOT adopter-facing (a tooling artifact) — LOW-MED priority, but unblocks the flogence currency pass + the corpus-ouroboros attack.
