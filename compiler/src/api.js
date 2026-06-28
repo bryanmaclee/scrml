@@ -33,6 +33,7 @@ import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
 import { buildBlockAnalysis } from "./block-analysis.ts";
+import { buildTokenSet, serializeTokenSet } from "./token-set.ts";
 import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
@@ -2853,6 +2854,14 @@ export function compileScrml(options = {}) {
     // leasable blocks. The function form mirrors `engineGraphJson` — no cost
     // unless called.
     blockAnalyses: () => buildBlockAnalysis(metaFiles),
+    // ss54 (S229) — the `--emit-token-set` projection. ONE deterministic
+    // `token-set.json` per compile: declared symbols (with kind), the §34
+    // error-code set, the keyword vocab, + an fnv1a content fingerprint.
+    // A READ-ONLY currency oracle for flogence's docs-drift pass — wired into
+    // nothing pass/fail (constraint i), written nowhere the compiler reads back
+    // (constraint ii). The function form mirrors `engineGraphJson` /
+    // `reachabilityRecordJson` — no cost unless called under the CLI flag.
+    tokenSetJson: () => serializeTokenSet(buildTokenSet(metaFiles)),
     // Stage 7.55 — A-3.5 wire (S91). The AuthGraph is the per-gate
     // classification surface consumed by RS Component 4 and (future)
     // A-4 per-role chunk emission. Surfaced on the return so integration

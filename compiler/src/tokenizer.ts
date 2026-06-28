@@ -54,7 +54,12 @@
 // ---------------------------------------------------------------------------
 // scrml + JS keywords
 // ---------------------------------------------------------------------------
-const KEYWORDS = new Set([
+//
+// Exported (S229 ss54) so the `--emit-token-set` tooling pass can project the
+// canonical keyword vocabulary into `token-set.json` (token-set.ts). The set is
+// the single source of truth for what the tokenizer reserves; the emit is a
+// read-only projection — it must never mutate it or be read back into the lexer.
+export const KEYWORDS = new Set([
   // scrml-specific
   "lift", "fn", "server", "match", "is", "type", "let", "const", "import",
   "export", "from", "as", "default", "return", "if", "else", "for", "while",

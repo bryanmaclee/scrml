@@ -48,6 +48,8 @@ Options:
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --emit-batch-plan       Print the Stage 7.5 BatchPlan as JSON (§PIPELINE)
   --emit-reachability     Emit <base>.reachability.json for each source (§PIPELINE Stage 7.6 / SPEC §40.9)
+  --emit-token-set        Emit token-set.json (symbols+kind, §34 codes, keywords, fnv1a version)
+                          for the compile — the flogence docs-drift currency oracle (ss54)
   --emit-per-route        Emit per-(entry-point, role, tier) JS chunks + chunks.json
                           (SPEC §40.9.7; opt-in during A-4 wave; default-on at v0.3.0 cut)
   --chunk-size-budget=N   Soft size budget in bytes for the W-CG-CHUNK-LARGE lint
@@ -102,6 +104,7 @@ function parseArgs(args) {
   let selfHost = false;
   let emitBatchPlan = false;
   let emitReachability = false;
+  let emitTokenSet = false;
   let emitEngineGraph = false;
   let emitBlockAnalysis = false;
   let emitPerRoute = false;
@@ -173,6 +176,8 @@ function parseArgs(args) {
       emitBatchPlan = true;
     } else if (arg === "--emit-reachability") {
       emitReachability = true;
+    } else if (arg === "--emit-token-set") {
+      emitTokenSet = true;
     } else if (arg === "--emit-engine-graph") {
       emitEngineGraph = true;
     } else if (arg === "--emit-block-analysis") {
@@ -286,7 +291,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +421,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -587,6 +592,17 @@ function runOnce(opts, selfHostModules = null) {
       writeFileSync(dest, json);
       if (verbose) console.log(c.dim(`  [RS] Wrote reachability JSON: ${base}.reachability.json`));
     }
+  }
+
+  // ss54 (S229) — write ONE token-set.json for the compile (symbols aggregate
+  // across all compiled sources, so a single artifact, NOT per-source). The
+  // flogence docs-drift currency oracle: declared symbols+kind, the §34 code
+  // set, the keyword vocab, + an fnv1a content fingerprint. Emission lives here
+  // (CLI-only); `tokenSetJson` is a lazy projection — no cost unless this fires.
+  if (emitTokenSet && typeof result.tokenSetJson === "function") {
+    const dest = join(result.outputDir, "token-set.json");
+    writeFileSync(dest, result.tokenSetJson());
+    if (verbose) console.log(c.dim(`  [TS] Wrote token-set: token-set.json`));
   }
 
   // engine-graph-sidecar-2026-05-31 — write <base>.engine-graph.json next to
