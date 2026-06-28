@@ -96,6 +96,25 @@ export function setRenderShadowedInFile(on: boolean): void {
   _renderShadowedInFile = !!on;
 }
 
+// g-markup-session-read-undeclared (S228 ruling) — PER-FILE flag: is the
+// compiler-provided `@session` window-scoped auth projection ACTIVE for this
+// file? Set by runCG to (auth configured for the file) AND (the file does NOT
+// declare a user reactive cell named `session`). When true, a CLIENT-mode
+// `@session` read lowers to the bare projection variable `session`
+// (emit-client.ts `var session = window._scrml_session_projection ?? ...`)
+// rather than the universal accessor `_scrml_reactive_get("session")` — the
+// latter reads `_scrml_state["session"]` (undefined; the projection is NOT a
+// reactive-store cell), which would crash at `.current`. When false (no auth,
+// or a user `session` cell shadows the name), the read falls through to the
+// default reactive accessor so a user `<session>` cell is honored. Mirrors the
+// `_renderShadowedInFile` per-file module-flag lifecycle (set + reset by runCG).
+let _sessionProjectionActive = false;
+
+/** Set the per-file `@session` projection-active flag (auth on + no user cell). */
+export function setSessionProjectionActive(on: boolean): void {
+  _sessionProjectionActive = !!on;
+}
+
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -570,6 +589,20 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     const _m = srcmapMark(node.span, bare);
     if (ctx.mode === "server") {
       return `${_m}_scrml_body["${bare}"]`;
+    }
+    // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
+    // scoped auth projection (emit-client.ts `var session = ...`) is a reserved
+    // compiler-provided AMBIENT singleton, NOT a reactive-store cell. Lower it to
+    // the bare projection variable `session` so the read resolves the live
+    // projection (`session.current` / `session.destroy()`); the default
+    // `_scrml_reactive_get("session")` reads `_scrml_state["session"]` (undefined
+    // → crashes at `.current`). Gated on `_sessionProjectionActive`
+    // (auth-configured-for-this-file AND no user `session` reactive cell), so a
+    // no-auth file or a user `<session>` cell falls through to the accessor.
+    // Markup and logic emit identically (both route here). Client mode only —
+    // server `@session` keeps the `_scrml_body[...]` form above.
+    if (bare === "session" && _sessionProjectionActive) {
+      return `${_m}session`;
     }
     // Client mode — check derived vs reactive
     if (ctx.derivedNames && ctx.derivedNames.has(bare)) {

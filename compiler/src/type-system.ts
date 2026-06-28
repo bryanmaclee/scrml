@@ -6401,6 +6401,27 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   "animationFrame",
 ]);
 
+// ---------------------------------------------------------------------------
+// Reserved compiler-provided AMBIENT projection cell names (read via `@name`).
+//
+// These are NOT user-declared reactive cells — they are window-scoped singletons
+// the compiler synthesizes (e.g. the `@session` auth projection emitted by
+// emit-client.ts under a configured auth gate). Per the §51.0.A engine-singleton
+// ambient-read precedent (a component reads an engine auto-cell via `@cellName`
+// in markup) and the S228 user ruling for g-markup-session-read-undeclared,
+// `@session` is a LEGAL ambient read in EVERY locus (markup + logic). It is a
+// RESERVED name — never an "undeclared cell" — so the read-side
+// E-STATE-UNDECLARED walker must exempt it (mirroring the `typeRegistry` /
+// `knownFnNames` `@`-branch guards). Scoped to the exact reserved name(s): a
+// genuine `@typoCell` (not in this set) still fires E-STATE-UNDECLARED.
+const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
+  // §20.5 / S224 Ryan #15 — the `@session` window-scoped auth projection
+  // (`var session` in emit-client.ts, hydrated via `fetch('/_scrml/session')`).
+  // Distinct from the §20.5 SERVER-only bare `session` object — the client
+  // projection is fed across the HTTP boundary and carries no server-only data.
+  "session",
+]);
+
 /**
  * Walk every identifier in a logic-context ExprNode and emit E-SCOPE-001 for
  * any bare ident that cannot be resolved against:
@@ -6483,6 +6504,13 @@ function checkLogicExprIdents(
       if (!atBase) return;
       // Runtime helpers / underscore convention (`@_internal`) — never a typo.
       if (atBase.startsWith("_")) return;
+      // Reserved compiler-provided AMBIENT projection (`@session` — the
+      // window-scoped auth singleton, emit-client.ts). Not a user reactive cell;
+      // a legal ambient read in every locus (markup + logic) per the §51.0.A
+      // engine-singleton precedent + the S228 ruling. Never "undeclared", so it
+      // does not fire E-STATE-UNDECLARED. A genuine `@typoCell` (not in the set)
+      // still fires. See `RESERVED_AMBIENT_PROJECTION_NAMES`.
+      if (RESERVED_AMBIENT_PROJECTION_NAMES.has(atBase)) return;
       // Defensive: a `@TypeName` / `@fnName` read is not idiomatic, but if the
       // base IS a declared type or known function name, exempt rather than fire
       // a confusing undeclared-cell diagnostic (mirrors the bare-name guards).

@@ -447,8 +447,17 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   { pattern: /\bBun\.cron\b/, resourceType: "Bun.cron" },
   // env() built-in is server-only unless prefixed with `public`
   { pattern: /(?<!public )\benv\s*\(/, resourceType: "env()" },
-  // session object is server-only (§20.5 — available only in server-escalated functions)
-  { pattern: /\bsession\b/, resourceType: "session" },
+  // The §20.5 SERVER-only `session` object (available only in server-escalated
+  // functions) is the BARE name `session`. The negative lookbehind `(?<!@)`
+  // excludes the CLIENT `@session` window-scoped auth projection (emit-client.ts
+  // `var session = window._scrml_session_projection ?? ...`, hydrated via
+  // `fetch('/_scrml/session')`): the two are semantically distinct (the client
+  // projection is fed across the HTTP boundary and carries no server-only data),
+  // so a `@session` read MUST NOT auto-escalate its enclosing function to the
+  // server (which would mis-read `_scrml_body["session"]`). Mirrors the
+  // `(?<!public )` lookbehind on the `env()` pattern above.
+  // (g-markup-session-read-undeclared, S228 ruling.)
+  { pattern: /(?<!@)\bsession\b/, resourceType: "session" },
 ];
 
 /**

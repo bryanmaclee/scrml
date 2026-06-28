@@ -66,9 +66,9 @@ import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setSessionProjectionActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
@@ -602,6 +602,10 @@ export function runCG(input: CgInput): CgOutput {
     // component-render builtin; the render() hijack then yields to the user fn
     // (so the §47 name-encoding + fnNameMap post-pass repairs the call site).
     setRenderShadowedInFile(fileDeclaresRender(fileAST));
+    // g-markup-session-read-undeclared — default the `@session` projection-active
+    // flag OFF; worker bundles carry no auth session projection. Re-set per-file
+    // in the main emit loop once auth middleware is resolved.
+    setSessionProjectionActive(false);
     const nodes: any[] = (fileAST as any).ast?.nodes ?? (fileAST as any).nodes ?? [];
 
     interface WorkerDef {
@@ -777,6 +781,9 @@ export function runCG(input: CgInput): CgOutput {
     setLogShadowedInFile(fileDeclaresLog(fileAST));
     // ss16 C3 — a file-level `function render` shadows the render() builtin.
     setRenderShadowedInFile(fileDeclaresRender(fileAST));
+    // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
+    // resolution below (needs `authMW`, resolved later in this iteration).
+    setSessionProjectionActive(false);
     const analysis = fileAnalyses.get(filePath);
     const nodes: object[] = analysis ? (analysis as any).nodes : [];
 
@@ -804,6 +811,14 @@ export function runCG(input: CgInput): CgOutput {
 
     // Resolve auth middleware for this file (from RI output)
     const authMW = safeRouteMap.authMiddleware?.get(filePath) ?? null;
+    // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
+    // scoped auth projection (emit-client.ts `var session = ...`) is emitted iff
+    // auth middleware is configured for this file. When active AND the file does
+    // not declare a user reactive cell named `session` (which would otherwise own
+    // the `@session` read), a CLIENT-mode `@session` read lowers to the bare
+    // projection var `session` instead of `_scrml_reactive_get("session")` (the
+    // latter reads an unregistered reactive key → undefined → `.current` crash).
+    setSessionProjectionActive(authMW !== null && !collectReactiveVarNames(fileAST).has("session"));
     // Resolve §39 middleware config from AST (compiler-auto tier)
     const middlewareCfg = (fileAST as any).middlewareConfig ?? null;
 
