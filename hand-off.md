@@ -1,29 +1,40 @@
-# scrml — Session 229 (OPEN)
+# scrml — Session 229 (CLOSE)
 
-**Date:** 2026-06-28. **Profile:** A — FULL (booted via `/boot A`). Prior session (S228) close archived → `handOffs/hand-off-231.md` (rotation counter, not session-aligned). This is the fresh S229 working doc; S228's design narrative + recovered-anomaly detail live in the archive.
+**Date:** 2026-06-28. **Profile:** A — FULL (booted via `/boot A`). An **execution + direction** session: landed 2 builds, restructured the public docs, scoped + parked the SSR arc, reframed v0.8, **cut v0.7.1** (the first semver cut in ~29 days), and set up the protect-leak security debate for the dPA. Mechanical stream → `handOffs/delta-log.md` [201]–[209].
 
-## 🚦 Board @ open (unchanged from S228 close — no S229 work landed yet)
-**HIGH 0 · MED 7 · LOW 10 · Nom 7 · v0.7.0.** HEAD `dca8bfe0`. Suite green (state.ts subset 18300/65/0, 1120 test files). Maps 1 commit behind HEAD (watermark `7cc5d8b4`). origin/main 0/0 (clean, pushed). No design gates block the board (S228 currency-pass confirmed the "gate backlog" = ratified-but-unbuilt + stale tracking).
+## 🚨 NEXT-START
+Boot Profile A. Board @ close: **HIGH 0 · MED 6 · LOW 9 · Nom 7 · v0.7.1.** Suite green (full `bun run test` 25734/0/211, 1122 files). **PUSHED + TAGGED v0.7.1** (the wrap commit + tag). Maps: incremental refresh dispatched (wrap 6c) — lands in a follow-up commit (a few S229 codegen/typer files).
 
-## ⚠️ Open at boot — needs disposition
-1. **6 unstaged fixture deletions** (`compiler/tests/unit/gauntlet-s20/__fixtures__/import-resolution/{e6-js-skip,e6-missing,e6-noext-importer,e6-present-importer,present-noext,present}.scrml`). VESTIGIAL — `import-resolution.test.js` synthesizes its sources inline via a virtual-file map (filename args are labels, not disk reads); **empirically verified the test passes 6/0 with them deleted.** Deletion pre-dates S229, NO reflog/stash trace → likely filesystem-sync from the other machine OR an uncommitted prior cleanup. Disposition: commit-the-cleanup (confirmed-dead) vs restore (if the other machine is mid-work on them). SURFACED to user — not auto-resolved (sync-hygiene rule).
-2. **Inbox action-needed:** `handOffs/incoming/2026-06-28-1025-flogence-to-scrml-tier2-render-schema-proposal.md` (LEFT in incoming/ = action-needed). flogence PROPOSED the tier2-render capture-format schema + a working `render commit-message` proof. **Needs ratify.** See thread #1 below.
+**Two live threads waiting on the user:**
+1. **`dpa-017` is BANKED for the dPA drain** — the `g-sql-row-protect-leak` security-contract debate (A static-prove-and-error vs B structural-redaction-floor). 3 experts PRE-STAGED in `flogence/.claude/agents/` (live at dPA boot). **To run:** open an instance rooted in `/home/bryan-maclee/scrmlMaster/flogence` → `read dpa.md and boot` → it drains the queue → artifact + design-insight CANDIDATE → PA+user ratify the SPEC §14.8.7 amendment + build decomp.
+2. **v0.8 framing decision (open).** The native-parser-swap peg is STALE (Road-B froze the native parser S222). The SSR survey (S229) established that **`g-tier1-ssr-prerender` is a sub-arc of the server-render-time / dynamic-deployment-target arc** (§58 Nominal · §40.9.5 · GITI-027B Option-D) — a plausible v0.8 milestone. Decide what v0.8 *is*; the 3 SSR rulings (deployment-target model · Option-A-DOM-prerender-vs-B-state-inline · auth/protect-during-SSR) are its step-0.
 
-## 🎯 S229 priorities (carried from S228 NEXT-START)
-1. **README updates/changes** — USER-FLAGGED for this session (doc-currency, not marketing — user-raised, legit).
-2. **Ratify the tier2-render capture-format schema** (flogence proposal, inbox). Markdown-tag extension of the delta-log: `[seq] kind · prose · → ptr · @to:<targets> · @as:<disposition> · @r:<renders> · #xref:<proj>`. flogence already built `render commit-message` (self-hosting proof) + rolled out per-artifact renders (changelog/handoff/known-gaps/index-row, per the cross-repo frontier [515][516]). **flogence's open-Q back to us:** `@r` author-declares vs flogence-infers from `kind`+`targets`. **PA lean (S228):** flogence INFERS `@r` — the inversion's whole point is keeping churn off the expert; PA writes only `@to`+`@as` (judgment), `@r` is mechanical. Ratify with that direction, then co-adopt (write enriched delta entries).
-3. **g-markup-session-read** — RULED markup-legal (gate-1, S228); now a FIREABLE build (wire `@session` into markup symbol-resolution, §51.0.A ambient-read precedent).
-4. **Genuinely-open gates** (post S228 currency-pass): dpa-010 / dpa-011 (advisory, meta/flogence — ratify-or-defer) · `g-sql-row-protect-leak` (security static-projection contract, design-first).
-5. **Fireable builds** (mislabeled as gates): `g-reactive-map-set-method-in-control-flow-raw-emit` (MED — clear fix shape) · `g-tier1-ssr-prerender` (the REAL flux residual — substantial SSR subsystem, survey-banked ss51/ss26).
+## 🎯 Design narrative (IRREDUCIBLE)
+**1. The SSR survey — depth-of-survey in the CONSERVATIVE direction.** Unlike g-component-body (S228, where the "substantial subsystem" estimate was REFUTED), the `g-tier1-ssr-prerender` survey VERIFIED it: request-time server-side HTML composition genuinely does NOT exist (static-compile + CSR + JSON-routes-only; no DOM-adoption hydration). The full §52.8 target IS the ratified-but-unbuilt server-render-time/dynamic-deployment arc. **The survey STOPPED a premature build** + caught the gap's own `route-splitter.ts:1167` SSR-cite as wrong (it's chunk-JS bundling). SCOPE: `docs/changes/g-tier1-ssr-prerender-2026-06-28/SCOPE.md`. Parked as a ruling-gated arc (NOT a blocker — client-load works, W-AUTH-002 tracks).
 
-## 🔗 Cross-repo frontier (flogence, via digest)
-flogence S17 shipped back fast on the shared threads: cross-PA awareness channel (bridge two-source ingest + #xref + "Cross-repo frontier" digest + xref_cursor, [511]) · token-set CONSUME pass (currency.ts reads our token-set.json, [514]) · **tier-2 render prototype + rollout** ([515][516] — the schema we owe ratification on). scrml co-adopts: tag `#xref:flogence` on coupled deltas (DOING since S228 [193]); boot reads the frontier via `digest.ts scrml --fresh`.
+**2. The v0.7.1 cut — the month-of-untagged-fixes capstone.** The user noticed PA had been cut-obsessed (v0.2→v0.7 = ~40 tags in 19 days) then silent for ~29 days while 922 commits landed. Diagnosis: the cut-generator was the rapid migration + gauntlet bug-clusters (each closed cluster → a patch); since v0.7.0 (S159) the work shifted to design/meta/spec-ahead, which produces no natural cut moments, and the discipline lapsed (even the changelog cut-blocks stopped at v0.6.6). **v0.7.1 cut this session** bundles those fixes so adopters pin to current. The v0.8 *milestone* needs a fresh target (see NEXT-START #2).
+
+**3. The protect-leak debate (dpa-017) — the security contract is genuinely forked.** `protect=` enforces at the schema layer but the server-fn RETURN boundary is unguarded (`return ?{SELECT * FROM users}.get()` ships `passwordHash`). §14.8.7 deferred it. The fork: (A) static-prove-and-error (provenance/effect-typed rows; type error on a protected-bearing return; fail-closed) vs (B) structural-redaction-floor (serializer strips by construction; sound-by-construction + a static lint). Soundness is non-negotiable (a name-only check is unsound — the AS-alias). PA lean: B-floor + A-as-DX-layer, but it's a real fork worth the debate. Banked w/ complete framing + 3 staged experts.
+
+## 🛟 Recovered anomalies / lessons
+- **S88 isolation slip (my error, caught clean).** First `g-reactive-map-set-control-flow` dispatch OMITTED `isolation:"worktree"` → the agent's F4 startup-verification REFUSED to work in main (zero work, zero leak) → re-dispatched correctly. The F4 gate is exactly why it's there.
+- **Verify-before-dispatch caught a mis-association.** "line up r28-c2" → r28-c2 turned out to be a DOCS gap (my board-survey script grabbed the wrong `###` header); the `Enum.toEnum` codegen item it described was ALREADY RESOLVED (ss22). Almost dispatched a build for a closed gap. (S138 reverse-direction discipline.) The board-survey grep needs token-anchoring, not header-anchoring (currency-pass class).
+- **commit-timeout-but-landed ×3** (S227 pattern — the hook's full-suite runs hotter than 5min under load; verified HEAD each time before assuming failure). Foreground commits with the new tests + parallel load now reliably exceed the 5min Bash ceiling but LAND.
+- **Markup-session: the brief premise was WRONG, the agent corrected it.** No markup-vs-logic asymmetry (fired in both); codegen was ALSO broken (not just the diagnostic). The agent wired a real read + a deliberate route-inference regression-guard + verified security-clean. 2 deferred follow-ons filed (no-auth @session diagnostic + missing GET /_scrml/session route).
+
+## Board @ close
+**HIGH 0 · MED 6 · LOW 9 · Nom 7 · v0.7.1.** Landings: `2e681e16` (dispose) · `9c23724e` (ratify-tier2 bookkeeping) · `ffc6fbec` (g-reactive-map-set-control-flow) · `b37327aa` (README/NERDME restructure, PUSHED) · `0df45d2e` (g-markup-session-read) · wrap+v0.7.1. Resolved: g-reactive-map-set-method-in-control-flow (MED) · g-markup-session-read (LOW). 0 worktrees. Delta-log [201]-[209].
+
+## §push / cross-repo
+**PUSHED + TAGGED v0.7.1.** flogence: the **tier-2 render schema RATIFIED** message sent (`2026-06-28-1127-...-RATIFIED.md`) + 3 dPA experts staged in `flogence/.claude/agents/` (gitignored machine-local roster). dpa-017 banked in `handOffs/dpa-queue.md`.
+
+## Open follow-ons (filed, non-blocking)
+- `g-markup-session-read` deferreds: a no-auth-`@session` diagnostic + the missing GET `/_scrml/session` route (`session.current` hydrates null today).
+- `import-resolution.test.js` hygiene bug: the test transiently deletes its own committed fixtures mid-run (= the boot-time "6 deleted fixtures" source; disposed `2e681e16`). Clean ~LOW follow-on to make it use a temp dir.
+- README anchor `#metaprogramming-` — eyeball on the rendered GitHub page.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · S228 flobase-concerns-route-to-flobase · S219 PRIMARY-GOAL (finish-the-project / default-GO / orchestrate-don't-grind) + flogence digest-boot · S227 dock investigation-as-query · S226 landing-concurrency (3-way-merge · ingestion-disjoint) + inversion-op · S88/S99/S126 path-discipline · S136 BRIEF archival · S138 R26 · S147 coherence · gate-cleanup-on-landing-success · S215 adversarial-verify · wrap 8-step.
-
-## Delta-log
-Source stream at `handOffs/delta-log.md` — last entry [200] (S228 E-RI-002 land). S229 appends start at [201].
+R1–R5 · `---` delimiter · Profile A · S228 flobase-routing · S219 PRIMARY-GOAL + flogence digest-boot · S227 dock · S226 landing-concurrency + inversion-op · S215 adversarial-verify · S138 R26 + reverse-direction · S147 coherence · S94 bump-on-tag (v0.7.1 cut this session) · S136 BRIEF archival · S88/S99/S126 path-discipline · gate-cleanup-on-landing-success · wrap 8-step.
 
 ## Tags
-#session-229 #open #board-HIGH-0 #readme-flagged #tier2-render-schema-ratify-pending #fixture-deletion-disposition #flogence-loop-tight
+#session-229 #close #board-HIGH-0 #v0.7.1-cut #ssr-arc-scoped-parked #v0.8-reframe-server-render-arc #dpa-017-protect-leak-debate-staged #2-builds-landed #readme-nerdme-restructure #tier2-render-ratified #verify-before-dispatch-catch #s88-isolation-slip-caught

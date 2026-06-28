@@ -32,8 +32,9 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-014 | **RATIFIED** S223 — W4 chunk model = ship B-conditional | "ratify W4" |
 | dpa-015 | **RATIFIED** S227 — markup-lease Q2-collapse; CONDITIONAL on 2 §40.9 facts (PA-to-verify); BUILD = `conflictsWith` query | "1, ratify it" |
 | dpa-016 | **DEFERRED** S225 — maps-vs-flogence; gate not met | S225 drain |
+| dpa-017 | **BANKED** S229 — protected-column return-boundary contract debate (A static-prove-and-error vs B structural-redaction-floor); 3 experts pre-staged in `flogence/.claude/agents/`; awaiting dPA drain | banked |
 
-**Genuinely-open (PA action needed):** dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual build = dpa-005 §52 server-cell WRITE-BACK (= flux G1).
+**Genuinely-open (PA action needed):** dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **dpa-017 BANKED for the next dPA drain** (g-sql-row-protect-leak security contract; experts staged S229). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual build = **`g-tier1-ssr-prerender`** (the real flux-G1 residual — survey-scoped S229, ruling-gated; the §52 write-back was RETRACTED S194, NOT the residual).
 
 ---
 
@@ -508,3 +509,42 @@ status: deferred-gate-not-met     # dPA 2026-06-27 — reviewed in the drain-all
 ### dPA disposition (2026-06-27 — no artifact; honest defer per R3/R5): The gate is "fire when flograph/dock coverage is high enough to judge whether the hand-maintained `.claude/maps/` are SUBSUMED by compiler-emit + flograph current-truth projection." **That gate is NOT met:** dock coverage is ~0/628 (per dpa-010's verified finding — reason-VCS CONDITIONAL-GO is itself gated on coverage rising from 0/628), and flograph projection isn't yet a drift-free current-truth source. A subsumption verdict now would be **evidence-free speculation** — the dPA RUNS-and-PRODUCES but will not manufacture a disposition the evidence can't support (R3 right-answer-beats-easy · R5 shoot-straight). **PA read (S207) stands: structural maps likely become obsolete once flograph is mature, but DON'T retire until proven.** **HOLD gated; the genuine fire-signal is a metric — dock/flograph coverage crossing a "high enough to judge" threshold.** Captured here so it stays drainable + doesn't rot as an invisible open-Q.
 banked: S207 → captured S225 2026-06-27
 scope: a disposition question — once flogence's flograph + compiler-emitted block-analysis are mature, do the hand-maintained `.claude/maps/` (project-mapper output) still earn their keep, or are they SUBSUMED (compiler-emit + flograph project current-truth drift-free)? PA read (S207): structural maps become obsolete; **DON'T retire until proven.** **GATED — fire when flograph/dock coverage is high enough to judge.** Captured here so it's drainable + doesn't rot as an invisible open-Q; NOT fire-now (the evidence isn't there yet).
+
+---
+
+## [dpa-017] debate — protected-column return-boundary contract: static-prove-and-error (A) vs structural-redaction-floor (B)
+status: banked     # banked → running → complete → ratified(by PA)
+banked: S229 2026-06-28
+output-path: scrml-support/docs/debates/sql-row-protect-leak-contract-2026-06-28.md
+gap: g-sql-row-protect-leak (LOW; NEW S175; deferred T1/T2/T3; design-track — "deliberate the contract shape before any implementation dispatch")
+
+### Scope-lock (COMPLETE framing)
+
+**Question:** What contract statically/structurally GUARANTEES a `protect=`-marked DB column never crosses the server→client return boundary — **(A)** static-prove-and-error (provenance/effect-typed `<sql-row>`; a server-fn return carrying a protected-bearing row to a client sink is a type/route error; the dev projects it out explicitly), or **(B)** structural redaction at the serialization boundary (the compiler-emitted response serializer strips `protectedFields` from every row by construction, regardless of source, paired with a static INFO-lint)? Where does the synthesis land (likely a hybrid — B-floor + A-as-DX-layer, OR A-load-bearing + B-backstop)?
+
+**The leak (verbatim constraint):** `protect="passwordHash"` is meant to make a column server-only. The `protect-analyzer` (Stage 4) computes per-table `fullSchema` / `clientSchema` (protected excluded) / `protectedFields`. BUT: (1) read-site `?{}` rows are typed from the **full** schema (protected INCLUDED); (2) `E-PROTECT-001` is effectively MOOT — SPEC §14.8.7 concedes every `?{}` fn auto-escalates to server (§12.2 Trigger 1) so a "client-boundary `?{}`" does not exist; (3) `E-PROTECT-003` catches ONLY a batch-plan `rowCacheColumns` overlap; (4) the GENERAL server-fn RETURN boundary is **unguarded** — `server fn loadUser() { return ?{SELECT * FROM users}.get() }` ships `passwordHash` over the wire. SPEC §14.8.7 (verbatim) DEFERS this: *"The protected-column-projection leak (does a server-fn RETURN a row carrying a protected column to the client?) is a data-flow / server-fn-return concern for a follow-on (return-boundary / `E-ROUTE-003`), not a read-site projection check."*
+
+**Load-bearing scrml CONSTRAINTS (verbatim — do NOT re-derive):**
+- **Soundness is non-negotiable** — a SECURITY/confidentiality property; a false-negative IS a leak. The gap rules out the naive answer: *"A name-only check would be UNSOUND (an `AS`-aliased protected column = false-negative on a SECURITY check)."*
+- **The `server` keyword is deprecated** (`g-server-keyword-drift`) — the contract MUST NOT key on a per-function `server` keyword; it is data-flow / boundary-shaped.
+- **Value-flow is currently INCOMPLETE:** `inferReturnTypeFromBody` covers only object-literal returns, NOT bare `return u`, spreads, or returns through helpers. Any static-prove approach must confront this (fail-closed where it can't prove).
+- **The 4 technical requirements the gap names** (static path): (1) a provenance channel on `<sql-row>` (source `(table,column)`); (2) body-return value-flow beyond object-literals; (3) a body-aware route gate; (4) new `E-ROUTE-*`/`E-PROTECT-*` + SPEC §14.8.7 ratification of the static-projection contract.
+- **scrml pillars:** "the compiler owns the wiring" + "bullet-proof apps; provability falls out of the natural shape, not separate ceremony." `protect=` ALREADY strips protected fields from the client SCHEMA view (same `protectedFields` set) — extending that strip to the wire boundary is in-character.
+- **Composes with the SSR arc:** `g-tier1-ssr-prerender` / `/__serverLoad` runs `SELECT *` with NO redaction today — the same boundary-redaction (if B) would cover SSR pre-render + the per-role gating arc. The chosen contract MUST NOT conflict with that arc.
+
+**In scope:** the A-vs-B contract shape; the soundness floor (which mechanism has zero false-negatives on the adversarial set); the new error/lint codes + the SPEC §14.8.7 amendment direction; the declassification escape (how an app legitimately gets a protected field to the client, if ever).
+
+**Out of scope:** the per-role content-gating runtime (GITI-027B Option-D — its own arc); SSR implementation (g-tier1-ssr-prerender — separate); the `protect=` schema/PRAGMA-layer enforcement (already works). **Do NOT seed the hybrid as a starting pole — let the judge land it.**
+
+**Approaches (poles):**
+- **A — static-prove-and-error** — provenance/effect-typed `<sql-row>`; a "client-safe row" return judgment; fail-closed where value-flow can't prove; new `E-ROUTE-*`/`E-PROTECT-*`; dev projects explicitly. → `type-systems-refinement-expert`.
+- **B — structural-redaction-floor** — serializer strips `protectedFields` by construction at the wire; sound-by-construction (no value-flow reasoning); paired static INFO-lint. → `secure-boundary-redaction-expert`.
+- **Soundness adjudication across both** — the security floor must have zero false-negatives. → `information-flow-security-expert`.
+
+**Experts / forge list (PRE-STAGED in `flogence/.claude/agents/`, S229 — live at dPA boot):**
+- `information-flow-security-expert` — the soundness authority (noninterference, sound-vs-complete, explicit-vs-implicit flows, reference-monitor, declassification).
+- `type-systems-refinement-expert` — pole A (refinement/effect/provenance types, fail-closed static-prove).
+- `secure-boundary-redaction-expert` — pole B (complete mediation, fail-safe defaults, boundary redaction).
+- Pipeline: `debate-curator` + `debate-judge` (existing global).
+
+**Deliverable:** scorecard + a design-insight CANDIDATE (authority: dPA-produced, awaiting PA+user ratification) → `output-path`. Feeds a SPEC §14.8.7 amendment the PA ratifies + a build decomposition.
