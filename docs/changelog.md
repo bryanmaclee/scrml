@@ -2,6 +2,19 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+### 2026-06-27 (S227 — board sweep: HIGH cleared + 3 MEDs [4-lane dispatch]; dpa-015 markup-lease RATIFIED [Q2-collapse, cost-corrected]; inversion domino-1 WIRED [dock investigation-as-query]; transcript-validation [85/15 holds]; 2 threads to flogence)
+
+A board-sweep + inversion-build session under the S219 primary-goal.
+- **4-lane dispatch sweep → board HIGH 1→0, MED 11→8** (suite 25680/0/214):
+  - **`g-unary-of-additive-arg` (HIGH — silent wrong-value) LANDED `02b4e71d`** — `emitUnary` generalized via a precedence-driven `unaryArgNeedsParens` (wraps any looser-binding arg — ternary/assign/lambda + all flat binaries incl `**`; excludes self-bracketed equality); ss21 left-operand + ss50 exponent intact. PA-side R26: `-(@a+@b)` → `-(a+b)` = -5, no over-wrap, `node --check` clean. (+331 tests)
+  - **`g-mount-hang-rails-dev` (MED — 100%-CPU compile hang) LANDED `02b4e71d`** — root was an exponential 2^depth re-visit in `detectRuntimeChunks` (`emit-client.ts`), NOT `nativeParseFile` (the gap's premise; `ss7-rails-dev-hang/FINDINGS.md` stale). A per-walk `visited` Set → linear; chunk-set unchanged. rails-dev: exit 124 hang → exit 1 in ~0.4s. (+90 tests)
+  - **`g-ternary-arrow-sql-e-error-003` (MED) LANDED `dec70dce`** — salvaged a crashed lane (ConnectionRefused mid-work) + PA-completed an incomplete alternate-arm its own test flagged: a `?{}` SQL block in EITHER arm of a concise-arrow ternary now fires E-SQL-009 (not the spurious E-ERROR-003). Real locus = `ast-builder.js collectExpr` (NOT the tokenizer), mirroring ss50's `_lastIsArrowGlyph` guard. (+185 tests)
+  - **`g-auto-await-reactive-server-no-error-arm` (MED)** = NOT-REPRODUCED / already-fixed by ss32/ss41 (`e02758e9`); stale gap flipped resolved.
+- **dpa-015 markup-lease RATIFIED (Q2-collapse).** scrml's compiler subsumes block-lease's FACTS (block-analysis + §40.9 `conflictsWith`); flogence consumes the thin lease-coordination. Cost CORRECTED from the verdict's "near-free" by the OQ-1/OQ-2 fact-checks (§40.9 solver output reads-only/undifferentiated → a real query BUILD; §31 DG coarsens `@obj.field` to OBJECT grain → field-grain GATE needs a DG redesign = BREAK-1). STAGED WARN-now@object-grain / GATE-gated.
+- **Inversion domino-1 WIRED — investigation-as-query via dock** (`pa-scrml.md` addendum, scrml-support `5084f56`): `dock --units <file>` (authoritative def-map, anti-blind-grep) + `dock --diff-scope --owns` (post-landing stray-check), codified as the structured-lookup discipline. dpa-010: dock = NAVIGATION, never the gate. Empirical motivation: this session's gap locus-hypotheses were 3/3 wrong from blind-grep/stale-prose.
+- **Transcript-parse validation** — the inversion's 85/15 churn/judgment thesis VALIDATED by token (churn 81.8-88.3%, bracketing 85%); a 3-tier amortization decomposition located the crux (tier-2 bookkeeping-writes = judgment-substance via churn-mechanism = the flogence doc-maintenance thread; ~1.5x vs ~5.5-8.5x ceiling).
+- **Two threads kicked to flogence** — the ratified PA-system changes (inversion op · dpa-015 · landing-concurrency) + a new design thread (docs↔code deterministic-ID provenance/currency graph) + a compiler-self-block-lease self-host-dividend addendum.
+
 ### 2026-06-27 (S226 — the PA-continuity INVERSION designed→ratified→operationalized [foundational PA-system re-architecture]; ss50 legacy-expr landing + 3 gaps [1 HIGH silent-miscompile])
 
 A foundational PA-system arc — the entire PA-continuity inversion ratified one-at-a-time, plus a clean compiler bug-fix landing.

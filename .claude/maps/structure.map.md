@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-27  commit: cf1471dd
+# updated: 2026-06-27  commit: dec70dce
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -2378,3 +2378,9 @@ Sixteen NEW test files (+7 browser, +5 integration, +4 unit). 1071 .test.js at `
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+
+## S227 (dec70dce) — light hand-refresh (3-file delta; full project-mapper walk deferred)
+- `codegen/emit-expr.ts` — `unaryArgNeedsParens` helper + `UNARY_PRECEDENCE`; `emitUnary` generalizes the ss50 `**`-paren to ALL looser-binding args (g-unary-of-additive-arg HIGH).
+- `codegen/emit-client.ts` — `detectRuntimeChunks` per-walk `visitedChunkNodes` Set → linear (was 2^depth re-visit; g-mount-hang-rails-dev).
+- `ast-builder.js` — `collectExpr` `sawArrowGlyphAtDepth0` latch + `_lastIsTernaryPunctInArrow` (`?`/`:`) break-suppression → `?{}` SQL in a concise-arrow ternary arm captures to E-SQL-009 (g-ternary-arrow-sql-e-error-003).
+- +3 test files (find-count 1103). ZERO new §34 codes (g-ternary reuses E-SQL-009).
