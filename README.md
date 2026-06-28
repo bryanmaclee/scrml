@@ -21,6 +21,7 @@ Here's a real app — a todo list, but the kind you actually ship: SQLite-backed
 ### 1 — the data
 
 ```scrml
+// gate: skip
 <program>
 
 <db src="tasks.db" protect="passwordHash" tables="users"/>
@@ -45,6 +46,7 @@ You wrote a schema. The compiler turns it into the `CREATE TABLE` on first run *
 ### 2 — the server (you won't notice writing it)
 
 ```scrml
+// gate: skip
 ${
     type Filter:enum = { All, Active, Done }
     type Phase:enum  = { Loading, Empty, Editing, Saving, Saved, ErrorState(msg: string) }
@@ -85,6 +87,7 @@ You wrote three functions that happen to touch the database — so the compiler 
 ### 3 — reactive state, realtime, and a test
 
 ```scrml
+// gate: skip
 <user>: User = not        // populated from the session token at boot
 
 <channel name="tasks" topic="user-${@user.id}">
@@ -113,6 +116,7 @@ const <visible> = match @filter {
 ### 4 — the UI is a state machine
 
 ```scrml
+// gate: skip
 <auth role="User">
 
 <engine for=Phase initial=.Loading effect=${

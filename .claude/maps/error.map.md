@@ -843,7 +843,9 @@ post-CE relocation). +2 NEW §34 codes. ZERO codegen change. ZERO new AST node s
   `<each>` row locals; TS runs post-CE and owns a COMPLETE resolution table. RELOCATED to type-system.ts:6240
   (the `resolveAtNameOnExprNode` / ident-walk site, ~line 6282). Exemptions: `@.` / `@.field` (each contextual
   sigil — E-SYNTAX-064 path), `@_internal` (underscore convention), `@TypeName` (declared type, typeRegistry),
-  `@fnName` (known fn). Message quotes the canonical `<name>` structural-decl form + `const <name> = expr`
+  `@fnName` (known fn), **`@session` (RESERVED compiler-provided ambient projection — S229 g-markup-session-read-undeclared,
+  `0df45d2e`; `RESERVED_AMBIENT_PROJECTION_NAMES={session}` in type-system.ts; legal ambient read in EVERY locus per the
+  §51.0.A engine-singleton precedent; a genuine `@typoCell` still fires)**. Message quotes the canonical `<name>` structural-decl form + `const <name> = expr`
   derived form and directs to SPEC §6.1.1/§6.2.
 
 **Related changes (no new §34 code):**
