@@ -202,12 +202,22 @@ interface IfOpts {
   /**
    * §59 (ss52) — NON-REACTIVE LOCAL map/set/ordered names, threaded through the
    * if CONDITION ctx + if/else BODY opts so a block-scoped local
-   * `m.insert(...)`/`m.size`/`s.has(k)` lowers (the reactive `@`-path's map/set
-   * names are NOT threaded here — a separate pre-existing control-flow gap).
+   * `m.insert(...)`/`m.size`/`s.has(k)` lowers.
    */
   localMapVarNames?: Set<string> | null;
   localSetVarNames?: Set<string> | null;
   localOrderedMapVarNames?: Set<string> | null;
+  /**
+   * §59 (g-reactive-map-set-control-flow) — REACTIVE `@`-cell value-native
+   * map/set/ordered-map names, threaded through the if CONDITION ctx + if/else
+   * BODY opts so a reactive `@m.insert(...)`/`@m.size`/`@s.has(k)`/`@m[k]` inside
+   * a control-flow construct lowers to the `_scrml_map_*` form (the same lowering
+   * top-level reactive already produces). The reactive twin of the ss52 local
+   * sets above — closes the pre-existing control-flow raw-emit gap ss52 filed.
+   */
+  mapVarNames?: Set<string> | null;
+  setVarNames?: Set<string> | null;
+  orderedMapVarNames?: Set<string> | null;
 }
 
 // §51.5 — Machine binding info for transition guard emission in rewriteBlockBody
@@ -328,10 +338,12 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
   const lines: string[] = [];
   const _ifExprCtx: EmitExprContext = { mode: opts.boundary === "server" ? "server" : "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null, serverFnNames: opts.serverFnNames ?? null, syncPeerCalls: opts.syncPeerCalls ?? null,
     // ss52 — NON-REACTIVE LOCAL map/set names so a condition `if (s.has(k))` /
-    // `if (m.size > 0)` on a pure-fn local lowers. The reactive `@`-path's
-    // map/set names are intentionally NOT added here (the if-condition has never
-    // carried them — a separate, pre-existing control-flow gap, left untouched).
-    localMapVarNames: opts.localMapVarNames ?? null, localSetVarNames: opts.localSetVarNames ?? null, localOrderedMapVarNames: opts.localOrderedMapVarNames ?? null };
+    // `if (m.size > 0)` on a pure-fn local lowers.
+    localMapVarNames: opts.localMapVarNames ?? null, localSetVarNames: opts.localSetVarNames ?? null, localOrderedMapVarNames: opts.localOrderedMapVarNames ?? null,
+    // g-reactive-map-set-control-flow — REACTIVE `@`-cell map/set names so a
+    // condition `if (@s.has(k))` / `if (@m.size > 0)` lowers to `_scrml_map_*`
+    // (the reactive twin of the local sets above; closes the ss52-filed gap).
+    mapVarNames: opts.mapVarNames ?? null, setVarNames: opts.setVarNames ?? null, orderedMapVarNames: opts.orderedMapVarNames ?? null };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
   lines.push(`if (${_ifCond}) {`);
 
@@ -376,11 +388,15 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     ...(opts.serverFnNames ? { serverFnNames: opts.serverFnNames } : {}),
     ...(opts.syncPeerCalls ? { syncPeerCalls: opts.syncPeerCalls } : {}),
     // ss52 — NON-REACTIVE LOCAL map/set names so a block-scoped local
-    // `m.insert(...)`/`m.size`/`m[k]` inside the if/else body lowers (the
-    // reactive `@`-path is a separate, pre-existing control-flow gap, untouched).
+    // `m.insert(...)`/`m.size`/`m[k]` inside the if/else body lowers.
     ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}),
     ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}),
     ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
+    // g-reactive-map-set-control-flow — REACTIVE `@`-cell map/set names so a
+    // reactive `@m.insert(...)`/`@m.size`/`@m[k]` inside the if/else body lowers.
+    ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}),
+    ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}),
+    ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}),
   };
 
   if (hasFragmentedLiftBody(consequent)) {
@@ -448,7 +464,11 @@ export function emitForStmt(
     syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
     // ss52 — NON-REACTIVE LOCAL map/set names so a `for (e of m.entries())`
     // iterable / C-style condition on a pure-fn local map/set lowers.
-    localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null },
+    localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null;
+    // g-reactive-map-set-control-flow — REACTIVE `@`-cell map/set names so a
+    // `for (e of @m.entries())` iterable / C-style condition / loop body on a
+    // reactive `@m`/`@s` lowers to `_scrml_map_*` (reactive twin of the local sets).
+    mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null },
 ): string {
   // S213 ss15 item 3 — activate the file's `<request>` id set for the loop's
   // lift bodies + iterable expr (Seam 2). File-global; nested same-set pushes
@@ -487,7 +507,7 @@ function _emitForStmtInner(
   // to the standard emission path.
   const _hoist = (_hoistMap && node.id != null) ? _hoistMap.get(node.id) : null;
   if (_hoist) {
-    return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? "_scrml_sql");
+    return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? "_scrml_sql", opts ?? undefined);
   }
 
   if (typeof iterable === "string") {
@@ -495,14 +515,14 @@ function _emitForStmtInner(
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
-      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null };
+      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
       const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitExprField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -541,7 +561,7 @@ function _emitForStmtInner(
     const renderFn = genVar("render_list");
     const createFnVar = genVar("create_item");
     const tmpContainerVar = genVar("tmp");
-    const _forExprCtx: EmitExprContext = { mode: "client", localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null };
+    const _forExprCtx: EmitExprContext = { mode: "client", localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
     const rewrittenIterable = emitExprField(node.iterExpr, iterable, _forExprCtx);
     const body: any[] = node.body ?? [];
 
@@ -624,7 +644,7 @@ function _emitForStmtInner(
   }
 
   // Non-reactive path — plain for loop
-  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null };
+  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
   lines.push(`for (const ${varName} of ${iterable}) {`);
 
@@ -636,7 +656,7 @@ function _emitForStmtInner(
       lines.push(`  ${liftCode}`);
     }
   } else {
-    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) } as any)) {
+    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
       lines.push(`  ${code}`);
     }
   }
@@ -733,7 +753,13 @@ function substituteHoistedSqlInBody(
  * string interpolation of user data — preserves §8.2 parameter invariant
  * via spread binding).
  */
-function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
+function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
+  // ss52 local + g-reactive-map-set-control-flow reactive — map/set/ordered names
+  // so a (local or `@`-cell) value-native map/set method inside a §8.10 batch-
+  // hoisted for-loop body / iterable lowers to `_scrml_map_*` instead of raw.
+  localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null;
+  mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null;
+}): string {
   // A5 — destructuring LHS support in the batch-hoisted for-stmt path.
   let loopVar: string;
   if (isDestructurePattern(node.variable)) {
@@ -746,7 +772,9 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
     const forOfMatch = iterable.match(/^\(\s*(?:(?:let|const|var)\s+)?(\w+)\s+of\s+(.*)\s*\)$/s);
     if (forOfMatch) iterable = forOfMatch[2].trim();
   }
-  const _ctx: EmitExprContext = { mode: "client" };
+  const _ctx: EmitExprContext = { mode: "client",
+    localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null,
+    mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
   iterable = emitExprField(node.iterExpr, iterable, _ctx);
 
   const keysVar = genVar("batch_keys");
@@ -811,7 +839,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
   const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], sourceRe, replacement);
 
   lines.push(`for (const ${loopVar} of ${iterable}) {`);
-  for (const code of emitLogicBody(rewrittenBody)) {
+  for (const code of emitLogicBody(rewrittenBody, { ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -837,11 +865,11 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
   // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -859,11 +887,11 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);

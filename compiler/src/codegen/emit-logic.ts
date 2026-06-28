@@ -2645,7 +2645,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
         ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
-        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
         ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
       } as any);
 
@@ -2681,7 +2681,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
         ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
-        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}),
       } as any);
 
     case "while-stmt":
@@ -2692,12 +2692,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);

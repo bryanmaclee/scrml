@@ -87,6 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `dca8bfe0` — chore(s228): WRAP — board HIGH 0/MED 7/LOW 10/Nom 7 · gate-tracking currency-pass · inversion-crux pushed→flogence-built-back — **pushed**
 - `6ac1f635` — chore(s227): WRAP — board sweep (HIGH 1->0, MED 11->8) · dpa-015 ratified · domino-1 wired · transcript-validation · 2 flogence threads — **pushed**
 - `cf1471dd` — chore(s226): WRAP — PA-continuity inversion ratified+operationalized · ss50 landed · landing-concurrency amendment — **pushed**
 - `352d90f6` — chore(s225): WRAP — ss43+ss49+ss52 landed · FBIP inc-2 ruled-(b) · dPA queue (7) drained+ratified — **pushed**
@@ -94,7 +95,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `7d8b527a` — chore(s223): wrap 6c — maps refresh to HEAD 6988c426 (S223 source changes: HAMT/auto-await/parse/endpoint/@apply) — **pushed**
 - `69cee28b` — chore(s222): wrap addendum — dpa-014 W4 chunk-model debate COMPLETE (advisory) — **pushed**
 - `f1607b97` — chore(s221): wrap — hand-off CLOSE + changelog S221 + delta-log [108] + 24 worktrees pruned — **pushed**
-- `cf9f1109` — chore(s220): wrap 6c — maps refresh to HEAD 852d6aa7 (full S220 surface) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
