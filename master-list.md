@@ -8,7 +8,7 @@
 
 ## §0 v0.2.0 migration status — LIVE DASHBOARD
 
-> **🔭 V1 REFRAMED — S230 (2026-06-29).** V1 is no longer "the TS compiler hardened" — it is **scrml-LANGUAGE 1.0**: the language split from the compiler (a partitioned spec + a **conformance suite** [codes + runtime] + **compilers-as-implementations** — TS = impl #1, native/Road-B = impl #2). This dissolves the native-cutover breaking-change (→ deliberate language-version events) and is the Road-B de-risking oracle. The v0.2.0 dashboard below is the **compiler-side** migration history; the **V1 definition + the Nominal triage** (N8/SSR → V1, N1 capability-vocab → V1, etc.) + the two V1 criteria live in `scrml-support/docs/deep-dives/language-compiler-split-2026-06-29.md` (the authority). **v0.8's old SSR-milestone identity DISSOLVED — V1 absorbed SSR.** See `docs/known-gaps.md` §4 for the per-Nominal V1-scoping dispositions.
+> **🔭 V1 REFRAMED — S230 (2026-06-29).** V1 is no longer "the TS compiler hardened" — it is **scrml-LANGUAGE 1.0**: the language split from the compiler (a partitioned spec + a **conformance suite** [codes + runtime] + **compilers-as-implementations** — TS = impl #1, native/Road-B = impl #2). This dissolves the native-cutover breaking-change (→ deliberate language-version events) and is the Road-B de-risking oracle. The v0.2.0 dashboard below is the **compiler-side** migration history; the **V1 definition + the Nominal triage** (N8/SSR → V1, N1 capability-vocab → V1, etc.) + the two V1 criteria live in `scrml-support/docs/deep-dives/language-compiler-split-2026-06-29.md` (the authority). **v0.8's old SSR-milestone identity DISSOLVED — V1 absorbed SSR.** See `docs/known-gaps.md` §4 for the per-Nominal V1-scoping dispositions. **S232 PROGRESS (2026-06-30):** the V1-security floor BUILT — capability-vocab SPEC §23.5 (the `capabilities=` authoring half) + the §14.8.9 protect-floor (server→client confidentiality redaction at EVERY compiler-emitted client-egress sink — server-fn/SSR/§61/channel/SSE); the 3 D3-suite-found bugs (`g-inline-value-match` · `g-nominal-foreign-forms` · `g-fn-shortform-arrow`) all RESOLVED; conformance corpus 51→69. Remaining V1: SSR (N8 → `g-tier1-ssr-prerender`) · D1/D2/D4 version-surface · conformance W4/W5 (native-era). See the changelog S232 block + `hand-off.md`.
 
 **Spec target:** ratified 2026-05-04 (S58 close); extended at S65 (L22 type-as-argument language primitive — debate-05 verdict + Path A architectural commit; not yet recorded in v0next-s56-deliberation-outcomes.md, queued with parseVariant dispatch). 22 architectural locks (L1-L22). 20 moves (M1-M20, M7+M21 dropped). SPEC.md authoritative engineering target.
 
@@ -89,6 +89,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `66a3e616` — chore(s231): WRAP — D3 conformance suite BUILT (51/gated/OQ1-resolved) + V1-scoping done + capability-vocab ratified — **LOCAL-ONLY**
 - `2559e20f` — chore(s230): WRAP — V1 reframed (language/compiler split) + dpa-017 §14.8.9 + @adv + Rosetta v0 — **pushed**
 - `19750f2b` — chore(s229): WRAP + release v0.7.1 — board HIGH 0/MED 6/LOW 9/Nom 7 — **pushed**
 - `dca8bfe0` — chore(s228): WRAP — board HIGH 0/MED 7/LOW 10/Nom 7 · gate-tracking currency-pass · inversion-crux pushed→flogence-built-back — **pushed**
@@ -96,7 +97,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `cf1471dd` — chore(s226): WRAP — PA-continuity inversion ratified+operationalized · ss50 landed · landing-concurrency amendment — **pushed**
 - `352d90f6` — chore(s225): WRAP — ss43+ss49+ss52 landed · FBIP inc-2 ruled-(b) · dPA queue (7) drained+ratified — **pushed**
 - `6ead4d7a` — chore(s224): wrap — Q-MATCH+Q-FIP ratified · 3-lane + Ryan adopter batches landed — **pushed**
-- `7d8b527a` — chore(s223): wrap 6c — maps refresh to HEAD 6988c426 (S223 source changes: HAMT/auto-await/parse/endpoint/@apply) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
