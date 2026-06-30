@@ -1127,12 +1127,20 @@ export function generateServerJs(
   //   _scrml_ws_handlers handler bodies (deferred per C18 SURVEY).
   function emitBroadcastInjection(channelName: string, indent: string): string[] {
     const topicExpr = channelTopicMap.get(channelName) ?? JSON.stringify(channelName);
+    // §14.8.9 — broadcast() is a compiler-emitted client-egress serializer: the
+    // published frame crosses the wire to every subscriber. Redact protected-
+    // origin columns at this sink (same treatment as the server-fn return),
+    // gated on `_protectActive` so a non-protect app emits byte-identically and
+    // `_scrml_protect_redact` is a runtime no-op on untagged data (no over-strip).
+    const _broadcastData = _protectActive
+      ? "_scrml_protect_redact(_scrml_data)"
+      : "_scrml_data";
     return [
       `${indent}// §38.6 broadcast/disconnect built-ins for channel "${channelName}"`,
       `${indent}const broadcast = (_scrml_data) => {`,
       `${indent}  const _scrml_srv = (typeof globalThis !== "undefined" && globalThis._scrml_active_server) || null;`,
       `${indent}  if (_scrml_srv && typeof _scrml_srv.publish === "function") {`,
-      `${indent}    _scrml_srv.publish(${topicExpr}, JSON.stringify(_scrml_data));`,
+      `${indent}    _scrml_srv.publish(${topicExpr}, JSON.stringify(${_broadcastData}));`,
       `${indent}  }`,
       `${indent}};`,
       `${indent}const disconnect = () => { /* §38.6: no-op from HTTP-routed server fn (no current client) */ };`,
@@ -1756,6 +1764,19 @@ export function generateServerJs(
         }
       }
 
+      // §14.8.9 — a `server function*` SSE generator is a compiler-emitted
+      // client-egress serializer: each yielded `data:` frame crosses the wire.
+      // Redact protected-origin columns at this sink (same treatment as the
+      // server-fn return), gated on `_protectActive` so a non-protect SSE app
+      // emits byte-identically and the redact is a runtime no-op on untagged
+      // data (no over-strip). `_scrml_val.data` is the `{ event, data }` shape;
+      // `_scrml_val` is the bare-value shape.
+      const _sseEventData = _protectActive
+        ? "_scrml_protect_redact(_scrml_val.data)"
+        : "_scrml_val.data";
+      const _sseBareData = _protectActive
+        ? "_scrml_protect_redact(_scrml_val)"
+        : "_scrml_val";
       lines.push(`        }`);
       lines.push(`        for await (const _scrml_val of _scrml_gen()) {`);
       lines.push(`          const _scrml_hasEvent = _scrml_val && typeof _scrml_val === 'object' && 'event' in _scrml_val && 'data' in _scrml_val;`);
@@ -1763,12 +1784,12 @@ export function generateServerJs(
       lines.push(`          if (_scrml_hasEvent) {`);
       lines.push(`            _scrml_chunk += \`event: \${_scrml_val.event}\\n\`;`);
       lines.push(`            if (_scrml_val.id != null) _scrml_chunk += \`id: \${_scrml_val.id}\\n\`;`);
-      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(_scrml_val.data)}\\n\\n\`;`);
+      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(${_sseEventData})}\\n\\n\`;`);
       lines.push(`          } else {`);
       lines.push(`            if (_scrml_val && typeof _scrml_val === 'object' && 'id' in _scrml_val) {`);
       lines.push(`              _scrml_chunk += \`id: \${_scrml_val.id}\\n\`;`);
       lines.push(`            }`);
-      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(_scrml_val)}\\n\\n\`;`);
+      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(${_sseBareData})}\\n\\n\`;`);
       lines.push(`          }`);
       lines.push(`          _scrml_ctrl.enqueue(_scrml_enc.encode(_scrml_chunk));`);
       lines.push(`        }`);

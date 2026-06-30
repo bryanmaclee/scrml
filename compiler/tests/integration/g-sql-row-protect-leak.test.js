@@ -68,6 +68,51 @@ ${serverBody}
 </program>`;
 }
 
+// A `<channel>` (§38) whose channel-owned server fn SELECTs the protected row
+// and reaches the `broadcast()` client-egress sink via `channelBody`.
+function protectChannelProgram(channelBody) {
+  return `<program>
+
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+  </schema>
+
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+      function noop() { return 1 }
+    }
+  </db>
+
+  <channel name="chat" topic="lobby">
+    \${
+      <messages> = []
+${channelBody}
+    }
+  </>
+
+  <div><p>hi</p></div>
+</program>`;
+}
+
+// A `server function*` (§37 SSE) whose generator SELECTs the protected row and
+// reaches the `data:` client-egress frame via `sseBody`.
+function protectSseProgram(sseBody) {
+  return `<program>
+
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+  </schema>
+
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+${sseBody}
+    }
+  </db>
+
+  <div><p>hi</p></div>
+</program>`;
+}
+
 // ---------------------------------------------------------------------------
 // LAYER 1 — the pure origin resolver
 // ---------------------------------------------------------------------------
@@ -327,5 +372,157 @@ describe("§14.8.9 raw-egress fail-closed — E-PROTECT-004", () => {
     ));
     const all = [...(result.warnings ?? []), ...(result.errors ?? [])];
     expect(all.some((d) => d.code === "E-PROTECT-004")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LAYER 3b — channel `broadcast()` (§38) + SSE `server function*` (§37) egress
+// sinks. These are ADDITIONAL compiler-emitted client-egress serializers; the
+// floor redacts at them identically to the server-fn return.
+// ---------------------------------------------------------------------------
+describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sink", () => {
+  test("broadcast(protectedRow) wraps the published frame with _scrml_protect_redact", () => {
+    const { serverJs, result } = compileSource(protectChannelProgram(
+      `      function pushUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        broadcast(u)\n      }`,
+    ));
+    // the SELECT is tagged at lowering
+    expect(serverJs).toContain('_scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, ["passwordHash"])');
+    // the broadcast built-in redacts at the publish sink (the wire frame)
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
+    // helper auto-injected via the on-use scan (finalEmitted.includes)
+    expect(serverJs).toContain("function _scrml_protect_redact(value)");
+    parseClean(serverJs);
+    // I-PROTECT-STRIP-001 names the stripped column
+    const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    const strip = allDiag.find((d) => d.code === "I-PROTECT-STRIP-001");
+    expect(strip).toBeDefined();
+    expect(strip.message).toContain("passwordHash");
+  });
+
+  test("reveal round-trip: broadcast(u.reveal(\"passwordHash\")) lowers to _scrml_protect_reveal", () => {
+    const { serverJs } = compileSource(protectChannelProgram(
+      `      function pushUser(id) {\n        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()\n        broadcast(u.reveal("passwordHash"))\n      }`,
+    ));
+    expect(serverJs).toContain("_scrml_protect_reveal(");
+    // still wrapped in the publish-sink redact (which honors the reveal list)
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
+    parseClean(serverJs);
+  });
+
+  test("a non-protect channel app is byte-unchanged at the publish sink (no redact wrap)", () => {
+    const src = `<program>
+  <schema>
+    ?{\`CREATE TABLE rooms (id INTEGER PRIMARY KEY, name TEXT)\`}
+  </schema>
+  <db src="app.db" tables="rooms">
+    \${ function noop() { return 1 } }
+  </db>
+  <channel name="chat" topic="lobby">
+    \${
+      <messages> = []
+      function pushRoom(id) {
+        let r = ?{\`SELECT * FROM rooms WHERE id = \${id}\`}.get()
+        broadcast(r)
+      }
+    }
+  </>
+  <div><p>hi</p></div>
+</program>`;
+    const { serverJs } = compileSource(src);
+    expect(serverJs).not.toContain("_scrml_protect");
+    // the publish sink is the plain pre-floor form — no redact wrap
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_data));");
+    parseClean(serverJs);
+  });
+});
+
+describe("§14.8.9 SSE server function* (§37) egress — strips at the data: frame", () => {
+  test("a generator yielding {event,data:protectedRows} redacts both frame shapes", () => {
+    const { serverJs, result } = compileSource(protectSseProgram(
+      `      server function* streamUsers() route="/users/stream" {\n        let u = ?{\`SELECT * FROM users\`}.all()\n        yield { event: "user", id: 1, data: u }\n      }`,
+    ));
+    // the SELECT is tagged at lowering
+    expect(serverJs).toContain('_scrml_protect_tag(await _scrml_sql`SELECT * FROM users`, ["passwordHash"])');
+    // BOTH SSE data: sinks (the {event,data} shape and the bare-value shape) redact
+    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val.data))}\\n\\n`");
+    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val))}\\n\\n`");
+    expect(serverJs).toContain("function _scrml_protect_redact(value)");
+    parseClean(serverJs);
+    const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
+    const strip = allDiag.find((d) => d.code === "I-PROTECT-STRIP-001");
+    expect(strip).toBeDefined();
+    expect(strip.message).toContain("passwordHash");
+  });
+
+  test("a non-protect SSE app is byte-unchanged at the data: frame (no redact wrap)", () => {
+    const src = `<program>
+  <schema>
+    ?{\`CREATE TABLE ticks (id INTEGER PRIMARY KEY, val INTEGER)\`}
+  </schema>
+  <db src="app.db" tables="ticks">
+    \${
+      server function* streamTicks() route="/ticks/stream" {
+        let rows = ?{\`SELECT * FROM ticks\`}.all()
+        yield { event: "tick", id: 1, data: rows }
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>`;
+    const { serverJs } = compileSource(src);
+    expect(serverJs).not.toContain("_scrml_protect");
+    // the data: frame is the plain pre-floor form — no redact wrap
+    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_val.data)}\\n\\n`");
+    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_val)}\\n\\n`");
+    parseClean(serverJs);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LAYER 2b — the SHIPPED runtime helper at the channel/SSE wire shapes. Proves
+// the EXACT bytes the published frame / SSE chunk carry strip the protected
+// column (and that the channel-cell-write `{__sync,__val:row}` lowering — which
+// routes through the SAME hardened `broadcast()` built-in — strips transitively
+// because redact recurses into nested object values).
+// ---------------------------------------------------------------------------
+describe("§14.8.9 channel/SSE runtime wire shapes — the published bytes are clean", () => {
+  test("broadcast(row): the JSON.stringify(redact(row)) wire frame omits the protected column", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "a", passwordHash: "SECRET" }, ["passwordHash"]);
+    const frame = JSON.stringify(_scrml_protect_redact(row));
+    expect(frame).not.toContain("SECRET");
+    expect(JSON.parse(frame)).toEqual({ id: 1, name: "a" });
+  });
+
+  test("channel-cell-write {__type:__sync,__key,__val:row} strips the row transitively (nested recursion)", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, name: "a", passwordHash: "SECRET" }, ["passwordHash"]);
+    const frame = JSON.stringify(_scrml_protect_redact({ __type: "__sync", __key: "m", __val: row }));
+    expect(frame).not.toContain("SECRET");
+    expect(JSON.parse(frame)).toEqual({ __type: "__sync", __key: "m", __val: { id: 1, name: "a" } });
+  });
+
+  test("SSE data: frame (an array of rows) strips each protected column", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const rows = _scrml_protect_tag([{ id: 1, passwordHash: "x" }, { id: 2, passwordHash: "y" }], ["passwordHash"]);
+    const frame = JSON.stringify(_scrml_protect_redact(rows));
+    expect(frame).not.toMatch(/"passwordHash"/);
+    expect(JSON.parse(frame)).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  test("reveal-stamped row at the broadcast sink is admitted (reveal round-trip)", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "SECRET" }, ["passwordHash"]);
+    const revealed = _scrml_protect_reveal(row, "passwordHash");
+    const frame = JSON.stringify(_scrml_protect_redact(revealed));
+    expect(JSON.parse(frame)).toEqual({ id: 1, passwordHash: "SECRET" });
+  });
+
+  test("untagged broadcast/SSE value passes through unchanged (no over-redaction)", () => {
+    const { _scrml_protect_redact } = loadHelper();
+    // a broadcast() of a non-protect computed literal — the runtime no-op property
+    expect(_scrml_protect_redact({ author: "a", body: "hi", ts: 7 })).toEqual({ author: "a", body: "hi", ts: 7 });
+    // an SSE of plain data
+    expect(_scrml_protect_redact([1, 2, 3])).toEqual([1, 2, 3]);
   });
 });
