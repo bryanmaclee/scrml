@@ -13187,7 +13187,7 @@ Server `!` functions serialize error values across the server/client boundary. T
 
 When a server `!` function fails:
 
-1. The server serializes the error variant as a tagged JSON object: `{ __variant: "VariantName", __data: { ... } }`.
+1. The server serializes the error variant as a tagged JSON object: `{ __scrml_error: true, type: "EnumType", variant: "VariantName", data: { ... } }` — the canonical `fail`-expression envelope (the shared emitter at `compiler/src/codegen/emit-logic.ts`); every reader keys on `.__scrml_error` (the `<errorBoundary>` gate, the CPS continuation, the client arm-dispatch) and reads `.variant` + `.data`. *(S232 currency fix — corrected from the stale `{ __variant, __data }`, a shape the implementation never emitted or read; `g-server-error-wire-spec-impl-divergence`. The §19.12 test-mode `{ __ok: false, __variant }` assertion shape at §19.12 is a SEPARATE test-harness representation, not this wire.)*
 2. The HTTP response carries an appropriate status code (see §19.9.2).
 3. The client CPS continuation deserializes the tagged object back into the error enum variant.
 4. The client code handles the error via match, `?`, `!{}`, or `<errorBoundary>`.
