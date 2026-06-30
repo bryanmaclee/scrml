@@ -1,0 +1,19 @@
+{
+  "id": "error-boundary-variant-renders",
+  "description": "errorBoundary §19.6.5 priority #1 — a caught error variant WITH a `renders` clause shows the variant's own markup, NOT the boundary fallback. loadItem(\"missing\") fails LoadError::NotFound(id) at mount; NotFound's `renders <div class=\"eb-notfound\">Item ${id} not found</>` wins and substitutes the id payload. Sibling content outside the boundary survives (§19.6.4). OQ1 NOTE: the whole-tree dom is OMITTED — impl#1 wraps the boundary subtree in a private container <div>; the impl-neutral contract is the anchored author-class assertions.",
+  "language-version": "1.0",
+  "spec": "§19.6.5",
+  "rationale": "§19.6.5 priority order: a variant's own `renders` clause takes precedence over the boundary's `fallback`. NotFound carries renders -> eb-notfound markup with the ${id} payload; eb-fallback never appears. §19.6.6: a `!`-call inside a boundary without explicit match/propagation does NOT trigger E-ERROR-002 (the boundary satisfies the handling requirement) -> the whole E-ERROR-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-notfound", "count": 1, "text": "Item missing not found" },
+      { "selector": ".eb-fallback", "count": 0 },
+      { "selector": ".eb-header", "text": "Header survives" },
+      { "selector": ".eb-footer", "text": "Footer survives" }
+    ]
+  }
+}

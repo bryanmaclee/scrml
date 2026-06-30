@@ -1,0 +1,6 @@
+<program>
+const Badge = <span class="badge" props={ label: string, status: string }>
+    ${label} ${status}
+</>
+<Badge label="Inbox" status="open" />
+</program>

@@ -1,0 +1,16 @@
+${
+    type Phase:enum = { Loading, Empty, Editing }
+}
+const loadTasks = () => [{ id: 1, text: "t1" }, { id: 2, text: "t2" }]
+<engine for=Phase initial=.Loading effect=${
+    @tasks = loadTasks()
+    @phase = @tasks.length == 0 ? .Empty : .Editing
+}>
+    <Loading rule=(.Empty | .Editing)>Loading…</>
+    <Empty rule=.Loading>None.</>
+    <Editing rule=.Loading>${@tasks.length} tasks</>
+</>
+<program>
+<p id="phase">Phase: ${@phase}</>
+<p id="count">Tasks: ${@tasks.length}</>
+</program>

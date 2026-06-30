@@ -1,0 +1,18 @@
+{
+  "id": "error-boundary-nested-inner-catches",
+  "description": "errorBoundary §19.6.4 nesting — an inner boundary catches its subtree's error BEFORE the outer boundary. loadItem(\"missing\") fails inside the inner boundary; the inner fallback (eb-inner-fallback) shows. The outer boundary's OTHER child (eb-outer-child) survives and the outer fallback (eb-outer-fallback) is NOT triggered.",
+  "language-version": "1.0",
+  "spec": "§19.6.4",
+  "rationale": "§19.6.4 / §19.6.6: nested boundaries follow inner-catches-first; an error caught by an inner boundary does NOT propagate to an outer boundary. So eb-inner-fallback shows, eb-outer-fallback does not, and the outer boundary's sibling content (eb-outer-child) is unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-inner-fallback", "count": 1, "text": "Inner fallback" },
+      { "selector": ".eb-outer-child", "count": 1, "text": "Outer child survives" },
+      { "selector": ".eb-outer-fallback", "count": 0 }
+    ]
+  }
+}

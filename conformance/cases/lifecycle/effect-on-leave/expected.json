@@ -1,0 +1,17 @@
+{
+  "id": "lifecycle-effect-on-leave",
+  "description": "State-child `effect=` attribute — single-target transition effect (§51.0.H Form 1). The .Closed state declares `effect=${ @opened = @opened + 1 }`; placed in the FROM state-child it fires when LEAVING .Closed. A click writes @door = Door.Open (a .Closed.rule=.Open-admitted transition); the effect runs once, @opened -> 1, engine -> Open.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "rationale": "§51.0.H Form 1: `effect=` on a single-target state-child runs when that transition fires; placed in the from state-child it is leave-semantics. Closed -> Open admitted by rule= -> the effect fires once -> @opened = 1.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#open" }],
+    "state": { "door": "Open", "opened": 1 },
+    "dom": "<button id=\"open\">Open</button><p id=\"opened\">Opened: 1</p>",
+    "domAnchored": [
+      { "selector": "#opened", "text": "Opened: 1" }
+    ]
+  }
+}

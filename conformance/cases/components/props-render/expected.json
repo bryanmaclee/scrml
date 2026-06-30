@@ -1,0 +1,15 @@
+{
+  "id": "components-props-render",
+  "description": "Basic component instance with props (§15). `const Badge = <span props={ label, status }>` instantiated as `<Badge label=\"Inbox\" status=\"open\"/>`; the by-value props are substituted into the body interpolation. OQ1 NOTE: whole-tree dom omitted — impl#1 leaks the prop values back as `label=`/`status=`/`data-scrml=` attributes on the root span (binding-anchor convention, impl-private); the anchored author-class assertion is impl-neutral.",
+  "language-version": "1.0",
+  "spec": "§15.13.2",
+  "rationale": "§15.13.2 a non-`bind` prop is captured by value at the call site and read inside the component body; `${label} ${status}` substitutes the two passed strings -> \"Inbox open\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".badge", "count": 1, "text": "Inbox open" }
+    ]
+  }
+}

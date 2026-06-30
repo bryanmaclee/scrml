@@ -1,0 +1,12 @@
+${
+    type Door:enum = { Closed, Open }
+    <opened> = 0
+}
+<engine for=Door initial=.Closed>
+    <Closed rule=.Open effect=${ @opened = @opened + 1 }></>
+    <Open rule=.Closed></>
+</>
+<program>
+<button id="open" onclick=${@door = Door.Open}>Open</>
+<p id="opened">Opened: ${@opened}</>
+</program>

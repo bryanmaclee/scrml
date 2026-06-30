@@ -1,0 +1,17 @@
+{
+  "id": "lifecycle-on-transition-from",
+  "description": "<onTransition from=.X> inverse directionality (§51.0.H Form 2). The handler is placed in the TARGET state-child (.Green) with `from=.Red`, so it fires on transitions arriving FROM .Red. A click writes @light = Light.Green (Red -> Green admitted by .Red.rule=.Green); the to-side handler fires once, @arrivals -> 1, engine -> Green.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "rationale": "§51.0.H `<onTransition from=.Variant>` placed in the target state-child fires on incoming transitions from that variant (to-side semantics, the inverse of the default leave-side `to=`). Red -> Green -> the from=.Red handler in .Green fires once -> @arrivals = 1.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "light": "Green", "arrivals": 1 },
+    "dom": "<button id=\"go\">Go</button><p id=\"arrivals\">Arrivals: 1</p>",
+    "domAnchored": [
+      { "selector": "#arrivals", "text": "Arrivals: 1" }
+    ]
+  }
+}

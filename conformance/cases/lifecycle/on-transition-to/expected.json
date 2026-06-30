@@ -1,0 +1,18 @@
+{
+  "id": "lifecycle-on-transition-to",
+  "description": "<onTransition to=.X> cross-state effect vs same-state divergence (§51.0.H Form 2 + §51.0.S.3 + §51.0.F.1). Two .Tick dispatches resolve .Playing (same-state): each RUNS its arm-body effect (@score++) but does NOT fire <onTransition to=.Title>. A .Quit dispatch resolves .Title (cross-state): it fires <onTransition> exactly once. Final: score 2 (both ticks' effects), transitions 1 (only the real transition), engine Title.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "rationale": "§51.0.S.3 a same-state arm still runs its body effect (score increments on each Tick), but §51.0.F.1 a self-target resolves to no real transition, so <onTransition> stays closed for the Ticks. §51.0.H Form 2 the cross-state .Quit (Playing -> Title) is a real transition and fires <onTransition to=.Title> once.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#tick" }, { "click": "#tick" }, { "click": "#quit" }],
+    "state": { "game": "Title", "score": 2, "transitions": 1 },
+    "dom": "<button id=\"tick\">Tick</button><button id=\"quit\">Quit</button><p id=\"score\">Score: 2</p><p id=\"trans\">Transitions: 1</p>",
+    "domAnchored": [
+      { "selector": "#score", "text": "Score: 2" },
+      { "selector": "#trans", "text": "Transitions: 1" }
+    ]
+  }
+}

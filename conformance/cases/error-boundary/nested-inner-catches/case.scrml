@@ -1,0 +1,17 @@
+type LoadError:enum = {
+    NotFound(id: string)
+}
+
+function loadItem(id: string)! LoadError {
+    if (id == "missing") fail LoadError::NotFound(id)
+    return id
+}
+
+<page>
+    <errorBoundary fallback={<div class="eb-outer-fallback">Outer fallback</>}>
+        <h2 class="eb-outer-child">Outer child survives</>
+        <errorBoundary fallback={<div class="eb-inner-fallback">Inner fallback</>}>
+            ${loadItem("missing")}
+        </>
+    </>
+</page>

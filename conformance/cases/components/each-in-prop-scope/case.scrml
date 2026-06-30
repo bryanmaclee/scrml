@@ -1,0 +1,14 @@
+<program>
+type Todo:struct = { id: string, name: string }
+const TodoList = <ul id="list" props={ items: Todo[] }>
+  <each in=items key=@.id>
+    <li class="row">${@.name}</li>
+  </each>
+</ul>
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+function addGamma() {
+    @todos = [...@todos, { id: "3", name: "gamma" }]
+}
+<button id="add" onclick=addGamma()>Add</>
+<TodoList items=@todos />
+</program>

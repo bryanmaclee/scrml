@@ -1,0 +1,16 @@
+{
+  "id": "components-ambient-engine-cell",
+  "description": "A component ambient-reading an engine cell (§15.13.4 + §15.13.5). The Phase engine's auto-derived @phase cell (§51.0.C) is read directly inside the StatePill component body (enclosing-scope @var). A click on #go advances the engine .Idle -> .Active; the component re-renders to show Active. §15.13.5: a component MAY read an engine's variant value (value-passing), the engine singleton lives outside the component.",
+  "language-version": "1.0",
+  "spec": "§15.13.4",
+  "rationale": "§15.13.4 a component establishes a subscriber on every enclosing-scope @var it references; @phase is the engine's auto-derived cell, so when the engine transitions the StatePill re-renders. §15.13.5 keeps the engine a singleton outside the (multi-instance) component while the component reads its variant value.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "phase": "Active" },
+    "domAnchored": [
+      { "selector": ".pill", "count": 1, "text": "Active" }
+    ]
+  }
+}

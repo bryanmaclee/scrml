@@ -1,0 +1,17 @@
+{
+  "id": "lifecycle-boot-effect",
+  "description": "Engine opener `effect=` — boot-only init effect (§51.0.H Form 3, S148 Insight 33). The effect runs exactly ONCE at module-init as the implicit init->initial= edge: it loads @tasks (2 items) then writes @phase = .Editing (tasks present), a cross-variant write statically checked against .Loading.rule. No input — the boot/hydration shape. OQ1 NOTE: whole-tree dom omitted — the .Editing state-child body renders into an impl-private engine-mount <div>; the author-anchored #phase + #count interpolations are impl-neutral.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "rationale": "§51.0.H Form 3: opener effect= is the effect of the implicit init->initial= transition, firing once at construction. Here it loads @tasks and performs a cross-variant write (.Loading -> .Editing) that is in .Loading.rule, so the engine boots straight past .Loading into .Editing with @tasks populated.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "phase": "Editing", "tasks": [{ "id": 1, "text": "t1" }, { "id": 2, "text": "t2" }] },
+    "domAnchored": [
+      { "selector": "#phase", "text": "Phase: Editing" },
+      { "selector": "#count", "text": "Tasks: 2" }
+    ]
+  }
+}

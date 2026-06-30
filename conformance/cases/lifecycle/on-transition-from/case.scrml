@@ -1,0 +1,14 @@
+${
+    type Light:enum = { Red, Green }
+    <arrivals> = 0
+}
+<engine for=Light initial=.Red>
+    <Red rule=.Green></>
+    <Green rule=.Red>
+        <onTransition from=.Red>${ @arrivals = @arrivals + 1 }</>
+    </>
+</>
+<program>
+<button id="go" onclick=${@light = Light.Green}>Go</>
+<p id="arrivals">Arrivals: ${@arrivals}</>
+</program>

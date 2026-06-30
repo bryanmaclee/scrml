@@ -1,0 +1,17 @@
+{
+  "id": "components-multi-instance",
+  "description": "Component multi-instance rendering (§15.13.5). The same `Badge` component is instantiated twice with distinct `label` props; each <Badge/> use-site renders its own instance carrying its own prop value. Two .badge spans: alpha, beta.",
+  "language-version": "1.0",
+  "spec": "§15.13.5",
+  "rationale": "§15.13.5 a component definition is a MULTI-INSTANCE vehicle: each <Badge/> tag instantiates a fresh component with its own props. Two instances -> two .badge nodes, each rendering its own label (alpha, beta). 'If you want many of them, use a component.'",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".badge", "count": 2 },
+      { "selector": ".badge:first-of-type", "text": "alpha" },
+      { "selector": ".badge:last-of-type", "text": "beta" }
+    ]
+  }
+}

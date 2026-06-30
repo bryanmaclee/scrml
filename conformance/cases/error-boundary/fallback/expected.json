@@ -1,0 +1,19 @@
+{
+  "id": "error-boundary-fallback",
+  "description": "errorBoundary §19.6.5 priority #2 — a caught error variant WITHOUT a `renders` clause falls through to the boundary's `fallback=` markup. loadItem(\"slow\") fails LoadError::Timeout at mount; Timeout has no renders, so eb-fallback shows. The variant-renders markup (eb-notfound) never appears. Siblings survive (§19.6.4).",
+  "language-version": "1.0",
+  "spec": "§19.6.3",
+  "rationale": "§19.6.3 item 2 / §19.6.5 priority #2: when the failing variant has no `renders` clause and the boundary has a `fallback`, the fallback markup is displayed. Timeout (no renders) -> eb-fallback. The fallback being present is exactly what keeps E-ERROR-005 silent (the §19.6.6 exhaustiveness check is satisfied).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-fallback", "count": 1, "text": "Boundary fallback shown" },
+      { "selector": ".eb-notfound", "count": 0 },
+      { "selector": ".eb-header", "text": "Header survives" },
+      { "selector": ".eb-footer", "text": "Footer survives" }
+    ]
+  }
+}

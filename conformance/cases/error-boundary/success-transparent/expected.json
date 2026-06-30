@@ -1,0 +1,18 @@
+{
+  "id": "error-boundary-success-transparent",
+  "description": "errorBoundary §19.6 — the boundary is transparent on success. loadItem(\"report\") returns its value (no fail), so the boundary renders its subtree normally; neither the variant `renders` markup nor the `fallback` appears. Establishes the no-error baseline against which variant-renders / fallback diverge.",
+  "language-version": "1.0",
+  "spec": "§19.6.3",
+  "rationale": "§19.6.3 the fallback/renders machinery engages ONLY when a `!`-call produces an error variant. On the success path the boundary is a transparent pass-through: the subtree (eb-ok) renders, eb-fallback + eb-notfound are absent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-ok", "count": 1, "text": "Loaded report" },
+      { "selector": ".eb-fallback", "count": 0 },
+      { "selector": ".eb-notfound", "count": 0 }
+    ]
+  }
+}

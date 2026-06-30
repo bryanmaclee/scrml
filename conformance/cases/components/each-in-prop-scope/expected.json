@@ -1,0 +1,18 @@
+{
+  "id": "components-each-in-prop-scope",
+  "description": "<each> over a typed component prop, with prop-cell reactivity (§15.13.4 / §42). TodoList iterates its `items: Todo[]` prop via <each in=items key=@.id>. It mounts with 2 rows (alpha, beta); a click on #add appends gamma to the caller's @todos cell, and the component's <each> re-renders to 3 rows in the SAME reactive flush. Regression-lifted from component-each-in-prop-scope.browser.test.js.",
+  "language-version": "1.0",
+  "spec": "§15.13.4",
+  "rationale": "§15.13.4 a component subscribes to the @var references it contains; the <each> over the `items` prop is driven by the caller's reactive @todos cell, so a write to @todos re-renders the component list. §42 keyed <each> reconciles to the new 3-item list. alpha, beta, +gamma.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#add" }],
+    "state": { "todos": [{ "id": "1", "name": "alpha" }, { "id": "2", "name": "beta" }, { "id": "3", "name": "gamma" }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 3 },
+      { "selector": "#list li:first-child", "text": "alpha" },
+      { "selector": "#list li:last-child", "text": "gamma" }
+    ]
+  }
+}

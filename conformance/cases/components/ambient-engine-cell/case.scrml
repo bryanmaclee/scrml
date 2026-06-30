@@ -1,0 +1,14 @@
+${
+    type Phase:enum = { Idle, Active }
+}
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Active></>
+    <Active rule=.Idle></>
+</>
+${
+    const StatePill = <span class="pill">${@phase}</>
+}
+<program>
+<button id="go" onclick=${@phase = Phase.Active}>Go</>
+<StatePill/>
+</program>

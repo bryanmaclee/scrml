@@ -1,0 +1,20 @@
+${
+    type Game:enum = { Title, Playing }
+    type GameMsg:enum = { Tick, Quit }
+    <score> = 0
+    <transitions> = 0
+}
+<engine for=Game initial=.Playing accepts=GameMsg>
+    <Title rule=.Playing></>
+    <Playing rule=(.Title | .Playing)>
+        | .Tick :> { @score = @score + 1; .Playing }
+        | .Quit :> .Title
+        <onTransition to=.Title>${ @transitions = @transitions + 1 }</>
+    </>
+</>
+<program>
+<button id="tick" onclick=@game.advance(.Tick)>Tick</>
+<button id="quit" onclick=@game.advance(.Quit)>Quit</>
+<p id="score">Score: ${@score}</>
+<p id="trans">Transitions: ${@transitions}</>
+</program>
