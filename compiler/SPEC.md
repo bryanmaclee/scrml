@@ -8110,9 +8110,12 @@ ordinary user type (§14.3) that crosses files like any other (import/export). S
 #### 14.8.9 Server→client confidentiality — protected-column egress redaction
 
 **Added:** 2026-06-28 (S230) — ratifies the `g-sql-row-protect-leak` return-boundary contract
-(dPA dpa-017, HYBRID verdict; design-insight landed). This subsection is **Nominal /
-spec-ahead**: the contract is normative; the floor build (the descriptor + the egress strip)
-flips this banner when it lands.
+(dPA dpa-017, HYBRID verdict; design-insight landed). **Implemented** 2026-06-30 (S232,
+`g-sql-row-protect-leak`): the structural-redaction floor is live — the query-lowering origin
+descriptor (`_scrml_protect_tag`), the single-sink egress strip (`_scrml_protect_redact` at every
+compiler-emitted server-fn response + SSR `/__serverLoad`), field-level `reveal` declassification
+(`_scrml_protect_reveal`), the dynamic-SQL strip-all, and the `E-PROTECT-004` raw-egress
+fail-closed gate all enforce this contract; `E-PROTECT-004` and `I-PROTECT-STRIP-001` fire.
 
 §11.3 (`protect=`) and §14.8.4 (full/client view selection) keep a protected column off the
 *client-visible generated type*. They do **not** govern what a **server function RETURNS across

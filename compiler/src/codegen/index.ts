@@ -868,7 +868,9 @@ export function runCG(input: CgInput): CgOutput {
     // root. null for legacy single-file callers (handled verbatim downstream).
     (fileAST as any)._outputBaseDir = cgOutputBaseDir;
     let serverJs: string | null = codegenStage("emit-server", () =>
-      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode)
+      // §14.8.9 — thread the PA stage's ProtectAnalysis so emit-server can apply
+      // protected-column egress redaction (server-fn response + SSR /__serverLoad).
+      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode, protectAnalysis)
     ) || null;
 
     // ---------------------------------------------------------------------------

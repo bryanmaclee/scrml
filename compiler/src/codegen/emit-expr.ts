@@ -1912,6 +1912,27 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     }
   }
 
+  // §14.8.9 — `reveal("col")` field-level declassification (the SOLE admit path
+  // past the protected-column egress sink). `<value>.reveal("col")` lowers to
+  // the server runtime `_scrml_protect_reveal(<value>, "col")`, which stamps the
+  // named column's provenance descriptor as declassified-at-this-value so the
+  // egress serializer admits it. Greppable in source AND emitted handler.
+  // Server-only (the descriptor + the sink live server-side); a `reveal` written
+  // in client context falls through to ordinary call emission (a no-op there).
+  if (
+    ctx.mode === "server" &&
+    node.callee.kind === "member" &&
+    !node.callee.optional &&
+    node.callee.property === "reveal" &&
+    node.args.length === 1 &&
+    node.args[0] && node.args[0].kind === "lit" &&
+    (node.args[0] as LitExpr).litType === "string"
+  ) {
+    const obj = emitExpr(node.callee.object as ExprNode, ctx);
+    const col = JSON.stringify((node.args[0] as LitExpr).value);
+    return `_scrml_protect_reveal(${obj}, ${col})`;
+  }
+
   // §59.12 (D4) — SET METHOD interception. A set is a map `[K: bool]` (a set
   // cell is ALSO in `mapVarNames`), so the SHARED methods `.has` / `.remove` and
   // the `.size` member already lower via the `_scrml_map_*` surface. This block

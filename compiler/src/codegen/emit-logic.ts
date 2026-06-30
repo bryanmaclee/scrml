@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
-import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate } from "./rewrite.js";
+import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
@@ -3006,10 +3006,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
 
         // Branch A: SQL has ${} params — use tagged template form.
+        // §14.8.9 — tag the SELECT row result with the protected-origin
+        // descriptor (no-op when protect inactive / no protected column).
         if (params.length > 0) {
           const tagged = taggedFromParams();
           if (method === "get" || method === "first") {
-            return `(await ${tagged})[0] ?? null;`;
+            return protectTagSqlResult(`(await ${tagged})[0] ?? null`, rawQuery) + ";";
+          }
+          if (method === "all") {
+            return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
           }
           return `await ${tagged};`;
         }
@@ -3019,7 +3024,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
           if (method === "get" || method === "first") {
-            return `(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null;`;
+            return protectTagSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery) + ";";
+          }
+          if (method === "all") {
+            return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
           }
           return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
         }
@@ -3027,7 +3035,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
         if (method === "get" || method === "first") {
-          return `(await ${taggedNoParams})[0] ?? null;`;
+          return protectTagSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery) + ";";
+        }
+        if (method === "all") {
+          return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
         }
         return `await ${taggedNoParams};`;
       }

@@ -5,7 +5,7 @@ import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collec
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
@@ -18,6 +18,8 @@ import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames } from "./scheduling.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
+// §14.8.9 — protected-column egress redaction (server→client confidentiality).
+import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -896,6 +898,7 @@ export function generateServerJs(
   batchPlan?: any,
   batchPlannerErrors?: Array<{ code: string; message: string; span?: any }>,
   modeLegacy?: "browser" | "library",
+  protectAnalysisLegacy?: unknown,
 ): string {
   // Support both new (ctx) and legacy (fileAST, routeMap, errors, authMW, mwConfig) signatures
   let fileAST: any;
@@ -922,6 +925,50 @@ export function generateServerJs(
   const filePath: string = fileAST.filePath;
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
 
+  // §14.8.9 — protected-column egress redaction context. Built from the PA
+  // stage's ProtectAnalysis (threaded via the new ctx field or the trailing
+  // positional). `_protectActive` is the master gate: when the app declares NO
+  // `protect=` field, every redaction site below is a no-op and the server
+  // bundle is byte-identical to the pre-floor emission (zero overhead).
+  const _protectAnalysis: unknown =
+    (ctxForCache as { protectAnalysis?: unknown } | null)?.protectAnalysis ?? protectAnalysisLegacy ?? null;
+  const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
+  const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
+
+  // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
+  // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
+  // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
+  // be guaranteed. The compiler never silently ships a protected column through
+  // a path it cannot redact. (Gated on protect-active; a `reveal` declassifies.)
+  if (_protectActive) {
+    const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
+    if (_src) {
+      const _seenEProtect = new Set<string>();
+      for (const fn of fnNodes) {
+        const _sp = (fn as { span?: { start?: number; end?: number } }).span;
+        if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
+        const _fnSrc = _src.slice(_sp.start, _sp.end);
+        const _leak = detectProtectedRawEgress(_fnSrc, _protectCtx);
+        if (_leak) {
+          const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
+          const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+          if (_seenEProtect.has(_dedupKey)) continue;
+          _seenEProtect.add(_dedupKey);
+          errors.push(new CGError(
+            "E-PROTECT-004",
+            `E-PROTECT-004: server function \`${_fnName}\` selects a protected (\`protect=\`) column in \`${_leak.query}\` ` +
+            `and reaches ${_leak.egressKind} — an egress the compiler cannot redact, so a protected column cannot be ` +
+            `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
+            `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
+            `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
+            (_sp as any),
+            "error",
+          ));
+        }
+      }
+    }
+  }
+
   // §12.6 (Library-mode emission) — effective compile mode. Read from the
   // ctx when the new signature is used, else the trailing legacy positional
   // param; defaults to "browser" so every legacy positional call site (and all
@@ -936,6 +983,12 @@ export function generateServerJs(
   const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, _scrmlVariantCollisions);
+
+  // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
+  // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released
+  // alongside the variant registry at the bottom of this function. `null` when
+  // protect is inactive (no `protect=` field) — a true no-op.
+  setProtectContextForRewriter(_protectActive ? _protectCtx : null);
 
   // §8.9.2 / §19.10.5: determine whether a handler receives an implicit
   // per-handler transaction envelope. Applies iff:
@@ -2124,9 +2177,14 @@ export function generateServerJs(
       // absence, and should not be encoded as such.
       const _retAnnotCsrf = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
       const _wireWrapCsrf = returnTypeAllowsAbsence(_retAnnotCsrf);
+      // §14.8.9 — redact protected-origin columns at the egress sink BEFORE the
+      // §57 wire envelope. `_scrml_result` is THIS route's client-facing result
+      // (a peer-helper's internal return is a separate `async function` whose
+      // returns are NOT redacted — server-internal data flow keeps the column).
+      const _resultBaseCsrf = _protectActive ? "_scrml_protect_redact(_scrml_result)" : "_scrml_result";
       const _resultExprCsrf = _wireWrapCsrf
-        ? "_scrml_wire_encode(_scrml_result)"
-        : "_scrml_result ?? null";
+        ? `_scrml_wire_encode(${_resultBaseCsrf})`
+        : `${_resultBaseCsrf} ?? null`;
       // A9 Ext 5: store the success result under the idempotency key so a
       // retry returns the same payload without re-executing the body.
       if (_ext5Dedup) {
@@ -2248,7 +2306,13 @@ export function generateServerJs(
       // A9 Ext 5: when dedup is active, wrap body in an inner async IIFE so we
       // can capture the return value and store it under the idempotency key
       // before sending the response.
-      if (_ext5DedupNonCsrf) {
+      // §14.8.9: ALSO wrap when protect is active (and Ext5 isn't already
+      // wrapping) so the body's client-facing return is captured into
+      // `_scrml_result` for the egress redact below. This is the COMMON
+      // protect-bearing read path (protect= auto-injects auth → non-CSRF; a
+      // simple read fn is non-CPS/non-Ext5).
+      const _wrapResultNonCsrf = _ext5DedupNonCsrf || _protectActive;
+      if (_wrapResultNonCsrf) {
         lines.push(`  const _scrml_result = await (async () => {`);
       }
 
@@ -2311,6 +2375,15 @@ export function generateServerJs(
       // Drain the crossing-shadow guard's narrow sink into the live error stream.
       for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
+      // §14.8.9 — protect-only raw path (protect active, no Ext5): close the
+      // capture IIFE and return the REDACTED value. This handler returns a raw
+      // value (the pre-floor behavior); the redact strips protected-origin
+      // columns by descriptor before the value crosses to the client.
+      if (_protectActive && !_ext5DedupNonCsrf) {
+        lines.push(`  })();`);
+        lines.push(`  return _scrml_protect_redact(_scrml_result);`);
+      }
+
       // A9 Ext 5: close the inner IIFE, store the result, return as Response.
       if (_ext5DedupNonCsrf) {
         // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap
@@ -2321,9 +2394,12 @@ export function generateServerJs(
         // precedent at line ~1296.
         const _retAnnotNonCsrf = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
         const _wireWrapNonCsrf = returnTypeAllowsAbsence(_retAnnotNonCsrf);
+        // §14.8.9 — redact protected-origin columns at the egress sink (see the
+        // CSRF-path note above for why this is client-facing-only).
+        const _resultBaseNonCsrf = _protectActive ? "_scrml_protect_redact(_scrml_result)" : "_scrml_result";
         const _resultExprNonCsrf = _wireWrapNonCsrf
-          ? "_scrml_wire_encode(_scrml_result)"
-          : "_scrml_result ?? null";
+          ? `_scrml_wire_encode(${_resultBaseNonCsrf})`
+          : `${_resultBaseNonCsrf} ?? null`;
         lines.push(`  })();`);
         lines.push(`  // A9 Ext 5: store success response under idempotency key`);
         lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprNonCsrf});`);
@@ -2427,7 +2503,13 @@ export function generateServerJs(
         return [`// §61.10 multi-statement bare body not lowered — see E-ENDPOINT-MULTI-STATEMENT-ARM.`];
       }
       out.push(`const _scrml_result = await (${expr});`);
-      out.push(`return new Response(JSON.stringify(_scrml_result), {`);
+      // §14.8.9 — the §61 `<endpoint>` JSON envelope is a client egress; redact
+      // at the sink (the arm value's `?{}` was protect-tagged at lowering).
+      if (_protectActive) {
+        out.push(`return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result)), {`);
+      } else {
+        out.push(`return new Response(JSON.stringify(_scrml_result), {`);
+      }
       out.push(`  status: 200,`);
       out.push(`  headers: { "Content-Type": "application/json" },`);
       out.push(`});`);
@@ -2746,8 +2828,19 @@ export function generateServerJs(
     // recogniser only accepts an opener `table=STRING`; there is no bound param.)
     lines.push(`// --- §52.6.1 server-authority load route for < ${varName} > (SELECT * FROM ${table}) ---`);
     lines.push(`async function ${slHandler}(_scrml_req) {`);
-    lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
-    lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
+    // §14.8.9 / §52.8 — the SSR `/__serverLoad` prerender payload is a CLIENT
+    // egress and SHALL apply the same protected-column redaction (else a
+    // protected column ships in the first-paint payload, the W-AUTH-002 leak).
+    // This `SELECT * FROM <table>` is hand-emitted (not via rewriteSqlRefs), so
+    // tag `_scrml_rows` inline with the table's protected columns, then redact.
+    const _slProtCols = _protectActive ? _protectCtx.protectedByTable.get(table) : undefined;
+    if (_slProtCols && _slProtCols.size > 0) {
+      lines.push(`  const _scrml_rows = _scrml_protect_tag(await _scrml_sql\`SELECT * FROM ${table}\`, ${JSON.stringify([..._slProtCols])});`);
+      lines.push(`  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_rows)), {`);
+    } else {
+      lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
+      lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
+    }
     lines.push(`    status: 200,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
     lines.push(`  });`);
@@ -2786,7 +2879,14 @@ export function generateServerJs(
     // `(await _scrml_sql`…`)[0] ?? null` for `.get()`, `await _scrml_sql`…`` for
     // `.all()`); do NOT double-await.
     lines.push(`  const _scrml_result = ${sqlExpr};`);
-    lines.push(`  return new Response(JSON.stringify(_scrml_result), {`);
+    // §14.8.9 — SSR `/__serverLoad` Pattern-C payload is a client egress. The
+    // `?{}` was lowered through rewriteSqlRefs (protect-tagged when it carries a
+    // protected column); redact at the sink so the descriptor is honored.
+    if (_protectActive) {
+      lines.push(`  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result)), {`);
+    } else {
+      lines.push(`  return new Response(JSON.stringify(_scrml_result), {`);
+    }
     lines.push(`    status: 200,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
     lines.push(`  });`);
@@ -3051,6 +3151,17 @@ export function generateServerJs(
     }
   }
 
+  // §14.8.9 — protected-column egress redaction helper inlining. The tag/redact/
+  // reveal calls emitted above (SQL-lowering tag, sink redact, reveal lowering)
+  // reference `_scrml_protect_tag` / `_scrml_protect_redact` / `_scrml_protect_reveal`.
+  // Inline the single helper block at the post-header boundary so the functions
+  // are hoisted above every route that references them. Server-only — the
+  // descriptor + the redaction never reach client.js. Gated purely on the
+  // emitted call (a non-protect app emits none of these and is byte-unchanged).
+  if (finalEmitted.includes("_scrml_protect_")) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_PROTECT_HELPER);
+  }
+
   // §20.6 — log() server helper inlining. A SERVER-side log() lowers to a
   // `_scrml_log(side, loc, ...args)` call (the client runtime is never
   // imported here). Inline the helper at the post-header boundary so it is
@@ -3187,6 +3298,30 @@ export function generateServerJs(
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + declBlock + finalEmitted.slice(headerEndIdx);
     }
   }
+
+  // §14.8.9 — drain the protected-column strip records the SQL-lowering pass
+  // collected, and surface one deduped `I-PROTECT-STRIP-001` (Info) per query so
+  // the redaction is never silent: the dev sees exactly which protected columns
+  // the egress floor removed. A `"*"` record is the wholesale strip of an
+  // unresolvable dynamic-SQL row. Routed into the `errors` stream with severity
+  // "info" — api.js partitions W-/I- info into result.warnings (non-fatal).
+  if (_protectActive) {
+    for (const info of drainProtectInfosFromRewriter()) {
+      const _what = info.cols === "*"
+        ? "ALL columns (the query's column origins are not statically resolvable — fail-closed wholesale strip)"
+        : `protected column(s) ${info.cols.map((c) => `\`${c}\``).join(", ")}`;
+      errors.push(new CGError(
+        "I-PROTECT-STRIP-001",
+        `I-PROTECT-STRIP-001: the egress floor strips ${_what} from the client response of \`${info.sql}\` ` +
+        `(§14.8.9 — a \`protect=\` column never crosses the wire unredacted). To send a protected column ` +
+        `deliberately, declassify it at the value with \`reveal("col")\`; to silence this, project the column out of the SELECT.`,
+        { file: filePath, start: 0, end: 0 } as any,
+        "info",
+      ));
+    }
+  }
+  // §14.8.9 — release the protect context (mirrors the variant-fields release).
+  setProtectContextForRewriter(null);
 
   // S95 Bug 2 — release the per-file variant-fields registry from the rewriter.
   // generateClientJs (which runs after generateServerJs per codegen/index.ts)

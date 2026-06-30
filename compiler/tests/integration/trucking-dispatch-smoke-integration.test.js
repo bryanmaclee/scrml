@@ -352,6 +352,17 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // "no UNEXPECTED codes" inverse). The aggregate total falls 92 -> 73.
   const EXPECTED_BASELINE = {
     "I-AUTH-REDIRECT-UNRESOLVED": 1,
+    // §14.8.9 protect-egress floor (g-sql-row-protect-leak, 2026-06-28): the
+    // structural-redaction floor strips a `protect=` column from any server
+    // function's CLIENT response by construction. The trucking corpus's auth
+    // flow runs `SELECT id, email, password_hash, role FROM users …` server-side
+    // (password verification), and that row reaches a client-facing egress in
+    // TWO route bundles (emitPerRoute) — so `password_hash` is stripped at egress
+    // and the Info fires twice (deduped per-bundle). NOT a leak — the floor is
+    // doing its job; the dev is informed the protected column is removed (use
+    // `reveal("password_hash")` to send it deliberately, or project it out).
+    // Aggregate 40 -> 42.
+    "I-PROTECT-STRIP-001": 2,
     "W-ATTR-001": 20,
     // ss19 #6/#7 (auth-precedence-2026-06-25): W-AUTH-001 20 -> 0, REMOVED.
     // Every protect= page in this corpus declares an EXPLICIT `<page auth=...>`
