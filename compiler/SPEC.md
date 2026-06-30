@@ -17643,6 +17643,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-FN-008 | §48.5.2 | `lift` inside `fn` body targets a `~` accumulator outside the `fn` boundary | Error |
 | E-FN-009 | §48.5.4 | Reactive `@variable` captured as live subscription inside `fn` body | Error |
 | W-FN-001 | §48.3.2 | `asIs`-typed value in DOM-mutation position inside `fn` body (probable violation) | Warning |
+| E-FN-ARROW-BODY | §48.2.1 | The `fn` keyword is followed by a parenthesized param list and an arrow `=>` body (e.g. `arr.map(fn(n) => n * 2)`). This mixes the two canonical anonymous-callable forms — the BLOCK-body anonymous `fn` (`fn(args) { return expr }`, §48.2.1) and the plain inline lambda (`args => expr`) — and is NOT a sanctioned scrml form. Pre-fix the shape fell through the codegen `fn`→`function` string-rewrite and emitted invalid JS `function(args) => …`, mis-framed as E-CODEGEN-INVALID-JS. Resolution: use `args => expr` for an inline lambda, or `fn(args) { return expr }` for a named-style anonymous function. Detected at parse (the acorn-rejection path — `detectFnKeywordArrowBody`, `compiler/src/expression-parser.ts`; surfaced via `fnArrowDiagnostic` in `compiler/src/ast-builder.js`). (Added 2026-06-30 — g-fn-shortform-arrow-reject; ruling A — the form is not sanctioned.) | Error |
 | E-LOOP-001 | §49.9 | `break` outside any loop | Error |
 | E-LOOP-002 | §49.9 | `continue` outside any loop | Error |
 | E-LOOP-003 | §49.9 | `break label` — label not found or not a loop | Error |

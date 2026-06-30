@@ -311,6 +311,19 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
         node.span,
       ));
     }
+    // g-fn-shortform-arrow-callback-invalid-js: `fn(args) => expr` (the `fn`
+    // keyword + an arrow body) is not a sanctioned scrml form; acorn rejected it
+    // and the expression fell back to a ParseError escape-hatch whose blind
+    // `\bfn\b`->`function` rewrite would emit `function(args) => …` (invalid JS,
+    // mis-framed as E-CODEGEN-INVALID-JS "compiler defect"). Surface a clean
+    // E-FN-ARROW-BODY syntax error that steers to the two valid forms.
+    if (errors && node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.fnArrowDiagnostic) {
+      errors.push(new TABError(
+        node.fnArrowDiagnostic.code || "E-FN-ARROW-BODY",
+        node.fnArrowDiagnostic.message,
+        node.span,
+      ));
+    }
     // §6.8.2 (Step 9, Phase A1a) — surface E-RESET-NO-ARG diagnostics
     // attached by the expression-parser when `reset(...)` is malformed
     // (zero-arg, multi-arg, or spread). Walks the full ExprNode tree so
@@ -3378,6 +3391,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         errors.push(new TABError(
           node.exponentDiagnostic.code || "E-CODEGEN-INVALID-JS",
           node.exponentDiagnostic.message,
+          node.span,
+        ));
+      }
+      // g-fn-shortform-arrow-callback-invalid-js: surface a clean E-FN-ARROW-BODY
+      // when acorn rejected the `fn(args) => …` shape (the `fn` keyword + an arrow
+      // body). See the companion block in safeParseExprToNodeGlobal.
+      if (node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.fnArrowDiagnostic) {
+        errors.push(new TABError(
+          node.fnArrowDiagnostic.code || "E-FN-ARROW-BODY",
+          node.fnArrowDiagnostic.message,
           node.span,
         ));
       }

@@ -64,6 +64,19 @@ export interface ParseResult {
    * binaryOperandNeedsParens; this is the acorn-fallback complement).
    */
   exponentDiagnostic?: { code: string; message: string; offset: number };
+  /**
+   * g-fn-shortform-arrow-callback-invalid-js — structured diagnostic raised when
+   * acorn REJECTS an expression because the `fn` keyword is followed by a
+   * parenthesized param list and then an ARROW `=>` body (e.g.
+   * `arr.map(fn(n) => n * 2)`). This mixes the two canonical anonymous-callable
+   * forms: the BLOCK-body anonymous `fn` (`fn(args) { return … }`, §48.2.1) and
+   * the plain inline lambda (`args => expr`). The mixed shape is not a sanctioned
+   * scrml form; pre-fix it fell back to the string-rewrite path, where the blind
+   * `\bfn\b`->`function` replace produced `function(n) => …` — invalid JS surfaced
+   * as a misleading "compiler defect" E-CODEGEN-INVALID-JS. Callers surface this
+   * as a clean E-FN-ARROW-BODY syntax error that steers to the two valid forms.
+   */
+  fnArrowDiagnostic?: { code: string; message: string; offset: number };
 }
 
 /** Return type for rewriteReactiveRefsAST / rewriteServerReactiveRefsAST. */
@@ -399,6 +412,73 @@ function detectUnaryLeftOfExponent(
 }
 
 /**
+ * g-fn-shortform-arrow-callback-invalid-js — detect the invalid scrml form where
+ * the `fn` keyword is followed by a parenthesized param list and then an ARROW
+ * `=>` body (e.g. `arr.map(fn(n) => n * 2)`). acorn rejects this at the `=>` (it
+ * parses `fn(n)` as a CALL expression, then the `=>` is unexpected), with the
+ * error position landing exactly on the `=>` token — the same anchor strategy as
+ * detectUnaryLeftOfExponent.
+ *
+ * `fn(args) => expr` mixes the two canonical anonymous-callable forms:
+ *   - the BLOCK-body anonymous `fn`:  `fn(args) { return expr }`  (§48.2.1)
+ *   - the plain inline lambda:        `args => expr`
+ * None of the valid siblings false-fire here:
+ *   - `fn(args) { … }` parses as a call `fn(args)` (acorn does NOT reject) so this
+ *     detector never runs on it.
+ *   - `args => expr` / `(x) => x*2` has no `fn` keyword left of the param list.
+ *   - `fn(args) -> T { … }` (return-type, brace body) rejects at `->`, not `=>`,
+ *     so the `=>`-at-`pos` guard short-circuits.
+ *   - `obj.fn(x) => …` is a member call (`.fn`) — the keyword guard excludes an
+ *     `fn` preceded by `.`/`@`/identifier chars.
+ *   - a `fn(x)=>` inside a STRING in an otherwise-valid expression never reaches
+ *     this path (acorn succeeds, so the catch block is not entered).
+ *
+ * @param src - the EXACT string acorn parsed (post internal preprocessing).
+ * @param pos - acorn's error offset (`err.pos`).
+ * @returns the structured diagnostic, or null when this is not the `fn`-arrow shape.
+ */
+function detectFnKeywordArrowBody(
+  src: string,
+  pos: number | undefined,
+): { code: string; message: string; offset: number } | null {
+  if (typeof pos !== "number" || pos < 1) return null;
+  if (src.slice(pos, pos + 2) !== "=>") return null;
+
+  // Walk left from `=>` over whitespace; the param list must close with `)`.
+  let i = pos - 1;
+  while (i >= 0 && /\s/.test(src[i])) i--;
+  if (i < 0 || src[i] !== ")") return null;
+
+  // Walk the balanced parameter parens leftward to the matching `(`.
+  let depth = 1;
+  i--;
+  while (i >= 0 && depth > 0) {
+    if (src[i] === ")") depth++;
+    else if (src[i] === "(") depth--;
+    i--;
+  }
+  if (depth !== 0) return null; // unbalanced — not a clean param list
+
+  // `i` now sits just before the `(`. Skip whitespace; the token immediately
+  // left of the param list must be the `fn` KEYWORD (word-boundary; not a member
+  // `.fn` and not the tail of a longer identifier like `myfn` / `fnButton`).
+  while (i >= 0 && /\s/.test(src[i])) i--;
+  if (i < 1) return null;
+  if (src[i] !== "n" || src[i - 1] !== "f") return null;
+  const beforeKw = i - 2;
+  if (beforeKw >= 0 && /[A-Za-z0-9_$.@]/.test(src[beforeKw])) return null;
+
+  return {
+    code: "E-FN-ARROW-BODY",
+    message:
+      "E-FN-ARROW-BODY: `fn(args) => expr` is not a valid scrml form — it mixes " +
+      "the `fn` keyword with an arrow body. For an inline lambda use `args => expr`; " +
+      "for a named-style anonymous function use `fn(args) { return expr }` (§48.2.1).",
+    offset: i - 1,
+  };
+}
+
+/**
  * Parse a single JS expression string into an ESTree node.
  */
 export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}): ParseResult {
@@ -442,7 +522,13 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
     // operand of `**`, surface a structured diagnostic so callers can fire a
     // LOUD E-CODEGEN-INVALID-JS instead of silently emitting invalid JS.
     const exponentDiagnostic = detectUnaryLeftOfExponent(processed, e.pos);
-    if (tolerant) return { ast: null, error: e.message, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}), ...(exponentDiagnostic ? { exponentDiagnostic } : {}) };
+    // g-fn-shortform-arrow-callback-invalid-js: acorn also rejects `fn(args) => …`
+    // (the `fn` keyword + an arrow body). Surface a clean E-FN-ARROW-BODY rather
+    // than letting the string-rewrite path emit `function(args) => …` (invalid JS
+    // mis-framed as a compiler defect). The two diagnostics anchor on different
+    // tokens (`**` vs `=>`) so at most one fires.
+    const fnArrowDiagnostic = detectFnKeywordArrowBody(processed, e.pos);
+    if (tolerant) return { ast: null, error: e.message, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}), ...(exponentDiagnostic ? { exponentDiagnostic } : {}), ...(fnArrowDiagnostic ? { fnArrowDiagnostic } : {}) };
     throw err;
   }
 }
@@ -2567,6 +2653,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   let trailingContent: string | undefined;
   let sqlDiagnostic: { code: string; message: string; offset: number } | undefined;
   let exponentDiagnostic: { code: string; message: string; offset: number } | undefined;
+  let fnArrowDiagnostic: { code: string; message: string; offset: number } | undefined;
   try {
     const result = parseExpression(processed);
     estree = result.ast;
@@ -2574,6 +2661,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     trailingContent = result.trailingContent;
     sqlDiagnostic = result.sqlDiagnostic;
     exponentDiagnostic = result.exponentDiagnostic;
+    fnArrowDiagnostic = result.fnArrowDiagnostic;
   } catch (e) {
     parseError = (e as Error).message;
   }
@@ -2616,7 +2704,11 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
       nativeKind: "ParseError",
       raw: trimmed,
       ...(exponentDiagnostic ? { exponentDiagnostic } : {}),
-    } as EscapeHatchExpr & { exponentDiagnostic?: { code: string; message: string; offset: number } };
+      ...(fnArrowDiagnostic ? { fnArrowDiagnostic } : {}),
+    } as EscapeHatchExpr & {
+      exponentDiagnostic?: { code: string; message: string; offset: number };
+      fnArrowDiagnostic?: { code: string; message: string; offset: number };
+    };
   }
 
   try {
