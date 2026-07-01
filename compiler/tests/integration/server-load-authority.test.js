@@ -277,3 +277,51 @@ describe("server-load-authority (h): a user <currentUser> cell shadows the ambie
     expect(serverJs).not.toContain("_scrml_current_user");
   });
 });
+
+// ---------------------------------------------------------------------------
+// (i) single-fire per code — family diagnostic-noise guard (S234)
+//
+// The whole isServer-block warning family (W-AUTH-001 / W-SERVERLOAD-UNGATED /
+// W-SSR-PRERENDER-UNSCOPED) emits from ONE `if (isServer)` block inside
+// `annotateNodes` -> `visitNode`. `visitNode` has no per-node memoization, so a
+// state-decl reachable via two walk paths WOULD double-fire the whole family.
+// Empirically (S234) every server state-decl is visited EXACTLY once per
+// compile, so each code fires ONCE per decl. This block LOCKS that: a future
+// double-visit regression turns any of these counts to 2 and fails here.
+//
+// Count ACROSS both streams (a W-/I- code partitions into result.warnings, but
+// asserting cross-stream means a partition change can never silently pass).
+// ---------------------------------------------------------------------------
+
+// A typed `server` cell with no detected initial load — the plain W-AUTH-001
+// trigger (not Tier-1 authority, not a Pattern-C param-free sql-load).
+const AUTH_NO_INIT = `<program auth="required" db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="users">
+  \${
+    ?{\`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)\`}.run()
+    <account server>: string
+  }
+  <main><div>\${@account}</div></main>
+</db>
+</program>`;
+
+function countCode(res, code) {
+  return [...res.warnings, ...res.errors].filter((d) => d && d.code === code).length;
+}
+
+describe("server-load-authority (i): single-fire per code (family noise guard)", () => {
+  test("W-AUTH-001 fires exactly ONCE on a single server decl (no double-visit)", () => {
+    const res = compileFull(AUTH_NO_INIT);
+    expect(countCode(res, "W-AUTH-001")).toBe(1);
+  });
+
+  test("W-SERVERLOAD-UNGATED fires exactly ONCE on a single opted-out decl", () => {
+    const res = compileFull(OPTOUT);
+    expect(countCode(res, "W-SERVERLOAD-UNGATED")).toBe(1);
+  });
+
+  test("W-SSR-PRERENDER-UNSCOPED fires exactly ONCE on a single Tier-1 decl", () => {
+    const res = compileFull(TIER1_AUTH);
+    expect(countCode(res, "W-SSR-PRERENDER-UNSCOPED")).toBe(1);
+  });
+});
