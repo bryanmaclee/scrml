@@ -1,0 +1,433 @@
+// =============================================================================
+// self-host-v2 / lex.scrml — Road-B compiler impl#2, LEXER slice 1.
+//
+// Approach B (compiler-reimagining-lexer-slice-2026-06-26.md): a lexer is a
+// PURE `fn lex(src) -> Token[]` that folds `step(st) -> LexState` over a
+// `match (mode, event)` transition table. No `<engine>`, no reactive `@` cells,
+// no singleton, no render — `LexState` is a struct THREADED through the fold, so
+// the lexer is re-entrant by construction (lex two sources, no reset).
+//
+// Slice 1 = the CORE-TOKEN front: identifiers/keywords, numbers, operators, and
+// punctuation. Strings, template interpolation, comments, and regex bodies are
+// DEFERRED to later slices — their lexical events route to a total-but-stub arm
+// (`deferAdvance`) so the fold stays exhaustive without scanning them here.
+//
+// NB — this file is wrapped in `<program>` deliberately: the importable
+// library-module path (a bare `${}` module, SPEC §21.5) does NOT lower the
+// flagship idiom (typed payloads + `match`) today, so the real AST emitter
+// (reached only via `<program>`) is used. See progress.md finding F1.
+// =============================================================================
+<program>
+${
+    // -------------------------------------------------------------------------
+    // Shared substrate — vocabulary types
+    // -------------------------------------------------------------------------
+
+    type QuoteKind:enum   = { Single, Double }
+    type BracketKind:enum = { Paren, Brace, Bracket }
+
+    // Token kinds. Nullary variants are NAMED to match the reference lexer's
+    // kind strings; payload variants carry the lexeme detail (§14.4 / D3).
+    type TokenKind:enum = {
+        // punctuation / brackets
+        LParen, RParen, LBrace, RBrace, LBracket, RBracket,
+        Semicolon, Comma, Dot, Colon, Arrow, Question,
+        // operators
+        Assign, Equal, StrictEqual, NotEqual, StrictNotEqual,
+        Plus, Minus, Star, Slash, Percent,
+        LessThan, LessEqual, GreaterThan, GreaterEqual,
+        Increment, Decrement, NullishCoalesce, OptionalChain, Bang,
+        LogicalAnd, LogicalOr, BitAnd, BitOr,
+        // literals + identifiers (payload-carrying)
+        NumberLit(raw: string),
+        Ident(name: string),
+        Keyword(name: string),
+        Unknown(ch: string),
+        // end of input
+        Eof,
+    }
+
+    type Span:struct   = { start: int, end: int, line: int, col: int }
+    type Token:struct  = { kind: TokenKind, text: string, span: Span }
+    type Cursor:struct = { source: string, pos: int, line: int, col: int }
+
+    // The result of one scanner: the produced token + the advanced cursor.
+    type Scan:struct = { tok: Token, cur: Cursor }
+
+    // -------------------------------------------------------------------------
+    // Cursor — a value struct. Reads are calculation; `advance` returns a NEW
+    // cursor (no value identity, §45.6 — the cursor is threaded, never mutated).
+    // -------------------------------------------------------------------------
+
+    fn makeCursor(src: string) -> Cursor {
+        return { source: src, pos: 0, line: 1, col: 1 }
+    }
+
+    // Code point `k` ahead of the cursor, or -1 past the end.
+    fn peekCode(c: Cursor, k: int) -> int {
+        const off: int = c.pos + k
+        if (off >= c.source.length) return -1
+        return c.source.charCodeAt(off)
+    }
+
+    // Advance ONE code point, tracking line/col. `c` is a clean Cursor param
+    // (not a reassigned local), so `peekCode` types cleanly here — see F8.
+    fn advance1(c: Cursor) -> Cursor {
+        if (c.pos >= c.source.length) return c
+        const code: int = peekCode(c, 0)
+        if (isLineFeed(code)) {
+            return { source: c.source, pos: c.pos + 1, line: c.line + 1, col: 1 }
+        }
+        return { source: c.source, pos: c.pos + 1, line: c.line, col: c.col + 1 }
+    }
+
+    fn isLineFeed(code: int) -> boolean { return code == 10 }
+
+    // Advance `n` code points. `cc` stays Cursor-typed via advance1's return.
+    fn advance(c: Cursor, n: int) -> Cursor {
+        let cc = c
+        let i = 0
+        while (i < n) {
+            cc = advance1(cc)
+            i = i + 1
+        }
+        return cc
+    }
+
+    fn isEof(c: Cursor) -> boolean {
+        return c.pos >= c.source.length
+    }
+
+    // The source text between two cursor positions (the lexeme).
+    fn sliceText(from: Cursor, to: Cursor) -> string {
+        return from.source.substring(from.pos, to.pos)
+    }
+
+    // The single character under the cursor, as a 1-char string (for dispatch).
+    fn charAt(c: Cursor) -> string {
+        return c.source.substring(c.pos, c.pos + 1)
+    }
+
+    // -------------------------------------------------------------------------
+    // Character classification — pure calculation over a single code point.
+    // -------------------------------------------------------------------------
+
+    fn isWhitespace(c: int) -> boolean { return c == 32 || c == 9 || c == 11 || c == 12 || c == 160 }
+    fn isNewline(c: int) -> boolean    { return c == 10 || c == 13 || c == 0x2028 || c == 0x2029 }
+    fn isTrivia(c: int) -> boolean     { return isWhitespace(c) || isNewline(c) }
+    fn isDigit(c: int) -> boolean      { return c >= 48 && c <= 57 }
+    fn isHexDigit(c: int) -> boolean   { return (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) }
+    fn isIdentStart(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 36 }
+    fn isIdentCont(c: int) -> boolean  { return isIdentStart(c) || isDigit(c) }
+
+    // Regex-vs-division: `/` starts a regex only when the previous token cannot
+    // end an expression. Bounded prev-token calculation (DD §D4 P3). The regex
+    // body itself is a DEFERRED slice; this predicate is the substrate for it.
+    fn regexAllowedAfter(last: TokenKind | not) -> boolean {
+        if (last is not) return true
+        if (last is .Ident)     return false
+        if (last is .NumberLit) return false
+        if (last is .RParen)    return false
+        if (last is .RBracket)  return false
+        if (last is .Increment) return false
+        if (last is .Decrement) return false
+        return true
+    }
+
+    // -------------------------------------------------------------------------
+    // TokenKind constructors — bare variants resolve in fn-return position, so
+    // the payload kinds are built by these typed-return helpers (a bare variant
+    // as an arg / struct-field / array-element does NOT resolve — see F4).
+    // -------------------------------------------------------------------------
+
+    fn kNumber(raw: string) -> TokenKind   { return .NumberLit(raw) }
+    fn kUnknown(ch: string) -> TokenKind   { return .Unknown(ch) }
+
+    fn identOrKeywordKind(text: string) -> TokenKind {
+        if (isKeyword(text)) return .Keyword(text)
+        return .Ident(text)
+    }
+
+    // Reserved words. Single-literal `match` arms (an alternation `|` arm would
+    // be silently dropped today — see F6), so this reads as a lookup table.
+    fn isKeyword(text: string) -> boolean {
+        return match text {
+            "const"    :> true
+            "let"      :> true
+            "var"      :> true
+            "function" :> true
+            "fn"       :> true
+            "return"   :> true
+            "if"       :> true
+            "else"     :> true
+            "for"      :> true
+            "while"    :> true
+            "do"       :> true
+            "break"    :> true
+            "continue" :> true
+            "match"    :> true
+            "import"   :> true
+            "export"   :> true
+            "from"     :> true
+            _          :> false
+        }
+    }
+
+    // Build a token spanning [from, to).
+    fn mkTok(k: TokenKind, txt: string, from: Cursor, to: Cursor) -> Token {
+        return {
+            kind: k,
+            text: txt,
+            span: { start: from.pos, end: to.pos, line: from.line, col: from.col },
+        }
+    }
+
+    // Emit a kind that advances exactly `n` code points from `cur`.
+    fn op(cur: Cursor, n: int, k: TokenKind) -> Scan {
+        const to: Cursor = advance(cur, n)
+        return { tok: mkTok(k, sliceText(cur, to), cur, to), cur: to }
+    }
+
+    // -------------------------------------------------------------------------
+    // CORE-TOKEN scanners
+    // -------------------------------------------------------------------------
+
+    fn scanIdentOrKeyword(cur: Cursor) -> Scan {
+        let c = advance(cur, 1)              // first char is a known ident-start
+        while (isIdentCont(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        const text: string = sliceText(cur, c)
+        return { tok: mkTok(identOrKeywordKind(text), text, cur, c), cur: c }
+    }
+
+    fn scanNumber(cur: Cursor) -> Scan {
+        let c = cur
+        const c0: int = peekCode(cur, 0)
+        const c1: int = peekCode(cur, 1)
+        if (c0 == 48 && (c1 == 120 || c1 == 88)) {
+            // 0x / 0X hex literal
+            c = advance(cur, 2)
+            while (isHexDigit(peekCode(c, 0))) {
+                c = advance(c, 1)
+            }
+        } else {
+            // decimal: digits, optional fraction, optional exponent
+            while (isDigit(peekCode(c, 0))) {
+                c = advance(c, 1)
+            }
+            if (peekCode(c, 0) == 46) {      // '.'
+                c = advance(c, 1)
+                while (isDigit(peekCode(c, 0))) {
+                    c = advance(c, 1)
+                }
+            }
+            const ec: int = peekCode(c, 0)
+            if (ec == 101 || ec == 69) {     // 'e' / 'E'
+                c = advance(c, 1)
+                const sgn: int = peekCode(c, 0)
+                if (sgn == 43 || sgn == 45) {   // '+' / '-'
+                    c = advance(c, 1)
+                }
+                while (isDigit(peekCode(c, 0))) {
+                    c = advance(c, 1)
+                }
+            }
+        }
+        const text: string = sliceText(cur, c)
+        return { tok: mkTok(kNumber(text), text, cur, c), cur: c }
+    }
+
+    // Operators + punctuation, dispatched on the leading character (a 1-char
+    // string; int-literal `match` arms do not lower today — see F2). Each arm
+    // delegates to a small muncher that does maximal munch.
+    fn scanOperatorOrPunct(cur: Cursor) -> Scan {
+        const ch: string = charAt(cur)
+        return match ch {
+            "=" :> munchEq(cur)
+            "!" :> munchBang(cur)
+            "<" :> munchLt(cur)
+            ">" :> munchGt(cur)
+            "+" :> munchPlus(cur)
+            "-" :> munchMinus(cur)
+            "?" :> munchQuestion(cur)
+            "&" :> munchAmp(cur)
+            "|" :> munchPipe(cur)
+            "(" :> op(cur, 1, TokenKind.LParen)
+            ")" :> op(cur, 1, TokenKind.RParen)
+            "{" :> op(cur, 1, TokenKind.LBrace)
+            "}" :> op(cur, 1, TokenKind.RBrace)
+            "[" :> op(cur, 1, TokenKind.LBracket)
+            "]" :> op(cur, 1, TokenKind.RBracket)
+            ";" :> op(cur, 1, TokenKind.Semicolon)
+            "," :> op(cur, 1, TokenKind.Comma)
+            "." :> op(cur, 1, TokenKind.Dot)
+            ":" :> op(cur, 1, TokenKind.Colon)
+            "*" :> op(cur, 1, TokenKind.Star)
+            "/" :> op(cur, 1, TokenKind.Slash)
+            "%" :> op(cur, 1, TokenKind.Percent)
+            _   :> op(cur, 1, kUnknown(ch))
+        }
+    }
+
+    fn munchEq(cur: Cursor) -> Scan {
+        const c1: int = peekCode(cur, 1)
+        const c2: int = peekCode(cur, 2)
+        if (c1 == 61 && c2 == 61) return op(cur, 3, TokenKind.StrictEqual)  // ===
+        if (c1 == 61)             return op(cur, 2, TokenKind.Equal)        // ==
+        if (c1 == 62)             return op(cur, 2, TokenKind.Arrow)        // =>
+        return op(cur, 1, TokenKind.Assign)                                 // =
+    }
+
+    fn munchBang(cur: Cursor) -> Scan {
+        const c1: int = peekCode(cur, 1)
+        const c2: int = peekCode(cur, 2)
+        if (c1 == 61 && c2 == 61) return op(cur, 3, TokenKind.StrictNotEqual)  // !==
+        if (c1 == 61)             return op(cur, 2, TokenKind.NotEqual)        // !=
+        return op(cur, 1, TokenKind.Bang)                                      // !
+    }
+
+    fn munchLt(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 61) return op(cur, 2, TokenKind.LessEqual)  // <=
+        return op(cur, 1, TokenKind.LessThan)                              // <
+    }
+
+    fn munchGt(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 61) return op(cur, 2, TokenKind.GreaterEqual)  // >=
+        return op(cur, 1, TokenKind.GreaterThan)                             // >
+    }
+
+    fn munchPlus(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 43) return op(cur, 2, TokenKind.Increment)  // ++
+        return op(cur, 1, TokenKind.Plus)                                  // +
+    }
+
+    fn munchMinus(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 45) return op(cur, 2, TokenKind.Decrement)  // --
+        return op(cur, 1, TokenKind.Minus)                                // -
+    }
+
+    fn munchQuestion(cur: Cursor) -> Scan {
+        const c1: int = peekCode(cur, 1)
+        if (c1 == 63) return op(cur, 2, TokenKind.NullishCoalesce)  // ??
+        if (c1 == 46) return op(cur, 2, TokenKind.OptionalChain)    // ?.
+        return op(cur, 1, TokenKind.Question)                       // ?
+    }
+
+    fn munchAmp(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 38) return op(cur, 2, TokenKind.LogicalAnd)  // &&
+        return op(cur, 1, TokenKind.BitAnd)                                 // &
+    }
+
+    fn munchPipe(cur: Cursor) -> Scan {
+        if (peekCode(cur, 1) == 124) return op(cur, 2, TokenKind.LogicalOr)  // ||
+        return op(cur, 1, TokenKind.BitOr)                                  // |
+    }
+
+    // -------------------------------------------------------------------------
+    // The lex fold — LexMode + LexEvent, LexState threaded through `step`.
+    // -------------------------------------------------------------------------
+
+    type LexMode:enum = {
+        InCode, InTemplateBody, InSingleString, InDoubleString,
+        InLineComment, InBlockComment, InRegexBody,
+    }
+
+    type LexEvent:enum = {
+        SawQuote(kind: QuoteKind),
+        SawBacktick,
+        SawLineComment,
+        SawBlockComment,
+        SawRegexSlash,
+        Ordinary,
+        SawEof,
+    }
+
+    // Slice-1 state: cursor + mode + accumulated tokens. Bracket-stack /
+    // error-recovery / interp-depth threading arrives with the later slices.
+    type LexState:struct = {
+        cur: Cursor,
+        mode: LexMode,
+        tokens: Token[],
+    }
+
+    fn skipTrivia(cur: Cursor) -> Cursor {
+        let c = cur
+        while (isTrivia(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        return c
+    }
+
+    fn lastKind(st: LexState) -> TokenKind | not {
+        if (st.tokens.length == 0) return not
+        return st.tokens[st.tokens.length - 1].kind
+    }
+
+    // Classify the lookahead into a lexical event. In slice 1 only `.Ordinary`
+    // and `.SawEof` are acted on; the string/comment/regex/template events are
+    // produced but routed to the deferred stub in `dispatch` (fold stays total).
+    fn classify(cur: Cursor, last: TokenKind | not) -> LexEvent {
+        if (isEof(cur)) return .SawEof
+        const c0: int = peekCode(cur, 0)
+        const c1: int = peekCode(cur, 1)
+        if (c0 == 39) return .SawQuote(QuoteKind.Single)   // '
+        if (c0 == 34) return .SawQuote(QuoteKind.Double)   // "
+        if (c0 == 96) return .SawBacktick                  // `
+        if (c0 == 47 && c1 == 47) return .SawLineComment   // //
+        if (c0 == 47 && c1 == 42) return .SawBlockComment  // /*
+        if (c0 == 47 && regexAllowedAfter(last)) return .SawRegexSlash
+        return .Ordinary
+    }
+
+    // The (mode x event) transition table (the DD's `match (st.mode, ev)`).
+    fn dispatch(st: LexState, ev: LexEvent) -> LexState {
+        return match (st.mode, ev) {
+            (.InCode, .Ordinary) :> emitOneToken(st)
+            (_, .SawEof)         :> st                  // cursor already at EOF; settle
+            (_, _)               :> deferAdvance(st)    // strings/comments/regex/template — slice-2/3
+        }
+    }
+
+    // One fold step: skip trivia, classify, dispatch.
+    fn step(st: LexState) -> LexState {
+        const cur: Cursor = skipTrivia(st.cur)
+        const st2: LexState = { cur: cur, mode: st.mode, tokens: st.tokens }
+        const ev: LexEvent = classify(cur, lastKind(st2))
+        return dispatch(st2, ev)
+    }
+
+    fn emitOneToken(st: LexState) -> LexState {
+        const c0: int = peekCode(st.cur, 0)
+        const scan: Scan = pickScan(st.cur, c0)
+        return { cur: scan.cur, mode: st.mode, tokens: st.tokens.concat([scan.tok]) }
+    }
+
+    fn pickScan(cur: Cursor, c0: int) -> Scan {
+        if (isIdentStart(c0)) return scanIdentOrKeyword(cur)
+        if (isDigit(c0))      return scanNumber(cur)
+        return scanOperatorOrPunct(cur)
+    }
+
+    // DEFERRED lexical events (strings, template interp, line/block comments,
+    // regex bodies) land here. Slice 1 does not scan them — advance one code
+    // point so the driver always makes progress; the real scanners arrive with
+    // the string/comment/regex slices. TODO(slice-2/3).
+    fn deferAdvance(st: LexState) -> LexState {
+        return { cur: advance(st.cur, 1), mode: st.mode, tokens: st.tokens }
+    }
+
+    fn makeEof(cur: Cursor) -> Token {
+        return mkTok(TokenKind.Eof, "", cur, cur)
+    }
+
+    // The driver: fold `step` until the cursor is exhausted, then append EOF.
+    export fn lex(src: string) -> Token[] {
+        let st: LexState = { cur: makeCursor(src), mode: LexMode.InCode, tokens: [] }
+        while (!isEof(st.cur)) {
+            st = step(st)
+        }
+        return st.tokens.concat([makeEof(st.cur)])
+    }
+}
+</program>
