@@ -1602,6 +1602,47 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
 
   try {
 
+  // SSR DOM-adoption (first reconcile only, §52.8 A-terminus D2). On the very
+  // first reconcile for a container the mount may already hold server-rendered
+  // rows (SSR D1): each row's ROOT element carries a data-scrml-key HTML
+  // ATTRIBUTE but has NO _scrml_key JS property (that property is set only on
+  // createFn-built nodes) and NO event listeners / reactive effects. We ADOPT
+  // those server nodes into the keyed diff so they get UPGRADED IN PLACE below
+  // (a fresh interactive node swapped into the same slot) instead of wiped —
+  // this is what kills the SSR client-rebuild double-render. _prevItemMap ===
+  // undefined is exactly the first-reconcile signal (container._scrml_item_by_key
+  // is written at the top of this fn, so it is undefined only on pass 1); a
+  // client-only each with an empty mount adopts nothing and stays byte-identical.
+  //
+  // KEY-TYPE NORMALIZATION (correctness-critical): the server attribute value is
+  // always a STRING ("42"); the client keyFn may return a NUMBER (42) or other
+  // type. We resolve this ONCE, here, by mapping each adopted server node back to
+  // the correctly-typed client key via String(clientKey) === attr, then storing
+  // that CLIENT-typed key as the node's _scrml_key. So oldNodes and every
+  // downstream lookup stay byte-identical to the steady-state path — no coercion
+  // leaks past this block. A server node whose key is absent from the client list
+  // keeps its raw string key (never matched) and is removed by the normal diff.
+  let adoptedAny = false;
+  if (_prevItemMap === undefined) {
+    let _ssrSeen = false;
+    for (const child of container.childNodes) {
+      if (child.nodeType === 1 && child._scrml_key === undefined
+          && child.getAttribute?.("data-scrml-key") != null) { _ssrSeen = true; break; }
+    }
+    if (_ssrSeen) {
+      const _strToClient = new Map();
+      for (let _s = 0; _s < newLen; _s++) _strToClient.set(String(newKeys[_s]), newKeys[_s]);
+      for (const child of container.childNodes) {
+        if (child.nodeType !== 1 || child._scrml_key !== undefined) continue;
+        const _attrKey = child.getAttribute?.("data-scrml-key");
+        if (_attrKey == null) continue;
+        child._scrml_key = _strToClient.has(_attrKey) ? _strToClient.get(_attrKey) : _attrKey;
+        child._scrml_ssr_adopt = true;
+        adoptedAny = true;
+      }
+    }
+  }
+
   const oldNodes = new Map();
   for (const child of [...container.childNodes]) {
     const key = child._scrml_key;
@@ -1646,7 +1687,11 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   // fire separately via _scrml_prop_subscribers; this function only needs to
   // confirm DOM ordering matches and bail.
   // Single forward pass; bails on first mismatch; allocates nothing on hit.
-  if (newItems.length === oldNodes.size) {
+  // Guard: when this pass ADOPTED server nodes, do NOT take the B2 no-op bail
+  // (the adopted keys already match newKeys in order, so B2 would leave the
+  // un-upgraded server nodes in place). Fall through to the diff so each
+  // adopted node gets its in-place upgrade. Post-hydration passes hit B2 normally.
+  if (newItems.length === oldNodes.size && !adoptedAny) {
     let i = 0;
     let sameOrder = true;
     for (const child of container.childNodes) {
@@ -1697,6 +1742,23 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       node._scrml_key = key;
       oldPositions[i] = -1; // new node, no old position
     } else {
+      if (node._scrml_ssr_adopt === true) {
+        // Hydration upgrade: this node was server-rendered (adopted above) and
+        // has NO event listeners / reactive effects. Build a fresh interactive
+        // node and swap it into the server node's exact DOM slot — the mount is
+        // never emptied, and (identical content) there is no visible flash.
+        const _skey = node.getAttribute?.("data-scrml-key");
+        const _fresh = createFn(newItems[i], i);
+        if (!_fresh) { container.removeChild(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
+        _fresh._scrml_key = key;
+        // Preserve the server-origin key marker so the upgraded row stays a
+        // faithful in-place continuation of the server row. Client-only rows
+        // never carry data-scrml-key — its presence marks a server-rendered,
+        // adopted-then-upgraded row (honestly absent on post-hydration new rows).
+        if (_skey != null && _fresh.nodeType === 1) _fresh.setAttribute("data-scrml-key", _skey);
+        container.replaceChild(_fresh, node);
+        node = _fresh;
+      }
       oldPositions[i] = oldKeyPos.get(key) ?? -1;
     }
     newNodes[i] = node;
