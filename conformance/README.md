@@ -167,19 +167,22 @@ sibling cases for present-vs-absent / success-vs-error paths, as the corpus does
 }
 ```
 
-**Why the error directive (the SPEC-vs-impl wire divergence).** §57.2's absence
-envelope is normative AND impl#1-matched, so an absent response is declared
-directly as `{"__scrml_absent": true}` and stays impl-neutral. But the server-`!`
-ERROR wire shape **diverges**: §19.9.1 normatively specifies `{__variant,
-__data}`, while impl#1 actually emits/detects `{__scrml_error, type, variant,
-data}` (the runtime `errorBoundary` gate keys on `.__scrml_error`). Declaring
-impl#1's actual envelope in the case would bake an impl#1-divergent shape into the
-agnostic contract — so an error is declared with the impl-neutral `__serverError`
-directive, and the **impl#1 adapter translates** it to impl#1's wire envelope +
-HTTP status. impl#2's adapter translates the same directive to ITS wire shape.
-*(This §19.9.1-vs-impl#1 divergence is a standing flag — the conformance contract
-asserts the resulting DOM/state, not the wire bytes, so the case is sound today;
-the SPEC/impl reconciliation is tracked separately.)*
+**Why the error directive (server-`!` wire SHAPE is D3 impl-freedom).** §57.2's
+absence envelope is normative AND impl#1-matched, so an absent response is declared
+directly as `{"__scrml_absent": true}` and stays impl-neutral. The server-`!` ERROR
+wire shape is impl#1's `{__scrml_error, type, variant, data}` (§19.9.1; the runtime
+`errorBoundary` gate keys on `.__scrml_error`). Declaring that literal envelope in a
+case would bake ONE impl's wire bytes into the agnostic contract — but the wire
+SHAPE is explicit D3 implementation-freedom (impl#2 may serialize errors however it
+likes). So an error is declared with the impl-neutral `__serverError` directive, and
+the **impl#1 adapter translates** it to impl#1's wire envelope + HTTP status; impl#2's
+adapter translates the same directive to ITS shape. The contract asserts the
+resulting DOM/state (the error routes to the right variant), not the wire bytes.
+*(Currency, S235: an earlier version of this note flagged a §19.9.1-vs-impl#1 DIVERGENCE
+— §19.9.1 saying `{__variant, __data}`. That was RECONCILED at S232: the currency fix
+corrected §19.9.1 to the actual `{__scrml_error, …}` shape (`g-server-error-wire-spec-impl-divergence`,
+SPEC.md:13195); §19.9.1 and impl#1 now AGREE, so there is NO standing divergence. The
+directive stays regardless — it keeps the contract impl-neutral per D3, which is the point.)*
 
 ### The `files` multi-file convention
 
