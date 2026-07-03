@@ -12875,7 +12875,7 @@ fail PaymentError::ExpiredCard
 #### 19.3.3 Normative Statements
 
 - `fail` SHALL be valid only inside a function body declared with the `!` modifier. Using `fail` in a function without `!` SHALL be a compile error: **E-ERROR-001** -- `'fail' used in function '{name}' which is not declared as failable. Add '!' to the function signature: 'function {name}(...)! -> {ErrorType}'.`
-- `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error (E-TYPE-001).
+- `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error: **E-ERROR-009** -- `'fail' names variant '{Variant}' which is not a valid variant of the declared error type '{ErrorType}' for function '{name}'. Valid variants: {list}.` This covers a variant undeclared by the declared enum, a `fail` naming a foreign enum entirely, and a `fail` target that is not an enum variant. For a bare-`!` function the declared error type is the built-in `Error` enum (§19.4.2), whose sole valid variant is `Generic`.
 - `fail` SHALL cause the enclosing function to return immediately with the error variant value. Statements after `fail` in the same block are unreachable. The compiler MAY emit a warning for unreachable code after `fail`.
 - `fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.
 
@@ -13830,6 +13830,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
@@ -17621,6 +17622,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
