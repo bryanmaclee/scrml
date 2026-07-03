@@ -1,0 +1,11 @@
+${
+    type Gate:enum = { Closed, Open }
+    type MyErr:error = { code: number }
+}
+<engine for=Gate initial=.Closed accepts=MyErr>
+    <Closed rule=.Open></>
+    <Open rule=.Closed></>
+</>
+<program>
+<p id="s">State: ${@gate}</>
+</program>

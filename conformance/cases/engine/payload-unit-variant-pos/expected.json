@@ -1,0 +1,12 @@
+{
+  "id": "engine-payload-unit-variant-pos",
+  "description": "Payload binding on a UNIT variant (§51.0.B.1). <Idle bogus rule=.Dragging> attaches a bareword payload binding (`bogus`) to Idle, which has zero payload fields. Unit variants carry no fields to bind, so E-ENGINE-PAYLOAD-ON-UNIT-VARIANT fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.B.1",
+  "rationale": "§51.0.B.1 payload-binding attributes on a unit variant (zero fields per §14.4) SHALL fire E-ENGINE-PAYLOAD-ON-UNIT-VARIANT.",
+  "expect": {
+    "codes": ["E-ENGINE-PAYLOAD-ON-UNIT-VARIANT"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-PAYLOAD-ON-UNIT-VARIANT": "error" }
+  }
+}

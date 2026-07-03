@@ -1,0 +1,13 @@
+${
+    type Phase:enum = { Idle, Loading, Done }
+}
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Loading></>
+    <Loading rule=.Done>
+        <onTransition to=.Loading>${ log("self") }</>
+    </>
+    <Done rule=.Idle></>
+</>
+<program>
+<p id="s">${@phase}</>
+</program>

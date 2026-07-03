@@ -1,0 +1,12 @@
+{
+  "id": "engine-component-engine-scope-pos",
+  "description": "Engine forbidden inside a component body (§51.0.Q.1 / §51.0.K). An <engine> declared inside the body of a component (const Widget = <div props={...}>) violates Machine Cohesion — engines are singleton-by-design and forbidden in component bodies (a component may be instantiated N times). E-COMPONENT-ENGINE-SCOPE fires (the §34 error partition). Contrast the LEGAL nested-engine-inside-a-composite-STATE-CHILD form (engine-nested-engine-inner-transition-rt).",
+  "language-version": "1.0",
+  "spec": "§51.0.Q.1",
+  "rationale": "§51.0.Q.1 engines remain forbidden inside component bodies (E-COMPONENT-ENGINE-SCOPE) and inside function/snippet bodies — the singleton invariant permits the nested form only inside a composite STATE-CHILD, not a component.",
+  "expect": {
+    "codes": ["E-COMPONENT-ENGINE-SCOPE"],
+    "notCodes": [],
+    "severity": { "E-COMPONENT-ENGINE-SCOPE": "error" }
+  }
+}

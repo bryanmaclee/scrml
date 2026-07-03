@@ -1,0 +1,12 @@
+{
+  "id": "engine-self-write-pos",
+  "description": "Self-write idempotence lint (§51.0.F.1). Inside <Loading rule=.Done>, the write @phase = .Loading re-asserts the current variant. Statically detectable (literal .Variant matching the enclosing state-child), so the compile-time info lint W-ENGINE-SELF-WRITE-DETECTED fires. Critically, .Loading is NOT in .Loading's rule= set (.Done), yet NO E-ENGINE-INVALID-TRANSITION fires — a self-write is reclassified as a runtime no-op, NOT a rule= violation (the trichotomy's no-op arm).",
+  "language-version": "1.0",
+  "spec": "§51.0.F.1",
+  "rationale": "§51.0.F.1 a self-write to the current variant is a runtime no-op (NOT a rule= violation) regardless of whether rule= lists the current variant; the compile-time W-ENGINE-SELF-WRITE-DETECTED info lint surfaces it.",
+  "expect": {
+    "codes": ["W-ENGINE-SELF-WRITE-DETECTED"],
+    "notCodes": ["E-ENGINE-INVALID-TRANSITION"],
+    "severity": { "W-ENGINE-SELF-WRITE-DETECTED": "info" }
+  }
+}

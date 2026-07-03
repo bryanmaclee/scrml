@@ -1,0 +1,12 @@
+{
+  "id": "engine-rule-violation-pos",
+  "description": "Engine rule= contract violation (§51.0.F). Inside <Idle rule=.Loading>, a direct write @phaseTag = .Done targets a variant NOT in the from-state's rule= set (.Loading only). The compiler statically knows from-state == Idle (M4+M5+M12 co-location) and rejects the transition with E-ENGINE-INVALID-TRANSITION (the §34 error partition). Uses the SPEC-canonical bare .Variant write form.",
+  "language-version": "1.0",
+  "spec": "§51.0.F",
+  "rationale": "§51.0.F the rule= attribute is a CONTRACT on writes; inside a state-child body the from-state is statically known, so a target not in rule= (and not the current variant) is rejected at compile time.",
+  "expect": {
+    "codes": ["E-ENGINE-INVALID-TRANSITION"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-INVALID-TRANSITION": "error" }
+  }
+}

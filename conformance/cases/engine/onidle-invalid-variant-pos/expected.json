@@ -1,0 +1,12 @@
+{
+  "id": "engine-onidle-invalid-variant-pos",
+  "description": "<onIdle> to= not a variant of the engine's for= enum (§51.0.R). Phase = { Active, Idle }; the watchdog targets .Sleeping, which is not a Phase variant. The to= target MUST be a variant of the for= enum (strict-by-default), so E-IDLE-INVALID-VARIANT fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.R",
+  "rationale": "§51.0.R the <onIdle> to= target MUST be a variant of the engine's for= enum; .Sleeping is not a Phase variant -> E-IDLE-INVALID-VARIANT.",
+  "expect": {
+    "codes": ["E-IDLE-INVALID-VARIANT"],
+    "notCodes": [],
+    "severity": { "E-IDLE-INVALID-VARIANT": "error" }
+  }
+}

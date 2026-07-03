@@ -1,0 +1,13 @@
+${
+    type Gate:enum = { Closed, Open }
+    type GateMsg:enum = { Toggle }
+}
+<engine for=Gate initial=.Closed>
+    <Closed rule=.Open>
+        | .Toggle :> .Open
+    </>
+    <Open rule=.Closed></>
+</>
+<program>
+<p id="s">State: ${@gate}</>
+</program>

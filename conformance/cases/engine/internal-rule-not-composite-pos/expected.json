@@ -1,0 +1,12 @@
+{
+  "id": "engine-internal-rule-not-composite-pos",
+  "description": "internal:rule= on a NON-composite state-child (§51.0.O). <Idle> is a simple state-child with no nested <engine> in its body, so there is no inner engine to preserve — the internal/external distinction is meaningless. internal:rule= is legal ONLY on a composite state-child, so E-INTERNAL-RULE-NOT-COMPOSITE fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.O",
+  "rationale": "§51.0.O internal:rule= is legal ONLY on a composite state-child (one with a nested <engine> body); otherwise E-INTERNAL-RULE-NOT-COMPOSITE.",
+  "expect": {
+    "codes": ["E-INTERNAL-RULE-NOT-COMPOSITE"],
+    "notCodes": [],
+    "severity": { "E-INTERNAL-RULE-NOT-COMPOSITE": "error" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "engine-accepts-not-enum-pos",
+  "description": "accepts= value is not an enum type (§51.0.S.2.2 / §51.0.S.4). accepts=MyErr references a declared type that is an `:error`, not an `:enum`. The accepts= message vocabulary must resolve to a declared :enum, so E-ENGINE-ACCEPTS-NOT-ENUM fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.4",
+  "rationale": "§51.0.S.2.2 if the accepts= value does not resolve to a declared :enum type, E-ENGINE-ACCEPTS-NOT-ENUM fires.",
+  "expect": {
+    "codes": ["E-ENGINE-ACCEPTS-NOT-ENUM"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-ACCEPTS-NOT-ENUM": "error" }
+  }
+}

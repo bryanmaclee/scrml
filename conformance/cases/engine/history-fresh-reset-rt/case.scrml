@@ -1,0 +1,25 @@
+${
+    type AppMode:enum = { Title, Playing }
+    type PlayMode:enum = { Exploring, Battle }
+}
+<engine for=AppMode initial=.Playing>
+    <Title rule=(.Playing | .Playing.history)>
+        <button id="resume" onclick=${@appMode = .Playing.history}>Resume</>
+        <button id="fresh" onclick=${@appMode = .Playing}>Fresh</>
+    </>
+    <Playing history rule=.Title>
+        <engine for=PlayMode initial=.Exploring>
+            <Exploring rule=.Battle>
+                <button id="fight" onclick=${@playMode = .Battle}>Fight</>
+            </>
+            <Battle rule=.Exploring>
+                <button id="flee" onclick=${@playMode = .Exploring}>Flee</>
+            </>
+        </>
+        <button id="quit" onclick=${@appMode = .Title}>Quit</>
+    </>
+</>
+<program>
+<p id="outer">Outer: ${@appMode}</>
+<p id="inner">Inner: ${@playMode}</>
+</program>

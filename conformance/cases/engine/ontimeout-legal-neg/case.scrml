@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Idle, Loading, Done, TimedOut }
+}
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Loading></>
+    <Loading rule=(.Done | .TimedOut)>
+        <onTimeout after=30s to=.TimedOut/>
+        "Loading..."
+    </>
+    <Done rule=.Idle></>
+    <TimedOut rule=.Idle></>
+</>
+<program>
+<p id="s">${@phase}</>
+</program>

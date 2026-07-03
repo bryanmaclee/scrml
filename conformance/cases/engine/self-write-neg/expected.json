@@ -1,0 +1,11 @@
+{
+  "id": "engine-self-write-neg",
+  "description": "Genuine cross-state write (§51.0.F.1). Inside <Loading rule=.Done>, @phase = .Done is a real transition to a distinct variant that IS in the rule= set. No self-write lint fires (this is arriving, not re-asserting), and no E-ENGINE-INVALID-TRANSITION. The legal-transition twin of engine-self-write-pos.",
+  "language-version": "1.0",
+  "spec": "§51.0.F.1",
+  "rationale": "§51.0.F.1 a write to a DIFFERENT (in-rule) variant is a real transition, not a self-write — W-ENGINE-SELF-WRITE-DETECTED does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-ENGINE-SELF-WRITE-DETECTED", "E-ENGINE-INVALID-TRANSITION"]
+  }
+}

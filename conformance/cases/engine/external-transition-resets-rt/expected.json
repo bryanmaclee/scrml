@@ -1,0 +1,17 @@
+{
+  "id": "engine-external-transition-resets-rt",
+  "description": "internal:rule= sibling — an EXTERNAL transition exits + re-inits the inner engine (§51.0.O / §51.0.Q). Same composite as engine-internal-transition-preserves-rt. Drive inner to .Battle (#fight), take the EXTERNAL transition out to .Title (#quit), then re-enter via the external edge Title -> .Playing (#enter). Because the composite carries no history, the outer-exit discards inner state and outer-entry re-initializes the inner engine at its initial= (.Exploring). This is the discriminating half of the internal-vs-external pair: an impl that failed to re-init the inner on external re-entry would leave .Battle here.",
+  "language-version": "1.0",
+  "spec": "§51.0.O",
+  "rationale": "§51.0.O an external transition (canonical rule=) causes the composite to exit (clearing inner-engine state when history is absent) then re-enter, re-initializing the inner engine at initial= (.Exploring) per §51.0.Q lifecycle coupling.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-INTERNAL-RULE-NOT-COMPOSITE"],
+    "input": [{ "click": "#fight" }, { "click": "#quit" }, { "click": "#enter" }],
+    "state": { "appMode": "Playing", "playMode": "Exploring" },
+    "domAnchored": [
+      { "selector": "#outer", "text": "Outer: Playing" },
+      { "selector": "#inner", "text": "Inner: Exploring" }
+    ]
+  }
+}

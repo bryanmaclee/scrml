@@ -1,0 +1,12 @@
+{
+  "id": "engine-ontimeout-invalid-target-pos",
+  "description": "<onTimeout> to= not in the state-child's rule= set (§51.0.M). <Loading rule=.Done> permits only .Done, but the timer targets .TimedOut. The to= target must be a legal target per the surrounding rule= set, validated compile-time (the from-state IS this state-child), so E-ENGINE-INVALID-TRANSITION fires (the §34 error partition). CODES half only — the timer->variant RUNTIME is harness-gated (see engine-ontimeout-legal-neg).",
+  "language-version": "1.0",
+  "spec": "§51.0.M",
+  "rationale": "§51.0.M the <onTimeout> to= target MUST be legal per the surrounding rule= set; rule=(.Done) + to=.TimedOut -> E-ENGINE-INVALID-TRANSITION (same validation discipline as the §51.0.F direct-write check).",
+  "expect": {
+    "codes": ["E-ENGINE-INVALID-TRANSITION"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-INVALID-TRANSITION": "error" }
+  }
+}

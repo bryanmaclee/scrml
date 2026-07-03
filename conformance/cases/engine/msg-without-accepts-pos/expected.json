@@ -1,0 +1,12 @@
+{
+  "id": "engine-msg-without-accepts-pos",
+  "description": "Message-arm without an accepts= declaration (§51.0.S.2.3 / §51.0.S.4). <Closed> declares a (state × message) arm `| .Toggle :> .Open`, but the engine opener has no accepts= attribute. E-ENGINE-MSG-WITHOUT-ACCEPTS fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.4",
+  "rationale": "§51.0.S.2.3 a state-child that declares a (state × message) arm while the engine opener has NO accepts= fires E-ENGINE-MSG-WITHOUT-ACCEPTS.",
+  "expect": {
+    "codes": ["E-ENGINE-MSG-WITHOUT-ACCEPTS"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-MSG-WITHOUT-ACCEPTS": "error" }
+  }
+}

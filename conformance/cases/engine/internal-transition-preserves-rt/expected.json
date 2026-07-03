@@ -1,0 +1,17 @@
+{
+  "id": "engine-internal-transition-preserves-rt",
+  "description": "internal:rule= — internal self-loop preserves the inner engine (§51.0.O). <Playing rule=.Title internal:rule=.Playing> declares an internal self-transition. Drive inner to .Battle (#fight), then take the internal self-loop @appMode=.Playing (#selfloop): the composite does NOT exit/re-enter, so the inner engine's variant survives as .Battle (contrast the external round-trip in engine-external-transition-resets-rt, which resets inner to .Exploring). NOTE (harness-observability): a self-target write is ALSO a §51.0.F.1 self-write no-op, so this state-snapshot observable coincides with the no-op path — it is a necessary-not-sufficient witness of internal:rule= (a discriminating internal-vs-external observable would need an <onTransition>-fires-on-external-only side effect; flagged to PA).",
+  "language-version": "1.0",
+  "spec": "§51.0.O",
+  "rationale": "§51.0.O an internal transition (internal:rule=) does NOT exit the composite; the inner engine's lifecycle is preserved (no re-init). The inner cell survives the internal self-loop as .Battle.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-INTERNAL-RULE-NOT-COMPOSITE"],
+    "input": [{ "click": "#fight" }, { "click": "#selfloop" }],
+    "state": { "appMode": "Playing", "playMode": "Battle" },
+    "domAnchored": [
+      { "selector": "#outer", "text": "Outer: Playing" },
+      { "selector": "#inner", "text": "Inner: Battle" }
+    ]
+  }
+}

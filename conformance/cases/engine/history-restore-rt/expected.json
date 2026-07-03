@@ -1,0 +1,17 @@
+{
+  "id": "engine-history-restore-rt",
+  "description": "history attribute — restore on re-entry (§51.0.N). <Playing history> carries a composite inner engine. Drive inner to .Battle (#fight), exit the composite to .Title (#quit), then re-enter via the structured target .Playing.history (#resume). The inner engine RESTORES its last-active variant (.Battle) from the synthesized history cell rather than resetting to initial= (.Exploring). Contrast engine-history-fresh-reset-rt (bare .Playing target ignores history).",
+  "language-version": "1.0",
+  "spec": "§51.0.N",
+  "rationale": "§51.0.N a composite state-child with history restores its inner engine's last variant on re-entry via the .Variant.history target; on outer-exit the inner variant is written to the synth history cell and restored on .Playing.history re-entry.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-HISTORY-NO-INNER-ENGINE"],
+    "input": [{ "click": "#fight" }, { "click": "#quit" }, { "click": "#resume" }],
+    "state": { "appMode": "Playing", "playMode": "Battle" },
+    "domAnchored": [
+      { "selector": "#outer", "text": "Outer: Playing" },
+      { "selector": "#inner", "text": "Inner: Battle" }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+${
+    type PhaseTag:enum = { Idle, Loading, Done }
+}
+<engine for=PhaseTag initial=.Idle>
+    <Idle rule=.Loading>
+        <button id="skip" onclick=${@phaseTag = .Done}>Skip</>
+    </>
+    <Loading rule=.Done></>
+    <Done rule=.Idle></>
+</>
+<program>
+<p id="phase">Phase: ${@phaseTag}</>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "engine-payload-arity-mismatch-pos",
+  "description": "Payload-binding arity mismatch (§51.0.B.1). Dragging(id: number) has ONE payload field, but <Dragging id extra rule=.Idle> declares TWO positional bindings. The binding count must match the variant's field count exactly, so E-ENGINE-PAYLOAD-ARITY-MISMATCH fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.B.1",
+  "rationale": "§51.0.B.1 payload-binding attribute counts in the bare-attribute/positional forms SHALL match the variant's payload field count exactly; too many bindings SHALL fire E-ENGINE-PAYLOAD-ARITY-MISMATCH.",
+  "expect": {
+    "codes": ["E-ENGINE-PAYLOAD-ARITY-MISMATCH"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-PAYLOAD-ARITY-MISMATCH": "error" }
+  }
+}

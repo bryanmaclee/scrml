@@ -1,0 +1,12 @@
+{
+  "id": "engine-payload-binding-neg",
+  "description": "Correct payload binding (§51.0.B.1). Dragging(id: number) is bound via the bare-attribute positional form <Dragging id rule=.Idle> — exactly one binding for one field, the local name in scope in the :-shorthand body's ${id} interpolation. None of the three payload-binding diagnostics fire.",
+  "language-version": "1.0",
+  "spec": "§51.0.B.1",
+  "rationale": "§51.0.B.1 a single positional binding matching the variant's one payload field is a well-formed binding, in scope throughout the state-child body; no payload diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ENGINE-PAYLOAD-"]
+  }
+}

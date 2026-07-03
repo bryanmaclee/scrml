@@ -1,0 +1,12 @@
+{
+  "id": "engine-onidle-duplicate-pos",
+  "description": "Two <onIdle> declarations on one engine (§51.0.R). <onIdle> is one-per-engine maximum; declaring a second watchdog fires E-IDLE-DUPLICATE (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.R",
+  "rationale": "§51.0.R one <onIdle> per engine maximum; multiple <onIdle> declarations -> E-IDLE-DUPLICATE.",
+  "expect": {
+    "codes": ["E-IDLE-DUPLICATE"],
+    "notCodes": [],
+    "severity": { "E-IDLE-DUPLICATE": "error" }
+  }
+}

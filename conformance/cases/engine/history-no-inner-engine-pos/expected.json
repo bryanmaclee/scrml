@@ -1,0 +1,12 @@
+{
+  "id": "engine-history-no-inner-engine-pos",
+  "description": "history attribute on a NON-composite state-child (§51.0.N). <Idle history> is a simple state-child with no nested <engine> in its body, so there is no inner engine to track. history is legal ONLY on a composite state-child, so E-HISTORY-NO-INNER-ENGINE fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.N",
+  "rationale": "§51.0.N history is legal ONLY on a state-child whose body contains a nested <engine> (a composite state-child); otherwise E-HISTORY-NO-INNER-ENGINE.",
+  "expect": {
+    "codes": ["E-HISTORY-NO-INNER-ENGINE"],
+    "notCodes": [],
+    "severity": { "E-HISTORY-NO-INNER-ENGINE": "error" }
+  }
+}

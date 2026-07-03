@@ -1,0 +1,13 @@
+{
+  "id": "engine-ontimeout-legal-neg",
+  "description": "Legal <onTimeout> declaration (§51.0.M). <Loading rule=(.Done | .TimedOut)> carries <onTimeout after=30s to=.TimedOut/>; the to= target IS in the rule= set, so the declaration compiles clean (no E-ENGINE-INVALID-TRANSITION, no E-STRUCTURAL-ELEMENT-MISPLACED). RUNTIME HALF IS HARNESS-GATED: the timer->variant firing after 30s cannot be exercised because the conformance harness has NO virtual clock (driver.ts drives selector events + settle only; timers deferred to v1.next). The timer runtime is a PA/infra follow-on on a virtual-clock driver.",
+  "language-version": "1.0",
+  "spec": "§51.0.M",
+  "rationale": "§51.0.M a legal <onTimeout> whose to= is in the surrounding rule= set compiles without diagnostics; the armed-on-entry / fire-after-N-ms runtime is not assertable without a virtual clock.",
+  "runtime-half-pending": true,
+  "runtime-half-ref": "virtual-clock driver (no clock in conformance/driver.ts:19-21; timers deferred to v1.next) — timer->variant fire is a PA/infra follow-on",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ENGINE-INVALID-TRANSITION", "E-STRUCTURAL-ELEMENT-MISPLACED"]
+  }
+}

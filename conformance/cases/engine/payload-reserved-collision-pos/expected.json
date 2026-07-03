@@ -1,0 +1,12 @@
+{
+  "id": "engine-payload-reserved-collision-pos",
+  "description": "Payload-binding name collides with a reserved state-child attribute (§51.0.B.1). Done(rule: number) is bound via the parenthesized form <Done(rule) rule=.Idle>; the extracted binding local name `rule` collides with the reserved attribute name `rule`. E-ENGINE-PAYLOAD-RESERVED-COLLISION fires (the §34 error partition); the escape hatch is a non-colliding positional local, e.g. <Done(r)>.",
+  "language-version": "1.0",
+  "spec": "§51.0.B.1",
+  "rationale": "§51.0.B.1 a payload-binding name colliding with a reserved state-child attribute name (rule/effect/history/internal:rule) SHALL fire E-ENGINE-PAYLOAD-RESERVED-COLLISION.",
+  "expect": {
+    "codes": ["E-ENGINE-PAYLOAD-RESERVED-COLLISION"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-PAYLOAD-RESERVED-COLLISION": "error" }
+  }
+}

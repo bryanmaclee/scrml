@@ -1,0 +1,17 @@
+{
+  "id": "engine-history-fresh-reset-rt",
+  "description": "history attribute — bare .Variant target ignores history (§51.0.N). Same history-bearing composite as engine-history-restore-rt, but re-entry is via the BARE .Playing target (#fresh), not .Playing.history. Per the §51.0.N form table, bare .Variant enters the composite and starts the inner engine at its initial= (.Exploring) even when history is set — the history cell is preserved but ignored on this entry. The reset twin of the restore case.",
+  "language-version": "1.0",
+  "spec": "§51.0.N",
+  "rationale": "§51.0.N `@appMode = .Playing` (bare) transitions to the variant and starts the inner engine at initial= even when history is set; only `.Playing.history` restores.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-HISTORY-NO-INNER-ENGINE"],
+    "input": [{ "click": "#fight" }, { "click": "#quit" }, { "click": "#fresh" }],
+    "state": { "appMode": "Playing", "playMode": "Exploring" },
+    "domAnchored": [
+      { "selector": "#outer", "text": "Outer: Playing" },
+      { "selector": "#inner", "text": "Inner: Exploring" }
+    ]
+  }
+}

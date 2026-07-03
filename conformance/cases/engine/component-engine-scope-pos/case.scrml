@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Idle, Active }
+}
+${
+    const Widget = <div props={ label: string }>
+        <engine for=Phase initial=.Idle>
+            <Idle rule=.Active></>
+            <Active rule=.Idle></>
+        </>
+        ${label}
+    </div>
+}
+<program>
+<Widget label="x" />
+</program>

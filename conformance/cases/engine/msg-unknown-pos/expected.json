@@ -1,0 +1,12 @@
+{
+  "id": "engine-msg-unknown-pos",
+  "description": "Dispatch of an unknown variant (§51.0.S.4). @gate.advance(.Bogus) names a literal bare-variant .Bogus that belongs to NEITHER the for= state enum (Gate) NOR the accepts= message enum (GateMsg). E-ENGINE-MSG-UNKNOWN fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.4",
+  "rationale": "§51.0.S.4 .advance(.X) where .X is a variant of neither the for= state enum nor the accepts= message enum fires E-ENGINE-MSG-UNKNOWN.",
+  "expect": {
+    "codes": ["E-ENGINE-MSG-UNKNOWN"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-MSG-UNKNOWN": "error" }
+  }
+}

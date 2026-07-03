@@ -1,0 +1,19 @@
+{
+  "id": "engine-nested-engine-inner-transition-rt",
+  "description": "Hierarchy / nested engines (§51.0.Q). A <engine for=PlayMode> is declared inside the outer engine's <Playing> composite state-child. On outer entry into .Playing the inner engine initializes at its initial= (.Exploring) and mounts (its markup renders). The inner engine has full engine semantics: a #fight click drives the inner Exploring -> Battle transition independently of the outer, which stays .Playing. Both auto-derived cells (@appMode, @playMode) are live and in-scope while the outer is in the composite.",
+  "language-version": "1.0",
+  "spec": "§51.0.Q",
+  "rationale": "§51.0.Q.1 the inner engine has full engine semantics and its lifecycle is coupled to the outer composite state-child (init + mount on outer entry); §51.0.F an inner-variable write validates against the inner state-child's rule=. Exploring rule=.Battle admits .Battle.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-ENGINE-SCOPE"],
+    "input": [{ "click": "#fight" }],
+    "state": { "appMode": "Playing", "playMode": "Battle" },
+    "domAnchored": [
+      { "selector": "#outer", "text": "Outer: Playing" },
+      { "selector": "#inner", "text": "Inner: Battle" },
+      { "selector": "#flee", "count": 1 },
+      { "selector": "#fight", "count": 0 }
+    ]
+  }
+}

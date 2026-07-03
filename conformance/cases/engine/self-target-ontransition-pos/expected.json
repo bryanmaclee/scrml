@@ -1,0 +1,12 @@
+{
+  "id": "engine-self-target-ontransition-pos",
+  "description": "Self-TARGET onTransition is the error arm of the .SameState trichotomy (§51.0.F.1). Inside <Loading rule=.Done>, <onTransition to=.Loading> means 'fire on LEAVING toward .Loading' — but there is no .Loading -> .Loading edge, so it is a hard E-ENGINE-INVALID-TRANSITION (NOT a self-write no-op, NOT the info lint). Contrast engine-self-write-pos (the no-op arm).",
+  "language-version": "1.0",
+  "spec": "§51.0.F.1",
+  "rationale": "§51.0.F.1 a self-TARGET <onTransition to=.Loading> inside <Loading> is a hard E-ENGINE-INVALID-TRANSITION (there is no self-edge); the discriminator is whether a real entry occurs — a to= handler asserts a non-existent edge.",
+  "expect": {
+    "codes": ["E-ENGINE-INVALID-TRANSITION"],
+    "notCodes": ["W-ENGINE-SELF-WRITE-DETECTED"],
+    "severity": { "E-ENGINE-INVALID-TRANSITION": "error" }
+  }
+}

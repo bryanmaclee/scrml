@@ -1,0 +1,25 @@
+${
+    type AppMode:enum = { Title, Playing }
+    type PlayMode:enum = { Exploring, Battle }
+}
+<engine for=AppMode initial=.Playing>
+    <Title rule=.Playing>
+        <button id="enter" onclick=${@appMode = .Playing}>Enter</>
+    </>
+    <Playing rule=.Title internal:rule=.Playing>
+        <engine for=PlayMode initial=.Exploring>
+            <Exploring rule=.Battle>
+                <button id="fight" onclick=${@playMode = .Battle}>Fight</>
+            </>
+            <Battle rule=.Exploring>
+                <button id="flee" onclick=${@playMode = .Exploring}>Flee</>
+            </>
+        </>
+        <button id="selfloop" onclick=${@appMode = .Playing}>Selfloop</>
+        <button id="quit" onclick=${@appMode = .Title}>Quit</>
+    </>
+</>
+<program>
+<p id="outer">Outer: ${@appMode}</>
+<p id="inner">Inner: ${@playMode}</>
+</program>

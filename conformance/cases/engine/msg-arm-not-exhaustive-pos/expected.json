@@ -1,0 +1,12 @@
+{
+  "id": "engine-msg-arm-not-exhaustive-pos",
+  "description": "Non-exhaustive message-arm coverage (§51.0.S.2.4 / §51.0.S.4). GateMsg has {Toggle, Lock}; <Closed> declares an arm for .Toggle only, with no `| _ :>` wildcard. A state that declares ANY message-arm must cover every accepts= variant or carry a wildcard, so E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE fires (sibling of E-MATCH-NOT-EXHAUSTIVE, the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.4",
+  "rationale": "§51.0.S.2.4 a state declaring message-arms MUST cover every MsgType variant OR carry `| _ :>`; non-exhaustive -> E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE.",
+  "expect": {
+    "codes": ["E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE": "error" }
+  }
+}

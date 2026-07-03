@@ -1,0 +1,12 @@
+{
+  "id": "engine-onidle-misplaced-pos",
+  "description": "<onIdle> misplaced inside a state-child body (§51.0.R). <onIdle> is a per-engine machine-wide watchdog, legal ONLY at engine-root scope (sibling of state-children). Placed inside the <Active> state-child body it fires E-IDLE-MISPLACED (the §34 error partition). For per-state timer semantics, use <onTimeout> instead.",
+  "language-version": "1.0",
+  "spec": "§51.0.R",
+  "rationale": "§51.0.R <onIdle> placement is engine-root-scope ONLY; inside a state-child body -> E-IDLE-MISPLACED.",
+  "expect": {
+    "codes": ["E-IDLE-MISPLACED"],
+    "notCodes": [],
+    "severity": { "E-IDLE-MISPLACED": "error" }
+  }
+}

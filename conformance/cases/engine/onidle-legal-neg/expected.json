@@ -1,0 +1,13 @@
+{
+  "id": "engine-onidle-legal-neg",
+  "description": "Legal <onIdle> declaration (§51.0.R). A single <onIdle after=5m to=.Idle/> at engine-root scope, to= a real Phase variant: compiles clean (no E-IDLE-MISPLACED / E-IDLE-INVALID-VARIANT / E-IDLE-DUPLICATE). RUNTIME HALF IS HARNESS-GATED: the watchdog arming at module-init, resetting on each transition, and firing after 5m of silence cannot be exercised because the conformance harness has NO virtual clock (driver.ts drives selector events + settle only). The watchdog runtime is a PA/infra follow-on on a virtual-clock driver.",
+  "language-version": "1.0",
+  "spec": "§51.0.R",
+  "rationale": "§51.0.R a single well-formed engine-root <onIdle> with a valid for=-variant to= compiles without diagnostics; the arm/reset/fire watchdog runtime is not assertable without a virtual clock.",
+  "runtime-half-pending": true,
+  "runtime-half-ref": "virtual-clock driver (no clock in conformance/driver.ts:19-21; timers deferred to v1.next) — idle-watchdog fire is a PA/infra follow-on",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-IDLE-"]
+  }
+}

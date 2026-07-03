@@ -1,0 +1,11 @@
+{
+  "id": "engine-rule-violation-neg",
+  "description": "Engine rule= contract satisfied (§51.0.F). Inside <Idle rule=.Loading>, the write @phaseTag = .Loading targets the ONE variant the rule= set admits, so no E-ENGINE-INVALID-TRANSITION fires. The legal-transition twin of engine-rule-violation-pos.",
+  "language-version": "1.0",
+  "spec": "§51.0.F",
+  "rationale": "§51.0.F a write whose target IS in the from-state's rule= set is a legal transition — the compile-time contract admits it silently.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ENGINE-INVALID-TRANSITION"]
+  }
+}
