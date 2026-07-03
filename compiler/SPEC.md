@@ -8207,9 +8207,10 @@ security property **never depends on it firing or being complete.** It is NOT bu
 revision; the structural-redaction floor is the guarantee.
 
 **Composition.**
-- **SSR** — the `g-tier1-ssr-prerender` boundary (when built) SHALL apply this same egress filter
-  to `/__serverLoad`; it MUST NOT ship its prerender without it (first-paint leak; tracked
-  `W-AUTH-002`).
+- **SSR** — the SSR pre-render boundary (BUILT S234–S235, §52.8) applies this same egress filter
+  to both `/__serverLoad` and the server-side markup render: the server-side row renderer
+  (`codegen/emit-ssr-render.ts`) feeds on the §14.8.9-redacted rows, so a protected column is
+  absent from the first-paint HTML (no prerender ships without the filter).
 - **Channel `broadcast()` (§38)** — the channel `broadcast()` built-in is a compiler-emitted
   client-egress serializer (it publishes a JSON frame to every subscriber); it SHALL apply the same
   redact-at-sink. This covers BOTH an explicit `broadcast(row)` and the §38.4 channel-cell-write
@@ -17691,7 +17692,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-AUTH-001 | §52.11 | `<var server>` has no detectable initial load pattern | Warning |
 | W-AUTH-004 | §52.6.5 | `<var server>` has a PARAM-BEARING inline `?{}` RHS (§52.6.5 Pattern C); param-passing on `/__serverLoad/<var>` is not yet shipped, so the cell will not hydrate — use a param-free query or an `on mount` block | Warning |
 | W-SERVERLOAD-UNGATED | §52.15 | A `/__serverLoad/<var>` route is emitted UNGATED (the cell's per-var `auth="none"`/`"optional"`, or no enclosing `auth="required"`) AND the compilation unit declares auth elsewhere (an auth-middleware entry exists) — the route serves server-authority data without the request-context gate the rest of the app enforces. Does NOT fire on a genuinely-public app (no auth anywhere) or an already-gated route. (S233 — server-load authority.) | Warning |
-| W-SSR-PRERENDER-UNSCOPED | §52.15, §52.8 | A server-authority cell is auth-scoped (gated, or under `auth="required"`, and NOT explicitly `auth="none"`/`"optional"`) AND its SSR pre-render is UNSCOPED (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` row-scope) — the once-computed pre-render bakes all users' rows into every viewer's first-paint HTML (cross-user leak). Sibling of W-AUTH-002. Does NOT fire on a public cell or a row-scoped Pattern-C cell. (S233 — SSR sequencing gate.) | Warning |
+| W-SSR-PRERENDER-UNSCOPED | §52.15, §52.8 | A server-authority cell is auth-scoped (gated, or under `auth="required"`, and NOT explicitly `auth="none"`/`"optional"`) AND its SSR pre-render is UNSCOPED (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` row-scope) — the once-computed pre-render bakes all users' rows into every viewer's first-paint HTML (cross-user leak). A per-var SSR-prerender confidentiality gate. Does NOT fire on a public cell or a row-scoped Pattern-C cell. (S233 — SSR sequencing gate.) | Warning |
 | W-ATTR-001 | §52.13 | Attribute name not recognized on a scrml-special element (informational; attribute is forwarded to HTML as-is) | Warning |
 | W-ATTR-002 | §52.13 | Attribute value-shape not recognized (e.g. `auth="role:X"` on `<page>`) — silently accepted but has no compile-time effect | Warning |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
@@ -30244,6 +30245,13 @@ The authority model directly controls which state is pre-rendered during SSR.
 - The compiler SHALL NOT include client-local reactive variables in the SSR output.
 - The compiler SHALL pre-render a derived value (`const <derived>`) if and only if all of its reactive dependencies are server-authoritative.
 
+**Implementation status (S234–S235 — SSR pre-render + flash-free DOM-adoption SHIPPED).** The SSR pre-render above is implemented end-to-end for the common list shape:
+
+- **Server-side markup render (D1, S234).** For a `<each>` iterating a server-authority (seeded) cell, the compiler emits a server-side row renderer (`codegen/emit-ssr-render.ts`) that builds the per-row HTML — keyed with a `data-scrml-key` attribute — into the each-mount, so a view-source of the first paint already contains the rows. It feeds on the §14.8.9-redacted rows (a protected column is absent — no first-paint confidentiality leak).
+- **DOM-adoption hydration (D2, S235).** On its first reconcile the client runtime (`runtime-template.js` `_scrml_reconcile_list`) ADOPTS the server-rendered rows by `data-scrml-key` and upgrades each in place (a fresh interactive node swapped into the same slot) instead of wiping the mount and rebuilding — no client-rebuild double-render, and the rows are fully interactive.
+- **Supported subset + fallback.** The server renderer covers the CONTENT-bearing subset (static markup, nested elements, `:`-shorthand bodies, and simple field-read interpolations of the iteration item). An each with conditional visibility (`if=`/`show=`), nested `<each>`/`<match>`, component rows, or non-field-read logic CONSERVATIVELY FALLS BACK to the pre-existing client-only render (empty mount) — the renderer never ships wrong/partial markup. Widening this subset is a tracked follow-on (`g-ssr-render-subset-widen`).
+- **Warning retired.** The interim per-type residual warning **`W-AUTH-002`** (which flagged "loads client-side after first paint, a placeholder flash; SSR pre-render is a tracked follow-on") is **RETIRED** as of S235 — its premise is obsolete for the supported subset. The distinct cross-user gate `W-SSR-PRERENDER-UNSCOPED` (§52.15) is unaffected.
+
 ### 52.9 Interaction with `<request>` (§6.7.7)
 
 `<request>` (§6.7.7) is a single-shot async fetch primitive. It is not a continuous authority declaration.
@@ -30490,7 +30498,7 @@ A server-authority cell scopes its rows to the request by promoting to a Tier-2 
 Route-admission (§52.15.2 — whole route → 401) ⟂ row-selection (§52.15.3 — per row → `WHERE`) ⟂ column-redaction (§14.8.9 protect-floor — per column → strip protected-origin). They STACK; none substitutes: a column-redacted payload can still leak every user's rows; a row-scoped payload can still leak a protected column. The compiler applies all three at the egress; §14.8.9 is reused unchanged.
 
 #### 52.15.5 SSR sequencing (`W-SSR-PRERENDER-UNSCOPED`)
-Per §52.8, a server-authority cell's SSR pre-render runs the seed query under the request. A per-user / auth-scoped cell whose pre-render is UNSCOPED (Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) would bake one query result into every viewer's first-paint HTML — a cross-user leak — and fires `W-SSR-PRERENDER-UNSCOPED` (per-var, sibling of `W-AUTH-002`). Public cells do not fire.
+Per §52.8, a server-authority cell's SSR pre-render runs the seed query under the request. A per-user / auth-scoped cell whose pre-render is UNSCOPED (Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) would bake one query result into every viewer's first-paint HTML — a cross-user leak — and fires `W-SSR-PRERENDER-UNSCOPED` (per-var). Public cells do not fire.
 
 #### 52.15.6 Error codes
 `W-SERVERLOAD-UNGATED`, `W-SSR-PRERENDER-UNSCOPED` (§34). The route-gate reuses `_scrml_auth_check` / the session middleware; no new error codes beyond the two warnings.

@@ -25,9 +25,11 @@
  * evaluating non-field logic server-side (function calls, `@cell` reads,
  * `class:`/`style:`/`bind` directives, computed members) makes the WHOLE each
  * fall back to the pre-existing client-only render (empty mount, no regression) —
- * the renderer NEVER ships wrong/partial markup. Widening the subset + the
- * DOM-adoption hydration + W-AUTH-002 retirement are SUBSEQUENT A-terminus
- * dispatches.
+ * the renderer NEVER ships wrong/partial markup. The client DOM-adoption
+ * hydration (D2, S235 — runtime-template.js `_scrml_reconcile_list` adopts these
+ * `data-scrml-key` rows in place) and the W-AUTH-002 retirement (S235) SHIPPED;
+ * widening this conservative subset is the remaining follow-on
+ * (g-ssr-render-subset-widen).
  *
  * Egress: this renderer feeds on `_scrml_ssr_state[<var>]`, which the B-substrate
  * already ran through `_scrml_protect_tag` → `_scrml_protect_redact`. A protected

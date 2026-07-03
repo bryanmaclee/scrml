@@ -1,30 +1,29 @@
 /**
- * W-AUTH-002 — Tier-1 server-authority residual warning (§52.8 SSR pre-render)
- *
- * change-id state-decl-shape-disambiguation-2026-06-14 (the G1 follow-on).
+ * W-AUTH-002 — RETIRED (S235). Regression lock: the interim Tier-1
+ * server-authority residual warning no longer fires.
  *
  * HISTORY. W-AUTH-002 landed S194 (change-id g1-server-sync-codegen-2026-06-14)
  * as an INTERIM honesty warning: a Tier-1 `< Type authority="server" table=>`
- * type compiled CLEAN with ZERO read-authority codegen — a SILENT no-op. At that
- * point the warning only fired on the NON-canonical opener-attr shape
- * (`< Card ... id(int) title(string)>`, fields as opener attrs), because the
- * canonical §52.3.5 BODY-field shape (`< Card> id: number </>` inside `${…}`)
- * parsed as `html-fragment` and the walker never saw it.
+ * type got its `SELECT *` initial load on mount, but its rows were NOT yet
+ * pre-rendered into the initial HTML — instances loaded client-side after first
+ * paint (a brief placeholder flash). The warning tracked that SSR-pre-render
+ * residual (§52.8, gap g-tier1-ssr-prerender).
  *
- * NOW (this change-id): the recogniser (ast-builder tryParseServerAuthorityDecl)
- * recognises the CANONICAL body-field shape in `${…}`, and the read-authority
- * SELECT * initial-load codegen lands (emit-sync emitServerAuthorityLoad +
- * the /__serverLoad/<var> server route). The ONE remaining read-authority
- * residual is SSR pre-render (§52.8). So W-AUTH-002 is NARROWED:
- *   - it fires on the CANONICAL body-field §52.3.5 shape (what adopters write),
- *   - its message names the SSR-pre-render residual (not "no read sync at all"),
- *   - it stays severity "warning" (non-fatal),
- *   - it still does NOT fire on a local / no-authority type.
+ * RETIRED S235. The SSR A-terminus shipped the residual end-to-end:
+ *   - D1 (S234, codegen/emit-ssr-render.ts) server-renders a server-authority
+ *     `<each>`'s rows INTO the first-paint HTML, keyed `data-scrml-key`.
+ *   - D2 (S235, runtime-template.js `_scrml_reconcile_list`) ADOPTS those rows
+ *     flash-free (in-place upgrade, no wipe-then-rebuild).
+ * The "placeholder flash / SSR is a tracked follow-on" premise is obsolete for
+ * the supported each subset, so the per-type warning is gone. The remaining gap
+ * is WIDENING the server-render subset (unsupported each shapes fall back to
+ * client-render — g-ssr-render-subset-widen), which is not a per-type concern.
+ * The cross-user unscoped-prerender gate `W-SSR-PRERENDER-UNSCOPED` (§52.15) is
+ * a distinct, still-live warning and is unaffected by this retirement.
  *
  * Cross-stream note (memory: diagnostic-stream-partition): `runTS` returns all
  * diagnostics in `.errors`; the W-/I- prefix routing to the warnings stream
- * happens DOWNSTREAM at result assembly. So these tests scan BOTH streams and
- * additionally assert `severity === "warning"` to prove non-fatality.
+ * happens DOWNSTREAM at result assembly. So this scan checks BOTH streams.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -57,40 +56,20 @@ const CANONICAL = (
   `</program>`
 );
 
-describe("W-AUTH-002: Tier-1 server-authority residual warning (SSR pre-render)", () => {
-  test("fires for the CANONICAL §52.3.5 body-field shape inside `${…}`", () => {
+describe("W-AUTH-002: RETIRED (S235) — no longer fires (SSR pre-render + DOM-adoption shipped)", () => {
+  test("does NOT fire for the CANONICAL §52.3.5 body-field shape (was the interim fire-case)", () => {
     const res = runTSForSource(CANONICAL);
-    expect(findDiag(res, "W-AUTH-002")).toBeDefined();
+    expect(findDiag(res, "W-AUTH-002")).toBeUndefined();
   });
 
-  test("the warning has severity 'warning' (non-fatal — does not fail the build)", () => {
-    const res = runTSForSource(CANONICAL);
-    expect(findDiag(res, "W-AUTH-002").severity).toBe("warning");
-  });
-
-  test("the message names the SSR-pre-render residual (NOT 'no read sync at all')", () => {
-    const w = findDiag(runTSForSource(CANONICAL), "W-AUTH-002");
-    expect(String(w.message)).toContain("SSR");
-    expect(String(w.message)).toContain("SELECT * initial load");
-    // It must NOT claim the read-authority sync is entirely absent — that was the
-    // pre-narrow message; the SELECT * load now lands.
-    expect(String(w.message)).not.toContain("does not yet generate its read-authority sync");
-  });
-
-  test("the message names the table and the type", () => {
-    const w = findDiag(runTSForSource(CANONICAL), "W-AUTH-002");
-    expect(String(w.message)).toContain("Card");
-    expect(String(w.message)).toContain("cards");
-  });
-
-  test("still fires for the legacy opener-attr shape (state-constructor-def)", () => {
+  test("does NOT fire for the legacy opener-attr shape (state-constructor-def)", () => {
     const src =
       `<program>\n` +
       `< Card authority="server" table="cards" id(int) title(string)>\n` +
       `  <span></span>\n` +
       `</>\n` +
       `</program>`;
-    expect(findDiag(runTSForSource(src), "W-AUTH-002")).toBeDefined();
+    expect(findDiag(runTSForSource(src), "W-AUTH-002")).toBeUndefined();
   });
 
   test("does NOT fire for a `authority='local'` state type", () => {
@@ -113,7 +92,7 @@ describe("W-AUTH-002: Tier-1 server-authority residual warning (SSR pre-render)"
     expect(findDiag(runTSForSource(src), "W-AUTH-002")).toBeUndefined();
   });
 
-  test("W-AUTH-001 does NOT fire on a Tier-1 instance (it gets the SELECT * load)", () => {
+  test("W-AUTH-001 still does NOT fire on a Tier-1 instance (it gets the SELECT * load)", () => {
     const res = runTSForSource(CANONICAL);
     expect(findDiag(res, "W-AUTH-001")).toBeUndefined();
   });

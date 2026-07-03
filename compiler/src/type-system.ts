@@ -8351,28 +8351,19 @@ function annotateNodes(
             ctorTransitions,
           );
 
-          // W-AUTH-002 (interim honesty, §52.8): a Tier-1 `authority="server"
-          // table=` state type now gets its `SELECT *` initial-load codegen
-          // (§52.6.1, change-id state-decl-shape-disambiguation-2026-06-14 — the
-          // recogniser + emit-sync emitServerAuthorityLoad + the /__serverLoad
-          // route). The ONE remaining read-authority residual is SSR pre-render
-          // (§52.8): instances are loaded client-side on mount (a brief
-          // placeholder flash on first paint), not yet pre-rendered into the
-          // initial HTML. W-AUTH-002 now NARROWLY surfaces only that SSR residual
-          // (split to the committed follow-on g-tier1-read-authority-codegen).
-          // The WRITE is always the dev's own `?{}` server fn (§52.6.2).
-          if (ctorAuthority === "server" && ctorTableName) {
-            errors.push(new TSError(
-              "W-AUTH-002",
-              `W-AUTH-002: state type '< ${ctorName}>' (authority="server" table="${ctorTableName}") ` +
-              `gets its SELECT * initial load on mount, but is not yet SSR pre-rendered (§52.8): ` +
-              `instances load client-side after first paint (a brief placeholder flash), rather than ` +
-              `being populated into the initial server-rendered HTML. SSR pre-render is a tracked ` +
-              `follow-on. The persist write is your own ?{} server fn (§52.6.2).`,
-              ctorSpan,
-              "warning",
-            ));
-          }
+          // SSR pre-render RETIRED the interim W-AUTH-002 residual warning (S235,
+          // §52.8). A Tier-1 `authority="server" table=` type now gets its `SELECT *`
+          // initial load (§52.6.1) AND its rows are server-rendered into the
+          // first-paint HTML (D1, codegen/emit-ssr-render.ts) then adopted flash-free
+          // by the client (D2, runtime-template.js `_scrml_reconcile_list` DOM-adoption).
+          // The old residual premise — "loads client-side after first paint, a brief
+          // placeholder flash" — is obsolete for the supported `<each>` subset, so the
+          // per-type honesty warning is gone. The remaining gap is WIDENING the
+          // server-render subset (unsupported each shapes still fall back to
+          // client-render — tracked g-ssr-render-subset-widen), which is not a
+          // per-type concern. The WRITE is always the dev's own `?{}` server fn
+          // (§52.6.2); cross-user unscoped pre-render is still gated by
+          // W-SSR-PRERENDER-UNSCOPED (§52.15), which is unaffected by this retirement.
 
           for (const ta of (n.typedAttrs as ASTNodeLike[])) {
             scopeChain.bind(ta.name as string, {
