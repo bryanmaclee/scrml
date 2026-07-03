@@ -1,7 +1,7 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-06-30  commit: 04e7a1bb
-# reconciliation: S231-S232 delta (D3 conformance suite + §14.8.9 protect-floor + foreign-form fail-closed-Nominal + E-FN-ARROW-BODY + inline value-form control-flow render) folded FORWARD onto the S229 (0df45d2e) body — see 'Key S231-S232 Source Changes' (NEW, at top). NOT yet reconciled into this body: the S228 window — ss54 `--emit-token-set`/`token-set.ts`, e-ri-002 route-inference server-authoritative steering, ss50 tokenizer/emit-expr unary-paren, the `detect-sql-in-arrow.ts` S228 touch.
+# updated: 2026-07-02  commit: 2fb2bf1f
+# reconciliation: S233-S234 delta (SSR two-terminus [B-substrate inline-seed + A-terminus per-row server render `emit-ssr-render.ts`] + server-load `/__serverLoad` request-context authority + match-arm-drop `E-CG-003` fail-closed net + Road-B self-host-v2 lexer + §62/§63 SPEC) folded FORWARD onto the S231-S232 (04e7a1bb) body — see 'Key S233-S234 Source Changes' (NEW, at top). PRIOR: S231-S232 delta (D3 conformance suite + §14.8.9 protect-floor + foreign-form fail-closed-Nominal + E-FN-ARROW-BODY + inline value-form control-flow render) folded FORWARD onto the S229 (0df45d2e) body — see 'Key S231-S232 Source Changes' (NEW, at top). NOT yet reconciled into this body: the S228 window — ss54 `--emit-token-set`/`token-set.ts`, e-ri-002 route-inference server-authoritative steering, ss50 tokenizer/emit-expr unary-paren, the `detect-sql-in-arrow.ts` S228 touch.
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -36,6 +36,7 @@ compiler/tests/self-host/  — self-host compiler conformance tests
 compiler/tests/commands/  — CLI subcommand integration tests
 compiler/runtime/  — embedded client runtime JS (stdlib/idempotency.js; stdlib/ modules; data.js set-algebra helpers S170)
 compiler/self-host/  — experimental scrml-native self-hosting compiler output (cg-parts/ + dist/)
+compiler/self-host-v2/  — **NEW S234** Road-B compiler impl#2 LEXER (`lex.scrml` ~34KB + `progress.md`); Approach-B pure `fn lex(src) -> Token[]` fold over `match (mode, event)` (no engine/reactive/singleton — re-entrant); slices 1-3 token-classes COMPLETE, oracle token-diff green (65/65) vs impl#1 `native-parser/lex.js`
 compiler/samples/  — MCP v0 fixture sample app with routes/
 stdlib/  — scrml standard library (server-side modules; +S176 `math` pure + `random` capability-scoped non-det): auth, compiler, cron, crypto, data, format, fs, host, http, **math**, mcp, oauth, path, process, **random**, redis, regex, router, store, test, time (21 module dirs). `scrml:math` (S176) = pure scalar vocabulary (round/floor/ceil/abs/min/max/clamp/parseInt/parseFloat/toNumber/isNaN). `scrml:random` (S176) = capability-scoped NON-DET random()/randomInt() (E-FN-004 in `fn`, same class as the wall clock). `scrml:time.now()` (S176) = capability clock NON-DET. Each `stdlib/<m>/index.scrml` mirrors a `compiler/runtime/stdlib/<m>.js` shim.
 lsp/  — Language Server Protocol implementation (server.js, handlers.js, workspace.js, l4.js)
@@ -53,6 +54,40 @@ docs/website-viewer/  — C1 self-demo scrml app (viewer shell + real provenance
 scripts/  — maintenance + state tooling: regen-spec-index.ts, compile-test-samples.sh, git-hooks/, state.ts (DD3 project-state tool, S172 — see build.map.md)
 editors/  — editor extension stubs (VS Code etc.)
 scratch/  — throwaway working files
+
+## Key S233-S234 Source Changes (SSR two-terminus + server-load authority + match-arm-drop + self-host-v2 lexer + §62/§63; watermark 04e7a1bb → 2fb2bf1f)
+
+### S234 — SSR A-terminus Dispatch 1: server-side per-row markup renderer (`d05cf40c`; first-paint HTML contains the rows)
+- **NEW `codegen/emit-ssr-render.ts` (410L)** — `buildSsrEachRenderers(fileAST, seededVarNames)` → `SsrEachRenderer[]` ({varName, mountId, fnName, render-fn source lines}) + `SSR_RENDER_HELPER` (the `_scrml_esc`/`_scrml_esc_attr`/`_scrml_ssr_fill_mount` runtime block). One server render fn `_scrml_ssr_render_each_<node.id>` per TOP-LEVEL each (a nested each mounts to its parent, not a static `data-scrml-each-mount` div). `nodeToParts` emits a `data-scrml-key` attr on each row element (the DOM-adoption marker matching the client `_scrml_reconcile_list` keys via `resolveKeyReadExpr`). `resolveRowRead` handles field reads; anything non-field (function calls, `@cell` reads, method calls) → CONSERVATIVE null-return → client-only fallback (empty mount, never wrong markup). Row-template component guard uses NR `isUserComponentMarkup()` (now EXPORTED from component-expander.ts).
+- `codegen/emit-server.ts` (+28L) — `import { buildSsrEachRenderers, SSR_RENDER_HELPER }`; `const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames)`; inside `_scrml_ssr_compose_handler(_scrml_req)` (the B-substrate route) each renderer fills its mount: `_scrml_html = _scrml_ssr_fill_mount(_scrml_html, "each_<id>", _r.fnName(_scrml_ssr_state[_r.varName]))`. Feeds the ALREADY-REDACTED `_scrml_ssr_state[<var>]` — no fresh query, structurally safe (no new data access).
+- `component-expander.ts` (±2) — `isUserComponentMarkup` `function` → `export function` (consumed by emit-ssr-render).
+- Test: `compiler/tests/integration/ssr-a-terminus.test.js` (282L). R26 anchor: first-paint `<div data-scrml-each-mount></div>` (empty) → `<li data-scrml-key="1">Alice</li>...` (keyed), a protected column ABSENT from rows + seed + client bundle.
+
+### S233 — §52.8 SSR B-substrate: server-side inline-state seed + client pre-mount hydration (`e72f058a`)
+- `codegen/emit-server.ts` (+113L) — the FIRST compiler-emitted `text/html` route composes SSR HTML at request time and injects `<script>window.__scrml_ssr_state={…}</script>` before `</head>`. `_scrml_ssr_state[<var>]` seeded from a Tier-1 `SELECT *` / Pattern-C `?{}` / coalesced callable, each passed through `_scrml_protect_redact` (the §14.8.9 floor). JSON `<`-escaped for script-injection safety.
+- `runtime-template.js` (+28L) — NEW `ssr` chunk: `_scrml_ssr_seed_apply()` (applies `window.__scrml_ssr_state` to cells) + `_scrml_ssr_seeded(name)` (guard); run BEFORE mount-fetch decisions + engine hydration (emit-reactive-wiring Step 4c) so the engine `server=@cell` ride hydrates at construction. Absent seed (static host, no server in request path) → no-op.
+- `codegen/emit-client.ts` (+13L) / `emit-reactive-wiring.ts` (+18L) / `emit-sync.ts` (+13L) / `runtime-chunks.ts` (+6L) — seed-apply wiring + conditional-fetch skip when a cell is seeded.
+- Tests: `ssr-b-substrate.test.js` (323L) + `ssr-seed-runtime.test.js` (107L).
+
+### S233 — server-load request-context authority: `/__serverLoad` gate + `@currentUser` + per-user row-scope (`f90bca9d`; §52.15)
+- `codegen/emit-server.ts` (+164L) — `serverLoadGateMode(decl, authMiddlewareEntry)` → `ServerLoadGate`; Fork-4 route gate: `/__serverLoad/<var>` enforces the enclosing page/program auth (the page redirect does NOT cover the data route). `@currentUser` ambient active for a file iff no user `<currentUser>` reactive cell shadows the name; a Fork-3 row-scope query reaching `@currentUser.id` → anon resolves to NULL → zero rows (fail-closed).
+- `type-system.ts` (+118L) — W-SERVERLOAD-UNGATED + W-SSR-PRERENDER-UNSCOPED fire sites; `@currentUser.{id,role,isAuth}` typing.
+- `ast-builder.js` (+42L) / `expression-parser.ts` (+24L) / `route-inference.ts` (+8L) / `collect.ts` (+65L) / `emit-expr.ts` (+29L) — `@currentUser` parse + server-side resolution.
+- SPEC.md §52.15 (+31L). Test: `server-load-authority.test.js` (279L + 48L isServer-warning single-fire lock-in `398c797d`).
+
+### S234 — match-arm-drop family F2/F3/F6 + `E-CG-003` fail-closed net (`e5d6a5ff`; g-match-lowering-arm-drop)
+- `ast-builder.js` (+44L) — `collectExpr` S27 arm-boundary detector recognizes NUMBER/bool/newline-guarded-`-N` arm starts (F2 int-literal arms `match n { 61 :> … }`); `matchPositionIsPatternShaped` recognizes NUMBER/bool/-N product-slot literals (F3 `(.LParen, 0) :> …` — the SILENT-drop soundness root); `parseMatchArm` handles string/number/boolean `|`-alternation + payload-discard variant-alternation (F6); `armCondition` OR-chains.
+- `codegen/emit-control-flow.ts` (+120L) — `emitMultiScrutineeMatch` fail-CLOSED net: any body child NOT recognized as an arm now emits source-anchored `E-CG-003` instead of silently vanishing (the soundness guard). Prevents the silent F3 drop from recurring.
+- SPEC (Rule 4): §18.16.1 sanctions literal-arm-pattern (string/number/boolean); §18.19 product reuses §18.2 per position. Test: `g-match-lowering-arm-drop.test.js` (unit, 282L, +12-case battery). Full suite 18630/0; self-host-v2 lexer 65/65 unchanged. Surfaced as a self-host-v2 lexer dog-food.
+
+### S234 — Road-B self-host-v2 lexer slices 1-3 (`a8df839a` + `4c9c113b` + `8c8ef0aa`)
+- **NEW `compiler/self-host-v2/lex.scrml` (~34KB) + `progress.md`** — compiler impl#2 LEXER, Approach B (`compiler-reimagining-lexer-slice-2026-06-26.md`): a PURE `fn lex(src) -> Token[]` folding `step(st) -> LexState` over `match (mode, event)`. NO `<engine>`, no reactive `@` cells, no singleton, no render — `LexState` is a struct THREADED through the fold (re-entrant by construction). Slice-1 = core-token front (ident/kw/number/operator/punct); slice-2 = strings (single/double + escapes) + comments (line/block, skipped as trivia); slice-3 = regex bodies (`/pattern/flags` char-classes + escapes) + template-interpolation nesting (§51.0.Q.1 composite, `interpDepths` frame stack). Token-classes COMPLETE. DEFERRED slice-4 = full typed `BracketStack` + `ErrorRecovery` LexState threading (slice-3 threads only a minimal `bracketDepth: int`).
+- Oracle = token-diff vs impl#1 `native-parser/lex.js` (loop-until-green; impl#2 nullary kinds NAMED to match impl#1 exactly + KW-collapse; only runtime helper referenced = `_scrml_structural_eq`). 65/65 green.
+- Tests: `self-host-v2-lexer-slice1.test.js` (156L) / `slice2.test.js` (168L) / `slice3.test.js` (218L).
+
+### S234 — §62 Language-Versioning + §63 Deprecation-Lifecycle SPEC (`495a041b`; D1/D4, contract-half of the language/compiler split)
+- `compiler/SPEC.md` (+428L, 33,965→34,356; section count 61→63) — §62 (§62.1-62.7: two version axes; conformance suite IS the versioned contract; corpus-anchored MAJOR/MINOR/PATCH; `chunks.json` `language` field [§47.5]; `scrml.toml [language] version` pin [§22.13]; pre-1.0→1.0 freeze discipline; `lang:` partition vocabulary; NO editions) + §63 (SANCTIONED→SOFT→SCHEDULED→REMOVED stage machine; permanent-soft 1.0 freeze = ZERO scheduled removals; `scrml fix` verb split from `scrml migrate`).
+- `compiler/SPEC-INDEX.md` (regenerated via `bun run scripts/regen-spec-index.ts`). +2 reserved codes NAMED (`E-LANGUAGE-VERSION-TOO-NEW` / `E-LANGUAGE-COMPILER-TOO-OLD`) — §34 rows land WITH the impl wave (Rule 4). Nominal/spec-ahead: the compiler wiring (`language`-field emit, `[language]` pre-parse read, `expected.json` schema split) is the follow-on. Disposition strikes: dead floating-schedule labels on `<machine>` [§51.3.2] / whitespace [§15.15.5] / CPS [§19.9.5] deprecations reclassified UNSCHEDULED; the §17.4 promotion-nudge 'sunset path' sentence struck (permanent-coexistence, §63.8). RULING `docs/changes/language-version-and-deprecation-lifecycle-2026-07-01/`.
 
 ## Key S231-S232 Source Changes (D3 conformance suite + §14.8.9 protect-floor + foreign-Nominal + E-FN-ARROW-BODY + inline value-form render; watermark 0df45d2e → 04e7a1bb)
 
