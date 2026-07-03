@@ -1,0 +1,19 @@
+{
+  "id": "parse-variant-happy-payload-variant",
+  "description": "§41.13 parseVariant (b) happy path — a valid tagged-variant JSON string is boundary-parsed into a PAYLOAD variant. Clicking #decode parses '{\"tag\":\"Success\",\"rows\":42}' against LoadResult; @result becomes the typed Success(rows) value and the <Success(rows)> match arm renders \"Loaded 42 rows\". The cell snapshots as the author-visible payload shape { variant, data } (README (b) rule). The exhaustive !{} handler stays silent (parseError = none), proving the success path never routes through the ParseError arms.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13: parseVariant(json, EnumType) lifts untyped JSON into a typed enum value via type-driven dispatch on the `tag` discriminator (the enum's own variant names). A discriminator matching a payload variant constructs that variant with its validated payload — the returned value is typed as EnumType. The payload-bearing variant snapshots as { variant, data } per the README author-visible representation.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-PARSEVARIANT-"],
+    "input": [{ "click": "#decode" }],
+    "state": { "result": { "variant": "Success", "data": { "rows": 42 } }, "parseError": "none" },
+    "domAnchored": [
+      { "selector": "#out", "text": "Loaded 42 rows" },
+      { "selector": "#status", "text": "Parse status: none" }
+    ]
+  }
+}

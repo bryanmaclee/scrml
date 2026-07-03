@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-no-sql-mapping",
+  "description": "§41.15.8 (a) compile-time rejection — the Record struct has a field (handleId) typed as a heterogeneous, non-`| not` union (string | integer). The v1.0 SQL model maps a column to a single scalar type, so a two-member union that is NOT the canonical nullable `T | not` has no single column type and is rejected with E-SCHEMAFOR-NO-SQL-MAPPING. NOTE (trigger choice): the heterogeneous-union trigger is used deliberately — it is the unambiguous SPEC-named form (§41.15.8 lists 'a non-`| not` union such as string | integer') AND fires reliably; the canonical `T | not` nullable union is EXEMPT (§41.15.8a; see the happy-nullable-field case).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.8 normative statement: a struct field whose declared type has no v1.0 SQL mapping (function types, Promise types, foreign-code types, deep-reactive proxy types, arrays, OR a non-`| not` union) SHALL emit E-SCHEMAFOR-NO-SQL-MAPPING at the type-system stage (§34). §41.15.8a: a nullable union qualifies as mappable ONLY when it is EXACTLY [T, not]; a heterogeneous union like string | integer has no single scalar column type and stays rejected. Resolution: exclude the field via omit:, OR refactor to a mappable single-scalar shape.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-NO-SQL-MAPPING"],
+    "notCodes": []
+  }
+}

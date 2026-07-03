@@ -1,0 +1,16 @@
+{
+  "id": "parse-variant-error-unknown-variant",
+  "description": "§41.13 parseVariant (b) failure mode — UnknownVariant. The wire value carries a `tag` discriminator ('{\"tag\":\"Archived\"}') whose value matches NO variant of LoadResult (Success/Empty/Failed). parseVariant raises ::ParseError::UnknownVariant(tag) and the exhaustive !{} handler routes to the UnknownVariant arm, recording @parseError = \"unknown-variant\". The contract asserts WHICH ParseError variant fired; it deliberately does NOT assert on the bound `tag` payload — see the impl#1-vs-SPEC divergence note in the ss61 dispatch report (single-field !{} arm binding binds the whole .data object, not the field value).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13 (Failure type / variant semantics): UnknownVariant(tag) — the JSON discriminator value does not match any variant name in the second-argument enum. Surfaced at runtime via E-PARSEVARIANT-UNKNOWN-VARIANT and matched by the ::UnknownVariant arm inside the failable-call handler. The discriminator key is the enum's own variant names (§41.13 normative statement: no discriminatorKey=/mapping= translation).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#decode" }],
+    "state": { "parseError": "unknown-variant" },
+    "dom": "<button id=\"decode\">Decode</button><p id=\"status\">Parse status: unknown-variant</p>",
+    "domAnchored": [{ "selector": "#status", "text": "Parse status: unknown-variant" }]
+  }
+}

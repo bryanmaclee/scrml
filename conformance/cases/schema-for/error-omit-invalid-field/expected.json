@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-omit-invalid-field",
+  "description": "§41.15.4 (a) compile-time misuse — the `omit:` field-set transform names a field (\"passwordHash\") that is not present on the User struct (a natural mistake: an author intends to exclude a sensitive column that was never declared on this struct). The type-system stage validates each omit array entry against the struct's field list and rejects the unknown name with E-SCHEMAFOR-OMIT-INVALID-FIELD.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.4 normative statement: `omit: [\"field\", ...]` SHALL accept an array literal of bare field-name strings; the generated table-declaration SHALL include all struct fields except those named; field names not present on the struct SHALL emit E-SCHEMAFOR-OMIT-INVALID-FIELD (§34). Resolution: verify each omit entry matches a declared struct field name.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-OMIT-INVALID-FIELD"],
+    "notCodes": []
+  }
+}

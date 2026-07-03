@@ -1,0 +1,16 @@
+{
+  "id": "parse-variant-error-missing-discriminator",
+  "description": "§41.13 parseVariant (b) failure mode — MissingDiscriminator. The wire value is a JSON object with NO `tag` discriminator field ('{\"foo\":1}'). parseVariant raises ::ParseError::MissingDiscriminator and the exhaustive !{} handler routes to the MissingDiscriminator arm, which records @parseError = \"missing-discriminator\". The contract asserts WHICH ParseError variant fired (the author-visible outcome cell), not the impl-freedom error message text. domAnchored confirms the #status line renders the routed outcome.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13 (Failure type / variant semantics): MissingDiscriminator — the JSON value has no `tag` field at parse time. Surfaced at runtime via E-PARSEVARIANT-DISCRIMINATOR-MISSING and, inside an !{} handler installed against the call, matched by the ::MissingDiscriminator arm. The call is failable and the handler's exhaustiveness over the four ParseError variants is required (§41.13; §19).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#decode" }],
+    "state": { "parseError": "missing-discriminator" },
+    "dom": "<button id=\"decode\">Decode</button><p id=\"status\">Parse status: missing-discriminator</p>",
+    "domAnchored": [{ "selector": "#status", "text": "Parse status: missing-discriminator" }]
+  }
+}

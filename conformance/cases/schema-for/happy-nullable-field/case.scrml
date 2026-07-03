@@ -1,0 +1,14 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Contact:struct = {
+    name:     string req
+    nickname: string | not
+    note:     string?
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Contact) }
+  </>
+</program>

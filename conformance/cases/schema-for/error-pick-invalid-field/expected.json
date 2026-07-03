@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-pick-invalid-field",
+  "description": "§41.15.4 (a) compile-time misuse — the `pick:` field-set transform names a field (\"phone\") that is not present on the User struct. The type-system stage validates each pick array entry against the struct's declared field list and rejects the unknown name with E-SCHEMAFOR-PICK-INVALID-FIELD.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.4 normative statement: `pick: [\"field\", ...]` SHALL accept an array literal of bare field-name strings; the generated table-declaration SHALL include only the named fields; field names not present on the struct SHALL emit E-SCHEMAFOR-PICK-INVALID-FIELD (§34). Resolution: verify each pick entry matches a declared struct field name.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-PICK-INVALID-FIELD"],
+    "notCodes": []
+  }
+}

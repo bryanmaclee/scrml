@@ -1,0 +1,13 @@
+{
+  "id": "schema-for-happy-canonical-expansion",
+  "description": "§41.15 (b) DDL structural effect — the canonical schemaFor(User) with typed + refinement-predicated fields (string req length/pattern, integer min, boolean req) expands cleanly inside a <schema> block: the whole E-SCHEMAFOR-* family stays silent. STRUCTURAL-EFFECT-VIA-CODES: schemaFor's output is a compile-time <schema> table-declaration fragment consumed by the migration pipeline (parseSchemaBlock + diffSchema); the emitted SQL DDL is explicit D3 impl-freedom AND is not present in the client html / clientJs / serverJs / post-run DOM / state snapshot (§41.15.9 'DDL is compile-time string'), so it has NO adapter-observable runtime (b) DOM/state surface. The impl-neutral structural contract is therefore asserted at the (a) codes layer: a well-formed struct with predicated fields is ACCEPTED and expanded without error (clean expansion == the predicate-to-CHECK lowering path per §41.15.5 is exercised end-to-end).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.2 + §41.15.5 — schemaFor(T) SHALL produce a <schema> table-declaration fragment; refinement-type predicates on struct fields SHALL lower to SQL CHECK constraints automatically (req -> NOT NULL, length(<=N) -> CHECK, pattern(re) -> CHECK, min(N) -> CHECK). A canonical struct whose fields span the primitive + predicate vocabulary MUST expand without emitting any E-SCHEMAFOR-* diagnostic. Because the emitted DDL text is impl-freedom (SPEC §41.15.2 round-trip property; the <schema> parser ingests both shared-core and SQL-mirror forms identically) and is a compile-time artifact with no runtime DOM/state projection (§41.15.9), the conformance contract for the acceptance path is the absence of the E-SCHEMAFOR-* family, NOT a byte-for-byte DDL match.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SCHEMAFOR-"]
+  }
+}

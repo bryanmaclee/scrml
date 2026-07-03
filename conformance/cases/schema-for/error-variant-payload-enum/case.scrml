@@ -1,0 +1,15 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type JobResult:enum = { Ok(integer), Err(string) }
+
+  type Job:struct = {
+    name:   string req
+    result: JobResult req
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Job) }
+  </>
+</program>

@@ -1,0 +1,8 @@
+{
+  "id": "tablefor-column-field-unknown",
+  "description": "§41.16.3 — a <column field=\"X\"> whose X is not a declared struct field fires E-TABLEFOR-COLUMN-FIELD-UNKNOWN.",
+  "language-version": "1.0",
+  "spec": "§41.16.3",
+  "rationale": "§41.16.3: a <column> slot's field= SHALL name a declared struct field; an unknown field name is E-TABLEFOR-COLUMN-FIELD-UNKNOWN.",
+  "expect": { "codes": ["E-TABLEFOR-COLUMN-FIELD-UNKNOWN"], "notCodes": [] }
+}

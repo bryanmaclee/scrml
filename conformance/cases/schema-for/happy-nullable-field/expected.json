@@ -1,0 +1,13 @@
+{
+  "id": "schema-for-happy-nullable-field",
+  "description": "§41.15.8a (S143 R28-7 nullable carve-out) — struct fields typed as the canonical nullable union `string | not` AND the `string?` sugar form are ACCEPTED by schemaFor (they lower to a NULLABLE column — the base type's column WITHOUT NOT NULL). This locks the carve-out that the nullable union is EXEMPT from E-SCHEMAFOR-NO-SQL-MAPPING (which otherwise rejects non-`| not` unions). STRUCTURAL-EFFECT-VIA-CODES: the nullable-column DDL is impl-freedom + compile-time-only (§41.15.9), so the carve-out is asserted by ACCEPTANCE — a `T | not` / `T?` field does NOT fire E-SCHEMAFOR-NO-SQL-MAPPING. Were the carve-out regressed, these fields would be rejected as unmappable unions, so a clean compile is the impl-neutral proof the nullable-column round-trip (the inverse of §14.8.3 DB introspection) is preserved.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schemafor-predicated-base-nullable-r28-7b.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.8a — a struct field whose declared type is the canonical nullable union `T | not` (§42), or the `T?` sugar (desugared to `T | not` before type checking), where T is a v1.0-mappable base type, SHALL lower to a NULLABLE column of T's SQL type. This is the EXACT INVERSE of §14.8.3 (DB introspection maps a nullable column to `T | not`); schemaFor closes the round-trip. The nullable union is explicitly EXEMPT from E-SCHEMAFOR-NO-SQL-MAPPING per the S143 R28-7 carve-out. The impl-neutral contract is the acceptance (no E-SCHEMAFOR-* fire); the emitted nullable-column DDL text is impl-freedom and is a compile-time artifact with no runtime DOM/state surface (§41.15.9).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SCHEMAFOR-"]
+  }
+}

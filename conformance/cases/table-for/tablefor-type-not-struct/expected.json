@@ -1,0 +1,8 @@
+{
+  "id": "tablefor-type-not-struct",
+  "description": "§41.16.1 — tableFor's for= must be a :struct type. An enum type fires E-TABLEFOR-TYPE-NOT-STRUCT.",
+  "language-version": "1.0",
+  "spec": "§41.16.1",
+  "rationale": "§41.16.1: for= SHALL be a bare scrml-native :struct type identifier; enum/named-shape/refinement/generic/arbitrary type expressions are rejected with E-TABLEFOR-TYPE-NOT-STRUCT (mirrors formFor/schemaFor).",
+  "expect": { "codes": ["E-TABLEFOR-TYPE-NOT-STRUCT"], "notCodes": [] }
+}

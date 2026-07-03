@@ -1,0 +1,23 @@
+${
+    import { parseVariant } from 'scrml:data'
+
+    type UserRow:struct = {
+        id: int
+        name: string
+    }
+
+    <status> = "idle"
+
+    function decode() {
+        parseVariant('{"id":1,"name":"ada"}', UserRow) !{
+            | ::MissingDiscriminator          :> { @status = "missing" }
+            | ::UnknownVariant(tag)           :> { @status = "unknown" }
+            | ::InvalidPayload(field, reason) :> { @status = "invalid" }
+            | ::Malformed(reason)             :> { @status = "malformed" }
+        }
+    }
+}
+<program>
+    <button id="decode" onclick=decode()>Decode</>
+    <p id="status">${@status}</p>
+</program>

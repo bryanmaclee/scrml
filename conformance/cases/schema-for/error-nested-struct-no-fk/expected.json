@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-nested-struct-no-fk",
+  "description": "§41.15.7 (a) compile-time rejection — the User struct has a struct-typed field (address: Address). v1.0 has no foreign-key derivation rule for cross-type struct references (OQ-SCH-4 ratified out-of-scope), so the type-system stage rejects the nested struct field with E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1 rather than silently guessing an FK column.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.7 normative statement: a struct field whose declared type is itself a :struct SHALL emit E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1 at the type-system stage (§34); auto-derived foreign-key columns for cross-type struct references are RESERVED for v1.next. Resolution: omit the nested struct field via schemaFor(T, { omit: [...] }) and hand-author the FK column inside the same <schema> block per §41.15.3 interleaving, OR refactor to a flat _id field.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1"],
+    "notCodes": []
+  }
+}

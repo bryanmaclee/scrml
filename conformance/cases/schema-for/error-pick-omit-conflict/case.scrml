@@ -1,0 +1,14 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type User:struct = {
+    email: string req length(<=120)
+    name:  string req length(>=2, <=80)
+    age:   integer min(0)
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(User, { pick: ["email"], omit: ["age"] }) }
+  </>
+</program>

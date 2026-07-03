@@ -1,0 +1,13 @@
+{
+  "id": "schema-for-happy-enum-lowering",
+  "description": "§41.15.6 / OQ-SCH-12 (the load-bearing v1.0 value-add) — a struct with a bare-variant enum-typed field (status: Status where Status = { Pending, Active, Archived }) is ACCEPTED by schemaFor and expands cleanly: the enum field lowers mechanically to `text req oneOf([variant-names...])` in the shared-core form (which §39.5.8 then expands to TEXT NOT NULL CHECK (col IN ('Pending','Active','Archived'))). STRUCTURAL-EFFECT-VIA-CODES: the emitted oneOf([...]) DDL text is impl-freedom + compile-time-only (not in the post-run DOM/state per §41.15.9), so the enum-lowering path is asserted by its ACCEPTANCE signal — a bare-variant enum field does NOT fire E-SCHEMAFOR-NO-SQL-MAPPING or E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1; it is recognized as mappable and lowered. Were OQ-SCH-12 enum-lowering unwired, the enum field would instead be rejected as unmappable, so a clean compile is the impl-neutral proof the enum-knowledge-at-DB-boundary lowering fires.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.6 — a struct field whose declared type is a bare-variant enum (no payload-bearing variants) SHALL lower to `text req oneOf([variant-names...])`, closing the enum-knowledge-loss-at-DB-boundary gap. This is the flagship OQ-SCH-12 value-add. The acceptance contract (clean expansion, no E-SCHEMAFOR-* fire) is the impl-neutral surface: the exact lowered oneOf([...]) string is impl-freedom and is a compile-time DDL artifact with no runtime DOM/state projection (§41.15.9). A bare-variant enum field being accepted-and-lowered (rather than rejected) is what distinguishes a schemaFor that closes the L4 'define type once -> schema derives' loop from one that does not.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SCHEMAFOR-"]
+  }
+}

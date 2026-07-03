@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-variant-payload-enum",
+  "description": "§41.15.6 (a) compile-time rejection — the Job struct has a field (result) typed as a PAYLOAD-bearing enum (JobResult = { Ok(integer), Err(string) } — variants carry payload data). v1.0 does not lower payload enums to SQL (JSON-column vs separate-table-join is deferred to v1.next), so it rejects with E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 to surface the design tension rather than silently discard payload data. Contrast the happy-enum-lowering case: a BARE-variant enum (no payloads) DOES lower to oneOf([...]).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.6 normative statement: a struct field whose declared type is a payload-bearing enum (one or more variants with payload) SHALL emit E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 at the type-system stage (§34). Payload enums require either a JSON column (deferred) or a separate-table join (out of scope for schemaFor); v1.0 rejects to surface the tension explicitly rather than throw away payload data. Resolution: refactor to a bare-variant enum if the payload is not load-bearing, OR omit: the field and hand-author a JSON column / separate table.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1"],
+    "notCodes": []
+  }
+}

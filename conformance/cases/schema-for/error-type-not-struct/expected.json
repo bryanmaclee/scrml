@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-type-not-struct",
+  "description": "§41.15.1 (a) compile-time misuse — the first positional argument to schemaFor is an :enum type (Color), not a :struct type. The type-system stage rejects it with E-SCHEMAFOR-TYPE-NOT-STRUCT. Passing an enum where a struct is required is the canonical 'wrong type family' mistake in the L22 type-as-argument family (mirrors formFor's E-FORMFOR-TYPE-NOT-STRUCT and parseVariant's E-PARSEVARIANT-TYPE-NOT-ENUM).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.1 normative statement: the first positional argument SHALL be a bare scrml-native :struct type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions SHALL NOT be accepted in this position; violations SHALL emit E-SCHEMAFOR-TYPE-NOT-STRUCT at the type-system stage (§34). The resolution per §34 is to pass a :struct type (for enum-shape boundary parsing use parseVariant §41.13).",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-TYPE-NOT-STRUCT"],
+    "notCodes": []
+  }
+}

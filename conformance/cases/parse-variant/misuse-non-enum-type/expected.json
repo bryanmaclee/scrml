@@ -1,0 +1,12 @@
+{
+  "id": "parse-variant-misuse-non-enum-type",
+  "description": "§41.13 parseVariant (a) compile-time misuse — the second argument is a :struct type (UserRow), not a bare :enum type identifier. The type-system stage rejects it with E-PARSEVARIANT-TYPE-NOT-ENUM. This is the only COMPILE-TIME code in the E-PARSEVARIANT-* family; the other three (DISCRIMINATOR-MISSING / UNKNOWN-VARIANT / INVALID-PAYLOAD) are RUNTIME codes surfaced via ParseError variants and are exercised by the sibling error-* runtime cases.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/parse-variant.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13 normative statement: the second argument SHALL be a bare scrml-native :enum type identifier. Struct types, named-shape types, refinement-type literals, and arbitrary type expressions SHALL NOT be accepted in argument-2 position; violations SHALL emit E-PARSEVARIANT-TYPE-NOT-ENUM at the type-system stage (§34). The compile-time enforcement closes the string-discriminator trap at the type system. A struct passed as arg-2 (the most likely real-world mistake — 'I have a struct, let me parseVariant it') is the canonical trigger. Resolution per §34: for struct-shape boundary parsing use a server-fn normalization step or §53.4 SPARK refinement on assignment.",
+  "expect": {
+    "codes": ["E-PARSEVARIANT-TYPE-NOT-ENUM"],
+    "notCodes": []
+  }
+}

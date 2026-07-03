@@ -1,0 +1,18 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Address:struct = {
+    street: string req
+    city:   string req
+  }
+
+  type User:struct = {
+    email:   string req length(<=120)
+    address: Address req
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(User) }
+  </>
+</program>

@@ -1,0 +1,19 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type User:struct = {
+    email: string req length(<=120)
+    name:  string req length(>=2, <=80)
+  }
+
+  type Post:struct = {
+    title: string req length(<=200)
+    body:  string req
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(User) }
+    ${ schemaFor(Post) }
+  </>
+</program>

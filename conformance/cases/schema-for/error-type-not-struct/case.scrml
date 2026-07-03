@@ -1,0 +1,10 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Color:enum = { Red, Green, Blue }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Color) }
+  </>
+</program>

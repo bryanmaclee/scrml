@@ -1,0 +1,8 @@
+{
+  "id": "tablefor-rows-missing",
+  "description": "§41.16.2 — the rows= attribute is required on every <tableFor>. Its absence fires E-TABLEFOR-ROWS-MISSING.",
+  "language-version": "1.0",
+  "spec": "§41.16.2",
+  "rationale": "§41.16.2: rows= SHALL be present on every <tableFor> element; absence is E-TABLEFOR-ROWS-MISSING (a type mismatch on a present rows= is the sibling E-TABLEFOR-ROWS-WRONG-TYPE).",
+  "expect": { "codes": ["E-TABLEFOR-ROWS-MISSING"], "notCodes": [] }
+}

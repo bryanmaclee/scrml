@@ -1,0 +1,19 @@
+{
+  "id": "parse-variant-happy-unit-variant",
+  "description": "§41.13 parseVariant (b) happy path — a valid tagged-variant JSON string is boundary-parsed into a UNIT (no-payload) variant. The cell is seeded to .Failed(\"unset\") so the assertion proves the parse actually mutated it. Clicking #decode parses '{\"tag\":\"Empty\"}' against LoadResult; @result becomes the Empty variant and the <Empty> match arm renders \"No rows loaded\". A unit variant snapshots as the bare variant-name string \"Empty\" (README (b) rule: non-payload variants snapshot as bare strings), NOT the { variant, data } payload shape.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13: a discriminator matching a unit (nullary) variant constructs that variant with no payload validation. The returned enum value for a unit variant is the bare variant-name string per the runtime enum representation (README (b): non-payload variants snapshot as bare strings). Confirms the discriminator-dispatch handles unit variants distinctly from payload variants.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-PARSEVARIANT-"],
+    "input": [{ "click": "#decode" }],
+    "state": { "result": "Empty", "parseError": "none" },
+    "domAnchored": [
+      { "selector": "#out", "text": "No rows loaded" },
+      { "selector": "#status", "text": "Parse status: none" }
+    ]
+  }
+}

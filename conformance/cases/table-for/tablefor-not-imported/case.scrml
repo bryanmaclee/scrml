@@ -1,0 +1,5 @@
+${
+    type User:struct = { id: integer, name: string }
+    <users>: User[] = []
+}
+<tableFor for=User rows=@users></tableFor>

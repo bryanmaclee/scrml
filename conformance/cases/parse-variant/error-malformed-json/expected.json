@@ -1,0 +1,16 @@
+{
+  "id": "parse-variant-error-malformed-json",
+  "description": "§41.13 parseVariant (b) failure mode — Malformed. The string argument ('not valid json') is not parseable JSON, so the internal JSON.parse throws. parseVariant raises ::ParseError::Malformed(reason); the exhaustive !{} handler routes to the Malformed arm and records @parseError = \"malformed\". The contract asserts WHICH ParseError variant fired, not the `reason` message string (the JSON.parse error text is impl-freedom).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13 (Failure type / variant semantics): Malformed(reason) — the JSON string failed JSON.parse, re-raised when JSON.parse throws. The `reason` is a free-form message string (impl-freedom, not asserted). This is the string-input decode path (parseVariant accepts json: string | object; a string is JSON.parsed before dispatch).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#decode" }],
+    "state": { "parseError": "malformed" },
+    "dom": "<button id=\"decode\">Decode</button><p id=\"status\">Parse status: malformed</p>",
+    "domAnchored": [{ "selector": "#status", "text": "Parse status: malformed" }]
+  }
+}

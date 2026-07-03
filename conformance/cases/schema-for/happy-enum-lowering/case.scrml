@@ -1,0 +1,15 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Status:enum = { Pending, Active, Archived }
+
+  type Task:struct = {
+    name:   string req length(<=80)
+    status: Status req
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Task) }
+  </>
+</program>

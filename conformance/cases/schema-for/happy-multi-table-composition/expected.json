@@ -1,0 +1,13 @@
+{
+  "id": "schema-for-happy-multi-table-composition",
+  "description": "§41.15.3 (OQ-SCH-3) — multiple schemaFor(T) calls compose inside a single <schema> block via concatenation (schemaFor(User) + schemaFor(Post) in one block produce two table-declaration fragments). Each call emits a BARE table-declaration fragment (NOT a wrapping <schema>...</schema>), so N calls concatenate into one schema. STRUCTURAL-EFFECT-VIA-CODES: the two emitted table-declaration fragments are impl-freedom + compile-time-only (§41.15.9), so composition is asserted by ACCEPTANCE — two struct-derived tables in one block expand without any E-SCHEMAFOR-* fire. Were the bare-fragment emit shape (§41.15.2) broken (e.g. each call emitting a full nested <schema>), a second call would collide, so a clean multi-call compile is the impl-neutral proof the fragment-concatenation model holds.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.2 + §41.15.3 — schemaFor(T) SHALL produce a bare <schema> table-declaration fragment (table name + columns + constraints), NOT a wrapping <schema> block; multiple schemaFor(T) calls SHALL be composable inside a single <schema> block via concatenation. The impl-neutral contract for the composition path is the acceptance of N calls in one block with no E-SCHEMAFOR-* diagnostic; the emitted concatenated DDL text is impl-freedom (§41.15.2 round-trip property) and is a compile-time artifact with no runtime DOM/state projection (§41.15.9).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SCHEMAFOR-"]
+  }
+}

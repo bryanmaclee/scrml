@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-pick-omit-conflict",
+  "description": "§41.15.4 (a) compile-time misuse — a single schemaFor(...) call supplies BOTH `pick` AND `omit` options. The two transforms are mutually exclusive (pick names the only fields to render; omit names fields to exclude — the inverse), so co-occurrence on one call is rejected with E-SCHEMAFOR-PICK-OMIT-CONFLICT.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.4 normative statement: `pick` and `omit` SHALL NOT be combined on the same schemaFor(...) call; co-occurrence is E-SCHEMAFOR-PICK-OMIT-CONFLICT (§34). Resolution: choose one; if both are truly needed, layer a Pick over an Omit at the type level and pass the derived type.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-PICK-OMIT-CONFLICT"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "tablefor-render-rt",
+  "description": "§41.16 tableFor(StructType, rows) renders an auto <table>: a <thead> with one <th> per struct field (header derived from the field name, in struct-declaration order — Id/Name/Role) and one data cell per field per row (2 rows x 3 fields = 6 <td>, default-rendered from each field's value: 1/Ada/Admin, 2/Bob/Editor). OQ1 + HARNESS NOTE: the row cells render into an each-mount <div> which the harness's innerHTML string-parse HOISTS out of <tbody> (a <div> is invalid table content), so the live <tbody> is empty and the cells sit in a sibling <div>; the impl-neutral effect (3 headers + 6 valued cells) is asserted LOCATION-AGNOSTICALLY via total th/td counts, never tbody nesting. Escalated as a harness/table-mount note.",
+  "language-version": "1.0",
+  "spec": "§41.16, §41.16.4",
+  "rationale": "§41.16: tableFor expands to a <table> with a <th> per included struct field + a <td> per field per row; §41.16.4 headers derive from field names in declaration order. The rendered headers + cells are the impl-neutral runtime effect (the exact table nesting is impl-freedom / harness-hoisted).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-TABLEFOR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": "table", "count": 1 },
+      { "selector": "thead th", "count": 3 },
+      { "selector": "thead th", "text": "Id" },
+      { "selector": "td", "count": 6 }
+    ]
+  }
+}

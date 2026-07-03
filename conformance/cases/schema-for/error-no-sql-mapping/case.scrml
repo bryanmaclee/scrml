@@ -1,0 +1,13 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Record:struct = {
+    name:     string req
+    handleId: string | integer
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Record) }
+  </>
+</program>

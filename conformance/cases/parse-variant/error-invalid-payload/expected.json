@@ -1,0 +1,16 @@
+{
+  "id": "parse-variant-error-invalid-payload",
+  "description": "§41.13 parseVariant (b) failure mode — InvalidPayload. The discriminator matches a payload variant (Success expects rows: int) but the wire payload is the wrong type ('{\"tag\":\"Success\",\"rows\":\"lots\"}' — rows is a string). parseVariant raises ::ParseError::InvalidPayload(field, reason); the exhaustive !{} handler routes to the InvalidPayload arm and records @parseError = \"invalid-payload:\" + field, i.e. \"invalid-payload:rows\". The contract asserts the OFFENDING FIELD NAME (impl-neutral, normative per §41.13) but NOT the `reason` message string (explicit D3 impl-freedom).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
+  "spec": "§41.13",
+  "rationale": "§41.13 (Failure type / variant semantics): InvalidPayload(field, reason) — a variant's payload field has the wrong type or fails a payload predicate during parse. Surfaced at runtime via E-PARSEVARIANT-INVALID-PAYLOAD. The `field` names the offending payload field ('rows') — a compiler-derivable, impl-neutral value; the `reason` string is impl-freedom message text and is deliberately not asserted. The two-field payload destructures per-field in the handler arm (field, reason).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#decode" }],
+    "state": { "parseError": "invalid-payload:rows" },
+    "dom": "<button id=\"decode\">Decode</button><p id=\"status\">Parse status: invalid-payload:rows</p>",
+    "domAnchored": [{ "selector": "#status", "text": "Parse status: invalid-payload:rows" }]
+  }
+}

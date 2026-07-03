@@ -1,0 +1,6 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Role:enum = { Admin, Editor }
+    <rows>: Role[] = []
+}
+<tableFor for=Role rows=@rows></tableFor>
