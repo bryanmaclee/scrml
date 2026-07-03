@@ -16,11 +16,30 @@
 // an `interpDepths` frame stack disambiguating the interp-closing `}` from a
 // plain object-literal `}` by bracket depth).
 //
-// DEFERRED to slice-4: the full typed BracketStack + ErrorRecovery LexState
-// threading (slice 3 threads only a minimal `bracketDepth: int` counter — just
-// enough for interp-close disambiguation) and precise cooked-decode of
-// hex/unicode/line-continuation escapes (raw/span are already correct; only the
-// uncompared `cooked` field is approximate — TemplateChunk `cooked` ~= raw).
+// Slice-4a makes cooked-decode PRECISE: `\xHH` / `\uHHHH` / `\u{…}` and
+// `\<newline>` line-continuation now decode exactly (via `scanEscape`, mirroring
+// impl#1's scanStringEscape) for BOTH strings and template chunks — TemplateChunk
+// `cooked` is now the true decoded value (no longer ~= raw).
+// Slice-4b swaps the ad-hoc `bracketDepth: int` counter for a typed
+// `bracketStack: BracketKind[]` (opener KINDS pushed/popped per `(`/`{`/`[` vs
+// `)`/`}`/`]`); DEPTH is now `bracketStack.length`. Token output is byte-identical
+// (a pure internal-state upgrade) — the structural bracket knowledge feeds the
+// parser wave + slice-4's matched-closer ErrorRecovery.
+// Slice-5a adds the contextual `.foo` BareVariant token: a `.` in VALUE position
+// (regexAllowedAfter — the same value-vs-member predicate the regex `/` reuses)
+// followed by an ident-start lexes as ONE BareVariant token, not Dot+Ident. In
+// MEMBER position (`obj.foo`, after a value) the `.` stays a plain Dot.
+// Slice-5b reserves impl#1's FULL keyword table (`token.js` JS_KEYWORDS — `type`
+// excluded, it is a contextual identifier) so a bareword lexes to `Keyword` on
+// both impls, and makes `regexAllowedAfter` TEXT-AWARE for keywords: after a
+// VALUE-KEYWORD (this/super/true/false/null/undefined) a `/` is division; after
+// any OTHER keyword (return/typeof/in/instanceof/new/delete/void/throw/…) a `/`
+// OPENS a regex — matching impl#1's regexAllowedAfter keyword split.
+// DEFERRED to slice-4: ErrorRecovery (mismatch detection) + per-frame SPANS on the
+// stack (slice-4b stores only the opener kind — a bare pop preserves depth).
+// DEFERRED (separate token classes, NOT BareVariant scope): leading-dot NumberLit
+// (`.5` — still Dot+Number here), Ellipsis (`...` — still three Dots), and the
+// `@`/ScrmlAt sigil (`@` lexes as Unknown, so `@.field` differs from impl#1).
 //
 // NB — this file is wrapped in `<program>` deliberately: the importable
 // library-module path (a bare `${}` module, SPEC §21.5) does NOT lower the
@@ -54,6 +73,10 @@ ${
         RegexLit(pattern: string, flags: string),
         TemplateChunk(cooked: string, raw: string),
         TemplateInterpStart, TemplateInterpEnd,
+        // A CONTEXTUAL `.foo` bare variant — a `.` in VALUE position (not member
+        // access) immediately followed by an ident-start. text = ".name", name =
+        // the ident without the dot. See scanBareVariant + classify's `.` arm.
+        BareVariant(name: string),
         Ident(name: string),
         Keyword(name: string),
         Unknown(ch: string),
@@ -138,20 +161,44 @@ ${
     // end an expression. Bounded prev-token calculation (DD §D4 P3). Mirrors
     // impl#1's regexAllowedAfter false-list (a value or a closing bracket cannot
     // be followed by a regex): Ident / NumberLit / StringLit / RegexLit / `)` /
-    // `]` / `}` / `++` / `--`. (impl#1's value-keyword cases — this/true/false/
-    // null/undefined — do not apply: this lexer's keyword set excludes them, so
-    // they lex as Ident, which is ALREADY in the false-list.)
+    // `]` / `}` / `++` / `--` / BareVariant, PLUS the VALUE-KEYWORDS
+    // (this/super/true/false/null/undefined) — a value-keyword produces a value,
+    // so a following `/` is division and a following `.foo` is member access. Every
+    // OTHER reserved word (return/typeof/in/instanceof/new/delete/void/throw/…)
+    // expects a value next, so a following `/` OPENS a regex (impl#1 parity — this
+    // is slice-5b: impl#2 now reserves impl#1's full keyword table, so `typeof /re/`
+    // etc. regex-open the same as `return /re/`). The value-keyword discrimination
+    // is TEXT-AWARE — `.Keyword(name)` carries the reserved word, split via
+    // isValueKeyword(keywordName(last)). impl#1's ScrmlAt case → this lexer has no
+    // `@`/ScrmlAt yet, so `@` lexes as Unknown (value-ending below); see
+    // progress.md slice-5a for the `@.field` note.
     fn regexAllowedAfter(last: TokenKind | not) -> boolean {
         if (last is not) return true
-        if (last is .Ident)     return false
-        if (last is .NumberLit) return false
-        if (last is .StringLit) return false
-        if (last is .RegexLit)  return false
-        if (last is .RParen)    return false
-        if (last is .RBracket)  return false
-        if (last is .RBrace)    return false
-        if (last is .Increment) return false
-        if (last is .Decrement) return false
+        if (last is .Ident)       return false
+        if (last is .NumberLit)   return false
+        if (last is .StringLit)   return false
+        if (last is .RegexLit)    return false
+        if (last is .RParen)      return false
+        if (last is .RBracket)    return false
+        if (last is .RBrace)      return false
+        if (last is .Increment)   return false
+        if (last is .Decrement)   return false
+        if (last is .BareVariant) return false
+        // Unknown stands in for chars this lexer does not tokenize yet — several
+        // (`@` the reactive/each sigil, `~`, `#`) are VALUE-producing in real
+        // scrml, so a following `.`/`/` is member-access / division, NOT a bare
+        // variant / regex. Conservatively treat Unknown as value-ending (parity
+        // with impl#1's ScrmlAt→false): `@.field` then lexes as Unknown + Dot +
+        // Ident, so `.field` is NOT a spurious BareVariant. (Full `@.field`→one
+        // ScrmlAt parity awaits the ScrmlAt sigil slice — see progress.md.)
+        if (last is .Unknown)     return false
+        // A VALUE-KEYWORD (this/super/true/false/null/undefined) ends an expression
+        // → division / member after it; every other reserved word expects a value
+        // → a regex may open. Text-aware via the `.Keyword(name)` payload.
+        if (last is .Keyword) {
+            if (isValueKeyword(keywordName(last))) return false
+            return true
+        }
         return true
     }
 
@@ -163,6 +210,7 @@ ${
 
     fn kNumber(raw: string) -> TokenKind   { return .NumberLit(raw) }
     fn kUnknown(ch: string) -> TokenKind   { return .Unknown(ch) }
+    fn kBareVariant(name: string) -> TokenKind { return .BareVariant(name) }
     fn kRegex(pattern: string, flags: string) -> TokenKind { return .RegexLit(pattern, flags) }
     fn kTemplateChunk(cooked: string, raw: string) -> TokenKind { return .TemplateChunk(cooked, raw) }
 
@@ -171,28 +219,112 @@ ${
         return .Ident(text)
     }
 
-    // Reserved words. Single-literal `match` arms (an alternation `|` arm would
-    // be silently dropped today — see F6), so this reads as a lookup table.
+    // Reserved words — the impl#1 keyword table (`native-parser/token.js`
+    // JS_KEYWORDS) verbatim, so a bareword lexes to `Keyword` on BOTH impls (the
+    // oracle collapses impl#1's per-word `Kw*` and impl#2's `Keyword` to one "KW"
+    // kind + compares `text`, so a word made a keyword here MUST be a keyword in
+    // impl#1 too — else it diverges). Single-literal `match` arms (an alternation
+    // `|` arm would be silently dropped today — see F6), so this reads as a lookup
+    // table. `type` is DELIBERATELY absent — impl#1 lexes it as a CONTEXTUAL
+    // identifier (a type-decl lead only at statement position; an ordinary name
+    // everywhere else — token.js CONTEXTUAL_KEYWORDS), so it stays an `Ident` here
+    // (both sides emit Ident on the whole-stream diff). `case` / `switch` are
+    // likewise absent — impl#1 does NOT reserve them (they lex as Ident).
     fn isKeyword(text: string) -> boolean {
         return match text {
-            "const"    :> true
-            "let"      :> true
-            "var"      :> true
-            "function" :> true
-            "fn"       :> true
-            "return"   :> true
-            "if"       :> true
-            "else"     :> true
-            "for"      :> true
-            "while"    :> true
-            "do"       :> true
-            "break"    :> true
-            "continue" :> true
-            "match"    :> true
-            "import"   :> true
-            "export"   :> true
-            "from"     :> true
-            _          :> false
+            // declarations / bindings + function modifiers
+            "const"      :> true
+            "let"        :> true
+            "var"        :> true
+            "function"   :> true
+            "fn"         :> true
+            "lin"        :> true
+            "server"     :> true
+            "pure"       :> true
+            // control flow
+            "return"     :> true
+            "if"         :> true
+            "else"       :> true
+            "for"        :> true
+            "while"      :> true
+            "do"         :> true
+            "break"      :> true
+            "continue"   :> true
+            "match"      :> true
+            // modules
+            "import"     :> true
+            "export"     :> true
+            "from"       :> true
+            "as"         :> true
+            "default"    :> true
+            // classes / prototypes
+            "class"      :> true
+            "extends"    :> true
+            "new"        :> true
+            // async
+            "async"      :> true
+            "await"      :> true
+            "yield"      :> true
+            // error handling
+            "try"        :> true
+            "catch"      :> true
+            "finally"    :> true
+            "throw"      :> true
+            // operator keywords — EXPECT a value next, so a following `/` OPENS a
+            // regex (regexAllowedAfter returns true for these; impl#1 parity).
+            "typeof"     :> true
+            "instanceof" :> true
+            "in"         :> true
+            "of"         :> true
+            "void"       :> true
+            "delete"     :> true
+            // scrml keywords
+            "is"         :> true
+            "not"        :> true
+            "lift"       :> true
+            "fail"       :> true
+            "render"     :> true
+            "given"      :> true
+            "some"       :> true
+            // VALUE-KEYWORDS — PRODUCE a value, so a following `/` is DIVISION and
+            // a following `.foo` is MEMBER access (regexAllowedAfter returns false
+            // for these via isValueKeyword; impl#1's Kw{This,Super,True,False,Null,
+            // Undefined} regexAllowedAfter false-cases).
+            "this"       :> true
+            "super"      :> true
+            "true"       :> true
+            "false"      :> true
+            "null"       :> true
+            "undefined"  :> true
+            _            :> false
+        }
+    }
+
+    // The VALUE-KEYWORDS: reserved words that produce a value (so a following `/`
+    // is division and a following `.foo` is member access). Mirrors impl#1's
+    // regexAllowedAfter keyword false-cases (KwThis / KwSuper / KwTrue / KwFalse /
+    // KwNull / KwUndefined). Single-literal `match` arms (lookup table) per F6.
+    fn isValueKeyword(name: string) -> boolean {
+        return match name {
+            "this"      :> true
+            "super"     :> true
+            "true"      :> true
+            "false"     :> true
+            "null"      :> true
+            "undefined" :> true
+            _           :> false
+        }
+    }
+
+    // The reserved word carried by a `.Keyword(name)` token (else ""). A
+    // single-arm `match` binds the payload — a binding `is .Keyword(kw)` in an
+    // `if` CONDITION does NOT compile today (E-SCOPE-001: `kw` undeclared; the
+    // binding never enters scope — see progress.md finding F10). regexAllowedAfter
+    // uses this to split value-keywords from the regex-preceding keywords.
+    fn keywordName(k: TokenKind) -> string {
+        return match k {
+            .Keyword(name) :> name
+            _              :> ""
         }
     }
 
@@ -222,6 +354,21 @@ ${
         }
         const text: string = sliceText(cur, c)
         return { tok: mkTok(identOrKeywordKind(text), text, cur, c), cur: c }
+    }
+
+    // A contextual bare variant `.foo`: the leading `.` (already known to be in
+    // value position with an ident-start following — see classify) plus the
+    // identifier, as ONE token. text = ".name"; the payload `name` is the ident
+    // WITHOUT the dot (matches impl#1's `{ name: text }` + `text = "." + text`).
+    fn scanBareVariant(cur: Cursor) -> Scan {
+        const nameStart: Cursor = advance(cur, 1)   // skip the leading '.'
+        let c = advance(nameStart, 1)               // first ident char (known ident-start)
+        while (isIdentCont(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        const name: string = sliceText(nameStart, c)   // the identifier (no dot)
+        const text: string = sliceText(cur, c)          // ".name"
+        return { tok: mkTok(kBareVariant(name), text, cur, c), cur: c }
     }
 
     fn scanNumber(cur: Cursor) -> Scan {
@@ -353,10 +500,12 @@ ${
     // (quotes included); `cooked` = the decoded value (§12.8.4 escape table).
     // A backslash escapes the NEXT code point, so an escaped quote never
     // terminates the string — this is the only escape behavior that affects
-    // WHERE the string ends (and thus `raw`/span). The cooked-decode covers the
-    // single-char escapes; precise \xHH / \uHHHH / \u{…} cooked-decoding is
-    // DEFERRED to a later slice (needs parseInt/fromCodePoint host support), but
-    // raw/span are already correct for those inputs (see progress.md slice-2).
+    // WHERE the string ends (and thus `raw`/span). The cooked-decode is PRECISE
+    // (slice-4a): single-char escapes via `decodeSingleEscape`, plus `\xHH` /
+    // `\uHHHH` / `\u{…}` (parseInt + String.fromCodePoint) and `\<newline>`
+    // line-continuation (contributes "" to cooked) — all via `scanEscape`,
+    // mirroring impl#1's scanStringEscape. raw/span are unchanged (a backslash
+    // still escapes exactly the next code point, so the string END is the same).
     // -------------------------------------------------------------------------
 
     // The ECMA-262 §12.8.4 single-char escape table. `c` is the char AFTER the
@@ -391,6 +540,87 @@ ${
         return .StringLit(cooked, raw, q)
     }
 
+    // -------------------------------------------------------------------------
+    // PRECISE ESCAPE DECODE (slice-4a) — mirrors impl#1's scanStringEscape /
+    // scanHexEscape / scanBraceUnicodeEscape. `scanEscape` is positioned AT the
+    // backslash; it returns the decoded text plus the cursor advanced past the
+    // whole escape. Both the string scanner AND the template-chunk scanner call
+    // it, so escapes decode identically in strings and template chunks (impl#1
+    // reuses the same routine — see lex-in-template.js). parseInt /
+    // String.fromCodePoint / Number.isNaN are host-supported (probed clean — NO
+    // workaround needed; see progress.md slice-4a host-support probe).
+    // -------------------------------------------------------------------------
+
+    // The decoded text of one escape + the cursor advanced past it.
+    type EscapeScan:struct = { text: string, cur: Cursor }
+
+    // Read exactly `digitCount` hex digits (up to EOF) → the codepoint's string.
+    // A malformed run (parseInt → NaN) decodes to "" (impl#1 parity).
+    fn scanHexEscape(cur: Cursor, digitCount: int) -> EscapeScan {
+        let c = cur
+        let hex: string = ""
+        let i = 0
+        while (i < digitCount && !isEof(c)) {
+            hex = hex + charAt(c)
+            c = advance(c, 1)
+            i = i + 1
+        }
+        const cp: int = parseInt(hex, 16)
+        if (Number.isNaN(cp)) return { text: "", cur: c }
+        return { text: String.fromCodePoint(cp), cur: c }
+    }
+
+    // The `\u{…}` brace form: read hex until `}` → the codepoint's string.
+    fn scanBraceUnicodeEscape(cur: Cursor) -> EscapeScan {
+        let c = advance(cur, 1)                          // consume the opening {
+        let hex: string = ""
+        while (!isEof(c) && peekCode(c, 0) != 125) {     // 125 = '}'
+            hex = hex + charAt(c)
+            c = advance(c, 1)
+        }
+        if (!isEof(c) && peekCode(c, 0) == 125) {
+            c = advance(c, 1)                            // consume the closing }
+        }
+        const cp: int = parseInt(hex, 16)
+        if (Number.isNaN(cp)) return { text: "", cur: c }
+        return { text: String.fromCodePoint(cp), cur: c }
+    }
+
+    // Decode one full escape sequence. `cur` is AT the backslash. Line
+    // continuation (`\<LF>` / `\<CR>` / `\<CR><LF>`) contributes "" to cooked;
+    // `\xHH` / `\uHHHH` / `\u{…}` decode to their codepoint; everything else
+    // uses the single-char table. The cursor advances past exactly the escaped
+    // code point(s) — the string/template END is unchanged (hex digits that were
+    // previously scanned as literals are now consumed by the escape, but a
+    // backslash still escapes exactly the next code point).
+    fn scanEscape(cur: Cursor) -> EscapeScan {
+        let c = advance(cur, 1)                          // consume the backslash
+        if (isEof(c)) return { text: "", cur: c }
+        const code: int = peekCode(c, 0)
+        if (code == 10) {                                // \<LF> — line continuation
+            return { text: "", cur: advance(c, 1) }
+        }
+        if (code == 13) {                                // \<CR> (+ optional LF) — line continuation
+            let c2 = advance(c, 1)
+            if (!isEof(c2) && peekCode(c2, 0) == 10) {
+                c2 = advance(c2, 1)
+            }
+            return { text: "", cur: c2 }
+        }
+        if (code == 120) {                               // 'x' — \xHH
+            return scanHexEscape(advance(c, 1), 2)
+        }
+        if (code == 117) {                               // 'u' — \uHHHH or \u{…}
+            const c3: Cursor = advance(c, 1)
+            if (!isEof(c3) && peekCode(c3, 0) == 123) {  // 123 = '{'
+                return scanBraceUnicodeEscape(c3)
+            }
+            return scanHexEscape(c3, 4)
+        }
+        const esc: string = charAt(c)                    // single-char escape (identity fallback)
+        return { text: decodeSingleEscape(esc), cur: advance(c, 1) }
+    }
+
     // Scan a quoted string from the opening quote to its close (or EOF). The
     // cursor is threaded; `cooked` accumulates the decoded value.
     fn scanString(cur: Cursor, q: QuoteKind) -> Scan {
@@ -400,13 +630,10 @@ ${
         let done = false
         while (!isEof(c) && !done) {
             const code: int = peekCode(c, 0)
-            if (code == 92) {             // backslash — escape the next code point
-                c = advance(c, 1)
-                if (!isEof(c)) {
-                    const esc: string = charAt(c)
-                    cooked = cooked + decodeSingleEscape(esc)
-                    c = advance(c, 1)
-                }
+            if (code == 92) {             // backslash — decode the escape (precise)
+                const esc: EscapeScan = scanEscape(c)
+                cooked = cooked + esc.text
+                c = esc.cur
             } else if (code == closeCode) {
                 c = advance(c, 1)         // consume the closing quote
                 done = true
@@ -502,7 +729,7 @@ ${
     // -------------------------------------------------------------------------
 
     type TemplateTerm:enum = { TermBacktick, TermInterp, TermEof }
-    type TmplScan:struct   = { raw: string, cur: Cursor, term: TemplateTerm }
+    type TmplScan:struct   = { cooked: string, raw: string, cur: Cursor, term: TemplateTerm }
 
     // Scan one template chunk from `cur` to the next backtick / `${` / EOF. The
     // closing backtick is CONSUMED (TermBacktick); `${` is NOT (TermInterp — the
@@ -510,13 +737,16 @@ ${
     // (so `\`` / `\${` never terminate the chunk).
     fn scanTemplateChunk(cur: Cursor) -> TmplScan {
         let c = cur
+        let cooked: string = ""
         let term: TemplateTerm = TemplateTerm.TermEof
         let done = false
         while (!isEof(c) && !done) {
             const code: int = peekCode(c, 0)
-            if (code == 92) {                                    // backslash — escape next code point
-                c = advance(c, 2)
-            } else if (code == 96) {                             // backtick — closes the template (consumed)
+            if (code == 92) {                                    // backslash — decode the escape (precise)
+                const esc: EscapeScan = scanEscape(c)
+                cooked = cooked + esc.text
+                c = esc.cur
+            } else if (code == 96) {                             // backtick — closes the template (consumed; NOT in cooked)
                 c = advance(c, 1)
                 term = TemplateTerm.TermBacktick
                 done = true
@@ -524,10 +754,11 @@ ${
                 term = TemplateTerm.TermInterp
                 done = true
             } else {
+                cooked = cooked + charAt(c)
                 c = advance(c, 1)
             }
         }
-        return { raw: sliceText(cur, c), cur: c, term: term }
+        return { cooked: cooked, raw: sliceText(cur, c), cur: c, term: term }
     }
 
     // -------------------------------------------------------------------------
@@ -545,28 +776,30 @@ ${
         SawLineComment,
         SawBlockComment,
         SawRegexSlash,
+        SawBareVariant,
         SawInterpClose,
         Ordinary,
         SawEof,
     }
 
-    // State threaded through the fold. `bracketDepth` is a minimal running count
-    // of open `(` / `{` / `[` (the full typed BracketStack + ErrorRecovery are
-    // slice-4); `interpDepths` is the template-interp frame stack — each entry is
-    // the bracketDepth at which a `${` opened, so the matching `}` (interp close)
-    // is the one seen at that same depth (§51.0.Q.1).
+    // State threaded through the fold. `bracketStack` is the typed stack of open
+    // bracket KINDS — an opener `(`/`{`/`[` pushes its BracketKind, a closer pops
+    // (DEPTH = `bracketStack.length`; ErrorRecovery + per-frame spans are slice-4).
+    // `interpDepths` is the template-interp frame stack — each entry is the
+    // bracket-stack DEPTH (length) at which a `${` opened, so the matching `}`
+    // (interp close) is the one seen at that same depth (§51.0.Q.1).
     type LexState:struct = {
         cur: Cursor,
         mode: LexMode,
         tokens: Token[],
-        bracketDepth: int,
+        bracketStack: BracketKind[],
         interpDepths: int[],
     }
 
     // The single LexState constructor — keeps the field list in ONE place so
     // later slices (recovery) extend it here, not at every call site.
-    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketDepth: int, interpDepths: int[]) -> LexState {
-        return { cur: cur, mode: mode, tokens: tokens, bracketDepth: bracketDepth, interpDepths: interpDepths }
+    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interpDepths: int[]) -> LexState {
+        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interpDepths: interpDepths }
     }
 
     fn skipTrivia(cur: Cursor) -> Cursor {
@@ -582,13 +815,27 @@ ${
         return st.tokens[st.tokens.length - 1].kind
     }
 
-    // The bracket-depth delta of a leading code point: +1 for `(` `{` `[`,
-    // -1 for `)` `}` `]`, 0 otherwise. (The interp-closing `}` is emitted as
-    // TemplateInterpEnd — not through this path — so it never adjusts depth.)
-    fn bracketDelta(c0: int) -> int {
-        if (c0 == 40 || c0 == 123 || c0 == 91) return 1    // ( { [
-        if (c0 == 41 || c0 == 125 || c0 == 93) return -1   // ) } ]
-        return 0
+    // Pop the top opener off the bracket stack (mirrors popDepth's slice shape).
+    // No mismatch check — matched-closer detection is slice-4's ErrorRecovery; a
+    // bare pop is all slice-4b needs (it preserves depth = the old counter's -1).
+    fn popBracket(stack: BracketKind[]) -> BracketKind[] {
+        if (stack.length == 0) return stack
+        return stack.slice(0, stack.length - 1)
+    }
+
+    // Fold a leading code point into the bracket stack: an opener `(`/`{`/`[`
+    // PUSHes its BracketKind; a closer `)`/`}`/`]` POPs the top; anything else
+    // leaves the stack unchanged. (The interp-closing `}` is emitted as
+    // TemplateInterpEnd — not through this path — so it never touches the stack.)
+    // Qualified `BracketKind.X` array elements per F4 (probed clean in a `.concat`
+    // element position; bare `.X` also resolves here, but qualified matches the
+    // file's `TokenKind.X` style + is the F4-safe choice).
+    fn pushBracket(stack: BracketKind[], c0: int) -> BracketKind[] {
+        if (c0 == 40)  return stack.concat([BracketKind.Paren])     // (
+        if (c0 == 123) return stack.concat([BracketKind.Brace])     // {
+        if (c0 == 91)  return stack.concat([BracketKind.Bracket])   // [
+        if (c0 == 41 || c0 == 125 || c0 == 93) return popBracket(stack)  // ) } ]
+        return stack
     }
 
     // Pop the top interp frame (last element) off the depth stack.
@@ -598,13 +845,13 @@ ${
     }
 
     // Is the current `}` the closer of the innermost open interp? True only when
-    // we are inside an interp (`interpDepths` non-empty), the char is `}`, and
-    // the current bracketDepth equals the depth recorded at the interp's open.
+    // we are inside an interp (`interpDepths` non-empty), the char is `}`, and the
+    // current bracket-stack DEPTH equals the depth recorded at the interp's open.
     fn isInterpCloseHere(st: LexState, cur: Cursor) -> boolean {
         if (st.interpDepths.length == 0) return false
         if (peekCode(cur, 0) != 125) return false           // not '}'
         const top: int = st.interpDepths[st.interpDepths.length - 1]
-        return st.bracketDepth == top
+        return st.bracketStack.length == top
     }
 
     // Classify the lookahead into a lexical event (InCode-position classifier).
@@ -618,6 +865,12 @@ ${
         if (c0 == 47 && c1 == 47) return .SawLineComment   // //
         if (c0 == 47 && c1 == 42) return .SawBlockComment  // /*
         if (c0 == 47 && regexAllowedAfter(last)) return .SawRegexSlash
+        // `.foo` bare variant: a `.` (46) in VALUE position (regexAllowedAfter,
+        // the same value-vs-member predicate impl#1 reuses) with an ident-start
+        // after it. In MEMBER position (after a value — Ident/`)`/`]` etc.) the
+        // `.` stays a plain Dot. A `.` before a digit / `.` / anything-else also
+        // falls through to Ordinary (number / Dot handling, unchanged).
+        if (c0 == 46 && isIdentStart(c1) && regexAllowedAfter(last)) return .SawBareVariant
         return .Ordinary
     }
 
@@ -640,6 +893,7 @@ ${
             (.InCode, .SawLineComment)  :> scanLineCommentStep(st)
             (.InCode, .SawBlockComment) :> scanBlockCommentStep(st)
             (.InCode, .SawRegexSlash)   :> scanRegexStep(st)
+            (.InCode, .SawBareVariant)  :> scanBareVariantStep(st)
             (.InCode, .SawBacktick)     :> enterTemplateStep(st)
             (.InCode, .SawInterpClose)  :> closeInterpStep(st)
             (_, .SawEof)                :> st                  // cursor already at EOF; settle
@@ -658,7 +912,7 @@ ${
 
     fn codeStep(st: LexState) -> LexState {
         const cur: Cursor = skipTrivia(st.cur)
-        const st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketDepth, st.interpDepths)
+        const st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interpDepths)
         const ev: LexEvent = classifyCode(st2, cur)
         return dispatch(st2, ev)
     }
@@ -666,8 +920,8 @@ ${
     fn emitOneToken(st: LexState) -> LexState {
         const c0: int = peekCode(st.cur, 0)
         const scan: Scan = pickScan(st.cur, c0)
-        const nd: int = st.bracketDepth + bracketDelta(c0)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nd, st.interpDepths)
+        const nstack: BracketKind[] = pushBracket(st.bracketStack, c0)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, st.interpDepths)
     }
 
     fn pickScan(cur: Cursor, c0: int) -> Scan {
@@ -679,21 +933,28 @@ ${
     // A string emits one StringLit; a comment emits NO token (trivia).
     fn scanStringStep(st: LexState, q: QuoteKind) -> LexState {
         const scan: Scan = scanString(st.cur, q)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketDepth, st.interpDepths)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
     }
 
     fn scanLineCommentStep(st: LexState) -> LexState {
-        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketDepth, st.interpDepths)
+        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths)
     }
 
     fn scanBlockCommentStep(st: LexState) -> LexState {
-        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketDepth, st.interpDepths)
+        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths)
     }
 
     // A regex emits one RegexLit and stays InCode.
     fn scanRegexStep(st: LexState) -> LexState {
         const scan: Scan = scanRegex(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketDepth, st.interpDepths)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
+    }
+
+    // A bare variant `.foo` emits one BareVariant and stays InCode. The `.` is
+    // not a bracket, so the bracket stack is threaded through unchanged.
+    fn scanBareVariantStep(st: LexState) -> LexState {
+        const scan: Scan = scanBareVariant(st.cur)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
     }
 
     // Enter a template: consume the opening backtick (no token) and DRIVE the
@@ -702,31 +963,33 @@ ${
     // which the `while (!isEof)` driver would otherwise skip at EOF).
     fn enterTemplateStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)
-        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketDepth, st.interpDepths)
+        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interpDepths)
         return templateBodyStep(started)
     }
 
     // Scan one template chunk, emit it, then act on the terminator: a backtick
     // returns to InCode (template done); a `${` emits TemplateInterpStart, pushes
-    // the current bracketDepth as a new interp frame, and drops to InCode to lex
-    // the interp body; EOF settles back to InCode (unterminated template).
+    // the current bracket-stack depth as a new interp frame, and drops to InCode to
+    // lex the interp body; EOF settles back to InCode (unterminated template).
     fn templateBodyStep(st: LexState) -> LexState {
         const scan: TmplScan = scanTemplateChunk(st.cur)
-        const chunk: Token = mkTok(kTemplateChunk(scan.raw, scan.raw), scan.raw, st.cur, scan.cur)
+        const chunk: Token = mkTok(kTemplateChunk(scan.cooked, scan.raw), scan.raw, st.cur, scan.cur)
         const toks: Token[] = st.tokens.concat([chunk])
         return match scan.term {
-            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketDepth, st.interpDepths)
-            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketDepth, st.interpDepths)
-            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketDepth, st.interpDepths)
+            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interpDepths)
+            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths)
+            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths)
         }
     }
 
     // Emit TemplateInterpStart (`${`) + push a new interp frame recording the
-    // bracketDepth at which the interp opened; lex the body as InCode.
-    fn emitInterpStart(cur: Cursor, toks: Token[], bd: int, ids: int[]) -> LexState {
+    // bracket-stack DEPTH (length) at which the interp opened; lex the body as
+    // InCode. The stack itself is threaded through unchanged (the `${` opens no
+    // bracket — only the depth snapshot the closing `}` is matched against).
+    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: int[]) -> LexState {
         const to: Cursor = advance(cur, 2)   // consume ${
         const tok: Token = mkTok(TokenKind.TemplateInterpStart, sliceText(cur, to), cur, to)
-        return mkState(to, LexMode.InCode, toks.concat([tok]), bd, ids.concat([bd]))
+        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([stack.length]))
     }
 
     // Close the innermost interp: emit TemplateInterpEnd (`}`), pop its frame,
@@ -736,14 +999,14 @@ ${
     fn closeInterpStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)   // consume the closing }
         const tok: Token = mkTok(TokenKind.TemplateInterpEnd, sliceText(st.cur, to), st.cur, to)
-        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketDepth, popDepth(st.interpDepths))
+        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interpDepths))
     }
 
     // DEFERRED-event safety net (unreachable in practice — every InCode event has
     // an explicit arm above, and InTemplateBody is routed through step). Advances
     // one code point so the driver always makes progress. TODO(slice-4).
     fn deferAdvance(st: LexState) -> LexState {
-        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketDepth, st.interpDepths)
+        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interpDepths)
     }
 
     fn makeEof(cur: Cursor) -> Token {
@@ -752,7 +1015,7 @@ ${
 
     // The driver: fold `step` until the cursor is exhausted, then append EOF.
     export fn lex(src: string) -> Token[] {
-        let st: LexState = mkState(makeCursor(src), LexMode.InCode, [], 0, [])
+        let st: LexState = mkState(makeCursor(src), LexMode.InCode, [], [], [])
         while (!isEof(st.cur)) {
             st = step(st)
         }
