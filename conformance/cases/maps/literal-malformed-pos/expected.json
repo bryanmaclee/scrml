@@ -1,0 +1,12 @@
+{
+  "id": "maps-literal-malformed-pos",
+  "description": "Malformed map literal (§59.3). The literal [ \"DAL\": ] has a depth-1 entry-colon but a missing value. A map literal with a depth-1 colon and a missing key/value, trailing colon, or count error is E-MAP-LITERAL-MALFORMED (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§59.3",
+  "rationale": "§59.3 a malformed map literal (depth-1 colon with a missing key or value, odd/even-count error, or trailing colon) is E-MAP-LITERAL-MALFORMED.",
+  "expect": {
+    "codes": ["E-MAP-LITERAL-MALFORMED"],
+    "notCodes": [],
+    "severity": { "E-MAP-LITERAL-MALFORMED": "error" }
+  }
+}

@@ -1,0 +1,5 @@
+${
+    <maxMana>: number = 100
+    <hp>: number(>=0 && <=@maxMana) = 100
+}
+<program><p id="p">${@hp}</></program>

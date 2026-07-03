@@ -1,0 +1,12 @@
+{
+  "id": "refinement-unknown-shape-pos",
+  "description": "Unknown named shape in a refinement predicate (§53.11 E-CONTRACT-002). string(ssn) references a named shape `ssn` that is not in the built-in registry (email, url, uuid, phone, date, time, color). Named shape resolution occurs at compile time, so E-CONTRACT-002 fires (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§53.11",
+  "rationale": "§53.11 E-CONTRACT-002 fires when a named shape identifier in a predicate does not match any built-in or registered shape; `ssn` is not a built-in shape.",
+  "expect": {
+    "codes": ["E-CONTRACT-002"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-002": "error" }
+  }
+}

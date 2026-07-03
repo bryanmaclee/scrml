@@ -1,0 +1,5 @@
+${
+    type P:struct = { a: int }
+    <m>: [P:int] = [ {a:1}: 5 ]
+}
+<program><p id="p">${@m.size}</></program>

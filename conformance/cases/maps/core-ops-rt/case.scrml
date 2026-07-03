@@ -1,0 +1,20 @@
+${
+    <fares>: [string:int] = [:]
+    const <sz> = @fares.size
+    const <dalfare> = @fares.getOr("DAL", 0)
+    const <hasDal> = @fares.has("DAL")
+    const <hasXxx> = @fares.has("XXX")
+}
+<program>
+<button id="add-dal" onclick=${@fares = @fares.insert("DAL", 4500)}>DAL</>
+<button id="add-hou" onclick=${@fares = @fares.insert("HOU", 5000)}>HOU</>
+<p id="size">Size: ${@sz}</>
+<p id="dalfare">DAL: ${@dalfare}</>
+<p id="hasdal">HasDAL: ${@hasDal}</>
+<p id="hasxxx">HasXXX: ${@hasXxx}</>
+<ul id="list">
+<each in=@fares.entries() as e>
+    <li class="row">${e.key}=${e.value}</li>
+</each>
+</ul>
+</program>

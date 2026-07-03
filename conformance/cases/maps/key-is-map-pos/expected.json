@@ -1,0 +1,12 @@
+{
+  "id": "maps-key-is-map-pos",
+  "description": "A map used as a map KEY type (§59.4). The cell type [[int:int]:int] declares a key type that is itself a map. Map-as-key is out for v1 — an @ordered map's == is order-sensitive, which would break the §59.5 hash-consistency keystone — so E-MAP-KEY-IS-MAP fires (the §34 error partition). Only the KEY is constrained; a map VALUE type is legal.",
+  "language-version": "1.0",
+  "spec": "§59.4",
+  "rationale": "§59.4/§59.12 a map (or @ordered map) used as a key type is out for v1 -> E-MAP-KEY-IS-MAP.",
+  "expect": {
+    "codes": ["E-MAP-KEY-IS-MAP"],
+    "notCodes": [],
+    "severity": { "E-MAP-KEY-IS-MAP": "error" }
+  }
+}

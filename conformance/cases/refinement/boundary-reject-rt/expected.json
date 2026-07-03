@@ -1,0 +1,14 @@
+{
+  "id": "refinement-boundary-reject-rt",
+  "description": "A non-conforming value is REJECTED at the refinement-type boundary at runtime (§53.3.3 / §53.9) — the enforcement that makes a refinement type 'stronger than a state validator'. process(@amount * 3) = process(15000) passes a value that VIOLATES number(>0 && <10000) (>= 10000). The compiler-generated boundary check throws E-CONTRACT-001-RT BEFORE the assignment is applied, so @amount RETAINS its prior value (5000). Observed via the retained cell value + DOM. (E-CONTRACT-001-RT is a runtime error, not a compile code, so it does not appear in the compile `codes` set — the RT observable is the retained-prior-value.)",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3 if the predicate evaluates false at runtime the boundary check SHALL throw E-CONTRACT-001-RT before the assignment; the variable retains its prior value. 15000 violates <10000 -> assignment rejected, @amount stays 5000.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001"],
+    "input": [{ "click": "#bad" }],
+    "state": { "amount": 5000 },
+    "domAnchored": [{ "selector": "#amt", "text": "Amount: 5000" }]
+  }
+}

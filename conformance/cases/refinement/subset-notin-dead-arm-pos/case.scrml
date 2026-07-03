@@ -1,0 +1,11 @@
+${
+    type Role:enum = { Admin, Editor, Viewer, Guest }
+    <role>: Role notIn([.Guest]) = .Admin
+    const <label> = match @role {
+        .Admin :> "admin"
+        .Editor :> "editor"
+        .Viewer :> "viewer"
+        .Guest :> "guest"
+    }
+}
+<program><p id="p">${@label}</></program>

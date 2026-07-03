@@ -1,0 +1,8 @@
+${
+    <m>: [string:int] = [:]
+    function setDal() { @m["DAL"] = 4500 }
+}
+<program>
+<button id="b" onclick=setDal()>Bad</>
+<p id="p">${@m.size}</>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "refinement-subset-notin-dead-arm-pos",
+  "description": "Enum-subset refinement — dead arm via the notIn form (§53.15). @role is typed Role notIn([.Guest]), so .Guest is EXCLUDED from the value's variant set. A match arm for .Guest is dead and fires E-MATCH-SUBSET-DEAD-ARM (the §34 error partition). The notIn([...]) twin of refinement-subset-dead-arm-pos (which uses oneOf([...])).",
+  "language-version": "1.0",
+  "spec": "§53.15",
+  "rationale": "§53.15.1 notIn([.Guest]) narrows the variant set to exclude .Guest; a match arm naming the excluded .Guest is dead -> E-MATCH-SUBSET-DEAD-ARM.",
+  "expect": {
+    "codes": ["E-MATCH-SUBSET-DEAD-ARM"],
+    "notCodes": [],
+    "severity": { "E-MATCH-SUBSET-DEAD-ARM": "error" }
+  }
+}

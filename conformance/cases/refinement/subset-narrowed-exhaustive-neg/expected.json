@@ -1,0 +1,11 @@
+{
+  "id": "refinement-subset-narrowed-exhaustive-neg",
+  "description": "Enum-subset refinement — narrowed exhaustiveness (§53.15). @role is typed Role oneOf([.Admin, .Editor]) even though Role has FOUR variants. A match covering exactly the subset {.Admin, .Editor} is EXHAUSTIVE — the exhaustiveness check narrows the variant set to the subset, so NOT covering .Viewer / .Guest does NOT fire E-MATCH-NOT-EXHAUSTIVE, and no arm is dead. The narrowing twin of refinement-subset-dead-arm-pos.",
+  "language-version": "1.0",
+  "spec": "§53.15",
+  "rationale": "§53.15 the variant set V used by the exhaustiveness check denotes the SUBSET, not the base enum; covering exactly the subset is exhaustive and dead-arm-free.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-SUBSET-DEAD-ARM", "E-MATCH-NOT-EXHAUSTIVE"]
+  }
+}

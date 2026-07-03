@@ -1,0 +1,12 @@
+{
+  "id": "refinement-subset-dead-arm-pos",
+  "description": "Enum-subset refinement — dead arm (§53.15). @role is typed Role oneOf([.Admin, .Editor]), so its value can only ever be .Admin or .Editor. A match arm for .Guest names a variant EXCLUDED by the subset — the arm can never match (dead code), so E-MATCH-SUBSET-DEAD-ARM fires (the §34 error partition). Distinct from E-TYPE-023 (a duplicate arm names the same variant twice); a dead subset arm names an excluded variant once.",
+  "language-version": "1.0",
+  "spec": "§53.15",
+  "rationale": "§53.15 when the matched value's declared type is an enum-subset refinement (oneOf([...])), the variant set narrows to the subset; a concrete arm naming an excluded variant is dead -> E-MATCH-SUBSET-DEAD-ARM.",
+  "expect": {
+    "codes": ["E-MATCH-SUBSET-DEAD-ARM"],
+    "notCodes": [],
+    "severity": { "E-MATCH-SUBSET-DEAD-ARM": "error" }
+  }
+}

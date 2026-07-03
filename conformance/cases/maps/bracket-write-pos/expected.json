@@ -1,0 +1,12 @@
+{
+  "id": "maps-bracket-write-pos",
+  "description": "Bracket-WRITE on a map is forbidden (§59.7). Read is bracket (@m[k]); write is method (.insert). A @m[\"DAL\"] = 4500 bracket-write on a map-typed cell fires E-MAP-BRACKET-WRITE (the §34 error partition), with a fix-it naming .insert(k,v). The cycles-prereq routes bracket-writes through the COW array/object path, which would corrupt a map's internal representation. NOTE (flagged to PA): the check fires in a function body / top-level logic, but a bracket-write inside an inline event-handler ${...} (onclick=${@m[k]=v}) is NOT caught — an inline-handler diagnostic-coverage gap. This case uses the function-body form, which fires the code exactly.",
+  "language-version": "1.0",
+  "spec": "§59.7",
+  "rationale": "§59.7 @m[k] = v bracket-write on a map-typed cell (at any nesting level) is E-MAP-BRACKET-WRITE; the type-system gates a bracket-write whose receiver is map-typed before the COW lowering.",
+  "expect": {
+    "codes": ["E-MAP-BRACKET-WRITE"],
+    "notCodes": [],
+    "severity": { "E-MAP-BRACKET-WRITE": "error" }
+  }
+}

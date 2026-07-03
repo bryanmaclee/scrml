@@ -1,0 +1,17 @@
+{
+  "id": "maps-struct-key-value-canonical-rt",
+  "description": "Value-canonical struct keying (§59.4/§59.5). A [Route:int] map is keyed by a struct value. .insert stores under the struct {from:\"DAL\",to:\"HOU\"}; the derived .getOr reads with a SYNTACTICALLY DISTINCT struct literal of the same field values and HITS (returns 4500) — proving keys are keyed by VALUE (structural ==), not by reference/identity. Two structurally-equal struct values are the same key (the §59.5 hash-consistency keystone falls out of §45). Observed via impl-neutral derived scalars + DOM.",
+  "language-version": "1.0",
+  "spec": "§59.5",
+  "rationale": "§59.4 struct keys 'just work' — structural == (§45.2) is the key-identity; §59.5 two §45-equal values produce byte-identical value-canonical strings, hence the same key. insert then getOr with a distinct-but-equal struct -> 4500, size 1.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MAP-KEY-NOT-COMPARABLE", "E-EQ-003"],
+    "input": [{ "click": "#ins" }],
+    "state": { "r1": 4500, "sz": 1 },
+    "domAnchored": [
+      { "selector": "#r1", "text": "R1: 4500" },
+      { "selector": "#sz", "text": "SZ: 1" }
+    ]
+  }
+}

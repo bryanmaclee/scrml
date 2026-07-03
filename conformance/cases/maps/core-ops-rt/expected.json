@@ -1,0 +1,20 @@
+{
+  "id": "maps-core-ops-rt",
+  "description": "Value-native map core operations (§59). A [string:int] cell starts [:] empty; two .insert calls add DAL->4500, HOU->5000. The map's observable surface is asserted via derived-scalar projections (impl-neutral: .size, .getOr bracket-fallback-read, .has present/absent) and the rendered DOM. .entries() feeds an <each> producing one <li> per entry. NOTE: the raw map cell snapshots as an impl#1-internal HAMT (asserting it would bake impl internals — D3 impl-freedom), so map values are observed through scalar projections + DOM, never the raw cell. Iteration ORDER is UNSPECIFIED (§59.8) so only the row COUNT is asserted, not order.",
+  "language-version": "1.0",
+  "spec": "§59",
+  "rationale": "§59.6/§59.7 .insert adds/overwrites (reassignment-canonical), @m[k] / .getOr read (V|not with fallback), .has reports presence, .size is the entry count; §59.8 .entries() is a value-native array feeding <each>. Two inserts -> size 2, DAL present (4500), XXX absent (false).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#add-dal" }, { "click": "#add-hou" }],
+    "state": { "sz": 2, "dalfare": 4500, "hasDal": true, "hasXxx": false },
+    "domAnchored": [
+      { "selector": "#size", "text": "Size: 2" },
+      { "selector": "#dalfare", "text": "DAL: 4500" },
+      { "selector": "#hasdal", "text": "HasDAL: true" },
+      { "selector": "#hasxxx", "text": "HasXXX: false" },
+      { "selector": ".row", "count": 2 }
+    ]
+  }
+}

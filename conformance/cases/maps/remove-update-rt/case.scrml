@@ -1,0 +1,14 @@
+${
+    <fares>: [string:int] = [ "DAL": 4500, "HOU": 5000 ]
+    const <sz> = @fares.size
+    const <dal> = @fares.getOr("DAL", -1)
+    const <hou> = @fares.getOr("HOU", -1)
+}
+<program>
+<button id="rm-dal" onclick=${@fares = @fares.remove("DAL")}>RmDAL</>
+<button id="bump-hou" onclick=${@fares = @fares.update("HOU", v => (v ?? 0) + 100)}>BumpHOU</>
+<button id="add-sat" onclick=${@fares = @fares.update("SAT", v => (v ?? 0) + 1)}>AddSAT</>
+<p id="size">Size: ${@sz}</>
+<p id="dal">DAL: ${@dal}</>
+<p id="hou">HOU: ${@hou}</>
+</program>

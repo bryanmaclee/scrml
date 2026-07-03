@@ -1,0 +1,4 @@
+${
+    <m>: [[int:int]: int] = [:]
+}
+<program><p id="p">${@m.size}</></program>

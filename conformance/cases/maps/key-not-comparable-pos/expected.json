@@ -1,0 +1,12 @@
+{
+  "id": "maps-key-not-comparable-pos",
+  "description": "A non-§45-comparable map KEY type (§59.4). The cell type [asIs:int] uses the opaque `asIs` escape-hatch type as the key — `asIs` values have no structural equality, so they cannot be keyed by value. This is neither a map (E-MAP-KEY-IS-MAP) nor a function-containing type (E-EQ-003), so it hits the general E-MAP-KEY-NOT-COMPARABLE code (the §34 error partition).",
+  "language-version": "1.0",
+  "spec": "§59.4",
+  "rationale": "§59.4 any non-§45-comparable key type that is not a map and not function-containing fires the general E-MAP-KEY-NOT-COMPARABLE; a key must be a primitive, an all-comparable struct, or an enum so two structurally-equal keys are the same key.",
+  "expect": {
+    "codes": ["E-MAP-KEY-NOT-COMPARABLE"],
+    "notCodes": ["E-MAP-KEY-IS-MAP"],
+    "severity": { "E-MAP-KEY-NOT-COMPARABLE": "error" }
+  }
+}

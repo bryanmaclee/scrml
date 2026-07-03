@@ -1,0 +1,12 @@
+${
+    <a>: [string:int] = [:]
+    <b>: [string:int] = [:]
+    const <eq> = @a == @b
+}
+<program>
+<button id="build" onclick=${
+    @a = @a.insert("X", 1).insert("Y", 2)
+    @b = @b.insert("Y", 2).insert("X", 1)
+}>Build</>
+<p id="eq">EQ: ${@eq}</>
+</program>

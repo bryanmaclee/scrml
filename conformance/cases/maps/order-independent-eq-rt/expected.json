@@ -1,0 +1,16 @@
+{
+  "id": "maps-order-independent-eq-rt",
+  "description": "Order-independent map equality (§59.9 / §45). @a is built by inserting X then Y; @b by inserting Y then X — the SAME entries in a DIFFERENT insertion order. The derived @a == @b is TRUE: map equality is structural and order-independent (two maps are equal iff they have the same key->value entries, regardless of insertion/iteration order). Observed via the impl-neutral derived boolean + DOM.",
+  "language-version": "1.0",
+  "spec": "§59.9",
+  "rationale": "§59.9 @m1 == @m2 is structural and order-independent; §45 reuses the structural == path. Same entries inserted in opposite order compare equal.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EQ-001"],
+    "input": [{ "click": "#build" }],
+    "state": { "eq": true },
+    "domAnchored": [
+      { "selector": "#eq", "text": "EQ: true" }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+${
+    <amount>: number(>0 && <10000) = -50
+}
+<program><p id="p">${@amount}</></program>

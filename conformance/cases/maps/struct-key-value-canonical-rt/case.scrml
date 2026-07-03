@@ -1,0 +1,11 @@
+${
+    type Route:struct = { from: string, to: string }
+    <fares>: [Route: int] = [:]
+    const <r1> = @fares.getOr({ from: "DAL", to: "HOU" }, -1)
+    const <sz> = @fares.size
+}
+<program>
+<button id="ins" onclick=${@fares = @fares.insert({ from: "DAL", to: "HOU" }, 4500)}>Ins</>
+<p id="r1">R1: ${@r1}</>
+<p id="sz">SZ: ${@sz}</>
+</program>

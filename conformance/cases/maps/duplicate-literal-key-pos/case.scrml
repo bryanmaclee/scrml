@@ -1,0 +1,4 @@
+${
+    <m>: [string:int] = [ "DAL": 3, "DAL": 5 ]
+}
+<program><p id="p">${@m.size}</></program>

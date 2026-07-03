@@ -1,0 +1,11 @@
+{
+  "id": "maps-duplicate-literal-key-pos",
+  "description": "Duplicate literal keys — last-wins (§59.3). The literal [ \"DAL\": 3, \"DAL\": 5 ] has two depth-1 entries whose keys are §45-equal; the later entry overwrites the earlier (last-wins, matching .insert overwrite semantics), and the compiler surfaces the overwrite with W-MAP-DUPLICATE-LITERAL-KEY. Asserts CODE PRESENCE only (no severity assertion): §59.11/§59.8 state Info severity, but impl#1 emits severity 'warning' — a spec-vs-impl severity-label divergence flagged to the PA rather than enshrined.",
+  "language-version": "1.0",
+  "spec": "§59.3",
+  "rationale": "§59.3 a map literal with two depth-1 entries whose keys are §45-equal is last-wins; the compiler MAY surface the overwrite with W-MAP-DUPLICATE-LITERAL-KEY.",
+  "expect": {
+    "codes": ["W-MAP-DUPLICATE-LITERAL-KEY"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "refinement-literal-violation-pos",
+  "description": "Compile-time refinement violation on a statically-known literal (§53.11 E-CONTRACT-001). The cell type number(>0 && <10000) is initialized with the literal -50, which demonstrably fails the `value > 0` condition. The compiler proves the violation statically and fires E-CONTRACT-001 (the §34 error partition) — the compile half of refinement enforcement.",
+  "language-version": "1.0",
+  "spec": "§53.11",
+  "rationale": "§53.11 E-CONTRACT-001 fires when the compiler can prove at compile time that a literal/statically-known value violates an inline predicate. -50 fails value>0.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

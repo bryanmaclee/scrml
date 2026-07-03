@@ -1,0 +1,4 @@
+${
+    <s>: string(ssn) = "x"
+}
+<program><p id="p">${@s}</></program>

@@ -1,0 +1,12 @@
+{
+  "id": "refinement-external-ref-pos",
+  "description": "Refinement predicate references external reactive state (§53.11 E-CONTRACT-003). number(>=0 && <=@maxMana) references the reactive variable @maxMana in the predicate. Inline predicates must be STATELESS — they may reference only the incoming value and its properties, not reactive variables / sibling fields / outer bindings. E-CONTRACT-003 fires (the §34 error partition); the developer is steered to a <machine> guard. (E-DG-002 also fires incidentally from the dependency graph; only E-CONTRACT-003 is asserted.)",
+  "language-version": "1.0",
+  "spec": "§53.11",
+  "rationale": "§53.3.1/§53.11 a predicate expression may not reference a reactive variable; @maxMana in the predicate -> E-CONTRACT-003 (the stateless-test boundary).",
+  "expect": {
+    "codes": ["E-CONTRACT-003"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-003": "error" }
+  }
+}

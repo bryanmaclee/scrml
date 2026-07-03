@@ -1,0 +1,18 @@
+{
+  "id": "maps-remove-update-rt",
+  "description": "Value-native map remove / update upsert (§59.7) + primitive-key literal init (§59.3). The cell inits from a primitive-key map literal [\"DAL\":4500, \"HOU\":5000] (the v1-shipped literal form). .remove(\"DAL\") drops the key (a key-miss getOr then yields the -1 fallback); .update(\"HOU\", fn) upserts on a PRESENT key (5000->5100); .update(\"SAT\", fn) upserts on an ABSENT key (fn receives not, ??0 -> 1). Net size stays 2 (removed DAL, added SAT). Observed via impl-neutral derived scalars + DOM.",
+  "language-version": "1.0",
+  "spec": "§59.7",
+  "rationale": "§59.3 a primitive-key map literal ships in v1; §59.7 .remove returns a new map without k, .update returns a new map with k->fn(currentOrNot) (the upsert form; fn receives the current value or not). remove DAL + bump HOU + add SAT -> {HOU:5100, SAT:1}, size 2, DAL absent (getOr -1).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MAP-LITERAL-MALFORMED", "E-MAP-BRACKET-WRITE"],
+    "input": [{ "click": "#rm-dal" }, { "click": "#bump-hou" }, { "click": "#add-sat" }],
+    "state": { "sz": 2, "dal": -1, "hou": 5100 },
+    "domAnchored": [
+      { "selector": "#size", "text": "Size: 2" },
+      { "selector": "#dal", "text": "DAL: -1" },
+      { "selector": "#hou", "text": "HOU: 5100" }
+    ]
+  }
+}

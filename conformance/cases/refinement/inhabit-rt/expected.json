@@ -1,0 +1,14 @@
+{
+  "id": "refinement-inhabit-rt",
+  "description": "A conforming value inhabits a refinement type across a function boundary (§53). process(amt) declares a refined parameter number(>0 && <10000). Calling process(@amount + 100) = process(5100) passes a value that SATISFIES the predicate, so the boundary check succeeds and the assignment applies (@amount -> 5100). The conforming path of refinement-boundary-reject-rt.",
+  "language-version": "1.0",
+  "spec": "§53.9",
+  "rationale": "§53.9.1 a refined function parameter carries a boundary check; a conforming argument (5100, in (>0 && <10000)) passes the check and the body runs, applying @amount = 5100.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-003"],
+    "input": [{ "click": "#ok" }],
+    "state": { "amount": 5100 },
+    "domAnchored": [{ "selector": "#amt", "text": "Amount: 5100" }]
+  }
+}

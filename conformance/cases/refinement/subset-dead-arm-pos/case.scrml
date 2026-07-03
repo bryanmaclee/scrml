@@ -1,0 +1,10 @@
+${
+    type Role:enum = { Admin, Editor, Viewer, Guest }
+    <role>: Role oneOf([.Admin, .Editor]) = .Admin
+    const <label> = match @role {
+        .Admin :> "admin"
+        .Editor :> "editor"
+        .Guest :> "guest"
+    }
+}
+<program><p id="p">${@label}</></program>
