@@ -1,0 +1,15 @@
+{
+  "id": "reactive-throttle-leading",
+  "description": "§6.13 throttle LEADING edge: the first write to a <val throttled=1s> cell in a quiescent window emits IMMEDIATELY (leading fire), synchronously — no timer is armed. One click drives @val 0 -> 42 and the #v interpolation + snapshot both read 42, with NO advance-time verb. Adversarial proof that the settled()-drain path works under the virtual clock: a synchronous leading-edge write drains via settle alone.",
+  "language-version": "1.0",
+  "spec": "§6.13.2",
+  "rationale": "§6.13.2 throttle: a leading+trailing throttle emits the first write in any quiescent window immediately. Under the deterministic virtual clock (fixed non-zero epoch base), Date.now() at the first write is far past the zero-initialized lastEmit, so the elapsed-window test opens and the leading fire commits synchronously through the bypass window — no setTimeout is armed, so the case needs no advance-time and drains entirely via settled().",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#b" }],
+    "state": { "val": 42 },
+    "dom": "<button id=\"b\">Bump</button><p id=\"v\">Val: 42</p>",
+    "domAnchored": [{ "selector": "#v", "text": "Val: 42" }]
+  }
+}

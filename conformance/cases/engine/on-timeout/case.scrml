@@ -1,0 +1,13 @@
+${
+    type Light:enum = { Green, Yellow, Red }
+}
+<engine for=Light initial=.Green>
+    <Green rule=.Yellow>
+        <onTimeout after=1000ms to=.Yellow/>
+    </>
+    <Yellow rule=.Red></>
+    <Red></>
+</>
+<program>
+<p id="light">Light: ${@light}</>
+</program>

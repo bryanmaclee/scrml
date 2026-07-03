@@ -1,0 +1,8 @@
+${
+    <val throttled=1s> = 0
+    function bump() {
+        @val = 42
+    }
+}
+<button id="b" onclick=bump()>Bump</>
+<p id="v">Val: ${@val}</>

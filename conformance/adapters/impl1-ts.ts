@@ -130,6 +130,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../compiler/src/runtime-template.js";
 import { driveInputs, type InputStep, type ConformanceHook } from "../driver.ts";
 import { normalizeDom, runAnchored, type AnchoredAssertion } from "../normalize.ts";
+import { FakeClock } from "../fake-clock.ts";
 
 /**
  * The conformance introspection shim — impl#1's realization of the OQ3 contract.
@@ -292,6 +293,11 @@ export async function run(
   const restoreFetch =
     Object.keys(serverStub).length > 0 ? installServerStubFetch(serverStub) : null;
 
+  // Virtual clock — installed just before the eval (so timer arming at module-
+  // init + on DOMContentLoaded funnels through it) and restored in finally.
+  // Declared out here so the finally can restore it even if the eval throws.
+  const clock = new FakeClock();
+
   const dir = mkdtempSync(join(tmpdir(), "scrml-conf-run-"));
   const file = writeCaseFiles(dir, source, auxFiles);
   try {
@@ -312,6 +318,13 @@ export async function run(
     const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
     (globalThis as any).document.body.innerHTML = cleanHtml;
 
+    // Install the virtual clock LAST — after happy-dom's DOM setup (which may
+    // use real timers internally) and immediately before the eval, so every
+    // ms>0 timer the runtime arms (at module-init + on DOMContentLoaded) is
+    // controller-driven. setTimeout(0) still passes through to the real timer
+    // (the delay===0 rule) so settled()'s macrotask hop keeps working.
+    clock.install();
+
     // Execute runtime + client + conformance shim in ONE IIFE so the shim sees
     // the runtime internals by closure (OQ3 zero-byte realization).
     const code = "(function () {\n" + SCRML_RUNTIME + "\n" + clientJs + "\n" + CONFORMANCE_SHIM + "\n})();";
@@ -324,7 +337,7 @@ export async function run(
     const hook = (globalThis as any).__scrml_conformance as ConformanceHook | undefined;
     if (hook && hook.settled) await hook.settled();
 
-    await driveInputs(doc, input, hook);
+    await driveInputs(doc, input, hook, clock);
 
     if (hook && hook.settled) await hook.settled();
 
@@ -335,6 +348,7 @@ export async function run(
     rmSync(dir, { recursive: true, force: true });
     delete (globalThis as any).__scrml_conformance;
     if (restoreFetch) restoreFetch();
+    clock.restore();
   }
 }
 

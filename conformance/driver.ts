@@ -15,10 +15,17 @@
  *   { submit:  "#form" }                 bubbling `submit`
  *   { key:     "#sel", press: "Enter" }  keydown + keyup for a named key
  *   { wait:    "settle" }                await the conformance hook's settled()
+ *   { "advance-time": 1000 }             advance the VIRTUAL clock by N ms, then settle
  *
- * Real-time waits are deliberately excluded (non-deterministic) — only the
- * semantic "settle" form is sanctioned (virtual-clock timer advance = v1.next).
+ * Real-time waits are deliberately excluded (non-deterministic). Time is driven
+ * ONLY through the `advance-time` verb, which advances a deterministic virtual
+ * clock (fake-clock.ts): ms>0 timers (`<onTimeout>` §51.0.M, `<onIdle>` §51.0.R,
+ * debounce/throttle §6.13, intervals §6.7) fire EXCLUSIVELY on `advance-time`,
+ * never on a wall clock. `advance-time` is a RATIFIED normative language-1.0
+ * conformance-contract verb (impl#2 must honor it; the contract adopts a
+ * virtual-clock model).
  */
+import type { FakeClock } from "./fake-clock.ts";
 
 type DomNode = any;
 
@@ -30,7 +37,8 @@ export type InputStep =
   | { uncheck: string }
   | { submit: string }
   | { key: string; press: string }
-  | { wait: "settle" };
+  | { wait: "settle" }
+  | { "advance-time": number };
 
 export interface ConformanceHook {
   snapshot(): { cells: Record<string, unknown>; derived: Record<string, unknown> };
@@ -63,8 +71,24 @@ function dispatch(el: DomNode, type: string, init: Record<string, unknown>): voi
  * Apply ONE input step to the post-run live DOM. `hook` backs the `wait:"settle"`
  * verb (and is otherwise unused — inputs flow through real handler wiring).
  */
-export async function applyInput(doc: DomNode, step: InputStep, hook: ConformanceHook | undefined): Promise<void> {
+export async function applyInput(
+  doc: DomNode,
+  step: InputStep,
+  hook: ConformanceHook | undefined,
+  clock?: FakeClock,
+): Promise<void> {
   if ("wait" in step) {
+    if (hook && hook.settled) await hook.settled();
+    return;
+  }
+
+  if ("advance-time" in step) {
+    // Advance the deterministic virtual clock by N ms — fires every ms>0 timer
+    // whose deadline lands in the window — then settle so the resulting reactive
+    // propagation (+ any macrotask a fired timer kicked off) drains before the
+    // next step. Without a clock threaded through, advance-time degrades to a
+    // plain settle (defensive; the harness always threads one).
+    if (clock) await clock.advance(step["advance-time"]);
     if (hook && hook.settled) await hook.settled();
     return;
   }
@@ -118,9 +142,14 @@ export async function applyInput(doc: DomNode, step: InputStep, hook: Conformanc
   throw new Error("input driver: unrecognized step " + JSON.stringify(step));
 }
 
-/** Apply an ordered input sequence. */
-export async function driveInputs(doc: DomNode, steps: InputStep[], hook: ConformanceHook | undefined): Promise<void> {
+/** Apply an ordered input sequence. `clock` backs the `advance-time` verb. */
+export async function driveInputs(
+  doc: DomNode,
+  steps: InputStep[],
+  hook: ConformanceHook | undefined,
+  clock?: FakeClock,
+): Promise<void> {
   for (const step of steps) {
-    await applyInput(doc, step, hook);
+    await applyInput(doc, step, hook, clock);
   }
 }

@@ -1,0 +1,15 @@
+{
+  "id": "engine-on-timeout",
+  "description": "§51.0.M <onTimeout>: the initial state .Green arms a 1000ms timer to .Yellow at engine boot. A single {\"advance-time\":1000} verb advances the VIRTUAL clock past the deadline, firing the timer through the rule= contract; the auto-derived @light cell + its interpolation update to Yellow. Proves timer surfaces are conformance-testable AND that the timer fires ONLY on advance-time (see the sibling on-timeout-no-advance case, which omits the verb and stays Green).",
+  "language-version": "1.0",
+  "spec": "§51.0.M",
+  "rationale": "§51.0.M onTimeout: a state-child <onTimeout after=DURATION to=.Variant/> arms a timer on state entry (here at module-init for the initial state) that fires a rule=-honoring transition on expiry. Under the conformance virtual clock, that setTimeout is deterministic — it fires exactly when the case advances time past the 1000ms deadline, never on a wall clock.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "advance-time": 1000 }],
+    "state": { "light": "Yellow" },
+    "dom": "<p id=\"light\">Light: Yellow</p>",
+    "domAnchored": [{ "selector": "#light", "text": "Light: Yellow" }]
+  }
+}

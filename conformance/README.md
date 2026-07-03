@@ -21,7 +21,8 @@ conformance/
       expected.json    the agnostic contract (codes + runtime effect + provenance)
       *.scrml          (optional) aux import fixtures — the `files` convention
   adapters/impl1-ts.ts compile() + run() over the TS reference compiler (impl#1)
-  driver.ts            the 7-verb selector-addressed input vocabulary (OQ2)
+  driver.ts            the 8-verb selector-addressed input vocabulary (OQ2)
+  fake-clock.ts        the deterministic virtual clock backing `advance-time`
   normalize.ts         the DOM normalization pipeline + anchored runner (OQ1)
   run.ts               loads + checks every case; exits non-zero on failure
   conformance-corpus.test.js   bun:test wrapper (one test() per case)
@@ -111,7 +112,7 @@ A case has a runtime half when `expect` carries any of `input` / `dom` /
 **Author BOTH `dom` and `domAnchored`** (this is how OQ1 is resolved
 empirically). See the OQ1 note below for when to reach for each.
 
-### Input vocabulary (OQ2 — 7 selector-addressed verbs)
+### Input vocabulary (OQ2 — 8 selector-addressed verbs)
 
 ```jsonc
 { "click":   "#inc" }                  // bubbling click
@@ -121,11 +122,42 @@ empirically). See the OQ1 note below for when to reach for each.
 { "submit":  "#form" }                 // bubbling `submit`
 { "key":     "#field", "press": "Enter" } // keydown + keyup for a named key
 { "wait":    "settle" }                // await the hook's settled() (async drain)
+{ "advance-time": 1000 }               // advance the VIRTUAL clock by N ms, then settle
 ```
 
 Inputs are USER-INTENT events flowing through the handlers BOTH impls wire.
 Direct state-set is **banned** (it bypasses handlers + names impl internals).
-Real-time waits are banned (non-deterministic); only `wait: "settle"`.
+Real (wall-clock) waits are banned (non-deterministic); time is driven ONLY
+through `advance-time` (below) and the semantic `wait: "settle"`.
+
+### `advance-time` — the virtual clock (a normative contract verb)
+
+`{ "advance-time": ms }` is a **RATIFIED normative language-1.0 conformance
+contract verb** (impl#2 MUST honor it). The contract adopts a **virtual-clock
+model**: an impl runs time-dependent surfaces against a deterministic virtual
+clock that advances ONLY when a case says so — never on a wall clock. The verb
+advances that clock by `ms`, fires every pending timer whose deadline lands in
+the window (in deadline order), then settles.
+
+Which surfaces this makes conformance-testable:
+
+- `<onTimeout after=DURATION to=.Variant/>` (§51.0.M) and `<onIdle>` (§51.0.R)
+- `debounced` / `throttled` reactive cells (§6.13)
+- engine temporal rules (`A after 1s => B`, §51.12) and interval timers (§6.7)
+
+**Determinism rule.** A ms>0 timer fires **exclusively** on an `advance-time`
+verb — never on `wait: "settle"` and never on a real elapsed wall clock. A
+`setTimeout(fn, 0)` (task-queue ordering, not time advancement) still runs on the
+real task queue, so `settled()` and 0-clamped / leading-edge reactive writes
+drain without any `advance-time`. See the paired `engine/on-timeout` (fires with
+the verb) and `engine/on-timeout-no-advance` (identical source, omits the verb,
+stays put) cases for the bracketing proof.
+
+impl#1 realizes the virtual clock in `fake-clock.ts` (a zero-production-byte
+adapter helper that overrides `setTimeout`/`clearTimeout`/`setInterval`/
+`clearInterval`/`Date.now`/`requestIdleCallback`/`cancelIdleCallback` on
+`globalThis` for the duration of one `run()`, restored in a `finally`); impl#2
+is free to realize the same virtual-clock contract however it likes.
 
 ### Server-fn stubs (`serverStub`) — the §52 (b)-runtime center
 

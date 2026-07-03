@@ -1,0 +1,15 @@
+{
+  "id": "engine-on-timeout-no-advance",
+  "description": "DETERMINISM NEGATIVE of engine-on-timeout: identical source + a 1000ms <onTimeout>, but the input drives ONLY {\"wait\":\"settle\"} — NO advance-time. Because ms>0 timers fire EXCLUSIVELY on the virtual clock's advance-time verb (never on a wall clock, never via settle's macrotask hop), the timer does NOT fire: @light stays .Green. This is the load-bearing proof that the virtual clock is deterministic — a settle alone can never advance time.",
+  "language-version": "1.0",
+  "spec": "§51.0.M",
+  "rationale": "The conformance virtual clock advances ONLY on advance-time. settle() does a microtask + a setTimeout(0) macrotask hop (which passes through to the real timer for task-queue ordering) but never advances virtual time, so a 1000ms onTimeout cannot fire without an explicit advance-time. Pairs with engine-on-timeout to bracket the verb: with it the timer fires, without it it does not.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "wait": "settle" }],
+    "state": { "light": "Green" },
+    "dom": "<p id=\"light\">Light: Green</p>",
+    "domAnchored": [{ "selector": "#light", "text": "Light: Green" }]
+  }
+}
