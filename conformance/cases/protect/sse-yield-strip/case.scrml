@@ -1,0 +1,14 @@
+<program>
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      server function* streamUsers() route="/users/stream" {
+        let u = ?{`SELECT * FROM users`}.all()
+        yield { event: "user", id: 1, data: u }
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

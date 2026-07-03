@@ -1,0 +1,13 @@
+{
+  "id": "protect-sse-yield-strip",
+  "description": "§14.8.9 SSE egress (§37) — each data: frame a `server function*` generator yields is a compiler-emitted client-egress serializer; a protected row in the yielded data is stripped at the frame sink and fires I-PROTECT-STRIP-001. The compile-time half of the SSE egress floor (item 6 codes). RUNTIME NOTE: the emitted SSE frame bytes are not asserted — the harness has no EventSource driver (adapter-gated, see ss60.progress).",
+  "language-version": "1.0",
+  "spec": "§14.8.9, §37",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 Composition: each data: frame a server function* yields (both the {event,data} shape and the bare-value shape) SHALL apply the same redact-at-sink. A protected row reaching the yield strips passwordHash at the data: frame; I-PROTECT-STRIP-001 names the stripped column.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}

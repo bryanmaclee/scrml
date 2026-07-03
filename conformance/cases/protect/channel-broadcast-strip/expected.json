@@ -1,0 +1,13 @@
+{
+  "id": "protect-channel-broadcast-strip",
+  "description": "§14.8.9 channel egress (§38) — the channel broadcast() built-in is a compiler-emitted client-egress serializer; a protected row reaching broadcast(row) is stripped at the publish sink and fires I-PROTECT-STRIP-001. The compile-time half of the channel egress floor (item 6 codes). RUNTIME NOTE: the published WS frame contents are not asserted — the harness has no WebSocket driver (adapter-gated, see ss60.progress).",
+  "language-version": "1.0",
+  "spec": "§14.8.9, §38",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 Composition: channel broadcast() publishes a JSON frame to every subscriber; it SHALL apply the same redact-at-sink as the server-fn return. A protected row reaching broadcast(row) strips passwordHash at the publish sink; the strip is announced by I-PROTECT-STRIP-001.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "protect-reveal-suppresses-e004",
+  "description": "§14.8.9 declassification — reveal(\"col\") is the sole admit path. Wrapping the protected row in u.reveal(\"passwordHash\") at a raw egress SUPPRESSES the E-PROTECT-004 fail-closed gate (the column is explicitly declassified-at-this-value). The strip machinery still engages (I-PROTECT-STRIP-001), but the reveal admits the named column past the sink.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: reveal(\"col\") stamps the column's provenance descriptor as declassified; the sink admits a protected-origin column only when its descriptor bears a reveal stamp. It is the ONLY re-admit path and is greppable in source and emitted handler — so the raw-egress gate that would otherwise fire E-PROTECT-004 is suppressed.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-004"],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}

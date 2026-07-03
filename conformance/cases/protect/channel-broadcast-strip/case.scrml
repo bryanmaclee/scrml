@@ -1,0 +1,18 @@
+<program>
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${ function noop() { return 1 } }
+  </db>
+  <channel name="chat" topic="lobby">
+    ${
+      <messages> = []
+      function pushUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        broadcast(u)
+      }
+    }
+  </>
+  <div><p>hi</p></div>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "protect-safe-projection-no-strip",
+  "description": "§14.8.9 — an explicit SAFE projection that never selects the protected column engages no redaction: no E-PROTECT-* / I-PROTECT-* code fires. The positive control for the strip/fail-closed cases — the floor only acts on a protected-origin column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 the redaction keys on a column's resolved (table,column) origin; SELECT id, name carries no protected-origin column, so the egress serializer has nothing to strip and no strip/fail-closed diagnostic fires. Proves the floor is precise, not blanket.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-PROTECT-", "I-PROTECT-"]
+  }
+}

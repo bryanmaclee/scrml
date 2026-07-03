@@ -1,0 +1,10 @@
+<program db="sqlite:./app.db">
+${
+  < Account authority="server" table="users">
+    id: number
+    name: string
+  </>
+  <Account> @accounts
+}
+<ul><each in=@accounts key=@.id as a><li class="row">${a.name}</li></each></ul>
+</program>

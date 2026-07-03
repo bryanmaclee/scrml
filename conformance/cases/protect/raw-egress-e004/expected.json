@@ -1,0 +1,13 @@
+{
+  "id": "protect-raw-egress-e004",
+  "description": "§14.8.9 raw-egress fail-closed — a protected row reaching a compiler-unanalyzable egress (a manual `new Response(...)`) without reveal fires E-PROTECT-004 (error). The floor cannot prove redaction at an un-analyzable sink, so it fails closed rather than silently ship the protected column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 closed-world precondition: an egress path the compiler cannot analyze (`_{}` foreign block, manual Response/handle body, asIs value) carrying a protected-origin column SHALL fail closed with E-PROTECT-004 — the confidentiality sibling of the read-site E-PROTECT-001, in the return-boundary direction. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged).",
+  "expect": {
+    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+  }
+}

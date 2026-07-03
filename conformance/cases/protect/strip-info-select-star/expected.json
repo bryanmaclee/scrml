@@ -1,0 +1,13 @@
+{
+  "id": "protect-strip-info-select-star",
+  "description": "§14.8.9 egress redaction — a server fn returning SELECT * over a protect= table strips the protected column at the egress sink and fires I-PROTECT-STRIP-001 (info, names the stripped column). The compile-time half of the server-fn return-boundary redaction (item 2 codes / item 5). RUNTIME NOTE: the client-visible absence is NOT asserted here — the conformance adapter mocks the server (fetch-mock returns the serverStub verbatim), so the server-side redaction sink never runs; the runtime half is adapter-gated (see ss60.progress adapter-gap escalation).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: every compiler-emitted client-egress serializer strips by column-origin every protected column before it crosses to the client; the strip is never silent — I-PROTECT-STRIP-001 names each stripped column. A `<db protect=passwordHash>` table SELECTed with * and returned engages the redact sink at compile.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}
