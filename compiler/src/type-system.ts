@@ -8609,6 +8609,66 @@ function annotateNodes(
                 (stmt.span ?? n.span) as Span,
               ));
             }
+            // E-ERROR-009: fail names a variant that is not a valid variant of
+            // the declared error enum type (§19.3.3). Runs ONLY inside a `!`
+            // function (the E-ERROR-001 gate above owns the non-`!` case). The
+            // fail-stmt grammar (§19.3.1) always names an enum-type + variant;
+            // three shapes are invalid here:
+            //   (1) undeclared variant of the DECLARED enum   (enumType == declared, variant absent)
+            //   (2) a FOREIGN enum entirely                   (enumType != declared)
+            //   (4) a non-enum target / missing variant       (enumType == "" || variant == "")
+            // Arity of the payload against a VALID variant (shape (3)) is a
+            // distinct error class — the variant IS valid — and is NOT covered
+            // by E-ERROR-009 (see the fail-arity note; unchecked, surfaced).
+            if (k === "fail-expr" && canFail) {
+              const failEnum = ((stmt as Record<string, unknown>).enumType as string) ?? "";
+              const failVariant = ((stmt as Record<string, unknown>).variant as string) ?? "";
+              // The declared error type: explicit `! -> T` / `! T`, else the
+              // built-in default `Error` enum (§19.4.2 — sole variant Generic).
+              const declaredType = ((n as Record<string, unknown>).errorType as string) || "Error";
+              // Resolve the declared enum's valid variant names. The built-in
+              // `Error` default is not in the type registry, so its sole variant
+              // (`Generic`, §19.4.2) is supplied directly.
+              let validVariants: string[] | null = null;
+              if (declaredType === "Error") {
+                validVariants = ["Generic"];
+              } else {
+                const declEnum = typeRegistry.get(declaredType);
+                if (declEnum && declEnum.kind === "enum") {
+                  validVariants = (declEnum as EnumType).variants.map((v) => v.name);
+                }
+              }
+              // Only validate when the declared enum resolved to a variant set.
+              // An unresolved declared type name is a DIFFERENT diagnostic's
+              // concern (undeclared type); do not double-fire here.
+              if (validVariants !== null) {
+                const failSpanE9 = (stmt.span ?? n.span) as Span;
+                const validList = validVariants.join(", ");
+                if (failEnum === "" || failVariant === "") {
+                  // (4) non-enum target / missing variant.
+                  errors.push(new TSError(
+                    "E-ERROR-009",
+                    `E-ERROR-009: 'fail' in function '${fnName}' does not name a valid variant of the declared error type '${declaredType}'. ` +
+                    `A 'fail' statement must name a variant (e.g. 'fail ${declaredType}.${validVariants[0] ?? "Variant"}(...)'). Valid variants: ${validList}.`,
+                    failSpanE9,
+                  ));
+                } else if (failEnum !== declaredType) {
+                  // (2) foreign enum — render the qualified name for clarity.
+                  errors.push(new TSError(
+                    "E-ERROR-009",
+                    `E-ERROR-009: 'fail' names variant '${failEnum}.${failVariant}' which is not a valid variant of the declared error type '${declaredType}' for function '${fnName}'. Valid variants: ${validList}.`,
+                    failSpanE9,
+                  ));
+                } else if (!validVariants.includes(failVariant)) {
+                  // (1) undeclared variant of the declared enum.
+                  errors.push(new TSError(
+                    "E-ERROR-009",
+                    `E-ERROR-009: 'fail' names variant '${failVariant}' which is not a valid variant of the declared error type '${declaredType}' for function '${fnName}'. Valid variants: ${validList}.`,
+                    failSpanE9,
+                  ));
+                }
+              }
+            }
             // Also detect `fail` that survives as a bare-expr string (e.g.
             // single-line if body where the if-body wasn't re-parsed through the
             // statement loop).
