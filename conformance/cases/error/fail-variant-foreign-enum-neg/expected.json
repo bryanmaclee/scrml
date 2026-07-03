@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-variant-foreign-enum-neg",
+  "description": "§19.3.3 E-ERROR-009 — `fail` names a FOREIGN enum entirely (`OtherError.Whatever`) when the function's declared error type is `MyError`. Even though Whatever is a valid variant of OtherError, it is not a variant of the DECLARED type, so E-ERROR-009 fires AS an error. Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: `fail` SHALL produce a value of the error enum type declared in the function's `!` signature; a variant that does not belong to the declared error type SHALL be a compile error (E-ERROR-009).",
+  "expect": {
+    "codes": ["E-ERROR-009"],
+    "notCodes": ["E-ERROR-001"],
+    "severity": { "E-ERROR-009": "error" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-variant-undeclared-neg",
+  "description": "§19.3.3 E-ERROR-009 — `fail` names a variant (`Nonexistent`) that is NOT a variant of the function's declared error enum (`MyError` has only NotFound/Timeout). Fires E-ERROR-009 AS an error (§34 fatal partition). Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: the variant specified in a `fail` statement SHALL be a valid variant of the declared error enum type; an undeclared variant SHALL be a compile error (E-ERROR-009).",
+  "expect": {
+    "codes": ["E-ERROR-009"],
+    "notCodes": ["E-ERROR-001"],
+    "severity": { "E-ERROR-009": "error" }
+  }
+}

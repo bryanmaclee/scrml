@@ -1,0 +1,9 @@
+${
+    type MyError:enum = { NotFound(id: string), Timeout }
+    type OtherError:enum = { Whatever }
+
+    function f()! MyError {
+        fail OtherError.Whatever
+    }
+}
+<p>x</>
