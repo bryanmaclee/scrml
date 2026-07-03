@@ -216,6 +216,56 @@ corrected §19.9.1 to the actual `{__scrml_error, …}` shape (`g-server-error-w
 SPEC.md:13195); §19.9.1 and impl#1 now AGREE, so there is NO standing divergence. The
 directive stays regardless — it keeps the contract impl-neutral per D3, which is the point.)*
 
+### Server-eval mode (`serverDb`) — running the REAL server handlers
+
+`serverStub` (above) MOCKS the server: its `fetch` returns the declared response
+VERBATIM, so the compiler-emitted route handler — and the §14.8.9 redaction sink
++ §52.8 SSR compose it contains — never execute, leaving the RUNTIME halves of
+protect-redaction and SSR first-paint unobservable.
+
+**Server-eval mode** (E-ADAPTER, S236) widens the existing seam: `result.outputs`
+already carries `serverJs`, and the adapter's `runServer()` EVALUATES that server
+bundle, then executes the client against the REAL handlers. It is **opt-in** via a
+case declaring `serverDb` (absent it, the byte-identical `run()`/`serverStub`
+path is used — non-perturbing).
+
+```jsonc
+"serverDb": {                                 // impl-neutral server DB seed, by TABLE
+  "users": [{ "id": 1, "name": "Alice", "passwordHash": "SECRET" }]
+},
+"input": [{ "click": "#load" }, { "wait": "settle" }],
+"state": { "user": { "id": 1, "name": "Alice" } }, // passwordHash REDACTED at egress
+// SSR: compose the §52.8 first-paint + seed __scrml_ssr_state, then hydrate
+"firstPaint": {
+  "contains":    ["<li data-scrml-key=\"1\" class=\"row\">Alice</li>"],
+  "notContains": ["SECRET", "passwordHash"]     // §14.8.9 redaction in the first paint
+}
+```
+
+- **`serverDb`** — `Record<tableName, row[]>`, impl-neutral (keyed by TABLE, never
+  a route/SQL encoding). Each `_scrml_sql\`... FROM <table> ...\`` the emitted
+  handler runs resolves to a fresh copy of that table's rows. Its presence is the
+  request→response serverJs-eval trigger. The adapter routes the client's
+  `/_scrml/*` fetches through the emitted WinterCG `fetch(request)` (a duck-typed
+  request + `document.cookie` jar so the baseline double-submit CSRF gate behaves
+  as deployed).
+- **`firstPaint`** — `{contains?, notContains?}` substring assertions on the
+  composed `_scrml_ssr_compose_handler` output. Presence selects SSR mode (compose
+  → mount the first-paint → seed `window.__scrml_ssr_state` → hydrate). `ssr:true`
+  forces SSR mode without a first-paint assertion.
+
+**Contract status — RATIFIED (S236, user "ratify both").** `serverDb` + `firstPaint`
+are **RATIFIED normative language-1.0 conformance contract verbs** (impl#2 MUST honor
+them). The language-1.0 conformance contract now commits: impl#2 SHALL seed its
+server-side DB from `serverDb`, run its real server route handlers (so the §14.8.9
+redaction sink + §52.8 SSR compose execute), and emit an impl-neutral first-paint that
+`firstPaint` asserts against. Rationale (parallel to the `advance-time` ratification,
+S235): "the server holds these rows / composes this HTML" is observable program
+behavior, not an impl internal. The E-CSRF harness fallback
+(`_scrml_fetch_with_csrf_retry`) is an adapter shim, NOT contract — it resolves a bare
+reference an auth-middleware client emits without a definition on that path (tracked as
+the codegen bug `g-csrf-retry-helper-def-gated`).
+
 ### The `files` multi-file convention
 
 Every `*.scrml` in a case dir besides `case.scrml` is an aux import fixture: it
