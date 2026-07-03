@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 8 |
+| MED | 9 |
 | LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -35,6 +35,13 @@
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S235 — gaps filed S235 (2026-07-03)
+
+### G-DEBOUNCE-THROTTLE-TRAILING-NO-COMMIT — a `debounced`/`throttled` cell's TRAILING fire never commits (the reactivity-bypass re-route) — `NEW S235; MED; open`
+`<x debounced=Nms>` / `<x throttled=Nms>` (§6.13) silently never applies its trailing (coalesced) write. Root: `_scrml_reactive_debounced`/`_scrml_reactive_throttled` (runtime-template.js) set `_scrml_reactivity_bypass[name]=true` synchronously for the original write and clear it in the same tick; the expiry closure fires LATER (after the flag is false) and calls `_scrml_reactive_set(name, valueFn())`, which RE-ROUTES back into the debounce/throttle wrapper and re-arms indefinitely instead of committing to the cell. **Confirmed with REAL timers** (a real 300ms wait on a 50ms debounce leaves the cell empty) — NOT a virtual-clock artifact; surfaced by the Track-B virtual-clock build (conformance-virtual-clock-2026-07-03), which used engine `<onTimeout>` (`_scrml_engine_direct_set`, not the reactivity re-route) + throttle LEADING-edge (fires synchronously inside the bypass window, so it works) as its proofs rather than a debounce case. Uncaught because NO existing test exercises debounce/throttle-TRAILING commit. Likely fix: set `_scrml_reactivity_bypass[name]=true` around the expiry's `_scrml_reactive_set`, or write to state directly in the expiry. **Conformance follow-on:** once fixed, `reactive/throttle-leading` gains a trailing-fire sibling case (a debounce case + a throttle-trailing case) via the now-available `advance-time` verb. <!-- @gap id=g-debounce-throttle-trailing-no-commit sev=MED status=open -->
 
 ---
 

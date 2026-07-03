@@ -1,43 +1,56 @@
-# scrml — Session 235 (OPEN)
+# scrml — Session 235 (CLOSE)
 
-**Date:** 2026-07-02. **Profile:** A — FULL (booted via `/boot`; full expert reads — pa-scrml.md contract + pa-profile-bryan + SPEC-INDEX + master-list §0 + user-voice S229–234 + known-gaps §0 + PRIMER §1–§13.7). Prior close: S234 (`hand-off-237.md`). Register carried in: **KEEP DRIVING / S219 PRIMARY-GOAL (finish the project) / partner-mode**.
+**Date:** 2026-07-02 → 07-03. **Profile:** A — FULL (booted `/boot`). A **marathon**: FINISHED the SSR A-terminus (**V1 SSR done**), then drove the **language/compiler split** toward a language-1.0 freeze — discovered the split's load-bearing build was already done, ratified the freeze bar, and launched the conformance-authoring program + the harness-extension arc + the self-host sPA. Mechanical stream → `handOffs/delta-log.md` [276]–[289]. Full narrative → `docs/changelog.md` S235 block.
 
-## 🚦 STATE (mid-session — SSR arc complete + pushed)
-- **git:** all S235 work pushed, coherence **0/0**. SSR arc: D2 `f1694f63` + D3 `fc726212` (+ session bookkeeping). scrml-support: uncommitted resolver design-insight edit (rides a future wrap).
-- **Board:** v0.7.1 · **HIGH 0 · MED 8 · LOW 12 · Nominal 7** (`g-tier1-ssr-prerender` RESOLVED → MED 8; `g-ssr-render-subset-widen` filed → LOW 12).
-- **Inbox:** empty.
-- **Maps:** refreshed to 2fb2bf1f (project-mapper S235); ~2 commits behind (D2+D3) — re-run at wrap (WARN-only).
-- **Digest:** booted off authoritative reads.
+## 🚀 NEXT-START
+Boot Profile A. Board: **HIGH 0 · MED 9 · LOW 12 · Nominal 7**. **The V1 path is now concrete: the conformance-suite must pin every claimed surface before language-1.0 freezes (ratified S235 = high coverage / do-it-right) → the freeze gate is coverage-GROWTH + D1/D2/D4 labeling, NOT feature builds** (SSR was the last feature; the D3 extraction was found already-built).
 
-## ✅ SSR A-TERMINUS COMPLETE — V1 SSR DONE (S235)
-The last V1-required feature shipped end-to-end + pushed:
-- **D1** (S234 `d05cf40c`) — server-side markup render: `<each>` over a server-authority cell renders rows into first-paint HTML, keyed `data-scrml-key`, §14.8.9-redacted.
-- **D2** (S235 `f1694f63`) — DOM-adoption hydration: client adopts the server rows in place (no wipe-rebuild double-render), fully interactive. R26 happy-dom 6/33 (`replaceChildren` spy 0 / `replaceChild` 2 = no-wipe proof). **Recovered from a ConnectionRefused disconnect** (agent finished+committed clean; PA independently verified).
-- **D3** (S235 `fc726212`) — retired `W-AUTH-002`; SPEC §52.8 impl-status; `g-tier1-ssr-prerender` RESOLVED.
-- **Residual (tracked, LOW):** `g-ssr-render-subset-widen` — unsupported each shapes (`if=`/nested-each/component-rows/computed-interps) fall back to client-render. Post-V1 coverage-widening; the common list shape is fully covered.
+**FIRST at boot — re-integrate the in-flight sPA landings** (they land on their own `spa/ssN` branches; PA file-deltas at list-completion, S67 + independent `bun conformance/run.ts` green):
+- **ss57 (validators §55)** — marked ALL 8 items `[status=landed spa/ss57]` = **list COMPLETE → re-integrate first** (file-delta `conformance/cases/forms/*` + `form-for/*` from `spa/ss57`; run `bun conformance/run.ts`).
+- **ss55 (self-host lexer)** — slice-4a landed (`spa/ss55` @ 41aef81d); items 2-5 continuing. Re-integrate at list-completion (self-host-v2/ disjoint). **Item-3 ruling was relayed** (see below).
+- **ss56 (engine §51)** + **ss58 (error-model §19)** — progressing (each committing on its branch). Re-integrate at completion.
+- Check `handOffs/incoming/` for per-item pings.
 
-## 🎯 NEXT PRIORITY (drive the whole board — S219; no blocking Qs)
-Candidate threads (pick per steer):
-- **Road-B self-host-v2 slice-4** — typed BracketStack/ErrorRecovery threading + cooked-decode precision (lexer refinements); then the PARSER wave (F1/emit-library fix-vs-continue call comes due).
-- **Dogfood typer gaps** — F4 `g-typer-bare-variant-non-return-ambiguous` · F5/F8 `g-typer-hostmethod-return-asis-and-anon-struct-poison`.
-- **D1/D4 codegen follow-on** — version-surface wiring (`chunks.json` `language` field / `scrml.toml [language]` pre-parse read / `expected.json` schema split).
-- **`g-ssr-render-subset-widen`** — widen SSR coverage (simple static `if=`/`show=` next).
-- MED 8 / LOW 12 backlog.
+**THEN drive the freeze-gate program** (all parallelizable): more conformance sPA lists (Tier-2 tail: `<api>` §60 · @apply/CSS · equality/assignment-expr · meta/lin/`~` · slots · input/while runtime · + the codes-only §34 backlog) · the harness-extension arc P2+ (below) · D1/D2/D4 labeling (below).
 
-## 🔭 OTHER OPEN THREADS (drive the whole board — S219)
-- **Road-B self-host-v2 compiler build** — the lexer is TOKEN-COMPLETE (`compiler/self-host-v2/`, 119/119 token-diff-green vs impl#1). Next: **slice-4** (typed BracketStack/ErrorRecovery threading + precise cooked-decode — refinements, NOT new token classes), then the **PARSER wave** (where F1/emit-library becomes load-bearing — the fix-vs-continue decision comes due).
-- **F1 (strategic Road-B blocker)** `g-library-mode-no-typed-payload-match` — `emit-library.ts` is a shallow regex-transform that can't lower typed-payloads + `match`; lean = DEFER the fix until the parser wave (user may pull forward).
-- **Dogfood typer gaps** (from the lexer build): F4 `g-typer-bare-variant-non-return-ambiguous` · F5/F8 `g-typer-hostmethod-return-asis-and-anon-struct-poison` · F7 (LOW benign) · F9 `g-string-literal-dollar-brace-interp-no-literal-escape` (LOW SPEC-OQ). The match-arm-drop family (F2/F3/F6) was FIXED S234.
-- **D1/D4 codegen follow-on** — the version-surface wiring (`chunks.json` `language` field / `scrml.toml [language]` pre-parse read / `expected.json` schema split); Nominal/spec-ahead is fine for now.
-- MED/LOW backlog (9/11) + Nominal features — drive per S219.
+## 🚦 STATE @ close
+- **git:** scrml **5 commits ahead of origin, UNPUSHED** (0821ba1a planning · cfa5303e Track-C+lists · 33c8a921 bookkeeping · cc8d5d6d virtual-clock landing · + this wrap commit). scrml-support **1 ahead** (f2def07). **PUSH is the wrap's open action** (pre-push runs the full suite ~5min). Coherence otherwise clean (no leaks; the virtual-clock file-delta was disjoint-verified).
+- **Board:** HIGH 0 · MED 9 · LOW 12 · Nominal 7. Full suite **26082/0** (at the virtual-clock landing); `bun conformance/run.ts` **72/72** (69 + the 3 new timer cases).
+- **In-flight sPAs (user-driven, separate instances):** ss55/56/57/58 running on their `spa/ssN` branches + `../scrml-spa-ssN` worktrees (persistent, OUTSIDE `.claude/worktrees/` — the wrap cleanup does NOT touch them). **Their dist is symlinked** (S209 fix applied to 55/56/57/58).
+- **Maps:** OWED refresh — watermark `2fb2bf1f`, behind by the SSR D2/D3 + split-drive + `conformance/` + virtual-clock commits. `project-mapper` deferred at this wrap (session depth; refreshed once already this session). Run incremental at next boot.
+- **Owed-minor:** `spa-lists/INDEX.md` entries for ss55-62.
 
-## 🧾 OWED at open (carry from S234 wrap)
-- **Maps refresh** (project-mapper — ~12 commits stale).
-- **master-list §0 detailed refresh** (still v0.2.0-dashboard framed).
-- scrml-support resolver design-insight edit is committed content-wise but the working-tree edit rides a future wrap.
+## 🎯 THE DURABLE THREADS OF S235
+
+### 1. SSR A-terminus COMPLETE = V1 SSR done
+D1 (server-render, S234) + **D2 DOM-adoption** (`f1694f63` — client adopts the `data-scrml-key` server rows in place, no double-render, interactive; recovered clean from a ConnectionRefused disconnect) + **D3 retire W-AUTH-002** (`fc726212` — `g-tier1-ssr-prerender` RESOLVED). Residual = LOW `g-ssr-render-subset-widen` (unsupported `<each>` shapes fall back). Pushed `2fb2bf1f..1c7526f6`.
+
+### 2. The language/compiler split — reframed + launched
+- **THE FINDING (verify-before-claim WIN):** the D3 conformance-suite extraction — the S230-DD's "load-bearing build remaining" — was ALREADY BUILT S231-232. `conformance/` = 69 cases, data-not-TS, codes+runtime halves, gated, 69/69 impl#1-green (PA-ran it). The **S230 DD marked partially-superseded**; the within-node "proto cross-impl oracle" claim REPUDIATED (AST is impl-freedom; `conformance/` IS the oracle). **The split is ~85-90% built.**
+- **V1-FREEZE BAR RATIFIED** (user "do it right, high coverage first"): language-1.0 freezes only when the conformance suite pins EVERY claimed surface (both halves, pillars to their edges; Nominal → v1.next). Coverage-gap map: distance ≈ **30-34 surfaces + the codes-only §34 backlog → 69 → ~200-270 cases**, three tracks: (A) sPA-able authoring [the bulk] · (B) harness-extension-first [~8 surfaces] · (C) rulings.
+- **Conformance-authoring program LAUNCHED** — 7 sPA lists ss56-62 (engine/validators/error-model/reactivity/SSR+protect/L22/maps+refinement), each with the method (author-from-impl#1 → sanity-check-vs-SPEC → ESCALATE divergences) + honest harness-gate flags. Full coverage map + the Tier-2 tail + the depth standard: delta-log [282] + the survey (transcript).
+- **Self-host → a self-host sPA** (ss55, Road-B impl#2 lexer completion = the pre-mitosis vehicle; full compiler-PA daughter waits on the artifact split landing per the §7 guardrail). **Parser wave = ss56+ NEEDS a PA decomposition pass + the F1/emit-library unblock** (the parser's first cross-module import; `g-library-mode-no-typed-payload-match`). Not yet decomposed.
+
+### 3. The two gates (Track C + B)
+- **Track C — §19.9.1 server-`!`-error wire = NO divergence** (the S232 currency fix already reconciled §19.9.1 to impl#1's `{__scrml_error,...}`; impl#1 conformant; the stale `conformance/README.md` flag corrected). No ruling.
+- **Track B — harness-extension arc SCOPED + P1 built.** 8 driver/adapter extensions phased (delta-log [286]): **P1 virtual clock DONE** (`cc8d5d6d` — `conformance/fake-clock.ts` + the `{advance-time:ms}` verb; 72/72; unblocks the ss56/ss59 timer items + §51.12). **`{advance-time}` RATIFIED as a normative language-1.0 contract verb** (impl#2 must honor). **P2+ remaining, ordered:** 2. multi-file [adapter-only] · 3. serverJs-eval [contract; `serverJs` is ALREADY in `result.outputs`, cast away at impl1-ts.ts:302] · 4. real-DB [`new SQL(":memory:")`] · 5. SSE [`sseFrames` directive ∥ `__serverError`] · 6. nav [`navigate` verb] · 7. worker [adapter-only] · 8. WebSocket [`wsBroadcast`, heaviest]. Each contract-side piece ratifies per-phase (no batch).
+
+## 🐛 New finding (filed)
+**MED `g-debounce-throttle-trailing-no-commit`** — `<x debounced/throttled=Nms>` §6.13 TRAILING fire silently never commits (the `_scrml_reactivity_bypass` re-route in the expiry closure re-arms indefinitely). Confirmed with REAL timers (not a virtual-clock artifact); surfaced by the P1 build; uncaught (no test exercised trailing-commit). A fix-dispatch candidate; a conformance trailing-fire case follows the fix (the `advance-time` verb now enables it).
+
+## 🎗️ Item-3 ruling (RELAYED to ss55 — record)
+impl#1's lexer is LENIENT by design (emits NO error tokens — verified). ss55 slice-4c "ErrorRecovery" was PA over-spec → re-scope to MATCH impl#1's lenient recovery (skip-continue, like the slice-1 `deferAdvance` stub; confirm-and-close, not a build). Lexer-stage error DIAGNOSTICS are out-of-layer (fire at parser/typer). NOT an impl#1 bug.
+
+## 🧾 Owed at wrap
+- **PUSH** scrml (5 commits) + scrml-support (1) — the open wrap action.
+- **Maps refresh** (project-mapper — deferred; watermark 2fb2bf1f).
+- **spa-lists/INDEX.md** ss55-62 entries.
+- Re-integrate the sPA landings (ss57 complete; 55/56/58 in-flight).
+- The debounce/throttle-trailing fix (MED) — dispatch candidate.
+- Deploy-finding: `isolation:worktree` intermittently not provisioning (ss55 dev-agent landed main-on-main + self-rescued; main verified clean; the sPA hardened items 2-5). Watch.
 
 ## pa.md directives in force
-R1–R5 · Profile A · commit `timeout:600000` · S226 landing-concurrency (3-way-merge shared files) · S219 PRIMARY-GOAL/orchestrate-don't-grind · S215 adversarial-verify + 10× sample · S138 R26 (bidirectional) · S147 coherence (rev-list divergence + branch-tip==FINAL_SHA) · S136 BRIEF archival · S88/S99/S126 path-discipline (Bash-edit on worktree-abs paths, no `cd` into main) · S164 background-commit-race (foreground when SHA needed next).
+R1–R5 · Profile A · commit `timeout:600000` · S226 landing-concurrency (disjoint-verify before file-delta) · S219 PRIMARY-GOAL/orchestrate · S215 adversarial-verify · S138 R26 · S147 coherence · S209 sPA-worktree dist-symlink (now in spa-scrml.md) · S136 BRIEF archival · S88/S90/S99/S126 path-discipline.
 
 ## Tags
-#session-235 #open #keep-driving #ssr-a-terminus-next #road-b-lexer-token-complete #v1-language-1.0 #board-high0-med9-low11-nom7
+#session-235 #close #v1-ssr-done #ssr-a-terminus-complete #language-compiler-split #d3-extraction-already-built #v1-freeze-bar-ratified #conformance-program-launched #self-host-spa #harness-extension-arc #virtual-clock #advance-time-contract-verb #4-spas-in-flight #push-pending
