@@ -1987,7 +1987,17 @@ function _scrml_reactive_debounced(name, valueFn, ms) {
   delay = Math.round(delay);
   const handle = setTimeout(function () {
     delete _scrml_reactivity_timers[name];
-    _scrml_reactive_set(name, valueFn());
+    // Commit the coalesced trailing value DIRECTLY. The bypass flag routes this
+    // set past the timing wrapper — without it, _scrml_reactive_set would see
+    // the still-registered rule and re-route back into _scrml_reactive_debounced,
+    // re-arming the timer forever so the cell never commits (S236
+    // g-debounce-throttle-trailing-no-commit).
+    _scrml_reactivity_bypass[name] = true;
+    try {
+      _scrml_reactive_set(name, valueFn());
+    } finally {
+      _scrml_reactivity_bypass[name] = false;
+    }
   }, delay);
   _scrml_reactivity_timers[name] = handle;
 }
@@ -2034,7 +2044,17 @@ function _scrml_reactive_throttled(name, valueFn, ms) {
       const thunk = stNow.pending;
       stNow.pending = null;
       stNow.lastEmit = Date.now();
-      _scrml_reactive_set(name, thunk());
+      // Commit the held trailing value DIRECTLY. Without the bypass flag,
+      // _scrml_reactive_set re-routes into _scrml_reactive_throttled, sees
+      // sinceLast≈0 (lastEmit was just stamped), and re-arms another trailing
+      // timer forever so the cell never commits (S236
+      // g-debounce-throttle-trailing-no-commit).
+      _scrml_reactivity_bypass[name] = true;
+      try {
+        _scrml_reactive_set(name, thunk());
+      } finally {
+        _scrml_reactivity_bypass[name] = false;
+      }
     }, remaining);
     _scrml_reactivity_timers[name] = handle;
   }

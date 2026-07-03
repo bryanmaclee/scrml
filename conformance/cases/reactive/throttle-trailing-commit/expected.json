@@ -1,0 +1,20 @@
+{
+  "id": "reactive-throttle-trailing-commit",
+  "description": "§6.13.2 throttle TRAILING commit: the leading edge commits synchronously; subsequent writes within the window are held, and after the window a single trailing fire commits the LATEST held value. Three rapid clicks drive a plain `<clicks>` counter 0->3 (immediate), each setting `@val = @clicks` (throttled=1s). With NO time advanced, @val reads 1 — the LEADING fire committed the first write (click 1) synchronously, while clicks 2+3 coalesce into the pending trailing value (the control observation). `advance-time` past the 1s window fires the trailing commit, landing the latest value (3). Sibling to reactive/throttle-leading and a regression guard for g-debounce-throttle-trailing-no-commit (S236): before the fix the trailing expiry re-routed into the throttle wrapper (sinceLast~=0) and re-armed forever, so @val was stuck at the leading value 1.",
+  "language-version": "1.0",
+  "spec": "§6.13.2",
+  "rationale": "§6.13.2 throttle is leading+trailing: the first write in a quiescent window emits immediately (leading) and subsequent writes within ms are suppressed but the most recent thunk is held; at window-end a single trailing fire emits it. Under the deterministic virtual clock (fixed non-zero epoch) click 1 leading-fires synchronously through the bypass window (@val=1 with no time advanced), and the held trailing value commits ONLY on advance-time. The trailing commit MUST route past the timing wrapper (bypass) so it lands in the cell rather than re-arming.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "click": "#b" },
+      { "click": "#b" },
+      { "click": "#b" },
+      { "advance-time": 1000 }
+    ],
+    "state": { "clicks": 3, "val": 3 },
+    "dom": "<button id=\"b\">Bump</button><p id=\"v\">Val: 3</p>",
+    "domAnchored": [{ "selector": "#v", "text": "Val: 3" }]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "reactive-debounce-trailing-commit",
+  "description": "§6.13.1 debounce TRAILING commit: writes to a `<val debounced=1s>` cell coalesce, and after the window expires the LATEST held value commits to the cell. Three rapid clicks drive a plain `<clicks>` counter 0->3 (immediate) and each sets `@val = @clicks` (debounced). With NO time advanced, @val stays 0 — every write is coalesced and NONE has committed yet (the control observation). A single `advance-time` past the 1s window fires the trailing commit, landing the latest value (3). Regression guard for g-debounce-throttle-trailing-no-commit (S236): before the fix the expiry closure re-routed back into the timing wrapper and re-armed forever, so @val never left 0 even after advance-time.",
+  "language-version": "1.0",
+  "spec": "§6.13.1",
+  "rationale": "§6.13.1 debounce: each write arms a timer for ms; a new write within the window cancels+re-arms; on expiry the coalesced value commits through the reactive write path (subscribers + derived + DOM). The commit MUST route past the timing wrapper (bypass) so it lands in the cell rather than re-arming. Under the deterministic virtual clock the three same-tick writes all fall inside the 1s window (coalesced), so the trailing fire is the ONLY commit — driven exclusively by advance-time.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "click": "#b" },
+      { "click": "#b" },
+      { "click": "#b" },
+      { "advance-time": 1000 }
+    ],
+    "state": { "clicks": 3, "val": 3 },
+    "dom": "<button id=\"b\">Bump</button><p id=\"v\">Val: 3</p>",
+    "domAnchored": [{ "selector": "#v", "text": "Val: 3" }]
+  }
+}
