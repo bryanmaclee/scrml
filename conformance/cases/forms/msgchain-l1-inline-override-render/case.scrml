@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <name req("Please enter your name") length(>=2, "Name must be at least 2 chars")> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+<div id="err"><errors of=@signup.name/></div>
+</program>

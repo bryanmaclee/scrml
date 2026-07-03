@@ -272,15 +272,23 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
     expect(clientJs).toMatch(/typeof _v\.variant === "string"/);
     // Data extraction reads `.data` (named fields, not Array.isArray on .payload).
     expect(clientJs).toMatch(/_v\.data && typeof _v\.data === "object"/);
-    // No reference to the dead `.tag` / `.payload` keys in the dispatcher.
-    // (The codebase still references `.tag` elsewhere — e.g. error objects;
-    // narrow to the dispatcher body.)
+    // The dead `.payload` Array placeholder is never referenced; `.variant` is
+    // the PRIMARY discriminant. §55.10-L4 (msgchain-render-wiring-2026-07-03)
+    // added a SECONDARY `.tag` fallback (checked AFTER `.variant`) so the
+    // `<match for=ValidationError on=@field.errors[0]>` escape hatch dispatches
+    // on ValidationError runtime values (`{tag:"Required", ...flatPayload}`,
+    // §55.9) — those key on `.tag`, not the enum-object `.variant`. The S95
+    // regression guard is preserved: `.variant` stays primary (read first) and
+    // the dead `.payload` shape is never used.
     const dispatcherMatch = clientJs.match(
       /function __scrml_engine_phase_dispatch\([^)]*\)[\s\S]*?\n\}\n/,
     );
     expect(dispatcherMatch).not.toBeNull();
-    expect(dispatcherMatch[0]).not.toMatch(/_v\.tag\b/);
     expect(dispatcherMatch[0]).not.toMatch(/_v\.payload\b/);
+    const _variantIdx = dispatcherMatch[0].indexOf("_v.variant");
+    const _tagIdx = dispatcherMatch[0].indexOf("_v.tag");
+    expect(_variantIdx).toBeGreaterThanOrEqual(0); // `.variant` is present
+    if (_tagIdx >= 0) expect(_variantIdx).toBeLessThan(_tagIdx); // `.variant` read BEFORE the `.tag` fallback
   });
 
   test("dispatcher passes payload via named-field lookup `_data[\"<bindingName>\"]`", () => {

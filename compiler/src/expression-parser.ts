@@ -2498,9 +2498,28 @@ export function esTreeToExprNode(
           return { kind: "shorthand" as const, name: keyNode.name as string, span: propSpan } satisfies Extract<ObjectProp, { kind: "shorthand" }>;
         }
 
+        // S66 bare-variant placeholder unmask in KEY position. The preprocessor
+        // masks `.Variant` → `__scrml_bare_variant_Variant__` so acorn can parse
+        // the surrounding literal; a `.Variant` used as a NON-computed object key
+        // (`registerMessages({.Required: fn})`, §55.10 L2 / §41.12) lands here as
+        // an Identifier key still carrying the placeholder. Restore the BARE
+        // variant name (no leading dot) so the emitted property name matches the
+        // runtime enum-tag string the store is keyed on (`_scrml_messages_register`
+        // keys on `error.tag` = "Required"). Without this the key leaked as the
+        // literal placeholder and every Level-2 registered-message lookup missed.
+        let rawKeyName = computed
+          ? null
+          : (keyNode.name as string ?? keyNode.value as string ?? "");
+        if (
+          typeof rawKeyName === "string" &&
+          rawKeyName.startsWith("__scrml_bare_variant_") &&
+          rawKeyName.endsWith("__")
+        ) {
+          rawKeyName = rawKeyName.slice("__scrml_bare_variant_".length, -2);
+        }
         const key: string | ExprNode = computed
           ? esTreeToExprNode(keyNode, filePath, baseOffset, rawSource)
-          : (keyNode.name as string ?? keyNode.value as string ?? "");
+          : (rawKeyName as string);
         const value = esTreeToExprNode(valueNode, filePath, baseOffset, rawSource);
         return { kind: "prop" as const, key, value, computed, span: propSpan } satisfies Extract<ObjectProp, { kind: "prop" }>;
       });

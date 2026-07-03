@@ -1,0 +1,22 @@
+{
+  "id": "forms-msgchain-l4-match-escape-render",
+  "description": "§55.10 Level 4 — the `<match for=ValidationError on=@field.errors[0]>` escape hatch RENDERS the developer-controlled arm string. Typing \"A\" fails length(>=2); `@signup.name.errors[0]` is the LengthFailed ValidationError, so the `<LengthFailed : \"Name is too short\">` arm renders (bypassing messageFor entirely). This is the kickstarter-v2 §6 'full control' pattern.",
+  "language-version": "1.0",
+  "spec": "§55.10",
+  "rationale": "§55.10 Level 4 (total control at the call site, §18.0.1 block-form match): the developer bypasses the messageFor resolution chain and dispatches on the ValidationError variant directly. The arm body is DEVELOPER-AUTHORED and normative, asserted verbatim. Pre-fix (msgchain-render-wiring-2026-07-03) this crashed at module init: `@signup.name.errors[0]` lowered to `_scrml_reactive_get(\"signup\").name.errors[0]` (a nested read on the DERIVED compound → undefined → `[0]` threw), the Shape-B dispatch effect ran before the synth cell was declared, and the dispatcher extracted the tag via `.variant` (ValidationError keys on `.tag`). All three are fixed. The `<match>` renders the raw arm string into its mount slot (no `.scrml-error` wrapper — that structure is a `<errors of=>` concern), so the assertion reads `#err` textContent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "input": "#name", "value": "A" }],
+    "state": {
+      "signup.name": "A",
+      "signup.name.isValid": false,
+      "signup.name.errors": [
+        { "tag": "LengthFailed", "predicate": { "op": ">=", "value": 2 } }
+      ]
+    },
+    "domAnchored": [
+      { "selector": "#err", "text": "Name is too short" }
+    ]
+  }
+}

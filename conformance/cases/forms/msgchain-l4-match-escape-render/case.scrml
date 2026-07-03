@@ -1,0 +1,15 @@
+<program>
+${
+    <signup>
+        <name req length(>=2)> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+<div id="err">
+    <match for=ValidationError on=@signup.name.errors[0]>
+        <Required : "Name is required">
+        <LengthFailed : "Name is too short">
+        <_ : "OK">
+    </>
+</div>
+</program>

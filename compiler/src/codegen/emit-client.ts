@@ -1558,16 +1558,24 @@ export function generateClientJs(ctx: CompileContext): string {
   const eachBodyRender = clientStage(ctx, "emit-each-body-render", () => emitEachBodyRenderForFile(fileAST, ctx));
 
   const allRenderFns = [...c12BodyRender.renderFunctions, ...c14BodyRender.renderFunctions, ...matchBodyRender.renderFunctions, ...eachBodyRender.renderFunctions];
-  // Engine (C12/C14) + match dispatchers fire here (early, before reactiveLines):
-  // their boot ordering is intentional (engine substrate seeds its OWN variant
-  // cells via emitEngineSubstrate, not via the user reactiveLines below). The
-  // EACH dispatchers are DEFERRED to after reactiveLines (see eachDispatchers
-  // below) so the initial `_scrml_each_render_NN()` sees the source cell's real
-  // value rather than undefined (the same-file cell-init crash, change-id
-  // each-render-before-cell-init-2026-06-01).
-  const allDispatchers = [...c12BodyRender.dispatchers, ...c14BodyRender.dispatchers, ...matchBodyRender.dispatchers];
+  // Engine (C12/C14) dispatchers fire here (early, before reactiveLines): their
+  // boot ordering is intentional (engine substrate seeds its OWN variant cells
+  // via emitEngineSubstrate, not via the user reactiveLines below).
+  //
+  // MATCH + EACH dispatchers are DEFERRED to after reactiveLines (see
+  // matchDispatchers / eachDispatchers below) so the initial dispatch/render
+  // sees the source cell's REAL value rather than undefined. For each this was
+  // the same-file cell-init crash (change-id each-render-before-cell-init-
+  // 2026-06-01); for match the §55.10-L4 case exposed it: a Shape-B `on=`
+  // scrutinee reading a synth-derived cell (`@signup.name.errors[0]`) ran its
+  // eager `_scrml_effect` before `_scrml_derived_declare("signup.name.errors")`,
+  // so the read returned undefined and `[0]` threw. Deferral makes the eager
+  // effect's first pass see the declared cell (Shape-A engine matches are
+  // subscribe + DOMContentLoaded, so their ordering is unaffected).
+  const allDispatchers = [...c12BodyRender.dispatchers, ...c14BodyRender.dispatchers];
+  const matchDispatchers = [...matchBodyRender.dispatchers];
   const eachDispatchers = [...eachBodyRender.dispatchers];
-  if (allRenderFns.length > 0 || allDispatchers.length > 0 || eachDispatchers.length > 0) {
+  if (allRenderFns.length > 0 || allDispatchers.length > 0 || matchDispatchers.length > 0 || eachDispatchers.length > 0) {
     lines.push("// --- engine + match + each body render (Phase A10, §51.0.D + §18.0.1 + §17.X) ---");
     for (const fn of allRenderFns) {
       lines.push(fn);
@@ -1753,6 +1761,24 @@ export function generateClientJs(ctx: CompileContext): string {
   // Emit top-level logic statements and CSS variable bridge
   const reactiveLines = clientStage(ctx, "emit-reactive-wiring", () => emitReactiveWiring(ctx));
   for (const line of reactiveLines) lines.push(line);
+
+  // §55.10-L4 (msgchain-render-wiring-2026-07-03): the `<match>` dispatchers are
+  // emitted HERE, AFTER reactiveLines, for the same reason as the each deferral
+  // below. A Shape-B `on=` scrutinee (a complex/indexed expression, not a bare
+  // `@cell`) uses an EAGER `_scrml_effect` that runs its first pass immediately;
+  // when the scrutinee reads a cell declared in reactiveLines (e.g. the derived
+  // synth cell in `<match for=ValidationError on=@signup.name.errors[0]>`), an
+  // early emission read undefined and the `[0]` index threw. Deferring lets the
+  // eager effect's first pass see the declared cell. Shape-A engine matches are
+  // subscribe + DOMContentLoaded, so their behaviour is order-independent.
+  if (matchDispatchers.length > 0) {
+    lines.push("");
+    lines.push("// --- match body-render dispatchers (deferred post-cell-init, §18.0.1) ---");
+    for (const disp of matchDispatchers) {
+      lines.push(disp);
+      lines.push("");
+    }
+  }
 
   // each-render-before-cell-init-2026-06-01: the `<each>` dispatchers (initial
   // `_scrml_each_render_NN()` + `_scrml_effect_static(...)`) are emitted HERE,

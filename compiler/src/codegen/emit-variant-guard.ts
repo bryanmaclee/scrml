@@ -1059,7 +1059,16 @@ export function emitVariantGuardedRender(
   // never-realized placeholder; payload-bearing engines never reached the
   // dispatcher because the upstream codegen bug crashed earlier
   // (`"Variant"(args)` calling a string).
-  dispatcherLines.push(`  const _tag = (typeof _v === "object" && _v !== null && typeof _v.variant === "string") ? _v.variant : _v;`);
+  //
+  // §55.10-L4 — ValidationError values (the `<match for=ValidationError
+  // on=@field.errors[0]>` escape hatch, §55.9) are produced by the validator
+  // runtime as `{ tag: "Required", ...flatPayload }`, discriminated by `.tag`
+  // (NOT the enum-object `.variant`). Fall back to `.tag` so the escape hatch
+  // dispatches on the ValidationError variant. Standard enum values never carry
+  // `.tag`, so the fallback is inert for them. ValidationError payload is flat
+  // fields (`.predicate`, `.threshold`, …) rather than a `.data` sub-object, so
+  // `_data` stays null for these (the canonical L4 arms render static strings).
+  dispatcherLines.push(`  const _tag = (typeof _v === "object" && _v !== null && typeof _v.variant === "string") ? _v.variant : (typeof _v === "object" && _v !== null && typeof _v.tag === "string") ? _v.tag : _v;`);
   dispatcherLines.push(`  const _data = (typeof _v === "object" && _v !== null && _v.data && typeof _v.data === "object") ? _v.data : null;`);
   // Tear down the prior arm's wiring before the innerHTML replace so
   // _scrml_effect callbacks don't fire against detached spans (memory

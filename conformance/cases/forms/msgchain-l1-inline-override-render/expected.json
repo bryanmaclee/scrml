@@ -1,0 +1,24 @@
+{
+  "id": "forms-msgchain-l1-inline-override-render",
+  "description": "§55.10 Level 1 — an inline message override RENDERS at `<errors of=>` (the RUNTIME half the ss57 codes-only case parked). Typing \"A\" fails length(>=2); the field's inline override string `\"Name must be at least 2 chars\"` is what renders inside the `.scrml-error` <p>, NOT the Level-3 shipped default. Level 1 is per-(cell,validator) and static-string-only (§55.10 / L12 Edge F).",
+  "language-version": "1.0",
+  "spec": "§55.10",
+  "rationale": "§55.10 Level 1 (highest precedence): a per-field inline override wins over Level-2 (registered) and Level-3 (shipped default). Unlike the Level-3 default text (impl-freedom, asserted only via `.scrml-error` count in the sibling cases), the Level-1 override string is DEVELOPER-AUTHORED SOURCE — it is normative and asserted verbatim. Pre-fix (msgchain-render-wiring-2026-07-03) the `<errors of=>` render called `_scrml_message_for(tag, field)` WITHOUT the cellName, so the Level-1 lookup never fired and the L3 default rendered; the cellName is now threaded. The paren+static form emits no E-VALIDATOR-INLINE-* code (positive control, mirrors msgchain-inline-static-accepted).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-VALIDATOR-INLINE-"],
+    "input": [{ "input": "#name", "value": "A" }],
+    "state": {
+      "signup.name": "A",
+      "signup.name.isValid": false,
+      "signup.name.errors": [
+        { "tag": "LengthFailed", "predicate": { "op": ">=", "value": 2 } }
+      ]
+    },
+    "domAnchored": [
+      { "selector": "#err .scrml-error", "count": 1 },
+      { "selector": "#err .scrml-error", "text": "Name must be at least 2 chars" }
+    ]
+  }
+}

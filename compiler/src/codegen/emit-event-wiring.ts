@@ -1014,6 +1014,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const isRollup = binding.isCompoundRollup === true;
         const allFlag = binding.allFlag === true;
         const fieldName = binding.fieldName ?? "";
+        // §55.10 Level-1 wiring — the QUALIFIED cell name for the inline-override
+        // lookup. `_scrml_message_for(tag, field, cellName)` keys Level-1 by
+        // `cellName + "::" + validatorName`; emit-messages.ts registers the SAME
+        // qualified path via `_scrml_messages_register_inline`. Per-field:
+        // `binding.errorsKey` IS the cell (`signup.name`). Compound rollup:
+        // `binding.errorsKey` is the COMPOUND prefix (`signup`); the per-field
+        // cell name is `errorsKey + "." + fieldKey`, computed per iteration below.
+        const inlineCellName: string = binding.errorsKey;
 
         // Compile the body-override arrow function if present. Reactive ref
         // rewrite + emit through emitExprField so any `@vars` resolve.
@@ -1039,14 +1047,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // Body-override factory — when absent, the default render shape per
         // SPEC line 25190.
         if (bodyFn !== null) {
+          // Body-override path bypasses messageFor (the developer owns the
+          // markup), so `cellName` is accepted for a uniform call shape but
+          // unused here.
           lines.push(`      const bodyFn_${suffix} = ${bodyFn};`);
-          lines.push(`      const renderOne_${suffix} = function(errTag, field) {`);
+          lines.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
           lines.push(`        const out = bodyFn_${suffix}(errTag);`);
           lines.push(`        return (out == null) ? "" : String(out);`);
           lines.push(`      };`);
         } else {
-          lines.push(`      const renderOne_${suffix} = function(errTag, field) {`);
-          lines.push(`        return '<p class="scrml-error">' + messageForFn_${suffix}(errTag, field) + '</p>';`);
+          // Default render — thread `cellName` as the 3rd arg so `_scrml_message_for`
+          // consults the Level-1 per-(cell,validator) inline override before
+          // falling through to Level-2 (registered) / Level-3 (shipped default).
+          lines.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
+          lines.push(`        return '<p class="scrml-error">' + messageForFn_${suffix}(errTag, field, cellName) + '</p>';`);
           lines.push(`      };`);
         }
         // Render function: reads source errors, iterates per (allFlag,
@@ -1061,22 +1075,25 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           lines.push(`        const parts = [];`);
           lines.push(`        for (const [fieldKey, arr] of entries) {`);
           lines.push(`          if (!Array.isArray(arr) || arr.length === 0) continue;`);
+          // Rollup cell name = compound prefix + "." + iterated field key
+          // (e.g. "signup" + "." + "name" → "signup.name"), matching the
+          // per-(cell,validator) inline-override registration key.
           if (allFlag) {
-            lines.push(`          for (const tag of arr) parts.push(renderOne_${suffix}(tag, fieldKey));`);
+            lines.push(`          for (const tag of arr) parts.push(renderOne_${suffix}(tag, fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
           } else {
-            lines.push(`          parts.push(renderOne_${suffix}(arr[0], fieldKey));`);
+            lines.push(`          parts.push(renderOne_${suffix}(arr[0], fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
           }
           lines.push(`        }`);
           lines.push(`        el.innerHTML = parts.join("");`);
         } else {
-          // Per-field: src is an array of tags.
+          // Per-field: src is an array of tags. `inlineCellName` IS the cell.
           lines.push(`        if (!Array.isArray(src) || src.length === 0) { el.innerHTML = ""; return; }`);
           if (allFlag) {
             lines.push(`        const parts = [];`);
-            lines.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}));`);
+            lines.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)}));`);
             lines.push(`        el.innerHTML = parts.join("");`);
           } else {
-            lines.push(`        el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)});`);
+            lines.push(`        el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)});`);
           }
         }
         lines.push(`      };`);

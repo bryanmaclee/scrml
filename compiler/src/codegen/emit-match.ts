@@ -368,19 +368,34 @@ function resolveOnExpr(
       };
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { emitExpr } = require("./emit-expr.ts") as {
-        emitExpr: (node: any, ctx: { mode: string; requestIds?: Set<string> | null }) => string;
+        emitExpr: (node: any, ctx: { mode: string; requestIds?: Set<string> | null; synthCellKeys?: Set<string> | null }) => string;
       };
       // §6.7.7 / §60.4 — route a `<#id>` request ref in the `on=` expr to the
       // reactive `_scrml_request_<id>` object (the deep-reactive Proxy the match
       // dispatch effect auto-tracks), not the §36 input-state registry.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { collectRequestIds } = require("./reactive-deps.ts") as {
+      const { collectRequestIds, collectSynthCellKeys } = require("./reactive-deps.ts") as {
         collectRequestIds: (fileAST: any) => Set<string>;
+        collectSynthCellKeys: (fileAST: any) => Set<string>;
       };
       const _requestIds = fileAST ? collectRequestIds(fileAST) : new Set<string>();
+      // §55.10 L4 — the scrutinee often reads a SYNTHESIZED validity-surface cell
+      // (`@signup.name.errors[0]` for the `<match for=ValidationError>` escape
+      // hatch). Those `.errors` / `.isValid` / `.touched` leaves are FLAT derived
+      // cells keyed by the whole dotted path (`signup.name.errors`), NOT nested
+      // properties on the compound value. Thread `synthCellKeys` so `emitMember`
+      // collapses `@signup.name.errors` to `_scrml_reactive_get("signup.name.errors")`
+      // (the universal accessor, which delegates to the derived cache) instead of
+      // `_scrml_reactive_get("signup").name.errors` — the latter reads the derived
+      // compound (undefined for a reactive_get) and crashes on `.name` at init.
+      const _synthCellKeys = fileAST ? collectSynthCellKeys(fileAST) : new Set<string>();
       const filePath = (fileAST?.filePath as string | undefined) ?? `<match-on:${matchBlock.id}>`;
       const onNode = parseExprToNode(innerExpr, filePath, 0);
-      if (onNode) loweredAccessor = emitExpr(onNode, { mode: "client", ...(_requestIds.size > 0 ? { requestIds: _requestIds } : {}) });
+      if (onNode) loweredAccessor = emitExpr(onNode, {
+        mode: "client",
+        ...(_requestIds.size > 0 ? { requestIds: _requestIds } : {}),
+        ...(_synthCellKeys.size > 0 ? { synthCellKeys: _synthCellKeys } : {}),
+      });
     } catch (_e) {
       // Leave loweredAccessor = innerExpr (verbatim fallback).
     }

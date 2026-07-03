@@ -1,0 +1,14 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .LengthFailed: (field, pred) => `${field} is too short`,
+        .Required:     (field)       => `${field} is absolutely required`,
+    })
+    <signup>
+        <name req length(>=2)> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+<div id="err"><errors of=@signup.name/></div>
+</program>
