@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <pw req length(>=8) pattern(/[A-Z]/)> = <input id="pw" type="text"/>
+    </>
+}
+<signup><pw/></>
+<div id="all"><errors of=@signup.pw all/></div>
+</program>

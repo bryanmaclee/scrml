@@ -1,0 +1,9 @@
+<program>
+${
+    <vform>
+        <role oneOf(["Admin","Editor"])> = <input id="role" type="text"/>
+        <tag  notIn(["banned"])>         = <input id="tag"  type="text"/>
+    </>
+}
+<vform><role/><tag/></>
+</program>

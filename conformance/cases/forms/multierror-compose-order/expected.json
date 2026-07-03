@@ -1,0 +1,20 @@
+{
+  "id": "forms-multierror-compose-order",
+  "description": "Multiple errors compose in DECLARATION ORDER (§55.12). <pw req length(>=8) pattern(/[A-Z]/)> on a non-empty \"abc\": req passes, then length AND pattern both fail → errors = [.LengthFailed, .PatternMismatch] in the source-declared order (length before pattern). <errors of=@signup.pw all/> renders both (2 .scrml-error).",
+  "language-version": "1.0",
+  "spec": "§55.12",
+  "rationale": "§55.12: 'Validators on a single cell COMPOSE... Order of error tags matches the source-code declaration order.' A non-empty value that fails two predicates yields both tags, ordered by declaration (req did not short-circuit because it passed).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "input": "#pw", "value": "abc" }],
+    "state": {
+      "signup.pw.errors": [
+        { "tag": "LengthFailed", "predicate": { "op": ">=", "value": 8 } },
+        { "tag": "PatternMismatch", "re": {} }
+      ],
+      "signup.pw.isValid": false
+    },
+    "domAnchored": [{ "selector": "#all .scrml-error", "count": 2 }]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-string-valid",
+  "description": "Universal-core string predicates — PASSING surface (§55.1). length(>=2) on \"Ada\" and pattern(/…/) on \"a@b\" both pass: each field isValid true, errors empty, and the compound rollup isValid true.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.5, §55.6",
+  "rationale": "§55.6 a satisfied validator yields an empty errors array and isValid true; §55.5 the compound rollup is true once every field passes. Proves the valid direction of length + pattern.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#name",  "value": "Ada" },
+      { "input": "#email", "value": "a@b" }
+    ],
+    "state": {
+      "vform.name.errors":  [],
+      "vform.name.isValid":  true,
+      "vform.email.errors": [],
+      "vform.email.isValid": true,
+      "vform.isValid": true
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

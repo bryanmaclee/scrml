@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-set-valid",
+  "description": "Universal-core set-membership predicates — PASSING surface (§55.1). oneOf([\"Admin\",\"Editor\"]) on \"Admin\" and notIn([\"banned\"]) on \"ok\" both pass: each field isValid true, errors empty, compound rollup true.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.5, §55.6",
+  "rationale": "§55.6 satisfied oneOf/notIn clear errors; §55.5 rollup true once all pass. Proves the valid direction of oneOf/notIn.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#role", "value": "Admin" },
+      { "input": "#tag",  "value": "ok" }
+    ],
+    "state": {
+      "vform.role.errors": [],
+      "vform.role.isValid": true,
+      "vform.tag.errors":  [],
+      "vform.tag.isValid":  true,
+      "vform.isValid": true
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

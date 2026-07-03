@@ -1,12 +1,30 @@
 {
   "id": "formfor-validity-bug58-clean",
-  "description": "The §41.14 canonical <formFor> compiles cleanly: no E-FORMFOR-* errors and no E-DG-002/W-DG-002 per-field orphans (Bug-58 regression lock). RUNTIME-HALF-PENDING: the asserted EFFECT (validity surface wired: signup.isValid / per-field .errors / submit passes values) is the (b) final-DOM+state half, designed in W3.",
+  "description": "The §41.14 canonical <formFor> compiles cleanly AND wires its validity surface at runtime (Bug-58 + Bug-61 regression lock). Codes: no E-FORMFOR-* and no E-DG-002/W-DG-002 per-field orphans. Runtime INITIAL: the synth compound `signup` + per-field cells are declared; every required field seeds a .Required error; signup.isValid is false; the form + 3 labelled fields render and the submit button is disabled. (The interactive halves — typing, valid-enable, submit — are the sibling formfor-* cases.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/conformance/conf-form-for-validity-surface-bug-58.test.js",
-  "runtime-half-pending": true,
-  "runtime-half-ref": "compiler/tests/browser/browser-form-for-validity-bug-58.test.js",
+  "spec": "§41.14, §55.5, §55.6",
+  "rationale": "§41.14.2/.3 + §55.5-.7: <formFor for=Signup> auto-synthesizes the signup compound (name/email/agree), seeds each required field to a .Required error, gates the submit button on !signup.isValid, and renders per-field <p class=scrml-error> defaults. This closes the W3 (b) runtime half the case previously deferred; the message TEXT is impl-freedom (asserted via state + structure, not text).",
   "expect": {
     "codes": [],
-    "notCodes": ["E-DG-002", "W-DG-002"]
+    "notCodes": ["E-DG-002", "W-DG-002"],
+    "notCodePrefixes": ["E-FORMFOR-"],
+    "input": [],
+    "state": {
+      "signup.isValid": false,
+      "signup.submitted": false,
+      "signup.name.errors":  [{ "tag": "Required" }],
+      "signup.email.errors": [{ "tag": "Required" }],
+      "signup.agree.errors": [{ "tag": "Required" }]
+    },
+    "domAnchored": [
+      { "selector": "form", "count": 1 },
+      { "selector": ".field", "count": 3 },
+      { "selector": "[data-scrml-formfor-input=\"name\"]",  "count": 1 },
+      { "selector": "[data-scrml-formfor-input=\"email\"]", "count": 1 },
+      { "selector": "[data-scrml-formfor-input=\"agree\"]", "count": 1 },
+      { "selector": "[data-scrml-formfor-submit][disabled]", "count": 1 },
+      { "selector": ".scrml-error", "count": 3 }
+    ]
   }
 }

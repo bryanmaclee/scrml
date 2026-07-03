@@ -1,0 +1,11 @@
+{
+  "id": "forms-msgchain-colon-reject",
+  "description": "Inline message override — the COLON form is rejected (§55.10 Level 1 / L12 Edge). req:\"Name is needed\" fires E-VALIDATOR-INLINE-COLON; the valid form is the paren form req(\"…\").",
+  "language-version": "1.0",
+  "spec": "§55.10, §55.15",
+  "rationale": "§55.15 error table: E-VALIDATOR-INLINE-COLON — 'Inline message override uses the colon form req:\"…\" (not valid scrml); use the paren form req(\"…\")'. Codes-only reject-path case.",
+  "expect": {
+    "codes": ["E-VALIDATOR-INLINE-COLON"],
+    "notCodes": []
+  }
+}

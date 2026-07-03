@@ -1,0 +1,26 @@
+{
+  "id": "formfor-submit-collects-values",
+  "description": "Submitting the valid formFor sets signup.submitted true and forwards the collected values to the onsubmit server-fn (§41.14.3 + §55.7). After a valid fill and a form submit (serverStub persistSignup → \"ok\"), signup.submitted flips true and the compound cell holds the collected {name,email,agree}; the server-fn route is exercised via the impl-neutral serverStub keyed by the source fn name.",
+  "language-version": "1.0",
+  "spec": "§41.14, §55.7",
+  "rationale": "§41.14.3 the default submit invokes onsubmit=persistSignup(values); §55.7 submitted flips true on the first submit attempt. serverStub is keyed by the scrml-SOURCE fn name persistSignup (impl-neutral; the adapter maps it to the emitted __ri_route_persistSignup_N). The (b) contract is the resulting state (submitted + collected values), not the wire bytes.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-FORMFOR-"],
+    "input": [
+      { "input": "[data-scrml-formfor-input=\"name\"]",  "value": "Alice" },
+      { "input": "[data-scrml-formfor-input=\"email\"]", "value": "alice@example.com" },
+      { "check": "[data-scrml-formfor-input=\"agree\"]" },
+      { "submit": "form" },
+      { "wait": "settle" }
+    ],
+    "serverStub": { "persistSignup": "ok" },
+    "state": {
+      "signup.submitted": true,
+      "signup.isValid": true,
+      "signup": { "name": "Alice", "email": "alice@example.com", "agree": true }
+    },
+    "domAnchored": [{ "selector": "form", "count": 1 }]
+  }
+}

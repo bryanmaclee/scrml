@@ -1,0 +1,11 @@
+{
+  "id": "forms-msgchain-dynamic-reject",
+  "description": "Inline message override must be a STATIC string literal (§55.10 Level 1 / L12 Edge F). A non-literal message arg (here the const identifier `greeting`) fires E-VALIDATOR-INLINE-DYNAMIC; E-TYPE-031 co-fires because the non-literal arg also violates the message slot's string-literal type.",
+  "language-version": "1.0",
+  "spec": "§55.10, §55.15",
+  "rationale": "§55.15 error table: E-VALIDATOR-INLINE-DYNAMIC — 'Level-1 inline message override is not a static string literal (§55.10 / L12 Edge F).' Reasoning: messages must be statically extractable for i18n tooling. E-TYPE-031 co-fires (inherent — a dynamic arg is also a type violation); superset matching pins the DYNAMIC code. NOTE (escalated): a template-literal message with ${} does NOT fire this code in impl#1, contra Edge F's '${} inside the message' wording.",
+  "expect": {
+    "codes": ["E-VALIDATOR-INLINE-DYNAMIC"],
+    "notCodes": []
+  }
+}

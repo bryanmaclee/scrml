@@ -1,0 +1,9 @@
+<program>
+${
+    <vform>
+        <pin  eq("1234")>   = <input id="pin"  type="text"/>
+        <code neq("0000")>  = <input id="code" type="text"/>
+    </>
+}
+<vform><pin/><code/></>
+</program>

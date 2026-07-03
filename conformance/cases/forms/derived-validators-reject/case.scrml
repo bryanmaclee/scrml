@@ -1,0 +1,6 @@
+<program>
+${
+    <count> = 0
+    const <doubled req min(0)> = @count * 2
+}
+</program>

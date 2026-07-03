@@ -1,0 +1,29 @@
+{
+  "id": "forms-vocab-numeric-valid",
+  "description": "Universal-core numeric predicates — PASSING surface (§55.1). All six comparison predicates satisfied → every field isValid true, errors empty, compound rollup true.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.5, §55.6",
+  "rationale": "§55.6 satisfied comparison predicates clear errors; §55.5 rollup true once all pass. Proves the valid direction of min/max/gt/lt/gte/lte.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#age",   "value": "25" },
+      { "input": "#cap",   "value": "100" },
+      { "input": "#score", "value": "5" },
+      { "input": "#lvl",   "value": "50" },
+      { "input": "#hi",    "value": "5" },
+      { "input": "#lo",    "value": "5" }
+    ],
+    "state": {
+      "vform.age.isValid":   true,
+      "vform.cap.isValid":   true,
+      "vform.score.isValid": true,
+      "vform.lvl.isValid":   true,
+      "vform.hi.isValid":    true,
+      "vform.lo.isValid":    true,
+      "vform.isValid": true
+    },
+    "domAnchored": [{ "selector": "input", "count": 6 }]
+  }
+}

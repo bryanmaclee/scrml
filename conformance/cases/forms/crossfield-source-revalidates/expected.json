@@ -1,0 +1,23 @@
+{
+  "id": "forms-crossfield-source-revalidates",
+  "description": "Cross-field REACTIVE recomputation on SOURCE change (§55.11). Sequence: confirm \"secret12\", password \"secret12\" (now matching, confirm valid), then password CHANGES to \"other123\". Because eq(@signup.password) is a reactive consumer of password, confirm re-validates: confirm.errors becomes .EqFailed(expected=\"other123\") and confirm.isValid flips to false — the dependent field re-checks when its SOURCE changes.",
+  "language-version": "1.0",
+  "spec": "§55.11",
+  "rationale": "§55.11 mechanics + §55.6: 'A change to a cell referenced in a cross-field predicate arg recomputes the dependent field's surface.' This case pins that reactivity — the expected payload tracks the NEW password value (other123), proving confirm re-ran after the source changed, not a stale first evaluation.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#cf", "value": "secret12" },
+      { "input": "#pw", "value": "secret12" },
+      { "input": "#pw", "value": "other123" }
+    ],
+    "state": {
+      "signup.password.isValid": true,
+      "signup.confirm.errors": [{ "tag": "EqFailed", "expected": "other123" }],
+      "signup.confirm.isValid": false,
+      "signup.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

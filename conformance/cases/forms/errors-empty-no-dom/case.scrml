@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <code length(>=5) pattern(/^[0-9]+$/)> = <input id="code" type="text"/>
+    </>
+}
+<signup><code/></>
+<div id="err"><errors of=@signup.code/></div>
+</program>

@@ -13,14 +13,14 @@ The validity surface: §55 (universal-core §55.1 · isValid/errors §55.5/.6 ·
 `conformance/README.md` · `conformance/cases/forms/` + `conformance/cases/form-for/` (existing) · `conformance/run.ts` · `compiler/SPEC.md` §55 + §41.14 (normative)
 
 ## Items (least-ingestion-first)
-1. **universal-core vocab breadth §55.1** (RT) `[status=pending]` — one case exercising each predicate valid+invalid → the right `ValidationError` tag: `length`/`pattern`/`min`/`max`/`gt`/`lt`/`gte`/`lte`/`eq`/`neq`/`oneOf`/`notIn` (+ `req`/`is some` already shallow-covered). Assert `@field.errors[0]` tag + `@field.isValid`.
-2. **touched / submitted §55.7** (RT) `[status=pending]` — interaction → `@field.touched` true; document-submit → `@compound.submitted` true; the timing table.
-3. **`<errors of=expr/>` §55.8** (RT) `[status=pending]` — renders per-cell errors + the compound rollup; `all` attr toggles full-array vs first-error.
-4. **cross-field predicate-args §55.11** (RT) `[status=pending]` — `<confirm req eq(@password)>` → validity depends on the other cell; change the source → confirm re-validates.
-5. **4-level message-resolution chain §55.10** (RT+codes) `[status=pending]` — inline `req("msg")` > registered > `scrml:data` default; the colon-form `req:"…"` is NOT valid (codes).
-6. **multi-error / short-circuit §55.12** (RT) `[status=pending]` — a field failing multiple predicates → the error order / req-short-circuit rule.
-7. **validators-on-derived reject §55.14** (codes) `[status=pending]` — `E-DERIVED-WITH-VALIDATORS` on a `const`-derived cell carrying validators.
-8. **formFor §41.14 runtime half** (RT) `[status=pending]` — closes the `runtime-half-pending` case: define a `:struct` → `formFor` renders the `<form>` + validity surface wired + submit produces the field values; per-field errors render. FLAGSHIP.
+1. **universal-core vocab breadth §55.1** (RT) `[status=landed spa/ss57]` — one case exercising each predicate valid+invalid → the right `ValidationError` tag: `length`/`pattern`/`min`/`max`/`gt`/`lt`/`gte`/`lte`/`eq`/`neq`/`oneOf`/`notIn` (+ `req`/`is some` already shallow-covered). Assert `@field.errors[0]` tag + `@field.isValid`.
+2. **touched / submitted §55.7** (RT) `[status=landed spa/ss57]` — interaction → `@field.touched` true; document-submit → `@compound.submitted` true; the timing table.
+3. **`<errors of=expr/>` §55.8** (RT) `[status=landed spa/ss57]` — renders per-cell errors + the compound rollup; `all` attr toggles full-array vs first-error.
+4. **cross-field predicate-args §55.11** (RT) `[status=landed spa/ss57]` — `<confirm req eq(@password)>` → validity depends on the other cell; change the source → confirm re-validates.
+5. **4-level message-resolution chain §55.10** (RT+codes) `[status=landed spa/ss57]` — inline `req("msg")` > registered > `scrml:data` default; the colon-form `req:"…"` is NOT valid (codes).
+6. **multi-error / short-circuit §55.12** (RT) `[status=landed spa/ss57]` — a field failing multiple predicates → the error order / req-short-circuit rule.
+7. **validators-on-derived reject §55.14** (codes) `[status=landed spa/ss57]` — `E-DERIVED-WITH-VALIDATORS` on a `const`-derived cell carrying validators.
+8. **formFor §41.14 runtime half** (RT) `[status=landed spa/ss57]` — closes the `runtime-half-pending` case: define a `:struct` → `formFor` renders the `<form>` + validity surface wired + submit produces the field values; per-field errors render. FLAGSHIP.
 
 **DoD:** the validity surface moves SHALLOW→conformance-COMPLETE; formFor gains its (b) half; all green on `bun conformance/run.ts`; divergences escalated.
 

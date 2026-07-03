@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-inline-static-accepted",
+  "description": "Inline message override — the valid PAREN + STATIC-STRING form parses cleanly (§55.10 Level 1). req(\"…\") and length(>=2, \"…\") emit no E-VALIDATOR-INLINE-* code — the positive control for the colon/dynamic reject cases.",
+  "language-version": "1.0",
+  "spec": "§55.10",
+  "rationale": "§55.10 Level 1: per-field, per-validator, static-string-only inline overrides use the paren form. This case pins that the canonical static-paren form is ACCEPTED (no inline-message diagnostic family fires). ESCALATED (RT half): impl#1 accepts these inline strings but does NOT render them — messageFor falls through to the Level-3 default; the Level-1/Level-2 render precedence is unimplemented (see ss57.progress E3), so the RUNTIME half of §55.10 is impl-gated and not asserted here.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-VALIDATOR-INLINE-"]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "forms-errors-first-all-rollup",
+  "description": "<errors of=expr/> rendering modes (§55.8). code fails length + pattern (2 errors); name fails length (1 error). Three anchors: <errors of=@signup.code/> renders the FIRST error only (1 .scrml-error <p>); <errors of=@signup.code all/> renders the full array (2); <errors of=@signup all/> is the compound ROLLUP across all fields (3 = code's 2 + name's 1).",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8: default render wraps the first error as <p class=\"scrml-error\">; the `all` flag renders the whole array; of=@compound rolls up every field's errors. The wrapper element+class are SPEC-normative structure (asserted via .scrml-error count); the message TEXT inside is impl-freedom (never asserted). State carries the impl-neutral tag arrays.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#code", "value": "ab" },
+      { "input": "#name", "value": "A" }
+    ],
+    "state": {
+      "signup.code.errors": [
+        { "tag": "LengthFailed", "predicate": { "op": ">=", "value": 5 } },
+        { "tag": "PatternMismatch", "re": {} }
+      ],
+      "signup.name.errors": [
+        { "tag": "LengthFailed", "predicate": { "op": ">=", "value": 2 } }
+      ]
+    },
+    "domAnchored": [
+      { "selector": "#first .scrml-error",  "count": 1 },
+      { "selector": "#allc .scrml-error",   "count": 2 },
+      { "selector": "#rollup .scrml-error", "count": 3 }
+    ]
+  }
+}

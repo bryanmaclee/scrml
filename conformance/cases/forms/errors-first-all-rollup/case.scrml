@@ -1,0 +1,12 @@
+<program>
+${
+    <signup>
+        <code length(>=5) pattern(/^[0-9]+$/)> = <input id="code" type="text"/>
+        <name req length(>=2)>                 = <input id="name" type="text"/>
+    </>
+}
+<signup><code/><name/></>
+<div id="first"><errors of=@signup.code/></div>
+<div id="allc"><errors of=@signup.code all/></div>
+<div id="rollup"><errors of=@signup all/></div>
+</program>

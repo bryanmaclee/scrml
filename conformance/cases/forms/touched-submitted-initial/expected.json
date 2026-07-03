@@ -1,0 +1,18 @@
+{
+  "id": "forms-touched-submitted-initial",
+  "description": "touched/submitted DEFAULTS (§55.7). Before any interaction, every field's touched is false and the compound submitted is false — the un-interacted baseline the UI uses to suppress premature error display.",
+  "language-version": "1.0",
+  "spec": "§55.7",
+  "rationale": "§55.7 timing table: touched default false (per-field), submitted default false (compound). Errors are computed continuously, but touched/submitted gate WHEN a UI surfaces them; at initial mount neither has fired.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": {
+      "signup.name.touched": false,
+      "signup.agree.touched": false,
+      "signup.submitted": false
+    },
+    "domAnchored": [{ "selector": "#f", "count": 1 }]
+  }
+}

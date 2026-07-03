@@ -1,0 +1,19 @@
+{
+  "id": "forms-touched-on-check",
+  "description": "touched fires on bind:checked change (§55.7). Checking #agree flips signup.agree.touched true (and the checkbox value to true); the un-interacted name field stays touched false; submitted stays false.",
+  "language-version": "1.0",
+  "spec": "§55.7",
+  "rationale": "§55.7 touched's second trigger is a bind:checked change. Confirms the trigger is the interaction TYPE-agnostic 'first interaction with the field' rule, per-field, and that a checkbox interaction does not submit.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "check": "#agree" }],
+    "state": {
+      "signup.agree": true,
+      "signup.agree.touched": true,
+      "signup.name.touched": false,
+      "signup.submitted": false
+    },
+    "domAnchored": [{ "selector": "#agree", "count": 1 }]
+  }
+}

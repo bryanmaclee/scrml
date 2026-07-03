@@ -1,0 +1,21 @@
+{
+  "id": "forms-crossfield-match",
+  "description": "Cross-field validation — matching case (§55.11). password \"secret12\" and confirm \"secret12\" agree → confirm eq(@signup.password) passes, confirm.isValid true, and the whole compound isValid true.",
+  "language-version": "1.0",
+  "spec": "§55.11, §55.5",
+  "rationale": "§55.11 the cross-field eq predicate passes when confirm equals the referenced password; §55.5 the rollup is true once every field (password req+length, confirm req+eq) passes.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#pw", "value": "secret12" },
+      { "input": "#cf", "value": "secret12" }
+    ],
+    "state": {
+      "signup.password.isValid": true,
+      "signup.confirm.isValid": true,
+      "signup.isValid": true
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

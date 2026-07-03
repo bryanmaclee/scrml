@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-equality-invalid",
+  "description": "Universal-core equality predicates — FAILING surface (§55.1). eq(\"1234\") on \"9999\" → .EqFailed(expected); neq(\"0000\") on \"0000\" → .NeqFailed(forbidden). isValid false per field, compound rollup false.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.9",
+  "rationale": "§55.1 eq/neq compare against the predicate arg; §55.9 EqFailed carries the expected value, NeqFailed the forbidden value. Literal args keep this self-contained — the @cell cross-field form is §55.11 / item 4.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#pin",  "value": "9999" },
+      { "input": "#code", "value": "0000" }
+    ],
+    "state": {
+      "vform.pin.errors":   [{ "tag": "EqFailed", "expected": "1234" }],
+      "vform.pin.isValid":   false,
+      "vform.code.errors":  [{ "tag": "NeqFailed", "forbidden": "0000" }],
+      "vform.code.isValid":  false,
+      "vform.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

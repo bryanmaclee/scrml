@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <password req length(>=8)>          = <input id="pw" type="password"/>
+        <confirm  req eq(@signup.password)> = <input id="cf" type="password"/>
+    </>
+}
+<signup><password/><confirm/></>
+</program>

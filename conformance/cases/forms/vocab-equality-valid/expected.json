@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-equality-valid",
+  "description": "Universal-core equality predicates — PASSING surface (§55.1). eq(\"1234\") on \"1234\" and neq(\"0000\") on \"1111\" both pass: each field isValid true, errors empty, compound rollup true.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.5, §55.6",
+  "rationale": "§55.6 satisfied eq/neq clear errors; §55.5 rollup true once all pass. Proves the valid direction of eq/neq.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#pin",  "value": "1234" },
+      { "input": "#code", "value": "1111" }
+    ],
+    "state": {
+      "vform.pin.errors":   [],
+      "vform.pin.isValid":   true,
+      "vform.code.errors":  [],
+      "vform.code.isValid":  true,
+      "vform.isValid": true
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

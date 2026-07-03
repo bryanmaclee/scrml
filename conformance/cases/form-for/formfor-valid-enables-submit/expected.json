@@ -1,0 +1,27 @@
+{
+  "id": "formfor-valid-enables-submit",
+  "description": "Filling ALL valid values clears errors, flips signup.isValid true, and ENABLES the disabled submit gate (§41.14.3 + §55.5, Bug-61 lock). name \"Alice\", email \"alice@example.com\", agree checked → every field isValid true, errors empty, the compound proxy reflects {name,email,agree}, and disabled=!signup.isValid removes the attribute (submit enabled).",
+  "language-version": "1.0",
+  "spec": "§41.14, §55.5",
+  "rationale": "§41.14.3 default submit is disabled=!@signup.isValid; §55.5 the rollup flips true once all fields pass. The reactive gate effect then removes the disabled attribute. The compound cell value collects the typed field values (bind → dotted cell → proxy).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-FORMFOR-"],
+    "input": [
+      { "input": "[data-scrml-formfor-input=\"name\"]",  "value": "Alice" },
+      { "input": "[data-scrml-formfor-input=\"email\"]", "value": "alice@example.com" },
+      { "check": "[data-scrml-formfor-input=\"agree\"]" }
+    ],
+    "state": {
+      "signup.name.isValid":  true,
+      "signup.email.isValid": true,
+      "signup.agree.isValid": true,
+      "signup.isValid": true,
+      "signup": { "name": "Alice", "email": "alice@example.com", "agree": true }
+    },
+    "domAnchored": [
+      { "selector": "[data-scrml-formfor-submit]:not([disabled])", "count": 1 }
+    ]
+  }
+}

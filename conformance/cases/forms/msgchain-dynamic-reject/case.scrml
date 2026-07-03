@@ -1,0 +1,9 @@
+<program>
+${
+    const greeting = "please fill this"
+    <signup>
+        <name req(greeting)> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+</program>

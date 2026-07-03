@@ -1,0 +1,13 @@
+<program>
+${
+    <vform>
+        <age   min(18)>  = <input id="age"   type="number"/>
+        <cap   max(120)> = <input id="cap"   type="number"/>
+        <score gt(0)>    = <input id="score" type="number"/>
+        <lvl   lt(100)>  = <input id="lvl"   type="number"/>
+        <hi    gte(1)>   = <input id="hi"    type="number"/>
+        <lo    lte(10)>  = <input id="lo"    type="number"/>
+    </>
+}
+<vform><age/><cap/><score/><lvl/><hi/><lo/></>
+</program>

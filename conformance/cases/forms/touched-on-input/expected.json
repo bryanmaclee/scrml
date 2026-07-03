@@ -1,0 +1,18 @@
+{
+  "id": "forms-touched-on-input",
+  "description": "touched fires on bind:value change (§55.7). Typing into #name flips signup.name.touched true; the un-interacted agree field stays touched false, and submitted stays false (interacting a field does NOT submit the form).",
+  "language-version": "1.0",
+  "spec": "§55.7",
+  "rationale": "§55.7 touched becomes true on first interaction — a bind:value change is one of the three triggers. It is PER-FIELD: only the field that changed becomes touched. submitted is orthogonal (compound-level, submit-only).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "input": "#name", "value": "Ada" }],
+    "state": {
+      "signup.name.touched": true,
+      "signup.agree.touched": false,
+      "signup.submitted": false
+    },
+    "domAnchored": [{ "selector": "#name", "count": 1 }]
+  }
+}

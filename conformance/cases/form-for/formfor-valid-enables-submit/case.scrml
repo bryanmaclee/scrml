@@ -1,0 +1,16 @@
+${
+  import { formFor } from 'scrml:data'
+
+  type Signup:struct = {
+    name:  string req length(>=2)
+    email: string req pattern(/^[^@]+@[^@]+$/)
+    agree: boolean req
+  }
+
+  server function persistSignup(values: Signup) ! string {
+    return "ok"
+  }
+}
+<program>
+  <formFor for=Signup onsubmit=persistSignup/>
+</program>

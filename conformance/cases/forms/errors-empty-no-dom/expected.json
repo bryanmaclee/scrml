@@ -1,0 +1,20 @@
+{
+  "id": "forms-errors-empty-no-dom",
+  "description": "<errors of=> with an empty errors list produces NO DOM (§55.8). A valid \"12345\" (len 5, all digits) clears code.errors; the <errors of=@signup.code/> anchor renders literally nothing (not a hidden element) — the #err container holds no .scrml-error and empty text.",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8: 'When errors.length == 0, the element produces NO DOM at all (not a hidden element with display:none; literally nothing rendered).' Asserted via a .scrml-error count of 0 and empty container text, plus the empty errors state.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "input": "#code", "value": "12345" }],
+    "state": {
+      "signup.code.errors": [],
+      "signup.code.isValid": true
+    },
+    "domAnchored": [
+      { "selector": "#err .scrml-error", "count": 0 },
+      { "selector": "#err", "text": "" }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "forms-derived-validators-reject",
+  "description": "Validators on a derived (const) cell are REJECTED (§55.14). const <doubled req min(0)> = @count * 2 carries validators on a read-only computed value → E-DERIVED-WITH-VALIDATORS (one error listing all offending validators).",
+  "language-version": "1.0",
+  "spec": "§55.14, §55.15",
+  "source-test": "compiler/tests/unit/derived-with-validators.test.js",
+  "rationale": "§55.14: derived cells are READ-ONLY; validators imply gating which is incoherent on a computed value. The compiler emits E-DERIVED-WITH-VALIDATORS at the A1b resolve-type stage (after shape-discrimination sets decl.isConst). Codes-only reject-path case.",
+  "expect": {
+    "codes": ["E-DERIVED-WITH-VALIDATORS"],
+    "notCodes": []
+  }
+}

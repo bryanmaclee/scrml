@@ -1,0 +1,18 @@
+{
+  "id": "forms-submitted-on-submit",
+  "description": "submitted fires on submit-form attempt (§55.7). Submitting #f flips the compound signup.submitted true; crucially, no field's touched flips (submit is compound-level and orthogonal to per-field touched) — the §55.7 timing distinction.",
+  "language-version": "1.0",
+  "spec": "§55.7",
+  "rationale": "§55.7 submitted is compound-level and becomes true on the first submit-form attempt. This case pins the ORTHOGONALITY: a form submit sets submitted but leaves every field's touched at its prior value (here still false) — submit is not a per-field interaction.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "submit": "#f" }],
+    "state": {
+      "signup.submitted": true,
+      "signup.name.touched": false,
+      "signup.agree.touched": false
+    },
+    "domAnchored": [{ "selector": "#go", "text": "Go" }]
+  }
+}

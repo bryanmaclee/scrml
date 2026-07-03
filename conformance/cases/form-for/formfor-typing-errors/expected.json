@@ -1,0 +1,24 @@
+{
+  "id": "formfor-typing-errors",
+  "description": "formFor per-field validators fire on real input (§41.14 + §55.1). Typing a too-short name \"x\" into the synth name input → .LengthFailed; an invalid email \"not-an-email\" → .PatternMismatch. Both fields go isValid false and the compound rollup stays false. Proves the bind:value → dotted write → validator-runner chain (the exact Bug-58 miscompile path).",
+  "language-version": "1.0",
+  "spec": "§41.14, §55.1, §55.9",
+  "rationale": "§41.14 formFor fields carry the struct-field validators (name req length(>=2), email req pattern(/…/)). Driving the real auto-generated inputs recomputes each field's surface: LengthFailed / PatternMismatch tags, isValid false, rollup false.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-FORMFOR-"],
+    "input": [
+      { "input": "[data-scrml-formfor-input=\"name\"]",  "value": "x" },
+      { "input": "[data-scrml-formfor-input=\"email\"]", "value": "not-an-email" }
+    ],
+    "state": {
+      "signup.name.errors":  [{ "tag": "LengthFailed", "predicate": { "op": ">=", "value": 2 } }],
+      "signup.name.isValid":  false,
+      "signup.email.errors": [{ "tag": "PatternMismatch", "re": {} }],
+      "signup.email.isValid": false,
+      "signup.isValid": false
+    },
+    "domAnchored": [{ "selector": "form", "count": 1 }]
+  }
+}

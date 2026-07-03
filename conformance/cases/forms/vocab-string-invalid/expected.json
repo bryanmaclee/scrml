@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-string-invalid",
+  "description": "Universal-core string predicates — FAILING surface (§55.1). length(>=2) on \"A\" → .LengthFailed; pattern(/…/) on \"nope\" → .PatternMismatch. Each field's errors[0] carries the right ValidationError tag (§55.9) and isValid goes false; the compound rollup isValid is false. OQ1: whole-tree dom omitted (rendered messages are impl-freedom); the contract is the validity-surface STATE + the tag.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.9",
+  "rationale": "§55.1 length + pattern fire with the same names across all three loci; on failure §55.9 appends the tagged ValidationError to the field's errors array and drops isValid to false. The load-bearing impl-neutral contract is the tag NAME (LengthFailed / PatternMismatch). PAYLOAD-SHAPE NOTE: (a) LengthFailed carries predicate:{op,value} here while §55.9 declares predicate:string — a standing SPEC-vs-impl payload-encoding divergence (parallel to §19.9.1), asserted-as-impl#1 pending PA/spec reconciliation; (b) PatternMismatch.re snapshots as {} (a regex has no JSON form) — a serialization artifact, not a semantic claim.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#name",  "value": "A" },
+      { "input": "#email", "value": "nope" }
+    ],
+    "state": {
+      "vform.name.errors":  [{ "tag": "LengthFailed", "predicate": { "op": ">=", "value": 2 } }],
+      "vform.name.isValid":  false,
+      "vform.email.errors": [{ "tag": "PatternMismatch", "re": {} }],
+      "vform.email.isValid": false,
+      "vform.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

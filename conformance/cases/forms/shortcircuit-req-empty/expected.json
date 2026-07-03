@@ -1,0 +1,20 @@
+{
+  "id": "forms-shortcircuit-req-empty",
+  "description": "req short-circuit on empty (§55.12). Same field, but emptied (typed \"x\" then cleared to \"\"): req FAILS, so the remaining length + pattern validators are SKIPPED and errors = [.Required] ONLY (not three noise errors). <errors of=@signup.pw all/> renders exactly 1 .scrml-error.",
+  "language-version": "1.0",
+  "spec": "§55.12",
+  "rationale": "§55.12 short-circuit rule: 'when req fails on an empty cell, the remaining validators are SKIPPED. Only .Required is reported.' Reasoning: vacuous failures on empty values would be noise. Contrast the compose case (non-empty → both length+pattern reported).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#pw", "value": "x" },
+      { "input": "#pw", "value": "" }
+    ],
+    "state": {
+      "signup.pw.errors": [{ "tag": "Required" }],
+      "signup.pw.isValid": false
+    },
+    "domAnchored": [{ "selector": "#all .scrml-error", "count": 1 }]
+  }
+}

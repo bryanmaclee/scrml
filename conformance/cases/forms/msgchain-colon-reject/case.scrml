@@ -1,0 +1,8 @@
+<program>
+${
+    <signup>
+        <name req:"Name is needed"> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+</program>

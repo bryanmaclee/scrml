@@ -1,0 +1,35 @@
+{
+  "id": "forms-vocab-numeric-invalid",
+  "description": "Universal-core numeric predicates — FAILING surface (§55.1). On numeric (type=number) fields, min/max/gt/lt/gte/lte each driven past their literal bound → the matching ValidationError tag (MinFailed / MaxFailed / GtFailed / LtFailed / GteFailed / LteFailed) with the threshold/expected payload (§55.9), isValid false per field, compound rollup false.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.9",
+  "rationale": "§55.1 the six comparison predicates fire numerically on a number-typed cell; §55.9 tags carry threshold (min/max) or expected (gt/lt/gte/lte). Literal args keep this self-contained — cross-field (@cell args) is §55.11 / item 4. ESCALATED DIVERGENCE (min/max string-coercion): on a STRING (type=text) field, min/max ALWAYS fire (NaN comparison) while gt/lt/gte/lte coerce the string correctly — an impl#1 min/max-vs-comparison inconsistency vs the §55.1 'numeric' intent. This case sidesteps it via the canonical numeric-field form (type=number); the string-field inconsistency is flagged to the PA, NOT enshrined here.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#age",   "value": "10" },
+      { "input": "#cap",   "value": "999" },
+      { "input": "#score", "value": "0" },
+      { "input": "#lvl",   "value": "500" },
+      { "input": "#hi",    "value": "0" },
+      { "input": "#lo",    "value": "50" }
+    ],
+    "state": {
+      "vform.age.errors":   [{ "tag": "MinFailed", "threshold": 18 }],
+      "vform.age.isValid":   false,
+      "vform.cap.errors":   [{ "tag": "MaxFailed", "threshold": 120 }],
+      "vform.cap.isValid":   false,
+      "vform.score.errors": [{ "tag": "GtFailed", "expected": 0 }],
+      "vform.score.isValid": false,
+      "vform.lvl.errors":   [{ "tag": "LtFailed", "expected": 100 }],
+      "vform.lvl.isValid":   false,
+      "vform.hi.errors":    [{ "tag": "GteFailed", "expected": 1 }],
+      "vform.hi.isValid":    false,
+      "vform.lo.errors":    [{ "tag": "LteFailed", "expected": 10 }],
+      "vform.lo.isValid":    false,
+      "vform.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 6 }]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "forms-vocab-set-invalid",
+  "description": "Universal-core set-membership predicates — FAILING surface (§55.1). oneOf([\"Admin\",\"Editor\"]) on \"Guest\" → .OneOfFailed(set); notIn([\"banned\"]) on \"banned\" → .NotInFailed(set). isValid false per field, compound rollup false.",
+  "language-version": "1.0",
+  "spec": "§55.1, §55.9",
+  "rationale": "§55.1 oneOf/notIn test set membership; §55.9 OneOfFailed / NotInFailed carry the SUBSET as the set payload (§55.1 confirms the payload is the declared subset, not a base enum).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#role", "value": "Guest" },
+      { "input": "#tag",  "value": "banned" }
+    ],
+    "state": {
+      "vform.role.errors": [{ "tag": "OneOfFailed", "set": ["Admin", "Editor"] }],
+      "vform.role.isValid": false,
+      "vform.tag.errors":  [{ "tag": "NotInFailed", "set": ["banned"] }],
+      "vform.tag.isValid":  false,
+      "vform.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}

@@ -1,0 +1,9 @@
+<program>
+${
+    <vform>
+        <name  req length(>=2)>              = <input id="name" type="text"/>
+        <email req pattern(/^[^@]+@[^@]+$/)> = <input id="email" type="text"/>
+    </>
+}
+<vform><name/><email/></>
+</program>

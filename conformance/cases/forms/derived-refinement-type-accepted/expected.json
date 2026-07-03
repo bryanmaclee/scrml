@@ -1,0 +1,12 @@
+{
+  "id": "forms-derived-refinement-type-accepted",
+  "description": "The §55.14 recommended ALTERNATIVE to derived-cell validators: a refinement type. const <doubled>: number(>=0) = @count * 2 constrains the computed value at the type level and does NOT fire E-DERIVED-WITH-VALIDATORS — the positive control for the reject case.",
+  "language-version": "1.0",
+  "spec": "§55.14",
+  "rationale": "§55.14: 'If the developer wants validation on a derived value, they should add a refinement type (const <x>: number(>=0) = ...) — that is the type-level invariant equivalent.' Pins that the refinement-type form is the accepted way to constrain a read-only derived cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-WITH-VALIDATORS"],
+    "notCodePrefixes": ["E-VALIDATOR-"]
+  }
+}

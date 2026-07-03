@@ -1,0 +1,12 @@
+<program>
+${
+    <signup>
+        <name  req length(>=2)> = <input id="name"  type="text"/>
+        <agree req>             = <input id="agree" type="checkbox"/>
+    </>
+}
+<form id="f">
+    <signup><name/><agree/></>
+    <button id="go" type="submit">Go</button>
+</form>
+</program>

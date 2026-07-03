@@ -1,0 +1,22 @@
+{
+  "id": "forms-crossfield-mismatch",
+  "description": "Cross-field validation via predicate args (§55.11). confirm req eq(@signup.password): typing password \"secret12\" then a non-matching confirm \"different\" → confirm.errors carries .EqFailed(expected=the password value), confirm.isValid false, and the compound rollup false — while password itself is valid.",
+  "language-version": "1.0",
+  "spec": "§55.11, §55.9",
+  "rationale": "§55.11: cross-field falls out of the universal-core vocabulary when a predicate arg references another cell; eq(@signup.password) makes confirm's validity depend on password. §55.9 EqFailed carries the expected (the referenced cell's current value).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "input": "#pw", "value": "secret12" },
+      { "input": "#cf", "value": "different" }
+    ],
+    "state": {
+      "signup.password.isValid": true,
+      "signup.confirm.errors": [{ "tag": "EqFailed", "expected": "secret12" }],
+      "signup.confirm.isValid": false,
+      "signup.isValid": false
+    },
+    "domAnchored": [{ "selector": "input", "count": 2 }]
+  }
+}
