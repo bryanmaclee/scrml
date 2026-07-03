@@ -1,0 +1,17 @@
+{
+  "id": "reactive-reset-compound-field",
+  "description": "§6.8.2 compound single-field reset (RT): reset(@form.name) reverts ONLY the name field to its default=; the sibling email keeps its typed value. Snapshot keys form.name / form.email.",
+  "language-version": "1.0",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.2 compound reset: `reset(@form.name)` applies the reset rule to the named field ONLY (its default='def-name'). The sibling @form.email keeps its typed value. fill() sets both to typed-*; resetName() reverts only name.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#fill" }, { "click": "#rn" }],
+    "state": { "form.name": "def-name", "form.email": "typed-email" },
+    "domAnchored": [
+      { "selector": "#n", "text": "Name: def-name" },
+      { "selector": "#e", "text": "Email: typed-email" }
+    ]
+  }
+}

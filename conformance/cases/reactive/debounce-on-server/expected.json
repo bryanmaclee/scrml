@@ -1,0 +1,12 @@
+{
+  "id": "reactive-debounce-on-server",
+  "description": "§6.13.5 E-DEBOUNCED-WITH-SERVER — `debounced=`/`throttled=` on a `<x server>` server-authoritative cell is forbidden: server writes go through the §52 server-write path, not the client-side timing wrapper. `<x server debounced=300ms> = \"\"` fires E-DEBOUNCED-WITH-SERVER. Asserted AS an error. Incidental server-auth codes (E-AUTH-005/W-AUTH-001) + E-DG-002/W-PROGRAM-001 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.6: `debounced=`/`throttled=` on a `<x server>` server-authoritative cell SHALL fire E-DEBOUNCED-WITH-SERVER — the client-side timing wrapper and the §52 server-write path don't compose.",
+  "expect": {
+    "codes": ["E-DEBOUNCED-WITH-SERVER"],
+    "notCodes": [],
+    "severity": { "E-DEBOUNCED-WITH-SERVER": "error" }
+  }
+}

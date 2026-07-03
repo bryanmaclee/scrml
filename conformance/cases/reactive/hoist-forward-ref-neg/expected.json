@@ -1,0 +1,12 @@
+{
+  "id": "reactive-hoist-forward-ref-neg",
+  "description": "§6.9 hoisting negative — the SAME shape as pinned-forward-ref but WITHOUT `pinned`: a plain `<count> = 0` hoists to file scope (§6.9.2), so the earlier reference resolves and E-STATE-PINNED-FORWARD-REF does NOT fire. This is the pinned-vs-hoisted contrast.",
+  "language-version": "1.0",
+  "spec": "§6.9.2",
+  "rationale": "§6.9.2: within a structural scope ALL state-cell declarations are collected before any reactive read/render, so reads can refer to declarations that appear later. Removing `pinned` re-enables hoisting → no forward-ref error.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STATE-PINNED-FORWARD-REF"],
+    "notCodePrefixes": ["E-STATE-PINNED-"]
+  }
+}

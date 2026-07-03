@@ -1,0 +1,13 @@
+${
+    <formRes>
+        <name>  = ""
+        <email> = ""
+    </>
+    function fill() {
+        @formRes.name  = "Alice"
+        @formRes.email = "alice@example.com"
+    }
+}
+<button id="fill" onclick=fill()>fill</>
+<p id="n">Name: ${@formRes.name}</>
+<p id="e">Email: ${@formRes.email}</>

@@ -1,0 +1,4 @@
+${
+    <x debounced=300ms throttled=100ms> = ""
+}
+<p>x</>

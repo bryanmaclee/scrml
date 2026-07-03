@@ -1,0 +1,17 @@
+{
+  "id": "reactive-array-reassign-reactive",
+  "description": "§6.5.5 array reassignment reactivity (RT): `@items = [...@items, x]` spread-reassignment is reactive (DQ-2 reassignment-canonical). One #add click grows the array 2→3; the <each> over @items re-renders (3 .item rows) and the @items.length interpolation re-reads (Count: 3). No mutating method — pure reassignment drives the subscribers.",
+  "language-version": "1.0",
+  "spec": "§6.5.5",
+  "rationale": "§6.5.5 full replacement: `@items = [...@items, x]` is standard reactive assignment (DQ-2 reassignment-canonical) and triggers all subscribers of @items identically to a mutation — the <each> re-renders and @items.length re-reads. One click grows the list 2→3.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#add" }],
+    "state": { "items": [{ "id": 1, "label": "a" }, { "id": 2, "label": "b" }, { "id": 3, "label": "c" }] },
+    "domAnchored": [
+      { "selector": ".item", "count": 3 },
+      { "selector": "#count", "text": "Count: 3" }
+    ]
+  }
+}

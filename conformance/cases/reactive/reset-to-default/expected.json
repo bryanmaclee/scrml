@@ -1,0 +1,14 @@
+{
+  "id": "reactive-reset-to-default",
+  "description": "§6.8 default= + reset(@cell) (RT): a cell with `default=` distinct from its init. [change, reset] drives query init-val→typed→reset-val; reset(@query) writes the default= expression ('reset-val'), NOT the init ('init-val') — proving default= is used at reset time.",
+  "language-version": "1.0",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.1/§6.8.2: when a cell carries `default=`, `reset(@cell)` evaluates the `default=` expression (at reset time) and writes it — NOT the init expression. default='reset-val' differs from init='init-val', so a reset after a change lands 'reset-val', proving default= (not init re-eval) is used.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#ch" }, { "click": "#rs" }],
+    "state": { "query": "reset-val" },
+    "domAnchored": [{ "selector": "#q", "text": "Q: reset-val" }]
+  }
+}

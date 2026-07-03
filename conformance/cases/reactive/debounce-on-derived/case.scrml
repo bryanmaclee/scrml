@@ -1,0 +1,5 @@
+${
+    <count> = 0
+    const <doubled debounced=300ms> = @count * 2
+}
+<p>x</>

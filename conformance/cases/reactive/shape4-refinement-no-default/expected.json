@@ -1,0 +1,12 @@
+{
+  "id": "reactive-shape4-refinement-no-default",
+  "description": "§6.2 Shape 4 refinement-violating-empty (codes): a refinement-typed no-RHS cell whose base canonical empty VIOLATES the predicate cannot be auto-defaulted. `<x>: number(>0)` — base empty 0 fails `>0` — fires E-REFINEMENT-NO-DEFAULT (§53/§34); an explicit initializer is required. (impl also surfaces the companion E-CONTRACT-001; asserted via superset, only E-REFINEMENT-NO-DEFAULT is pinned.)",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4: a refined type with no predicate-satisfying canonical empty is a hard error (E-REFINEMENT-NO-DEFAULT). The check is compile-time: the §53 predicate is statically evaluated on the literal canonical-empty (0), which fails >0.",
+  "expect": {
+    "codes": ["E-REFINEMENT-NO-DEFAULT"],
+    "notCodes": [],
+    "severity": { "E-REFINEMENT-NO-DEFAULT": "error" }
+  }
+}

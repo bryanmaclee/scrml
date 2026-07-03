@@ -1,0 +1,17 @@
+{
+  "id": "reactive-reset-compound-all",
+  "description": "§6.8.2 whole-compound reset (RT): reset(@form) reverts EVERY field (name + email) to its own default=, in declaration order. The multi-field counterpart to reset-compound-field.",
+  "language-version": "1.0",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.2 compound reset: `reset(@form)` applies the reset rule to EVERY field of the compound (in declaration order) — each reverts to its own default=. fill() sets both to typed-*; resetAll() reverts both name→def-name and email→def-email.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#fill" }, { "click": "#ra" }],
+    "state": { "form.name": "def-name", "form.email": "def-email" },
+    "domAnchored": [
+      { "selector": "#n", "text": "Name: def-name" },
+      { "selector": "#e", "text": "Email: def-email" }
+    ]
+  }
+}

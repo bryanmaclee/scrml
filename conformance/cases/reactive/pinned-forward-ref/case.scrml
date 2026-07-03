@@ -1,0 +1,8 @@
+${
+    function readEarly() {
+        return @count
+    }
+    @count = readEarly()
+    <count pinned> = 0
+}
+<p>x</>

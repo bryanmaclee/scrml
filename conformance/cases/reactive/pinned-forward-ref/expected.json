@@ -1,0 +1,12 @@
+{
+  "id": "reactive-pinned-forward-ref",
+  "description": "§6.10.2 E-STATE-PINNED-FORWARD-REF — a `pinned` state cell opts OUT of hoisting (§6.9.3), so a reference to it before its declaration site is a compile error. `<count pinned> = 0` is referenced (read + write) above its decl → E-STATE-PINNED-FORWARD-REF. Asserted AS an error. Incidental W-PROGRAM-001 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.10.2",
+  "rationale": "§6.10.2 / §6.9.3: a pinned declaration is not collected during the scope's hoisting pass and initializes exactly at its source position; any forward reference is E-STATE-PINNED-FORWARD-REF.",
+  "expect": {
+    "codes": ["E-STATE-PINNED-FORWARD-REF"],
+    "notCodes": [],
+    "severity": { "E-STATE-PINNED-FORWARD-REF": "error" }
+  }
+}

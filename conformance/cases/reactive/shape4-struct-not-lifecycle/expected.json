@@ -1,0 +1,12 @@
+{
+  "id": "reactive-shape4-struct-not-lifecycle",
+  "description": "§6.2 Shape 4 no-canonical-empty path (codes): a bare `:struct`-typed no-RHS cell (`<user>: User`) has NO canonical empty (a struct's required fields aren't inhabited by {}) so it defaults to `not` and acquires an IMPLICIT `(not to User)` lifecycle (§14.12). A read before any User-shaped assignment (@user.name in show()) fires E-TYPE-001. Asserted AS an error. Incidental W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4: a bare `T` with no canonical empty inits to `not` with an implicit (not to T) lifecycle; the §14.12 per-access tracker fires E-TYPE-001 on a read before the cell holds a T-shaped value.",
+  "expect": {
+    "codes": ["E-TYPE-001"],
+    "notCodes": [],
+    "severity": { "E-TYPE-001": "error" }
+  }
+}

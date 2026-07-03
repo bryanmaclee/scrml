@@ -1,0 +1,12 @@
+{
+  "id": "reactive-fn-mutual-recursion-hoist",
+  "description": "§6.9 / §48.6.4 fn file-scope hoist — `fn` declarations at file scope hoist per §6.9, mirroring `function`; mutual recursion works without source-order constraints. isEven references isOdd declared LATER; both compile clean (no forward-ref / scope error).",
+  "language-version": "1.0",
+  "spec": "§6.9.1",
+  "rationale": "§48.6.4: `fn` declarations at file scope hoist per §6.9, so isEven can call isOdd (declared after it). Mutual recursion of `fn` is supported without source-order constraints; no diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-STATE-PINNED-", "E-SCOPE-"]
+  }
+}

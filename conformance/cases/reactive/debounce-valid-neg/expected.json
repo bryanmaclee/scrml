@@ -1,0 +1,12 @@
+{
+  "id": "reactive-debounce-valid-neg",
+  "description": "§6.13.1 valid debounced decl (codes-neg) — `<searchTerm debounced=300ms> = \"\"` on a plain Shape-1 cell is LEGAL (§6.13.4): none of the §6.13 conflict diagnostics fire. The cell is used (set handler + interpolation) so no orphan-DG noise. NOTE: the debounced-WRITE runtime (trailing/coalesced commit) is NOT asserted here — it is blocked by the open bug G-DEBOUNCE-THROTTLE-TRAILING-NO-COMMIT (see NOTES.md); the throttle LEADING-edge runtime is covered by reactive/throttle-leading.",
+  "language-version": "1.0",
+  "spec": "§6.13.1",
+  "rationale": "§6.13.4 composition table: Shape 1 (`<x debounced=300ms> = \"\"`) is legal — writes are wrapped per §6.13.1. No E-DEBOUNCED-* / E-REACTIVITY-ATTR-CONFLICT fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-DEBOUNCED-", "E-REACTIVITY-"]
+  }
+}

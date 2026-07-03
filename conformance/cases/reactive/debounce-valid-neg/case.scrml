@@ -1,0 +1,8 @@
+${
+    <searchTerm debounced=300ms> = ""
+    function setIt() {
+        @searchTerm = "hi"
+    }
+}
+<button id="s" onclick=setIt()>set</>
+<p id="v">Term: ${@searchTerm}</>

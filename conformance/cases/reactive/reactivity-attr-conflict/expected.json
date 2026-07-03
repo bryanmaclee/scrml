@@ -1,0 +1,12 @@
+{
+  "id": "reactive-reactivity-attr-conflict",
+  "description": "§6.13.5 E-REACTIVITY-ATTR-CONFLICT — a state cell carrying BOTH `debounced=` AND `throttled=` describes competing timing rules and is forbidden. `<x debounced=300ms throttled=100ms> = \"\"` fires E-REACTIVITY-ATTR-CONFLICT. Asserted AS an error. Incidental E-DG-002 / W-PROGRAM-001 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.6: `debounced=` AND `throttled=` on the same state-decl SHALL fire E-REACTIVITY-ATTR-CONFLICT — the two attributes describe competing timing rules; a cell picks one.",
+  "expect": {
+    "codes": ["E-REACTIVITY-ATTR-CONFLICT"],
+    "notCodes": [],
+    "severity": { "E-REACTIVITY-ATTR-CONFLICT": "error" }
+  }
+}

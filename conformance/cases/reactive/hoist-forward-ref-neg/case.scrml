@@ -1,0 +1,8 @@
+${
+    function readEarly() {
+        return @count
+    }
+    @count = readEarly()
+    <count> = 0
+}
+<p>x</>

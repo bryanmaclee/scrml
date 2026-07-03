@@ -1,0 +1,11 @@
+{
+  "id": "reactive-shape4-refinement-satisfied-neg",
+  "description": "§6.2 Shape 4 refinement-SATISFYING-empty negative: `<y>: number(>=0)` — the base canonical empty 0 SATISFIES `>=0`, so it is used as the default and E-REFINEMENT-NO-DEFAULT does NOT fire. The predicate-satisfies counterpart to shape4-refinement-no-default.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4: if the base canonical empty SATISFIES the refinement predicate (number(>=0) → 0), it is used and no diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-REFINEMENT-NO-DEFAULT"]
+  }
+}

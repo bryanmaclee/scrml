@@ -1,0 +1,17 @@
+{
+  "id": "reactive-compound-variant-c",
+  "description": "§6.3.2 Variant-C ad-hoc compound state — a `<formRes>` cell with structural-child fields name/email. fill() does canonical dot-nav writes (@formRes.name = 'Alice', @formRes.email = ...); each field's nested reactive cell updates and re-renders its own interpolation. Fields snapshot under dotted keys (formRes.name / formRes.email).",
+  "language-version": "1.0",
+  "spec": "§6.3.2",
+  "rationale": "§6.3.2 Variant-C ad-hoc compound: a cell with structural-child fields (name/email). A canonical dot-nav write (@formRes.name = ...) updates that field's nested reactive cell and re-renders its interpolation; the sibling field is independent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#fill" }],
+    "state": { "formRes.name": "Alice", "formRes.email": "alice@example.com" },
+    "domAnchored": [
+      { "selector": "#n", "text": "Name: Alice" },
+      { "selector": "#e", "text": "Email: alice@example.com" }
+    ]
+  }
+}

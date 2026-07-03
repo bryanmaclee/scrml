@@ -1,0 +1,10 @@
+${
+    <count>: int
+    <name>: string
+    <active>: bool
+    <todos>: string[]
+}
+<p id="c">Count: ${@count}</>
+<p id="n">Name: ${@name}</>
+<p id="a">Active: ${@active}</>
+<p id="t">Todos: ${@todos.length}</>

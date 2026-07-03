@@ -1,0 +1,21 @@
+${
+    <form>
+        <name default="def-name">   = "init-name"
+        <email default="def-email"> = "init-email"
+    </>
+    function fill() {
+        @form.name  = "typed-name"
+        @form.email = "typed-email"
+    }
+    function resetName() {
+        reset(@form.name)
+    }
+    function resetAll() {
+        reset(@form)
+    }
+}
+<button id="fill" onclick=fill()>fill</>
+<button id="rn" onclick=resetName()>reset name</>
+<button id="ra" onclick=resetAll()>reset all</>
+<p id="n">Name: ${@form.name}</>
+<p id="e">Email: ${@form.email}</>

@@ -1,0 +1,13 @@
+${
+    <items> = [{ id: 1, label: "a" }, { id: 2, label: "b" }]
+    function addItem() {
+        @items = [...@items, { id: 3, label: "c" }]
+    }
+}
+<button id="add" onclick=addItem()>add</>
+<ul id="list">
+    <each in=@items key=@.id as item>
+        <li class="item">${item.label}</li>
+    </each>
+</ul>
+<p id="count">Count: ${@items.length}</p>

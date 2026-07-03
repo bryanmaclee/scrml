@@ -1,0 +1,19 @@
+{
+  "id": "reactive-shape4-canonical-empty",
+  "description": "§6.2 Shape 4 typed no-RHS canonical-empty defaults (RT): `<count>: int`→0, `<name>: string`→\"\", `<active>: bool`→false, `<todos>: string[]`→[]. No initializer, no input — the cell inits to the type's canonical empty DEFINED value. State snapshot + interpolations both read the empties; `@todos.length` is 0.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4 (typed no-RHS): a type-annotated cell with no initializer defaults to the type's canonical empty DEFINED value — int→0, string→\"\", bool→false, T[]→[]. `<x>: T` is exact sugar for `<x>: T = <canonical-empty>`. These are DEFINED values (§42.1.1), not absence, so reads are legal with no lifecycle.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "count": 0, "name": "", "active": false, "todos": [] },
+    "domAnchored": [
+      { "selector": "#c", "text": "Count: 0" },
+      { "selector": "#n", "text": "Name:" },
+      { "selector": "#a", "text": "Active: false" },
+      { "selector": "#t", "text": "Todos: 0" }
+    ]
+  }
+}

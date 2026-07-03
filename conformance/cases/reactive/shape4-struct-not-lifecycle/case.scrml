@@ -1,0 +1,9 @@
+${
+    type User:struct = { name: string, age: int }
+    <user>: User
+    function show() {
+        let n = @user.name
+    }
+}
+<button id="b" onclick=show()>go</>
+<p>x</>

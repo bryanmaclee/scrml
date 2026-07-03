@@ -1,0 +1,12 @@
+{
+  "id": "reactive-debounce-on-derived",
+  "description": "§6.13.4 E-DEBOUNCED-WITH-DERIVED — `debounced=`/`throttled=` on a `const`-derived cell is forbidden: derived cells are read-only and debounce/throttle is a write-side wrapper. `const <doubled debounced=300ms> = @count * 2` fires E-DEBOUNCED-WITH-DERIVED. Asserted AS an error. Incidental E-DG-002 / W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§6.13.4",
+  "rationale": "§6.13.4 / §6.13.6: `debounced=`/`throttled=` on a const-derived state-decl SHALL fire E-DEBOUNCED-WITH-DERIVED — the write-side timing wrapper is meaningless on a read-only derived cell.",
+  "expect": {
+    "codes": ["E-DEBOUNCED-WITH-DERIVED"],
+    "notCodes": [],
+    "severity": { "E-DEBOUNCED-WITH-DERIVED": "error" }
+  }
+}
