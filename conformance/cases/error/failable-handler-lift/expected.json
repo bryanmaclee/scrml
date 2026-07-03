@@ -1,0 +1,15 @@
+{
+  "id": "error-failable-handler-lift",
+  "description": "§19.4.3 `!{}` call-site handler lifting a PAYLOAD error variant into a state enum (errors-as-states, §6/§19.11). loadItem('missing') fails LoadError.NotFound(id); the `.NotFound(mid)` arm binds the payload and writes @phase = Phase.Missing(mid). @phase snapshots as {variant:'Missing', data:{id:'missing'}}; the handled call keeps the whole E-ERROR-* family silent (§19.6.6 handling-requirement satisfied by the `!{}` catch).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "A `!` function's error result routed through an inline `!{}` call-site handler whose arms lift each error variant into a Phase state enum (errors-as-states, §6/§19.11). loadItem('missing') fails LoadError.NotFound(id); the `.NotFound(mid)` arm writes @phase = Phase.Missing(mid), carrying the payload.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-missing" }],
+    "state": { "phase": { "variant": "Missing", "data": { "id": "missing" } } },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

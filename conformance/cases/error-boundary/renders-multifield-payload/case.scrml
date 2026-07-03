@@ -1,0 +1,16 @@
+type PaymentError:enum = {
+    InsufficientFunds(available: int, requested: int)
+        renders <div class="eb-funds">Need ${requested} but only ${available} available</>
+    Declined
+}
+
+function charge(amount: int)! PaymentError {
+    if (amount > 50) fail PaymentError.InsufficientFunds(50, amount)
+    return amount
+}
+
+<page>
+    <errorBoundary fallback={<div class="eb-fb">generic failure</>}>
+        ${charge(75)}
+    </>
+</page>

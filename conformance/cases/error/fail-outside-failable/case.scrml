@@ -1,0 +1,8 @@
+${
+    type MyError:enum = { Bad(msg: string) }
+
+    function notFailable() {
+        fail MyError.Bad("nope")
+    }
+}
+<p>x</>

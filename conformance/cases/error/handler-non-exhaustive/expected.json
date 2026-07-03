@@ -1,0 +1,13 @@
+{
+  "id": "error-handler-non-exhaustive",
+  "description": "§19.7 E-TYPE-080 — a `!{}` call-site handler that covers only .NotFound leaves the .Timeout error variant uncovered, firing E-TYPE-080 (non-exhaustive error handler). Asserted AS an error (§34 fatal partition; §34 catalog maps E-TYPE-080 -> §19.7).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.7 + §34 (E-TYPE-080)",
+  "spec": "§19.7",
+  "rationale": "§19.7 / §34: an error handler that does not cover all error variants of the failable call's error enum is non-exhaustive -> E-TYPE-080. LoadError has {NotFound, Timeout}; the handler names only NotFound.",
+  "expect": {
+    "codes": ["E-TYPE-080"],
+    "notCodes": [],
+    "severity": { "E-TYPE-080": "error" }
+  }
+}

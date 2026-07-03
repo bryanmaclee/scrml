@@ -1,0 +1,15 @@
+{
+  "id": "error-failable-handler-lift-success",
+  "description": "§19.4.3 `!{}` handler SUCCESS passthrough: loadItem('ok') returns the id (no fail), no arm fires, the success value flows to `result`, and the handler lifts it to Phase.Loaded(result). Proves `!{}` catches ONLY error variants; the success value passes through unwrapped.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "Success passthrough: loadItem('ok') returns the id (no fail), so no `!{}` arm fires and the success value flows to `result`; the handler then lifts it to Phase.Loaded(result). Proves the `!{}` handler catches ONLY error variants and passes the success value through.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-ok" }],
+    "state": { "phase": { "variant": "Loaded", "data": { "data": "ok" } } },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

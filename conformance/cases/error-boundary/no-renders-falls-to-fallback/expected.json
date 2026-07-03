@@ -1,0 +1,19 @@
+{
+  "id": "error-boundary-no-renders-falls-to-fallback",
+  "description": "errorBoundary §19.6.5 priority #2 — a caught error variant WITHOUT a `renders` clause falls to the boundary's `fallback`. loadItem('slow') fails LoadError.Timeout (no renders) at mount; the boundary's `fallback` (eb-fallback) is shown, and the sibling variant's markup (eb-notfound) does NOT appear (that variant wasn't the one thrown). Complements error-boundary/variant-renders (priority #1). Sibling content outside the boundary survives (§19.6.4). OQ1: whole-tree dom OMITTED (impl#1 wraps the boundary subtree in a private container div); the impl-neutral contract is the anchored author-class assertions.",
+  "language-version": "1.0",
+  "spec": "§19.6.3",
+  "rationale": "§19.6.3 priority #2: if the caught error variant has NO `renders` clause and the boundary has a `fallback`, the `fallback` markup is displayed. Timeout is a nullary no-renders variant -> eb-fallback shows. NotFound's renders never fires (not the thrown variant). §19.6.6: the `!`-call inside the boundary needs no explicit handling -> the whole E-ERROR-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-fallback", "count": 1, "text": "Boundary fallback shown" },
+      { "selector": ".eb-notfound", "count": 0 },
+      { "selector": ".eb-header", "text": "Header survives" },
+      { "selector": ".eb-footer", "text": "Footer survives" }
+    ]
+  }
+}

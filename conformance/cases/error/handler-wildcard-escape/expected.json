@@ -1,0 +1,12 @@
+{
+  "id": "error-handler-wildcard-escape",
+  "description": "§19.7.3 wildcard escape — a `!{}` handler with a `_` wildcard arm covering the remaining unmatched variants IS exhaustive; E-TYPE-080 does NOT fire. Only .NotFound is named; `_` absorbs .Timeout.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.7.3",
+  "spec": "§19.7.3",
+  "rationale": "§19.7.3: a `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants (per §18.6). So a handler with `.NotFound` + `_` is exhaustive -> no E-TYPE-080.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-080"]
+  }
+}

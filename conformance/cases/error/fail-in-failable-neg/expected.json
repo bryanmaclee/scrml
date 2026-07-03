@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-in-failable-neg",
+  "description": "§19.3.3 negative — `fail` INSIDE a `!` function is legal and does NOT fire E-ERROR-001 (the failable() function carries the `!` modifier). The whole E-ERROR-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: a function WITH `!` SHALL accept `fail`; no diagnostic fires for a correctly-placed `fail`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-001"],
+    "notCodePrefixes": ["E-ERROR-"]
+  }
+}

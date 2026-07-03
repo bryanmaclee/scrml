@@ -1,0 +1,40 @@
+${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Timeout
+    }
+
+    type Phase:enum = {
+        Idle
+        Missing(id: string)
+        TimedOut
+        Ok(data: string)
+    }
+
+    function inner(id: string)! LoadError {
+        if (id == "missing") fail LoadError.NotFound(id)
+        if (id == "slow") fail LoadError.Timeout
+        return id
+    }
+
+    // outer does NOT fail directly — it `?`-propagates inner's error through
+    // its own `!` boundary to whoever calls outer.
+    function outer(id: string)! LoadError {
+        let v = inner(id)?
+        return v
+    }
+}
+
+<phase> = Phase.Idle
+
+${
+    function handleMissing() {
+        let r = outer("missing") !{
+            | .NotFound(mid) :> @phase = Phase.Missing(mid)
+            | .Timeout :> @phase = Phase.TimedOut
+        }
+    }
+}
+
+<button id="btn-missing" onclick=handleMissing()>missing</>
+<div id="out">${@phase}</>

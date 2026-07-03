@@ -1,0 +1,15 @@
+{
+  "id": "error-propagate-success-unwrap",
+  "description": "§19.5 `?` SUCCESS unwrap (RT): inner('ok') returns the id (no fail); outer's `inner(id)?` unwraps the success value and binds it to `v`; outer returns it; the `!{}` handler's arms never fire and `r` = 'ok'; the handler lifts @phase = Phase.Ok('ok'). Proves `?` unwraps the success case (not just the error case).",
+  "language-version": "1.0",
+  "spec": "§19.5.2",
+  "rationale": "§19.5.2 step 1: on a success value, `?` unwraps it and produces the success value. So outer('ok') -> 'ok' through the `?` frame, r = 'ok', @phase lands Phase.Ok('ok'). E-ERROR-* silent (`?` in a `!` fn is legal; handled call).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-ok" }],
+    "state": { "phase": { "variant": "Ok", "data": { "data": "ok" } } },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

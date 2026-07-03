@@ -1,0 +1,20 @@
+${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Timeout
+    }
+
+    function f(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+
+    function go() {
+        let r = f("x") !{
+            | .NotFound(m) :> log(m)
+            | _ :> log("other")
+        }
+    }
+}
+<button id="b" onclick=go()>go</>

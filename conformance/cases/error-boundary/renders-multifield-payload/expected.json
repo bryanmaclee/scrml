@@ -1,0 +1,17 @@
+{
+  "id": "error-boundary-renders-multifield-payload",
+  "description": "§19.2.2 renders-clause payload access — a `renders` clause references MULTIPLE payload fields of its variant. charge(75) fails PaymentError.InsufficientFunds(50, 75); the variant's renders <div class=\"eb-funds\">Need ${requested} but only ${available} available</> substitutes BOTH bound fields, winning over the boundary fallback (§19.6.5 priority #1). OQ1: whole-tree dom OMITTED (private boundary container); anchored contract only.",
+  "language-version": "1.0",
+  "spec": "§19.2.2",
+  "rationale": "§19.2.2: a `renders` clause body has access to the variant's payload fields. InsufficientFunds carries {available, requested}; the clause interpolates both -> 'Need 75 but only 50 available'. §19.6.5 priority #1: the variant's renders wins over the boundary fallback (eb-fb never appears). E-ERROR-* silent (boundary satisfies handling).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-funds", "count": 1, "text": "Need 75 but only 50 available" },
+      { "selector": ".eb-fb", "count": 0 }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Timeout
+    }
+
+    type Phase:enum = {
+        Idle
+        Missing(id: string)
+        TimedOut
+        Loaded(data: string)
+    }
+
+    function loadItem(id: string)! LoadError {
+        if (id == "missing") fail LoadError.NotFound(id)
+        if (id == "slow") fail LoadError.Timeout
+        return id
+    }
+}
+
+<phase> = Phase.Idle
+
+${
+    function handleMissing() {
+        let result = loadItem("missing") !{
+            | .NotFound(mid) :> @phase = Phase.Missing(mid)
+            | .Timeout :> @phase = Phase.TimedOut
+        }
+    }
+    function handleSlow() {
+        let result = loadItem("slow") !{
+            | .NotFound(mid) :> @phase = Phase.Missing(mid)
+            | .Timeout :> @phase = Phase.TimedOut
+        }
+    }
+    function handleOk() {
+        let result = loadItem("ok") !{
+            | .NotFound(mid) :> @phase = Phase.Missing(mid)
+            | .Timeout :> @phase = Phase.TimedOut
+        }
+        @phase = Phase.Loaded(result)
+    }
+}
+
+<button id="btn-missing" onclick=handleMissing()>missing</>
+<button id="btn-slow" onclick=handleSlow()>slow</>
+<button id="btn-ok" onclick=handleOk()>ok</>
+<div id="out">${@phase}</>

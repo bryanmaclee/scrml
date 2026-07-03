@@ -1,0 +1,15 @@
+{
+  "id": "error-failable-handler-lift-timeout",
+  "description": "§19.4.3 `!{}` handler NO-PAYLOAD arm: loadItem('slow') fails the nullary LoadError.Timeout; the `.Timeout` arm lifts it to the nullary Phase.TimedOut, which snapshots as the bare string 'TimedOut' (non-payload variants snapshot bare, per conformance README).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "The `!{}` handler's no-payload arm: loadItem('slow') fails LoadError.Timeout (a nullary error variant); the `.Timeout :> @phase = Phase.TimedOut` arm lifts it to the nullary Phase.TimedOut. A non-payload variant snapshots as a bare string.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-slow" }],
+    "state": { "phase": "TimedOut" },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

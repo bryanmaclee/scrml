@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-outside-failable",
+  "description": "§19.3.3 E-ERROR-001 — `fail` used in a function NOT declared failable (`!`). notFailable() has no `!` modifier, so `fail MyError.Bad(...)` fires E-ERROR-001. Asserted AS an error (§34 fatal partition). Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: `fail` SHALL be valid only inside a function body declared with `!`. Using `fail` without `!` SHALL be E-ERROR-001.",
+  "expect": {
+    "codes": ["E-ERROR-001"],
+    "notCodes": [],
+    "severity": { "E-ERROR-001": "error" }
+  }
+}

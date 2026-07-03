@@ -1,0 +1,15 @@
+{
+  "id": "error-propagate-reaches-handler",
+  "description": "§19.5 `?` propagation (RT): inner('missing') fails LoadError.NotFound; outer calls inner(id)? which propagates the error THROUGH outer's own `!` boundary; the call-site `!{}` handler on outer('missing') then catches the propagated .NotFound(mid) and lifts @phase = Phase.Missing(mid). Proves `?` carried the error across the intermediate failable frame to the caller's handler. LoadError is the error type of BOTH inner and outer, so §19.5.3 compatibility holds (no E-TYPE-001).",
+  "language-version": "1.0",
+  "spec": "§19.5.2",
+  "rationale": "§19.5.2: `?` on a failable call returns the error variant from the enclosing `!` function. So outer('missing') resolves to LoadError.NotFound('missing'), which the call-site `!{}` catches -> @phase lands Phase.Missing with the propagated payload. The whole E-ERROR-* family stays silent (handled call, §19.6.6; `?` in a `!` fn is legal so no E-ERROR-003/004).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-missing" }],
+    "state": { "phase": { "variant": "Missing", "data": { "id": "missing" } } },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

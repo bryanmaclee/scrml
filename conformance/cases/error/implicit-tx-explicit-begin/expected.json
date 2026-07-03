@@ -1,0 +1,13 @@
+{
+  "id": "error-implicit-tx-explicit-begin",
+  "description": "§19.10.5 / §8.9.2 W-BATCH-001 — an explicit `?{BEGIN}` inside a `!` server handler with 2+ coalescing `?{}` sites SUPPRESSES the implicit per-handler transaction envelope and emits W-BATCH-001 (advising `transaction { }` or `.nobatch()` for clarity). Asserted AS a warning (§34 non-fatal partition). Incidental W-DEPRECATED-SERVER-MODIFIER / W-SQL-ROW-UNTYPED / W-PROGRAM-* ignored by superset matching. NOTE: this is the ONLY source-reachable §19.10.5 diagnostic — see the case dir README for the E-BATCH-001 (parser-limited) + SQL-rollback runtime (harness-gated) gaps.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/batch-planner.test.js §12",
+  "spec": "§8.9.2",
+  "rationale": "§8.9.2 normative: 'An explicit ?{BEGIN} inside the handler suppresses the implicit envelope and emits W-BATCH-001.' The handler has two coalescing SELECT sites that WOULD form an implicit envelope; the manual BEGIN/COMMIT opts out of it, surfacing W-BATCH-001.",
+  "expect": {
+    "codes": ["W-BATCH-001"],
+    "notCodes": [],
+    "severity": { "W-BATCH-001": "warning" }
+  }
+}

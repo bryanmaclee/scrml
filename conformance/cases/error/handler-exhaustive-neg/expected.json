@@ -1,0 +1,12 @@
+{
+  "id": "error-handler-exhaustive-neg",
+  "description": "§19.7 negative (full enumeration) — a `!{}` handler naming BOTH error variants (.NotFound + .Timeout) is exhaustive by enumeration; E-TYPE-080 does NOT fire. The full-coverage counterpart to the wildcard escape.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.7",
+  "spec": "§19.7",
+  "rationale": "§19.7: an error handler covering every variant of the error enum is exhaustive -> no E-TYPE-080. LoadError's full variant set {NotFound, Timeout} is named.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-080"]
+  }
+}
