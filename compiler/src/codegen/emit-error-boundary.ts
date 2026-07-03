@@ -137,12 +137,14 @@ export function emitBoundaryMarkupExpr(
   if (tpl.fields.length === 0) {
     return JSON.stringify(tpl.htmlTemplate);
   }
-  // Arity-aware substitution. The error envelope stores a SINGLE-field variant's
-  // payload as the BARE value on `.data` (mirroring the `!{}` single-binding
-  // shape), and a MULTI-field variant's payload as a field-keyed object. So a
-  // `${field}` reference lowers to `(data)` when the variant has exactly one
-  // payload field, else `(data).field`.
-  const singleField = Array.isArray(payloadFields) && payloadFields.length === 1;
+  // §51.3.2 — the error envelope stores EVERY payload variant's fields as a
+  // field-keyed object on `.data`, for BOTH single- AND multi-field variants
+  // (matching the enum constructor `Shape.Circle(10)` -> `data:{r:10}`,
+  // emitFailExpr, parseVariant, and the `!{}` / `match` payload binders). So a
+  // `${field}` reference lowers to `(data).field` uniformly. (`payloadFields`
+  // is retained for caller-signature stability; the field name comes from the
+  // sentinel segment, so no arity discrimination is needed.)
+  void payloadFields;
   // Split on the sentinel. The split alternates literal-HTML and field-name
   // segments: even indices are HTML, odd indices are field names.
   const segments = tpl.htmlTemplate.split(FIELD_SENTINEL);
@@ -152,8 +154,7 @@ export function emitBoundaryMarkupExpr(
       if (segments[i] !== "") pieces.push(JSON.stringify(segments[i]));
     } else {
       const field = segments[i];
-      const ref = singleField ? `(${dataExpr})` : `(${dataExpr}).${field}`;
-      pieces.push(`String((${dataExpr}) != null ? ${ref} : "")`);
+      pieces.push(`String((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
     }
   }
   if (pieces.length === 0) return '""';
@@ -187,13 +188,12 @@ export interface EnumRendersInfo {
   /** variantName -> raw `renders` markup string (only variants that HAVE a renders clause). */
   renders: Map<string, string>;
   /**
-   * variantName -> ordered payload field names. Drives the runtime substitution
-   * shape of a variant's renders markup: the error envelope stores a SINGLE-field
-   * variant's payload as the bare value on `.data` (mirroring the `!{}` single-
-   * binding shape, emit-logic.ts:emitGuardedArmBinding), and a MULTI-field
-   * variant's payload as a field-keyed object `.data.{field}`. A `${field}`
-   * interpolation therefore lowers to `_eb_result.data` (single) or
-   * `_eb_result.data.field` (multi).
+   * variantName -> ordered payload field names. Per §51.3.2 the error envelope
+   * stores EVERY payload variant's fields as a field-keyed object on `.data`
+   * (single- AND multi-field alike, matching the enum constructor / emitFailExpr
+   * / parseVariant / the `!{}` + `match` payload binders), so a `${field}`
+   * interpolation lowers to `_eb_result.data.{field}` uniformly. The ordered
+   * field list is retained for arity diagnostics / potential future use.
    */
   variantFields: Map<string, string[]>;
 }

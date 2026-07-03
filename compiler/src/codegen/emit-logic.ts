@@ -459,10 +459,23 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     data = "null";
   } else {
     const argParts = _splitTopLevelCommas(rawArgs);
-    if (argParts.length <= 1) {
+    const schema = getVariantFieldSchema(variant);
+    // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
+    // whose keys are the variant's DECLARED payload field names, for BOTH single-
+    // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
+    // -> `data: { r: 10 }` and parseVariant's ParseError shape). Single- and
+    // multi-arg share one field-keying pass so a single-field `fail` binds the
+    // same way its `match` / `!{}` / `<errorBoundary>` readers destructure it
+    // (emitVariantBindingPrelude / emitGuardedArmBinding / emit-error-boundary).
+    //
+    // Exception (raw `.data`): a variant with NO declared field schema — a nullary
+    // variant given an erroneous payload (the deferred g-fail-variant-payload-arity
+    // case) or an imported error type whose decl is not in this file's registry —
+    // has no field name to key by, so a SINGLE such arg lowers to the bare value
+    // on `.data` (best-effort; the readers fall back to the whole `.data` too).
+    if (argParts.length === 1 && (!schema || schema.length === 0)) {
       data = emitExprField(node.argsExpr as Parameters<typeof emitExprField>[0], rawArgs, _makeExprCtx(opts));
     } else {
-      const schema = getVariantFieldSchema(variant);
       const props = argParts.map((a, i) => {
         const field = schema && i < schema.length ? schema[i] : `_${i}`;
         return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
@@ -589,34 +602,44 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
  * `!{}` failable arm (§19.4.3). The error envelope is
  * `{ __scrml_error, type, variant, data }`.
  *
- * - Single binding (`::Variant(e)` / `::Variant e`): the whole `.data` value
- *   binds to the one name — `const e = result.data;` (the established shape).
- * - Multi-field binding (`::Thrown(message, name)` — HostError, used heavily
- *   across stdlib): `.data` is a `{ field: value, ... }` object, so each
- *   binding name maps POSITIONALLY to the variant's declared payload field
- *   (`const message = result.data.message; const name = result.data.name;`),
- *   mirroring emitVariantBindingPrelude. When the field schema is unknown
- *   (e.g. an imported error type whose decl isn't in _variantFields), fall back
- *   to positional `.data[i]` index access so the emit is still valid JS rather
- *   than the pre-fix corrupted single-ident parse.
+ * Per §51.3.2 the envelope's `.data` is a field-keyed object whose keys are the
+ * variant's DECLARED payload field names, for BOTH single- and multi-field
+ * variants (matching the enum constructor `Shape.Circle(10)` -> `data:{r:10}`,
+ * emitFailExpr, and parseVariant). So a payload binding on a DECLARED variant
+ * projects the field — mirroring the `match` reference emitter (emit-control-
+ * flow.ts:emitVariantBindingPrelude, `const <local> = tmp.data.<field>`):
+ *
+ * - Declared variant, single- OR multi-field (`::UnknownVariant(tag)`,
+ *   `::Thrown(message, name)`): each binding name maps POSITIONALLY to the
+ *   variant's declared field (`const tag = result.data.tag;`). Single- and
+ *   multi-field share the schema resolution so a single-field `!{}` arm reads
+ *   the value the same way `match` / `<errorBoundary>` do (the D2 fix). ParseError
+ *   (imported) resolves via the fixed schema registered in setVariantFieldsForFile.
+ * - Unknown-schema variant (a wildcard catch-all `| e :>`, or an ambient/
+ *   undeclared error variant with no declared payload — e.g. a server-fn
+ *   `::NetworkError e`): there is no declared field to project, so the single
+ *   name binds the whole `.data` payload — the established catch-all shape and
+ *   the only correct choice absent a field name. This mirrors emitFailExpr's
+ *   producer side, which likewise emits the bare `.data` value for a single
+ *   unknown-schema arg, keeping the reader and writer in step.
  */
 function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
+  const schema = variantName ? getVariantFieldSchema(variantName) : null;
   if (names.length === 1) {
+    // Declared single-field variant → project the field (§51.3.2). No schema
+    // (wildcard / ambient variant) → bind the whole `.data` payload.
+    if (schema && schema.length >= 1) {
+      return [`    const ${names[0]} = ${resultVar}.data.${schema[0]};`];
+    }
     return [`    const ${names[0]} = ${resultVar}.data;`];
   }
-  const schema = getVariantFieldSchema(variantName);
   const out: string[] = [];
   for (let i = 0; i < names.length; i++) {
     if (names[i] === "_") continue;
-    // `.data` is a field-keyed object for multi-field variants (the enum
-    // constructor + the fixed fail-expr both emit `data: { field: value }`).
-    // Resolve the field name positionally from the declared schema; when the
-    // schema is unknown (e.g. an imported error type whose decl isn't in this
-    // file's _variantFields), fall back to binding-name-as-field — the
-    // canonical usages name the binding to MATCH the declared field
-    // (`::Thrown(message, name)`), so `data.<bindingName>` is correct there.
+    // Multi-field always projects; fall back to binding-name-as-field when the
+    // schema is unknown (canonical usages name the binding to MATCH the field).
     const field = schema && i < schema.length ? schema[i] : names[i];
     out.push(`    const ${names[i]} = ${resultVar}.data.${field};`);
   }
@@ -3166,6 +3189,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       let bindingName: string | null = null;
       let initExpr: string | null = null;
+      // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
+      // reactive assignment `@cell = call() !{...}`. In that shape emitLogicNode
+      // lowers the guardedNode to the EAGER `_scrml_reactive_set("cell", call())`
+      // (below), which puts the RAW error envelope in the cell on the failure
+      // path. The arm handler only rewrites the local `resultVar`, so without a
+      // write-back the cell keeps the envelope instead of the recovery value.
+      // We record the cell name here and, after the arms run, re-set the cell to
+      // the (possibly-recovered) resultVar — §19.4.3 catch-recovery-into-assignment.
+      let reactiveCellName: string | null = null;
       // S89 §13.2 Sub-Phase B Step 3 — auto-await detection. When the guarded
       // node's init expression is a statically-known `Promise<T>`-returning
       // call (server fn OR stdlib `async` export per §13.2.1 Q1 BROAD), the
@@ -3184,6 +3216,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           const bodyCode = emitLogicNode(guardedNode);
           if (bodyCode) {
             initExpr = bodyCode.replace(/;\s*$/, "").replace(/^\s*return\s+/, "");
+          }
+          // D3 — a reactive assignment `@cell = call()` lowers to a state-decl
+          // node whose emit is the eager `_scrml_reactive_set("cell", call())`.
+          // Capture the cell name so the recovery write-back (after the arms)
+          // can land the recovered value back into the cell.
+          if (guardedNode.kind === "state-decl" && typeof guardedNode.name === "string" && guardedNode.name.length > 0) {
+            reactiveCellName = guardedNode.name;
           }
         }
         // Auto-await classification, gated on classifier inputs being threaded.
@@ -3382,6 +3421,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
       } else if (opts.insideFunctionBody) {
         lines.push(`  return ${resultVar};`);
+      }
+
+      // D3 (g-handler-recovery-into-cell) — for a reactive assignment
+      // `@cell = call() !{...}` the eager set above stored the RAW error
+      // envelope in the cell on the failure path. A matched recovery arm has
+      // rewritten `resultVar` to the recovery value; land that back into the
+      // cell as the LAST statement of the error block (§19.4.3 catch-recovery).
+      // A no-wildcard escalation arm's `return` fires before reaching here, so
+      // the error propagates to the caller (the eagerly-set envelope is left in
+      // the cell, unchanged from prior behavior — escalation is out of the
+      // recovery-into-assignment gap). The success path never enters this block,
+      // so the eager set stays authoritative there and no double-set occurs.
+      if (reactiveCellName && arms.length > 0) {
+        const _encCell = opts.encodingCtx ? opts.encodingCtx.encode(reactiveCellName) : reactiveCellName;
+        lines.push(`  _scrml_reactive_set(${JSON.stringify(_encCell)}, ${resultVar});`);
       }
 
       lines.push(`}`);

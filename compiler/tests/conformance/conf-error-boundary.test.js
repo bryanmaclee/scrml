@@ -91,12 +91,15 @@ describe("errorBoundary §19.6 — emission contract", () => {
     expect(js).toMatch(/try\s*\{[\s\S]*catch\s*\(_eb_err\)/);
   });
 
-  test("payload-field substitution is arity-aware (single-field -> bare .data)", () => {
+  test("payload-field substitution is field-keyed (§51.3.2 — single-field -> .data.field)", () => {
     const out = getOutput(compile("single.scrml", RENDERS_AND_FALLBACK));
     const js = out.clientJs ?? "";
-    // NotFound(id) is single-field → bare `_eb_result.data` (NOT `.data.id`).
-    expect(js).toContain("(_eb_result.data) : \"\"");
-    expect(js).not.toContain("(_eb_result.data).id");
+    // §51.3.2 — a payload variant stores its fields as a field-keyed object on
+    // `.data`, single- AND multi-field alike (matching the enum constructor /
+    // emitFailExpr / parseVariant / the `!{}` + `match` payload binders). So
+    // NotFound(id) substitutes `${id}` -> `(_eb_result.data).id` (NOT bare `.data`).
+    expect(js).toContain("(_eb_result.data).id");
+    expect(js).not.toContain("(_eb_result.data) : \"\"");
   });
 });
 

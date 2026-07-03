@@ -1,0 +1,23 @@
+${
+    type LoadError:enum = {
+        NotFound(reason: string)
+        Empty
+    }
+
+    function risky()! -> LoadError {
+        fail LoadError.NotFound("was-zero")
+    }
+
+    <result> = "init"
+
+    function go() {
+        @result = risky() !{
+            | ::NotFound(reason) :> "recovered: " + reason
+            | ::Empty            :> "was-empty"
+        }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@result}</p>
+</program>

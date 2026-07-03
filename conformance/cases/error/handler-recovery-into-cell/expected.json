@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-recovery-into-cell",
+  "description": "§19.4.3 — a recovery arm's value lands in the assigned cell (g-handler-recovery-into-cell). `@result = risky(0) !{ ::NotFound(reason) :> \"recovered: \" + reason }` — risky(0) fails with NotFound(\"was-zero\"); the recovery arm runs and its value MUST be written into @result. Clicking #go leaves @result = \"recovered: was-zero\" (NOT the raw {__scrml_error,...} envelope). Also exercises the single-field bind: reason = \"was-zero\" (the field value, not the whole .data object). Driven by a user click.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "§19.4.3 — the `!{}` inline handler recovers a failed `!`-call: a non-escalating arm produces a value that becomes the result of the guarded expression. For a reactive assignment `@cell = call() !{...}`, that recovery value must be written into the cell — otherwise the raw error envelope leaks into @cell on the failure path. The recovered value \"recovered: was-zero\" (with reason bound to the NotFound field per §51.3.2) is the final cell value.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "result": "recovered: was-zero" },
+    "domAnchored": [{ "selector": "#out", "text": "recovered: was-zero" }]
+  }
+}

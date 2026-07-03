@@ -1,0 +1,14 @@
+{
+  "id": "parse-variant-single-field-payload-bind",
+  "description": "§41.13 / §51.3.2 — a SINGLE-field `!{}` handler pattern `::UnknownVariant(tag)` binds the FIELD VALUE, not the whole `.data` object (g-single-field-handler-payload-bind). Clicking #decode parses '{\"tag\":\"Archived\"}' against LoadResult; the discriminator matches no variant, so parseVariant raises ::ParseError::UnknownVariant(tag=\"Archived\") and the single-field arm binds tag = \"Archived\" (the string value). @parseError becomes \"unknown: Archived\" — proving the bind projects the declared field (`.data.tag`), NOT the object (which would stringify to \"unknown: [object Object]\"). This is the RT half the ss61 dispatch deliberately parked pending the fix.",
+  "language-version": "1.0",
+  "spec": "§41.13",
+  "rationale": "§51.3.2 — a payload variant's `.data` is a field-keyed object whose keys are the declared field names (`UnknownVariant(tag)` -> `data: { tag }`), single- and multi-field alike. A single-field `!{}` arm therefore projects the field (`const tag = result.data.tag`), matching the enum constructor / `match` / `<errorBoundary>` readers, so `tag` holds the discriminator string \"Archived\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#decode" }],
+    "state": { "parseError": "unknown: Archived" },
+    "domAnchored": [{ "selector": "#status", "text": "Parse status: unknown: Archived" }]
+  }
+}

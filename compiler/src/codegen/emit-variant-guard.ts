@@ -1153,7 +1153,16 @@ export function emitVariantGuardedRender(
   // wildcard arm (legal but unusual — renders the wildcard for every value).
   // The default arm carries no payload bindings, so the render fn is called
   // with no args and the wire fn receives only `_mount`.
-  if (defaultArm && defaultArm.body && defaultArm.body.length > 0) {
+  //
+  // g-match-empty-wildcard-no-clear (S236) — the else branch is emitted even
+  // when the wildcard body is EMPTY (`<_ : "">`, the §55.10 L4 escape-hatch
+  // shape). An empty-body arm still has a `render_${tag}()` that returns "" +
+  // a no-op `wire_${tag}()` (emitted above for every arm), so the else clears
+  // the mount (`_mount.innerHTML = ""`). Without it, transitioning TO the empty
+  // wildcard leaves the previously-rendered arm content stale in the DOM.
+  // (Named arms already clear via their unconditional `if (_tag === …)` branch;
+  // only the wildcard default was gated on a non-empty body.)
+  if (defaultArm) {
     const dfnName = `${renderFnPrefix}_${idPrefix}_render_${defaultArm.tag}`;
     const dwireFnName = `${renderFnPrefix}_${idPrefix}_wire_${defaultArm.tag}`;
     if (switchArms.length > 0) {

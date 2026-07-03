@@ -64,12 +64,36 @@ function getBatchInListCap(): number {
 let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
 
+/**
+ * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
+ * from `scrml:data`, so its decl is NOT in a consuming file's typeDecls; without
+ * seeding it a parseVariant handler/match binding (`::UnknownVariant(tag)`,
+ * `::InvalidPayload(field, reason)`, `::Malformed(reason)`) can't resolve its
+ * declared field and falls back to the whole `.data` object
+ * (g-single-field-handler-payload-bind). The names + field order mirror
+ * emit-parse-variant.ts:emitParseErrorFail exactly.
+ */
+const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
+  ["UnknownVariant", ["tag"]],
+  ["InvalidPayload", ["field", "reason"]],
+  ["Malformed", ["reason"]],
+];
+
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
+  // Seed the ParseError schema for parseVariant binding resolution. Only fill
+  // in variants the file does NOT already declare — a file-local enum of the
+  // same name always wins (and a genuine cross-enum collision keeps the entry,
+  // so `.has` is true and we skip, leaving the collision path untouched).
+  if (_variantFields) {
+    for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_variantFields.has(name)) _variantFields.set(name, [...fields]);
+    }
+  }
 }
 
 /**

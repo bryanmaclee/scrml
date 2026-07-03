@@ -1,0 +1,24 @@
+${
+    import { parseVariant } from 'scrml:data'
+
+    type LoadResult:enum = {
+        Success(rows: int)
+        Empty
+        Failed(reason: string)
+    }
+
+    <parseError> = "none"
+
+    function decode() {
+        parseVariant('{"tag":"Archived"}', LoadResult) !{
+            | ::MissingDiscriminator          :> { @parseError = "missing-discriminator" }
+            | ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag }
+            | ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field }
+            | ::Malformed(reason)             :> { @parseError = "malformed" }
+        }
+    }
+}
+<program>
+    <button id="decode" onclick=decode()>Decode</>
+    <p id="status">Parse status: ${@parseError}</p>
+</program>

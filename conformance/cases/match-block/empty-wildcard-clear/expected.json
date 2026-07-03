@@ -1,0 +1,17 @@
+{
+  "id": "match-block-empty-wildcard-clear",
+  "description": "Block-form <match> with an EMPTY wildcard body (`<_ : \"\">`, the §55.10 L4 escape-hatch shape). The match starts at Loading (renders data-arm=\"loading\"); a click sets @phase = Phase.Idle, which has no named arm and matches the empty wildcard. The previously-rendered Loading content MUST be cleared — the mount empties rather than leaving stale DOM (g-match-empty-wildcard-no-clear). Driven by a user click, not a banned state-set.",
+  "language-version": "1.0",
+  "spec": "§18.0.1",
+  "rationale": "§18.0.1 — a <match> dispatcher renders the arm matching the current variant. When the current variant matches the wildcard `<_>` and the wildcard body is empty, the mount is cleared (innerHTML set to the empty render). Without the clearing else, transitioning TO the empty wildcard leaves the prior arm's DOM stale; §55.10 L4 documents `<_ : \"\">` as the deliberate render-nothing escape, so it must empty the anchor.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#to-idle" }],
+    "state": { "phase": "Idle" },
+    "domAnchored": [
+      { "selector": "[data-arm=\"loading\"]", "count": 0 },
+      { "selector": "[data-arm=\"ready\"]", "count": 0 }
+    ]
+  }
+}

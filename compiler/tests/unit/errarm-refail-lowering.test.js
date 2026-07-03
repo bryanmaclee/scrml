@@ -83,8 +83,11 @@ describe("errarm-refail §1: `!{}` block arm re-fail (Layer 1 — TYPER)", () =>
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-block-2");
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
     // The arm bodies emit the canonical fail-expr shape (not a literal `fail …`).
-    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: reason \};/);
-    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: "y" \};/);
+    // §51.3.2 — a payload variant's `.data` is a field-keyed object whose keys
+    // are the declared field names, for single- AND multi-field variants alike
+    // (Wrapped(reason) -> `data: { reason: … }`), matching the enum constructor.
+    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: reason \} \};/);
+    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: "y" \} \};/);
     // Literal `fail` keyword must NOT appear in emitted JS.
     expect(clientJs).not.toMatch(/\bfail\b/);
     cleanup();
@@ -93,7 +96,9 @@ describe("errarm-refail §1: `!{}` block arm re-fail (Layer 1 — TYPER)", () =>
   test("the `::X reason` payload binding is in scope inside the re-fail arm", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-block-3");
     expect(result.errors ?? []).toHaveLength(0);
-    expect(clientJs).toMatch(/const reason = _scrml_\w+\.data;/);
+    // §51.3.2 — single-field binding projects the declared field (`.data.reason`),
+    // the same way `match` / `<errorBoundary>` read it (g-single-field-handler-bind).
+    expect(clientJs).toMatch(/const reason = _scrml_\w+\.data\.reason;/);
     cleanup();
   });
 });
@@ -120,8 +125,9 @@ describe("errarm-refail §2: JS-style match value-arm re-fail (Layer 2 — CODEG
   test("no E-CODEGEN-INVALID-JS; arm-value fail lowers to the tagged-error envelope", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-match");
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
-    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: reason \};/);
-    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: "y" \};/);
+    // §51.3.2 field-keyed `.data` (see §1 above).
+    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: reason \} \};/);
+    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: "y" \} \};/);
     expect(clientJs).not.toMatch(/=\s*fail\b/);
     cleanup();
   });
@@ -175,7 +181,8 @@ describe("errarm-refail §4: statement-position fail control (no regression)", (
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-control");
     expect(codes(result)).not.toContain("E-SCOPE-001");
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
-    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Bad", data: "must be positive" \};/);
+    // §51.3.2 field-keyed `.data` — Bad(reason) -> `data: { reason: … }`.
+    expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Bad", data: \{ reason: "must be positive" \} \};/);
     cleanup();
   });
 });

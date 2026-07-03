@@ -1,6 +1,6 @@
 {
   "id": "parse-variant-error-unknown-variant",
-  "description": "§41.13 parseVariant (b) failure mode — UnknownVariant. The wire value carries a `tag` discriminator ('{\"tag\":\"Archived\"}') whose value matches NO variant of LoadResult (Success/Empty/Failed). parseVariant raises ::ParseError::UnknownVariant(tag) and the exhaustive !{} handler routes to the UnknownVariant arm, recording @parseError = \"unknown-variant\". The contract asserts WHICH ParseError variant fired; it deliberately does NOT assert on the bound `tag` payload — see the impl#1-vs-SPEC divergence note in the ss61 dispatch report (single-field !{} arm binding binds the whole .data object, not the field value).",
+  "description": "§41.13 parseVariant (b) failure mode — UnknownVariant. The wire value carries a `tag` discriminator ('{\"tag\":\"Archived\"}') whose value matches NO variant of LoadResult (Success/Empty/Failed). parseVariant raises ::ParseError::UnknownVariant(tag) and the exhaustive !{} handler routes to the UnknownVariant arm, recording @parseError = \"unknown-variant\". This case asserts WHICH ParseError variant fired; the bound single-field `tag` VALUE is asserted by the sibling case parse-variant/single-field-payload-bind (the S236 fix for g-single-field-handler-payload-bind — the single-field !{} arm now projects the declared field `.data.tag` per §51.3.2, not the whole .data object).",
   "language-version": "1.0",
   "source-test": "compiler/tests/integration/parse-variant-runtime.test.js",
   "spec": "§41.13",
