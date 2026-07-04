@@ -1,0 +1,7 @@
+${
+    <n> = 5
+    if (@n is 0) {
+        log("zero")
+    }
+}
+<p id="p">count check</>

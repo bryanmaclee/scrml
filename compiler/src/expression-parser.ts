@@ -1184,8 +1184,18 @@ function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
  * Replace every `<lhs> is <suffix>` occurrence in `s` with the corresponding
  * `__scrml_is_X__(...)` placeholder call. Scans left-to-right, skipping
  * string-literal interiors.
+ *
+ * E-EQ-005 (§45.5, S237) — the `is` RHS is bounded. When a `<lhs> is …` form
+ * has a valid LHS but the RHS is NEITHER a sanctioned absence/presence keyword
+ * (`not` / `some` / `given` / `not not`) NOR a `.Variant` / `Type.Variant`
+ * pattern — i.e. it is a value literal (`x is 0`) or a value-expression
+ * (`x is @other`) — this scanner flags `detector.valueRhsOnIs`. The offending
+ * text is left VERBATIM (not masked): the stamped node is harvested downstream
+ * (parseExprToNode → `_isValueRhsOnIs`) and E-EQ-005 fires as a hard error
+ * BEFORE codegen, replacing the old misleading `E-DG-002` / `E-CODEGEN-INVALID-JS`
+ * mis-lowering. Mirror of E-EQ-002 (`x == not` → `x is not`); steers to `==`.
  */
-function rewriteIsPredicates(s: string): string {
+function rewriteIsPredicates(s: string, detector?: { valueRhsOnIs?: boolean }): string {
   let result = "";
   let i = 0;
   let inString: string | null = null;
@@ -1256,6 +1266,19 @@ function rewriteIsPredicates(s: string): string {
               i = suffixStart + suffix.consumeLen;
               continue;
             }
+          } else if (suffixStart < s.length && detector) {
+            // E-EQ-005 (§45.5) — `is` with a NON-sanctioned RHS. The suffix is
+            // neither `not` / `some` / `given` / `not not` nor a `.Variant` /
+            // `Type.Variant` pattern, so it is a value literal (`x is 0`,
+            // `x is "text"`, `x is true`) or a value-expression (`x is @other`,
+            // `x is someLocal`). Only flag when there is a genuine LHS predicate
+            // target (so a stray `is` with no left operand is not misread). The
+            // text is left verbatim; the downstream harvest fires E-EQ-005 and
+            // steers to `==`.
+            const lhsStart = scanLhsLeft(s, i);
+            if (lhsStart !== -1) {
+              detector.valueRhsOnIs = true;
+            }
           }
         }
       }
@@ -1272,7 +1295,7 @@ function rewriteIsPredicates(s: string): string {
 function preprocessForAcorn(
   raw: string,
   opts?: { tildeActive?: boolean },
-  detector?: { notPrefixNegation: boolean },
+  detector?: { notPrefixNegation: boolean; valueRhsOnIs?: boolean },
 ): string {
   let s = raw.trim();
 
@@ -1377,7 +1400,7 @@ function preprocessForAcorn(
   //     codegen/rewrite.ts:_rewriteParenthesizedIsOp is enforced separately
   //     by the codegen pipeline; the AST shape carries the full expression
   //     as a node tree).
-  s = rewriteIsPredicates(s);
+  s = rewriteIsPredicates(s, detector);
 
   // Bare-dot variants (.Variant) as primary expressions (S66 — principled fix per Bryan)
   //
@@ -2658,15 +2681,22 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // walk (harvestNotPrefixNegation) emits E-TYPE-045 once per stamped node. This
   // covers ALL expression positions + BOTH forms with a single source of truth
   // (the lowering choke-point), since every expression flows through this fn once.
-  const _notDetector = { notPrefixNegation: false };
-  const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _notDetector);
-  if (_notDetector.notPrefixNegation && _node && typeof _node === "object") {
-    (_node as Record<string, unknown>)._notPrefixNegation = true;
+  //
+  // §45.5 (S237): the same detector object also captures `valueRhsOnIs` — an
+  // `is <value>` form (`x is 0` / `x is @other`) whose RHS is neither a
+  // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
+  // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
+  // (once per stamped node) BEFORE codegen, steering the author to `==`.
+  const _detector = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
+  if (_node && typeof _node === "object") {
+    if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
+    if (_detector.valueRhsOnIs) (_node as Record<string, unknown>)._isValueRhsOnIs = true;
   }
   return _node;
 }
 
-function _parseExprToNodeInner(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }, _notDetector?: { notPrefixNegation: boolean }): ExprNode {
+function _parseExprToNodeInner(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }, _notDetector?: { notPrefixNegation: boolean; valueRhsOnIs?: boolean }): ExprNode {
   if (!raw || typeof raw !== "string" || !raw.trim()) {
     // Empty expression — return an absence-literal placeholder.
     // §42 absence canon (S90 M-7C-D-12 Track 1): canonical `litType: "not"`

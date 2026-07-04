@@ -1,0 +1,12 @@
+{
+  "id": "reactive-is-literal-rhs-reject",
+  "description": "§45.5 the `is` RHS is bounded (codes): a VALUE literal on the right of `is` (`@n is 0`) is not valid — `is` is the absence / variant-discrimination keyword (`is not` / `is some` / `is .Variant`), NOT a value-equality operator (limit-the-primitive, §14.1.1). It fires E-EQ-005, steering to `==` (`@n == 0`). Mirror of E-EQ-002 (`x == not` → `x is not`). notCodes pins that the CLEAN reject REPLACES the old misleading mis-lowering: before this rule `@n is 0` silently mis-lowered to E-DG-002 (\"declared but never consumed\") or an internal E-CODEGEN-INVALID-JS. Incidental codes (e.g. W-PROGRAM-001) ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§45.5",
+  "rationale": "§45.5 / §45.8: the right operand of `is` SHALL be `not`, `some` / `given` (incl. `not not`), or an enum-variant pattern `.Variant`. A value RHS on `is` — a literal (`x is 0`) or value-expression (`x is @other`) — SHALL be a compile error (E-EQ-005); use `==` for value equality. The clean E-EQ-005 fires at the §45 equality stage BEFORE dependency-graph (E-DG-002) and codegen (E-CODEGEN-INVALID-JS), so those misleading codes must NOT fire.",
+  "expect": {
+    "codes": ["E-EQ-005"],
+    "notCodes": ["E-DG-002", "E-CODEGEN-INVALID-JS"],
+    "severity": { "E-EQ-005": "error" }
+  }
+}

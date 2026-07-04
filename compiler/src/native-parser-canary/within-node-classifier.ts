@@ -144,6 +144,15 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // atom and never goes through this stamp, so it
                               // never carries the flag; a live-pipeline-internal
                               // diagnostic field, NOT a semantic divergence.
+  "_isValueRhsOnIs",          // S237 (E-EQ-005 §45.5) — LIVE-only diagnostic-
+                              // support flag stamped by parseExprToNode when the
+                              // lowering choke-point detects a VALUE RHS on `is`
+                              // (`x is 0` / `x is @other`, non-sanctioned suffix).
+                              // Drives E-EQ-005 (steer to `==`). The native parser
+                              // does not run this string-preprocess stamp, so it
+                              // never carries the flag; a live-pipeline-internal
+                              // diagnostic field, NOT a semantic divergence
+                              // (mirrors `_notPrefixNegation` above).
   "derivedExprText",          // S190 (§51.0.J derived-engine EXPRESSION form) —
                               // LIVE-only fields on an engine-decl: the raw
                               // `derived=<expr>` source (ternary / call /

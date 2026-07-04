@@ -825,6 +825,72 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
 
 
 // ---------------------------------------------------------------------------
+// E-EQ-005 (§45.5, S237) — `is <value>` reject harvest.
+// ---------------------------------------------------------------------------
+
+/**
+ * Harvest every ExprNode stamped `_isValueRhsOnIs` by the expression-parser
+ * lowering choke-point (parseExprToNode → preprocessForAcorn → rewriteIsPredicates)
+ * and emit E-EQ-005 once per stamped node. A value RHS on `is` — a literal
+ * (`x is 0`, `x is "text"`, `x is true`) or a value-expression (`x is @other`) —
+ * is NOT valid: `is` is the absence / variant-discrimination keyword
+ * (`is not` / `is some` / `is .Variant`), not a value-equality operator
+ * (limit-the-primitive, §14.1.1). The mirror of E-EQ-002 (`x == not` → `x is not`).
+ * Resolution: use `==` (`x == 0`).
+ *
+ * Runs at the §45 equality stage (GCP3) — BEFORE dependency-graph (E-DG-002)
+ * and codegen (E-CODEGEN-INVALID-JS), so the clean "use `==`" diagnostic replaces
+ * the misleading mis-lowering the old silent path produced. A generic structural
+ * walk (mirrors type-system.harvestNotPrefixNegation) covers ALL expression
+ * positions (if / while / ${} / derived-RHS / && / attr / match arm); a
+ * visited-set guards cycles and a span-key set dedups aliased nodes.
+ *
+ * @param {object} ast — the file AST (tabResult.ast)
+ * @param {string} filePath
+ * @param {Array} errors
+ */
+function harvestValueRhsOnIs(ast, filePath, errors) {
+  if (!ast) return;
+  const seen = new WeakSet();
+  const firedSpans = new Set();
+
+  function fire(span) {
+    const s = (span && typeof span === "object")
+      ? span
+      : { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const key = `${s.file ?? filePath}:${s.start ?? 0}:${s.end ?? 0}`;
+    if (firedSpans.has(key)) return;
+    firedSpans.add(key);
+    errors.push(new GauntletPhase3Error(
+      "E-EQ-005",
+      "E-EQ-005: `is <value>` is not valid — `is` is the absence / variant keyword " +
+      "(`x is not` / `x is some` / `x is .Variant`), not a value-equality operator (§45.5). " +
+      "Use `==` for value equality (e.g. `x == 0`). Mirror of E-EQ-002 (`x == not` → `x is not`).",
+      { file: filePath, start: s.start ?? 0, end: s.end ?? 0, line: s.line ?? 1, col: s.col ?? 1 },
+    ));
+  }
+
+  function visit(v) {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (v._isValueRhsOnIs === true && typeof v.kind === "string") {
+      fire(v.span);
+    }
+    for (const k in v) {
+      if (k === "_isValueRhsOnIs") continue;
+      visit(v[k]);
+    }
+  }
+
+  visit(ast.nodes ?? []);
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -845,6 +911,9 @@ export function runGauntletPhase3EqChecks(tabResult) {
   const structFnSet = collectStructTypesWithFnField(ast);
   const bindings = collectBindings(ast, structFnSet);
   walkAst(ast, bindings, structFnSet, filePath, errors);
+
+  // E-EQ-005 (§45.5, S237) — reject `is <value>` (steer to `==`).
+  harvestValueRhsOnIs(ast, filePath, errors);
 
   return errors;
 }
