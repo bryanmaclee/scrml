@@ -81,6 +81,33 @@ const __apiFile = fileURLToPath(import.meta.url);
 const STDLIB_RUNTIME_DIR = resolve(dirname(__apiFile), "..", "runtime", "stdlib");
 
 // ---------------------------------------------------------------------------
+// Import-specifier separator normalization (GitHub #18)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize an OS filesystem path fragment into an ES-module import SPECIFIER.
+ *
+ * A `path.relative()` result uses the HOST separator — `\` on Windows, `/` on
+ * POSIX. But an import specifier is a URL, not a filesystem path: it is ALWAYS
+ * `/`-separated on every OS. Embedding a `\` produces an invalid string escape
+ * in the emitted `import ... from "<specifier>"` — e.g. `"./_scrml\process.js"`
+ * collapses `\p` and resolves to `"./_scrmlprocess.js"` ("module not found"),
+ * and `"..\sheets.js"` collapses to `"..sheets.js"`. So every relative()
+ * result that lands in an emitted import specifier MUST pass through here first.
+ *
+ * OS-independent by construction: `\` is never a legal specifier separator, so
+ * rewriting it to `/` is a no-op on POSIX (where relative() already yields `/`)
+ * and the fix on Windows. Filesystem paths handed to fs/mkdir/writeFile are
+ * deliberately NOT routed through here — those correctly use the OS separator.
+ *
+ * @param {string} p — a relative filesystem path fragment
+ * @returns {string} — the same path with `\` separators rewritten to `/`
+ */
+export function toPosixSpecifier(p) {
+  return typeof p === "string" ? p.replaceAll("\\", "/") : p;
+}
+
+// ---------------------------------------------------------------------------
 // Directory scanner
 // ---------------------------------------------------------------------------
 
@@ -216,7 +243,11 @@ export function findOutputFiles(dirPath, suffix) {
       } else if (entry.endsWith(suffix)) {
         results.push({
           absPath: fullPath,
-          relPath: relative(absRoot, fullPath),
+          // relPath is consumed by build.js/dev.js as an import SPECIFIER
+          // (generateServerEntry: `import ... from "./${filename}"`), so it
+          // must be `/`-separated on every OS (GitHub #18). absPath stays raw
+          // for fs use.
+          relPath: toPosixSpecifier(relative(absRoot, fullPath)),
         });
       }
     }
@@ -516,8 +547,10 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir) {
       }
       // Resolve the import path from the source file's directory
       const absImportPath = resolve(sourceDir, relPath);
-      // Compute the relative path from the output directory
-      let newRelPath = relative(outDir, absImportPath);
+      // Compute the relative path from the output directory. This becomes an
+      // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
+      // Windows `relative()` result would embed `\` and break the import.
+      let newRelPath = toPosixSpecifier(relative(outDir, absImportPath));
       // Ensure it starts with ./ or ../
       if (!newRelPath.startsWith('.')) newRelPath = './' + newRelPath;
       return `${prefix}${quote}${newRelPath}${quote}${semi}`;
@@ -557,7 +590,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
     (match, indent, prefix, quote, name, semi) => {
       if (!bundled.has(name)) return match;
       const target = join(stdlibAbs, `${name}.js`);
-      let rel = relative(writeDir, target);
+      // This relative path becomes the emitted `scrml:NAME` -> `./_scrml/NAME.js`
+      // import specifier, so posix-normalize it (GitHub #18).
+      let rel = toPosixSpecifier(relative(writeDir, target));
       if (!rel.startsWith(".")) rel = "./" + rel;
       return `${indent}${prefix}${quote}${rel}${quote}${semi}`;
     }
