@@ -692,23 +692,20 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // required, so the header rides along with the body. Mirrors the
         // !usesCsrfRetry branch with manual CSRF retry semantics.
         lines.push(`  // A9 Ext 5: bypass _scrml_fetch_with_csrf_retry to add Idempotency-Key header`);
-        // Issue #2 (parent scrmlTS): in baseline CSRF mode read the token from
-        // the cookie via `_scrml_get_csrf_token()` (which bootstraps one when
-        // absent) — the SAME source the non-idempotency retry helper uses. The
-        // previous `meta[name="csrf-token"]` read targeted a tag emit-html.ts
-        // never emits, so the write path always sent an empty token and BOTH the
-        // initial fetch and the retry 403'd.
+        // Issue #2 (parent scrmlTS): read the token from the cookie via
+        // `_scrml_get_csrf_token()` (which bootstraps one when absent) — the SAME
+        // source the non-idempotency retry helper uses. The previous
+        // `meta[name="csrf-token"]` read targeted a tag emit-html.ts never emits,
+        // so the write path always sent an empty token and BOTH the initial fetch
+        // and the retry 403'd.
         //
-        // KNOWN GAP (auth-managed path): when an auth middleware is in scope we
-        // still read the meta tag, which is ALSO never emitted today — so an
-        // auth-protected non-monotone CPS mutation still 403s. Fixing that means
-        // wiring the session-based CSRF token into the SSR HTML (or switching the
-        // auth path to the same cookie scheme), which is out of scope for this
-        // baseline-CSRF fix and tracked separately. Left as-is so this change
-        // does not alter auth-path behavior.
-        const _csrfTokenExpr = ctx.authMiddleware
-          ? `(typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '') : ''`
-          : `_scrml_get_csrf_token()`;
+        // g-auth-csrf-token-never-surfaced (S238): the auth path now reads the
+        // SAME cookie source. On the auth path the server is authoritative — its
+        // 403 Set-Cookie plants the §40.2 session synchronizer token
+        // (emit-server.ts), so the retry below re-reads the cookie and echoes the
+        // matching token. The former `ctx.authMiddleware` branch read a
+        // never-emitted `meta[name="csrf-token"]` tag and always 403'd twice.
+        const _csrfTokenExpr = `_scrml_get_csrf_token()`;
         lines.push(`  const _scrml_csrf_token = ${_csrfTokenExpr};`);
         lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`    method: ${JSON.stringify(httpMethod)},`);

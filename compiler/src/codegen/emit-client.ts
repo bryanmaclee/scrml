@@ -1689,9 +1689,17 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("");
   }
 
-  // Baseline CSRF token helper
-  if (csrfEnabled && !authMiddlewareEntry) {
-    lines.push("// --- CSRF token helper (compiler-generated, double-submit cookie) ---");
+  // CSRF token helper. Emitted on BOTH paths when csrf is enabled:
+  //   - baseline (no `<program auth=>`): double-submit cookie the client mints.
+  //   - auth (`csrf="auto"` + auth): the server-authoritative session
+  //     synchronizer token, delivered to this cookie by the server's 403
+  //     Set-Cookie (emit-server.ts) so the single-shot retry can echo it.
+  // g-csrf-retry-helper-def-gated (S238): this def was previously gated
+  // `!authMiddlewareEntry`, so an auth-path mount emitted the
+  // `_scrml_fetch_with_csrf_retry` CALL (emit-functions.ts) without this DEF →
+  // `ReferenceError` at load. It now emits whenever `csrfEnabled`.
+  if (csrfEnabled) {
+    lines.push("// --- CSRF token helper (compiler-generated) ---");
     lines.push("function _scrml_get_csrf_token() {");
     lines.push("  const match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
     lines.push("  if (match) return decodeURIComponent(match[1]);");
@@ -1706,6 +1714,13 @@ export function generateClientJs(ctx: CompileContext): string {
     // double-submit CSRF guarantee is preserved. The token is plain
     // (UUID / base36), so we return it directly rather than round-tripping
     // through document.cookie a second time.
+    //
+    // Auth path (§40.2 synchronizer token): the server is authoritative — the
+    // token lives in the session, not this cookie. The bootstrap-minted value
+    // does NOT match the session token, so the first mutating POST 403s; the
+    // server's 403 Set-Cookie plants the real session token, and the single-shot
+    // `_scrml_fetch_with_csrf_retry` retry re-reads it here and succeeds. Once
+    // planted, subsequent mutations this session validate on the first try.
     lines.push("  const _scrml_t = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));");
     lines.push("  document.cookie = `scrml_csrf=${_scrml_t}; Path=/; SameSite=Strict`;");
     lines.push("  return _scrml_t;");

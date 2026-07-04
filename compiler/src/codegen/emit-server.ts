@@ -1369,6 +1369,11 @@ export function generateServerJs(
   // across every emitted server route, so a login on one route is visible to a
   // serverLoad on another).
   if (_needsSessionInfra) {
+    // §40.2 / §39.2.3 — with `<program auth=>` + `csrf="auto"` the CSRF token is
+    // a SESSION-BOUND SYNCHRONIZER token (not the no-auth double-submit cookie).
+    // When csrf is auto the middleware mints + surfaces it (see below); otherwise
+    // the middleware is byte-identical to a non-CSRF session-infra app.
+    const _csrfAuto = authMiddlewareEntry?.csrf === "auto";
     lines.push("// --- §52 Session store + request-context middleware (compiler-generated) ---");
     lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
     lines.push("");
@@ -1376,6 +1381,18 @@ export function generateServerJs(
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
     lines.push("  const sessionId = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
     lines.push("  const _rec = sessionId ? (_scrml_session_store.get(sessionId) || null) : null;");
+    if (_csrfAuto) {
+      // §40.2 session-bound synchronizer token. Per §39.2.3 the compiler emits a
+      // server-side function that "reads OR creates a CSRF token in the current
+      // session" — so we mint it lazily on first read and PERSIST it back onto
+      // the session-store record. `_scrml_validate_csrf` then has a stable,
+      // session-bound value to compare the client's `X-CSRF-Token` against.
+      // Anonymous requests (no `_rec`) carry no token and never reach the CSRF
+      // gate (the `_scrml_auth_check` 302 short-circuits mutating routes first).
+      lines.push("  if (_rec && !_rec.csrfToken) {");
+      lines.push("    _rec.csrfToken = _scrml_generate_csrf();");
+      lines.push("  }");
+    }
     // userId / role resolve from the session store keyed by sessionId. Absence is
     // `null` (scrml `not`) — anon → null → SQL NULL → row-scope fails closed.
     lines.push("  return {");
@@ -1383,6 +1400,9 @@ export function generateServerJs(
     lines.push("    isAuth: !!sessionId,");
     lines.push("    userId: _rec ? (_rec.userId ?? null) : null,");
     lines.push("    role: _rec ? (_rec.role ?? null) : null,");
+    if (_csrfAuto) {
+      lines.push("    csrfToken: _rec ? (_rec.csrfToken ?? null) : null,");
+    }
     lines.push("  };");
     lines.push("}");
     lines.push("");
@@ -2122,12 +2142,22 @@ export function generateServerJs(
     }
 
     if (authMiddlewareEntry?.csrf === "auto" && isStateMutating) {
-      lines.push(`  // CSRF validation (compiler-generated, auth path)`);
+      lines.push(`  // CSRF validation (compiler-generated, auth path — §40.2 session synchronizer token)`);
       lines.push(`  const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);`);
       lines.push(`  if (!_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {`);
+      // §40.2: the authoritative token lives in the session, NOT a client-minted
+      // cookie. Deliver it to the client on the 403 (mirrors the baseline 403's
+      // Set-Cookie below) so the client's single-shot `_scrml_fetch_with_csrf_retry`
+      // can echo the matching `X-CSRF-Token`. Readable + SameSite=Strict: a
+      // cross-site forged POST sends no cookie and cannot read this response, so
+      // it is still rejected — the token is only useful to the same-origin client.
+      lines.push(`    const _scrml_csrf_403_headers = { "Content-Type": "application/json" };`);
+      lines.push(`    if (_scrml_sessionForCsrf.csrfToken) {`);
+      lines.push(`      _scrml_csrf_403_headers["Set-Cookie"] = \`scrml_csrf=\${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict\`;`);
+      lines.push(`    }`);
       lines.push(`    return new Response(JSON.stringify({ error: "CSRF validation failed" }), {`);
       lines.push(`      status: 403,`);
-      lines.push(`      headers: { "Content-Type": "application/json" },`);
+      lines.push(`      headers: _scrml_csrf_403_headers,`);
       lines.push(`    });`);
       lines.push(`  }`);
     }
