@@ -766,10 +766,22 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // which is not the declared return type — they take the raw `.json()`.
     const _isLastStub = !_isMultiStub || _sb.batchIndex === _stubBatches.length - 1;
     if (_isLastStub && returnTypeAllowsAbsence(_retAnnot)) {
-      lines.push(`  return _scrml_wire_decode(await _scrml_resp.json());`);
+      lines.push(`  const _scrml_body_json = _scrml_wire_decode(await _scrml_resp.json());`);
     } else {
-      lines.push(`  return _scrml_resp.json();`);
+      lines.push(`  const _scrml_body_json = await _scrml_resp.json();`);
     }
+    // §6.7.7 / §19.9.2 (Peter #20) — a non-2xx response that is NOT a typed scrml
+    // error envelope is a transport / host / upstream failure. Surface it as a
+    // rejection so a `<request>` settles to `.error` (not the success cell) and a
+    // reactive-assign's `.catch` routes it to the error surface, instead of the
+    // pre-fix behavior where a 500 body was returned and silently treated as
+    // success data. A `{ __scrml_error, ... }` envelope (a scrml `!`/`fail`, HTTP
+    // 500 per §19.9.2) is a RETURNED value the match / `?` / `!{}` / errorBoundary
+    // dispatch consumes via `.__scrml_error` — it is NEVER thrown here.
+    lines.push(`  if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {`);
+    lines.push(`    throw new Error("HTTP " + _scrml_resp.status);`);
+    lines.push(`  }`);
+    lines.push(`  return _scrml_body_json;`);
     lines.push(`}`);
     lines.push("");
     } // end per-batch fetch-stub loop (Ext 1 M1.5)

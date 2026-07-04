@@ -856,6 +856,127 @@ export function collectRequestIds(fileAST: Record<string, unknown>): Set<string>
 }
 
 /**
+ * §6.7.7 — the reactive-assign settle info for each body-form `<request>`.
+ * `<request id="R">${ @cell = serverFn(...) }</>` — the "body form" that has NO
+ * `url=` and NO `api=` attr (those two drive their own fetch machinery in
+ * `emitRequestNode`; the body form's fetch IS the body's server-fn call).
+ */
+export interface RequestBodyCell {
+  /** The `<request id="R">` id — names the hoisted `_scrml_request_<R>` state object. */
+  requestId: string;
+  /** The `@variable` reads that trigger a re-fetch (explicit `deps=` OR inferred). */
+  depsVars: string[];
+}
+
+/**
+ * §6.7.7 — map each body-form `<request>`'s assigned cell NAME → its settle info.
+ *
+ * Keyed by the body's assigned cell (`@cell` in `${ @cell = serverFn() }`) so the
+ * emit-client auto-await pass — which sees the lowered `_scrml_reactive_set("cell",
+ * stub(...))` — can recognize a request-body reactive-assign and wrap it with the
+ * full loading/data/error/stale settle machine that mutates `_scrml_request_<R>`.
+ *
+ * ONLY the body form is collected: a `<request url=>` / `<request api=>` already
+ * emits its own settle machine in `emitRequestNode`, and its body (if any) is not
+ * a server-fn reactive-assign of this shape.
+ */
+export function collectRequestBodyCells(
+  fileAST: Record<string, unknown>,
+): Map<string, RequestBodyCell> {
+  const out = new Map<string, RequestBodyCell>();
+  if (!fileAST || typeof fileAST !== "object") return out;
+  const nodes = getNodes(fileAST);
+
+  function attrValue(node: any, name: string): string | null {
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    for (const a of attrs) {
+      if (a?.name !== name) continue;
+      const v = a.value;
+      if (v?.kind === "string-literal" && typeof v.value === "string") return v.value;
+      if (v?.kind === "variable-ref") return (v.name ?? "").replace(/^@/, "");
+      if (typeof v === "string") return v;
+      if (typeof v?.value === "string") return v.value;
+    }
+    return null;
+  }
+
+  function hasAttr(node: any, name: string): boolean {
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    return attrs.some((a) => a?.name === name);
+  }
+
+  // Explicit `deps=[@a, @b]` → the @-var names (mirrors emitRequestNode).
+  function explicitDeps(node: any): string[] {
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    const depsAttr = attrs.find((a) => a?.name === "deps");
+    if (!depsAttr) return [];
+    const v = depsAttr.value;
+    const found: string[] = [];
+    if (v?.kind === "array" && Array.isArray(v.elements)) {
+      for (const el of v.elements) {
+        if (el?.kind === "variable-ref") found.push((el.name ?? "").replace(/^@/, ""));
+      }
+    } else if (typeof v?.value === "string") {
+      for (const m of v.value.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g)) found.push(m[1]);
+    }
+    return found;
+  }
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as any;
+
+      if (
+        n.kind === "markup" && n.tag === "request" &&
+        !hasAttr(n, "url") && !hasAttr(n, "api")
+      ) {
+        const requestId = attrValue(n, "id");
+        // The body is a `logic` child whose first `state-decl` is `@cell = expr`.
+        let cell: string | null = null;
+        let initSrc = "";
+        for (const child of (n.children ?? [])) {
+          if (child && child.kind === "logic" && Array.isArray(child.body)) {
+            for (const stmt of child.body) {
+              if (stmt && stmt.kind === "state-decl" && typeof stmt.name === "string") {
+                cell = stmt.name;
+                initSrc = typeof stmt.init === "string" ? stmt.init : "";
+                break;
+              }
+            }
+          }
+          if (cell) break;
+        }
+        if (requestId && cell) {
+          // deps=[...] wins; else infer @var reads from the body expr (§6.7.7).
+          let depsVars = explicitDeps(n);
+          if (depsVars.length === 0 && initSrc) {
+            depsVars = [...extractReactiveDeps(initSrc, null)];
+          }
+          out.set(cell, { requestId, depsVars });
+        }
+      }
+
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+      if (Array.isArray(n.bodyChildren)) visit(n.bodyChildren as unknown[]);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body as unknown[]);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray(n.consequent)) visit(n.consequent as unknown[]);
+        if (Array.isArray(n.alternate)) visit(n.alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
+        visit(n.body as unknown[]);
+      }
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) visit(n.body as unknown[]);
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return out;
+}
+
+/**
  * §59.8 (S169) — Collect the names of every cell whose `state-decl` type
  * annotation is an `@ordered` value-native map (`[KeyT: ValT]@ordered`). This is
  * the STRICT subset of `collectMapVarNames` for which a map-literal VALUE must

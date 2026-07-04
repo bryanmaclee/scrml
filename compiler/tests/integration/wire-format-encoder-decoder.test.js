@@ -163,7 +163,12 @@ describe("§57 wire dual-decoder — type-gating on client fetch stub", () => {
   test("declared `string` return does NOT wrap in decoder", () => {
     const { clientJs } = makeServerFn("loadName", "string");
     expect(clientJs).not.toContain("_scrml_wire_decode(await _scrml_resp.json())");
-    expect(clientJs).toContain("return _scrml_resp.json()");
+    // Peter #20 — the stub now binds `const _scrml_body_json = await
+    // _scrml_resp.json();`, applies the §6.7.7/§19.9.2 non-2xx ok-check (a
+    // non-`{__scrml_error}` non-2xx throws), then `return _scrml_body_json;`.
+    // Pure-`T` still takes the RAW `.json()` (no decoder wrap).
+    expect(clientJs).toContain("const _scrml_body_json = await _scrml_resp.json();");
+    expect(clientJs).toContain("return _scrml_body_json;");
   });
 
   test("postfix `User?` sugar triggers decoder wrap", () => {

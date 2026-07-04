@@ -1,0 +1,20 @@
+{
+  "id": "request-settle-success-rt",
+  "description": "§6.7.7 <request> settled-state machine, SUCCESS path (Peter #20 / GitHub #20). A body-form `<request id=\"userReq\">${ @userData = loadUser() }</>` calls a server fn returning a User. On a 2xx settle: `<#userReq>.loading` transitions to false (#loading reads \"false\" — was STUCK at initial `true` pre-fix), `<#userReq>.data` populates so `if=<#userReq>.data` shows #who, the assigned @userData cell hydrates from .data (#who reads the name), and `<#userReq>.error` stays absent so `if=<#userReq>.error` keeps #err out of the DOM. Twin of request-settle-error-rt.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 settled(success): .loading→false, .data→resolved value, .error remains not, .stale→false; the assigned @cell is the sanctioned compiler-managed write point populated from .data. Pre-fix the compiler emitted the request-state object + read sites but NO transition code, so none of these settled — the state machine was inert (Peter #20).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-TYPE-", "E-RI-"],
+    "input": [{ "wait": "settle" }],
+    "serverStub": { "loadUser": { "id": 7, "name": "Ada" } },
+    "state": { "userData": { "id": 7, "name": "Ada" } },
+    "domAnchored": [
+      { "selector": "#loading", "text": "false" },
+      { "selector": "#who", "text": "Ada" },
+      { "selector": "#err", "count": 0 }
+    ]
+  }
+}

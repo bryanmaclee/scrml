@@ -1,0 +1,23 @@
+{
+  "id": "request-settle-error-rt",
+  "description": "§6.7.7 <request> settled-state machine, FAILURE path (Peter #20 / GitHub #20). Same body-form `<request>` as request-settle-success-rt, but loadUser's route returns a RAW non-2xx (HTTP 500 `{error, detail}` — NOT a scrml `{__scrml_error}` envelope; the __httpError directive models an uncaught host throw / upstream API 500). On settle: `<#userReq>.loading`→false (#loading \"false\"), `<#userReq>.error` populates so `if=<#userReq>.error` renders #err, `<#userReq>.data` stays absent (#who out of the DOM), and CRITICALLY the parsed error body is NOT written to the @userData success cell (state.userData stays null) — closing the pre-fix type violation where a 500 body was silently treated as success data.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 settled(failure): .loading→false, .error→caught error, .data retains prior (not, first mount), the success cell is left untouched. §19.9.2: a non-2xx that is NOT a `{__scrml_error}` scrml-fail envelope is a transport/host failure — the per-route stub surfaces it as a rejection so the <request> settles to .error, never the cell. Pre-fix the stub returned resp.json() blindly and the request emitted no transition code, so the 500 body landed in the cell and .error/.loading never moved (Peter #20).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-TYPE-", "E-RI-"],
+    "input": [{ "wait": "settle" }],
+    "serverStub": {
+      "loadUser": { "__httpError": { "status": 500, "body": { "error": "Internal server error", "detail": "boom" } } }
+    },
+    "state": { "userData": null },
+    "domAnchored": [
+      { "selector": "#loading", "text": "false" },
+      { "selector": "#err", "count": 1 },
+      { "selector": "#err", "text": "failed" },
+      { "selector": "#who", "text": "" }
+    ]
+  }
+}

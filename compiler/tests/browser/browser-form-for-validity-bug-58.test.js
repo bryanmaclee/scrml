@@ -86,7 +86,12 @@ function mount() {
   const fetchCalls = [];
   globalThis.fetch = async (path, opts) => {
     fetchCalls.push({ path, opts });
+    // A faithful Response mock: `.ok` is REQUIRED — the per-route stub now applies
+    // the §6.7.7/§19.9.2 non-2xx ok-check (Peter #20), so a 2xx mock must set
+    // `ok: true` (a real `fetch` Response always does). Without it the stub sees a
+    // falsy `.ok` on a 200 and rejects with "HTTP 200".
     return {
+      ok: true,
       status: 200,
       json: async () => ({ ok: true }),
     };

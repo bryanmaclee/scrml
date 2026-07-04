@@ -222,6 +222,25 @@ function isServerErrorDirective(v: unknown): v is ServerErrorDirective {
   );
 }
 
+// §6.7.7 / §19.9.2 (Peter #20) — the RAW (non-scrml-typed) HTTP failure directive:
+// a transport / host / upstream error that is NOT a scrml `!`/`fail` envelope. The
+// server returns `body` VERBATIM (e.g. `{"error":"Internal server error","detail":
+// "..."}`) with the given non-2xx status — modeling the common real-world case
+// (an uncaught host throw, an upstream API 500) that must settle a `<request>` to
+// `.error`, never the success cell. Impl-neutral: names an HTTP status + a raw
+// body, no wire-envelope keys. `body` defaults to a generic error object.
+interface HttpErrorDirective {
+  __httpError: { status: number; body?: unknown };
+}
+
+function isHttpErrorDirective(v: unknown): v is HttpErrorDirective {
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    Object.prototype.hasOwnProperty.call(v, "__httpError")
+  );
+}
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 /**
@@ -252,6 +271,14 @@ function installServerStubFetch(serverStub: ServerStub): () => void {
       // `.__scrml_error` (see runtime-template.js `_scrml_error_boundary_log`).
       body = { __scrml_error: true, type: e.type, variant: e.variant, data: e.data ?? null };
       status = typeof e.status === "number" ? e.status : 500; // §19.9.2 default
+    } else if (isHttpErrorDirective(body)) {
+      // Peter #20 — a RAW non-2xx (no scrml envelope). The body rides verbatim; a
+      // `<request>` must settle it to `.error`, not the success cell.
+      const h = body.__httpError;
+      status = typeof h.status === "number" ? h.status : 500;
+      body = h.body === undefined
+        ? { error: "Internal server error", detail: "" }
+        : h.body;
     }
     return new RealResponse(JSON.stringify(body === undefined ? null : body), {
       status,

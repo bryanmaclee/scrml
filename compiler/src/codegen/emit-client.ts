@@ -4,7 +4,7 @@ import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { rewriteCodeSegments } from "./code-segments.ts";
@@ -2075,6 +2075,80 @@ export function generateClientJs(ctx: CompileContext): string {
     // awaits the fetch stub before setting the reactive. Scoped by fnNameMap
     // so only server-fn call sites (fetch stubs / CPS wrappers) are touched.
     clientStage(ctx, "post-server-fn-iife-wrap", () => {
+    // §6.7.7 — body-form `<request id="R">${ @cell = serverFn() }</>` settle
+    // machine. The body's reactive-assign lowers to the same
+    // `_scrml_reactive_set("cell", stub(...))` this pass wraps in an async IIFE;
+    // when "cell" is a request-body cell we instead emit the FULL loading/data/
+    // error/stale settle machine that mutates the hoisted `_scrml_request_<R>`
+    // state object (declared in emit-reactive-wiring's hoist pass). Peter #20:
+    // the state object was declared but never mutated — reads were live but the
+    // WRITES were absent, so `.loading` stuck `true`, `.data`/`.error` stayed
+    // `null`, and a non-2xx body landed in the cell as success. The stub itself
+    // now throws on a non-`{__scrml_error}` non-2xx (emit-functions.ts), so a
+    // transport/host failure routes to `.error` here, never the success cell.
+    const requestBodyCells: Map<string, RequestBodyCell> = collectRequestBodyCells(fileAST);
+    // A request-body cell's mount-fetch is emitted ONCE at module-init (before
+    // the DOMContentLoaded wiring), so it is the FIRST occurrence in the client.
+    // Convert only that first occurrence per request id; any later reassignment
+    // of the same cell (e.g. an event handler) stays a plain cell-set IIFE so we
+    // never redeclare the fetch fn / seq / mounted vars.
+    const convertedRequestCells = new Set<string>();
+    // Emit the §6.7.7 settle machine as a statement-position replacement for the
+    // plain `_scrml_reactive_set(cell, stub(args))` cell-set. `nameArg` is the
+    // JS source of the cell key (a `"cell"` string literal for a request body).
+    const emitRequestSettleMachine = (
+      info: RequestBodyCell,
+      nameArg: string,
+      call: string,
+    ): string => {
+      const R = info.requestId;
+      const stateVar = `_scrml_request_${R}`;
+      const seqVar = `${stateVar}_seq`;
+      const mountedVar = `${stateVar}_mounted`;
+      const fetchFn = `${stateVar}_fetch`;
+      const lines: string[] = [];
+      lines.push(`var ${seqVar} = 0;`);
+      lines.push(`var ${mountedVar} = true;`);
+      lines.push(`async function ${fetchFn}() {`);
+      lines.push(`  var _scrml_seq = ++${seqVar};`);
+      lines.push(`  ${stateVar}.loading = true;`);
+      lines.push(`  ${stateVar}.error = null;`);
+      lines.push(`  if (${stateVar}.data !== null) { ${stateVar}.stale = true; }`);
+      lines.push(`  try {`);
+      lines.push(`    var _scrml_data = await ${call};`);
+      lines.push(`    if (!${mountedVar} || _scrml_seq !== ${seqVar}) return;`);
+      // Populate the assigned cell BEFORE `.data` so a `<#R>.data`-truthy render
+      // that reads the cell (`if=<#R>.data > ${@cell.field}`) sees a populated
+      // cell — avoids a 1-mutation intermediate-render window. `.loading` flips
+      // false LAST so the canonical §6.7.7 else-branch (gated on `!.loading` /
+      // `!.error`, reading the cell) also renders with the cell already set.
+      lines.push(`    _scrml_reactive_set(${nameArg}, _scrml_data);`);
+      lines.push(`    ${stateVar}.data = _scrml_data;`);
+      lines.push(`  } catch (_scrml_e) {`);
+      lines.push(`    if (!${mountedVar} || _scrml_seq !== ${seqVar}) return;`);
+      lines.push(`    ${stateVar}.error = _scrml_e;`);
+      lines.push(`  }`);
+      lines.push(`  ${stateVar}.loading = false;`);
+      lines.push(`  ${stateVar}.stale = false;`);
+      lines.push(`}`);
+      lines.push(`${stateVar}.refetch = ${fetchFn};`);
+      lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
+      if (info.depsVars.length > 0) {
+        // Re-fetch on any declared/inferred `@var` dependency change (§6.7.7).
+        // The reads inside the effect establish the reactive subscription; the
+        // effect also fires once on registration → the mount fetch.
+        const depsJs = info.depsVars
+          .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
+          .join(", ");
+        lines.push(`_scrml_effect(function() {`);
+        lines.push(`  var _scrml_deps = [${depsJs}];`);
+        lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+        lines.push(`});`);
+      } else {
+        lines.push(`${fetchFn}();`);
+      }
+      return lines.join("\n");
+    };
     // ss41 (g-auto-await-error-arm-dead-promise-check) — string-aware matching
     // `}` finder for the error-arm relocation below. An `!{}` arm body may carry
     // `{`/`}` inside a string literal (e.g. an error message), so a naive
@@ -2233,6 +2307,31 @@ export function generateClientJs(ctx: CompileContext): string {
                 continue;
               }
             }
+          }
+        }
+
+        // §6.7.7 — body-form `<request>` settle machine. When the target cell is
+        // a request-body cell (and this is its first, module-init occurrence, in
+        // statement position), replace the plain cell-set IIFE with the full
+        // loading/data/error/stale machine that drives `_scrml_request_<R>`. The
+        // machine's own try/catch routes a thrown fetch (a non-2xx surfaced by the
+        // stub) to `.error` and leaves the success cell untouched (§6.7.7 failure
+        // contract); success sets both `.data` and the cell.
+        if (hadTrailingSemi && requestBodyCells.size > 0) {
+          let cellKey: string | null = null;
+          try {
+            const parsed = JSON.parse(nameArg.trim());
+            if (typeof parsed === "string") cellKey = parsed;
+          } catch {
+            cellKey = null;
+          }
+          const reqInfo = cellKey !== null ? requestBodyCells.get(cellKey) : undefined;
+          if (reqInfo && !convertedRequestCells.has(reqInfo.requestId)) {
+            convertedRequestCells.add(reqInfo.requestId);
+            parts.push(clientCode.slice(i, setIdx));
+            parts.push(emitRequestSettleMachine(reqInfo, nameArg, `${mangledName}(${args})`));
+            i = stmtEnd;
+            continue;
           }
         }
 

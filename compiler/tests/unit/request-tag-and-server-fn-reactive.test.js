@@ -13,9 +13,18 @@
  * 2. `<request id="req1">` without a `url=` attribute emitted a full
  *    fetch machinery whose `fetch(urlExpr, ...)` call had urlExpr=`""`.
  *    The empty-URL fetch ran on mount, silently failed, and added
- *    runtime noise. The tag was being used as a wrapper around a body
- *    that already did its own fetch (`\${ @data = loadValue() }`); the
- *    tag's own machinery was redundant.
+ *    runtime noise. GITI-001 fixed the empty-URL fetch by emitting NO
+ *    request machinery at all for the body form — but that ALSO dropped
+ *    the §6.7.7 loading/data/error/stale SETTLE machine, so
+ *    `_scrml_request_<id>` was declared and never mutated (Peter #20).
+ *
+ * Peter #20 (§6.7.7) CORRECTION: the body form's fetch IS the body's
+ * server-fn stub, and the settle machine drives `_scrml_request_<id>`
+ * around it (loading→false on settle; .data + cell on 2xx; .error on a
+ * thrown/non-2xx, leaving the success cell untouched). The GENERAL
+ * (non-`<request>`) reactive-server assignment keeps the plain auto-await
+ * IIFE (§1/§6/§7/§8, now via the `plainTopFx` non-request fixture). The
+ * §6.7.7 machine is asserted in §3.
  *
  * Fixes (emit-client.ts + emit-reactive-wiring.ts):
  *   - Post-emit rewrite: `_scrml_reactive_set("X", _scrml_fetch_Y_N(...))`
@@ -51,7 +60,7 @@ function fix(name, src) {
   return path;
 }
 
-let gitiFx, urlFx, plainFx, exprCtxFx, errArmHandlerFx;
+let gitiFx, urlFx, plainFx, exprCtxFx, errArmHandlerFx, plainTopFx;
 
 beforeAll(() => {
   mkdirSync(FIXTURE_DIR, { recursive: true });
@@ -167,6 +176,29 @@ beforeAll(() => {
 
 </program>
 `);
+
+  // Peter #20 (§6.7.7): the GENERAL auto-await IIFE for a reactive-server
+  // assignment that is NOT a `<request>` body. A top-level `\${ @data =
+  // loadValue() }` outside any `<request>` keeps the plain single-line IIFE +
+  // ss32 `.catch` uncaught-surface arm — the mechanism the §1/§6/§7/§8 blocks
+  // guard. (The `<request>` body form, gitiFx, now emits the §6.7.7 SETTLE
+  // MACHINE instead — see §3 + the dedicated §9 block below.)
+  plainTopFx = fix("plain-top-assign.scrml", `<program>
+
+\${
+  server function loadValue() {
+    lift { value: 42 }
+  }
+}
+
+\${ @data = loadValue() }
+
+<div>
+  <p>\${@data}</p>
+</div>
+
+</program>
+`);
 });
 
 afterAll(() => {
@@ -188,8 +220,11 @@ describe("§1: GITI-001 — `@data = serverFn()` awaited before reactive set", (
   });
 
   test("reactive-set of a server-fn call is wrapped in async IIFE with await + error arm", () => {
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    // The GENERAL (non-`<request>`) reactive-server assignment keeps the plain
+    // auto-await IIFE. (The `<request>` body form now routes to the §6.7.7 settle
+    // machine — asserted in §3 + §9.)
+    const result = compile(plainTopFx);
+    const js = result.outputs.get(plainTopFx).clientJs;
     // The wrapped form — now carries the ss32-item-1 `.catch` error arm so a
     // rejected fetch/CPS stub surfaces via the scrml uncaught surface instead of
     // a browser-level unhandledrejection (catch-less silent drop).
@@ -218,14 +253,32 @@ describe("§2: emitted JS parses as a module", () => {
 // §3: `<request>` without url= emits no fetch machinery
 // ---------------------------------------------------------------------------
 
-describe("§3: `<request id=\"req1\">` without url= emits no fetch", () => {
-  test("no empty-URL fetch call is emitted", () => {
+describe("§3: `<request id=\"req1\">` without url= drives the §6.7.7 settle machine", () => {
+  test("no empty-URL raw fetch is emitted (the fetch IS the body's server-fn stub)", () => {
     const result = compile(gitiFx);
     const js = result.outputs.get(gitiFx).clientJs;
-    // The buggy pattern was `fetch("", { method: "GET" })`. Must not appear.
+    // The old GITI-001 bug pattern was a raw `fetch("", { method: "GET" })`. The
+    // body form never emits its own raw fetch — its fetch is the body's server-fn
+    // stub (`_scrml_fetch_loadValue_N`), driven by the settle machine.
     expect(js).not.toMatch(/fetch\(""\s*,\s*\{\s*method:\s*"GET"\s*\}/);
-    // The full request-state vars must also be absent
-    expect(js).not.toContain("_scrml_request_req1_fetch");
+  });
+
+  test("Peter #20 — the settle machine IS emitted (state object is now mutated)", () => {
+    const result = compile(gitiFx);
+    const js = result.outputs.get(gitiFx).clientJs;
+    // GITI-001 wrongly deemed the request machinery "redundant" and emitted NONE —
+    // so `_scrml_request_req1` was declared but never mutated (Peter #20). The
+    // settle machine now wires the WRITES.
+    expect(js).toContain("async function _scrml_request_req1_fetch()");
+    expect(js).toContain("_scrml_request_req1.loading = true;");
+    expect(js).toContain("_scrml_request_req1.loading = false;");
+    expect(js).toContain("_scrml_request_req1.error = null;");
+    expect(js).toContain("_scrml_request_req1.data = _scrml_data;");
+    expect(js).toContain("_scrml_request_req1.error = _scrml_e;");
+    expect(js).toContain("_scrml_request_req1.refetch = _scrml_request_req1_fetch;");
+    // The success cell is populated ONLY on the happy path, BEFORE `.data` (so a
+    // `<#R>.data`-gated render reading the cell sees it populated — no window).
+    expect(js).toMatch(/_scrml_reactive_set\("data", _scrml_data\);\s*\n\s*_scrml_request_req1\.data = _scrml_data;/);
   });
 });
 
@@ -316,12 +369,12 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
   });
 
   test("statement-context wrap (top-level or in fn body) still ends with `().catch(...);`", () => {
-    // The original §1 fixture has `@data = loadValue()` inside a `<request>`
-    // body, which compiles to a statement-context wrap. Verify that path
-    // still emits the trailing `;` (now after the ss32-item-1 `.catch` error
-    // arm) — must not regress.
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    // A top-level `@data = loadValue()` (NON-`<request>`) compiles to a
+    // statement-context wrap. Verify that path still emits the trailing `;`
+    // (now after the ss32-item-1 `.catch` error arm) — must not regress. (The
+    // `<request>` body form now routes to the §6.7.7 settle machine, §3/§9.)
+    const result = compile(plainTopFx);
+    const js = result.outputs.get(plainTopFx).clientJs;
     // Match the statement-form: `(async () => _scrml_reactive_set("data", await _scrml_fetch_loadValue_N()))().catch(_scrml_async_err => _scrml_error_boundary_log("data", _scrml_async_err));`
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
   });
@@ -344,9 +397,10 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
 
 describe("§7: ss32-item-1 — auto-await IIFE error arm", () => {
   test("no-`!{}` reactive server assignment: IIFE carries `.catch` -> uncaught surface", () => {
-    const result = compile(gitiFx);
+    // General (non-`<request>`) reactive-server assignment — the plain IIFE path.
+    const result = compile(plainTopFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(gitiFx).clientJs;
+    const js = result.outputs.get(plainTopFx).clientJs;
     // The error arm routes through the typed uncaught surface, not a silent drop.
     expect(js).toContain(".catch(_scrml_async_err => _scrml_error_boundary_log(");
     // The reference target must be present in the (always-included) runtime.
@@ -464,8 +518,9 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
   });
 
   test("INVARIANCE: the no-`!{}` reactive-server form is byte-unchanged (no `let`/IIFE-block relocation)", () => {
-    const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    // General (non-`<request>`) plain form — must not acquire the error-arm block.
+    const result = compile(plainTopFx);
+    const js = result.outputs.get(plainTopFx).clientJs;
     // The plain `@data = loadValue()` (no `!{}`) keeps the ss32 single-line form:
     // `(async () => _scrml_reactive_set("data", await stub()))().catch(...)`.
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);

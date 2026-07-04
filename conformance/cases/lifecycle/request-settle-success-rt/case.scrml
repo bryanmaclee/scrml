@@ -1,0 +1,16 @@
+${
+    type User:struct = { id: number, name: string }
+    <userData> : User | not = not
+    function loadUser() : User | not {
+        rows = ?{`SELECT id, name FROM users LIMIT 1`}
+        return rows[0]
+    }
+}
+<page>
+    <request id="userReq">
+        ${ @userData = loadUser() }
+    </>
+    <p id="loading">${<#userReq>.loading}</>
+    <div id="err" if=${<#userReq>.error}>failed</>
+    <p id="who" if=${<#userReq>.data}>${@userData?.name}</>
+</page>
