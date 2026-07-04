@@ -1,0 +1,18 @@
+{
+  "id": "error-match-failable-ok-arm-rt",
+  "description": "§19.7.3 explicit `match` over a failable (`!`) result — the implicit `::Ok(v)` success arm. computeOk: safeDiv(10,2) succeeds and returns 5 BARE (un-tagged); the `::Ok(v)` arm fires and binds v = the whole success value, so @okOut = 'ok: 5'. computeErr: safeDiv(10,0) fails DivErr.DivByZero (a { __scrml_error,... } envelope); the `::DivByZero` arm routes and @errOut = 'ERR: divide by zero'. Proves the success arm both FIRES and BINDS, and the error arm still routes by .variant (GitHub #21).",
+  "language-version": "1.0",
+  "spec": "§19.7.3",
+  "rationale": "§19.7 / §19.5.2: a `!` function returns its success value BARE and its error path as a tagged `{ __scrml_error, type, variant, data }` envelope (§19.9.1). The `::Ok` variant is the implicit success wrapper (§19.7.3) — `match` must discriminate success (bare value → Ok(value)) from error (envelope → its .variant). Before the fix the tag discriminator read `.variant` off the bare success (never 'Ok', so `::Ok` never fired) and left `v` unbound. E-ERROR-* silent (safeDiv is `!`, uses `fail` legally; both matches handle the result).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-", "E-CG-", "E-CODEGEN-"],
+    "input": [{ "click": "#btn-ok" }, { "click": "#btn-err" }],
+    "state": { "okOut": "ok: 5", "errOut": "ERR: divide by zero" },
+    "domAnchored": [
+      { "selector": "#out-ok", "count": 1, "text": "ok: 5" },
+      { "selector": "#out-err", "count": 1, "text": "ERR: divide by zero" }
+    ]
+  }
+}

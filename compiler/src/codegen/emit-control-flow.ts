@@ -2119,7 +2119,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
   }
 
   // S22 §1a slice 2: decide whether this match needs the tagged-object normalization.
-  const needsTagNormalization = hasPayloadBindingOrTaggedVariant(arms);
+  // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
+  // success value is bare, so the `::Ok` arm can only be recognized via the
+  // `__scrml_error`-sentinel tag).
+  const failableMatch = isFailableOkMatch(arms);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
   const iifeLines: string[] = [];
@@ -2131,16 +2135,16 @@ export function emitMatchExpr(node: any, opts?: any): string {
   iifeLines.push(_matchMode === "server" ? `await (async function() {` : `(function() {`);
   iifeLines.push(`  const ${tmpVar} = ${header};`);
   if (needsTagNormalization) {
-    iifeLines.push(
-      `  const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`,
-    );
+    iifeLines.push(`  ${emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch)}`);
   }
 
   let conditionIndex = 0;
   for (const arm of arms) {
     // Pre-compute payload binding statements (applies to variant arms only).
+    // §19.7.3 — the failable-match `::Ok(v)` arm binds `v` to the whole bare
+    // success value (not `tmpVar.data.field`).
     const bindingPrelude = arm.kind === "variant"
-      ? emitVariantBindingPrelude(arm, tmpVar)
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok")
       : "";
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
@@ -2359,10 +2363,65 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
   });
 }
 
-export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string): string {
+/**
+ * §19.7 / §19.5.2 — detect a `match` over a FAILABLE (`!`) result.
+ *
+ * A `!` function returns its success value BARE (un-tagged) and its error path
+ * as a tagged `{ __scrml_error, type, variant, data }` envelope (§19.9.1). The
+ * developer names the success case with the implicit `::Ok(value)` wrapper
+ * (§19.7.3) — `Ok` is reserved for exactly this. So a `match` whose arms include
+ * an `Ok` variant arm is a match over a failable result, and MUST discriminate
+ * success-vs-error on the `__scrml_error` sentinel rather than on `.variant`.
+ *
+ * A file-local enum that genuinely declares a payload variant named `Ok` wins
+ * (it lands in `_variantFields`), so this predicate defers to the regular
+ * tagged-object path in that (pathological) collision.
+ */
+export function isFailableOkMatch(arms: MatchArm[]): boolean {
+  if (_variantFields?.has("Ok")) return false;
+  return arms.some(a =>
+    a.kind === "variant" &&
+    (a.test === "Ok" || (Array.isArray(a.tests) && a.tests.includes("Ok"))),
+  );
+}
+
+/**
+ * The `.variant` tag discriminator line for a match subject.
+ *
+ * Regular enum match: the subject is a tagged `{ variant, data }` object (bare
+ * scalar for literal arms) — read `.variant` off objects, else the raw value.
+ *
+ * Failable match (§19.7, `failable === true`): the subject is EITHER the bare
+ * success value OR an `{ __scrml_error, variant, ... }` error envelope
+ * (§19.9.1). Discriminate on the `__scrml_error` sentinel — an error envelope
+ * yields its `.variant`; anything else (the bare success value, primitive OR
+ * struct) yields the implicit `"Ok"` tag so the `::Ok` arm fires on success.
+ */
+export function emitMatchTagDiscriminator(tmpVar: string, tagVar: string, failable: boolean): string {
+  if (failable) {
+    return `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object" && ${tmpVar}.__scrml_error === true) ? ${tmpVar}.variant : "Ok";`;
+  }
+  return `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`;
+}
+
+export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failableOk?: boolean): string {
   if (!arm.binding) return "";
   const bindings = parseBindingList(arm.binding);
   if (bindings.length === 0) return "";
+
+  // §19.7.3 — the implicit `::Ok(v)` success arm binds `v` to the WHOLE bare
+  // success value. A `!` function returns success UN-tagged (there is no `.data`
+  // envelope to positionally index), and the success value is singular, so the
+  // named binding takes the subject directly. A struct success is reached by
+  // field access on that one name (`::Ok(user)` then `user.name`).
+  if (failableOk) {
+    const okStatements: string[] = [];
+    for (const b of bindings) {
+      if (b.discard) continue;
+      okStatements.push(`const ${b.localName} = ${tmpVar};`);
+    }
+    return okStatements.length > 0 ? okStatements.join(" ") + " " : "";
+  }
 
   const variantName = arm.test ?? "";
   const fieldSchema = _variantFields?.get(variantName) ?? null;

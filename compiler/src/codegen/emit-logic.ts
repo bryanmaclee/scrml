@@ -3,7 +3,7 @@ import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -4219,18 +4219,20 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   }
 
   // S22 §1a slice 2: normalize tagged-object variants the same way as emitMatchExpr.
-  const needsTagNormalization = hasPayloadBindingOrTaggedVariant(arms);
+  // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
+  // success value is bare; the `::Ok` arm is recognized only via the
+  // `__scrml_error`-sentinel tag).
+  const failableMatch = isFailableOkMatch(arms);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   if (needsTagNormalization) {
-    lines.push(
-      `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`,
-    );
+    lines.push(emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch));
   }
 
   // Emit arms as if/else-if chain with tilde assignment
   let conditionIndex = 0;
   for (const arm of arms) {
-    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar) : "";
+    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok") : "";
     // Structured body: emit each statement via emitLogicNode (handles lift via tildeContext)
     if (arm.structuredBody) {
       const bodyCode: string[] = [];

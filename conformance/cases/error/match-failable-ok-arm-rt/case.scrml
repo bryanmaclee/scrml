@@ -1,0 +1,33 @@
+${
+    type DivErr:enum = {
+        DivByZero
+    }
+
+    function safeDiv(a, b)! DivErr {
+        if (b == 0) fail DivErr.DivByZero
+        return a / b
+    }
+}
+
+<okOut> = ""
+<errOut> = ""
+
+${
+    function computeOk() {
+        match safeDiv(10, 2) {
+            ::Ok(v)     :> @okOut = "ok: " + v
+            ::DivByZero :> @okOut = "ERR"
+        }
+    }
+    function computeErr() {
+        match safeDiv(10, 0) {
+            ::Ok(v)     :> @errOut = "ok: " + v
+            ::DivByZero :> @errOut = "ERR: divide by zero"
+        }
+    }
+}
+
+<button id="btn-ok" onclick=computeOk()>ok</>
+<button id="btn-err" onclick=computeErr()>err</>
+<div id="out-ok">${@okOut}</>
+<div id="out-err">${@errOut}</>
