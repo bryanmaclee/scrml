@@ -1,0 +1,3 @@
+# Peter #20 — <request> settled-state never transitions; non-2xx parsed as success
+change-id peter-20-request-settled-state-2026-07-04 · agent ad7b22202f30b6beb · base 4d8140cb · High
+§6.7.7 request state machine: compiler emits the state object + reads but NO transition code — .loading stuck true, .error/.data null, non-2xx error body written to success cell. Survey-first (locate request-state emit locus). Fix: wire the settle transitions (2xx→loading=false/data/cell; non-2xx→error, NOT success cell). gh issue view 20 for full root-cause. R26 + adversarial + conformance. Full brief = Agent prompt.

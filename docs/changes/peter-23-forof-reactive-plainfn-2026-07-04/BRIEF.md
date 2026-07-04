@@ -1,0 +1,3 @@
+# Peter #23 — for-of over reactive cell in a PLAIN function miscompiled as DOM list-render
+change-id peter-23-forof-reactive-plainfn-2026-07-04 · agent ad563cc95504d0726 · base a7077ae4 · High
+Emitted JS: plain fn's `for(let p of @unitParts)` → `_scrml_render_list/reconcile_list` (DOM render) not a plain loop; p unscoped. Fix (verify §17.7): gate list-render on RENDER context; a logic-body for-of-over-reactive → plain `for(const x of _scrml_reactive_get(cell))`. Loci emit-logic.ts ~3885/4118 + emit-each.ts. R26 (plain-loop fix AND markup-render still works) + adversarial + conformance. Full brief = Agent prompt.
