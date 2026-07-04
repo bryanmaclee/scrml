@@ -17838,7 +17838,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), or a `:`-shorthand body (§4.14) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (Spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires the compiler-side fire. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | W-DISPLAY-TEXT-OVERQUOTE | §4.18.7, §4.18.1, §4.18.3, §18.0.1, §51.0 | (S181 — the inverse of E-UNQUOTED-DISPLAY-TEXT.) A `"..."` display-text literal is the **sole content** of a **plain-markup element** (an HTML element — NOT a component, NOT a scrml structural element) that is **nested inside a code-default body** (an engine state-child body §51.0, a match block-form arm body §18.0.1, or a `:`-shorthand body §4.14). The nested plain-markup element opens a **free-text body** (§4.18.1 — body modes nest), so the `"..."` the adopter wrote (correct in the enclosing code-default body) renders **literally** — the quote marks appear in the output. This surfaces the over-quoting footgun: the mirror of E-UNQUOTED-DISPLAY-TEXT, which is the UNDER-quoting case (bare prose in the code-default body itself, where a literal is required). **Fire condition:** a plain-markup element (`getElementShape(tag) !== null`) nested in one of the three code-default-body loci whose body, after ignoring whitespace-only formatting, is exactly one display-text literal (`"..."` with no interior unescaped `"`). **Does NOT fire:** a `"..."` directly in the code-default body (the CORRECT §4.18.3 display-text literal); bare free text in a plain-markup body; a `"..."` in plain markup OUTSIDE any code-default-body context; a NON-sole-content quoted string (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes); a `:`-shorthand body that IS a display-text literal (the quotes are stripped per §4.18.3 — correct, no footgun). The diagnostic SHALL suggest bare free text (`<p>On the way.</p>`). Partitions into `result.warnings` (non-fatal). Fire site: `type-system.ts` `checkDisplayTextOverquote` (the type pass — the FileAST carries the engine `bodyChildren` / match arm bodies and the wired W-/I- diagnostic stream). Reserved for promotion to a hard reject only if the under-quoting E-UNQUOTED-DISPLAY-TEXT is wired (they share the code-default-body boundary). | Info |
 | E-PARSEVARIANT-TYPE-NOT-ENUM | §41.13, §53.14 | Second argument to `parseVariant` is not a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, string literals, and arbitrary expressions are rejected. Resolution: pass an enum type as the second argument; for struct-shape boundary parsing, use a server-function normalization step or §53.4 SPARK boundary refinement on assignment. (Stage TS — type-system pass; catalog addition S65 — parseVariant Path-A architectural commit) | Error |
-| E-PARSEVARIANT-DISCRIMINATOR-MISSING | §41.13 | Runtime: a `parseVariant` call's input has no `tag` field at parse time, or the value is `null`/non-object/non-string. Surfaced via `::ParseError::MissingDiscriminator`. Resolution: ensure the wire format includes the enum-variant-name discriminator; non-conforming wire shapes require server-fn normalization before `parseVariant`. (Runtime; catalog addition S65) | Error |
+| E-PARSEVARIANT-DISCRIMINATOR-MISSING | §41.13 | Runtime: a `parseVariant` call's input is an OBJECT that lacks a `tag` field at parse time. Surfaced via `::ParseError::MissingDiscriminator`. (A `null`/non-object/non-string input routes to `::ParseError::Malformed` instead — not a decodable object shape; S236 ruling `g-parsevariant-null-routing`.) Resolution: ensure the wire format includes the enum-variant-name discriminator; non-conforming wire shapes require server-fn normalization before `parseVariant`. (Runtime; catalog addition S65) | Error |
 | E-PARSEVARIANT-UNKNOWN-VARIANT | §41.13 | Runtime: a `parseVariant` call's input has a `tag` field whose value does not match any variant name in the second-argument enum. Surfaced via `::ParseError::UnknownVariant(tag)`. Resolution: add the variant to the enum, OR normalize the wire format in a server function before `parseVariant`. (Runtime; catalog addition S65) | Error |
 | E-PARSEVARIANT-INVALID-PAYLOAD | §41.13 | Runtime: a variant's payload field has the wrong type or fails a payload predicate during parse. Surfaced via `::ParseError::InvalidPayload(field, reason)`. Resolution: verify the wire format matches the variant payload shape declared in the enum; type-coerce primitive payloads in a server function if the wire format is loosely typed. (Runtime; catalog addition S65) | Error |
 | E-FORMFOR-TYPE-NOT-STRUCT | §41.14, §53.14 | `<formFor for=X/>` was called with a non-struct type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions are rejected in `for=` position. Resolution: pass a `:struct` type as the `for=` value. For enum-shape boundary parsing, use `parseVariant` (§41.13) instead. (Stage TS — type-system pass; catalog addition S102 — formFor SPEC entry) | Error |
@@ -21609,10 +21609,10 @@ type ParseError:enum = {
 
 Variant semantics:
 
-- `MissingDiscriminator` — the JSON value has no `tag` field at parse time, or the value is `null`/non-object/non-string-on-string-arg. Emitted via `E-PARSEVARIANT-DISCRIMINATOR-MISSING` (runtime).
+- `MissingDiscriminator` — the input is an OBJECT that lacks a `tag` field at parse time. Emitted via `E-PARSEVARIANT-DISCRIMINATOR-MISSING` (runtime). (A `null`/non-object/non-string input is NOT a decodable object shape at all and routes to `Malformed`, not here — the impl distinguishes "wrong shape entirely" from "object missing its discriminator"; S236 ruling `g-parsevariant-null-routing`, aligning §41.13 to the impl + the locked `parse-variant-runtime.test.js`.)
 - `UnknownVariant(tag)` — the JSON discriminator value does not match any variant name in the second-argument enum. Emitted via `E-PARSEVARIANT-UNKNOWN-VARIANT` (runtime).
 - `InvalidPayload(field, reason)` — a variant's payload field has the wrong type or fails a payload predicate. Emitted via `E-PARSEVARIANT-INVALID-PAYLOAD` (runtime).
-- `Malformed(reason)` — the JSON string failed `JSON.parse`, or other unrecoverable shape failure with a free-form reason string. Re-raised when `JSON.parse` throws.
+- `Malformed(reason)` — the JSON string failed `JSON.parse`, OR the input is `null`/non-object/non-string (not a decodable object shape at all), or other unrecoverable shape failure with a free-form reason string. Re-raised when `JSON.parse` throws.
 
 **Compile-time recognition:**
 
@@ -32387,8 +32387,8 @@ extractable for i18n tooling; expressions defeat that.
 
 ```scrml
 ${
-  use scrml:data
-  data.registerMessages({
+  import { registerMessages } from 'scrml:data'
+  registerMessages({
     .Required:        (field) => `Please fill in ${field}.`,
     .LengthFailed:    (field, pred) => `${field} must satisfy ${pred}.`,
     .PatternMismatch: (field, re) => `${field} doesn't match the expected pattern.`,
@@ -32397,8 +32397,11 @@ ${
 }
 ```
 
-The `data.registerMessages` API is part of `scrml:data` (cross-ref §41). Each entry is a
-function from `(fieldName, ...errorTagPayload)` to a string. Functions can return
+The `registerMessages` API is part of `scrml:data` (cross-ref §41), imported via a named
+import (`import { registerMessages } from 'scrml:data'`) — the `use scrml:data` +
+`data.registerMessages` member-access form does NOT resolve (fires `E-USE-001`/`E-SCOPE-001`;
+S236 ruling `g-spec-msgchain-l2-example-uncompilable`). Each entry is a function from
+`(fieldName, ...errorTagPayload)` to a string. Functions can return
 template-interpolated strings, including reactive references.
 
 **Level 3 — `scrml:data` shipped English defaults** (zero-config; works for prototype-phase
