@@ -6,7 +6,17 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
 
-### 2026-07-02/03 (S235 — **SSR A-terminus COMPLETE = V1 SSR done** [D2 DOM-adoption + D3 W-AUTH-002 retire] · **drove the language/compiler split** — the D3 conformance extraction was already built · the V1-freeze bar ratified · the conformance program + harness-extension arc launched · the self-host sPA started)
+### 2026-07-03 (S236 — **the freeze-gate marathon: conformance 72→220, all sPA lists landed, the escalation-fix wave, and V1 within reach**)
+
+The whole S235-launched conformance-authoring program came home. All 8 sPA lists (ss55-62) were re-integrated, the escalation backlog they surfaced was fixed, two harness contract verbs were ratified, and a V1-freeze-readiness assessment established that **the flagship pillars are done** — the remaining distance to language-1.0 freeze is a bounded blocker-set + coverage-tail + labeling, not open-ended. Board at close: **HIGH 0 · MED 14 · LOW 13**; conformance **220/220**; full suite ~18966/0.
+
+- **Conformance 72 → 220 (25 categories)** — ss55 self-host lexer (337/337 token-diff, TOKEN-COMPLETE) · ss56 engine §51 (+28) · ss57 validators §55 (+27) · ss58 error-model §19 (+13) · ss59 reactivity §6 (+16) · ss60 SSR+protect (+7) · ss61 L22 family (+24; schemaFor superset curation) · ss62 maps §59 + refinement §53 (+18).
+- **Escalation-fix wave** — #1 `fail`-variant validation (minted **E-ERROR-009**, §19.3.3 typer check) · E3 §55.10 message-resolution render wiring (L1 cellName-drop + L2 `.Variant`-key placeholder leak + L4 match-escape 3-defect crash; the "no runtime" escalation was an over-read) · **D2 single-field handler payload-bind** (systemic — migrated `fail`/error-boundary to the field-keyed `.data` shape per §51.3.2, so `fail T.V(x)` and `return T.V(x)` finally agree) · D3 handler-recovery-into-cell · match-empty-wildcard clear · schemaFor `T[]` array-type recognition (fixes `T[]` for schemaFor/formFor/inference) · debounce/throttle trailing-commit (§6.13) · **E-ADAPTER server-eval mode** (runs the real server handler + SSR compose — closed all 4 ss60 SSR/protect runtime halves).
+- **Ratified `serverDb` + `firstPaint`** as normative language-1.0 conformance contract verbs (impl#2 must seed its DB, run real handlers, emit an impl-neutral first-paint) — parallel to `advance-time`.
+- **SPEC ruling-tail** — §55.10 Level-2 example fixed to the named-import form; §41.13/§34 parseVariant null-routing aligned to impl (null→`Malformed`, object-without-`tag`→`MissingDiscriminator`).
+- **V1-freeze-readiness assessment** authored (`scrml-support/docs/deep-dives/v1-freeze-readiness-2026-07-03.md`) + the fail-closed-lexer-error-recovery DD queued (run-trigger: the parser wave).
+
+
 
 A marathon. Finished the last V1-required feature (SSR), then drove the language/compiler split toward a language-1.0 freeze — and discovered the split's load-bearing build was already done.
 

@@ -13,9 +13,9 @@ The type-as-argument family: §53.14 (family framing + discipline) · §41.13 pa
 `conformance/README.md` · `conformance/cases/form-for/` (existing sibling) · `conformance/run.ts` · `compiler/SPEC.md` §41.13 + §41.15 + §41.16 + §53.14 (normative)
 
 ## Items (least-ingestion-first)
-1. **parseVariant §41.13** (RT+codes) `[status=pending]` — `parseVariant(json, EnumType)` → the tagged variant; the `ParseError` failure variants (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`) route through `!{}`. RT: a valid JSON → the variant value in state; an invalid → the error variant. + the 4 `E-PARSEVARIANT-*` codes.
-2. **schemaFor §41.15** (RT/shape + codes) `[status=pending]` — `schemaFor(StructType)` emits `<schema>` SQL DDL from the struct's field predicates (§39+L4 vocab; enum-lowering per OQ-SCH-12). Assert the emitted DDL shape (impl-freedom on exact SQL text → assert the STATE/structural effect, not byte-for-byte SQL) + the 8 `E-SCHEMAFOR-*` codes (type-not-struct, etc.).
-3. **tableFor §41.16** (RT+codes) `[status=pending]` — `tableFor(StructType, rows)` renders an auto-`<table>` (header from struct fields + a row per element). RT: `domAnchored` on the table cells; + the 13 `E-TABLEFOR-*` codes.
+1. **parseVariant §41.13** (RT+codes) `[status=landed-on-branch SHA=2a37e296]` — `parseVariant(json, EnumType)` → the tagged variant; the `ParseError` failure variants (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`) route through `!{}`. RT: a valid JSON → the variant value in state; an invalid → the error variant. + the 4 `E-PARSEVARIANT-*` codes.
+2. **schemaFor §41.15** (RT/shape + codes) `[status=landed-on-branch SHA=ab8eef6a]` — `schemaFor(StructType)` emits `<schema>` SQL DDL from the struct's field predicates (§39+L4 vocab; enum-lowering per OQ-SCH-12). Assert the emitted DDL shape (impl-freedom on exact SQL text → assert the STATE/structural effect, not byte-for-byte SQL) + the 8 `E-SCHEMAFOR-*` codes (type-not-struct, etc.).
+3. **tableFor §41.16** (RT+codes) `[status=landed-on-branch SHA=ab8eef6a]` — `tableFor(StructType, rows)` renders an auto-`<table>` (header from struct fields + a row per element). RT: `domAnchored` on the table cells; + the 13 `E-TABLEFOR-*` codes.
 
 **DoD:** the L22 family (all 4 members incl. ss57's formFor) reaches conformance coverage; all green on `bun conformance/run.ts`; divergences escalated.
 

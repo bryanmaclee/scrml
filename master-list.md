@@ -89,7 +89,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `33c8a921` — chore(s235): wrap-prep bookkeeping — changelog S235 + master-list §0 + delta-log [285-287] + virtual-clock BRIEF — **LOCAL-ONLY**
+- `cfba6295` — chore(s235): WRAP — hand-off CLOSE + virtual-clock landing bookkeeping + debounce bug filed [288-289] — **pushed**
 - `2fb2bf1f` — chore(s234): WRAP — hand-off CLOSE + changelog + known-gaps + master-list + 6 BRIEFs + delta-log [257-275] — **pushed**
 - `b24f3892` — chore(s233): WRAP — hand-off + changelog + master-list + architecture-skeleton RULING + delta-log [242-256] — **pushed**
 - `e7455a68` — chore(s232): WRAP — autonomous board-drive [9 landings] · 3 D3-bugs resolved · V1-security floor · conformance 51→69 · pushed — **pushed**
