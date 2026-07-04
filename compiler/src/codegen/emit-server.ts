@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
@@ -503,9 +503,22 @@ function isBodyOnlyEscalation(route: any, fnNode: any): boolean {
   if (!reasons.every((r) => r && r.kind === "server-only-resource")) return false;
   if (route?.explicitRoute != null || route?.explicitMethod != null) return false;
 
-  // Scope guard: no top-level server-only node in the function body.
+  // Scope guard: no server-only node in the function body. Such a body does NOT
+  // emit cleanly as a plain library export today (§44.7.1 staged lifecycle / cf.
+  // E-SQL-009), so the fn keeps its route-handler wrapper (its server home) —
+  // the library `.js` omits it entirely (W5b, emit-library.ts prunes every
+  // server-boundary fn from the client-facing artifact). Two scans:
+  //   (a) top-level server-only-node scan (import/meta/env resources + a bare
+  //       top-level `?{}` statement).
+  //   (b) W5b deep SQL/transaction scan — a `?{}` nested in a const/let init or
+  //       a return expr (`const r = ?{...}.get()`) is NOT a top-level
+  //       server-only node, and `isServerOnlyNode`'s emitStringFromTree
+  //       round-trip yields a comment placeholder (no `?{` sigil) for the
+  //       chained form, so (a) misses it. The structural `sql-ref`/`sql`/
+  //       `transaction-block` walk is round-trip-independent.
   const body: any[] = Array.isArray(fnNode?.body) ? fnNode.body : [];
   if (body.some((stmt) => isServerOnlyNode(stmt))) return false;
+  if (containsSqlOrTransaction(body)) return false;
 
   return true;
 }

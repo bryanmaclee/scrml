@@ -445,6 +445,35 @@ function exprTreeContainsSqlRef(node: unknown): boolean {
 }
 
 /**
+ * W5b (g-library-mode-sql-no-db-context) — deep structural scan for a `?{}` SQL
+ * node (`sql` / `sql-ref`) or a `transaction-block` ANYWHERE beneath `node`.
+ *
+ * Unlike `isServerOnlyNode` (a single-node classifier that inspects a statement
+ * in isolation and, for the chained `const r = ?{...}.get()` form, relies on an
+ * `emitStringFromTree` round-trip that yields a comment placeholder instead of
+ * the `?{` sigil), this walks the full node tree by node KIND, so it catches a
+ * `?{}` nested in a const/let init or a return-expr. Used by:
+ *   - the §12.6 library-mode discriminator (emit-server.ts) to retain a
+ *     `?{}`-bearing fn's route-handler wrapper (its server home);
+ *   - the library `.js` emitter (emit-library.ts) to prune a `?{}`-bearing fn
+ *     from the client-facing artifact (a raw `?{}` there is invalid JS, §2.2.1).
+ * `span` is skipped to keep the walk on structural fields only.
+ */
+export function containsSqlOrTransaction(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some((child) => containsSqlOrTransaction(child));
+  const n = node as Record<string, unknown>;
+  const k = n.kind;
+  if (k === "sql" || k === "sql-ref" || k === "transaction-block") return true;
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    const v = n[key];
+    if (v && typeof v === "object" && containsSqlOrTransaction(v)) return true;
+  }
+  return false;
+}
+
+/**
  * Determine whether an AST node is server-only and must NOT be emitted to
  * client JavaScript output.
  *

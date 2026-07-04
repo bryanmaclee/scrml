@@ -3,7 +3,7 @@ import { getNodes } from "./collect.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { emitLogicNode } from "./emit-logic.js";
-import { isServerOnlyNode } from "./collect.ts";
+import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
 import type { CompileContext } from "./context.ts";
 
@@ -93,42 +93,94 @@ function collectGuardedExprs(node: unknown, out: ASTNode[]): void {
 }
 
 /**
- * Splice the AST-lowered emission of every `guarded-expr` node over its raw
- * `!{}` source within a logic block's text. `blockSource` is the UNTRIMMED raw
- * slice `sourceText.slice(logicSpan.start, logicSpan.end)`; guarded-expr spans
- * are absolute into `sourceText`, so block-relative offset = `span.x -
- * blockStart`. Splices are applied in reverse start-order so each earlier
- * replacement does not shift a later span's offsets.
+ * W5b (g-library-mode-sql-no-db-context) — collect the source-text spans of
+ * every function declaration whose body carries a `?{}` SQL block / transaction
+ * in a library file's logic block.
  *
- * The lowered JS is valid JS already and contains no scrml `not`/`is`/`fn`/
- * `type` keywords (the §19 arm `not` literal lowers to `null`, etc.), so it
- * passes through the downstream regex-transform pipeline (fn→function, type-decl
- * strip, not/is rewrite) untouched — verified against the host-containment
- * lowering shape.
+ * A `?{}` SQL fn (resolving against the file's own top-level `<db src>`,
+ * §44.7.1) is server-only — its raw `?{}` is invalid JS and cannot appear in
+ * the importable library `.js` (the client-facing artifact). The whole-block
+ * slicer below dumps the block verbatim, so the `?{}` would leak → the §2.2.1
+ * E-CODEGEN-INVALID-JS emit gate. Such a fn lives ONLY in the `.server.js`
+ * (its route-handler wrapper, retained by the §12.6 discriminator once its body
+ * carries SQL). We prune it here.
+ *
+ * The criterion is the fn BODY carrying SQL/transaction — NOT mere server-
+ * boundary classification. A body-content-escalated `scrml:fs` import fn (§12.6
+ * (a)) or an explicit `export server function` with a pure JS body emits
+ * cleanly as a plain library export and MUST stay; only a `?{}`/transaction
+ * body (which would leak raw scrml) is pruned. A client-USED pure export stays.
+ *
+ * The `export` keyword and any `pure`/`server` modifier prefix (§21.5.1) sit
+ * BEFORE the function-decl span, so we look back from `span.start` to include
+ * them in the removal range.
  */
-function lowerGuardedExprsInBlock(
+function collectSqlFnRemovalRanges(
+  logicBody: unknown,
+  sourceText: string,
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  if (!Array.isArray(logicBody)) return ranges;
+  const seen = new Set<string>();
+  for (const node of logicBody as ASTNode[]) {
+    if (!node || typeof node !== "object") continue;
+    const n = node as ASTNode;
+    if (n.kind !== "function-decl" && n.kind !== "export-decl") continue;
+    if (!containsSqlOrTransaction(n)) continue;
+    const sp = n.span as Span | undefined;
+    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+    const key = `${sp.start}:${sp.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Extend backward to swallow `export` + optional `pure`/`server` modifiers
+    // (§21.5.1). Anchored at end-of-lookback so only keywords immediately
+    // preceding the function-decl span are captured.
+    const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
+    const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
+    const prefixLen = m ? m[1].length : 0;
+    ranges.push({ start: sp.start - prefixLen, end: sp.end });
+  }
+  return ranges;
+}
+
+/**
+ * Prune `?{}`/transaction-bearing functions from the library block AND splice
+ * the AST-lowered emission of every `guarded-expr` node over its raw `!{}`
+ * source. Both operate on absolute offsets into `sourceText`; `blockSource` is
+ * the UNTRIMMED raw slice `sourceText.slice(logicSpan.start, logicSpan.end)`, so
+ * block-relative offset = `span.x - blockStart`. All edits are collected then
+ * applied highest-start-first in ONE pass, so earlier offsets stay valid as
+ * later edits mutate the tail.
+ *
+ * A guarded-expr that falls INSIDE a pruned fn span is dropped (the whole fn is
+ * removed, so lowering an expression inside it would be dead work AND would
+ * splice into text that no longer exists). A guarded-expr elsewhere lowers as
+ * before: the lowered JS is valid JS with no scrml `not`/`is`/`fn`/`type`
+ * keywords, so it survives the downstream regex-transform pipeline.
+ */
+function pruneServerFnsAndLowerGuarded(
   blockSource: string,
   blockStart: number,
   logicBody: unknown,
+  sourceText: string,
 ): string {
+  const removals = collectSqlFnRemovalRanges(logicBody, sourceText);
+
   const guarded: ASTNode[] = [];
   collectGuardedExprs(logicBody, guarded);
-  if (guarded.length === 0) return blockSource;
 
-  // Splice highest-start-first so earlier offsets stay valid as we mutate.
-  const ordered = guarded
-    .filter((g) => {
-      const sp = g.span as Span | undefined;
-      return sp && typeof sp.start === "number" && typeof sp.end === "number";
-    })
-    .sort((a, b) => (b.span as Span).start - (a.span as Span).start);
+  type SpliceOp = { start: number; end: number; text: string };
+  const ops: SpliceOp[] = [];
 
-  let text = blockSource;
-  for (const g of ordered) {
-    const sp = g.span as Span;
-    const relStart = sp.start - blockStart;
-    const relEnd = sp.end - blockStart;
-    if (relStart < 0 || relEnd > text.length || relStart >= relEnd) continue;
+  // Server-fn removals — splice to empty (the fn lives in `.server.js`).
+  for (const r of removals) ops.push({ start: r.start, end: r.end, text: "" });
+
+  // §19 host-containment `!{}` — lower each guarded-expr, skipping any that
+  // fall inside a pruned server-fn span.
+  for (const g of guarded) {
+    const sp = g.span as Span | undefined;
+    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+    if (removals.some((r) => sp.start >= r.start && sp.end <= r.end)) continue;
     // A guarded-expr at library scope is always inside a function body (a bare
     // top-level `${...}` host-containment call is a program-mode shape); emit
     // with insideFunctionBody so an unhandled-variant arm escalates via `return`.
@@ -137,7 +189,19 @@ function lowerGuardedExprsInBlock(
       { insideFunctionBody: true } as Parameters<typeof emitLogicNode>[1],
     );
     if (lowered == null) continue;
-    text = text.slice(0, relStart) + lowered + text.slice(relEnd);
+    ops.push({ start: sp.start, end: sp.end, text: lowered });
+  }
+
+  if (ops.length === 0) return blockSource;
+
+  // Highest-start-first so earlier offsets stay valid as we mutate.
+  ops.sort((a, b) => b.start - a.start);
+  let text = blockSource;
+  for (const op of ops) {
+    const relStart = op.start - blockStart;
+    const relEnd = op.end - blockStart;
+    if (relStart < 0 || relEnd > text.length || relStart >= relEnd) continue;
+    text = text.slice(0, relStart) + op.text + text.slice(relEnd);
   }
   return text;
 }
@@ -243,7 +307,17 @@ export function generateLibraryJs(
         // (E-CODEGEN-INVALID-JS). blockStart === logicSpan.start since the splice
         // runs on the UNTRIMMED slice (guarded-expr spans are absolute into
         // sourceText). Reuses browser mode's emit-logic.ts `case "guarded-expr"`.
-        blockText = lowerGuardedExprsInBlock(blockText, logicSpan.start, logic.body);
+        // W5b — prune `?{}`/transaction-bearing fns (they live in `.server.js`,
+        // not the client-facing library `.js`) AND lower §19 `!{}` guarded-exprs
+        // in one reverse-ordered splice pass. A `?{}` SQL fn resolving against
+        // the file's own `<db src>` (§44.7.1) would otherwise leak verbatim into
+        // the library `.js` and trip the §2.2.1 E-CODEGEN-INVALID-JS gate.
+        blockText = pruneServerFnsAndLowerGuarded(
+          blockText,
+          logicSpan.start,
+          logic.body,
+          sourceText,
+        );
         // Strip the ${ prefix and } suffix
         if (blockText.startsWith("${")) blockText = blockText.slice(2);
         if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
