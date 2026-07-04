@@ -7,7 +7,7 @@
 // compiler envelopes as the JSON response (§61.5). A multi-statement bare body
 // (`<Variant>…two or more statements…</>`) is NOT yet lowered — a future-wave gap
 // (§61.10). BEFORE this fix the malformed `await (<expr>)` tripped the generic
-// `E-CODEGEN-INVALID-JS` emit gate (a cryptic "compiler defect" message the
+// `E-CODEGEN-INVALID-LOGIC` emit gate (a cryptic "compiler defect" message the
 // adopter cannot act on); W4 now detects the multi-statement case at codegen
 // (`emitEndpointArmEnvelope`, via `isSingleJsExpression` reusing the §2.2.1 emit
 // gate's acorn) and fires the clean, adopter-actionable named diagnostic
@@ -78,11 +78,11 @@ describe("<endpoint> multi-statement bare-body arm (§61.10)", () => {
     `    { jsonrpc: "2.0", result: { since: seq, count: 0 } }\n` +
     `  </>\n`;
 
-  test("fires E-ENDPOINT-MULTI-STATEMENT-ARM (NOT the generic E-CODEGEN-INVALID-JS)", () => {
+  test("fires E-ENDPOINT-MULTI-STATEMENT-ARM (NOT the generic E-CODEGEN-INVALID-LOGIC)", () => {
     const r = compile(ep(MULTI));
     expect(errCodes(r)).toContain("E-ENDPOINT-MULTI-STATEMENT-ARM");
     // The whole point: the clean named diagnostic REPLACES the cryptic gate.
-    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("the diagnostic names the offending variant + the workaround", () => {
@@ -161,7 +161,7 @@ describe("<endpoint> multi-statement bare-body arm (§61.10)", () => {
     const e = multiStmtErr(r);
     expect(e).toBeTruthy();
     expect(e.message).toContain("<_> arm");
-    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // ---- @-led multi-statement bare body (g-endpoint-at-led-arm-trailing-expr-dropped, ss49)
@@ -187,7 +187,7 @@ describe("<endpoint> multi-statement bare-body arm (§61.10)", () => {
     );
     expect(errCodes(r)).toContain("E-ENDPOINT-MULTI-STATEMENT-ARM");
     // The whole point: the value-expr is no longer silently dropped to a clean compile.
-    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(multiStmtErr(r).message).toContain("<DeltaSince> arm");
   });
 
@@ -202,7 +202,7 @@ describe("<endpoint> multi-statement bare-body arm (§61.10)", () => {
       ),
     );
     expect(errCodes(r)).toContain("E-ENDPOINT-MULTI-STATEMENT-ARM");
-    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("@-led multi-statement WILDCARD arm fires identically, naming <_>", () => {
@@ -216,7 +216,7 @@ describe("<endpoint> multi-statement bare-body arm (§61.10)", () => {
     const e = multiStmtErr(r);
     expect(e).toBeTruthy();
     expect(e.message).toContain("<_> arm");
-    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("supported: a single-expression @-bearing bare body does NOT fire (no over-fire)", () => {

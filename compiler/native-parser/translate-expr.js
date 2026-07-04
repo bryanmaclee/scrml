@@ -305,7 +305,7 @@ export function translateExpr(nativeExpr) {
             // `emitMarkupValueExpr` → the markup→DOM-node IIFE). Pre-fix this
             // routed to an EMPTY escape-hatch (`makeEscapeHatch("MarkupValue", "")`)
             // — the markup body was DROPPED, leaving a malformed `cond ? : ""`
-            // ternary that failed the E-CODEGEN-INVALID-JS gate. This is the
+            // ternary that failed the E-CODEGEN-INVALID-LOGIC gate. This is the
             // expression-position twin of the top-level path, where ast-builder's
             // `parseExprWithMarkupValues` already produces the `markup-value` leaf.
             return translateMarkupValueExpr(nativeExpr);

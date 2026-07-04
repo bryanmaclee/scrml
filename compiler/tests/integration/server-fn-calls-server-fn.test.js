@@ -214,7 +214,7 @@ describe("Issue #1 — review hardening", () => {
     const codes = errors.map((e) => e.code);
     expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
     // It must NOT be the generic "compiler emitted invalid JS" defect framing.
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Finding 2: a peer call that becomes a CPS return-var initializer must be
@@ -311,7 +311,7 @@ ${body}
       "collide-routes", ITEMS);
     const codes = errors.map((e) => e.code);
     expect(codes).toContain("E-CG-016");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Defect B — peer call in a synchronous-callback parameter default.
@@ -322,7 +322,7 @@ ${body}
       "param-default", ITEMS);
     const codes = errors.map((e) => e.code);
     expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Defect C1 — sync BLOCK-body callback (the original "peer not defined" shape).
@@ -333,7 +333,7 @@ ${body}
       "sync-block", ITEMS);
     const codes = errors.map((e) => e.code);
     expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Defect C2 — async expr-body lambda: LEGITIMATE composition. The peer MUST be
@@ -389,7 +389,7 @@ ${body}
       prog("", `    ${L}\n    server function caller(ids) { const run = async (x, y = lookup(0)) => x; return run(1) }`),
       "async-param-default", ITEMS);
     expect(codesOf(errors)).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
-    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Cand4: a sync ES5 `function(x){...}` callback (not an arrow) must diagnose.
@@ -398,7 +398,7 @@ ${body}
       prog("", `    ${L}\n    server function caller(ids) { ?{\`INSERT INTO items (ord,name) VALUES (0,'x')\`}.run(); return ids.map(function(x){ return lookup(x) }) }`),
       "sync-function-callback", ITEMS);
     expect(codesOf(errors)).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
-    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Bug2: a lambda param that shadows a peer name is a LOCAL — a call to it is a
@@ -417,7 +417,7 @@ ${body}
       prog("", `    export const lookup = 5\n    ${L}\n    server function caller(ids) { ?{\`INSERT INTO items (ord,name) VALUES (0,'x')\`}.run(); return lookup(ids[0]) }`),
       "export-collision", ITEMS);
     expect(codesOf(errors)).toContain("E-CG-016");
-    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   // Legit: an async block-body lambda calling a peer compiles clean with the

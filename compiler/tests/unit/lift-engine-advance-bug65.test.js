@@ -10,7 +10,7 @@
  *
  * `_scrml_reactive_get("phase")` returns the engine's bare variant STRING (no
  * `.advance` method) → TypeError on click. Compile exits 0 AND `node --check`
- * passes — a SILENT miscompile (distinct from Bug 62's loud E-CODEGEN-INVALID-JS).
+ * passes — a SILENT miscompile (distinct from Bug 62's loud E-CODEGEN-INVALID-LOGIC).
  *
  * The fix threads the file's engine codegen ctx (built ONCE via the SHARED
  * `buildEachEngineCtx` / re-packed by `buildLiftEngineCtxFromExtras`) down to
@@ -106,9 +106,9 @@ ${"$"}{
 <ul>${"$"}{ for (col of @cols) { lift <li onclick=@phase.advance(.Active)>${"$"}{col}</li> } }</ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug65-state");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -163,9 +163,9 @@ const taskMovedTo = (tasks, id, col) => tasks.map((t) => t.id == id ? { id: t.id
 <ul class="cols">${"$"}{ for (col of @columns) { lift <li class="col" onclick=@dragPhase.advance(.Drop(col))>${"$"}{col}</li> } }</ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug65-msg");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -208,9 +208,9 @@ ${"$"}{
 <ul>${"$"}{ for (col of @cols) { lift <li onclick=${"$"}{@phase = .Active}>${"$"}{col}</li> } }</ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug65-assign");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 

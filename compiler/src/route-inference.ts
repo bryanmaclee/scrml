@@ -1995,7 +1995,7 @@ function isReactiveStatement(node: LogicStatement): boolean {
  * function. The CPS body-split classifier (`analyzeCPSEligibility` →
  * `isServerTriggerStatement`) did NOT mirror that recursion, so the
  * control-flow statement was mis-tiered as client and emitted into the client
- * wrapper raw (E-CG-006 / E-CODEGEN-INVALID-JS) or the whole function escalated
+ * wrapper raw (E-CG-006 / E-CODEGEN-INVALID-LOGIC) or the whole function escalated
  * and a following `@cell` write tripped E-RI-002. This set + the recursive
  * helper below close that asymmetry so the control-flow statement is classified
  * server-tier and routed through the same CPS split a server-fn call in that
@@ -2258,7 +2258,7 @@ function isServerTriggerStatement(
   // the same boundary a top-level `?{}` statement is. Without this the CPS
   // body-split classifier mis-tiered such a control-flow statement as client,
   // emitting the nested `?{}` into the client wrapper raw (E-CG-006 /
-  // E-CODEGEN-INVALID-JS) or letting whole-function escalation strand a
+  // E-CODEGEN-INVALID-LOGIC) or letting whole-function escalation strand a
   // following `@cell` write under E-RI-002. Classifying it server-tier routes
   // the whole statement through the existing CPS split (server stub emits the
   // control-flow + nested SQL; the surrounding `@`-writes stay client as the

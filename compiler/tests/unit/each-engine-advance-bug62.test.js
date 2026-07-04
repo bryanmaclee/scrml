@@ -3,7 +3,7 @@
  *
  * Engine `.advance(.X)` (state AND message plane) and `@engine = .X`
  * direct-write inside a Tier-1 `<each>` per-item event handler were emitted
- * RAW (neither the `@` sigil nor `.advance` lowered) → E-CODEGEN-INVALID-JS
+ * RAW (neither the `@` sigil nor `.advance` lowered) → E-CODEGEN-INVALID-LOGIC
  * "Unexpected character '@'". renderTemplateAttrToJs case (2) routed the
  * handler value through `rewriteIterValueExpr` ONLY (iter-scope lowering, no
  * engine awareness).
@@ -14,7 +14,7 @@
  *
  * Coverage:
  *   §1 — STATE-plane `.advance(.X)` in <each> handler → _scrml_engine_advance,
- *        compile exit 0, no E-CODEGEN-INVALID-JS, no raw `@`.
+ *        compile exit 0, no E-CODEGEN-INVALID-LOGIC, no raw `@`.
  *   §2 — MESSAGE-plane `.advance(.Msg(payload))` (§51.0.S.6 shape, accepts=) in
  *        a nested <each> → _scrml_engine_dispatch_message; `as`-name payload
  *        (`col`) composes with the dispatch.
@@ -81,9 +81,9 @@ ${"$"}{
 </ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug62-state");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -135,9 +135,9 @@ const taskMovedTo = (tasks, id, col) => tasks.map((t) => t.id == id ? { id: t.id
 </ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug62-msg");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -178,9 +178,9 @@ ${"$"}{
 </ul>
 </program>`;
 
-  test("compiles exit 0 (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles exit 0 (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(src, "bug62-assign");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
   });
 

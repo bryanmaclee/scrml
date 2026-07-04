@@ -3,7 +3,7 @@
  *
  * After codegen produces the final JS artifacts, parse each one with the
  * in-process Acorn that is already a compiler dependency, and FAIL the compile
- * with `E-CODEGEN-INVALID-JS` if any artifact does not parse. This makes
+ * with `E-CODEGEN-INVALID-LOGIC` if any artifact does not parse. This makes
  * "compile exits 0 ⇒ the emitted JS is at least syntactically valid" a
  * compile-time invariant rather than a runtime time-bomb.
  *
@@ -62,7 +62,7 @@ const PARSE_OPTIONS = { ecmaVersion: 2022 as const, sourceType: "module" as cons
 
 /**
  * Parse one emitted artifact. Returns a `CGError` with code
- * `E-CODEGEN-INVALID-JS` if it does not parse, or `null` if it is valid JS.
+ * `E-CODEGEN-INVALID-LOGIC` if it does not parse, or `null` if it is valid JS.
  *
  * The diagnostic names the artifact + the byte/line/column offset Acorn
  * reports + a short offending snippet (a 60-char window centered on the parse
@@ -83,7 +83,7 @@ export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
     const rawMessage = (err.message ?? String(e)).replace(/\s*\(\d+:\d+\)\s*$/, "");
 
     const message =
-      `E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n` +
+      `E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n` +
       `  artifact: ${art.artifact} (byte ${pos}, line ${line}, column ${col})\n` +
       `  ${rawMessage}\n` +
       `    ${snippet}\n` +
@@ -91,7 +91,7 @@ export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
       `No codegen output artifacts were written (vendored stdlib shims may already be staged).`;
 
     return new CGError(
-      "E-CODEGEN-INVALID-JS",
+      "E-CODEGEN-INVALID-LOGIC",
       message,
       { file: art.sourceFile, start: pos, end: pos, line, col },
       "error",
@@ -129,7 +129,7 @@ export function validateEmittedArtifacts(artifacts: EmitArtifact[]): CGError[] {
  * multi-statement body cannot be a single value-expression, so the compiler
  * fires the clean named `E-ENDPOINT-MULTI-STATEMENT-ARM` (a SPEC §61.10
  * future-wave gap) instead of letting the malformed `await (…)` trip the
- * generic `E-CODEGEN-INVALID-JS` gate above. This correctly admits the
+ * generic `E-CODEGEN-INVALID-LOGIC` gate above. This correctly admits the
  * SUPPORTED forms — a single value-expression that legitimately spans multiple
  * source lines (a call split across lines, a multi-line object literal) parses
  * as one expression and consumes the whole string; only a genuine 2+-statement

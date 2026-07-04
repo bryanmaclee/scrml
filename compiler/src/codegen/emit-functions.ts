@@ -1028,7 +1028,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // `${ }` logic block. Mirrors the emit-library.ts:428 `generatorStar` pattern.
     // §13.6 — `function*`/`yield` are admissible in any function position. Without
     // this branch the star was dropped, landing `yield` inside a plain function =
-    // invalid JS (E-CODEGEN-INVALID-JS "keyword 'yield' is reserved"). Computed
+    // invalid JS (E-CODEGEN-INVALID-LOGIC "keyword 'yield' is reserved"). Computed
     // independently of asyncPrefix; a generator does not take the server-call CPS
     // path, so the two should not co-occur, but the fix is defensive either way.
     const generatorStar = (fnNode as { isGenerator?: boolean }).isGenerator ? "*" : "";

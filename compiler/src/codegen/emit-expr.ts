@@ -932,7 +932,7 @@ function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
     // mis-association hits ALL prefix unaries — `!(a * b)`, `~(a + b)`,
     // `typeof (a || b)`, `-(a ? b : c)`, … all mis-print without the wrap.
     // GENERALIZES the ss50 `**`-only special case (`-(2 ** 3)` stayed a LOUD
-    // E-CODEGEN-INVALID-JS, the rest were silent) via unaryArgNeedsParens. It is
+    // E-CODEGEN-INVALID-LOGIC, the rest were silent) via unaryArgNeedsParens. It is
     // the OPERAND-side sibling of the ss21 binaryOperandNeedsParens left-operand
     // guard (`(-2) ** 3`), which it leaves intact. AST-precedence driven, not
     // string-sniffing; a wrapped arg starts with `(`, so the B3 double-sign guard
@@ -1327,7 +1327,7 @@ function binaryOperandNeedsParens(
   // kinds as loose. (`unary` is NOT in THIS switch: a prefix unary binds TIGHTER
   // than the flat binary ops, so `@a + -@b` needs no wrap. The lone `-x ** 2`
   // edge — a unary LEFT operand of `**` — is a separate, LOUD
-  // E-CODEGEN-INVALID-JS (not a silent drop) and is handled by the
+  // E-CODEGEN-INVALID-LOGIC (not a silent drop) and is handled by the
   // g-unary-left-of-exponent-no-paren guard below.)
   switch (child.kind) {
     case "ternary":
@@ -1342,7 +1342,7 @@ function binaryOperandNeedsParens(
   //       UnaryExpression
   //     | UpdateExpression ** ExponentiationExpression
   // So `-@a ** 2` MUST serialize as `(-…) ** 2`; the flat `-… ** 2` is a
-  // SyntaxError that `node --check` rejects (E-CODEGEN-INVALID-JS) — a LOUD
+  // SyntaxError that `node --check` rejects (E-CODEGEN-INVALID-LOGIC) — a LOUD
   // invalid-JS edge, distinct from the SILENT g-paren-ternary drop above.
   // The UPDATE operators (`++` / `--`, prefix or postfix) parse as an
   // UpdateExpression, which IS a valid `**` base, so they are excluded.

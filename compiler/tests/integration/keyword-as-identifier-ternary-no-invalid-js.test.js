@@ -13,7 +13,7 @@
  * the second `type` (in `type.variants.map`) is the `type` KEYWORD; collectExpr
  * saw `parts[-1] === "?"` (not ".") and broke, truncating the init to
  * `Array.isArray(type.variants) ?` and emitting `const variants = ... ?;`
- * (invalid JS — the gate's E-CODEGEN-INVALID-JS).
+ * (invalid JS — the gate's E-CODEGEN-INVALID-LOGIC).
  *
  * FIX: in RHS context (previous part is a value-expecting operator), a
  * STMT_KEYWORD followed by `.`/`(`/`[`/`?.` is an IDENTIFIER operand, not a
@@ -22,7 +22,7 @@
  * fire before collectExpr.
  *
  * This compiles minimal snippets with the gate ON and asserts no
- * E-CODEGEN-INVALID-JS + acorn-parse-clean emitted client.js.
+ * E-CODEGEN-INVALID-LOGIC + acorn-parse-clean emitted client.js.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -41,7 +41,7 @@ function compileSource(src) {
 }
 
 function assertCleanClient(result, mustContain) {
-  const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+  const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
   expect(invalid).toHaveLength(0);
   const out = result.outputs ? [...result.outputs.values()][0] : null;
   expect(out?.clientJs).toBeTruthy();

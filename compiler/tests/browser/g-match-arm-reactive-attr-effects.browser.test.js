@@ -130,7 +130,7 @@ describe("g-match-arm-reactive-attr-effects §1 — emit shape (arm body wires i
     expect(effectCount).toBeGreaterThanOrEqual(3);
   });
 
-  test("emitted client.js parses (no E-CODEGEN-INVALID-JS)", () => {
+  test("emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(REPRO_SRC, "repro");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
   });

@@ -13,7 +13,7 @@
 //   emit-match / emit-bindings / emit-form-for / emit-table-for /
 //   emit-variant-guard. Absent on native -> codegen string-fallback -> e.g. an
 //   `onclick=@x.advance(.Drop("done"))` handler emits raw `@x.advance(...)` (the
-//   `.advance` lowering never fires) -> E-CODEGEN-INVALID-JS ("Unexpected
+//   `.advance` lowering never fires) -> E-CODEGEN-INVALID-LOGIC ("Unexpected
 //   character '@'"). Cross-cutting (~162 corpus files).
 //
 // WHY HERE (placement, not in tag-frame.js)
@@ -50,7 +50,7 @@
 //     dominant R26 cross-cutter — `onclick=@x.advance(.Drop("done"))` parses as a
 //     call-ref (name `@x.advance`, args `[".Drop(\"done\")"]`) on BOTH pipelines;
 //     codegen lowers `.Drop(...)` from `argExprNodes` and strips/lowers the `@x`
-//     callee from `name`. Absent argExprNodes -> raw `@` -> E-CODEGEN-INVALID-JS.
+//     callee from `name`. Absent argExprNodes -> raw `@` -> E-CODEGEN-INVALID-LOGIC.
 //   NEITHER field set on: string-literal, props-block, absent, dotted-ident,
 //     wildcard (the last two are native-specific value kinds with no live
 //     equivalent). Live sets neither field on these.

@@ -4,7 +4,7 @@
  *
  * ROOT CAUSE: the `!{}` failable arm parser (ast-builder.js) only captured the
  * FIRST binding ident inside `::Variant(a, b)`, leaving `, b ) -> ...` to leak
- * into the handler -> invalid JS (the gate's E-CODEGEN-INVALID-JS). Separately,
+ * into the handler -> invalid JS (the gate's E-CODEGEN-INVALID-LOGIC). Separately,
  * `fail Type::Variant(a, b)` emitted `data: a, b` (a bare comma list in
  * object-value position) -- also invalid JS. The enum CONSTRUCTOR canonically
  * shapes `.data` as a field-keyed object (`data: { a, b }`), so:
@@ -55,7 +55,7 @@ describe("multi-field !{} arm binding + multi-arg fail (gate fix-wave)", () => {
   <button onclick=run()>Run</button>
 </program>`;
     const { clientJs, errors } = compileSource(src);
-    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
     // fail emits a field-keyed object (matching the enum constructor's data shape).
@@ -82,7 +82,7 @@ describe("multi-field !{} arm binding + multi-arg fail (gate fix-wave)", () => {
   <button onclick=fetchData()>Fetch</button>
 </program>`;
     const { clientJs, errors } = compileSource(src);
-    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
     expect(clientJs).toMatch(/async function _scrml_fetchData_\d+\s*\(/);

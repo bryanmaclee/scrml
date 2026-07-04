@@ -126,10 +126,10 @@ describe("nested-each §1 — emit shape (inline inner each, no phantom module-s
     expect(clientJs).not.toContain('each: unhandled template child kind="each-block"');
   });
 
-  test("emitted client.js parses (no E-CODEGEN-INVALID-JS) via --validate-emit", () => {
+  test("emitted client.js parses (no E-CODEGEN-INVALID-LOGIC) via --validate-emit", () => {
     // The full compile already runs the Stage emit-validate gate when invoked
     // through the CLI; here we assert the compile-with-write surfaced no errors
-    // (the gate would have populated result.errors with E-CODEGEN-INVALID-JS).
+    // (the gate would have populated result.errors with E-CODEGEN-INVALID-LOGIC).
     const { errors } = compileToOutputs(NESTED_SRC, "nested");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     expect(errors.filter((e) => String(e.code || "").includes("SCOPE-001"))).toEqual([]);

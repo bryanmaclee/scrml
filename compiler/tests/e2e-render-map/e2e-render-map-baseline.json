@@ -930,10 +930,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase2-for-else-no-lift-050.client.js (byte 758, line 24, column 0)\n  Unexpected token\n    ...static(_scrml_render_list_4); else { _scrml_log_2 ( \"empty\"...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase2-for-else-no-lift-050.client.js (byte 758, line 24, column 0)\n  Unexpected token\n    ...static(_scrml_render_list_4); else { _scrml_log_2 ( \"empty\"...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -968,10 +968,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase2-for-lift-else-empty-049.client.js (byte 1215, line 31, column 0)\n  Unexpected token\n    ...static(_scrml_render_list_3); else { lift < li class = \"empt...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase2-for-lift-else-empty-049.client.js (byte 1215, line 31, column 0)\n  Unexpected token\n    ...static(_scrml_render_list_3); else { lift < li class = \"empt...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -1555,7 +1555,7 @@
         ],
         "compileErrorMessages": [
           "E-SCOPE-001: Undeclared identifier `partial` in logic expression. No variable, function, type, or import with that name is in scope. Check for a typo, a missing `import`, or whether you meant a reactive `@partial`.",
-          "E-MATCH-ARM-MARKUP-IN-VALUE: a JS-style `match` arm returns a VALUE, not markup (§18.0) — but this arm body is a markup element. Use a `<match for=Type [on=expr]>` block (the structural Tier-1 form, §18.0.1) to render a UI tree per variant, or fire a variant's `renders` display via the render-expression. To compute a VALUE per variant (a string / number), have the arm return that value (e.g. `:> \"Failed: \" + reason`) and interpolate it in markup.",
+          "E-MATCH-ARM-MARKUP-IN-VALUE: a value-form `match` arm returns a VALUE, not markup (§18.0) — but this arm body is a markup element. Use a `<match for=Type [on=expr]>` block (the structural Tier-1 form, §18.0.1) to render a UI tree per variant, or fire a variant's `renders` display via the render-expression. To compute a VALUE per variant (a string / number), have the arm return that value (e.g. `:> \"Failed: \" + reason`) and interpolate it in markup.",
           "E-TYPE-020: Non-exhaustive match over enum type `Status`. Missing variants: ::Inactive. Add arms for the missing variants, or add an `else` arm to handle them all."
         ]
       }
@@ -1581,10 +1581,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase2-return-top-level-080.client.js (byte 53, line 6, column 0)\n  'return' outside of function\n    ...ime.017w6k3y.js let x = 5; return x;\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase2-return-top-level-080.client.js (byte 53, line 6, column 0)\n  'return' outside of function\n    ...ime.017w6k3y.js let x = 5; return x;\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -1782,10 +1782,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase2-while-break-missing-label-066.client.js (byte 66, line 6, column 2)\n  Unsyntactic break\n    ...js outer: while (true) { break inner; }\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase2-while-break-missing-label-066.client.js (byte 66, line 6, column 2)\n  Unsyntactic break\n    ...js outer: while (true) { break inner; }\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -1886,10 +1886,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase3-arith-in-match-arm-cond-118.client.js (byte 244, line 20, column 2)\n  Unexpected token\n    ...const _scrml_match_5 = n; else return _scrml_handleOther...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase3-arith-in-match-arm-cond-118.client.js (byte 244, line 20, column 2)\n  Unexpected token\n    ...const _scrml_match_5 = n; else return _scrml_handleOther...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -1983,10 +1983,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase3-assign-expr-chained-080.client.js (byte 81, line 8, column 6)\n  Identifier 'a' has already been declared\n    ...; let b = 0; let c = 0; const a = b = c = 5; // --- Event h...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase3-assign-expr-chained-080.client.js (byte 81, line 8, column 6)\n  Identifier 'a' has already been declared\n    ...; let b = 0; let c = 0; const a = b = c = 5; // --- Event h...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -1999,10 +1999,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase3-assign-expr-declaration-083.client.js (byte 61, line 6, column 8)\n  The keyword 'let' is reserved\n    ...6k3y.js let a = 1; if (( ( let b = 2 ) )) { let _bad =...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase3-assign-expr-declaration-083.client.js (byte 61, line 6, column 8)\n  The keyword 'let' is reserved\n    ...6k3y.js let a = 1; if (( ( let b = 2 ) )) { let _bad =...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -2033,10 +2033,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase3-assign-expr-to-const-081.client.js (byte 61, line 6, column 6)\n  Identifier 'x' has already been declared\n    ...6k3y.js const x = 1; const x = 2;\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase3-assign-expr-to-const-081.client.js (byte 61, line 6, column 6)\n  Identifier 'x' has already been declared\n    ...6k3y.js const x = 1; const x = 2;\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -2333,10 +2333,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase3-is-none-bare-008.client.js (byte 70, line 6, column 11)\n  Unexpected token\n    ...let name = null; if (( name is none )) { let _bad = 1; }\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase3-is-none-bare-008.client.js (byte 70, line 6, column 11)\n  Unexpected token\n    ...let name = null; if (( name is none )) { let _bad = 1; }\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -3008,10 +3008,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: phase4-component-lowercase-ghost-058.client.js (byte 55, line 5, column 13)\n  Unexpected token\n    ...e.017w6k3y.js const card = < div props = { title : string...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: phase4-component-lowercase-ghost-058.client.js (byte 55, line 5, column 13)\n  Unexpected token\n    ...e.017w6k3y.js const card = < div props = { title : string...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -3525,10 +3525,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: meta-type-registry-001.client.js (byte 780, line 20, column 47)\n  Unexpected character '@'\n    ...>${info.kind}: ${info.name || @selectedType}</p>`); } }, O...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: meta-type-registry-001.client.js (byte 780, line 20, column 47)\n  Unexpected character '@'\n    ...>${info.kind}: ${info.name || @selectedType}</p>`); } }, O...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },
@@ -3904,10 +3904,10 @@
       "seeded": false,
       "detail": {
         "compileErrorCodes": [
-          "E-CODEGEN-INVALID-JS"
+          "E-CODEGEN-INVALID-LOGIC"
         ],
         "compileErrorMessages": [
-          "E-CODEGEN-INVALID-JS: the compiler emitted JavaScript it cannot itself parse.\n  artifact: file-manager-r11.client.js (byte 3914, line 118, column 22)\n  Identifier directly after number\n    ...8576) { return bytes / 1024.toFixed(1) + \" KB\"; } return...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
+          "E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n  artifact: file-manager-r11.client.js (byte 3914, line 118, column 22)\n  Identifier directly after number\n    ...8576) { return bytes / 1024.toFixed(1) + \" KB\"; } return...\n  This is a compiler defect (codegen produced malformed output). Please report it. No codegen output artifacts were written (vendored stdlib shims may already be staged)."
         ]
       }
     },

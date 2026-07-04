@@ -10,7 +10,7 @@
  *
  * Before the fix the inner `@.` leaked RAW into the emitted client JS:
  *   `...createTextNode(String((@ .) ?? ""))); _scrml_lift...`
- * producing the confusing `E-CODEGEN-INVALID-JS` ("the compiler emitted
+ * producing the confusing `E-CODEGEN-INVALID-LOGIC` ("the compiler emitted
  * JavaScript it cannot itself parse"). Root cause: the for-stmt lift body
  * routes through `emitForStmt` (emit-control-flow.ts) → its reactive
  * DocumentFragment fallback / consolidated-lift sub-paths, NONE of which
@@ -26,7 +26,7 @@
  * `<each>` body) — that is asserted by each-sigil-outside-each-bug70 §5.
  *
  * Coverage:
- *   §1 — the reproducer compiles CLEAN (no E-CODEGEN-INVALID-JS) and the
+ *   §1 — the reproducer compiles CLEAN (no E-CODEGEN-INVALID-LOGIC) and the
  *        emitted client.js has ZERO raw `@.` sigils + parses with node.
  *   §2 — the inner `@.` lowers to the inner each's iter var (`_scrml_each_item`).
  *   §3 — `<each of=N>` nested in a lift (index-form) compiles clean.
@@ -87,10 +87,10 @@ const REPRO = `type Row:struct = { id: string, cells: string[] }
 // ---------------------------------------------------------------------------
 
 describe("bug72 §1 — Tier-0 lift with nested <each> compiles clean", () => {
-  test("no E-CODEGEN-INVALID-JS; ZERO raw @. sigils; node --check passes", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; ZERO raw @. sigils; node --check passes", () => {
     const r = compile(REPRO, "bug72-s1");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       expect(r.clientJs.length).toBeGreaterThan(0);
       // ZERO raw sigils — the inner @. must have lowered to the iter var.
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
@@ -141,10 +141,10 @@ describe("bug72 §3 — <each of=N> nested in a lift compiles clean", () => {
   </tbody>
 </table>`;
 
-  test("no E-CODEGEN-INVALID-JS; sigil-free; node --check passes", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; sigil-free; node --check passes", () => {
     const r = compile(src, "bug72-s3");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
@@ -170,10 +170,10 @@ describe("bug72 §4 — `as` alias on inner each lowers to the alias var", () =>
   </tbody>
 </table>`;
 
-  test("the inner interpolation reads the `cell` alias; no E-CODEGEN-INVALID-JS", () => {
+  test("the inner interpolation reads the `cell` alias; no E-CODEGEN-INVALID-LOGIC", () => {
     const r = compile(src, "bug72-s4");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Bug 64 (S159): live-keyed per-item text; the inner @. still lowers to
       // the `cell` alias.
       expect(r.clientJs).toContain(".textContent = String(cell)");
@@ -201,10 +201,10 @@ describe("bug72 §5 — @. per-item attr value inside nested each compiles clean
   </tbody>
 </table>`;
 
-  test("attr value @. + interpolation @. both lower; no E-CODEGEN-INVALID-JS", () => {
+  test("attr value @. + interpolation @. both lower; no E-CODEGEN-INVALID-LOGIC", () => {
     const r = compile(src, "bug72-s5");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
       // The `title=@.` ATTR value (a bare `@`-sigil — tokenized as a standalone
       // PUNCT, which pre-fix forced the lift onto the string-fallback path) now
@@ -240,10 +240,10 @@ describe("bug72 §6 — nested <each> inside an if inside the for-lift compiles 
   </tbody>
 </table>`;
 
-  test("the if-gated nested-each lowers @. to the inner iter var; no E-CODEGEN-INVALID-JS", () => {
+  test("the if-gated nested-each lowers @. to the inner iter var; no E-CODEGEN-INVALID-LOGIC", () => {
     const r = compile(src, "bug72-s6");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
       // Bug 64 (S159): live-keyed per-item text — textContent assignment inside
       // the per-item effect; the inner @. still lowers to _scrml_each_item.
@@ -275,7 +275,7 @@ describe("bug72 §7 — Tier-0 lift WITHOUT a nested each is unaffected (no-regr
   test("compiles clean; the plain lift body still reads the outer iter var", () => {
     const r = compile(src, "bug72-s7");
     try {
-      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
       // No nested each → no inner reconcile machinery should appear.
       expect(r.clientJs).not.toContain("_scrml_each_item");

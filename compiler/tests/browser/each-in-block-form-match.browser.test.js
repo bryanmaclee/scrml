@@ -10,7 +10,7 @@
  * lives in buildAST/ast-builder, not the native parser that emit-match used to
  * re-parse arm bodies). The each rendered as a LITERAL `<each>` string and its
  * `${@.name}` lowered to an unscoped logic binding → `el.textContent = .name;`
- * (E-CODEGEN-INVALID-JS, the `.name` leak). The `as` alias form compiled (valid
+ * (E-CODEGEN-INVALID-LOGIC, the `.name` leak). The `as` alias form compiled (valid
  * JS) but ALSO rendered as literal `<each>` text — it never populated either.
  *
  * Three coupled failure modes (all asserted here):

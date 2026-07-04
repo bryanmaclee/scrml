@@ -6,7 +6,7 @@
  *
  * BUG: an interpolated double-quoted attribute value whose `${...}` interior
  * is an inline ternary with QUOTED string-literal arms mis-compiled to
- * E-CODEGEN-INVALID-JS — the emitted JS truncated to `...) ? }` (BOTH arms
+ * E-CODEGEN-INVALID-LOGIC — the emitted JS truncated to `...) ? }` (BOTH arms
  * dropped) → "Unexpected token" at the CG validate-emit gate, no artifacts.
  *
  * ROOT CAUSE (NOT emit-each, NOT each-specific): tokenizer.ts
@@ -57,7 +57,7 @@ function compileToClient(source, suffix = "qarms") {
 
 // node --check equivalent: try to construct a Function from the source. A
 // truncated ternary (`...) ? }`) throws a SyntaxError here, mirroring the
-// validate-emit gate's E-CODEGEN-INVALID-JS. The runtime helpers are not
+// validate-emit gate's E-CODEGEN-INVALID-LOGIC. The runtime helpers are not
 // invoked — Function() only parses — so undefined globals are fine.
 function isParseableJs(src) {
   try {
@@ -83,8 +83,8 @@ describe("g-each-peritem-attr-ternary-quoted-arms §1 — the repro", () => {
     </each>
 </ul>
 `);
-    // No E-CODEGEN-INVALID-JS (the headline failure).
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    // No E-CODEGEN-INVALID-LOGIC (the headline failure).
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     expect(clientJs.length).toBeGreaterThan(0);
     // Both ternary arms survive (the truncation dropped both).
     expect(clientJs).toContain("bg-yellow");
@@ -106,7 +106,7 @@ fn cls(v: int): string = "x"
     </each>
 </ul>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     // Bug 1 fix (g-attr-interp-fn-name-not-renamed, codegen-interp-literal-2026-06-20):
     // the fn call inside the per-item attr template literal `base ${cls(r.n)}`
     // is now correctly mangled to the encoded name `_scrml_cls_N(r.n)`. The
@@ -127,7 +127,7 @@ describe("g-each-peritem-attr-ternary-quoted-arms §3 — body interpolation bou
     </each>
 </ul>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     expect(clientJs).toContain("r.n");
     expect(isParseableJs(clientJs)).toBe(true);
   });
@@ -143,7 +143,7 @@ fn label(v: int): string = "hot"
     </each>
 </ul>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     // Bug 1 fix: the fn-call arm `label(r.n)` inside the ternary in the
     // per-item attr template literal is now correctly mangled to `_scrml_label_N(`.
     // The quoted `"cold"` arm is a string literal inside the interp and is NOT
@@ -166,7 +166,7 @@ describe("g-each-peritem-attr-ternary-quoted-arms §5 — single-quoted arms", (
     </each>
 </ul>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     expect(clientJs).toContain("bg-yellow");
     expect(clientJs).toContain("bg-white");
     expect(isParseableJs(clientJs)).toBe(true);
@@ -182,7 +182,7 @@ describe("g-each-peritem-attr-ternary-quoted-arms §6 — multi-segment literal 
     </each>
 </ul>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     expect(clientJs).toContain("pill ");
     expect(clientJs).toContain(" rounded");
     expect(clientJs).toContain('"on"');
@@ -199,7 +199,7 @@ describe("g-each-peritem-attr-ternary-quoted-arms §7 — NON-each attr (shared 
     <li class="\${(@n == @hi) ? "bg-yellow" : "bg-white"}">\${@n}</li>
 </div>
 `);
-    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
+    expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBeUndefined();
     expect(clientJs).toContain("bg-yellow");
     expect(clientJs).toContain("bg-white");
     expect(clientJs).not.toContain(") ? }");

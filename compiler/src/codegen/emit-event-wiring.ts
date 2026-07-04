@@ -851,7 +851,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // VARIABLE NAME is built from domEvent, which for a non-canonical event attr
     // (`on:click` → domEvent ":click"; `else-if` → "...-...") would emit an
     // invalid JS identifier (`const _scrml_:click_handlers = ...` → the gate's
-    // E-CODEGEN-INVALID-JS). Sanitize the identifier segment to [A-Za-z0-9_$]
+    // E-CODEGEN-INVALID-LOGIC). Sanitize the identifier segment to [A-Za-z0-9_$]
     // (the DOM event string passed to addEventListener + the data-attribute
     // selector below still use the raw event name, which is legal there).
     const idEvent = domEvent.replace(/[^A-Za-z0-9_$]/g, "_");
@@ -1649,7 +1649,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // (`emitExprField`), NOT the raw-string `rewriteReactiveRefs` shortcut.
       // The shortcut leaves variant literals (`.Home`, `Step::Info`) + `==`/`!=`
       // RAW, which emits invalid JS for `else-if=(@step == Step::Info)` (the
-      // gate's E-CODEGEN-INVALID-JS). `emitExprField` lowers `.Variant` to its
+      // gate's E-CODEGEN-INVALID-LOGIC). `emitExprField` lowers `.Variant` to its
       // string tag and `==`/`!=` to `_scrml_structural_eq(...)`, matching the
       // mount-toggle path at line ~804 above. Parse failures fall back to the
       // prior raw-string rewrite (regression-preserving).

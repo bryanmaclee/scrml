@@ -34,7 +34,7 @@ import { CGError } from "./errors.js";
  * produced; Case A was proven dead (0 fires across the full suite + corpus while
  * all of S5/S11/S13/S4/S9 fire cleanly via Case B) and removed.
  *
- * All of these otherwise leak as the generic E-CODEGEN-INVALID-JS ("compiler
+ * All of these otherwise leak as the generic E-CODEGEN-INVALID-LOGIC ("compiler
  * defect, please report it"). Worse, when the enclosing fn does NOT escalate to
  * server (a curried `?{}` two arrows deep — S4 — stays client), the malformed
  * fragment is emitted into the CLIENT bundle and emit-server never runs at all.

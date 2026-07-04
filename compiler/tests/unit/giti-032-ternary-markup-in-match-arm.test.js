@@ -5,7 +5,7 @@
  * is markup-as-value, Pillar 1 §1.4/§7.4) works at TOP LEVEL (landed S201,
  * `g-markup-value-ternary-fnreturn-codegen`) but was BROKEN inside a `<match>`
  * arm body: the emitted client.js showed `cond ? : ""` — the markup consequent
- * was DROPPED, failing the E-CODEGEN-INVALID-JS gate.
+ * was DROPPED, failing the E-CODEGEN-INVALID-LOGIC gate.
  *
  * ROOT CAUSE: the `<match>` arm bare-body re-parse routes through the native
  * parser (`nativeParseFile`). The native parser DID recognize the markup in
@@ -23,7 +23,7 @@
  * top-level S201 path) — a bare `el.textContent =` would stringify a DOM node to
  * "[object HTMLParagraphElement]".
  *
- * This file asserts the CODEGEN SHAPE (no E-CODEGEN-INVALID-JS, the consequent
+ * This file asserts the CODEGEN SHAPE (no E-CODEGEN-INVALID-LOGIC, the consequent
  * markup IIFE present, node-aware display wiring). The same root class lowered
  * the top-level control in g-markup-value-in-expression.test.js.
  */
@@ -81,9 +81,9 @@ const MULTI = [
 ].join("\n");
 
 describe("GITI-032 — ternary-returning-markup inside a <match> arm body", () => {
-  test("single block: no E-CODEGEN-INVALID-JS; the markup consequent is present (not a dropped `? : `)", () => {
+  test("single block: no E-CODEGEN-INVALID-LOGIC; the markup consequent is present (not a dropped `? : `)", () => {
     const { errors, clientJs } = compileToClient(SINGLE, "giti032-single");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The smoking gun was `_scrml_structural_eq(d, "yes") ? : ""` — the consequent
     // GONE. Assert it is NOT present and the markup IIFE consequent IS.
     expect(clientJs).not.toMatch(/\?\s*:\s*""/);
@@ -99,9 +99,9 @@ describe("GITI-032 — ternary-returning-markup inside a <match> arm body", () =
     expect(clientJs).not.toMatch(/el\.textContent\s*=\s*_scrml_structural_eq/);
   });
 
-  test("multiple blocks in one arm: no E-CODEGEN-INVALID-JS; all three consequents present (not whitespace-only)", () => {
+  test("multiple blocks in one arm: no E-CODEGEN-INVALID-LOGIC; all three consequents present (not whitespace-only)", () => {
     const { errors, clientJs } = compileToClient(MULTI, "giti032-multi");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).not.toMatch(/\?\s*:\s*""/);
     expect(clientJs).toContain('document.createTextNode("A")');
     expect(clientJs).toContain('document.createTextNode("B")');
@@ -143,9 +143,9 @@ const ENGINE = [
 ].join("\n");
 
 describe("GITI-032 — engine state-child arm body (shared-helper parity)", () => {
-  test("no E-CODEGEN-INVALID-JS; the markup consequent is present (not an empty render fn)", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; the markup consequent is present (not an empty render fn)", () => {
     const { errors, clientJs } = compileToClient(ENGINE, "giti032-engine");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).not.toMatch(/\?\s*:\s*""/);
     expect(clientJs).toContain('createElement("p")');
     expect(clientJs).toContain('document.createTextNode("SHOWN")');
@@ -165,7 +165,7 @@ describe("GITI-032 — engine state-child arm body (shared-helper parity)", () =
 // (emitEachPerItemMarkupValue) now LOWERS it — builds the markup DOM, resolves
 // the iter-scope `@.` to the item binding, and live-keys it on reconcile —
 // instead of the prior deferred skip marker. Still clean-compile (no raw
-// tokenizer-spaced `< span >` leak, no E-CODEGEN-INVALID-JS).
+// tokenizer-spaced `< span >` leak, no E-CODEGEN-INVALID-LOGIC).
 // ---------------------------------------------------------------------------
 
 const EACH = [
@@ -180,9 +180,9 @@ const EACH = [
 ].join("\n");
 
 describe("GITI-032 — markup-value in an <each> per-item interpolation (ss17 item-2: lowered)", () => {
-  test("compiles clean — no E-CODEGEN-INVALID-JS (raw `< span >` is not emitted)", () => {
+  test("compiles clean — no E-CODEGEN-INVALID-LOGIC (raw `< span >` is not emitted)", () => {
     const { errors, clientJs } = compileToClient(EACH, "giti032-each");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The markup must NOT leak as a raw tokenizer-spaced fragment.
     expect(clientJs).not.toMatch(/<\s+span\s+>/);
   });

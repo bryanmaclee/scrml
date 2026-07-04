@@ -2924,7 +2924,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // the emitted IIFE redeclares an identifier already bound by the parameter —
       // e.g. `(async (x) => { const x = … })(x)` — which is invalid JS. Without
       // this guard the failure surfaces post-emit as the MISLEADING
-      // E-CODEGEN-INVALID-JS ("compiler defect — please report it"), even though
+      // E-CODEGEN-INVALID-LOGIC ("compiler defect — please report it"), even though
       // it is AUTHOR error: the author chose a crossing name that collides with a
       // name the slice itself declares. This pre-emit SYNTACTIC scan (no parse —
       // §23.2.3 opacity preserved: it inspects only top-level binding KEYWORDS,
@@ -2954,7 +2954,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           ));
           // Decline to emit the redeclaring IIFE — the error stops the build, and
           // a defensive `null` keeps the surrounding expression syntactically
-          // well-formed (no cascade into the misleading E-CODEGEN-INVALID-JS).
+          // well-formed (no cascade into the misleading E-CODEGEN-INVALID-LOGIC).
           return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
         }
       }
@@ -3744,7 +3744,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // server-only resource — see route-inference.ts walkBodyForTriggers), its
       // server-only resources lower to `await _scrml_sql\`…\`` etc. A bare
       // `function` wrapper would make that `await` a SyntaxError
-      // ("await outside async" → E-CODEGEN-INVALID-JS). Mirror the meta-effect
+      // ("await outside async" → E-CODEGEN-INVALID-LOGIC). Mirror the meta-effect
       // wrapper (case "meta" above): emit `async function` whenever the emitted
       // body contains a top-level `await`. On the CLIENT path the same nested
       // body stubs its SQL to `return null` (no await), so the function stays
@@ -4268,7 +4268,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     // shared `fail-expr` emitter to `return { __scrml_error, … };` — `fail`
     // returns from the ENCLOSING (always `!`, per NS-1) function, so it does NOT
     // assign to the tilde var; the `return` exits the function directly. The
-    // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-JS.
+    // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-LOGIC.
     const armResultLine = (a: MatchArm): string =>
       a.failExpr ? `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}` : `  ${tildeVar} = ${emitExprField(null, a.result, _makeExprCtx(opts))};`;
 

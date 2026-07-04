@@ -7,7 +7,7 @@
  *   (a) inline ternary    `${ cond ? <a/> : <b/> }`
  *   (b) derived-cell ternary `const <x> = cond ? <a/> : <b/>`
  *   (c) fn-return markup  `fn f() -> markup { return <m/> }`
- * All three emitted E-CODEGEN-INVALID-JS (markup dropped at parse, or raw `< span >`),
+ * All three emitted E-CODEGEN-INVALID-LOGIC (markup dropped at parse, or raw `< span >`),
  * while the plain markup-typed derived control (`const <x> = <span>${@n}</span>`)
  * compiled fine.
  *
@@ -18,7 +18,7 @@
  * `parseExprWithMarkupValues`) recover each ternary markup arm to a `markup-value`
  * ExprNode leaf, and emit-expr's `case "markup-value"` lowers it via
  * `emitMarkupValueExpr` — a real createElement-built DOM node. None of the four
- * forms emit E-CODEGEN-INVALID-JS / dropped arms / raw `< span >`.
+ * forms emit E-CODEGEN-INVALID-LOGIC / dropped arms / raw `< span >`.
  *
  * THIS file asserts the CODEGEN SHAPE. The companion RENDER-level R26 (happy-dom:
  * the DOM shows the rendered markup, NOT "[object HTMLSpanElement]") lives in
@@ -57,7 +57,7 @@ describe("g-markup-value-ternary-fnreturn-codegen", () => {
 <n> = 0
 <div>\${ label(@n) }</div>`;
     const { errors, clientJs } = compileToClient(src, "mv-fnret");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain('createElement("span")');
     expect(clientJs).not.toMatch(/<\s+span\s+>/);
   });
@@ -67,7 +67,7 @@ describe("g-markup-value-ternary-fnreturn-codegen", () => {
 const <x> = <span>\${@n}</span>
 <div>\${@x}</div>`;
     const { errors, clientJs } = compileToClient(src, "mv-plain");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain('createElement("span")');
   });
 
@@ -81,7 +81,7 @@ const <x> = <span>\${@n}</span>
     const src = `<n> = 0
 <div>\${ @n > 0 ? <span>pos</span> : <span>neg</span> }</div>`;
     const { errors, clientJs } = compileToClient(src, "mv-inline");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // Both ternary arms survive as real markup-value IIFEs (not a dropped alternate
     // arm `> 0 ?)` and not a raw mangled `< span >`).
     expect(clientJs).toContain('createElement("span")');
@@ -95,7 +95,7 @@ const <x> = <span>\${@n}</span>
 const <badge> = @n > 0 ? <span>pos</span> : <span>neg</span>
 <div>\${@badge}</div>`;
     const { errors, clientJs } = compileToClient(src, "mv-derived");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The derived cell factory evaluates a ternary of markup-value IIFEs — both arms
     // present, real DOM-node lowering, no raw `< span >`.
     expect(clientJs).toContain('createElement("span")');

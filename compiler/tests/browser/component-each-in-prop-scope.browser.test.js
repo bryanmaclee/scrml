@@ -7,7 +7,7 @@
  *   const TodoList = <ul props={ items: Todo[] }>
  *     <each in=items key=@.id> <li>${@.name}</li> </each>
  *   </ul>
- * — failed with E-SCOPE-001 on `key=@.id` + E-CODEGEN-INVALID-JS (`@.name` leaked
+ * — failed with E-SCOPE-001 on `key=@.id` + E-CODEGEN-INVALID-LOGIC (`@.name` leaked
  * as bare `.name`). THREE coordinated roots:
  *
  *   1. The component-body re-parse (component-expander.ts) defaulted to the
@@ -82,7 +82,7 @@ function compileToOutputs(source, baseName) {
 // ---------------------------------------------------------------------------
 
 describe("component-each §1 — emit shape (each survives expansion, prop + @. resolved)", () => {
-  test("compiles with no errors (no E-SCOPE-001 on key, no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles with no errors (no E-SCOPE-001 on key, no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(COMPONENT_SRC, "comp");
     expect(errors.filter((e) => String(e.code || "").includes("SCOPE-001"))).toEqual([]);
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);

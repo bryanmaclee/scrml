@@ -90,7 +90,7 @@ describe("markup-value-in-expression — RENDER (happy-dom)", () => {
    */
   function mount(source) {
     const { html, clientJs, runtimeJs, errors } = compileToOutputs(source);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     document.documentElement.innerHTML = html;
     const exec = new Function(
       "window",

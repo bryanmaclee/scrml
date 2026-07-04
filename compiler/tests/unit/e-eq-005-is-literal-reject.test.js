@@ -10,7 +10,7 @@
  * (`x == not` → `x is not`) and fires E-EQ-005, steering to `==`.
  *
  * Before this rule `x is 0` mis-lowered silently to a misleading `E-DG-002`
- * or an internal `E-CODEGEN-INVALID-JS`. These tests pin that the clean reject
+ * or an internal `E-CODEGEN-INVALID-LOGIC`. These tests pin that the clean reject
  * fires AND that the old misleading codes do NOT (notCodes half).
  */
 
@@ -64,7 +64,7 @@ describe("E-EQ-005 — reject `is <value>` (steer to `==`)", () => {
     expect(codes(errors)).toContain("E-EQ-005");
     // The clean reject REPLACES the old misleading mis-lowering.
     expect(codes(errors)).not.toContain("E-DG-002");
-    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test('`x is "text"` (string literal) → E-EQ-005', () => {

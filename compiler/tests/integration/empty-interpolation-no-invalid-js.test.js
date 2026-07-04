@@ -6,13 +6,13 @@
  * that the component-expander substitutes away to NOTHING leaves a `bare-expr`
  * whose expression lowers to the empty string. emit-lift.js then emitted
  * `appendChild(document.createTextNode(String(() ?? "")))` — `()` is empty
- * parens, invalid JS (the gate's E-CODEGEN-INVALID-JS). The fix SKIPS the
+ * parens, invalid JS (the gate's E-CODEGEN-INVALID-LOGIC). The fix SKIPS the
  * text-node append when the interpolation lowers to empty (an empty
  * interpolation has no text to render).
  *
  * This test compiles a minimal snippet-slot component end-to-end with the
  * emitted-JS parse gate ON and asserts the compile produces NO
- * E-CODEGEN-INVALID-JS (and that the emitted client.js is acorn-parse-clean).
+ * E-CODEGEN-INVALID-LOGIC (and that the emitted client.js is acorn-parse-clean).
  */
 
 import { describe, test, expect } from "bun:test";
@@ -60,7 +60,7 @@ describe("empty interpolation does not emit invalid JS (gate fix-wave)", () => {
   </main>
 </program>`;
     const result = compileSource(src);
-    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     // The emitted client.js must be acorn-parse-clean and must NOT contain the
     // malformed empty-arrow interpolation.

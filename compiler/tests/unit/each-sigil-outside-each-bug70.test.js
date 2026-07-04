@@ -7,8 +7,8 @@
  * referent and SHALL fire `E-SYNTAX-064`.
  *
  * Before the fix the diagnostic was QUEUED/unwired: `@.` outside `<each>` either
- *   - leaked raw into codegen -> the confusing `E-CODEGEN-INVALID-JS` ("the
- *     compiler emitted JavaScript it cannot itself parse ... please report it"),
+ *   - leaked raw into codegen -> the confusing `E-CODEGEN-INVALID-LOGIC` ("the
+ *     compiler could not lower this construct to valid output ... please report it"),
  *     for handler-call args / interpolations in a Tier-0 `${for...lift}`, or
  *   - fell through to a misleading `E-SCOPE-001` on the base `@` token, for a
  *     bare `@.field` attribute value.
@@ -21,12 +21,12 @@
  *       walked by the TS visitor).
  * The emitted-JS parse gate is suppressed when a prior fatal error exists, so a
  * misuse already diagnosed by E-SYNTAX-064 no longer ALSO accuses codegen of a
- * defect via E-CODEGEN-INVALID-JS.
+ * defect via E-CODEGEN-INVALID-LOGIC.
  *
  * Coverage:
  *   §1 — bare `@.field` attr-value outside each -> E-SYNTAX-064 (no E-SCOPE-001)
  *   §2 — Tier-0 for-lift handler-call arg `ping(@.id)` -> E-SYNTAX-064, and
- *        E-CODEGEN-INVALID-JS NO LONGER fires
+ *        E-CODEGEN-INVALID-LOGIC NO LONGER fires
  *   §3 — Tier-0 for-lift interpolation `${@.name}` -> E-SYNTAX-064
  *   §4 — `@.` INSIDE an `<each>` body (attr + handler + interp) compiles CLEAN
  *   §5 — a Tier-0 lift CONTAINING a nested `<each>` using `@.` does NOT
@@ -86,10 +86,10 @@ ${"$"}{
 
 // ---------------------------------------------------------------------------
 // §2 — Tier-0 for-lift handler-call arg ping(@.id) -> E-SYNTAX-064;
-//      E-CODEGEN-INVALID-JS NO LONGER fires.
+//      E-CODEGEN-INVALID-LOGIC NO LONGER fires.
 // ---------------------------------------------------------------------------
 
-describe("bug70 §2 — Tier-0 for-lift handler-arg ping(@.id) -> E-SYNTAX-064 (not E-CODEGEN-INVALID-JS)", () => {
+describe("bug70 §2 — Tier-0 for-lift handler-arg ping(@.id) -> E-SYNTAX-064 (not E-CODEGEN-INVALID-LOGIC)", () => {
   const src = `<program>
 ${"$"}{
     type Item:struct = { id: int, name: string }
@@ -106,9 +106,9 @@ ${"$"}{
     expect(m).toContain("@.id");
   });
 
-  test("E-CODEGEN-INVALID-JS NO LONGER fires for the same source", () => {
+  test("E-CODEGEN-INVALID-LOGIC NO LONGER fires for the same source", () => {
     const { errors } = compileToDiagnostics(src, "bug70-handler-codegen");
-    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 });
 
@@ -125,10 +125,10 @@ ${"$"}{
 <ul>${"$"}{ for (it of @items) { lift <li>${"$"}{@.name}</li> } }</ul>
 </program>`;
 
-  test("E-SYNTAX-064 fires for the @.name interpolation; no E-CODEGEN-INVALID-JS", () => {
+  test("E-SYNTAX-064 fires for the @.name interpolation; no E-CODEGEN-INVALID-LOGIC", () => {
     const { errors } = compileToDiagnostics(src, "bug70-interp");
     expect(codes(errors)).toContain("E-SYNTAX-064");
-    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const m = msgsFor(errors, "E-SYNTAX-064").join("\n");
     expect(m).toContain("@.name");
   });
@@ -148,10 +148,10 @@ ${"$"}{
 <ul><each in=@items><li title=@.name class:done=@.done onclick=ping(@.id)>${"$"}{@.name}</li></each></ul>
 </program>`;
 
-  test("no E-SYNTAX-064 and no E-CODEGEN-INVALID-JS — @. is in scope inside each", () => {
+  test("no E-SYNTAX-064 and no E-CODEGEN-INVALID-LOGIC — @. is in scope inside each", () => {
     const { errors } = compileToDiagnostics(src, "bug70-in-each");
     expect(codes(errors)).not.toContain("E-SYNTAX-064");
-    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 });
 

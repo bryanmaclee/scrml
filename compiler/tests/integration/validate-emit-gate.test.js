@@ -7,7 +7,7 @@
  *   1. valid programs compile clean under the gate (zero false positives) and
  *      still write their output files;
  *   2. when the codegen DOES emit invalid JS today, the gate fires
- *      E-CODEGEN-INVALID-JS for exactly those artifacts and writes no codegen
+ *      E-CODEGEN-INVALID-LOGIC for exactly those artifacts and writes no codegen
  *      output (self-adjusting: if the separate codegen fix-wave later closes
  *      that surface, the test asserts the gate then emits ZERO false positives
  *      on the now-clean reference app);
@@ -56,7 +56,7 @@ function parsesClean(src) {
 }
 
 describe("validate-emit gate — valid program (no false positive)", () => {
-  test("a clean app compiles with zero E-CODEGEN-INVALID-JS and writes output", () => {
+  test("a clean app compiles with zero E-CODEGEN-INVALID-LOGIC and writes output", () => {
     const src = `<program>
 \${
   <count> = 0
@@ -68,7 +68,7 @@ describe("validate-emit gate — valid program (no false positive)", () => {
     writeFileSync(file, src);
     const outDir = join(TMP, "clean.dist");
     const r = compileScrml({ inputFiles: [file], outputDir: outDir, write: true, validateEmit: true, log: () => {} });
-    expect(r.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(r.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(r.errors.filter((e) => e.severity === "error")).toEqual([]);
     // Output actually landed on disk.
     expect(walkJs(outDir).length).toBeGreaterThan(0);
@@ -79,7 +79,7 @@ describe("validate-emit gate — valid program (no false positive)", () => {
   });
 });
 
-describe("validate-emit gate — invalid emission fires E-CODEGEN-INVALID-JS", () => {
+describe("validate-emit gate — invalid emission fires E-CODEGEN-INVALID-LOGIC", () => {
   test("trucking-dispatch reference app: gate count === acorn-detected invalid count", () => {
     // Self-adjusting against the separate codegen fix-wave. First measure, with
     // the gate OFF, how many emitted artifacts acorn rejects today.
@@ -97,7 +97,7 @@ describe("validate-emit gate — invalid emission fires E-CODEGEN-INVALID-JS", (
     // contract can be checked.
     const outDir = join(TMP, "td.dist");
     const gated = compileScrml({ inputFiles: files, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
-    const fires = gated.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const fires = gated.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
 
     // The gate fires for EXACTLY the artifacts acorn rejects — no more (no
     // false positives on valid artifacts), no fewer (catches every invalid one).
@@ -127,6 +127,6 @@ describe("validate-emit gate — default OFF preserves pre-gate behavior", () =>
     const files = walkScrml(TD_DIR);
     const r = compileScrml({ inputFiles: files, write: false, validateEmit: false, log: () => {} });
     expect(r.errors.filter((e) => e.severity === "error")).toEqual([]);
-    expect(r.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(r.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
   }, 30000);
 });

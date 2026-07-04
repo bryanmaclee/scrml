@@ -4,7 +4,7 @@
  *
  * The INLINE value-returning form `const out = _={ in:{…} … }=` in a server-fn
  * body (lang="ts"/"js" ONLY). Pre-build: `_={` was mis-tokenized as `_ = {`
- * (identifier + assign + object) → E-CODEGEN-INVALID-JS, and the §23.2.2
+ * (identifier + assign + object) → E-CODEGEN-INVALID-LOGIC, and the §23.2.2
  * ForeignBlock node had NO producer and NO codegen consumer.
  *
  * The build:
@@ -107,7 +107,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 
   test("§2 codegen — server JS wraps the slice in an async IIFE with the named crossings + an injected await", () => {
     const { errors, serverJs } = compileSource(DISPATCHER, "disp");
-    const cgErr = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const cgErr = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(cgErr.length).toBe(0);
     expect(serverJs).toBeTruthy();
     // `await (async (prompt, path) => { … })(prompt, path)` — boundary await injected.
@@ -130,10 +130,10 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     expect(clientJs ?? "").toMatch(/fetch/);
   });
 
-  test("§5 compiles exit-0 (no E-CODEGEN-INVALID-JS — the pre-build failure mode)", () => {
+  test("§5 compiles exit-0 (no E-CODEGEN-INVALID-LOGIC — the pre-build failure mode)", () => {
     const { errors } = compileSource(DISPATCHER, "disp");
     const fatal = errors.filter(
-      (e) => e.code === "E-CODEGEN-INVALID-JS" || e.code === "E-FOREIGN-004",
+      (e) => e.code === "E-CODEGEN-INVALID-LOGIC" || e.code === "E-FOREIGN-004",
     );
     expect(fatal.length).toBe(0);
   });
@@ -149,7 +149,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 </program>
 `;
     const { errors, serverJs } = compileSource(src, "typed");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     expect(serverJs).toMatch(/await \(async \(prompt, path\) =>/);
   });
 
@@ -209,7 +209,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 </program>
 `;
     const { errors, serverJs } = compileSource(src, "lvl2");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS" || e.code === "E-CTX-001").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC" || e.code === "E-CTX-001").length).toBe(0);
     expect(serverJs).toContain("contains }= inside safely");
     expect(serverJs).toMatch(/await \(async \(p\) =>/);
   });
@@ -234,7 +234,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 
   test("§12 value-flow — a SINGLE-expression slice is wrapped as `return (slice)` so the value flows", () => {
     const { serverJs, errors } = compileSource(DISPATCHER, "vf1");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     // single-expression dispatcher slice → codegen-injected `return (…)`.
     expect(serverJs).toMatch(/return \(await new Response\(/);
   });
@@ -251,7 +251,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 </program>
 `;
     const { serverJs, errors } = compileSource(src, "vf2");
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     // The author's own top-level `return await Promise.resolve(...)` is preserved
     // verbatim — the multi-statement body is NOT re-wrapped as `return (…)`.
     expect(serverJs).toContain("return await Promise.resolve(mapped.join(\"|\"))");
@@ -263,11 +263,11 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
   // The `in:{}` crossing names become the async-IIFE PARAMETERS. If the
   // verbatim slice ALSO declares a TOP-LEVEL binding of the same name, the
   // emitted IIFE redeclares the parameter — invalid JS. Pre-fix this surfaced
-  // as the MISLEADING post-emit E-CODEGEN-INVALID-JS ("compiler defect, please
+  // as the MISLEADING post-emit E-CODEGEN-INVALID-LOGIC ("compiler defect, please
   // report it"), even though it is AUTHOR error. A pre-emit syntactic scan now
   // fires the clear E-FOREIGN-006 (naming the shadowed binding) instead.
 
-  test("§14 crossing-shadow — a `const x` slice-local colliding with `in:{x}` fires E-FOREIGN-006, NOT the misleading E-CODEGEN-INVALID-JS", () => {
+  test("§14 crossing-shadow — a `const x` slice-local colliding with `in:{x}` fires E-FOREIGN-006, NOT the misleading E-CODEGEN-INVALID-LOGIC", () => {
     const src = `<program lang="ts" db="./d.db">
   export function shadower(x: string) {
     const out = _={ in: { x }
@@ -280,7 +280,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 `;
     const { errors } = compileSource(src, "shadow");
     const f6 = errors.filter((e) => e.code === "E-FOREIGN-006");
-    const cg = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const cg = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(f6.length).toBe(1);
     // The clear diagnostic NAMES the shadowed binding (author error) ...
     expect(f6[0].message).toContain("`x`");
@@ -303,7 +303,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     const fnRes = compileSource(fnSrc, "fnshadow");
     expect(fnRes.errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(1);
     expect(fnRes.errors.find((e) => e.code === "E-FOREIGN-006").message).toContain("`handler`");
-    expect(fnRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(fnRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
 
     const clSrc = `<program lang="ts" db="./d.db">
   export function clS(Widget: string) {
@@ -318,7 +318,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     const clRes = compileSource(clSrc, "classshadow");
     expect(clRes.errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(1);
     expect(clRes.errors.find((e) => e.code === "E-FOREIGN-006").message).toContain("`Widget`");
-    expect(clRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(clRes.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
   });
 
   test("§16 NON-shadow — a crossing name distinct from every slice-local compiles clean (no E-FOREIGN-006)", () => {
@@ -334,7 +334,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 `;
     const { errors, serverJs } = compileSource(src, "nonshadow");
     expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     // The non-colliding crossing still lowers to the canonical IIFE.
     expect(serverJs).toMatch(/await \(async \(y\) =>/);
   });
@@ -355,7 +355,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     // the `const x` lives inside the `.map()` arrow body (nested), so it does
     // NOT collide with the `x` parameter — the scan is brace-depth-aware.
     expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
-    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     expect(serverJs).toMatch(/await \(async \(x\) =>/);
   });
 });

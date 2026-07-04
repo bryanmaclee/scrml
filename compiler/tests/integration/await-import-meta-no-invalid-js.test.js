@@ -19,7 +19,7 @@
  *   whenever the meta body contains a top-level `await`.
  *
  * Both bugs live behind the emitted-JS parse gate. This compiles the shapes with
- * the gate ON and asserts no E-CODEGEN-INVALID-JS + acorn-clean output.
+ * the gate ON and asserts no E-CODEGEN-INVALID-LOGIC + acorn-clean output.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -54,7 +54,7 @@ describe("await import() does not double-await and meta wrappers go async", () =
       "}",
     ].join("\n");
     const result = compileSource(src);
-    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     const out = result.outputs ? [...result.outputs.values()][0] : null;
     const js = out?.clientJs ?? "";

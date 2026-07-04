@@ -2,7 +2,7 @@
  * division-in-ternary-arm tests — g-division-in-ternary-arm (S188)
  *
  * A `/` division inside EITHER arm of a ternary — `@e > 0 ? @h / @e : @h` —
- * emitted invalid JS (E-CODEGEN-INVALID-JS, "compiler defect"). The divide-with-
+ * emitted invalid JS (E-CODEGEN-INVALID-LOGIC, "compiler defect"). The divide-with-
  * guard idiom `cond ? a/b : fallback` (guard divide-by-zero) broke everywhere it
  * was idiomatically written.
  *
@@ -171,7 +171,7 @@ const FOOT = `  }\n  <p>\${@h}</p>\n</program>`;
 describe("full compile — division in a ternary arm emits valid division JS", () => {
   test("derived cell, `/` in CONSEQUENT — 0 errors, valid client JS, division present", () => {
     const { res, fp } = compile(`${HEAD}    const <ratio> = @e > 0 ? @h / @e : @h\n${FOOT}`);
-    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
     const clientJs = res.outputs.get(fp).clientJs ?? "";
     expect(parseModule(clientJs)).toBeNull();
@@ -180,7 +180,7 @@ describe("full compile — division in a ternary arm emits valid division JS", (
 
   test("derived cell, `/` in ALTERNATIVE — 0 errors, valid client JS, division present", () => {
     const { res, fp } = compile(`${HEAD}    const <ratio> = @e == 0 ? @h : @h / @e\n${FOOT}`);
-    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
     const clientJs = res.outputs.get(fp).clientJs ?? "";
     expect(parseModule(clientJs)).toBeNull();
@@ -189,14 +189,14 @@ describe("full compile — division in a ternary arm emits valid division JS", (
 
   test("logic-const (plain `const`), `/` in consequent — valid client JS", () => {
     const { res, fp } = compile(`${HEAD}    const ratio = @e > 0 ? @h / @e : @h\n${FOOT}`);
-    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
     expect(parseModule(res.outputs.get(fp).clientJs ?? "")).toBeNull();
   });
 
   test("markup interpolation `${ ... }`, `/` in consequent — valid client JS, division present", () => {
     const { res, fp } = compile(`<program>\n  \${\n    @h = 10\n    @e = 2\n  }\n  <p>\${@e > 0 ? @h / @e : @h}</p>\n</program>`);
-    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
     const clientJs = res.outputs.get(fp).clientJs ?? "";
     expect(parseModule(clientJs)).toBeNull();
@@ -231,7 +231,7 @@ describe("full compile — clean cases stay clean", () => {
 
   test("regex `/not found/i` in a `.filter` (GITI-017) — survives verbatim, NOT corrupted", () => {
     const { res, fp } = compile(`<program>\n  \${\n    @names = ["x"]\n    const hits = @names.filter(n => /not found/i.test(n))\n  }\n  <p>\${hits}</p>\n</program>`);
-    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
     const clientJs = res.outputs.get(fp).clientJs ?? "";
     expect(parseModule(clientJs)).toBeNull();

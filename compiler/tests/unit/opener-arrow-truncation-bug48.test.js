@@ -16,7 +16,7 @@
  *
  * Fix (emit-match.ts): the complex-expression `on=` fall-through emitted the raw
  * scrml text VERBATIM into the dispatch call, leaking the `@` sigil + scrml
- * operators (`==`) into emitted JS (E-CODEGEN-INVALID-JS). It now lowers the
+ * operators (`==`) into emitted JS (E-CODEGEN-INVALID-LOGIC). It now lowers the
  * expression through parseExprToNode + emitExpr (the same helpers the arm-body
  * path uses), so `@nums` -> `_scrml_reactive_get("nums")` and `==` ->
  * `_scrml_structural_eq`.
@@ -57,7 +57,7 @@ function clientJs(filename) {
 }
 
 describe("§1 <match> opener with inline `=>` arrow in on=", () => {
-  test("`<match on=@nums.filter(c => c == 1)>` compiles clean (no E-CODEGEN-INVALID-JS)", () => {
+  test("`<match on=@nums.filter(c => c == 1)>` compiles clean (no E-CODEGEN-INVALID-LOGIC)", () => {
     const result = compile("m.scrml", `<div>
     \${
         type Phase:enum = { Idle, Loading, Ready }
@@ -72,7 +72,7 @@ describe("§1 <match> opener with inline `=>` arrow in on=", () => {
         <_><p data-arm="fallback">Something else</p></>
     </match>
 </div>`);
-    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(fatalCodes(result)).toEqual([]);
     // The arrow + @cell + == lowered, not emitted verbatim.
     const js = clientJs("m.scrml");
@@ -95,7 +95,7 @@ describe("§2 <engine> opener with inline `=>` arrow in on=", () => {
         <Ready><p>Ready</p></>
     </engine>
 </div>`);
-    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(fatalCodes(result)).toEqual([]);
   });
 });
@@ -112,7 +112,7 @@ describe("§3 <machine> opener with inline `=>` arrow in on=", () => {
         <Green><p>green</p></>
     </machine>
 </div>`);
-    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(fatalCodes(result)).toEqual([]);
   });
 });

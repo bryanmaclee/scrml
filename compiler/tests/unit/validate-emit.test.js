@@ -5,7 +5,7 @@
  *
  * Exercises the core gate logic in compiler/src/codegen/validate-emit.ts in
  * isolation: a valid artifact returns null; an invalid artifact returns a
- * CGError(E-CODEGEN-INVALID-JS) naming the artifact + byte/line/column +
+ * CGError(E-CODEGEN-INVALID-LOGIC) naming the artifact + byte/line/column +
  * offending snippet. Deterministic — does NOT depend on any transient codegen
  * bug, so it stays green when the separate codegen fix-wave closes the
  * pre-existing invalid-JS surface.
@@ -58,7 +58,7 @@ describe("validate-emit (Approach A) — single artifact", () => {
       contents,
     });
     expect(err).not.toBeNull();
-    expect(err.code).toBe("E-CODEGEN-INVALID-JS");
+    expect(err.code).toBe("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("the truncated `!==` (compound is-some) shape is rejected, with offset + snippet", () => {
@@ -72,7 +72,7 @@ describe("validate-emit (Approach A) — single artifact", () => {
       contents,
     });
     expect(err).not.toBeNull();
-    expect(err.code).toBe("E-CODEGEN-INVALID-JS");
+    expect(err.code).toBe("E-CODEGEN-INVALID-LOGIC");
     // Names the artifact + a numeric byte/line/column.
     expect(err.message).toContain("drivers.client.js");
     expect(err.message).toMatch(/byte \d+, line \d+, column \d+/);
@@ -92,7 +92,7 @@ describe("validate-emit (Approach A) — single artifact", () => {
       contents,
     });
     expect(err).not.toBeNull();
-    expect(err.code).toBe("E-CODEGEN-INVALID-JS");
+    expect(err.code).toBe("E-CODEGEN-INVALID-LOGIC");
   });
 });
 
@@ -114,7 +114,7 @@ describe("validate-emit (Approach A) — batch", () => {
     ];
     const errs = validateEmittedArtifacts(arts);
     expect(errs.length).toBe(2);
-    expect(errs.every((e) => e.code === "E-CODEGEN-INVALID-JS")).toBe(true);
+    expect(errs.every((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toBe(true);
     const artifacts = errs.map((e) => e.message).join("\n");
     expect(artifacts).toContain("bad1.client.js");
     expect(artifacts).toContain("bad2.client.js");

@@ -565,7 +565,7 @@ describe("class:name=!@var — negated reactive variable (fix-class-negation)", 
 // ExprNode emitter, NOT leave them RAW. Before the fix, the class: form-3
 // path + the else-if chain cascade used the raw-string rewriteReactiveRefs
 // shortcut, which left `.Home` / `Step::Info` and `==`/`!=` verbatim in the
-// emitted JS -> E-CODEGEN-INVALID-JS. Examples 05-multi-step-form (Step::Info)
+// emitted JS -> E-CODEGEN-INVALID-LOGIC. Examples 05-multi-step-form (Step::Info)
 // and 21-navigation (.Home) shipped invalid .client.js as a result.
 // ---------------------------------------------------------------------------
 

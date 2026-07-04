@@ -111,7 +111,7 @@ describe("§19.15 match-arm `<render of=err/>` codegen", () => {
     ].join("\n");
     const result = compileSource(src);
     expect(errsByCode(result, "E-RENDER-NO-CLAUSE").length).toBe(0);
-    expect(errsByCode(result, "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errsByCode(result, "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     const js = clientJs(result);
     expect(js).toContain('case "NotFound"');
     expect(js).toContain('case "Network"');
@@ -134,7 +134,7 @@ describe("§19.15 top-level `<render of=@cell/>` codegen", () => {
       "</program>",
     ].join("\n");
     const result = compileSource(src);
-    expect(errsByCode(result, "E-CODEGEN-INVALID-JS").length).toBe(0);
+    expect(errsByCode(result, "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
     const js = clientJs(result);
     expect(js).toContain('case "NotFound"');
     expect(js).toContain('_scrml_reactive_subscribe("err"');

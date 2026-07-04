@@ -301,12 +301,12 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
     // B1 (g-unary-left-of-exponent-no-paren): a unary operator immediately left
     // of `**` (e.g. `-@a ** 2`) is invalid JS; acorn rejected it and the
     // expression fell back to a ParseError escape-hatch that would re-emit the
-    // flat `- … ** 2` form SILENTLY. Surface a LOUD E-CODEGEN-INVALID-JS here
+    // flat `- … ** 2` form SILENTLY. Surface a LOUD E-CODEGEN-INVALID-LOGIC here
     // (mirrors the SQL-diagnostic surfacing above). The author-paren `(-@a) ** 2`
     // parses cleanly and never reaches this branch.
     if (errors && node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.exponentDiagnostic) {
       errors.push(new TABError(
-        node.exponentDiagnostic.code || "E-CODEGEN-INVALID-JS",
+        node.exponentDiagnostic.code || "E-CODEGEN-INVALID-LOGIC",
         node.exponentDiagnostic.message,
         node.span,
       ));
@@ -315,7 +315,7 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
     // keyword + an arrow body) is not a sanctioned scrml form; acorn rejected it
     // and the expression fell back to a ParseError escape-hatch whose blind
     // `\bfn\b`->`function` rewrite would emit `function(args) => …` (invalid JS,
-    // mis-framed as E-CODEGEN-INVALID-JS "compiler defect"). Surface a clean
+    // mis-framed as E-CODEGEN-INVALID-LOGIC "compiler defect"). Surface a clean
     // E-FN-ARROW-BODY syntax error that steers to the two valid forms.
     if (errors && node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.fnArrowDiagnostic) {
       errors.push(new TABError(
@@ -3387,12 +3387,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           node.span,
         ));
       }
-      // B1 (g-unary-left-of-exponent-no-paren): surface a LOUD E-CODEGEN-INVALID-JS
+      // B1 (g-unary-left-of-exponent-no-paren): surface a LOUD E-CODEGEN-INVALID-LOGIC
       // when acorn rejected a unary base of `**` (e.g. `-@a ** 2`). See the
       // companion block in safeParseExprToNodeGlobal.
       if (node && node.kind === "escape-hatch" && node.nativeKind === "ParseError" && node.exponentDiagnostic) {
         errors.push(new TABError(
-          node.exponentDiagnostic.code || "E-CODEGEN-INVALID-JS",
+          node.exponentDiagnostic.code || "E-CODEGEN-INVALID-LOGIC",
           node.exponentDiagnostic.message,
           node.span,
         ));
@@ -3444,7 +3444,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    *
    * acorn cannot parse `<span>` markup, so a markup-bearing expression otherwise
    * degrades to an escape-hatch whose `raw` is emitted verbatim (raw `< span >`
-   * → E-CODEGEN-INVALID-JS). This helper:
+   * → E-CODEGEN-INVALID-LOGIC). This helper:
    *   1. scans the (tokenizer-spaced) expr for balanced markup element spans,
    *   2. replaces each span with a placeholder ident `__scrml_mv_N__`,
    *   3. parses the placeholder SKELETON via safeParseExprToNode (acorn-clean),
@@ -3755,7 +3755,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // closing (`<span>p</span>`) does NOT complete the RHS value — the `:` and
     // the alternate arm `<span>n</span>` still follow. Pre-fix, the consequent
     // arm's close set markupRootClosed → the break fired at the `:` → the
-    // alternate arm was DROPPED → `() => ... > 0 ?)` → E-CODEGEN-INVALID-JS.
+    // alternate arm was DROPPED → `() => ... > 0 ?)` → E-CODEGEN-INVALID-LOGIC.
     let sawTernaryAtRoot = false;
     // g-ternary-arrow-sql-e-error-003 (2026-06-27) — the ternary-body SIBLING of
     // the ss50 `=>`-direct concise-arrow SQL-capture below. A concise arrow whose
@@ -3923,7 +3923,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // a trailing arm-arrow marks the boundary. Without the chain walk the
             // first alternate `"a"` (followed by `|`, not an arrow) was NOT seen
             // as a new arm, so `"a" | "b" :>` was absorbed into the PRECEDING arm's
-            // result → E-CODEGEN-INVALID-JS.
+            // result → E-CODEGEN-INVALID-LOGIC.
             if (tok.kind === "STRING") {
               if (armArrowAt(1)) return true;
               let si = 1;
@@ -4122,7 +4122,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // `@cell` (`cond ? @cell : alt`), and there the depth-0 `@cell :`
             // IS the ternary value-arm separator, not a typed-decl start.
             // Mis-firing this break truncated the init at the consequent
-            // (`@e > 0 ? @h /` etc.) and emitted invalid JS (E-CODEGEN-INVALID-JS).
+            // (`@e > 0 ? @h /` etc.) and emitted invalid JS (E-CODEGEN-INVALID-LOGIC).
             // Guard with `ternaryDepth === 0` so the break fires ONLY for a
             // genuine top-level typed-reactive decl, never inside a ternary arm.
             const isTypedReactive = next1 && next1.kind === "PUNCT" && next1.text === ":";
@@ -5065,7 +5065,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // parse and re-route the whole lift through the string-fallback path
     // ({kind:"expr"}). That string path renders a nested `<each>` as a literal
     // element and leaks the inner `@.` raw into the emitted JS
-    // (E-CODEGEN-INVALID-JS). Collecting the `@`-sigil expression here keeps the
+    // (E-CODEGEN-INVALID-LOGIC). Collecting the `@`-sigil expression here keeps the
     // lift on the structured `{kind:"markup"}` path, where the shared each
     // machinery lowers the inner `@.` to the inner each's iter var (§17.7.3).
     // Mirrors the paren-branch below: collect the balanced `@...` token run
@@ -6498,7 +6498,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // (nodeId:-1) that codegen rendered as the self-flagged
     // `null /* sql-ref unresolved … upstream parser/AST bug, please report */`
     // placeholder (non-server `<x> = ?{}`) or leaked the raw `?{}` into client JS
-    // → E-CODEGEN-INVALID-JS (`<x server> = ?{}`). type-system.ts:8894 already
+    // → E-CODEGEN-INVALID-LOGIC (`<x server> = ?{}`). type-system.ts:8894 already
     // ASSUMES this site attaches `sqlNode`; this closes the contract gap.
     // Mirrors the `server @x = ?{}` shape at ~6915.
     {
@@ -7438,7 +7438,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // §19.5: `const x = fallible()?` — propagate-expr binding. Mirrors the
         // let-decl `?`-propagate hook above (ast-builder.js ~5630). Without this
         // the const path captured `inner()?` whole in `init`, leaving the `?`
-        // to emit LITERALLY (E-CODEGEN-INVALID-JS — `const v = _scrml_inner_1()?`).
+        // to emit LITERALLY (E-CODEGEN-INVALID-LOGIC — `const v = _scrml_inner_1()?`).
         // The `?` propagation operator is a §19.5 flagship primitive; both decl
         // forms must desugar it identically to the `propagate-expr` node that
         // emit-logic.ts:case "propagate-expr" lowers (the §19.5.2 match/handler
@@ -8122,7 +8122,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // lowers it via emitMarkupValueExpr (the markup→DOM-node IIFE primitive).
       // Without this hook the markup fell to collectExpr → acorn escape-hatch
       // `< span >` (raw, mangled) + the `${...}` interpolation orphaned → invalid
-      // JS (E-CODEGEN-INVALID-JS). The `peek().text === "<"` / IDENT-or-KEYWORD
+      // JS (E-CODEGEN-INVALID-LOGIC). The `peek().text === "<"` / IDENT-or-KEYWORD
       // gate is the same disambiguator the `lift` path uses; a `return @a < @b`
       // comparison is NOT matched (peek(1) is AT_IDENT, not IDENT/KEYWORD).
       if (
@@ -9858,7 +9858,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` VALUE-arm
     // (`::X(reason) :> fail AErr::Wrapped(reason)`). The inline-arm `result` is
     // captured as a string where `fail` is a leading ident, so it emitted
-    // LITERALLY (`return fail "Wrapped"(reason)` -> E-CODEGEN-INVALID-JS).
+    // LITERALLY (`return fail "Wrapped"(reason)` -> E-CODEGEN-INVALID-LOGIC).
     // Attach a `failExpr` so codegen (emit-control-flow.ts:emitMatchExpr) lowers
     // it via the fail-expr path (`return { __scrml_error, … }`) and the typer's
     // NS-1 gate fires E-ERROR-001 when the enclosing function is non-`!`.
@@ -13791,7 +13791,7 @@ function parseErrorTokens(tokens, filePath) {
       // positionally — e.g. `::Thrown(message, name)` (HostError, used heavily
       // across stdlib). Consume EVERY comma-separated binding ident inside the
       // parens; a single-ident-only parse left `, name ) -> ...` to leak into
-      // the handler -> invalid JS (the gate's E-CODEGEN-INVALID-JS).
+      // the handler -> invalid JS (the gate's E-CODEGEN-INVALID-LOGIC).
       if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "(") {
         i++; // consume `(`
         const _bindNames = [];
@@ -14012,7 +14012,7 @@ function parseErrorTokens(tokens, filePath) {
   // through the NS-1 gate (E-ERROR-001 in a non-`!` function) instead of the
   // ident scope-check (which mis-read `fail` as undeclared -> spurious
   // E-SCOPE-001), and codegen emits the `return { __scrml_error, ... }` shape
-  // (instead of the literal `fail …` -> E-CODEGEN-INVALID-JS).
+  // (instead of the literal `fail …` -> E-CODEGEN-INVALID-LOGIC).
   for (const arm of arms) {
     const h = (arm.handler ?? "").trim();
     const inner = (h.startsWith("{") && h.endsWith("}")) ? h.slice(1, -1).trim() : h;

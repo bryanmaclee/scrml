@@ -14,7 +14,7 @@
  * was `undefined === undefined` → always TRUE. The next statement's leading
  * identifier (`out`) was wrongly consumed as a labeled-`continue` target,
  * producing `continue out;` and orphaning `out.push(line)` → `. push ( line );`.
- * The `--validate-emit` gate (default-ON) caught it as E-CODEGEN-INVALID-JS
+ * The `--validate-emit` gate (default-ON) caught it as E-CODEGEN-INVALID-LOGIC
  * ("Unsyntactic continue"); silent-latent before the gate.
  *
  * Fix: compare `tok.span?.line` with a null-guard (mirrors the adjacent
@@ -218,7 +218,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
   // --- End-to-end emit assertions (gate ON + node --check) ----------------
   test("continue: gate-clean compile + valid emitted .server.js", () => {
     const { errors, serverJs } = compileWithGate("readLines", CONTINUE_PROG);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
     expect(serverJs).not.toContain("continue out");
     expect(serverJs).toMatch(/continue;/);
@@ -227,7 +227,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
 
   test("break: gate-clean compile + valid emitted .server.js", () => {
     const { errors, serverJs } = compileWithGate("firstFew", BREAK_PROG);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
     expect(serverJs).not.toContain("break out");
     expect(serverJs).toMatch(/break;/);
@@ -236,7 +236,7 @@ describe("GITI-024: brace-less continue/break/return in a server-split body", ()
 
   test("return: gate-clean compile + valid emitted .server.js", () => {
     const { errors, serverJs } = compileWithGate("pick", RETURN_PROG);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
     expect(errors).toEqual([]);
     expect(nodeCheckOk(serverJs)).toEqual({ ok: true, err: "" });
   });

@@ -49,7 +49,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 // to route the handler value through `rewriteIterValueExpr` ONLY — iter-scope
 // lowering with NO engine awareness. So `@phase.advance(.Active)` and
 // `@phase = .Active` survived RAW into the emitted handler body → invalid JS
-// (`E-CODEGEN-INVALID-JS: Unexpected character '@'`).
+// (`E-CODEGEN-INVALID-LOGIC: Unexpected character '@'`).
 //
 // This carrier threads the file's engine codegen context (built once in
 // emitEachBodyRenderForFile from `ctx.fileAST`, mirroring emit-event-wiring.ts)
@@ -694,7 +694,7 @@ function renderTemplateChildToJs(
         // (emitCreateElementFromMarkup does not yet rewrite `@.` to the iter
         // binding), so a full lowering is a separate follow-on. Until then,
         // PRESERVE the pre-GITI-032 clean-compile behavior (skip) rather than
-        // emit a raw `String(< span > … )` that fails the E-CODEGEN-INVALID-JS
+        // emit a raw `String(< span > … )` that fails the E-CODEGEN-INVALID-LOGIC
         // gate. Surfaced as a deferred item; NOT a silent correctness change vs.
         // the prior behavior (which also did not render the markup).
         // g-each-peritem-markup-value-ternary (GITI-032 follow-on) — lower the
@@ -980,7 +980,7 @@ function lowerEachExpr(text: string, iterVarName: string): string {
   // so member access `card.id` / method-chain `foo().Bar` / `obj.Foo` are
   // EXCLUDED) — g-each-body-bare-variant-arg (S201): emit-expr.ts:295 lowers
   // `.InProgress` → its frozen string `"InProgress"`; the text path does not,
-  // so a bare-variant leaked raw into the each-render-fn → E-CODEGEN-INVALID-JS.
+  // so a bare-variant leaked raw into the each-render-fn → E-CODEGEN-INVALID-LOGIC.
   if (!/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s|(?:^|[^.\w$)\]])\.[A-Z]/.test(preRewritten)) return preRewritten;
   try {
     const { parseExprToNode } = require("../expression-parser.ts") as {
@@ -1077,7 +1077,7 @@ function eventNameForAttr(aName: string): string | null {
  *   - bare ref `${@h}` / `${handler}`           -> invoke `<ref>(event);`.
  *   - assignment `${@cell = ...}`               -> `_scrml_reactive_set(...)` via
  *     the structured emitter (pre-fix the string-rewriter lowered the LHS to a
- *     GETTER -> `E-CODEGEN-INVALID-JS: Assigning to rvalue`).
+ *     GETTER -> `E-CODEGEN-INVALID-LOGIC: Assigning to rvalue`).
  *   - plain expr / call                          -> structured statement.
  *
  * Mirrors buildHandlerExpr's shape dispatch but is a deliberately PARALLEL impl:
@@ -1268,7 +1268,7 @@ function renderTemplateAttrToJs(
         // NON-engine `${...}` handler through the structured emitter so an arrow
         // / fn-shorthand is INVOKED (was a dead statement), a bare cell ref is
         // invoked, and an assignment LHS lowers to `_scrml_reactive_set` (was a
-        // getter-on-LHS -> E-CODEGEN-INVALID-JS). Bug-73 live-keying still wraps
+        // getter-on-LHS -> E-CODEGEN-INVALID-LOGIC). Bug-73 live-keying still wraps
         // this body below so the iter var resolves to the LIVE item at fire-time.
         handlerBody = buildEachExprHandlerBody(preLowered, iterVarName);
       }
@@ -1379,7 +1379,7 @@ function serializeCallArgs(callRef: any, iterVarName: string): string {
  * the structured emitter (emit-expr.ts:295) — the each-render-fn analog of the
  * Tier-0 / static-markup / `<match>`-arm bare-variant lowering, which the plain
  * serializeCallArgs (iter-scope text-rewrite only) omitted, leaking raw `.X`
- * into the handler → E-CODEGEN-INVALID-JS. Per-arg (the fn name is never routed
+ * into the handler → E-CODEGEN-INVALID-LOGIC. Per-arg (the fn name is never routed
  * through emit-expr, so no double-encoding). Used ONLY in the NON-engine
  * call-ref handler fallback; the engine path keeps the raw serializeCallArgs
  * callText so `.advance(.X)` variant detection (emitEngineHandlerBody) still
@@ -2018,7 +2018,7 @@ function emitEachReconcileLines(
 // promotes `<each>`. So emit-lift.js's `emitCreateElementFromMarkup` used to
 // render the `<each>` as a LITERAL `<each>` DOM element and its `${@.}` body
 // reached the bare-expr text-node path with NO iter-scope rewrite — the inner
-// sigil leaked RAW (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-JS.
+// sigil leaked RAW (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-LOGIC.
 //
 // The inner `@.` is LEGITIMATE per SPEC §17.7.3 ("Nested `<each>` scopes resolve
 // `@.` to the INNERMOST scope's current value") — this holds in ANY markup

@@ -364,7 +364,7 @@ describe("tilde (~) Gap 5/6/7 — cross-gap interaction smoke", () => {
 // (`fetchContacts()`) lowers to `let _scrml_tilde_N = _scrml_fetch_*();` under
 // an active tildeContext. The CPS scheduler's single-statement await branch
 // (scheduling.ts) prepended `await` to the WHOLE statement -> `await let X = ...`
-// (invalid JS — the gate's E-CODEGEN-INVALID-JS). The await belongs on the
+// (invalid JS — the gate's E-CODEGEN-INVALID-LOGIC). The await belongs on the
 // initializer, not the declaration; the fix injects it after the `=`.
 // ---------------------------------------------------------------------------
 
@@ -388,7 +388,7 @@ describe("gate fix-wave: await on tilde-init server call lands on the initialize
   <button onclick=load()>Load</button>
 </program>`;
     const { clientJs, errors } = compileSource(src, "tilde-await-init.scrml");
-    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     expect(clientJs.length).toBeGreaterThan(0);
     // The malformed `await let` must NOT appear; the await must be on the init.

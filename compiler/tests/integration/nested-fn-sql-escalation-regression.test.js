@@ -95,7 +95,7 @@ describe("g-sql-in-nested-function-client-leak: nested-fn SQL escalates enclosin
 
     // No leak guard fired, and the emitted JS is valid (validate-emit gate).
     expect(errors.filter(e => e.code === "E-CG-006")).toEqual([]);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
 
     // The nested SQL must NOT leak into the client bundle.
     expect(clientJs).not.toMatch(/\b_scrml_sql(?:_\d+)?\s*[.`]/);
@@ -143,7 +143,7 @@ describe("g-sql-in-nested-function-client-leak: nested-fn SQL escalates enclosin
     const { errors, clientJs, serverJs } = compileSource("nested-sql-deep", src);
 
     expect(errors.filter(e => e.code === "E-CG-006")).toEqual([]);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
 
     // No leak; the deeply-nested SQL lands server-side.
     expect(clientJs).not.toMatch(/\b_scrml_sql(?:_\d+)?\s*[.`]/);
@@ -196,7 +196,7 @@ describe("g-sql-in-nested-function-client-leak: nested-fn SQL escalates enclosin
     const { errors, clientJs, serverJs } = compileSource("nested-pure-partition", src);
 
     expect(errors.filter(e => e.code === "E-CG-006")).toEqual([]);
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
 
     // `outer` must stay client: no server route, no fetch stub.
     expect(serverJs).not.toMatch(/__ri_route_outer_\d+/);

@@ -60,7 +60,7 @@ export interface ParseResult {
    * un-parenthesized unary base (`-a ** 2` is a SyntaxError; only `(-a) ** 2` or
    * `-(a ** 2)` parse). Such an expression fell back to the string-rewrite path,
    * which re-emitted the flat `- … ** 2` form — SILENTLY-invalid JS. Callers
-   * surface this as a LOUD E-CODEGEN-INVALID-JS (the AST-path twin is handled by
+   * surface this as a LOUD E-CODEGEN-INVALID-LOGIC (the AST-path twin is handled by
    * binaryOperandNeedsParens; this is the acorn-fallback complement).
    */
   exponentDiagnostic?: { code: string; message: string; offset: number };
@@ -73,7 +73,7 @@ export interface ParseResult {
    * the plain inline lambda (`args => expr`). The mixed shape is not a sanctioned
    * scrml form; pre-fix it fell back to the string-rewrite path, where the blind
    * `\bfn\b`->`function` replace produced `function(n) => …` — invalid JS surfaced
-   * as a misleading "compiler defect" E-CODEGEN-INVALID-JS. Callers surface this
+   * as a misleading "compiler defect" E-CODEGEN-INVALID-LOGIC. Callers surface this
    * as a clean E-FN-ARROW-BODY syntax error that steers to the two valid forms.
    */
   fnArrowDiagnostic?: { code: string; message: string; offset: number };
@@ -402,10 +402,10 @@ function detectUnaryLeftOfExponent(
   if (!isUnary) return null;
 
   return {
-    code: "E-CODEGEN-INVALID-JS",
+    code: "E-CODEGEN-INVALID-LOGIC",
     message:
-      "E-CODEGEN-INVALID-JS: a unary operator immediately left of `**` is invalid " +
-      "JavaScript \u2014 the exponentiation grammar forbids an un-parenthesized unary " +
+      "E-CODEGEN-INVALID-LOGIC: a unary operator immediately left of `**` is invalid " +
+      "\u2014 the exponentiation grammar forbids an un-parenthesized unary " +
       "base. Parenthesize the base: write `(-@a) ** 2` (negate, then square).",
     offset: pos,
   };
@@ -520,7 +520,7 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
     const e = err as Error & { pos?: number };
     // B1: when acorn fails specifically because a unary operator is the LEFT
     // operand of `**`, surface a structured diagnostic so callers can fire a
-    // LOUD E-CODEGEN-INVALID-JS instead of silently emitting invalid JS.
+    // LOUD E-CODEGEN-INVALID-LOGIC instead of silently emitting invalid JS.
     const exponentDiagnostic = detectUnaryLeftOfExponent(processed, e.pos);
     // g-fn-shortform-arrow-callback-invalid-js: acorn also rejects `fn(args) => …`
     // (the `fn` keyword + an arrow body). Surface a clean E-FN-ARROW-BODY rather
@@ -1192,7 +1192,7 @@ function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
  * (`x is @other`) — this scanner flags `detector.valueRhsOnIs`. The offending
  * text is left VERBATIM (not masked): the stamped node is harvested downstream
  * (parseExprToNode → `_isValueRhsOnIs`) and E-EQ-005 fires as a hard error
- * BEFORE codegen, replacing the old misleading `E-DG-002` / `E-CODEGEN-INVALID-JS`
+ * BEFORE codegen, replacing the old misleading `E-DG-002` / `E-CODEGEN-INVALID-LOGIC`
  * mis-lowering. Mirror of E-EQ-002 (`x == not` → `x is not`); steers to `==`.
  */
 function rewriteIsPredicates(s: string, detector?: { valueRhsOnIs?: boolean }): string {
@@ -2769,7 +2769,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   if (!estree) {
     // Parse failed — return escape hatch. B1: when acorn rejected a unary base
     // of `**`, carry the structured diagnostic so ast-builder surfaces a LOUD
-    // E-CODEGEN-INVALID-JS (mirrors the sqlDiagnostic escape-hatch path).
+    // E-CODEGEN-INVALID-LOGIC (mirrors the sqlDiagnostic escape-hatch path).
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };
     return {
       kind: "escape-hatch",

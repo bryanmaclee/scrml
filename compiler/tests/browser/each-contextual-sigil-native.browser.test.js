@@ -8,7 +8,7 @@
  * the iteration item's field value.
  *
  * The pre-fix native lexer dropped the `@` of `@.name`, so the per-item interp
- * exprNode was `ident{name:".name"}` → invalid emitted JS (E-CODEGEN-INVALID-JS)
+ * exprNode was `ident{name:".name"}` → invalid emitted JS (E-CODEGEN-INVALID-LOGIC)
  * OR a stray leading-`.` member at runtime. This canary proves the `@.` sigil
  * now renders the item value under `--parser=scrml-native`.
  *
@@ -76,7 +76,7 @@ describe("each-contextual-sigil native render canary", () => {
 
   function mount(source, baseName) {
     const { errors, html, clientJs, runtimeJs } = compileNative(source, baseName);
-    // Native compile must be clean — the pre-fix symptom is E-CODEGEN-INVALID-JS.
+    // Native compile must be clean — the pre-fix symptom is E-CODEGEN-INVALID-LOGIC.
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     expect(errors).toEqual([]);
     document.documentElement.innerHTML = html;

@@ -70,9 +70,9 @@ describe("g-failable-arm-nested-constructor-crash §1: nested ctor in `!{}` arm"
     "</program>",
   ].join("\n");
 
-  test("compiles without E-CODEGEN-INVALID-JS", () => {
+  test("compiles without E-CODEGEN-INVALID-LOGIC", () => {
     const { result, cleanup } = compileSrc(src, "fanc-nested-1");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     cleanup();
   });
 
@@ -114,7 +114,7 @@ describe("g-failable-arm-nested-constructor-crash §2: qualified-direct ctor in 
 
   test("no string-call mangle; collapses to frozen-enum constructor call", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "fanc-qual-1");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(clientJs).not.toMatch(STRING_CALL_MANGLE);
     expect(clientJs).toMatch(/_scrml_reactive_set\("held",\s*LoadError\.NotFound\s*\(/);
     cleanup();

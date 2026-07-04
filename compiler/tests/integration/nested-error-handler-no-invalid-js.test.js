@@ -7,7 +7,7 @@
  * flat token-joined STRING; a nested `!{}` inside it never became a child
  * guarded-expr node. It reached rewriteBlockBody (zero `!{}` handling) and the
  * inner `!{ | ::Y -> {...} }` leaked verbatim → invalid JS (the gate's
- * E-CODEGEN-INVALID-JS; the pre-gate test passed only on substring presence).
+ * E-CODEGEN-INVALID-LOGIC; the pre-gate test passed only on substring presence).
  *
  * FIX (emit-logic.ts emitArmBody): when an arm body contains a top-level `!{`,
  * re-parse the body through the BS → TAB sub-pipeline so the nested guarded-expr
@@ -15,7 +15,7 @@
  * rewriteBlockBody if the re-parse fails.
  *
  * Compiles the §5 shape end-to-end with the emit gate ON and asserts no
- * E-CODEGEN-INVALID-JS + both arm reactive writes present + acorn-clean output.
+ * E-CODEGEN-INVALID-LOGIC + both arm reactive writes present + acorn-clean output.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -61,7 +61,7 @@ describe("nested `!{}` inside an arm body does not leak the structural wrapper",
       "</program>",
     ].join("\n");
     const result = compileSource(src);
-    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(invalid).toHaveLength(0);
     expect(result.errors).toHaveLength(0);
     const out = result.outputs ? [...result.outputs.values()][0] : null;

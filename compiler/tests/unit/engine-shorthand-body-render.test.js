@@ -191,7 +191,7 @@ describe("engine-shorthand-body-render §4: markup-as-value + bare-expr shorthan
       `</program>`,
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "esb-4-markup");
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(clientJs).toContain("<strong>hi</strong>");
     cleanup();
   });
@@ -208,7 +208,7 @@ describe("engine-shorthand-body-render §4: markup-as-value + bare-expr shorthan
       `</program>`,
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "esb-4-bareexpr");
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const on = renderFnBody(clientJs, "On");
     expect(on).not.toBeNull();
     expect(on).toMatch(/data-scrml-logic/);
@@ -251,7 +251,7 @@ describe("engine-shorthand-body-render §5: mixed shorthand + bare-body arms all
 });
 
 // ---------------------------------------------------------------------------
-// §6: emitted client.js is `node --check`-clean (no E-CODEGEN-INVALID-JS shape)
+// §6: emitted client.js is `node --check`-clean (no E-CODEGEN-INVALID-LOGIC shape)
 // ---------------------------------------------------------------------------
 
 describe("engine-shorthand-body-render §6: emitted client.js is syntactically valid", () => {

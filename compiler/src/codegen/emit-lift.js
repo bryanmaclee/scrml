@@ -239,7 +239,7 @@ export function maybeWrapLiftCallableHandler(arrowText) {
 //   `_scrml_reactive_get("phase").advance("Active")`
 // `_scrml_reactive_get("phase")` returns the engine's bare variant STRING (no
 // `.advance` method) → `TypeError` on click. Compile exits 0 and `node --check`
-// passes — a SILENT miscompile (distinct from Bug 62's loud E-CODEGEN-INVALID-JS).
+// passes — a SILENT miscompile (distinct from Bug 62's loud E-CODEGEN-INVALID-LOGIC).
 //
 // The fix THREADS the file's engine codegen ctx (`EachEngineCtx`, built ONCE via
 // the shared `buildEachEngineCtx` from emit-each.ts) down to the lifted-handler
@@ -350,7 +350,7 @@ function tryLowerLiftEngineHandler(rawHandlerText, engineCtx) {
 // path). Pre-fix, `emitCreateElementFromMarkup` rendered the `<each>` as a
 // LITERAL `<each>` DOM element and its `${@.}` body reached the bare-expr
 // text-node path with NO iter-scope rewrite — the inner sigil leaked RAW
-// (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-JS.
+// (`createTextNode(String((@ .) ?? ""))`) → E-CODEGEN-INVALID-LOGIC.
 //
 // FIX (the each-nesting analog of the Bug 65 / 63fcba72 engine-ctx gap — reuse
 // the SHARED emit-each machinery, no fork): route the `<each>` markup child
@@ -1421,7 +1421,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
               const rewritten = cleanRenderPlaceholder(emitExprField(logicChild.exprNode, rewriteRenderCall(logicChild.expr ?? ""), liftExprCtx()));
               // gate-found-invalid-js-fix-wave (S141): a `${...}` interpolation whose
               // expression lowers to the EMPTY string emits `String(() ?? "")` — invalid
-              // JS (`()` is empty parens, the gate's E-CODEGEN-INVALID-JS). This happens
+              // JS (`()` is empty parens, the gate's E-CODEGEN-INVALID-LOGIC). This happens
               // when a render-slot (`${render header()}`) is substituted away to nothing
               // by the component-expander, leaving a `bare-expr` with an empty escape-hatch
               // node (example 12-snippets-slots shipped invalid .client.js this way). An

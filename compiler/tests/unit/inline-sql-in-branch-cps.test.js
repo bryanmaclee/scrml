@@ -11,7 +11,7 @@
  * (`analyzeCPSEligibility` → `isServerTriggerStatement`) only inspected the
  * TOP-LEVEL statement grain and missed the nested `?{}`:
  *   - in a `match` arm  → the literal `?{...}` leaked into the client JS raw
- *                         → E-CG-006 + E-CODEGEN-INVALID-JS;
+ *                         → E-CG-006 + E-CODEGEN-INVALID-LOGIC;
  *   - in an `if` branch → whole-fn server-escalation won, and a following
  *                         `@cell = ...` write tripped E-RI-002.
  *
@@ -118,9 +118,9 @@ describe("§1 inline ?{} in a match arm → server-call boundary + client contin
   </db>
 </program>`;
 
-  test("compiles with no E-CODEGEN-INVALID-JS / E-CG-006 / E-RI-002", () => {
+  test("compiles with no E-CODEGEN-INVALID-LOGIC / E-CG-006 / E-RI-002", () => {
     const { result } = compile(dir, "app.scrml", SOURCE(dir));
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(errorsByCode(result, "E-RI-002")).toHaveLength(0);
     // No fatal errors at all.
@@ -146,7 +146,7 @@ describe("§1 inline ?{} in a match arm → server-call boundary + client contin
     expect(clientJs).not.toContain("_scrml_sql");
     expect(clientJs).not.toContain("?{");
     expect(clientJs).not.toContain("INSERT INTO todos");
-    // The classic-script parse invariant (the E-CODEGEN-INVALID-JS the bug hit).
+    // The classic-script parse invariant (the E-CODEGEN-INVALID-LOGIC the bug hit).
     expect(() => new Script(clientJs)).not.toThrow();
   });
 
@@ -189,10 +189,10 @@ describe("§2 inline ?{} in an if branch → no spurious E-RI-002; CPS-split", (
   </db>
 </program>`;
 
-  test("compiles with no E-RI-002 and no E-CODEGEN-INVALID-JS", () => {
+  test("compiles with no E-RI-002 and no E-CODEGEN-INVALID-LOGIC", () => {
     const { result } = compile(dir, "app.scrml", SOURCE(dir));
     expect(errorsByCode(result, "E-RI-002")).toHaveLength(0);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
@@ -242,10 +242,10 @@ describe("§3 inline ?{} in a for-loop body → server-call boundary", () => {
   </db>
 </program>`;
 
-  test("compiles with no E-RI-002 / E-CODEGEN-INVALID-JS / E-CG-006", () => {
+  test("compiles with no E-RI-002 / E-CODEGEN-INVALID-LOGIC / E-CG-006", () => {
     const { result } = compile(dir, "app.scrml", SOURCE(dir));
     expect(errorsByCode(result, "E-RI-002")).toHaveLength(0);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
@@ -335,7 +335,7 @@ describe("§5 regression — server-fn call in a match arm still compiles (P3)",
 
   test("compiles clean; client.js parses; no SQL leak", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
     const clientJs = clientJsFor(result, filePath);
@@ -381,7 +381,7 @@ describe("§6 regression — named server fn with a match+?{} called from a hand
 
   test("compiles clean; server runs the match SQL; client parses; no SQL leak", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
     const serverJs = serverJsFor(result, filePath);

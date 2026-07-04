@@ -168,7 +168,7 @@ describe("g-shorthand-interp-match-arm-codegen §3: no regression on other short
       "</program>",
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "simac-value");
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // the call is wired as a logic interpolation (data-scrml-logic +
     // _scrml_render_value(el, cap()) — GITI-032 node-aware display parity)
     expect(clientJs).toMatch(/_scrml_render_value\(el,\s*_scrml_cap_\d+\(\)\)/);
@@ -186,7 +186,7 @@ describe("g-shorthand-interp-match-arm-codegen §3: no regression on other short
       "</program>",
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "simac-markup");
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(clientJs).toContain("<strong>bold</strong>");
     cleanup();
   });

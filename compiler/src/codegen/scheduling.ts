@@ -746,7 +746,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
             // tilde-init bare-expr (`fetchContacts()`) that emit-logic lowered to
             // `let _scrml_tilde_N = _scrml_fetch_*();` under an active tildeContext.
             // Prepending `await` to the whole statement yields `await let X = ...`
-            // (invalid JS — the gate's E-CODEGEN-INVALID-JS; example 16-remote-data
+            // (invalid JS — the gate's E-CODEGEN-INVALID-LOGIC; example 16-remote-data
             // shipped this). The await belongs on the INITIALIZER, not the decl, so
             // inject it after the `=`.
             const declAwaitMatch = code.match(/^(\s*(?:let|const)\s+[A-Za-z_$][\w$]*\s*=\s*)(.+?)(;?)$/s);

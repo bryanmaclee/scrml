@@ -6,7 +6,7 @@
  * (module-with-db-context, §44.7.1). Before W5b, generateLibraryJs sliced the
  * whole logic block VERBATIM into the importable library `.js`, so the raw
  * `?{}` leaked into the client-facing artifact → invalid JS → the §2.2.1
- * E-CODEGEN-INVALID-JS emit gate (or, gate-off, an unparseable `.js`).
+ * E-CODEGEN-INVALID-LOGIC emit gate (or, gate-off, an unparseable `.js`).
  *
  * The fix (change-id w5b-library-db-emit-2026-07-04):
  *   - emit-library.ts prunes every fn whose BODY carries `?{}`/transaction from
@@ -18,7 +18,7 @@
  *
  * These are the flogence-shaped R26 reproducers, encoded as regression tests.
  * `validateEmit: true` proves the §2.2.1 emit gate now passes (a leak would
- * abort the compile with E-CODEGEN-INVALID-JS and write no artifacts).
+ * abort the compile with E-CODEGEN-INVALID-LOGIC and write no artifacts).
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -54,7 +54,7 @@ function compileLib(name, source, extra = {}) {
     inputFiles: [filePath],
     outputDir: outDir,
     write: true,
-    // validateEmit ON — a leaked `?{}` would abort with E-CODEGEN-INVALID-JS.
+    // validateEmit ON — a leaked `?{}` would abort with E-CODEGEN-INVALID-LOGIC.
     validateEmit: true,
     log: () => {},
     ...extra,
@@ -86,7 +86,7 @@ export function countProjects() {
     const r = compileLib("w5b_bare", src);
 
     // (a) exit-0 — the §2.2.1 emit gate did not fire.
-    expect(r.errorCodes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(r.errorCodes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(r.errorCodes).toEqual([]);
     // (b) the client-facing library `.js` carries NO raw `?{}` / server fn body.
     expect(r.libExists).toBe(true);

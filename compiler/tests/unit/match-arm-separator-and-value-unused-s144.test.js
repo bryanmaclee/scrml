@@ -5,7 +5,7 @@
  *          (§18.2: arms are juxtaposed, newline-separated; the only arm
  *          separator is the `=>`/`->` arrow). A trailing `,` after an arm body
  *          is rejected with a clean source-anchored error that REPLACES the
- *          generic E-CODEGEN-INVALID-JS the comma would otherwise surface from
+ *          generic E-CODEGEN-INVALID-LOGIC the comma would otherwise surface from
  *          codegen. Covers BOTH the markup `${match}` path and the
  *          `let/const = match` decl path.
  *
@@ -77,7 +77,7 @@ function countCode(codes, code) {
 // ---------------------------------------------------------------------------
 
 describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
-  test("§1 decl form: `let r = match {...,}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-JS", () => {
+  test("§1 decl form: `let r = match {...,}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-LOGIC", () => {
     const { codes } = compile(`<program>
 \${
   type S:enum = { Loading, Ready, Done }
@@ -87,10 +87,10 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 <p>\${r}</p>
 </program>`);
     expect(codes).toContain("E-MATCH-ARM-SEPARATOR");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
-  test("§2 markup form: `${match {...,}}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-JS", () => {
+  test("§2 markup form: `${match {...,}}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-LOGIC", () => {
     const { codes } = compile(`<program>
 \${
   type S:enum = { Loading, Ready, Done }
@@ -99,7 +99,7 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 <p>\${match @state { .Loading => "a", .Ready => "b", else => "c" }}</p>
 </program>`);
     expect(codes).toContain("E-MATCH-ARM-SEPARATOR");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("§3 one E-MATCH-ARM-SEPARATOR per comma-terminated arm", () => {
@@ -129,7 +129,7 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 <p>\${r}</p>
 </program>`);
     expect(codes).not.toContain("E-MATCH-ARM-SEPARATOR");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("§5 regression: newline arms (markup) compile clean", () => {
@@ -145,7 +145,7 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 }}</p>
 </program>`);
     expect(codes).not.toContain("E-MATCH-ARM-SEPARATOR");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("§6 inner result comma (fmt(1, 2)) does not false-positive", () => {

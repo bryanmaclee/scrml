@@ -10271,7 +10271,7 @@ function annotateNodes(
         // an object), so a Tier-0 `@.` inside the lifted markup — a handler-call
         // arg (`lift <li onclick=ping(@.id)>`) or an interpolation
         // (`lift <li>${@.name}</li>`) — would leak straight to codegen and
-        // surface the confusing E-CODEGEN-INVALID-JS. A Tier-0 `${for...lift}`
+        // surface the confusing E-CODEGEN-INVALID-LOGIC. A Tier-0 `${for...lift}`
         // is NOT an `<each>` body scope (the for-stmt pushes a `for:` scope, not
         // `each:`), so `@.` here has no referent. Scan the lifted subtree for
         // `@.` tokens and fire the spec'd E-SYNTAX-064 once per distinct sigil.
@@ -11379,7 +11379,7 @@ function annotateNodes(
         // it appears in an attribute value OUTSIDE any `<each>` body scope (e.g.
         // a Tier-0 `${for...lift}` uses the bare loop variable, not `@.`). Fire
         // the spec'd E-SYNTAX-064 instead of letting the raw `@.` leak to
-        // codegen as a confusing E-CODEGEN-INVALID-JS, or fall through to a
+        // codegen as a confusing E-CODEGEN-INVALID-LOGIC, or fall through to a
         // misleading E-SCOPE-001 on the base `@` token.
         const atDotSpan = (value.span ?? attr.span ?? parent?.span ?? {
           file: filePath, start: 0, end: 0, line: 1, col: 1,
@@ -14517,7 +14517,7 @@ function checkMatchDiagnostics(
   // `"x" ,`, resultExpr.kind === "escape-hatch"). Detect it here at the typer
   // layer (covers BOTH the markup `${match}` path AND the `let/const = match`
   // decl path with ONE detection) and fire a clean, source-anchored error that
-  // REPLACES the generic E-CODEGEN-INVALID-JS the comma would otherwise surface
+  // REPLACES the generic E-CODEGEN-INVALID-LOGIC the comma would otherwise surface
   // from codegen (codegen separately sanitizes the comma so the emitted JS still
   // parses — see emit-control-flow.ts:matchArmInlineToMatchArm). We reject the
   // comma rather than widen the grammar: one canonical separator (cohesion).
@@ -14549,7 +14549,7 @@ function checkMatchDiagnostics(
   // emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}`
   // sits on the value<->markup boundary the two forms split. Without this steer
   // it surfaces a wrong-altitude failure at a LATER stage — Seam 1 (markup body)
-  // -> E-CODEGEN-INVALID-JS (a CG "compiler defect" message for a USER error),
+  // -> E-CODEGEN-INVALID-LOGIC (a CG "compiler defect" message for a USER error),
   // Seam 2 (payload var in a `${...}` inside the markup body) -> E-SCOPE-001
   // "Undeclared identifier" (the payload isn't in scope for value-match codegen).
   // Replace BOTH with ONE early TYPER-stage steer. We do NOT widen value-match to
@@ -14585,12 +14585,12 @@ function checkMatchDiagnostics(
       // adopter at the right form; don't spam one error per arm. Stamp the node
       // so the match-expr/stmt case skips the arm-body visit — the steer REPLACES
       // the downstream wrong-altitude errors (Seam 2's E-SCOPE-001 on a markup-arm
-      // payload, Seam 1's E-CODEGEN-INVALID-JS), per the DD "ONE clear steer".
+      // payload, Seam 1's E-CODEGEN-INVALID-LOGIC), per the DD "ONE clear steer".
       steered = true;
       (node as { __markupInValueSteered?: boolean }).__markupInValueSteered = true;
       errors.push(new TSError(
         "E-MATCH-ARM-MARKUP-IN-VALUE",
-        "E-MATCH-ARM-MARKUP-IN-VALUE: a JS-style `match` arm returns a VALUE, not markup " +
+        "E-MATCH-ARM-MARKUP-IN-VALUE: a value-form `match` arm returns a VALUE, not markup " +
         "(§18.0) — but this arm body is a markup element. Use a `<match for=Type [on=expr]>` " +
         "block (the structural Tier-1 form, §18.0.1) to render a UI tree per variant, or fire " +
         "a variant's `renders` display via the render-expression. To compute a VALUE per " +

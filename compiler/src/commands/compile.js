@@ -58,7 +58,7 @@ Options:
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --watch, -w             Watch for changes and recompile
   --convert-legacy-css    Convert <style> blocks to #{...}
-  --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-JS); abort on malformed output (§2.2.1)
+  --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output (§2.2.1)
   --no-validate-emit      Opt out of the emitted-JS parse gate (dev/CI escape hatch)
   --mode <mode>           Output mode: browser (default) or library
   --self-host             Use compiled scrml modules (requires build-self-host.js)
@@ -220,7 +220,7 @@ function parseArgs(args) {
     } else if (arg === "--emit-machine-tests") {
       emitMachineTests = true;
     } else if (arg === "--validate-emit") {
-      // S142 — force the emitted-JS parse gate on (E-CODEGEN-INVALID-JS).
+      // S142 — force the emitted-JS parse gate on (E-CODEGEN-INVALID-LOGIC).
       validateEmit = true;
     } else if (arg === "--no-validate-emit") {
       // S142 — opt out of the emitted-JS parse gate (dev/CI escape hatch).
@@ -473,7 +473,7 @@ function runOnce(opts, selfHostModules = null) {
       parser,
       // S142 — `--validate-emit` / `--no-validate-emit`. `undefined` here lets
       // compileScrml apply its own default (api.js); `true`/`false` override.
-      // The emitted-JS parse gate (E-CODEGEN-INVALID-JS) makes SPEC §2.2.1 a
+      // The emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) makes SPEC §2.2.1 a
       // compile-time invariant; `--no-validate-emit` is the operational opt-out.
       validateEmit,
     });

@@ -136,7 +136,7 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §1 — emit shape (arm body w
     expect(clientJs).toContain('_scrml_reactive_set("draft", event.target.value)');
   });
 
-  test("MATCH arm: emitted client.js parses (no E-CODEGEN-INVALID-JS)", () => {
+  test("MATCH arm: emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(MATCH_SRC, "match");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
   });

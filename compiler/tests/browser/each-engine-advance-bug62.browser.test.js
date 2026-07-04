@@ -3,7 +3,7 @@
  *
  * Engine `.advance(.X)` (state AND message plane) and `@engine = .X` direct-
  * write inside a Tier-1 `<each>` per-item event handler were emitted RAW →
- * E-CODEGEN-INVALID-JS (the each-render event-wiring path did not thread the
+ * E-CODEGEN-INVALID-LOGIC (the each-render event-wiring path did not thread the
  * engine ctx). `node --check`-clean ≠ correct (S139/S140/S152): this test drives
  * an ACTUAL click on an each-rendered item and asserts the engine advanced — the
  * full DOM-event → handler → engine-runtime path.

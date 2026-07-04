@@ -1646,7 +1646,7 @@ export function splitBlocks(filePath, source) {
     // which STOPS at the first `<span` markup-opener and splits the ternary arms
     // into SEPARATE top-level markup blocks. The parser then saw only the text
     // `const <badge> = @n > 0 ?` → the arms were DROPPED → `() => ... > 0 ?)` →
-    // E-CODEGEN-INVALID-JS.
+    // E-CODEGEN-INVALID-LOGIC.
     //
     // Fix: scan the full balanced expression; if it CONTAINS a markup element,
     // gobble the whole decl (including the markup arms) as ONE text block so the

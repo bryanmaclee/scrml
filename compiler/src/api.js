@@ -740,7 +740,7 @@ export function compileScrml(options = {}) {
      * invariant-2026-05-29). When TRUE, every final JS artifact (.client.js /
      * .server.js / library .js / per-route chunk / runtime chunk) is parsed by
      * the in-process Acorn after the post-codegen import rewrites; any artifact
-     * that does not parse aborts the compile with E-CODEGEN-INVALID-JS and NO
+     * that does not parse aborts the compile with E-CODEGEN-INVALID-LOGIC and NO
      * files are written (SPEC §2.2.1). Mirrors meta-eval.ts:reparseEmitted /
      * E-META-EVAL-002 for the final artifacts.
      *
@@ -766,7 +766,7 @@ export function compileScrml(options = {}) {
      *   plus two cascade residuals the closed surface exposed (the
      *   `await await import()` double-await — expression-parser ImportExpression
      *   case — and the non-async `^{}` meta-effect wrapper — emit-logic.ts). The
-     *   FULL test suite is GREEN with the gate ON (0 E-CODEGEN-INVALID-JS).
+     *   FULL test suite is GREEN with the gate ON (0 E-CODEGEN-INVALID-LOGIC).
      *   `--no-validate-emit` (compile/build/dev) is the OPERATIONAL escape that
      *   suppresses the gate's ENFORCEMENT for a build — it is NOT a relaxation
      *   of the §2.2.1 "SHALL NOT emit JS that fails to parse" invariant.
@@ -1122,7 +1122,7 @@ export function compileScrml(options = {}) {
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
     // issue #12 blast radius — a `?{}` SQL block inside a CONCISE / curried arrow
     // body (`(x) => ?{...}`, `(a)=>(b)=>{?{...}}`, `.map(x => ?{...})`) leaks as the
-    // generic E-CODEGEN-INVALID-JS (and, when the fn does not escalate to server,
+    // generic E-CODEGEN-INVALID-LOGIC (and, when the fn does not escalate to server,
     // into the CLIENT bundle — emit-server.ts never runs). Diagnose precisely here,
     // parser-agnostic + escalation-independent. BRACED-body arrows stay with the
     // emit-server.ts E-SQL-009 site (the concise gate keeps the two disjoint).
@@ -2403,7 +2403,7 @@ export function compileScrml(options = {}) {
     // .server.js / library .js, after the stdlib-import rewrites that produce
     // the exact bytes that would land on disk + per-route chunk payloads) with
     // the in-process Acorn. Any artifact that does not parse pushes a hard
-    // E-CODEGEN-INVALID-JS error and ABORTS the write phase entirely (return
+    // E-CODEGEN-INVALID-LOGIC error and ABORTS the write phase entirely (return
     // before mkdir/writeFileSync). This makes SPEC SS 2.2.1 a compile-time
     // invariant: a syntactically-invalid emit is a hard error, never a green
     // build shipping broken JS. In-tree precedent: meta-eval reparseEmitted /
@@ -2427,7 +2427,7 @@ export function compileScrml(options = {}) {
     // it." When the source is already invalid (e.g. `@.` used outside an
     // `<each>` body → E-SYNTAX-064 at TS), codegen-of-invalid-source producing
     // a non-parsing artifact is EXPECTED, not a compiler defect; firing
-    // E-CODEGEN-INVALID-JS on top of the real (already-surfaced) error is
+    // E-CODEGEN-INVALID-LOGIC on top of the real (already-surfaced) error is
     // actively misleading. The build still fails (the prior fatal error fails
     // it) and no artifacts are written. We use the same fatal/non-fatal
     // partition as the final result split below (`isNonFatal`): only W-/I-

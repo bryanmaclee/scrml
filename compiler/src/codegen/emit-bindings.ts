@@ -796,7 +796,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           // rewrites `@var` → `_scrml_reactive_get("var")` and leaves variant
           // literals (`.Home`, `Step::Info`) + `==`/`!=` RAW, which emits
           // invalid JS for `class:active=(@view == .Home)` (the gate's
-          // E-CODEGEN-INVALID-JS). `emitExprField` lowers `.Variant` to its
+          // E-CODEGEN-INVALID-LOGIC). `emitExprField` lowers `.Variant` to its
           // string tag and `==`/`!=` to `_scrml_structural_eq(...)`, matching
           // the `if=` markup path (emit-event-wiring.ts:804). Parse failures
           // fall back to the prior raw-string rewrite (regression-preserving).

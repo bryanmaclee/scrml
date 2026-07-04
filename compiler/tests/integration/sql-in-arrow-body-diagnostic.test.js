@@ -1,7 +1,7 @@
 /**
  * ss19 #12 (g-sql-in-arrow-body-invalid-js) — a `?{}` SQL block inside an
  * arrow / lambda body must raise a PRECISE, actionable diagnostic, NOT the
- * generic E-CODEGEN-INVALID-JS ("this is a compiler defect ... please report it").
+ * generic E-CODEGEN-INVALID-LOGIC ("this is a compiler defect ... please report it").
  *
  * REPRO (/tmp/ryan-verify/08-arrow-sql.scrml):
  *   function doit() {
@@ -14,7 +14,7 @@
  * as an OPAQUE escape-hatch whose raw text is emitted VERBATIM
  * (rewriteServerExprArrowBody) — the `?{...}` never reaches the SQL-lowering
  * pass, so it leaks into the emitted JS as invalid syntax. Pre-fix this surfaced
- * as E-CODEGEN-INVALID-JS, telling the user to report a compiler bug for what is
+ * as E-CODEGEN-INVALID-LOGIC, telling the user to report a compiler bug for what is
  * actually a fixable source shape.
  *
  * FIX (Option B — diagnostic; correct lowering would require the unimplemented
@@ -65,7 +65,7 @@ ${body}
 </program>`;
 
 describe("ss19 #12 — SQL inside an arrow body diagnoses precisely (not a compiler-defect leak)", () => {
-  test("block-body arrow with ?{} → E-SQL-009, NOT E-CODEGEN-INVALID-JS", () => {
+  test("block-body arrow with ?{} → E-SQL-009, NOT E-CODEGEN-INVALID-LOGIC", () => {
     const { codes, errors } = compileSrc(
       WRAP(`    function doit() {
       const ins = (x) => { ?{\`INSERT INTO items (id) VALUES (\${x})\`}.run() }
@@ -76,7 +76,7 @@ describe("ss19 #12 — SQL inside an arrow body diagnoses precisely (not a compi
     expect(codes).toContain("E-SQL-009");
     // The whole point: the generic "report a compiler bug" diagnostic must NOT
     // fire — the cause is a fixable source shape, surfaced by E-SQL-009 alone.
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const msg = errors.find((e) => e.code === "E-SQL-009")?.message ?? "";
     // The message must be actionable (name the move-to-server-function fix).
     expect(msg).toContain("server function");
@@ -120,7 +120,7 @@ describe("ss19 #12 — SQL inside an arrow body diagnoses precisely (not a compi
 /**
  * Issue #12 blast radius (S215-class adversarial completion). The S220 emit-server
  * detection caught BLOCK-body arrows only; a CONCISE / curried arrow body that
- * contains a `?{}` is missed there — these otherwise leak as E-CODEGEN-INVALID-JS
+ * contains a `?{}` is missed there — these otherwise leak as E-CODEGEN-INVALID-LOGIC
  * (and, when the fn does not escalate to server, into the CLIENT bundle). The
  * post-AST detectSqlInConciseArrowBody pass (wired at TAB, api.js) closes the gap
  * by text-scanning the arrow's retained `.init` / `.expr` / `.raw` source.
@@ -143,10 +143,10 @@ describe("ss19 #12 blast radius — CONCISE / curried arrow bodies diagnose prec
     ["concise-in-map",       `    function doit() {\n      [1,2,3].map(x => ?{\`INSERT INTO items (id) VALUES (\${x})\`}.run())\n    }`],
   ];
   for (const [tag, body] of cases) {
-    test(`${tag}: ?{} in a concise arrow body → E-SQL-009, NOT E-CODEGEN-INVALID-JS`, () => {
+    test(`${tag}: ?{} in a concise arrow body → E-SQL-009, NOT E-CODEGEN-INVALID-LOGIC`, () => {
       const { codes, errors } = compileSrc(WRAP(body), tag);
       expect(codes).toContain("E-SQL-009");
-      expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Exactly ONE E-SQL-009 (the concise pass + emit-server site stay disjoint).
       expect(codes.filter((c) => c === "E-SQL-009").length).toBe(1);
       const msg = errors.find((e) => e.code === "E-SQL-009")?.message ?? "";

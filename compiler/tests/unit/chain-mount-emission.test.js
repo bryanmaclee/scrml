@@ -488,7 +488,7 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
 // `@step == Step::Info`) must lower the variant + ==/!= through the variant-
 // aware emitter, NOT leave them RAW in the `_update_chain_*` cascade. Before
 // the fix the cascade used the raw-string rewriteReactiveRefs shortcut, which
-// left `.Info` / `Step::Info` + `==` verbatim -> E-CODEGEN-INVALID-JS.
+// left `.Info` / `Step::Info` + `==` verbatim -> E-CODEGEN-INVALID-LOGIC.
 // (example 05-multi-step-form shipped invalid .client.js this way.)
 // ---------------------------------------------------------------------------
 

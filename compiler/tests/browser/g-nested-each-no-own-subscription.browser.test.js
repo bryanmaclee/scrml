@@ -132,7 +132,7 @@ describe("g-nested-each-no-own-subscription §1 — emit shape (inner each owns 
     expect(effectBeforeRead).toBeLessThan(innerReadIdx);
   });
 
-  test("emitted client.js parses (no E-CODEGEN-INVALID-JS / E-SCOPE-001)", () => {
+  test("emitted client.js parses (no E-CODEGEN-INVALID-LOGIC / E-SCOPE-001)", () => {
     const { errors } = compileToOutputs(NESTED_CELL_SRC, "nested");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     expect(errors.filter((e) => String(e.code || "").includes("SCOPE-001"))).toEqual([]);

@@ -839,7 +839,7 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
  * Resolution: use `==` (`x == 0`).
  *
  * Runs at the §45 equality stage (GCP3) — BEFORE dependency-graph (E-DG-002)
- * and codegen (E-CODEGEN-INVALID-JS), so the clean "use `==`" diagnostic replaces
+ * and codegen (E-CODEGEN-INVALID-LOGIC), so the clean "use `==`" diagnostic replaces
  * the misleading mis-lowering the old silent path produced. A generic structural
  * walk (mirrors type-system.harvestNotPrefixNegation) covers ALL expression
  * positions (if / while / ${} / derived-RHS / && / attr / match arm); a

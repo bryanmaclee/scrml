@@ -4,7 +4,7 @@
  * Bug (g-each-peritem-if-predicate-not-lowered, C2): a per-item `<el if=(pred)>`
  * inside an `<each>` was not recognized as a conditional — it fell through to
  * `setAttribute("if", String((x is some)))`, which (a) emits the scrml predicate
- * `x is some` raw (invalid JS, `E-CODEGEN-INVALID-JS`) and (b) wouldn't condition
+ * `x is some` raw (invalid JS, `E-CODEGEN-INVALID-LOGIC`) and (b) wouldn't condition
  * the element anyway.
  *
  * Fix (emit-each.ts): detect `if=` on the per-item element, lower the predicate
@@ -69,7 +69,7 @@ function compileCase(src = SRC) {
   }
 }
 
-describe("g-each-peritem-if §1 — compiles + lowers the predicate (was E-CODEGEN-INVALID-JS)", () => {
+describe("g-each-peritem-if §1 — compiles + lowers the predicate (was E-CODEGEN-INVALID-LOGIC)", () => {
   test("compiles with no errors", () => {
     expect(compileCase().errors).toEqual([]);
   });

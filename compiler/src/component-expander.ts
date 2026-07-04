@@ -1029,7 +1029,7 @@ function sourceNeedsLiveFallback(source: string): boolean {
   //   each-block / match-block dispatch). When a component body contains an
   //   `<each>` / `<match>`, routing its re-parse through the native path drops
   //   the structural promotion → the iteration never renders + `@.` leaks
-  //   (E-SCOPE-001 on `key=@.id`, bare `.name` in the body → E-CODEGEN-INVALID-JS).
+  //   (E-SCOPE-001 on `key=@.id`, bare `.name` in the body → E-CODEGEN-INVALID-LOGIC).
   //   Route to the legacy path so the structural node survives re-parse. This is
   //   the same divergence-guard mechanism as (1)/(2): a false positive merely
   //   takes the slower (correct) path; here it is a true positive.

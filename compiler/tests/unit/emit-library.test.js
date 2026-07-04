@@ -17,7 +17,7 @@
  *   §8  rewriteNotKeyword rewrites scrml keywords in whole-block path
  *   §9  type-decl exclusion from whole-block extraction path (Bug R18 — actual syntax)
  *   §11 §19 host-containment `!{}` call-site handler lowered in library mode
- *       (ss23 item 1 — was E-CODEGEN-INVALID-JS, verbatim `!{}` survived)
+ *       (ss23 item 1 — was E-CODEGEN-INVALID-LOGIC, verbatim `!{}` survived)
  */
 
 import { describe, test, expect } from "bun:test";
@@ -797,7 +797,7 @@ describe("emit-library §11: GITI-018 — all scrml: imports rewritten (not firs
 // public try/catch replacement) lowered correctly in BROWSER mode (via
 // emit-logic.ts `case "guarded-expr"`) but the library whole-block extraction
 // path only regex-transformed source text — so the `!{}` survived VERBATIM and
-// tripped the §2.2.1 emit gate (E-CODEGEN-INVALID-JS, byte 238). The fix wires
+// tripped the §2.2.1 emit gate (E-CODEGEN-INVALID-LOGIC, byte 238). The fix wires
 // the SAME emit-logic.ts lowering into the library path via span-splicing
 // (collectGuardedExprs + lowerGuardedExprsInBlock in emit-library.ts).
 //
@@ -858,8 +858,8 @@ describe("emit-library §11: §19 host-containment `!{}` lowered in library mode
   test("RED→GREEN: the giti repro lowers to valid JS (no verbatim `!{}`, no E-CODEGEN)", async () => {
     const { result, emitted } = await compileLibToDisk(REPRO);
 
-    // No E-CODEGEN-INVALID-JS (the byte-238 verbatim-`!{}` failure).
-    expect(result.errors.map((e) => e.code)).not.toContain("E-CODEGEN-INVALID-JS");
+    // No E-CODEGEN-INVALID-LOGIC (the byte-238 verbatim-`!{}` failure).
+    expect(result.errors.map((e) => e.code)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(result.errors).toHaveLength(0);
 
     // The `!{}` host-containment shape is GONE — lowered to the sentinel guard.

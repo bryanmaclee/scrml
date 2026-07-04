@@ -240,7 +240,7 @@ interface OnExprResolution {
  * iter-var member-access that the `alias.field` form already produces.
  * Without this, the raw `@.` survives into the module-scope dispatcher call
  * (`_scrml_match_match_NNN_dispatch(@.field)`) — invalid JS, gate-caught by
- * E-CODEGEN-INVALID-JS.
+ * E-CODEGEN-INVALID-LOGIC.
  *
  * Mirror of emit-table-for.ts:rewriteAtDotInExprText (Bug 32 prior art) and
  * emit-each.ts:rewriteContextualSigil — `@.field` -> `<iterVar>.field`,
@@ -355,7 +355,7 @@ function resolveOnExpr(
     // become `_scrml_reactive_get(...)` and scrml operators (`==`, etc.) lower
     // to their JS forms — previously this branch emitted `innerExpr` VERBATIM,
     // leaking the `@` sigil + scrml operators into the dispatch call and
-    // tripping E-CODEGEN-INVALID-JS. The simple regex shapes above (`@ident`,
+    // tripping E-CODEGEN-INVALID-LOGIC. The simple regex shapes above (`@ident`,
     // `@ident.path`, `${...}`, `.Variant`) are unchanged; only this complex
     // fall-through is now lowered. parseExprToNode + emitExpr are the same
     // helpers the arm-body path uses (below). On parse failure, fall back to the
@@ -668,7 +668,7 @@ function buildMatchArms(
   // exactly the pre-M6.3 synthesis route, scoped to the each case). Without it
   // the each renders as a LITERAL `<each>` string and its `${@.name}` lowers to
   // an unscoped logic binding → `el.textContent = .name;` (invalid JS,
-  // E-CODEGEN-INVALID-JS).
+  // E-CODEGEN-INVALID-LOGIC).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { splitBlocks } = require("../block-splitter.js") as {
     splitBlocks: (filePath: string, src: string) => any;

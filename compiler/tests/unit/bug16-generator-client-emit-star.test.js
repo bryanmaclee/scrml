@@ -11,7 +11,7 @@
  *   Pre-fix emit (client):  function _scrml_counts_2() { yield 1; ... }
  *     — the generator `*` was DROPPED, so `yield` landed inside a plain
  *       (non-generator) function = invalid JS. The S141/S142 emit-validation
- *       parse gate caught it as E-CODEGEN-INVALID-JS "keyword 'yield' is
+ *       parse gate caught it as E-CODEGEN-INVALID-LOGIC "keyword 'yield' is
  *       reserved" → the whole compile FAILED.
  *
  * Root cause:
@@ -131,7 +131,7 @@ function getJs(path) {
 // ---------------------------------------------------------------------------
 
 describe("§1: function* counts() { yield 1; yield 2; yield 3 }", () => {
-  test("compiles without errors (no E-CODEGEN-INVALID-JS)", () => {
+  test("compiles without errors (no E-CODEGEN-INVALID-LOGIC)", () => {
     const result = compile(minimalFx);
     expect(result.errors).toEqual([]);
   });

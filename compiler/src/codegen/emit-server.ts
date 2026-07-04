@@ -1797,7 +1797,7 @@ export function generateServerJs(
       // sqlNode pass), but an arrow/lambda body parses as an OPAQUE escape-hatch
       // whose raw text is emitted VERBATIM (rewriteServerExprArrowBody). The
       // `?{...}` therefore leaks into the output as invalid JS — pre-fix this
-      // surfaced as the generic E-CODEGEN-INVALID-JS ("compiler defect, please
+      // surfaced as the generic E-CODEGEN-INVALID-LOGIC ("compiler defect, please
       // report it"), which hid the real, fixable cause. We diagnose it precisely
       // here. The `?{` + backtick signature (a SQL tagged-template opener) avoids
       // false-positives on a ternary-object (`cond?{a:1}:b` has no backtick).
@@ -2643,7 +2643,7 @@ export function generateServerJs(
       // each lower to ONE value-expression the compiler envelopes as the JSON
       // response (§61.5). A 2+-statement bare body cannot be a single expression,
       // so the lowered `expr` is not parsable as `await (<expr>)` — which, left
-      // unchecked, trips the generic `E-CODEGEN-INVALID-JS` emit gate with a
+      // unchecked, trips the generic `E-CODEGEN-INVALID-LOGIC` emit gate with a
       // cryptic "compiler defect" message the adopter cannot act on. Detect the
       // multi-statement case HERE (the lowered expr does not parse as a single
       // JS expression consuming the whole string — reusing the emit gate's acorn)
@@ -2665,7 +2665,7 @@ export function generateServerJs(
           "error",
         ));
         // Emit a parseable, inert placeholder so this arm does NOT additionally
-        // trip the generic E-CODEGEN-INVALID-JS gate (the compile aborts on the
+        // trip the generic E-CODEGEN-INVALID-LOGIC gate (the compile aborts on the
         // named error above; no artifact is written).
         return [`// §61.10 multi-statement bare body not lowered — see E-ENDPOINT-MULTI-STATEMENT-ARM.`];
       }

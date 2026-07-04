@@ -766,7 +766,7 @@ function clk(i) {
 // g-each-body-bare-variant-arg (S201) — a bare `.Variant` enum literal as an
 // event-handler call-ARG in an <each> per-item body must lower to its frozen
 // string (the Tier-0/static/<match> lowering, previously MISSING in emit-each.ts
-// → raw `.InProgress` leaked → E-CODEGEN-INVALID-JS).
+// → raw `.InProgress` leaked → E-CODEGEN-INVALID-LOGIC).
 // ---------------------------------------------------------------------------
 describe("g-each-body-bare-variant-arg — bare .Variant call-arg lowering", () => {
   test("bare .Variant call-arg lowers to its frozen string (non-engine handler)", () => {
@@ -780,7 +780,7 @@ type Card:struct = { id: int, status: Status }
     </each>
 </ul>`;
     const { errors, clientJs } = compileToOutputs(src, "ebv-bare");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The bare-variant is lowered to its frozen string, not left raw.
     expect(clientJs).toContain('"InProgress"');
     expect(clientJs).not.toMatch(/moveTo_\d+\([^)]*\.InProgress/);
@@ -801,7 +801,7 @@ type Card:struct = { id: int }
     </each>
 </ul>`;
     const { errors, clientJs } = compileToOutputs(src, "ebv-engine");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The engine transition routes through the canonical engine machinery — NOT
     // the bare-variant string-lowering fallback (the engine path keeps the raw
     // callText so `.advance(.X)` variant detection still fires).

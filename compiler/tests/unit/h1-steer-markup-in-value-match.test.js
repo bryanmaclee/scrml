@@ -3,7 +3,7 @@
  *
  * The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` — a JS-style
  * VALUE-match arm RETURNING MARKUP — hit one of two wrong-altitude failures:
- *   Seam 1 (markup body) -> E-CODEGEN-INVALID-JS (a CG "compiler defect" message
+ *   Seam 1 (markup body) -> E-CODEGEN-INVALID-LOGIC (a CG "compiler defect" message
  *           for a USER error — wrong altitude).
  *   Seam 2 (payload var in `${...}` inside the markup body) -> E-SCOPE-001
  *           "Undeclared identifier" (payload not in scope for value-match codegen).
@@ -51,7 +51,7 @@ function hasCode(result, code) {
 const errorCodes = (result) => (result.errors || []).map((e) => e.code);
 
 // ---------------------------------------------------------------------------
-// §1: Seam 1 — markup body in a value-match -> steer (NOT E-CODEGEN-INVALID-JS)
+// §1: Seam 1 — markup body in a value-match -> steer (NOT E-CODEGEN-INVALID-LOGIC)
 // ---------------------------------------------------------------------------
 
 describe("h1-steer §1: Seam 1 — markup body in a JS-style value-match", () => {
@@ -70,10 +70,10 @@ describe("h1-steer §1: Seam 1 — markup body in a JS-style value-match", () =>
     "</program>",
   ].join("\n");
 
-  test("fires E-MATCH-ARM-MARKUP-IN-VALUE (the steer), not E-CODEGEN-INVALID-JS", () => {
+  test("fires E-MATCH-ARM-MARKUP-IN-VALUE (the steer), not E-CODEGEN-INVALID-LOGIC", () => {
     const { result, cleanup } = compileSrc(src, "h1-seam1");
     expect(hasCode(result, CODE)).toBe(true);
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     cleanup();
   });
 
@@ -141,10 +141,10 @@ describe("h1-steer §3: value-position markup-match (const decl)", () => {
     "</program>",
   ].join("\n");
 
-  test("a const-bound markup-returning value-match steers (not E-CODEGEN-INVALID-JS)", () => {
+  test("a const-bound markup-returning value-match steers (not E-CODEGEN-INVALID-LOGIC)", () => {
     const { result, cleanup } = compileSrc(src, "h1-valuepos");
     expect(hasCode(result, CODE)).toBe(true);
-    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     cleanup();
   });
 });

@@ -1039,7 +1039,7 @@ export interface MatchArm {
    * re-`fail` (`::X(reason) :> fail AErr::Wrapped(reason)`). When present,
    * emitMatchExpr lowers it via the `fail-expr` emitter (`return { __scrml_error,
    * … }`) so it escapes the match IIFE -> the enclosing (always `!`, per NS-1)
-   * function, instead of emitting `fail …` literally (E-CODEGEN-INVALID-JS).
+   * function, instead of emitting `fail …` literally (E-CODEGEN-INVALID-LOGIC).
    */
   failExpr?: any | null;
 }
@@ -1297,7 +1297,7 @@ export function matchArmInlineToMatchArm(node: any): MatchArm | null {
   // §18.2 has NO comma separator between arms; when source writes `.A => x,`
   // the AST builder folds the `,` into this arm's `result` (`"x" ,`). Left
   // intact it emits invalid JS (`return "x" ,;`) which the validate-emit gate
-  // reports as the GENERIC E-CODEGEN-INVALID-JS. The typer already fires the
+  // reports as the GENERIC E-CODEGEN-INVALID-LOGIC. The typer already fires the
   // clean source-anchored E-MATCH-ARM-SEPARATOR (type-system.ts) — that error
   // is what fails the build. Here we only sanitize so the never-meant-to-ship
   // emitted JS still PARSES, leaving E-MATCH-ARM-SEPARATOR as the sole

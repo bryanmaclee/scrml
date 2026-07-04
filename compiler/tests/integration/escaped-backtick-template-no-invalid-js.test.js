@@ -9,7 +9,7 @@
  *     const msg = `E-IMPORT-004: \`${name}\` is not exported by \`${source}\``
  * the template truncated at the first `\``, emitting:
  *     const msg = `E-IMPORT-004: \`;   ` is not exported by \`;
- * (invalid JS — the gate's E-CODEGEN-INVALID-JS). The downstream `is not` →
+ * (invalid JS — the gate's E-CODEGEN-INVALID-LOGIC). The downstream `is not` →
  * `is !` rewrite then operated on the broken fragments. Both symptoms collapse
  * once the template tokenizes as a single STRING token.
  *
@@ -35,7 +35,7 @@ function compileSource(src) {
 }
 
 function clientOf(result) {
-  const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+  const invalid = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
   expect(invalid).toHaveLength(0);
   const out = result.outputs ? [...result.outputs.values()][0] : null;
   expect(out?.clientJs).toBeTruthy();

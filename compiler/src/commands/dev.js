@@ -41,7 +41,7 @@ Options:
   --verbose, -v           Show per-stage timing and counts
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --convert-legacy-css    Convert <style> blocks to #{...}
-  --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-JS); abort on malformed output
+  --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output
   --no-validate-emit      Opt out of the emitted-JS parse gate (dev/CI escape hatch)
   --help, -h              Show this message
 

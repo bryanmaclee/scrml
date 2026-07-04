@@ -17,7 +17,7 @@
  * `preserveParens`). Both AST serializers — `emitBinary`/`binaryOperandNeedsParens`
  * (emit-expr.ts) and its round-trip twin `emitStringFromTree` (expression-parser.ts)
  * — historically re-emitted the flat `-… ** 2`, which is INVALID JS (the LOUD
- * E-CODEGEN-INVALID-JS class — distinct from the SILENT g-paren-ternary drop).
+ * E-CODEGEN-INVALID-LOGIC class — distinct from the SILENT g-paren-ternary drop).
  * The fix wraps a unary LEFT operand of `**` (excluding `++`/`--`).
  *
  * §1  emit-expr.ts printer — exact emit + acorn validity + runtime value.
@@ -262,36 +262,36 @@ describe("g-unary-exp §4: end-to-end compile of (-@a) ** 2 emits valid JS", () 
 //      invalid JS). The B1 fix detects the unary-`**` shape on the acorn-
 //      fallback path (expression-parser `detectUnaryLeftOfExponent` →
 //      escape-hatch `exponentDiagnostic` → ast-builder TABError) and surfaces a
-//      LOUD E-CODEGEN-INVALID-JS instead. The author-paren `(-@a) ** 2` parses
+//      LOUD E-CODEGEN-INVALID-LOGIC instead. The author-paren `(-@a) ** 2` parses
 //      cleanly and is UNAFFECTED (Bug-A / §4 guard intact).
 // ---------------------------------------------------------------------------
 const codesOf = (result) => (result.errors || []).map((e) => e.code);
 
-describe("g-unary-exp §5: BARE `-@a ** 2` is a LOUD E-CODEGEN-INVALID-JS (not silent)", () => {
+describe("g-unary-exp §5: BARE `-@a ** 2` is a LOUD E-CODEGEN-INVALID-LOGIC (not silent)", () => {
   test("structured decl `<r> = -@a ** 2` — LOUD reject, not silent-invalid JS", () => {
     const src = `<program>\n\n<a> = 3\n<r> = -@a ** 2\n\n<div>\${@r}</div>\n\n</program>`;
     const result = compileSource("bare-decl.scrml", src);
     // The compile now ABORTS loud (error present) rather than shipping the
     // silently-invalid `- _scrml_reactive_get("a") ** 2` artifact.
-    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("logic-block `${ @r = -@a ** 2 }` — LOUD reject (@a inside ${...})", () => {
     const src = `<program>\n\n<a> = 3\n<r> = 0\n\n\${ @r = -@a ** 2 }\n\n<div>\${@r}</div>\n\n</program>`;
     const result = compileSource("bare-logic.scrml", src);
-    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("bang base `!@flag ** 2` — LOUD reject (any prefix unary, not just `-`)", () => {
     const src = `<program>\n\n<flag> = 0\n<r> = !@flag ** 2\n\n<div>\${@r}</div>\n\n</program>`;
     const result = compileSource("bare-bang.scrml", src);
-    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("author-paren `(-@a) ** 2` still compiles CLEAN — Bug-A guard intact", () => {
     const src = `<program>\n\n<a> = 3\n<r> = (-@a) ** 2\n\n<div>\${@r}</div>\n\n</program>`;
     const result = compileSource("paren-decl.scrml", src);
-    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const client = clientJsFor(result, "paren-decl.scrml");
     expect(typeof client).toBe("string");
     expect(clientValid(client)).toBe(true);
@@ -310,7 +310,7 @@ describe("g-unary-exp §5: BARE `-@a ** 2` is a LOUD E-CODEGEN-INVALID-JS (not s
     for (const [name, rhs] of fixtures) {
       const src = `<program>\n\n<a> = 3\n<b> = 2\n<r> = ${rhs}\n\n<div>\${@r}</div>\n\n</program>`;
       const result = compileSource(name, src);
-      expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-JS");
+      expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     }
   });
 });

@@ -216,10 +216,10 @@ describe("source-map real provenance (Phase 1: JS)", () => {
   it("emitted client JS still parses (provenance must not corrupt output)", () => {
     const { result, out } = compileCounter();
     // The compiler's always-on emitted-JS parse gate (S142) would have failed
-    // the compile with E-CODEGEN-INVALID-JS if the source-map work corrupted
+    // the compile with E-CODEGEN-INVALID-LOGIC if the source-map work corrupted
     // the output. A clean compile with errors-free output proves it didn't.
     expect(
-      (result.errors || []).filter((e) => e.code === "E-CODEGEN-INVALID-JS")
+      (result.errors || []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")
     ).toHaveLength(0);
     expect(out.clientJs).toContain("//# sourceMappingURL=");
   });

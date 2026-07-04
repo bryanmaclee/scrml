@@ -67,7 +67,7 @@ type Status:enum = { Pending Active Done }
 
   test("the call is LOWERED to a table lookup (no un-lowered `.toEnum(` survives)", () => {
     const { result, out } = compileSource(SRC);
-    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(typeof out.clientJs).toBe("string");
     // The `Status.toEnum(...)` call must NOT survive un-lowered.
     expect(out.clientJs).not.toMatch(/Status\.toEnum\s*\(/);
@@ -114,7 +114,7 @@ type Status:enum = { Pending Active Done }
 <div>\${@status}</div>
 </program>`;
     const { result, out } = compileSource(SRC);
-    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     parseClean(out.clientJs);
     expect(out.clientJs).not.toMatch(/Status\.toEnum\s*\(/);
   });
@@ -176,7 +176,7 @@ type Load:enum = { Pending Ok Bad }
 <div><p>x</p></div>
 </program>`;
     const { result, out } = compileSource(SRC);
-    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(out.serverJs).toBeTruthy();
     expect(out.serverJs).not.toMatch(/Load\.toEnum\s*\(/);
     expect(out.serverJs).toContain("Load_toEnum[raw] ?? null");

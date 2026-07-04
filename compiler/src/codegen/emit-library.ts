@@ -65,7 +65,7 @@ function stripInlineMeta(text: string): string {
  * function bodies through emitLogicNode, so the §19 host-containment call-site
  * handler (`EXPR !{ | ::Variant(...) :> ... }`, the public try/catch
  * replacement) survives as VERBATIM scrml `!{}` and trips the §2.2.1 emit gate
- * (E-CODEGEN-INVALID-JS). Browser mode lowers it via emit-logic.ts's
+ * (E-CODEGEN-INVALID-LOGIC). Browser mode lowers it via emit-logic.ts's
  * `case "guarded-expr"`. This collector lets the library path reuse that SAME
  * lowering by span-splicing the emitted JS over the raw `!{}` source.
  *
@@ -101,7 +101,7 @@ function collectGuardedExprs(node: unknown, out: ASTNode[]): void {
  * §44.7.1) is server-only — its raw `?{}` is invalid JS and cannot appear in
  * the importable library `.js` (the client-facing artifact). The whole-block
  * slicer below dumps the block verbatim, so the `?{}` would leak → the §2.2.1
- * E-CODEGEN-INVALID-JS emit gate. Such a fn lives ONLY in the `.server.js`
+ * E-CODEGEN-INVALID-LOGIC emit gate. Such a fn lives ONLY in the `.server.js`
  * (its route-handler wrapper, retained by the §12.6 discriminator once its body
  * carries SQL). We prune it here.
  *
@@ -304,14 +304,14 @@ export function generateLibraryJs(
         // the AST-lowered emission over its raw `!{}` source. The library
         // whole-block path below only regex-transforms text; without this splice
         // the `!{}` survives verbatim and trips the §2.2.1 emit gate
-        // (E-CODEGEN-INVALID-JS). blockStart === logicSpan.start since the splice
+        // (E-CODEGEN-INVALID-LOGIC). blockStart === logicSpan.start since the splice
         // runs on the UNTRIMMED slice (guarded-expr spans are absolute into
         // sourceText). Reuses browser mode's emit-logic.ts `case "guarded-expr"`.
         // W5b — prune `?{}`/transaction-bearing fns (they live in `.server.js`,
         // not the client-facing library `.js`) AND lower §19 `!{}` guarded-exprs
         // in one reverse-ordered splice pass. A `?{}` SQL fn resolving against
         // the file's own `<db src>` (§44.7.1) would otherwise leak verbatim into
-        // the library `.js` and trip the §2.2.1 E-CODEGEN-INVALID-JS gate.
+        // the library `.js` and trip the §2.2.1 E-CODEGEN-INVALID-LOGIC gate.
         blockText = pruneServerFnsAndLowerGuarded(
           blockText,
           logicSpan.start,

@@ -15,7 +15,7 @@
      `<each>` (`<li ondrop=@dragPhase.advance(.Drop(col.id))>`). `.advance` inside
      an `<each>`-render event handler is a SEPARATE pre-existing codegen gap
      (the each-render event-wiring path does not thread the engine ctx, so
-     `@x.advance(...)` emits a raw `@` → E-CODEGEN-INVALID-JS) — orthogonal to
+     `@x.advance(...)` emits a raw `@` → E-CODEGEN-INVALID-LOGIC) — orthogonal to
      #14 and tracked as a follow-up. This fixture therefore drives the SAME
      message dispatches from plain (non-each) handlers so it exercises the
      §51.0.S message-dispatch lowering end-to-end. -->

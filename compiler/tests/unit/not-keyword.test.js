@@ -108,7 +108,7 @@ describe("not keyword — codegen rewrite", () => {
   // bug-18 / GITI-015 (S210) — is-op with a computed (bracket-index) LHS. The
   // library-mode line-by-line path (rewriteIsOperator(rewriteNotKeyword(line)))
   // had NO fallback for `is some` / `is not not` once the LHS was a bracket
-  // index, so the keyword survived literal → E-CODEGEN-INVALID-JS
+  // index, so the keyword survived literal → E-CODEGEN-INVALID-LOGIC
   // (`arr[i + 1] is some ? …`). The LHS chain now admits a bracket-index tail.
   test("§5e `is not` with simple bracket-index LHS", () => {
     expect(rewriteNotKeyword("arr[i] is not")).toBe("(arr[i] === null || arr[i] === undefined)");

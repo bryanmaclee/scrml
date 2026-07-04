@@ -8,7 +8,7 @@
  * (SPEC §17.7.3: "@.field and the as-bound name produce identical codegen").
  * Pre-R28-1 the raw `@.` survived into the dispatcher invocation
  * (`__scrml_match_match_NNN_dispatch(@.field)`) — invalid JS, gate-caught by
- * E-CODEGEN-INVALID-JS (`Unexpected character '@'`).
+ * E-CODEGEN-INVALID-LOGIC (`Unexpected character '@'`).
  *
  * R28-1b (S143 — architectural closure): R28-1 lowered the sigil but the
  * dispatch was still emitted at MODULE scope (`_scrml_effect(() =>

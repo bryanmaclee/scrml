@@ -2052,7 +2052,7 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     // `?{}` through tryConsumeSqlInit → a structured `sqlNode` with `init: ""`,
     // matching every other decl form (let/const/@x/server @x). Pre-fix the raw
     // `?{`SELECT 1`}` string was kept in `init` (which leaked an unresolved
-    // sql-ref placeholder / E-CODEGEN-INVALID-JS into codegen). The boundary
+    // sql-ref placeholder / E-CODEGEN-INVALID-LOGIC into codegen). The boundary
     // assertion (TWO decls) is preserved.
     expect(byName.x.init).toBe("");
     expect(byName.x.sqlNode?.kind).toBe("sql");

@@ -72,7 +72,7 @@ ${body}
 
 describe("g-ternary-arrow-sql-e-error-003 — SQL `?{}` in a ternary arm of a concise arrow body", () => {
   // The core regression: ternary CONSEQUENT carries the SQL.
-  test("consequent-arm `?{}` → E-SQL-009 (NOT E-ERROR-003, NOT E-CODEGEN-INVALID-JS)", () => {
+  test("consequent-arm `?{}` → E-SQL-009 (NOT E-ERROR-003, NOT E-CODEGEN-INVALID-LOGIC)", () => {
     const { codes, errors } = compileSrc(
       WRAP(`    function doit() {
       const ins = (x) => x ? ?{\`SELECT id FROM items WHERE id = \${x}\`}.all() : []
@@ -83,7 +83,7 @@ describe("g-ternary-arrow-sql-e-error-003 — SQL `?{}` in a ternary arm of a co
     expect(codes).toContain("E-SQL-009");
     // The whole point of this bug: the WRONG diagnostic must be gone.
     expect(codes).not.toContain("E-ERROR-003");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // Exactly ONE E-SQL-009 (the concise pass + emit-server site stay disjoint).
     expect(codes.filter((c) => c === "E-SQL-009").length).toBe(1);
     const msg = errors.find((e) => e.code === "E-SQL-009")?.message ?? "";
@@ -101,7 +101,7 @@ describe("g-ternary-arrow-sql-e-error-003 — SQL `?{}` in a ternary arm of a co
     );
     expect(codes).toContain("E-SQL-009");
     expect(codes).not.toContain("E-ERROR-003");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(codes.filter((c) => c === "E-SQL-009").length).toBe(1);
   });
 
@@ -116,7 +116,7 @@ describe("g-ternary-arrow-sql-e-error-003 — SQL `?{}` in a ternary arm of a co
     );
     expect(codes).toContain("E-SQL-009");
     expect(codes).not.toContain("E-ERROR-003");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(codes.filter((c) => c === "E-SQL-009").length).toBe(1);
   });
 });
@@ -163,7 +163,7 @@ describe("g-ternary-arrow-sql-e-error-003 — no-regression guards", () => {
       "ss50-direct",
     );
     expect(codes).toContain("E-SQL-009");
-    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(codes.filter((c) => c === "E-SQL-009").length).toBe(1);
   });
 

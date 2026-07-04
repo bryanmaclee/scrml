@@ -106,7 +106,7 @@ describe("token-set errorCodes", () => {
   test("scans the §34 code set (non-trivial, sorted, deduped)", () => {
     const codes = collectErrorCodes();
     expect(codes.length).toBeGreaterThan(100);
-    expect(codes).toContain("E-CODEGEN-INVALID-JS");
+    expect(codes).toContain("E-CODEGEN-INVALID-LOGIC");
     expect(codes).toContain("E-NAME-COLLIDES-STATE");
     expect([...codes].sort()).toEqual(codes);
     expect(new Set(codes).size).toBe(codes.length);
@@ -114,7 +114,7 @@ describe("token-set errorCodes", () => {
 
   test("the emitted token-set carries the same code set", () => {
     const ts = tokenSetOf(COUNTER);
-    expect(ts.errorCodes).toContain("E-CODEGEN-INVALID-JS");
+    expect(ts.errorCodes).toContain("E-CODEGEN-INVALID-LOGIC");
     expect(ts.errorCodes.length).toBeGreaterThan(100);
   });
 });

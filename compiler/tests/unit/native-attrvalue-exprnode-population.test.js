@@ -10,7 +10,7 @@
 // emit-html.ts reads `val.exprNode` (handlers 1735, if=/show= 1718/1756, body 1015)
 // and call-ref args lower from `argExprNodes`; absent on native -> codegen string-
 // fallback -> e.g. an `onclick=@x.advance(.Inc)` handler emits raw `@x.advance(...)`
-// (the `.advance` lowering never fires) -> E-CODEGEN-INVALID-JS ("Unexpected
+// (the `.advance` lowering never fires) -> E-CODEGEN-INVALID-LOGIC ("Unexpected
 // character '@'").
 //
 // THE FIX: `compiler/src/native-walker/attrvalue-exprnode-walker.ts`
@@ -22,7 +22,7 @@
 //
 // These tests assert (1) the walker populates the fields directly, and (2) the
 // downstream codegen lowers the handler/if= correctly under native — no raw `@`,
-// no E-CODEGEN-INVALID-JS, byte-parity with default (R26 byte-presence, not the
+// no E-CODEGEN-INVALID-LOGIC, byte-parity with default (R26 byte-presence, not the
 // S139 fatal-error-absence trap).
 
 import { describe, test, expect } from "bun:test";
@@ -151,10 +151,10 @@ describe("native attr-value exprNode/argExprNodes population (parity-closer)", (
     expect(typeof ifVals[0].exprNode.kind).toBe("string");
   });
 
-  test("native client.js lowers the call-ref handler — no raw @, no E-CODEGEN-INVALID-JS", () => {
+  test("native client.js lowers the call-ref handler — no raw @, no E-CODEGEN-INVALID-LOGIC", () => {
     const nat = compileWith(ENGINE_HANDLER, "scrml-native", "handler-nat");
-    // The file compiled clean (the E-CODEGEN-INVALID-JS symptom is gone).
-    const codegenErr = nat.errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS");
+    // The file compiled clean (the E-CODEGEN-INVALID-LOGIC symptom is gone).
+    const codegenErr = nat.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(codegenErr.length).toBe(0);
     expect(nat.errors.length).toBe(0);
     // The handler body lowered the `.advance(.Inc)` dispatch — the engine message

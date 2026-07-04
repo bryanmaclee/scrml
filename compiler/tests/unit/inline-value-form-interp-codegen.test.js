@@ -52,7 +52,7 @@ describe("inline-value-form-interp — codegen shape", () => {
 <x>: View = .List
 <p>\${ match @x { .List :> "list view"  .Grid :> "grid view" } }</p>`;
     const { errors, clientJs, html } = compileToOutputs(src, "ivf-match");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // A render slot is allocated in the HTML.
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The value is rendered via the node-aware display helper + a reactive effect.
@@ -71,7 +71,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `<n>: int = 5
 <p>\${ if @n > 3 { "big" } else { "small" } }</p>`;
     const { errors, clientJs, html } = compileToOutputs(src, "ivf-if");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The if lowers to a readable conditional-expression cascade (a ternary).
     expect(clientJs).toContain('(_scrml_reactive_get("n") > 3 ? "big" : "small")');
@@ -87,7 +87,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `<n>: int = 5
 <p>\${ if @n > 8 { "hi" } else if @n > 3 { "mid" } else { "lo" } }</p>`;
     const { errors, clientJs } = compileToOutputs(src, "ivf-elseif");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain('"hi"');
     expect(clientJs).toContain('"mid"');
     expect(clientJs).toContain('"lo"');
@@ -99,7 +99,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `const LIMIT = 10
 <p>\${ if LIMIT > 3 { "big" } else { "small" } }</p>`;
     const { errors, clientJs } = compileToOutputs(src, "ivf-static");
-    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain("_scrml_render_value(el,");
     // No reactive cell read → no _scrml_effect wrapper for this slot.
     // (The whole client.js may still use _scrml_effect elsewhere, but here the

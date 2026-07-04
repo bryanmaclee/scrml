@@ -1645,7 +1645,7 @@ export function parseBlockStub(ctx) {
     // body) is NOT a JS-statement body. The downstream consumer re-parses the
     // verbatim through the JS-arm path (emit-control-flow.ts parseMatchArm ->
     // rewriteBlockBody), which would read the `<tag>` as a less-than operator
-    // and emit malformed JS (E-CODEGEN-INVALID-JS). Such an arm belongs to the
+    // and emit malformed JS (E-CODEGEN-INVALID-LOGIC). Such an arm belongs to the
     // match-BLOCK routing (markup-position match), which the native parser does
     // not yet promote for a `match` in a `${...}` logic body — a SEPARATE gap
     // (filed). Leaving `verbatim` unset preserves the pre-S170 `{}` fallback

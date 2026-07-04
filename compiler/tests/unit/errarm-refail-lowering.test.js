@@ -9,7 +9,7 @@
  *   Layer 1 — TYPER (E-SCOPE-001): a `!{}` handler arm body `{ fail … }` ran
  *     through checkLogicExprIdents, which mis-read `fail` as an undeclared
  *     identifier (the body never reached a `fail-expr` node).
- *   Layer 2 — CODEGEN (E-CODEGEN-INVALID-JS): an arm-VALUE `fail` (`:> fail …`,
+ *   Layer 2 — CODEGEN (E-CODEGEN-INVALID-LOGIC): an arm-VALUE `fail` (`:> fail …`,
  *     incl. the `?` desugaring) emitted `fail` LITERALLY.
  *
  * Shared root: `fail` in arm contexts was captured as a STRING/ExprNode where
@@ -79,9 +79,9 @@ describe("errarm-refail §1: `!{}` block arm re-fail (Layer 1 — TYPER)", () =>
     cleanup();
   });
 
-  test("no E-CODEGEN-INVALID-JS; fail-expr lowered to the tagged-error envelope", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; fail-expr lowered to the tagged-error envelope", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-block-2");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The arm bodies emit the canonical fail-expr shape (not a literal `fail …`).
     // §51.3.2 — a payload variant's `.data` is a field-keyed object whose keys
     // are the declared field names, for single- AND multi-field variants alike
@@ -122,9 +122,9 @@ describe("errarm-refail §2: JS-style match value-arm re-fail (Layer 2 — CODEG
     "}",
   ].join("\n");
 
-  test("no E-CODEGEN-INVALID-JS; arm-value fail lowers to the tagged-error envelope", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; arm-value fail lowers to the tagged-error envelope", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-match");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // §51.3.2 field-keyed `.data` (see §1 above).
     expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: reason \} \};/);
     expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: "y" \} \};/);
@@ -147,9 +147,9 @@ describe("errarm-refail §3: `?` propagation desugars in a const-decl", () => {
     "}",
   ].join("\n");
 
-  test("no E-CODEGEN-INVALID-JS; emits the propagate-expr desugaring", () => {
+  test("no E-CODEGEN-INVALID-LOGIC; emits the propagate-expr desugaring", () => {
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-propagate");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The `?` must NOT survive into emitted JS as a literal suffix.
     expect(clientJs).not.toMatch(/\(\s*\)\s*\?\s*;/);
     // propagate-expr lowering: const tmp = …; if (tmp.__scrml_error) return tmp; const v = tmp;
@@ -160,7 +160,7 @@ describe("errarm-refail §3: `?` propagation desugars in a const-decl", () => {
   test("parity with the `let` form (which already worked)", () => {
     const letSrc = src.replace("const v = inner()?", "let v = inner()?");
     const { result, cleanup } = compileSrc(letSrc, "errarm-propagate-let");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     cleanup();
   });
 });
@@ -180,7 +180,7 @@ describe("errarm-refail §4: statement-position fail control (no regression)", (
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "errarm-control");
     expect(codes(result)).not.toContain("E-SCOPE-001");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // §51.3.2 field-keyed `.data` — Bad(reason) -> `data: { reason: … }`.
     expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Bad", data: \{ reason: "must be positive" \} \};/);
     cleanup();
@@ -264,7 +264,7 @@ describe("errarm-refail §7: route-to-state arm idiom (non-! function) — no re
     expect(result.errors ?? []).toHaveLength(0);
     expect(codes(result)).not.toContain("E-SCOPE-001");
     expect(codes(result)).not.toContain("E-ERROR-001");
-    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The route-to-state arm emits a reactive write to @phase (NOT a tagged-error
     // return). The `__scrml_error` envelope CHECK on the guarded result is normal
     // (it is how `!{}` tests the failable call's result); what matters is the arm

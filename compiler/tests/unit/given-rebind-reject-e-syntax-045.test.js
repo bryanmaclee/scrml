@@ -9,13 +9,13 @@
 // form `given obj.field :>` (already rejected by E-SYNTAX-044).
 //
 // Before the fix the rebind form was asymmetrically broken:
-//   - logic context  → E-CODEGEN-INVALID-JS (the "compiler defect" path)
+//   - logic context  → E-CODEGEN-INVALID-LOGIC (the "compiler defect" path)
 //   - markup `${}`    → silently compiled (accepted the invalid form)
 // After the fix BOTH contexts fire E-SYNTAX-045 cleanly at the parse stage
 // (ast-builder.js, both given-guard parse sites).
 //
 // This file verifies:
-//   §A — logic-context rebind fires E-SYNTAX-045 (NOT E-CODEGEN-INVALID-JS).
+//   §A — logic-context rebind fires E-SYNTAX-045 (NOT E-CODEGEN-INVALID-LOGIC).
 //   §B — markup-`${}`-context rebind fires the SAME E-SYNTAX-045 (was silent).
 //   §C — canonical narrow-in-place `given @var :>` stays CLEAN (no E-SYNTAX-045).
 //   §D — multi-identifier narrow `given x, y :>` stays CLEAN.
@@ -62,7 +62,7 @@ function countCode(result, code) {
 }
 
 // ---------------------------------------------------------------------------
-// §A — logic-context rebind → E-SYNTAX-045, NOT E-CODEGEN-INVALID-JS
+// §A — logic-context rebind → E-SYNTAX-045, NOT E-CODEGEN-INVALID-LOGIC
 // ---------------------------------------------------------------------------
 
 describe("§A: logic-context `given n = @name :>` rebind", () => {
@@ -78,9 +78,9 @@ describe("§A: logic-context `given n = @name :>` rebind", () => {
     expect(hasCode(r, "E-SYNTAX-045")).toBe(true);
   });
 
-  test("does NOT emit E-CODEGEN-INVALID-JS (the old compiler-defect path)", () => {
+  test("does NOT emit E-CODEGEN-INVALID-LOGIC (the old compiler-defect path)", () => {
     const r = compile("a-logic2.scrml", SRC);
-    expect(hasCode(r, "E-CODEGEN-INVALID-JS")).toBe(false);
+    expect(hasCode(r, "E-CODEGEN-INVALID-LOGIC")).toBe(false);
   });
 
   test("fires E-SYNTAX-045 exactly once for the single rebind", () => {

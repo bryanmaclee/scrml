@@ -39,7 +39,7 @@ Options:
   --embed-runtime           Embed runtime inline instead of writing a separate file
   --minify                  Accepted flag (minification is a Phase 2 feature)
   --verbose, -v             Per-stage timing and counts
-  --validate-emit           Parse every emitted JS artifact (E-CODEGEN-INVALID-JS); abort on malformed output
+  --validate-emit           Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output
   --no-validate-emit        Opt out of the emitted-JS parse gate (dev/CI escape hatch)
   --target <platform>       Deploy adapter: fly|railway|render|static|docker
   --idle-timeout <n>        Bun.serve idleTimeout in seconds baked into the
@@ -640,7 +640,7 @@ export async function runBuild(args) {
     write: true,
     log: console.log,
     // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml
-    // default; the emitted-JS parse gate (E-CODEGEN-INVALID-JS) is especially
+    // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially
     // valuable for `build` (catches malformed output before deploy).
     validateEmit: opts.validateEmit,
   });

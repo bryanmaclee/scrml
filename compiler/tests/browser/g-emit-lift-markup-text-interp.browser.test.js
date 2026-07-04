@@ -151,7 +151,7 @@ describe("g-emit-lift-markup-text-interp §1 — emit shape (text-child `${}` lo
     expect(clientJs).toContain('createTextNode(String((_scrml_reactive_get("cell")) ?? ""))');
   });
 
-  test("emitted client.js parses (no E-CODEGEN-INVALID-JS)", () => {
+  test("emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {
     const { errors } = compileToOutputs(TERNARY_SRC, "ternary");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
   });

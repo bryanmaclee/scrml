@@ -46,7 +46,7 @@ function compileSource(scrmlSource, testName) {
 }
 
 // A hard error is anything on the error stream carrying a code (W-/I- partition
-// into warnings). E-CODEGEN-INVALID-JS is the generic "emitted unparseable JS"
+// into warnings). E-CODEGEN-INVALID-LOGIC is the generic "emitted unparseable JS"
 // backstop that every one of these shapes previously tripped.
 const hardErrors = (r) => (r.errors ?? []).filter((e) => e && e.code !== undefined);
 const hasCode = (r, code) => [...(r.errors ?? []), ...(r.warnings ?? [])].some((d) => d.code === code);

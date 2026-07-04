@@ -1,7 +1,7 @@
 <!-- R26 (A) isolated fixture — native attr-value exprNode/argExprNodes population.
      Exercises the two parsed-expr-field shapes codegen consumes off markup attr
      values, both of which DEFAULT-compile clean but native-failed pre-fix
-     (string-fallback emitted raw `@` -> E-CODEGEN-INVALID-JS):
+     (string-fallback emitted raw `@` -> E-CODEGEN-INVALID-LOGIC):
        - call-ref handler:  onclick=@counter.advance(.Inc)  (argExprNodes path)
        - if= expr:          if=(@count > 0)                 (exprNode path)
      A non-each, plain-handler program so the only variable is the attr-value

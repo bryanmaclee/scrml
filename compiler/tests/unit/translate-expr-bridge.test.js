@@ -565,7 +565,7 @@ describe("§9 — escape-hatch passthrough (native kinds with no live target)", 
     // body) now translates to the LIVE `markup-value` ExprNode (ast.ts:2039) that
     // emit-expr.ts `case "markup-value"` lowers to a real DOM node. Pre-fix the
     // empty escape-hatch dropped the markup entirely, producing a malformed
-    // `cond ? : ""` ternary that failed the E-CODEGEN-INVALID-JS gate.
+    // `cond ? : ""` ternary that failed the E-CODEGEN-INVALID-LOGIC gate.
     test("MarkupValue translates to a live markup-value ExprNode (not escape-hatch)", () => {
         const out = translateExpr({ kind: ExprKind.MarkupValue, span: null });
         expect(out.kind).toBe("markup-value");

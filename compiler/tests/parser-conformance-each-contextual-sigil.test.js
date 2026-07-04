@@ -7,7 +7,7 @@
 // DISCARDED; the trailing `.name` was then independently lexed as a BareVariant.
 // Net: `${@.name}` produced exprNode `ident{name:".name"}` (the `@` gone) and
 // `${@.}` produced a malformed member — so a `<each>` per-item body using `@.`
-// mis-compiled (E-CODEGEN-INVALID-JS) under `--parser=scrml-native`.
+// mis-compiled (E-CODEGEN-INVALID-LOGIC) under `--parser=scrml-native`.
 //
 // The fix adds a dedicated `@`-followed-by-`.` lexer branch that consumes `@.`
 // PLUS the optional dotted-ident chain as ONE `ScrmlAt` token whose `name`

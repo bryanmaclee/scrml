@@ -11,7 +11,7 @@
  *     a DEAD arrow-expression statement — the arrow is created and discarded, the
  *     click is a silent no-op.
  *   - `onclick=${() => @clicked = @.id}`   -> `() => _scrml_reactive_get("clicked") = ...`
- *     the assignment LHS lowered to a GETTER -> `E-CODEGEN-INVALID-JS` ("Assigning
+ *     the assignment LHS lowered to a GETTER -> `E-CODEGEN-INVALID-LOGIC` ("Assigning
  *     to rvalue") — the whole compile FAILED.
  *
  * FIX (emit-each.ts buildEachExprHandlerBody): converge the NON-engine `${...}`
@@ -110,7 +110,7 @@ describe("g-expr-event-handler-dead-in-each — item1 (Family-A Half-2)", () => 
 
   function mount(source, baseName) {
     const { errors, html, clientJs, runtimeJs } = compileToOutputs(source, baseName);
-    // The assignment-arrow form previously produced E-CODEGEN-INVALID-JS — must be gone.
+    // The assignment-arrow form previously produced E-CODEGEN-INVALID-LOGIC — must be gone.
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     document.documentElement.innerHTML = html;
     const exec = new Function(
@@ -144,7 +144,7 @@ describe("g-expr-event-handler-dead-in-each — item1 (Family-A Half-2)", () => 
     expect(app.get("picked")).toBe("alpha");
   });
 
-  test("arrow-with-assignment: compiles AND fires (was E-CODEGEN-INVALID-JS)", () => {
+  test("arrow-with-assignment: compiles AND fires (was E-CODEGEN-INVALID-LOGIC)", () => {
     const app = mount(MIXED_SRC, "arrow-assign");
     app.set("rows", [
       { id: "a", label: "alpha" },

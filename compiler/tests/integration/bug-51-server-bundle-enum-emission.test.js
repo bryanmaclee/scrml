@@ -227,7 +227,7 @@ type Tick:enum = {
 //     `import { SQL } from "bun"` runtime handle. The duplicate top-level
 //     declaration must NOT be emitted; a clear E-CG-016 diagnostic fires
 //     instead of the cryptic `Identifier 'SQL' has already been declared`
-//     SyntaxError (E-CODEGEN-INVALID-JS).
+//     SyntaxError (E-CODEGEN-INVALID-LOGIC).
 // ---------------------------------------------------------------------------
 function allDiagnostics(result) {
   // The collision diagnostic is a CGError; partition-agnostic gather (errors

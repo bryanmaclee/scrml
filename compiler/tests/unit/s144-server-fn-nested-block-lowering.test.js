@@ -21,7 +21,7 @@
  *   separate copy that never seeded/threaded a shared `declaredNames` Set.
  *
  * GITI-022 (MED, gate-caught): `let x` (no init) followed by `x = 1` emitted
- *   `let x; const x = 1;` → E-CODEGEN-INVALID-JS ("Identifier 'x' already
+ *   `let x; const x = 1;` → E-CODEGEN-INVALID-LOGIC ("Identifier 'x' already
  *   declared"). Same declared-identifier-tracking gap as GITI-021.
  *
  * Coverage:
@@ -108,10 +108,10 @@ describe("§1 GITI-020 — nested channel-cell write lowers to broadcast(__sync)
 <div><p>\${@msg}</></div>
 </program>`;
 
-  test("compile succeeds (no E-RI-002, no E-CODEGEN-INVALID-JS)", () => {
+  test("compile succeeds (no E-RI-002, no E-CODEGEN-INVALID-LOGIC)", () => {
     const { result } = compile(dir, "app.scrml", SOURCE);
     expect(errorsByCode(result, "E-RI-002")).toHaveLength(0);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
 
@@ -164,7 +164,7 @@ describe("§2 GITI-021 — server-fn nested reassignment is plain (not const)", 
 
   test("compile succeeds", () => {
     const { result } = compile(dir, "app.scrml", SOURCE);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
 
@@ -224,9 +224,9 @@ describe("§3 GITI-022 — server-fn `let x; x = v` is gate-clean", () => {
 <div><p>\${@v}</></div>
 </program>`;
 
-  test("compile is gate-clean (no E-CODEGEN-INVALID-JS, no errors)", () => {
+  test("compile is gate-clean (no E-CODEGEN-INVALID-LOGIC, no errors)", () => {
     const { result } = compile(dir, "app.scrml", SOURCE);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
 
@@ -303,7 +303,7 @@ describe("§5 guardrails — compound-assign + method-call + V5 first-assign pre
 
   test("compile succeeds", () => {
     const { result } = compile(dir, "app.scrml", SOURCE);
-    expect(errorsByCode(result, "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
   });
 

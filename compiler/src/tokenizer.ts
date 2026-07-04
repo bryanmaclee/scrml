@@ -586,7 +586,7 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
           // terminator of the attribute string. The pre-fix reader stopped at
           // the first such inner `"`, truncating the value to `${... ? ` (both
           // ternary arms dropped) → emit-each/emit-html later emitted invalid
-          // JS (`...) ? }`) → E-CODEGEN-INVALID-JS. Track interpolation depth
+          // JS (`...) ? }`) → E-CODEGEN-INVALID-LOGIC. Track interpolation depth
           // (brace-balanced, opened by `${`/sigil-`{`/bare-`{`) so the
           // value-terminating `"` is only the one seen at depth 0. Inside an
           // interpolation we also skip over nested string literals (`'…'` /
@@ -1650,7 +1650,7 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
     // (`<<`/`>>`/`>>>` below) so `@x <<= 1` lexes `<<=` as ONE OPERATOR token.
     // Without them the longest match was `<<`, leaving `=` a separate PUNCT;
     // joinWithNewlines then reassembled `<< =`, which broke
-    // rewriteReactiveAssign's contiguous-op regex -> E-CODEGEN-INVALID-JS.
+    // rewriteReactiveAssign's contiguous-op regex -> E-CODEGEN-INVALID-LOGIC.
     // (`>>>=`/`>>=` are mutually non-conflicting; both precede `>>>`/`>>`.)
     "...", "===", "!==", "**=", "&&=", "||=", "??=", ">>>=", "<<=", ">>=", "=>", ":>",
     "==", "!=", "<=", ">=", "**", "&&", "||", "??",

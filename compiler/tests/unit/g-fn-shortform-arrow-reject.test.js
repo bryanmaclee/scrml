@@ -11,7 +11,7 @@
 //
 // THE BUG. `const d = arr.map(fn(n) => n * 2)` used to compile to invalid JS
 // `arr.map(function(n) => n * 2)` (the codegen `rewriteFnKeyword` does a blind
-// `\bfn\b`->`function` text replace), surfaced as E-CODEGEN-INVALID-JS — the
+// `\bfn\b`->`function` text replace), surfaced as E-CODEGEN-INVALID-LOGIC — the
 // "compiler defect" framing that MIS-ATTRIBUTES an author error to a compiler
 // bug. The fix recognises the shape at the PARSE layer (the acorn-rejection path
 // in expression-parser.ts `detectFnKeywordArrowBody`, surfaced by ast-builder.js
@@ -43,14 +43,14 @@ const WRAP = (body) =>
   "<program>\n${\n" + body + "\n}\n<button onclick=doit()>go</button>\n</program>";
 
 describe("E-FN-ARROW-BODY — the invalid `fn(args) => expr` form", () => {
-  test("repro: `arr.map(fn(n) => n * 2)` fires E-FN-ARROW-BODY, NOT E-CODEGEN-INVALID-JS", () => {
+  test("repro: `arr.map(fn(n) => n * 2)` fires E-FN-ARROW-BODY, NOT E-CODEGEN-INVALID-LOGIC", () => {
     const r = compile(WRAP(
       "function doit() {\n  const arr = [1,2,3]\n  const d = arr.map(fn(n) => n * 2)\n  return { d: d }\n}",
     ));
     const c = codes(r);
     expect(c).toContain("E-FN-ARROW-BODY");
     // The whole point of the fix: the misleading "compiler defect" code is gone.
-    expect(c).not.toContain("E-CODEGEN-INVALID-JS");
+    expect(c).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("the steering message names BOTH canonical forms", () => {
