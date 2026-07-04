@@ -1701,6 +1701,17 @@ export function generateClientJs(ctx: CompileContext): string {
   if (csrfEnabled) {
     lines.push("// --- CSRF token helper (compiler-generated) ---");
     lines.push("function _scrml_get_csrf_token() {");
+    // §39.2.3 canonical delivery — PREFER the <meta name="csrf-token"> element the
+    // server fills at HTML-composition time with THIS session's synchronizer
+    // token. Present synchronously at first paint, so the FIRST mutating POST
+    // already carries the right X-CSRF-Token and does NOT 403. Same-origin only:
+    // a cross-origin page cannot read our document's meta tag (SOP), so the token
+    // never leaks cross-site. Falls back to the cookie (baseline double-submit, or
+    // the value planted by a 403 Set-Cookie) and finally to a fresh mint below —
+    // the S238 403+retry stays as the fallback when the meta token is absent/stale.
+    lines.push("  const _scrml_meta = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("  const _scrml_meta_token = _scrml_meta && _scrml_meta.getAttribute('content');");
+    lines.push("  if (_scrml_meta_token) return _scrml_meta_token;");
     lines.push("  const match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
     lines.push("  if (match) return decodeURIComponent(match[1]);");
     // Issue #2 (parent scrmlTS): bootstrap a same-origin double-submit token

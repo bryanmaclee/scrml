@@ -37,7 +37,12 @@ const TMP_ROOT = resolve(testDir, "_tmp_sql_in_arrow");
 let counter = 0;
 
 beforeAll(() => {
-  if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
+  // Recurrence-proof isolation: a KILLED / --bail'd prior suite run (e.g. a
+  // pre-commit hook timed out mid-file) skips afterAll and leaves TMP_ROOT with
+  // a `m.db` that already has `items` — the next run's `CREATE TABLE items` then
+  // throws "table already exists". Start from a clean TMP_ROOT every time.
+  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
+  mkdirSync(TMP_ROOT, { recursive: true });
 });
 afterAll(() => {
   if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });

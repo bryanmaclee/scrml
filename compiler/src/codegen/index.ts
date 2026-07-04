@@ -1194,6 +1194,20 @@ export function runCG(input: CgInput): CgOutput {
       docParts.push("<head>");
       docParts.push("  <meta charset=\"UTF-8\">");
       docParts.push("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+      // §39.2.3 canonical CSRF delivery — the `<meta name="csrf-token">` element.
+      // Emitted as an EMPTY placeholder in the static HTML for an auth + `csrf="auto"`
+      // app; the server's request-time HTML-composition route (emit-server.ts SSR
+      // compose handler) fills `content=""` with the loading viewer's session
+      // synchronizer token at serve time (the token is per-session, so it cannot be
+      // baked into the static file). The client reads it FIRST in
+      // `_scrml_get_csrf_token()` so the initial mutating POST already carries
+      // `X-CSRF-Token` — no 403 round-trip. Absent/empty (anon, or a non-composed
+      // serve) falls back to the cookie + the single-shot 403-retry. Baseline
+      // (no-auth) double-submit apps emit no meta tag (the client mints its own
+      // token), so this is auth-path only.
+      if (authMW !== null && authMW.csrf === "auto") {
+        docParts.push("  <meta name=\"csrf-token\" content=\"\">");
+      }
       // <title> emission rule (§40.7):
       //   1. Author-written <title> → no compiler-emitted <title>
       //      (the author <title> renders via htmlBody itself)

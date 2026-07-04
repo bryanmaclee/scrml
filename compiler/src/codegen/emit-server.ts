@@ -1489,6 +1489,40 @@ export function generateServerJs(
     lines.push("  },");
     lines.push("};");
     lines.push("");
+
+    // §20.5 @session projection GET handler (compiler-generated). The client's
+    // `@session` reactive projection (emit-client.ts) does
+    // `fetch('/_scrml/session', {credentials:'include'})` on load to hydrate
+    // `session.current`; without this handler that fetch 404s and `@session`
+    // resolves null (g-session-projection-no-server-handler). GET is read-only
+    // (never state-mutating) so it is NOT CSRF-gated, and it is NOT behind the
+    // auth 302 gate — an anonymous caller gets `{ isAuth:false, userId:null,
+    // role:null }` so the client can gate UI on `@session.current.isAuth`.
+    //
+    // §39.2.3 canonical CSRF delivery: when `csrf="auto"` the projection ALSO
+    // carries the session's `csrfToken` (the server-authoritative synchronizer
+    // token the middleware mints + persists). Same-origin only — a cross-origin
+    // page cannot read this response (no CORS headers), so the token never
+    // leaks cross-site. This is the projection-based token delivery vehicle
+    // that pairs with the `<meta name="csrf-token">` first-paint delivery.
+    lines.push("// --- §20.5 @session projection GET handler (compiler-generated) ---");
+    lines.push("export const _scrml_session_projection = {");
+    lines.push(`  path: "/_scrml/session",`);
+    lines.push(`  method: "GET",`);
+    lines.push("  handler: async function(_scrml_req) {");
+    lines.push("    const _s = _scrml_session_middleware(_scrml_req);");
+    if (csrf === "auto") {
+      lines.push("    const _body = { isAuth: _s.isAuth, userId: _s.userId, role: _s.role, csrfToken: _s.csrfToken };");
+    } else {
+      lines.push("    const _body = { isAuth: _s.isAuth, userId: _s.userId, role: _s.role };");
+    }
+    lines.push("    return new Response(JSON.stringify(_body), {");
+    lines.push("      status: 200,");
+    lines.push(`      headers: { "Content-Type": "application/json" },`);
+    lines.push("    });");
+    lines.push("  },");
+    lines.push("};");
+    lines.push("");
   }
 
   // Baseline CSRF protection
@@ -3143,7 +3177,14 @@ export function generateServerJs(
     const _ssrSeedCallable = _needsMountHydrate ? _mhCallableDecls : [];
     const _hasSsrSeed =
       _ssrSeedTier1.length > 0 || _ssrSeedPatternC.length > 0 || _ssrSeedCallable.length > 0;
-    if (_hasSsrSeed) {
+    // §39.2.3 canonical CSRF delivery — when `csrf="auto"` the request-time
+    // HTML-composition route ALSO fills the `<meta name="csrf-token">`
+    // placeholder (emitted empty into the static head by codegen/index.ts) with
+    // the loading viewer's session synchronizer token. This is why the compose
+    // route is emitted even for an auth+csrf app with NO server-authority seed:
+    // the meta-tag first-paint token delivery needs a per-request HTML rewrite.
+    const _csrfMetaInject = authMiddlewareEntry?.csrf === "auto";
+    if (_hasSsrSeed || _csrfMetaInject) {
       const _ssrHtmlBase = _pathBasename(filePath, ".scrml");
       const _ssrServedPath = computeServedPath(filePath, (fileAST as any)._outputBaseDir);
       // §52 (S233) Fork-3 — a Pattern-C seed query reads @currentUser iff it
@@ -3172,9 +3213,11 @@ export function generateServerJs(
           lines.push("");
         }
       }
-      lines.push(`// --- §52.8 SSR pre-render: inline server-authoritative state seed (B-substrate) ---`);
+      lines.push(`// --- §52.8 SSR pre-render + §39.2.3 CSRF meta-token injection (request-time HTML composition) ---`);
       lines.push(`async function _scrml_ssr_compose_handler(_scrml_req) {`);
-      lines.push(`  const _scrml_ssr_state = {};`);
+      if (_hasSsrSeed) {
+        lines.push(`  const _scrml_ssr_state = {};`);
+      }
       // §52 (S233) Fork-3 — bind the per-request @currentUser so the seed queries
       // below run row-scoped under THIS viewer (each first paint contains only
       // their rows). Anon → @currentUser.id is null → SQL NULL → zero rows.
@@ -3218,23 +3261,42 @@ export function generateServerJs(
           lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await Promise.resolve(${_expr});`);
         }
       }
-      // Read the sibling compiled <base>.html and inject the seed before </head>.
-      // String.fromCharCode(92) is a backslash: a `<` in the JSON becomes the JS
-      // escape `<` so the embedded value can never break out of the <script>
-      // (a `</script>` in protected-but-revealed string data stays inert).
-      lines.push(`  ${_ssrRenderers.length > 0 ? "let" : "const"} _scrml_html = await Bun.file(new URL(${JSON.stringify("./" + _ssrHtmlBase + ".html")}, import.meta.url)).text();`);
+      // Read the sibling compiled <base>.html. Always `let`: the enclosing gate
+      // guarantees `_hasSsrSeed || _csrfMetaInject`, so _scrml_html is reassigned
+      // by at least one of the meta injection, the each-mount fills, or the seed
+      // injection below.
+      lines.push(`  let _scrml_html = await Bun.file(new URL(${JSON.stringify("./" + _ssrHtmlBase + ".html")}, import.meta.url)).text();`);
       // §52.8 A-terminus — fill each server-authority <each> mount with its
       // server-rendered (redacted) rows so view-source of the first paint shows
       // the data, not an empty placeholder. data-scrml-key markers ride each row.
       for (const _r of _ssrRenderers) {
         lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify("each_" + _r.id)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
       }
-      lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
-      lines.push(`  const _scrml_seed_tag = "<script>window.__scrml_ssr_state=" + _scrml_seed_json + ";</script>";`);
-      lines.push(`  const _scrml_out = _scrml_html.includes("</head>")`);
-      lines.push(`    ? _scrml_html.replace("</head>", _scrml_seed_tag + "</head>")`);
-      lines.push(`    : _scrml_seed_tag + _scrml_html;`);
-      lines.push(`  return new Response(_scrml_out, {`);
+      // §39.2.3 — fill the `<meta name="csrf-token" content="">` placeholder with
+      // THIS viewer's session synchronizer token. The middleware mints + persists
+      // it lazily on read, so a logged-in first paint carries a live token; an
+      // anonymous viewer has no session record → the token stays empty and the
+      // client falls back to the cookie + single-shot 403-retry (anonymous
+      // mutations 302 before the CSRF gate anyway). The token is a compiler-minted
+      // UUID; the `[<>"]` strip is a defensive guard so it can never break out of
+      // the attribute even if the token format ever changes.
+      if (_csrfMetaInject) {
+        lines.push(`  const _scrml_csrf_meta_token = String((_scrml_session_middleware(_scrml_req).csrfToken) || "").replace(/[<>"]/g, "");`);
+        lines.push(`  _scrml_html = _scrml_html.replace('<meta name="csrf-token" content="">', '<meta name="csrf-token" content="' + _scrml_csrf_meta_token + '">');`);
+      }
+      if (_hasSsrSeed) {
+        // Inline the server-authoritative state seed before </head> so the client
+        // hydrates BEFORE mount (kills the fetch RTT). String.fromCharCode(92) is a
+        // backslash: a `<` in the JSON becomes the JS escape so the embedded value
+        // can never break out of the <script> (a `</script>` in revealed string
+        // data stays inert).
+        lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
+        lines.push(`  const _scrml_seed_tag = "<script>window.__scrml_ssr_state=" + _scrml_seed_json + ";</script>";`);
+        lines.push(`  _scrml_html = _scrml_html.includes("</head>")`);
+        lines.push(`    ? _scrml_html.replace("</head>", _scrml_seed_tag + "</head>")`);
+        lines.push(`    : _scrml_seed_tag + _scrml_html;`);
+      }
+      lines.push(`  return new Response(_scrml_html, {`);
       lines.push(`    status: 200,`);
       lines.push(`    headers: { "Content-Type": "text/html; charset=utf-8" },`);
       lines.push(`  });`);
