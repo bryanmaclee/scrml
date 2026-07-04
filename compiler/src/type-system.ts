@@ -9465,6 +9465,18 @@ function annotateNodes(
             // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor
             // (`@phase == Phase.Serving`) — always-false silent branch.
             checkEqPayloadVariantOperands(reactInitExprNode, typeRegistry, reactSpan, errors);
+            // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference for
+            // bare variants embedded in calls inside the state-decl init
+            // (`<x>: T = f(.V)`). g-typer-bare-variant-non-return-ambiguous
+            // (S238) — this MUST run BEFORE the ctor-arg + struct-nav walkers
+            // below (matching the let-decl ordering at ~9045) so a call-arg
+            // whose PARAM enum differs from the LHS state-cell type is stamped
+            // against its OWN param enum first; otherwise the LHS-context
+            // struct-nav walker false-fires E-TYPE-063 (`<t>: Tok = wrap(.Paren)`
+            // where `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not
+            // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
+            // resolved too late.
+            inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG
             // `.Easy` must resolve against the OnePlayer payload type
@@ -9476,11 +9488,6 @@ function annotateNodes(
             // struct contextTypes (e.g. the kanban shape
             // `<cards>: { id, title, status: Status }[] = [...]`).
             inferBareVariantsWithStructNav(reactInitExprNode, bvCtxType, reactSpan, errors);
-            // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference for
-            // bare variants embedded in calls inside the state-decl init
-            // (`<x>: T = f(.V)`). The struct-nav walker handles the LHS
-            // type; this handles per-call param types.
-            inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
           }
         }
         if (n.name) {
@@ -10650,20 +10657,41 @@ function annotateNodes(
           const retCtx = enclosingFnReturnTypeStack.length > 0
             ? enclosingFnReturnTypeStack[enclosingFnReturnTypeStack.length - 1]
             : null;
-          // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
-          // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
-          // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
-          // the flat return-type walker so the stamp it sets makes that walker
-          // (which carries retCtx) skip the ctor arg.
-          inferBareVariantsAtVariantCtorArgs(retExprNode, retCtx, typeRegistry, retSpan, errors);
-          if (retCtx) {
-            inferBareVariantsInExpr(retExprNode, retCtx, retSpan, errors);
-          }
           // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference within
           // the return expression. e.g. `return applyState(.V)` — the
           // call-arg position has its own type context from applyState's
           // param annotation, distinct from the return-type context.
+          //
+          // g-typer-bare-variant-non-return-ambiguous (S238) — this MUST run
+          // BEFORE the LHS return-type-driven walker below (matching the
+          // let/state-decl ordering at ~9045 / ~9483). A bare variant at a
+          // typed call-arg position is stamped here against its PARAM enum;
+          // otherwise the return-type-context walker false-fires E-TYPE-063 /
+          // E-VARIANT-AMBIGUOUS on a call-arg whose param enum differs from
+          // the fn's return type (`return wrap(.Paren)` where
+          // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
           inferBareVariantsAtCallArgs(retExprNode, fnSignatures, retSpan, errors);
+          // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
+          // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
+          // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
+          // the return-type struct-nav walker so the stamp it sets makes that
+          // walker (which carries retCtx) skip the ctor arg.
+          inferBareVariantsAtVariantCtorArgs(retExprNode, retCtx, typeRegistry, retSpan, errors);
+          if (retCtx) {
+            // g-typer-bare-variant-non-return-ambiguous (S238) — use the
+            // struct-nav walker (NOT the flat `inferBareVariantsInExpr`) so a
+            // STRUCT or ARRAY-of-enum RETURN type refines the per-position
+            // context as the walker descends into object / array literals.
+            // `return { kind: .A, len: 2 }` (struct return) and `return [.A]`
+            // (`Enum[]` return) now resolve each bare variant against the
+            // FIELD / ELEMENT type instead of the whole struct / array type
+            // (which is neither enum nor union → the old flat walker fired a
+            // spurious E-VARIANT-AMBIGUOUS). Falls back to the flat walker for
+            // enum / union / asIs / null return types — byte-identical to the
+            // pre-fix behavior for `return .V` with a `-> Enum` signature.
+            // Mirrors the let-decl (~9065) and state-decl (~9478) dispatch.
+            inferBareVariantsWithStructNav(retExprNode, retCtx, retSpan, errors);
+          }
         }
         resolvedType = tAsIs();
         break;
