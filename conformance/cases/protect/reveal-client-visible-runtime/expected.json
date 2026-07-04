@@ -1,0 +1,19 @@
+{
+  "id": "protect-reveal-client-visible-runtime",
+  "description": "§14.8.9 declassification — the RUNTIME half of item 4 (ss60-parked, adapter-gated). reveal(\"col\") is the sole admit path: a server fn that returns u.reveal(\"passwordHash\") declassifies that column at this value, so the E-ADAPTER server-eval roundtrip lands the FULL row on the client (@user = {id, name, passwordHash}). This is the client-visible PRESENCE counterpart to strip-client-visible-runtime's client-visible ABSENCE — proving reveal admits the named column past the sink at runtime, not just that it suppresses the compile-time gate.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 (SPEC.md E-PROTECT-004 row): 'the column is not reveal-declassified ... Resolution: declassify explicitly with value.reveal(\"col\").' The reveal stamp on the row's provenance descriptor makes _scrml_protect_redact ADMIT passwordHash, so the client observes it present. The strip machinery still engages (I-PROTECT-STRIP-001, info) — reveal admits the named column, it does not disarm the sink for the rest.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": ["E-PROTECT-004"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [{ "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" } }
+  }
+}

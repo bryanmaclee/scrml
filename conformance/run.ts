@@ -23,7 +23,16 @@ import { readdirSync, readFileSync, statSync, existsSync } from "fs";
 import { join, dirname, relative } from "path";
 import { fileURLToPath } from "url";
 import { compile } from "./adapters/impl1-ts.ts";
-import { run, runAnchored, type InputStep, type AnchoredAssertion, type ServerStub } from "./adapters/impl1-ts.ts";
+import {
+  run,
+  runServer,
+  runAnchored,
+  type InputStep,
+  type AnchoredAssertion,
+  type ServerStub,
+  type ServerDb,
+  type FirstPaintAssertion,
+} from "./adapters/impl1-ts.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CASES_DIR = join(HERE, "cases");
@@ -63,6 +72,20 @@ export interface ExpectedCase {
      *  status? } }`. The adapter mocks fetch over the compiler-emitted route and
      *  (for errors) translates the directive to impl#1's wire envelope. */
     serverStub?: ServerStub;
+    /** E-ADAPTER server-eval seed (impl-neutral, keyed by TABLE name → rows).
+     *  Its presence opts the case OUT of the verbatim `serverStub` mock and INTO
+     *  running the REAL emitted server bundle: the §14.8.9 redaction sink + §52.8
+     *  SSR compose actually execute (the client observes redacted data / the
+     *  composed first-paint). Mutually exclusive with `serverStub`. */
+    serverDb?: ServerDb;
+    /** E-ADAPTER SSR mode: compose the §52.8 first-paint (`_scrml_ssr_compose_
+     *  handler`), mount THAT + seed `window.__scrml_ssr_state`, then hydrate.
+     *  Implied by `firstPaint`; set explicitly to hydrate without a first-paint
+     *  assertion. Requires `serverDb`. */
+    ssr?: boolean;
+    /** §52.8 first-paint assertions ({contains,notContains}) on the composed SSR
+     *  HTML. Presence enables SSR mode (requires `serverDb`). */
+    firstPaint?: FirstPaintAssertion;
   };
 }
 
@@ -138,7 +161,9 @@ export function hasRuntimeHalf(c: LoadedCase): boolean {
     e.dom !== undefined ||
     e.domAnchored !== undefined ||
     e.state !== undefined ||
-    e.serverStub !== undefined
+    e.serverStub !== undefined ||
+    e.serverDb !== undefined ||
+    e.firstPaint !== undefined
   );
 }
 
@@ -213,7 +238,32 @@ export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
   const e = c.expected.expect;
   const failures: string[] = [];
 
-  const r = await run(c.source, e.input ?? [], c.auxFiles, e.serverStub ?? {});
+  // E-ADAPTER: `serverDb` selects server-eval mode (run the REAL emitted server
+  // handlers so the §14.8.9 redaction sink + §52.8 SSR compose execute); absent
+  // it, the verbatim `serverStub` mock path. `firstPaint` (or explicit `ssr`)
+  // selects the SSR compose→hydrate flow.
+  const ssr = e.ssr === true || e.firstPaint !== undefined;
+  const r =
+    e.serverDb !== undefined
+      ? await runServer(c.source, { input: e.input ?? [], auxFiles: c.auxFiles, serverDb: e.serverDb, ssr })
+      : await run(c.source, e.input ?? [], c.auxFiles, e.serverStub ?? {});
+
+  // firstPaint — §52.8 composed first-paint substring assertions (SSR mode). The
+  // contains-set proves the server pre-rendered the rows into view-source; the
+  // notContains-set proves §14.8.9 redaction stripped the protected column.
+  if (e.firstPaint) {
+    const fp = (r as { firstPaint?: string }).firstPaint;
+    if (fp === undefined) {
+      failures.push("firstPaint: no composed first-paint (SSR mode not engaged / no compose handler)");
+    } else {
+      for (const s of e.firstPaint.contains ?? []) {
+        if (!fp.includes(s)) failures.push("firstPaint: expected to contain " + JSON.stringify(s));
+      }
+      for (const s of e.firstPaint.notContains ?? []) {
+        if (fp.includes(s)) failures.push("firstPaint: expected NOT to contain " + JSON.stringify(s));
+      }
+    }
+  }
 
   // state — merged {cells, derived}, expected is a subset.
   if (e.state) {

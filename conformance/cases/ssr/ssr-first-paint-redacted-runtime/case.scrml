@@ -1,0 +1,15 @@
+<program db="sqlite:./app.db" auth="none">
+<schema>
+  ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+</schema>
+<db src="app.db" protect="passwordHash" tables="users"></db>
+${
+  < Account authority="server" table="users">
+    id: number
+    name: string
+    passwordHash: string
+  </>
+  <Account> @accounts
+}
+<ul><each in=@accounts key=@.id as a><li class="row">${a.name}</li></each></ul>
+</program>

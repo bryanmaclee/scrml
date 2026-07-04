@@ -352,6 +352,290 @@ export async function run(
   }
 }
 
+// ===========================================================================
+// E-ADAPTER — server-eval mode: run the REAL emitted route + SSR-compose handlers
+// ===========================================================================
+//
+// The `run()` path above MOCKS the server: its `fetch` returns a case-declared
+// `serverStub` VERBATIM, so the compiler-emitted route handler — and with it the
+// §14.8.9 `_scrml_protect_redact` egress sink + the §52.8 `_scrml_ssr_compose_
+// handler` — never execute. That makes the RUNTIME halves of protect-redaction
+// (client-visible absence) and SSR first-paint UNOBSERVABLE (ss60 escalation).
+//
+// Server-eval mode WIDENS the existing seam. `result.outputs` already carries
+// `serverJs` (the `run()` cast simply drops it); here the adapter EVALUATES that
+// server bundle — stubbing `_scrml_sql` from a case-declared `serverDb` and the
+// `Bun` / `Response` / `crypto` ambient globals (borrowing the D2 browser harness
+// `ssr-a-terminus-hydration.browser.test.js` compose wrapper) — and then either:
+//
+//   (a) DISPATCHES the client's `/_scrml/*` fetches through the emitted WinterCG
+//       `fetch(request)`, so the route handler's redaction sink actually runs and
+//       the client observes the REDACTED response (protect item-2/4); and/or
+//   (b) invokes `_scrml_ssr_compose_handler` to produce the first-paint HTML +
+//       `window.__scrml_ssr_state` seed, mounts THAT, and hydrates the client
+//       (SSR item-1/3).
+//
+// OPT-IN + NON-PERTURBING. Triggered ONLY by a case declaring `serverDb`. Absent
+// it, `runCaseRuntime` uses the byte-identical `run()` path — the 165 existing
+// cases (and the fetch-mock / fake-clock install) are untouched.
+//
+// NEW CONTRACT AXES (flagged for per-phase language-1.0 ratification, S235
+// no-batch rule — the PA rules at landing):
+//   • `serverDb`  — impl-neutral server-side DB seed, keyed by TABLE name → rows.
+//                   Its presence is the request→response serverJs-eval directive.
+//   • `firstPaint`— impl-neutral assertions ({contains,notContains}) on the
+//                   composed SSR first-paint HTML (the §52.8 observation axis).
+
+/** A case-declared server-side DB seed — impl-neutral, keyed by TABLE name
+ *  (never impl#1's SQL/route encoding). Each `_scrml_sql\`... FROM <table> ...\``
+ *  the emitted handler runs resolves to this table's rows (a fresh shallow copy
+ *  per query so the redaction sink's Symbol-descriptor tagging never bleeds back
+ *  into the seed). The WHERE clause is NOT evaluated — a conformance fixture
+ *  controls its rows directly; `.get()` (→ row[0]) reads the first. */
+export type ServerDb = Record<string, unknown[]>;
+
+/** Assertions on the composed SSR first-paint HTML (§52.8). */
+export interface FirstPaintAssertion {
+  /** Every substring MUST appear in the first-paint (e.g. a rendered row). */
+  contains?: string[];
+  /** No substring may appear (e.g. a §14.8.9-protected column / its value). */
+  notContains?: string[];
+}
+
+/** The subset of the emitted server module the harness drives. */
+interface ServerModule {
+  /** The WinterCG `fetch(request)` route dispatcher (null when no routes). */
+  fetch: ((req: unknown) => Promise<unknown>) | null;
+  /** `_scrml_ssr_compose_handler` (null when the app has no SSR authority). */
+  compose: ((req: unknown) => Promise<{ text(): Promise<string> }>) | null;
+}
+
+/** The `_scrml_sql` tagged-template stub — parses the table out of the query and
+ *  returns a fresh copy of the seed's rows for it (empty array when unseeded). */
+function makeSqlStub(db: ServerDb): (strings: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]> {
+  return (strings: TemplateStringsArray) => {
+    const q = strings.join(" ");
+    const m = /\bFROM\s+["'`]?(\w+)/i.exec(q);
+    const table = m ? m[1] : null;
+    const rows = table && Array.isArray(db[table]) ? db[table] : [];
+    // Fresh shallow copies: the server's `_scrml_protect_tag` stamps a Symbol
+    // descriptor onto each row object; copying keeps the seed pristine across
+    // queries (and across the ×3 determinism re-run).
+    return Promise.resolve(rows.map((r) => (r && typeof r === "object" ? { ...(r as object) } : r)));
+  };
+}
+
+/**
+ * Evaluate the emitted server bundle into its drivable surface. Mirrors the D2
+ * browser harness compose wrapper: strip the `import { SQL } from "bun"` + the
+ * `new SQL(...)` handle decl (both replaced by the `_scrml_sql` stub param),
+ * strip `export ` (the wrapper `return`s the bindings instead), and neutralize
+ * `import.meta.url` (the compose handler reads a sibling `.html` off it — the
+ * `Bun.file` stub answers with the in-memory `html`). The emitted server code is
+ * otherwise UNMODIFIED — the same bytes a real deploy ships.
+ */
+function evalServerModule(serverJs: string, html: string, db: ServerDb): ServerModule {
+  const g = globalThis as any;
+  const runnable = serverJs
+    .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = new SQL\([^)]*\);\s*$/m, "")
+    .replace(/^export\s+/gm, "")
+    .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
+  const BunStub = { file: () => ({ text: async () => html }) };
+  const wrapper = new Function(
+    "_scrml_sql", "Bun", "Response", "crypto", "URL",
+    `${runnable}\nreturn {` +
+      ` fetch: typeof fetch !== "undefined" ? fetch : null,` +
+      ` compose: typeof _scrml_ssr_compose_handler !== "undefined" ? _scrml_ssr_compose_handler : null` +
+      ` };`,
+  );
+  return wrapper(makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL) as ServerModule;
+}
+
+/**
+ * Install a `globalThis.fetch` that DISPATCHES `/_scrml/*` requests through the
+ * emitted server module's real `fetch(request)`. Returns a restore thunk.
+ *
+ * Two browser fidelities the real Fetch API would provide, re-created here so the
+ * emitted handler's CSRF gate behaves as deployed:
+ *   • COOKIE JAR — `document.cookie` is attached as the request `Cookie` header.
+ *     (`Cookie` is a Fetch "forbidden header" the `Headers`/`Request` API silently
+ *     drops, so the handler receives a DUCK-TYPED request whose `.headers.get`
+ *     returns it verbatim — never a real `Request`.)
+ *   • Set-Cookie WRITE-BACK — a response `Set-Cookie` is applied to the jar, so
+ *     the baseline mint-on-403 → client-retry CSRF handshake completes.
+ * A non-`/_scrml/` request resolves to a deterministic empty 200 (hermetic).
+ */
+function installServerDispatchFetch(mod: ServerModule): () => void {
+  const g = globalThis as any;
+  const realFetch = g.fetch;
+  const RealResponse = g.Response;
+  const emptyJson = () => new RealResponse("null", { status: 200, headers: JSON_HEADERS });
+  g.fetch = async (input: any, init?: any): Promise<any> => {
+    const url = typeof input === "string" ? input : (input && input.url) || String(input);
+    if (!String(url).startsWith("/_scrml/") || !mod.fetch) return emptyJson();
+    // Fold the caller's headers (a plain object OR a Headers instance) down to a
+    // lowercase map, then splice in the cookie jar.
+    const hmap: Record<string, string> = {};
+    const src = init?.headers;
+    if (src && typeof src.forEach === "function") src.forEach((v: string, k: string) => { hmap[k.toLowerCase()] = v; });
+    else if (src) for (const k of Object.keys(src)) hmap[k.toLowerCase()] = String(src[k]);
+    const cookie = (g.document && g.document.cookie) || "";
+    if (cookie) hmap["cookie"] = cookie;
+    const bodyStr = init?.body != null ? String(init.body) : "";
+    const req = {
+      url: "http://localhost" + url,
+      method: init?.method || "GET",
+      headers: { get: (k: string) => hmap[String(k).toLowerCase()] ?? null },
+      json: async () => JSON.parse(bodyStr || "null"),
+      text: async () => bodyStr,
+    };
+    const resp = (await mod.fetch(req)) as any;
+    const r = resp || emptyJson();
+    const setCookie = r.headers && typeof r.headers.get === "function" ? r.headers.get("Set-Cookie") : null;
+    if (setCookie && g.document) g.document.cookie = String(setCookie).split(";")[0];
+    return r;
+  };
+  return () => { g.fetch = realFetch; };
+}
+
+// The E-CSRF harness runtime shim (ss60 E-CSRF-HELPER escalation). A client
+// bundle emitted UNDER an auth middleware references `_scrml_fetch_with_csrf_
+// retry(...)` but — on that path — does NOT emit its definition (the def is gated
+// on the baseline/no-auth branch), so the mount throws `ReferenceError` when the
+// server fn is called. This global FALLBACK resolves that bare reference. A client
+// that DOES emit its own `function _scrml_fetch_with_csrf_retry` shadows this in
+// its IIFE scope (a local decl wins the scope-chain), so the baseline path is
+// unaffected. Mirrors the emitted baseline helper: cookie-token header + one
+// mint-on-403 retry.
+const CSRF_RETRY_FALLBACK = async function (path: string, method: string, body: unknown): Promise<unknown> {
+  const g = globalThis as any;
+  const token = (): string => {
+    const doc = g.document;
+    const m = doc && doc.cookie ? /(?:^|;\s*)scrml_csrf=([^;]+)/.exec(doc.cookie) : null;
+    if (m) return decodeURIComponent(m[1]);
+    const t = g.crypto && g.crypto.randomUUID ? g.crypto.randomUUID() : Math.random().toString(36).slice(2);
+    if (doc) doc.cookie = `scrml_csrf=${t}; Path=/; SameSite=Strict`;
+    return t;
+  };
+  const hdr = () => ({ "Content-Type": "application/json", "X-CSRF-Token": token() });
+  let resp = await g.fetch(path, { method, headers: hdr(), body });
+  if (resp && resp.status === 403) resp = await g.fetch(path, { method, headers: hdr(), body });
+  return resp;
+};
+
+/** Install the E-CSRF fallback on globalThis; returns a restore thunk. */
+function installCsrfRetryFallback(): () => void {
+  const g = globalThis as any;
+  const had = "_scrml_fetch_with_csrf_retry" in g;
+  const prev = g._scrml_fetch_with_csrf_retry;
+  g._scrml_fetch_with_csrf_retry = CSRF_RETRY_FALLBACK;
+  return () => { if (had) g._scrml_fetch_with_csrf_retry = prev; else delete g._scrml_fetch_with_csrf_retry; };
+}
+
+/** Pull the inline B-substrate seed value out of composed first-paint HTML.
+ *  `innerHTML=` does NOT execute the seed `<script>`, so the caller applies it by
+ *  hand (exactly what that script would set on `window.__scrml_ssr_state`). */
+function extractSsrSeed(firstPaint: string): unknown {
+  const m = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+  return m ? JSON.parse(m[1]) : null;
+}
+
+export interface ServerRunResult extends RunResult {
+  /** The composed SSR first-paint HTML (SSR mode only; else undefined). */
+  firstPaint?: string;
+}
+
+export interface ServerRunOptions {
+  input?: InputStep[];
+  auxFiles?: Record<string, string>;
+  /** Impl-neutral server DB seed — the server-eval trigger. */
+  serverDb: ServerDb;
+  /** When true, compose the SSR first-paint, mount THAT + seed, then hydrate. */
+  ssr?: boolean;
+}
+
+/**
+ * Server-eval sibling of `run()` (E-ADAPTER). Compiles the source, evaluates the
+ * emitted `serverJs`, and executes the client against the REAL route / SSR-compose
+ * handlers. Returns the post-run DOM + state (+ the composed first-paint in SSR
+ * mode). Determinism is preserved: rows come from the fixed `serverDb`, the seed
+ * is deterministic, and CSRF tokens round-trip (cookie === header) so their
+ * non-determinism never reaches asserted output.
+ */
+export async function runServer(source: string, opts: ServerRunOptions): Promise<ServerRunResult> {
+  const { input = [], auxFiles = {}, serverDb, ssr = false } = opts;
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  // A real document URL is required for happy-dom's cookie jar (the baseline CSRF
+  // double-submit reads/writes `document.cookie`); about:blank rejects cookies.
+  GlobalRegistrator.register({ url: "http://localhost/" } as any);
+
+  const clock = new FakeClock();
+  const dir = mkdtempSync(join(tmpdir(), "scrml-conf-server-"));
+  const file = writeCaseFiles(dir, source, auxFiles);
+  let restoreFetch: (() => void) | null = null;
+  const restoreCsrf = installCsrfRetryFallback();
+  try {
+    const result = compileScrml({
+      inputFiles: [file],
+      write: false,
+      outputDir: join(dir, "out"),
+      log: () => {},
+    }) as { outputs?: Map<string, { html?: string; clientJs?: string; serverJs?: string }> };
+
+    const out = result.outputs ? result.outputs.get(file) : undefined;
+    const html = (out && out.html) || "";
+    const clientJs = (out && out.clientJs) || "";
+    const serverJs = (out && out.serverJs) || "";
+
+    const mod = evalServerModule(serverJs, html, serverDb);
+    restoreFetch = installServerDispatchFetch(mod);
+
+    // SSR mode: compose the first-paint, mount THAT (its <body>), and seed
+    // window.__scrml_ssr_state so the client hydrates the server rows in place.
+    let firstPaint: string | undefined;
+    let seedState: unknown = null;
+    let mountSource = html;
+    if (ssr) {
+      if (!mod.compose) throw new Error("server-eval SSR: emitted serverJs has no _scrml_ssr_compose_handler");
+      const resp = await mod.compose({});
+      firstPaint = await resp.text();
+      seedState = extractSsrSeed(firstPaint);
+      mountSource = firstPaint;
+    }
+
+    const bodyMatch = mountSource.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    const bodyHtml = bodyMatch ? bodyMatch[1] : mountSource;
+    const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+    (globalThis as any).document.body.innerHTML = cleanHtml;
+    if (ssr && seedState != null) (globalThis as any).window.__scrml_ssr_state = seedState;
+
+    clock.install();
+    const code = "(function () {\n" + SCRML_RUNTIME + "\n" + clientJs + "\n" + CONFORMANCE_SHIM + "\n})();";
+    // eslint-disable-next-line no-eval
+    (0, eval)(code);
+
+    const doc = (globalThis as any).document;
+    doc.dispatchEvent(new (globalThis as any).Event("DOMContentLoaded", { bubbles: true }));
+
+    const hook = (globalThis as any).__scrml_conformance as ConformanceHook | undefined;
+    if (hook && hook.settled) await hook.settled();
+    await driveInputs(doc, input, hook, clock);
+    if (hook && hook.settled) await hook.settled();
+
+    const state = hook && hook.snapshot ? hook.snapshot() : { cells: {}, derived: {} };
+    const dom = normalizeDom(doc.body);
+    return { dom, state, body: doc.body, firstPaint };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    delete (globalThis as any).__scrml_conformance;
+    try { delete (globalThis as any).window.__scrml_ssr_state; } catch { /* not seeded */ }
+    if (restoreFetch) restoreFetch();
+    restoreCsrf();
+    clock.restore();
+  }
+}
+
 // Re-export the anchored-assertion runner + types so the corpus runner imports a
 // single adapter surface.
 export { runAnchored };

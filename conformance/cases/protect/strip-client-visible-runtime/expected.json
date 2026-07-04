@@ -1,0 +1,22 @@
+{
+  "id": "protect-strip-client-visible-runtime",
+  "description": "§14.8.9 egress redaction — the RUNTIME half of item 2/5 (ss60-parked, adapter-gated). A client button calls the server fn getUser (a SELECT * over a protect= table); the E-ADAPTER server-eval path runs the REAL emitted route handler, so _scrml_protect_redact executes at the egress sink and the client-bound cell @user observes the payload with the protected column ABSENT ({id, name} — no passwordHash). This is the client-visible absence the fetch-mock could never show (the mock returned the serverStub verbatim, bypassing the sink). Compile half stays pinned: I-PROTECT-STRIP-001 (info) names the stripped column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 (SPEC.md I-PROTECT-STRIP-001 row): 'The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return ... before it crossed to the client.' The runtime proof is that the client cell holds {id, name} only; passwordHash never crosses. auth=\"none\" declassifies the AUTH scope (dodging the auth-path CSRF gate) while the §14.8.9 column-redaction floor stays engaged (column-redaction ⟂ auth-scope, SPEC.md §52 line ~30500).",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" },
+        { "id": 2, "name": "Bob", "passwordHash": "SECRET_HASH_BOB" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": { "id": 1, "name": "Alice" } }
+  }
+}

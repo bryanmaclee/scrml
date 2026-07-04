@@ -1,14 +1,27 @@
 {
   "id": "ssr-first-paint-render",
-  "description": "§52.8 SSR first-paint render (D1/D2, S234-235) — a server-authority <each> whose rows are pre-rendered INTO the first-paint HTML (keyed data-scrml-key) so view-source contains the rows before client JS. This case pins the COMPILE half (the canonical SSR source compiles clean — no E-*). RUNTIME-HALF-PENDING: the composed first-paint markup assertion needs the server compose handler (_scrml_ssr_compose_handler) + a window.__scrml_ssr_state seed, which the current client-mount adapter does not invoke — an ADAPTER EXTENSION (track B, escalated). The runtime shape is proven meanwhile by the D2 browser test.",
+  "description": "§52.8 SSR first-paint render (D1/D2, S234-235) — a server-authority <each> whose rows are pre-rendered INTO the first-paint HTML (keyed data-scrml-key) so view-source contains the rows before client JS. RUNTIME HALF CLOSED (S236 E-ADAPTER): the server-eval SSR path invokes the REAL _scrml_ssr_compose_handler, asserts the composed first-paint carries the keyed rows + the window.__scrml_ssr_state seed, then hydrates the client (accounts = the seeded rows). Previously runtime-half-pending — the adapter had no SSR-compose path; it now does.",
   "language-version": "1.0",
   "spec": "§52.8",
-  "runtime-half-pending": true,
   "runtime-half-ref": "compiler/tests/browser/ssr-a-terminus-hydration.browser.test.js",
-  "rationale": "§52.8: server-authoritative reactive variables SHALL be included in the SSR output; the D1 server-side row renderer (codegen/emit-ssr-render.ts) emits per-row HTML keyed data-scrml-key into the each-mount. The conformance runtime half is adapter-gated: the adapter mounts the CLIENT bundle and has no SSR-compose path; extending it (invoke the compose handler + seed __scrml_ssr_state, borrowing the D2 browser harness) closes this. Codes half only for now.",
+  "rationale": "§52.8: server-authoritative reactive variables SHALL be included in the SSR output; the D1 server-side row renderer (codegen/emit-ssr-render.ts) emits per-row HTML keyed data-scrml-key into the each-mount. The runtime proof: _scrml_ssr_compose_handler fills the mount with the rows + seeds window.__scrml_ssr_state, and the client hydrates in place (D2 shape, now driven through the whole compile pipeline).",
   "expect": {
     "codes": [],
     "notCodes": [],
-    "notCodePrefixes": ["E-"]
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice" },
+        { "id": 2, "name": "Bob" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"1\" class=\"row\">Alice</li>",
+        "<li data-scrml-key=\"2\" class=\"row\">Bob</li>",
+        "window.__scrml_ssr_state="
+      ]
+    },
+    "state": { "accounts": [{ "id": 1, "name": "Alice" }, { "id": 2, "name": "Bob" }] }
   }
 }

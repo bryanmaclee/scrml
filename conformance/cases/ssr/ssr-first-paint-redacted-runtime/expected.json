@@ -1,0 +1,28 @@
+{
+  "id": "ssr-first-paint-redacted-runtime",
+  "description": "§52.8 SSR first-paint + §14.8.9 redaction — the RUNTIME half of item 1/3 (ss60-parked, adapter-gated). The E-ADAPTER server-eval SSR path invokes the REAL _scrml_ssr_compose_handler: a server-authority <each> over a protect= table pre-renders its rows INTO the first-paint HTML (keyed data-scrml-key, view-source-visible before client JS), and those rows feed on the §14.8.9-redacted seed — the protected column (passwordHash / its value) is ABSENT from both the rendered rows AND the window.__scrml_ssr_state seed. The client then hydrates against that first paint (accounts = the redacted rows). Closes the runtime half the D2 browser test proved only with a hand-built protectAnalysis; here the whole compile pipeline derives it from source.",
+  "language-version": "1.0",
+  "spec": "§52.8, §14.8.9",
+  "runtime-half-ref": "compiler/tests/browser/ssr-a-terminus-hydration.browser.test.js",
+  "rationale": "§52.8 (SPEC.md §52 line ~30252): 'a view-source of the first paint already contains the rows ... It feeds on the §14.8.9-redacted rows (a protected column is absent — no first-paint confidentiality leak).' auth=\"none\" makes the pre-render public/unscoped (so W-SSR-PRERENDER-UNSCOPED does not fire — it is gated on non-explicit-auth), which is orthogonal to the column-redaction floor asserted here (§52 line ~30500 — the three axes STACK).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" },
+        { "id": 2, "name": "Bob", "passwordHash": "SECRET_HASH_BOB" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"1\" class=\"row\">Alice</li>",
+        "<li data-scrml-key=\"2\" class=\"row\">Bob</li>",
+        "window.__scrml_ssr_state="
+      ],
+      "notContains": ["SECRET", "passwordHash"]
+    },
+    "state": { "accounts": [{ "id": 1, "name": "Alice" }, { "id": 2, "name": "Bob" }] }
+  }
+}
