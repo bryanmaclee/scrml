@@ -1,0 +1,12 @@
+# FIX the auth-path CSRF arc — TWO coupled codegen bugs (freeze-blocker wave, scrml S238)
+change-id: auth-csrf-defgate-and-token-2026-07-04 · agent a783be0a8271a1bab · base 2b503bdd · isolation:worktree
+
+TWO coupled auth-path CSRF codegen bugs (both spec-clear, no ruling):
+
+Bug 1 g-csrf-retry-helper-def-gated: client emits the _scrml_fetch_with_csrf_retry(path,method,body) CALL on the AUTH path (emit-functions.ts:731) but its DEF (async function, emit-client.ts:1735) is inside the `if (csrfEnabled && !authMiddlewareEntry)` BASELINE branch (~emit-client.ts:1692). Auth-path mount → ReferenceError. Fix: DEF emits whenever the CALL can emit (auth path too), incl. transitive helper deps.
+
+Bug 2 g-auth-csrf-token-never-surfaced: _scrml_validate_csrf (emit-server.ts:1452) does `token === session.csrfToken` but _scrml_session_middleware (emit-server.ts:1375-1387) returns {sessionId,isAuth,userId,role} — no csrfToken → always undefined → gate unpassable. SPEC §40.2 (SPEC.md:20560/20616): csrf=auto + auth= → session-bound synchronizer-token. _scrml_generate_csrf (emit-server.ts:1446) mints one. Fix: mint per session (at creation/login) + store in _scrml_session_store/_rec + surface via middleware so validate_csrf passes for a matching X-CSRF-Token. Spec-faithful synchronizer token (NOT double-submit, that's baseline).
+
+COUPLED: together make an auth-path client issue a state-mutating server-fn call carrying a validatable CSRF token. Fix both; verify round-trip.
+
+Blocks (verbatim in the dispatch): MAPS-first read (primary.map @66a3afb1); STARTUP-VERIFICATION + PATH-DISCIPLINE (F4/S88/S90/S99/S126 — pwd prefix check, git merge main, bun install, bun run pretest, Bash-edits on worktree-abs paths, no cd into main, WIP-pwd first commit, incremental commits, clean status before DONE); PHASE 0 reverse-R26 (S138 — prove BOTH bugs reproduce on pre-fix baseline via a <program auth csrf=auto> repro; NOT-REPRODUCED-and-stop if a ghost; canonical decl forms primer §3); PHASE 1 fix; PHASE 3 empirical (post-fix recompile both, ideally live handler csrf round-trip, FULL `bun run test` 0-fail, conformance/regression for both, within-node re-baseline if fixtures touched, S215 adversarial blast-radius: baseline/no-auth path, double-submit, session destroy, role-gated — + /code-review); REPORT shape (WORKTREE_PATH, FINAL_SHA, FILES_TOUCHED, phase-0/3 evidence, adversarial, deferred). Repros /tmp/csrf-r26/.

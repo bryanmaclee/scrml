@@ -1,0 +1,12 @@
+# FIX g-typer-bare-variant-non-return-ambiguous (freeze-blocker wave, scrml S238)
+change-id: typer-bare-variant-ambiguous-2026-07-04 · agent a6f47250f0006a1e3 · base 2b503bdd · isolation:worktree
+
+TYPER-soundness fix in compiler/src/type-system.ts. JS lowers correctly (bare variant → string tag); only the TYPER wrongly rejects.
+
+GAP (known-gaps ~2774): bare variant .X/.X(payload) resolves ONLY in fn-return position or qualified (TokenKind.Num). As a fn ARG / struct-FIELD value / ARRAY element it fires E-VARIANT-AMBIGUOUS even with an annotated/known target enum. Origin: self-host-v2/progress.md F4.
+
+CRITICAL — F4 is PARTIALLY REFINED: progress.md ~436-479 (slice-4b) found bare-variant DOES resolve as a typed .concat ARRAY ELEMENT with typed element-flow. Phase 0 MUST characterize the EXACT still-failing positions on current baseline — do not fix by blanket gap text. Fire sites type-system.ts ~9036/9057/9371/9418/9456; ctor resolver + arg-context walker ~13751-13810 (resolveCtorVariant + walk) already threads payload-arg context; type-system.ts:2671 "E-VARIANT-AMBIGUOUS even when Status is a statically-known enum".
+
+FIX: when a bare variant appears where the TARGET type is a statically-known enum (fn-arg declared param enum; struct-field declared field enum; array-element declared element enum), resolve .X against that enum (reuse contextType/enumFromContext, 13751+) instead of firing E-VARIANT-AMBIGUOUS. Keep unsound cases erroring (no known target enum, or .X not a variant of the target → correct diagnostic).
+
+Blocks (verbatim in the dispatch): MAPS-first (primary.map @66a3afb1); STARTUP + PATH-DISCIPLINE (F4/S88/S90/S99/S126); PHASE 0 reverse-R26 + CHARACTERIZE (canonical repros for fn-arg/struct-field/array-element positions with `type Foo:enum={A,B(x:int)}`; record which fire pre-fix, which already pass per F4-refinement; NOT-REPRODUCED-and-stop if none; cross-check progress.md F4); PHASE 1 fix (extend context-type resolution, keep unsound erroring); PHASE 3 (recompile all repros, still-correct string-tag JS, already-passing still pass, genuinely-ambiguous still errors; FULL `bun run test`; regression per position + negative; within-node re-baseline; S215 adversarial: over-resolve non-variant? union target? nested ctors? + /code-review); REPORT (WORKTREE_PATH, FINAL_SHA, FILES_TOUCHED, phase-0 characterization table, phase-3, adversarial, deferred). Repros /tmp/bare-variant-r26/.

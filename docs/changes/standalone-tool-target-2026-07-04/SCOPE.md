@@ -1,6 +1,6 @@
 ---
 change-id: standalone-tool-target-2026-07-04
-status: SCOPE — OQ1 lean (ii) bryan-greenlit ("go" S238); OQ3/OQ4 defaulted (E-TOOL mint / hard-error); OQ1+OQ2 → flogence review in-flight (pinged 2026-07-04); build GATED on flogence's emit review
+status: BUILD-READY — OQ1=(ii) flogence-ENDORSED (return-type discriminator; BOTH harness arms `await main(...)`; no park-boilerplate — Bun handles keep the loop alive; SPEC semantic = "no-return main declines to force the process DOWN, natural liveness decides") · OQ2=top-level self-closing `<foreign lang="ts" />` block orthogonal to `<db src>` — RATIFIED (bryan S238, over terse `<lang ts/>`: "foreign" names the capability + `lang=` attr mirrors `<db src>`'s `src=`) · OQ3/OQ4 defaulted (E-TOOL mint / hard-error) · build QUEUED behind the freeze-blocker wave (emit-client/emit-server concurrency)
 author: scrml PA (S238)
 ratified: S237 (bryan verbatim "ratify both kind=\"tool\" and library-with-lang")
 consumer: flogence (named first consumer / R26)
