@@ -22926,6 +22926,8 @@ The compiler derives structural comparability automatically:
 
 `==` compares two values of the same type: `direction1 == direction2`. `is` checks a value against a literal variant: `direction is .North`. Both are valid and serve different use cases.
 
+**The `is` RHS is bounded (S237).** The right operand of `is` SHALL be one of: the absence sentinel `not` (`x is not`, §42.2.2), the presence keyword `some` / `given` — including the `not not` double-negation (`x is some`, §42.2.2a / §42.2.4), or an enum-variant pattern `.Variant` / `.Variant(payload)` (§45.5, §18). A **value** on the right of `is` — a literal (`x is 0`, `x is "text"`, `x is true`) or a value-expression (`x is @other`) — is NOT valid: `is` is the absence / variant-discrimination keyword, not a value-equality operator (the limit-the-primitive axiom, §14.1.1 — `is` stays sharp; value equality is `==`). A value RHS on `is` SHALL be compile error **E-EQ-005**, steering to `==` (`x == 0`). This is the mirror of E-EQ-002 (`x == not` → `x is not`): each keyword has one job, and using `is` for value-equality (or `==` for absence) is a hard error with a fix-it. Rationale: before this rule `x is 0` mis-lowered silently — surfacing as a misleading `E-DG-002` ("declared but never consumed") or an internal `E-CODEGEN-INVALID-JS` — instead of a clean "use `==`" diagnostic.
+
 ### 45.6 Identity Comparison
 
 There is no identity comparison operator in scrml. The reactive runtime handles identity checking internally for change detection. Exposing identity comparison as a language operator would be a JS abstraction leak.
@@ -22938,6 +22940,7 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 | E-EQ-002 | `== not` used instead of `is not` | Error |
 | E-EQ-003 | `==` applied to type containing function fields | Error |
 | E-EQ-004 | `===` operator used (not valid in scrml) | Error |
+| E-EQ-005 | `is <value>` — a literal (`x is 0`) or value-expression (`x is @other`) RHS on `is` used instead of `==`. `is` is for absence (`is not`/`is some`) + variant (`is .Variant`), not value equality. Mirror of E-EQ-002. (§45.5, S237) | Error |
 | W-EQ-001 | `==` on `asIs`-typed values | Warning |
 | W-EQ-PAYLOAD-VARIANT | `==`/`!=` against a payload-variant CONSTRUCTOR reference (`@phase == Phase.Serving` where `Serving` carries payload). The reference is the ctor function, not a value, so the structural comparison (§45.4) is ALWAYS false (`!=` → always true) — silently. Steer to `is .Variant` (§45.5) or `match` (§18). Unit variants are NOT affected (they compare as string tags). Warning-level — non-fatal (routes to `result.warnings`). (Added ss16 C4.) | Warning |
 
@@ -22951,6 +22954,7 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 - The compiler SHALL derive comparability automatically for all struct and enum types whose fields are comparable.
 - `==` between incompatible types SHALL be a compile error (E-EQ-001).
 - `x == not` SHALL be a compile error (E-EQ-002); use `x is not`.
+- The right operand of `is` SHALL be `not`, `some` / `given` (incl. `not not`), or an enum-variant pattern `.Variant`. A value RHS on `is` — a literal (`x is 0`) or value-expression (`x is @other`) — SHALL be a compile error (E-EQ-005); use `==` for value equality (§45.5). This is the mirror of E-EQ-002.
 - `==` on types containing function fields SHALL be a compile error (E-EQ-003).
 - `==` on maps SHALL be structural and order-independent (§59.9); a map key type SHALL itself be comparable (§59.4). `==` between a map and a non-map value SHALL be a cross-type compile error (E-EQ-001).
 - `==`/`!=` against a payload-variant CONSTRUCTOR reference (`@x == Enum.PayloadVariant`, no payload argument) SHALL emit warning-level `W-EQ-PAYLOAD-VARIANT`: the reference is the constructor function (not a value), so the comparison is statically always-false (`!=`: always-true). The author SHALL be steered to `is .Variant` (§45.5) or `match` (§18). The diagnostic is non-fatal (the always-false branch compiles); unit variants are unaffected.
