@@ -1,0 +1,3 @@
+# DISPATCH — E-EQ-005: reject `is <literal>`/`is <value-expr>` (use `==`)
+change-id: e-eq-005-is-literal-reject-2026-07-04 · agent a43387a3de13be837 · S237 · base d98fc988 (S112 ff-merge)
+Freeze-blocker 2/8. Rule (SPEC §45.5): `is` RHS must be not/some/given/not-not/.Variant; a value literal or value-expr RHS → E-EQ-005 (mirror of E-EQ-002), steer to `==`. Locus: gauntlet-phase3-eq-checks.js + ast-builder.js is/eq-node checkers. §34 main-catalog row lands with impl. Corpus scan+migrate + conformance (codes E-EQ-005, notCodes E-DG-002/E-CODEGEN-INVALID-JS) + tests. Verify full suite + reverse-R26 + adversarial. Full brief = the Agent prompt (transcript).
