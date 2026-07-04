@@ -7583,6 +7583,8 @@ if (tok.block is not) {
 }
 ```
 
+**Enforcement (S237).** "Must handle the `not` case" is a compile-time obligation, not a convention: dereferencing an optional field's value through a further member access — `tok.block.someField` where `block: Block | not` — without optional-chaining (`tok.block?.someField`, §42.3.6) or narrowing (`if=` / `given` / `is not` / `match`, §42.3.5) is compile error **E-TYPE-046**. The same rule applies to any receiver whose type admits `not`, including plain-optional state cells (§42.3.5). This is the plain-optional (steady-state) analog of the lifecycle E-TYPE-001 pre-transition guard (§14.12.6.1).
+
 E-STATE-COMPLETE (state-literal completeness, §54.6.1; replaces retired E-FN-006 as of 2026-04-20 S32) does NOT fire for optional fields that remain `not` at the literal's closing tag — only required fields (those without `= not` default) must be assigned before the `</>`.
 
 #### 14.3.2 Enum Types as Struct Field Types
@@ -8519,6 +8521,8 @@ In all three forms, the act of discriminating the `not` variant IS the transitio
 const u = loadUser(42)
 const name = u.name           // E-TYPE-001 — u was not discriminated; still pre-transition
 ```
+
+**E-TYPE-001 vs E-TYPE-046 (S237).** E-TYPE-001 above is the **lifecycle** guard: `u` carries a `(not to T)` annotation, so its `not` is a *pre-transition* state and a discrimination *transitions it away* (subsequent unguarded access is then fine). A **plain-optional** receiver (`<x>: T | not` / `T?`, §42.3.1 — no lifecycle) is different: its `not` is a legitimate *steady-state* value that has to be handled at *every* access, so an unguarded member access there fires **E-TYPE-046** (§42.3.5), not E-TYPE-001. Both demand the same handling (optional-chain `?.` or narrow via `if=` / `given` / `is not` / `match`); a receiver fires exactly one of the two, keyed on whether it is lifecycle-annotated.
 
 ##### 14.12.6.2 Variant-progression — `(.VariantA to .VariantB)` — explicit `transition()`
 
@@ -22509,6 +22513,55 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 `@x` MAY be of type `T | not`. Transition from `not` to `not` does not trigger re-render (no-change no-render rule).
 
+#### 42.3.5 Member Access Through a Possibly-`not` Receiver
+
+**Added S237, 2026-07-04 (user-ratified — "A, and spec `?.` properly").** A member access — `recv.field`, `recv[key]`, or a method call `recv.method(...)` — dereferences `recv`. When the static type of `recv` **admits `not`** (a plain-optional type `T | not` / `T?`, per §42.3.1), the receiver may hold `not` at runtime, and an unguarded dereference would fault (a JS `null`-access `TypeError`). Because `not` is a first-class absence that PROPAGATES and never faults (§42.1), such an unguarded access is rejected at compile time — the author must SAY, at each access, how absence is handled.
+
+**Normative statements:**
+
+- A member access whose receiver's static type admits `not` (a plain-optional `T | not` / `T?` receiver) SHALL be compile error **E-TYPE-046** UNLESS the access is made absence-safe by one of:
+  1. **Optional chaining** the access itself — `recv?.field` / `recv?.[key]` / `recv?.method(...)` (§42.3.6) — which propagates `not`.
+  2. **Narrowing** `recv` from `T | not` to `T` in an enclosing scope, via any canonical presence-discrimination: the `if=` / `show=` markup guard (§42.4), `given recv :> { ... }` (§42.2.3), an `if (recv is not) return` / `is some` early-return, or a `match recv { not :> …  given recv :> … }` arm (§42.2.3). Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.
+- The rule is **per-hop**. Each member-access hop through a possibly-`not` receiver needs its own guard. `?.` guards ONLY its immediate receiver (§42.3.6): in `@user?.address.city`, the `?.` guards `@user`, but if `address` is itself optional the bare `.city` on `@user?.address` (type `Address | not`) is a fresh possibly-`not` dereference and SHALL fire E-TYPE-046 — the absence-safe form is `@user?.address?.city`.
+- E-TYPE-046 is DISTINCT from **E-TYPE-001** (§14.12.6.1). E-TYPE-001 fires for a **lifecycle** receiver — a bare-`T` no-RHS cell (Shape 4, §6.2) or a `(not to T)` function return, where `not` is a *pre-transition* state that a presence-discrimination *transitions away*. E-TYPE-046 fires for a **plain-optional** receiver, where `not` is a legitimate *steady-state* value (§42.3.1, §14.3.1) that must be handled at every access; there is no transition. Both codes demand the same handling (guard or optional-chain); they differ only in what the `not` means. A given receiver fires exactly one of the two, never both — a lifecycle-annotated receiver routes to E-TYPE-001; a plain-optional receiver routes to E-TYPE-046.
+
+**E-TYPE-046 message** names the possibly-`not` receiver and steers to the two resolutions: optional-chain the access (`recv?.field`) to propagate absence, or narrow the receiver (`if=` / `given` / `is not` / `match`) to prove presence.
+
+**Worked example:**
+
+```scrml
+<user>: { name: string } | not              // plain-optional cell; starts `not`
+
+<main>
+  <p>${@user.name}</p>                        // E-TYPE-046 — @user may be `not`
+  <p>${@user?.name}</p>                        // OK — propagates `not` (renders nothing when absent)
+  <div if=@user><p>${@user.name}</p></div>     // OK — `if=` narrows @user to the struct inside
+  ${ given @user :> { <p>${@user.name}</p> } } // OK — narrowed to present inside the guard
+</main>
+```
+
+#### 42.3.6 Optional Chaining — `?.`
+
+**Added S237, 2026-07-04.** `?.` is the **absence-propagating member-access operator** — the terse counterpart to presence-discrimination. Where `given` / `if=` / `is not` NARROW a possibly-`not` value to prove presence (§42.2.3, §42.4), `?.` PROPAGATES absence through the access.
+
+**Syntax:**
+
+```
+optional-access ::= expr '?.' identifier          // property:  recv?.field
+                  | expr '?.' '[' expr ']'         // computed:  recv?.[key]
+                  | expr '?.' arguments            // call:      recv?.method(args)
+```
+
+**Semantics:**
+
+- When the receiver `expr` is `not`, the access **short-circuits**: the whole optional-chain expression evaluates to `not`, and the remainder of the chain is NOT evaluated (no field read, no index, no call, no argument evaluation, no side effects past the `?.`). When `expr` is present, the access proceeds normally.
+- **Short-circuit is chain-wide from the `?.` point, but each hop is guarded only against its own receiver.** In `a?.b.c`, if `a` is `not` the entire expression is `not` and `b`/`c` are never touched; but the `.c` hop is guarded ONLY against `a` being `not`, NOT against `b` being `not`. If an intermediate hop is itself optional it needs its own `?.` (the §42.3.5 per-hop rule) — `a?.b?.c`.
+- **Result type.** `recv?.field` has type `F | not` where `F` is the declared type of `field` — absence propagates into the result type. Because the result admits `not`, a further BARE dereference on it fires E-TYPE-046 (§42.3.5); continue the chain with `?.` or narrow it.
+
+**Codegen.** `recv?.field` / `recv?.[key]` / `recv?.method(...)` SHALL lower to the corresponding JavaScript optional-chaining form (`recv?.field`, `recv?.[key]`, `recv?.method(...)`). The JS `?.` operator short-circuits on both `null` and `undefined`, matching the `not` runtime representation of §42.8. A `not` result renders as nothing in a `${...}` interpolation context (§6), consistent with the no-value-no-output rule.
+
+**Relationship to the guards.** `?.` and the narrowing guards are complementary, not competing. Use `?.` when the natural handling of absence is "produce nothing / propagate" (a render that shows nothing when the datum is absent). Use a narrowing guard (`if=` / `given` / `is not` / `match`) when a block of logic should run ONLY when the value is present. Either form satisfies the §42.3.5 absence-handling requirement.
+
 ### 42.4 Interaction with `if=` Markup Attribute
 
 `not` is falsy. `<div if=@x>` where `@x: T | not` renders when `@x` has a value, unmounts when `@x is not`. The compiler narrows `@x` to `T` inside the `if=`-guarded scope.
@@ -22520,6 +22573,7 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 - `given x :> body` → `if (x !== null && x !== undefined) { body }` in JavaScript output
 - `given x, y :> body` → `if (x !== null && x !== undefined && y !== null && y !== undefined) { body }` in JavaScript output
 - `given x` in a match arm → the arm's generated condition is `x !== null && x !== undefined`
+- `recv?.field` / `recv?.[key]` / `recv?.method(...)` (optional chaining, §42.3.6) → the corresponding JavaScript optional-chaining form `recv?.field` / `recv?.[key]` / `recv?.method(...)` (JS `?.` short-circuits on both `null` and `undefined`, matching the `not` representation)
 
 ### 42.6 Error Codes
 
@@ -22535,6 +22589,7 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 | E-TYPE-043 | Function with non-optional return type has a path returning `not` | Error |
 | E-TYPE-044 | `given` applied to a variable whose type does not include `| not` | Error |
 | E-TYPE-045 | `not` used in prefix position as boolean negation — bare `not @x` OR parenthesized `not (expr)`, in any expression position (S188) | Error |
+| E-TYPE-046 | Member access (`.field` / `[key]` / `.method(...)`) through a plain-optional (`T \| not` / `T?`) receiver without optional-chain (`?.`) or narrowing (`if=` / `given` / `is not` / `match`) — §42.3.5 (S237) | Error |
 | E-MATCH-012 | `match` on `T | not` type lacks a `not` arm and lacks an `else` arm | Error |
 
 ### 42.7 Normative Statements
@@ -22572,6 +22627,8 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 - `given` narrows in place; it SHALL NOT rebind a variable to a new name. The rebind form `given <name> = <expr> :>` SHALL be compile error E-SYNTAX-045 (in both logic and markup-`${}` contexts). Declare the value first (`let n = <expr>` then `given n :> { ... }`), or narrow an existing variable in place.
 - A `match` on `T | not` without a `not` arm or `else` arm SHALL be compile error E-MATCH-012.
 - `.get()` on `?{}` results SHALL return `T | not`, not `T | null`.
+- A member access (`.field` / `[key]` / `.method(...)`) through a receiver whose static type admits `not` (plain-optional `T | not` / `T?`) SHALL be compile error **E-TYPE-046** unless the access is optional-chained (`?.`, §42.3.6) or the receiver is narrowed by `if=` / `given` / `is not` / `match` (§42.3.5). The rule is per-hop; `?.` guards only its immediate receiver. E-TYPE-046 (plain-optional, steady-state absence) is distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition); a receiver fires exactly one.
+- Optional chaining `expr?.member` SHALL short-circuit to `not` when `expr` is `not` (the remainder of the chain is not evaluated) and SHALL lower to the JavaScript `?.` form (§42.3.6). The result type of `recv?.field` is `F | not`.
 
 ### 42.8 Runtime Representation
 
