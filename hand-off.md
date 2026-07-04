@@ -19,8 +19,13 @@ The flagship pillars are DONE (conformance 72→220, 25 categories). V1-freeze i
 - **Inbox:** `handOffs/incoming/` empty at boot (only `dist/` + `read/`). flogence exchange from S236 archived to `read/`; the S217 lift-driver joint DD is the live cross-PA thread.
 - **Boot:** Profile A full reads done (pa-scrml.md IN FULL · PRIMER pending on-demand · SPEC-INDEX section-table on-demand · master-list §0 · user-voice tail S230-236 · flogence programmatic digest). Old `handOffs/digest.md` is STALE (S218) — superseded by the flogence digest per S219.
 
-## 🧵 In-flight threads
-- (none active at boot — S236 wrapped clean. Next work = the freeze-blocker wave, pending user direction.)
+## ✅ DONE this session — freeze-blocker 1/8
+- **`g-not-cell-render-null-throw` RESOLVED.** User ruled **Option A + spec `?.` properly**. SPEC amendment `097b5452` (§42.3.5 E-TYPE-046 rule + §42.3.6 `?.` normative spec + cross-refs) · impl `49f0898e` (typer checkOptionalMemberAccess pass + §34 row + `?.` result-typing + 3 conformance cases 220→223 + 25 tests; agent addb6488118bf8610) · user-voice → scrml-support `10ea101`. Corpus migration ZERO. PA-independent R26 4/4 + adversarial (one `@`-sigil over-fire caught+fixed). Residuals filed: `g-etype046-map-bracket-read-narrow` (MED, §59.6 tension) · `g-etype046-write-lhs-and-fn-param` (LOW).
+
+## 🧵 In-flight / next
+- **Push:** scrml `097b5452`+`49f0898e`+bookkeeping + scrml-support `10ea101` — [push state at wrap-time; see delta-log].
+- **Freeze-blocker wave — item 2/8: `g-is-literal-rhs-if-condition-drop`.** SCOPED (delta [328]): gap-description STALE — `if (@n is 0)` now hard-errors **E-CODEGEN-INVALID-JS** (not the claimed silent-drop; the S142 emit-parse gate). Needs on-dispatch: reverse-R26 reclassify + a **Rule-4 SPEC-position ruling** (is `v is 0` valid, or must it be `v == 0`? equality is `==` §45, `is` is absence/pattern-match) — a user-facing fork like E-TYPE-046. Serializes after E-TYPE-046 (shares type-system.ts/expr-parser). **NOT dispatched — surface the fork to the user next.**
+- **Then:** enum-toEnum (`g-enum-toenum-not-lowered-server-side`) · CSRF/auth pair · typer-soundness pair · `g-fail-variant-payload-arity` (needs E-ERROR-010 mint — probe fail-only-vs-general first).
 
 ## 🧾 Owed at wrap
 - Maps refresh (project-mapper incremental — watermark behind by the S235+S236 landing set).

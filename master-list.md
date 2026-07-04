@@ -89,6 +89,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
 - `cfba6295` — chore(s235): WRAP — hand-off CLOSE + virtual-clock landing bookkeeping + debounce bug filed [288-289] — **pushed**
 - `2fb2bf1f` — chore(s234): WRAP — hand-off CLOSE + changelog + known-gaps + master-list + 6 BRIEFs + delta-log [257-275] — **pushed**
 - `b24f3892` — chore(s233): WRAP — hand-off + changelog + master-list + architecture-skeleton RULING + delta-log [242-256] — **pushed**
@@ -96,7 +97,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `66a3e616` — chore(s231): WRAP — D3 conformance suite BUILT (51/gated/OQ1-resolved) + V1-scoping done + capability-vocab ratified — **pushed**
 - `2559e20f` — chore(s230): WRAP — V1 reframed (language/compiler split) + dpa-017 §14.8.9 + @adv + Rosetta v0 — **pushed**
 - `19750f2b` — chore(s229): WRAP + release v0.7.1 — board HIGH 0/MED 6/LOW 9/Nom 7 — **pushed**
-- `dca8bfe0` — chore(s228): WRAP — board HIGH 0/MED 7/LOW 10/Nom 7 · gate-tracking currency-pass · inversion-crux pushed→flogence-built-back — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
