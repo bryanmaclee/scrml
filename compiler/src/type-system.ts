@@ -20226,6 +20226,31 @@ function processFile(
     runRefinementNoRhsDefaultCheck(lifecycleTopNodes, errors, fileSpan);
   }
 
+  // §42.3.5 — Member Access Through a Possibly-`not` Receiver (E-TYPE-046).
+  // The plain-optional (steady-state) analog of the lifecycle E-TYPE-001
+  // guard above: a member access (`.field` / `[key]` / `.method(...)`) through
+  // a plain-optional (`T | not` / `T?`) receiver that is neither
+  // optional-chained (`?.`) nor narrowed (`if=` / `given` / `is not` / `match`)
+  // fires E-TYPE-046. Lifecycle cells (`(A to B)` / `implicitNotLifecycle`) are
+  // EXCLUDED — they route to E-TYPE-001; a receiver fires exactly one of the two.
+  {
+    const optionalTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+      ?? [];
+    const optionalEngineCellNames = new Set<string>();
+    for (const machine of machineRegistry.values()) {
+      if (typeof machine.name === "string" && machine.name.length > 0) {
+        optionalEngineCellNames.add(machine.name);
+      }
+    }
+    const receivers = collectPlainOptionalReceivers(
+      optionalTopNodes,
+      typeRegistry,
+      optionalEngineCellNames,
+    );
+    checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan);
+  }
+
   // §51.9 — After annotation, collect the reactive → machine bindings that
   // `annotateNodes` attached to state-decl nodes and validate every
   // derived machine's source-var reference + exhaustiveness (E-ENGINE-018).
@@ -23861,6 +23886,506 @@ function runCellValueLifecycleAccessCheck(
 }
 
 // ---------------------------------------------------------------------------
+// §42.3.5 — Member Access Through a Possibly-`not` Receiver (E-TYPE-046)
+// ---------------------------------------------------------------------------
+//
+// A member access — `recv.field`, `recv[key]`, or a method call
+// `recv.method(...)` — dereferences `recv`. When `recv`'s static type is
+// PLAIN-OPTIONAL (`T | not` / `T?`, §42.3.1 — `not` is a legitimate
+// steady-state member of the type, NO lifecycle annotation), an unguarded
+// dereference would fault at runtime (`null`-access `TypeError`). Because
+// `not` propagates and never faults (§42.1), such an access is rejected at
+// compile time (E-TYPE-046) UNLESS made absence-safe by:
+//   1. optional-chaining the access — `recv?.field` / `recv?.[key]` /
+//      `recv?.method(...)` (§42.3.6); OR
+//   2. narrowing `recv` to `T` in an enclosing scope — the `if=` / `show=`
+//      markup guard (§42.4), `given recv :> { ... }`, an `if (recv is not)
+//      return` early-return, or a `match recv { not :> … given recv :> … }`.
+//
+// BOUNDARY (§14.12.6.1 / §42.3.5): this is the plain-optional analog of the
+// LIFECYCLE guard E-TYPE-001. A lifecycle receiver — a bare-`T` no-RHS Shape-4
+// cell (`implicitNotLifecycle`) or a `(not to T)` return — routes to
+// E-TYPE-001, NEVER here. A receiver fires exactly one of the two, keyed on
+// whether it carries a `(not to T)` lifecycle annotation. This check therefore
+// EXCLUDES `implicitNotLifecycle` and `(A to B)`-annotated cells; those are
+// handled by the E-TYPE-001 family (checkLifecycleBindingAccess et al.).
+//
+// The check is a dedicated AST walk (rather than an extension of the text-based
+// E-TYPE-001 statement-body walker) because the dominant fire surface is markup
+// interpolation (`${@user.name}`), where the AST carries clean structural
+// signals the text walker never sees: the per-hop `?.` flag (`member.optional`),
+// `if=`/`show=` narrowing attrs, and `given-guard` / `match-stmt` scopes.
+
+/** The per-file set of PLAIN-OPTIONAL receivers, keyed by cell name. */
+interface OptionalReceiverSet {
+  /**
+   * Cells whose OWN declared type is plain-optional (`T | not` / `T?`). The
+   * value is the underlying struct of the non-`not` member (for resolving
+   * deeper field-chain hops), or null when it is unresolvable / non-struct.
+   */
+  optionalCells: Map<string, StructType | null>;
+  /**
+   * Cells whose declared type is a struct (present, non-optional) — used ONLY
+   * to resolve field-chain receivers like `@obj.optField.x`, where `@obj` is a
+   * present struct and `optField` is the plain-optional field that makes the
+   * `.x` receiver possibly-`not`.
+   */
+  cellStructs: Map<string, StructType>;
+  /**
+   * Cells whose declared type is a map with a PLAIN-OPTIONAL value type
+   * (`[K: T | not]`). A bracket read `@map[k]` on such a cell yields `T | not`
+   * (§59.6), so a bare deref `@map[k].field` is possibly-`not`. The value is
+   * the underlying struct of the map's value member (for deeper hops), or null.
+   */
+  optionalMapCells: Map<string, StructType | null>;
+}
+
+/**
+ * Classify a cell/field type-annotation string as plain-optional or not, and
+ * return the base (non-`not`) type expression. String-based + top-level-aware
+ * (via `splitTopLevel`, which respects `(){}[]` nesting) so an INNER `| not`
+ * inside a struct field (`{ name: string | not }`) or map value does NOT count
+ * as top-level optionality. Recognizes both canonical forms:
+ *   - union:  `T | not`  (a top-level `| not` member)
+ *   - suffix: `T?`       (a top-level trailing `?`)
+ */
+function classifyOptionalAnnotation(annotation: string): { optional: boolean; baseExpr: string } {
+  const a = annotation.trim();
+  if (a.length === 0) return { optional: false, baseExpr: a };
+  // `T?` suffix form (§42.3.1). A single top-level trailing `?`; guard against
+  // `??` (not a scrml form) and against a `?` that is inside a nested group
+  // (only a genuine top-level suffix optionalizes the whole type).
+  if (a.endsWith("?") && !a.endsWith("??")) {
+    const base = a.slice(0, -1).trim();
+    if (base.length > 0) return { optional: true, baseExpr: base };
+  }
+  // `T | not` union form (§42.3.1). Split on top-level `|`.
+  const parts = splitTopLevel(a, ["|"]).map((p) => p.trim()).filter((p) => p.length > 0);
+  if (parts.length > 1 && parts.some((p) => p === "not")) {
+    const base = parts.filter((p) => p !== "not");
+    if (base.length > 0) return { optional: true, baseExpr: base.join(" | ") };
+  }
+  return { optional: false, baseExpr: a };
+}
+
+/**
+ * A resolved type is plain-optional iff it is a union carrying BOTH a `not`
+ * member AND at least one non-`not` member. STRICTER than `isOptionalType`
+ * (which also returns true for a bare `unknown` / `asIs`) — E-TYPE-046 fires
+ * ONLY on a genuine `T | not`, never on an un-annotated / unresolvable value,
+ * so an `asIs`-typed receiver never over-fires.
+ */
+function isPlainOptionalUnionType(type: ResolvedType | null | undefined): boolean {
+  if (!type || type.kind !== "union") return false;
+  const members = (type as UnionType).members;
+  return members.some((m) => m.kind === "not") && members.some((m) => m.kind !== "not");
+}
+
+/** The struct member of a type (the type itself, or the struct arm of a union). */
+function underlyingStructOfType(type: ResolvedType | null | undefined): StructType | null {
+  if (!type) return null;
+  if (type.kind === "struct") return type as StructType;
+  if (type.kind === "union") {
+    const s = (type as UnionType).members.find((m) => m.kind === "struct");
+    return (s as StructType | undefined) ?? null;
+  }
+  return null;
+}
+
+/**
+ * Walk the file's top-level nodes and collect every plain-optional receiver:
+ * plain-optional state cells, present struct cells (for field-chain receivers),
+ * and optional-value map cells. Excludes engine cells and lifecycle cells
+ * (`(A to B)` annotation or `implicitNotLifecycle` — those route to E-TYPE-001).
+ */
+function collectPlainOptionalReceivers(
+  topNodes: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+  engineCellNames: Set<string>,
+): OptionalReceiverSet {
+  const optionalCells = new Map<string, StructType | null>();
+  const cellStructs = new Map<string, StructType>();
+  const optionalMapCells = new Map<string, StructType | null>();
+
+  function isLifecycleAnnotation(typeExpr: string): boolean {
+    const trimmed = typeExpr.trim();
+    if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) return false;
+    return findTopLevelArrow(trimmed.slice(1, -1)) !== null;
+  }
+
+  function visit(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      // Don't descend into fn bodies — fn-local declarations are scope-local
+      // and not part of the hoisted file-scope cell set.
+      if (n.kind === "function-decl") continue;
+
+      if (n.kind === "state-decl" && typeof n.name === "string") {
+        const cellName = n.name;
+        const annotation = (n as ASTNodeLike).typeAnnotation as string | undefined;
+        const isEngine = engineCellNames.has(cellName);
+        // BOUNDARY: lifecycle cells route to E-TYPE-001 for their OWN member
+        // access (`@cell.field`), never here.
+        const isLifecycle =
+          (n as ASTNodeLike).implicitNotLifecycle === true ||
+          (typeof annotation === "string" && isLifecycleAnnotation(annotation));
+        if (!isEngine && typeof annotation === "string" && annotation.trim().length > 0) {
+          const { optional, baseExpr } = classifyOptionalAnnotation(annotation);
+          const baseType = resolveTypeExpr(baseExpr, typeRegistry);
+          // An optional-VALUE map (`[K: T | not]`) is collected REGARDLESS of the
+          // cell's own lifecycle status: `@map[k]` bracket reads yield `T | not`
+          // (§59.6), so a bare deref `@map[k].field` is a fresh possibly-`not`
+          // access ORTHOGONAL to whether `@map` itself is lifecycle-tracked.
+          if (!optional && baseType.kind === "map" && isPlainOptionalUnionType((baseType as MapType).value)) {
+            optionalMapCells.set(cellName, underlyingStructOfType((baseType as MapType).value));
+          }
+          // The cell's OWN optionality routes to E-TYPE-046 only for a
+          // plain-optional (non-lifecycle) cell; lifecycle cells route to E-TYPE-001.
+          if (!isLifecycle) {
+            if (optional) {
+              // Plain-optional cell (`T | not` / `T?`). The receiver `@cell` is
+              // possibly-`not`; record the underlying struct for deeper hops.
+              optionalCells.set(cellName, underlyingStructOfType(baseType));
+            } else if (baseType.kind !== "map") {
+              const s = underlyingStructOfType(baseType);
+              if (s) cellStructs.set(cellName, s);
+            }
+          }
+        }
+      }
+
+      for (const key of ["body", "children", "nodes", "ast", "bodyChildren"]) {
+        const val = (n as Record<string, unknown>)[key];
+        if (Array.isArray(val)) visit(val as ASTNodeLike[]);
+      }
+    }
+  }
+
+  visit(topNodes);
+  return { optionalCells, cellStructs, optionalMapCells };
+}
+
+/** Describes the VALUE an expression node produces, for per-hop resolution. */
+interface ReceiverValueInfo {
+  /** True when the produced value's static type admits `not` (possibly-`not`). */
+  optional: boolean;
+  /** The struct member of the produced value's type (for the next hop), or null. */
+  struct: StructType | null;
+}
+
+/**
+ * The per-file E-TYPE-046 walk. Threads a `present` set of cell names currently
+ * NARROWED to present (via `if=` / `show=` / `given` / `is not` / `match`) and
+ * fires at every bare (`optional !== true`) member/index/method hop whose
+ * receiver is possibly-`not` and un-narrowed.
+ */
+function checkOptionalMemberAccess(
+  topNodes: ASTNodeLike[],
+  receivers: OptionalReceiverSet,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const { optionalCells, cellStructs, optionalMapCells } = receivers;
+  if (optionalCells.size === 0 && optionalMapCells.size === 0) return;
+
+  // The bare cell name a node references, if it is a tracked reactive-cell
+  // ident. Reactive cells are ALWAYS `@`-prefixed in V5-strict source; a bare
+  // ident (no `@`) is a local / parameter that may SHADOW a cell name and MUST
+  // NOT be treated as the cell (else `let user = {...}; user.name` false-fires).
+  function bareCellName(node: unknown): string | null {
+    const n = node as { kind?: string; name?: string } | undefined;
+    if (!n || n.kind !== "ident" || typeof n.name !== "string") return null;
+    if (!n.name.startsWith("@")) return null;
+    const bare = n.name.slice(1);
+    if (optionalCells.has(bare) || cellStructs.has(bare) || optionalMapCells.has(bare)) return bare;
+    return null;
+  }
+
+  // Resolve the optionality + struct of the value an expression node produces.
+  function resolveValueInfo(node: unknown): ReceiverValueInfo {
+    const n = node as { kind?: string; name?: string; object?: unknown; property?: string; optional?: boolean } | undefined;
+    if (!n || typeof n !== "object") return { optional: false, struct: null };
+    if (n.kind === "ident" && typeof n.name === "string") {
+      // Only `@`-prefixed idents are reactive cells (V5-strict); a bare local
+      // that shadows a cell name is NOT the cell.
+      if (!n.name.startsWith("@")) return { optional: false, struct: null };
+      const bare = n.name.slice(1);
+      if (optionalCells.has(bare)) return { optional: true, struct: optionalCells.get(bare) ?? null };
+      if (cellStructs.has(bare)) return { optional: false, struct: cellStructs.get(bare) ?? null };
+      return { optional: false, struct: null };
+    }
+    if (n.kind === "member" && typeof n.property === "string") {
+      const objStruct = resolveValueInfo(n.object).struct;
+      const fieldType = objStruct?.fields.get(n.property) ?? null;
+      if (n.optional === true) {
+        // `recv?.field` result is `F | not` — absence propagates (§42.3.6).
+        return { optional: true, struct: underlyingStructOfType(fieldType) };
+      }
+      if (fieldType) {
+        return { optional: isPlainOptionalUnionType(fieldType), struct: underlyingStructOfType(fieldType) };
+      }
+      return { optional: false, struct: null };
+    }
+    if (n.kind === "index") {
+      const bare = bareCellName(n.object);
+      if (n.optional === true) {
+        // `recv?.[key]` result propagates absence.
+        const s = bare && optionalMapCells.has(bare) ? optionalMapCells.get(bare) ?? null : null;
+        return { optional: true, struct: s };
+      }
+      // A bracket read on an optional-value map yields `T | not` (§59.6).
+      if (bare && optionalMapCells.has(bare)) {
+        return { optional: true, struct: optionalMapCells.get(bare) ?? null };
+      }
+      return { optional: false, struct: null };
+    }
+    return { optional: false, struct: null };
+  }
+
+  // Fire the diagnostic for one bare hop through a possibly-`not` receiver.
+  function fire(receiverText: string, span: Span): void {
+    errors.push(new TSError(
+      "E-TYPE-046",
+      `E-TYPE-046: member access through \`${receiverText}\`, whose type admits \`not\` ` +
+      `(a plain-optional \`T | not\` receiver). An unguarded dereference would fault at runtime. ` +
+      `Optional-chain the access (\`${receiverText}?.…\`) to propagate absence, or narrow the ` +
+      `receiver to prove presence (\`if=\` / \`given\` / \`is not\` / \`match\`). (§42.3.5)`,
+      span,
+    ));
+  }
+
+  // A readable source label for the receiver of a hop.
+  function receiverLabel(node: unknown): string {
+    const n = node as { kind?: string; name?: string; object?: unknown; property?: string; optional?: boolean } | undefined;
+    if (!n) return "the receiver";
+    if (n.kind === "ident" && typeof n.name === "string") return n.name;
+    if (n.kind === "member" && typeof n.property === "string") {
+      const base = receiverLabel(n.object);
+      return `${base}${n.optional === true ? "?." : "."}${n.property}`;
+    }
+    if (n.kind === "index") return `${receiverLabel(n.object)}[…]`;
+    return "the receiver";
+  }
+
+  // A presence-discrimination condition narrows a bare optional cell. Returns
+  // the cell and WHICH branch proves presence: `@x is some` / bare `@x` prove
+  // presence when TRUE (`not` is falsy, §42.4); `@x is not` proves presence
+  // when FALSE. Used by ternary + if-stmt narrowing. Returns null otherwise.
+  function discriminateCondition(cond: unknown): { cell: string; presentWhenTrue: boolean } | null {
+    let c = cond as Record<string, unknown> | undefined;
+    while (c && c.kind === "paren" && c.expr) c = c.expr as Record<string, unknown>;
+    if (!c) return null;
+    if (c.kind === "binary" && (c.op === "is-some" || c.op === "is-not")) {
+      const cell = bareCellName(c.left);
+      if (cell && optionalCells.has(cell)) return { cell, presentWhenTrue: c.op === "is-some" };
+    }
+    // Bare `@x` truthiness (`not` is falsy) proves presence when TRUE.
+    if (c.kind === "ident") {
+      const cell = bareCellName(c);
+      if (cell && optionalCells.has(cell)) return { cell, presentWhenTrue: true };
+    }
+    return null;
+  }
+
+  // Walk an expression node tree, firing at bare possibly-`not` hops.
+  function checkExpr(node: unknown, present: Set<string>, span: Span): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const el of node) checkExpr(el, present, span);
+      return;
+    }
+    const n = node as Record<string, unknown>;
+    // Ternary narrowing: `@x is some ? A : B` proves `@x` present in A;
+    // `@x is not ? A : B` proves it present in B (§42.2.5). Special-cased so
+    // each branch is walked with its own narrowing (not the generic descent).
+    if (n.kind === "ternary" || n.kind === "conditional") {
+      const cond = (n.condition ?? n.test) as unknown;
+      checkExpr(cond, present, span);
+      const disc = discriminateCondition(cond);
+      const thenPresent = disc && disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
+      const elsePresent = disc && !disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
+      checkExpr(n.consequent, thenPresent, span);
+      checkExpr(n.alternate, elsePresent, span);
+      return;
+    }
+    if (n.kind === "member" && n.optional !== true) {
+      const recv = resolveValueInfo(n.object);
+      if (recv.optional) {
+        const cell = bareCellName(n.object);
+        if (!(cell && present.has(cell))) {
+          fire(receiverLabel(n.object), span);
+        }
+      }
+    } else if (n.kind === "index" && n.optional !== true) {
+      // A bare `[key]` on an optional map value is a read, not a deref of the
+      // element, so it does not itself fault — the FAULT is a further `.field`
+      // hop (handled at the enclosing member node). Nothing to fire here.
+    }
+    for (const key of Object.keys(n)) {
+      const v = n[key];
+      if (v && typeof v === "object") checkExpr(v, present, span);
+    }
+  }
+
+  // The if=/show=/else-if= attrs of a markup node that narrow a bare optional
+  // cell to present for the node's children (§42.4). Only a BARE `if=@x`
+  // condition narrows; a compound condition (`if=(@x.foo)`) does not.
+  function markupNarrowedCells(markupNode: Record<string, unknown>): string[] {
+    const out: string[] = [];
+    const attrs = markupNode.attrs as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(attrs)) return out;
+    for (const attr of attrs) {
+      const name = attr.name as string | undefined;
+      if (name !== "if" && name !== "show" && name !== "else-if") continue;
+      const val = attr.value as Record<string, unknown> | undefined;
+      if (!val) continue;
+      const exprNode = (val.exprNode as Record<string, unknown> | undefined) ?? val;
+      // Unwrap a redundant paren wrapper if present.
+      let target = exprNode;
+      while (target && target.kind === "paren" && target.expr) {
+        target = target.expr as Record<string, unknown>;
+      }
+      if (target && target.kind === "ident" && typeof target.name === "string") {
+        const bare = target.name.startsWith("@") ? target.name.slice(1) : target.name;
+        if (optionalCells.has(bare)) out.push(bare);
+      }
+    }
+    return out;
+  }
+
+  // A markup attr's own value expression (fires on `if=(@x.foo)` etc.).
+  function checkMarkupAttrs(markupNode: Record<string, unknown>, present: Set<string>, span: Span): void {
+    const attrs = markupNode.attrs as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(attrs)) return;
+    for (const attr of attrs) {
+      const val = attr.value as Record<string, unknown> | undefined;
+      if (val && typeof val === "object") checkExpr(val, present, span);
+    }
+  }
+
+  // If `node` is an `if (@x is not) <exit>` discrimination, return the cell it
+  // narrows for the REST of the enclosing body (early-return / fail). §42.2.3.
+  function earlyReturnNarrowedCell(node: Record<string, unknown>): string | null {
+    if (node.kind !== "if-stmt") return null;
+    const condExpr = node.condExpr as Record<string, unknown> | undefined;
+    if (!condExpr) return null;
+    let c = condExpr;
+    while (c && c.kind === "paren" && c.expr) c = c.expr as Record<string, unknown>;
+    if (c.kind !== "binary" || c.op !== "is-not") return null;
+    const left = c.left as Record<string, unknown> | undefined;
+    const cell = bareCellName(left);
+    if (!cell || !optionalCells.has(cell)) return null;
+    // The consequent must EXIT (return / fail) for the narrowing to hold after.
+    const consequent = node.consequent as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(consequent)) return null;
+    const exits = consequent.some((s) => s && (s.kind === "return-stmt" || s.kind === "fail-stmt" || s.kind === "fail-expr"));
+    return exits ? cell : null;
+  }
+
+  // The bare optional cell a `match` header discriminates, if any (§42.2.3).
+  function matchHeaderCell(node: Record<string, unknown>): string | null {
+    const headerExpr = node.headerExpr as Record<string, unknown> | undefined;
+    const cell = bareCellName(headerExpr);
+    return cell && optionalCells.has(cell) ? cell : null;
+  }
+
+  const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "conditionExpr"];
+  const CHILD_KEYS = ["body", "children", "consequent", "alternate", "cases", "arms"];
+
+  function spanOf(node: Record<string, unknown>, fallback: Span): Span {
+    const s = node.span as Span | undefined;
+    return s && typeof s.line === "number" ? s : fallback;
+  }
+
+  // Walk one node with the current `present` narrowing set.
+  function walkNode(node: unknown, present: Set<string>, span: Span): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { walkBody(node as ASTNodeLike[], present, span); return; }
+    const n = node as Record<string, unknown>;
+    const here = spanOf(n, span);
+
+    // Fire on every expression this node carries (with the current narrowing).
+    for (const k of EXPR_KEYS) {
+      if (n[k] && typeof n[k] === "object") checkExpr(n[k], present, here);
+    }
+
+    if (n.kind === "markup") {
+      checkMarkupAttrs(n, present, here);
+      const narrowed = markupNarrowedCells(n);
+      const childPresent = narrowed.length > 0 ? new Set(present) : present;
+      for (const c of narrowed) childPresent.add(c);
+      walkBody((n.children as ASTNodeLike[]) ?? [], childPresent, here);
+      return;
+    }
+
+    if (n.kind === "given-guard") {
+      const bodyPresent = new Set(present);
+      const vars = n.variables as string[] | undefined;
+      if (Array.isArray(vars)) {
+        for (const v of vars) {
+          const bare = v.startsWith("@") ? v.slice(1) : v;
+          if (optionalCells.has(bare)) bodyPresent.add(bare);
+        }
+      }
+      walkBody((n.body as ASTNodeLike[]) ?? [], bodyPresent, here);
+      return;
+    }
+
+    if (n.kind === "match-stmt") {
+      const cell = matchHeaderCell(n);
+      const bodyPresent = cell ? new Set(present).add(cell) : present;
+      walkBody((n.body as ASTNodeLike[]) ?? [], bodyPresent, here);
+      return;
+    }
+
+    if (n.kind === "if-stmt") {
+      // Positive/negative narrowing: `if (@x is some) { … }` proves `@x` present
+      // in the consequent; `if (@x is not) { … } else { … }` proves it present
+      // in the alternate (§42.2.5). The condition itself was already checked via
+      // EXPR_KEYS above. Early-return narrowing across siblings is handled in
+      // walkBody (`earlyReturnNarrowedCell`).
+      const disc = discriminateCondition(n.condExpr);
+      const conseqPresent = disc && disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
+      const altPresent = disc && !disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
+      walkBody((n.consequent as ASTNodeLike[]) ?? [], conseqPresent, here);
+      walkBody((n.alternate as ASTNodeLike[]) ?? [], altPresent, here);
+      return;
+    }
+
+    // Generic descent into structural child arrays.
+    for (const k of CHILD_KEYS) {
+      const v = n[k];
+      if (Array.isArray(v)) walkBody(v as ASTNodeLike[], present, here);
+    }
+    // Some containers hold nested nodes under other keys (e.g. imports). Descend
+    // into any remaining array-of-nodes we have not already handled.
+    for (const k of Object.keys(n)) {
+      if (CHILD_KEYS.includes(k) || EXPR_KEYS.includes(k) || k === "attrs" || k === "children") continue;
+      const v = n[k];
+      if (Array.isArray(v) && v.length > 0 && v[0] && typeof v[0] === "object" && typeof (v[0] as Record<string, unknown>).kind === "string") {
+        walkBody(v as ASTNodeLike[], present, here);
+      }
+    }
+  }
+
+  // Walk a body array, threading early-return narrowing across siblings.
+  function walkBody(body: ASTNodeLike[], present: Set<string>, span: Span): void {
+    if (!Array.isArray(body)) return;
+    let acc = present;
+    for (const node of body) {
+      walkNode(node, acc, span);
+      const narrowed = node && typeof node === "object" ? earlyReturnNarrowedCell(node as Record<string, unknown>) : null;
+      if (narrowed) {
+        acc = new Set(acc);
+        acc.add(narrowed);
+      }
+    }
+  }
+
+  walkBody(topNodes, new Set<string>(), fileSpan);
+}
+
+// ---------------------------------------------------------------------------
 // Exports for testing and downstream use
 // ---------------------------------------------------------------------------
 
@@ -23898,6 +24423,10 @@ export {
   checkSubstateExhaustiveness,
   checkExhaustiveness,
   isOptionalType,
+  isPlainOptionalUnionType,
+  classifyOptionalAnnotation,
+  collectPlainOptionalReceivers,
+  checkOptionalMemberAccess,
   checkNotAssignment,
   checkNotReturn,
   tPrimitive,

@@ -1,0 +1,17 @@
+{
+  "id": "reactive-optional-member-access-absent",
+  "description": "§42.3.5 / §42.3.6 absence-safe render, ABSENT path. The plain-optional cell is `not`. `${@user?.name}` (optional-chain, §42.3.6) short-circuits to `not` and renders NOTHING (no-value-no-output, §6), so #opt reads only \"Name:\". `if=@user` is falsy so the guard is OFF (#guard `display: none`) and the guarded `${@user.name}` interp does NOT run — #inner is empty (vs \"Ada\" in the -render twin). Both forms compile clean (no E-TYPE-046). Twin of optional-member-access-render — the empty/fallback render.",
+  "language-version": "1.0",
+  "spec": "§42.3.6",
+  "rationale": "§42.3.6: `recv?.field` short-circuits to `not` when the receiver is `not`; §6 no-value-no-output renders nothing. §42.4: `not` is falsy, so `if=@user` unmounts the guarded subtree. Absence renders as nothing, never the string \"undefined\" (§42.8).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046"],
+    "state": { "user": null },
+    "domAnchored": [
+      { "selector": "#opt", "text": "Name:" },
+      { "selector": "#guard", "attr": { "style": "display: none;" } },
+      { "selector": "#inner", "text": "" }
+    ]
+  }
+}

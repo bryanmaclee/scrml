@@ -1,0 +1,5 @@
+${
+    <user>: { name: string } | not = not
+}
+<p id="opt">Name: ${@user?.name}</p>
+<div id="guard" if=@user><span id="inner">${@user.name}</span></div>

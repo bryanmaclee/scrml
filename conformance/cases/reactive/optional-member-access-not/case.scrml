@@ -1,0 +1,8 @@
+${
+    <user>: { name: string } | not = not
+    function show() {
+        let n = @user.name
+    }
+}
+<button id="b" onclick=show()>go</>
+<p>x</>

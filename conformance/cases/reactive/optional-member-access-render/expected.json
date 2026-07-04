@@ -1,0 +1,17 @@
+{
+  "id": "reactive-optional-member-access-render",
+  "description": "§42.3.5 / §42.3.6 absence-safe render, PRESENT path. A plain-optional cell initialized present (`{ name: \"Ada\" }`) is read two absence-safe ways: `${@user?.name}` (optional-chain, §42.3.6) renders the value; the `if=@user`-narrowed `${@user.name}` (§42.4 narrowing) renders inside the mounted guard. Both compile clean (no E-TYPE-046) and render \"Ada\". Twin of optional-member-access-absent.",
+  "language-version": "1.0",
+  "spec": "§42.3.6",
+  "rationale": "§42.3.6: `recv?.field` lowers to JS `?.` and yields the field value when the receiver is present. §42.4: `if=@user` narrows `@user` to the struct inside the guarded subtree, so the bare `${@user.name}` is safe and mounts. Neither form fires E-TYPE-046.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046"],
+    "state": { "user": { "name": "Ada" } },
+    "domAnchored": [
+      { "selector": "#opt", "text": "Name: Ada" },
+      { "selector": "#inner", "text": "Ada" },
+      { "selector": "#inner", "count": 1 }
+    ]
+  }
+}

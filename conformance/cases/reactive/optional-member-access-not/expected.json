@@ -1,0 +1,12 @@
+{
+  "id": "reactive-optional-member-access-not",
+  "description": "§42.3.5 plain-optional member-access (codes): a PLAIN-OPTIONAL cell (`<user>: { name: string } | not = not` — `not` is a legitimate steady-state value, NO lifecycle) member-accessed WITHOUT optional-chaining (`?.`) or narrowing (`if=` / `given` / `is not` / `match`) fires E-TYPE-046 on the bare `@user.name`. Distinct from the lifecycle E-TYPE-001 (a bare-`T` no-RHS cell) — the plain-optional receiver routes to E-TYPE-046 (§42.3.5), never E-TYPE-001. Asserted AS an error; notCodes pins the boundary (E-TYPE-001 must NOT fire). Incidental W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5: a member access through a receiver whose static type admits `not` (plain-optional `T | not`) SHALL fire E-TYPE-046 unless optional-chained or narrowed — an unguarded dereference would fault at runtime (`null`-access). §14.12.6.1 boundary: the receiver carries no `(not to T)` lifecycle, so it is plain-optional (E-TYPE-046), not lifecycle (E-TYPE-001); a receiver fires exactly one.",
+  "expect": {
+    "codes": ["E-TYPE-046"],
+    "notCodes": ["E-TYPE-001"],
+    "severity": { "E-TYPE-046": "error" }
+  }
+}
