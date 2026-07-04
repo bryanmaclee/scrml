@@ -1,6 +1,12 @@
-# scrml — Session 237 (OPEN)
+# scrml — Session 237 (CLOSE)
 
-**Date:** 2026-07-04. **Profile:** A — FULL (booted `/boot`). Session in progress — this hand-off fills as work lands; it becomes the S237 CLOSE at wrap. Prior close: `handOffs/hand-off-238.md` (S236). Mechanical stream → `handOffs/delta-log.md` [324→]. Narrative → `docs/changelog.md`.
+**Date:** 2026-07-04. **Profile:** A — FULL (booted `/boot`). **A high-throughput orchestration marathon:** opened the freeze-blocker wave (2/8 closed), fixed ALL 6 of Peter's adopter bugs, unblocked flogence's SQL layer (W5b, field-verified), ratified the standalone-tool language target, and de-JS'd the emit-parse error (JS→LOGIC rename). ~21 commits, coherence 0/0 throughout; conformance 220→229. Mechanical stream → `handOffs/delta-log.md` [324]–[350]. Narrative → `docs/changelog.md` S237. Prior close: `handOffs/hand-off-238.md` (S236).
+
+## 🚀 NEXT-START — the path continues
+Boot Profile A. **The two biggest queued items are flogence-facing + Road-B-facing:**
+1. **Standalone-tool target — SCOPE + build** (RATIFIED this session). Write the SCOPE against the ratified design (two surfaces: `<program kind="tool">` + library-with-`lang=`; `fn main(args:string[]):number`; main-returns→exit / main-blocks→stays-up). Grounding: §43 execution-context kinds + §23.5 `capabilities=`. flogence = consumer/R26 — ping before build for the MCP-stdio-blocking-main emit review. → dispatch.
+2. **emit-library type-strip (`g-library-mode-no-typed-payload-match`)** — the STRATEGIC Road-B blocker + flogence's next 100%-scrml domino: route library-mode emit through the real emit-logic/emit-expr path (not the regex shim) so typed fns / `match` / payload-variants lower. flogence's typed harness needs it.
+3. **Freeze-blockers 3-8** (the wave continues): enum-toEnum (`g-enum-toenum-not-lowered-server-side`) · CSRF/auth pair · typer-soundness pair · `g-fail-variant-payload-arity` (needs the **E-ERROR-010 mint** — probe fail-only-vs-general first).
 
 ## 🚀 NEXT-START — the path to V1 (carried from S236 freeze-readiness)
 The flagship pillars are DONE (conformance 72→220, 25 categories). V1-freeze is within reach — a handful of focused arcs, NOT open-ended. Map: `scrml-support/docs/deep-dives/v1-freeze-readiness-2026-07-03.md`. Priority path:
@@ -19,22 +25,28 @@ The flagship pillars are DONE (conformance 72→220, 25 categories). V1-freeze i
 - **Inbox:** `handOffs/incoming/` empty at boot (only `dist/` + `read/`). flogence exchange from S236 archived to `read/`; the S217 lift-driver joint DD is the live cross-PA thread.
 - **Boot:** Profile A full reads done (pa-scrml.md IN FULL · PRIMER pending on-demand · SPEC-INDEX section-table on-demand · master-list §0 · user-voice tail S230-236 · flogence programmatic digest). Old `handOffs/digest.md` is STALE (S218) — superseded by the flogence digest per S219.
 
-## ✅ DONE this session — freeze-blocker 1/8
-- **`g-not-cell-render-null-throw` RESOLVED.** User ruled **Option A + spec `?.` properly**. SPEC amendment `097b5452` (§42.3.5 E-TYPE-046 rule + §42.3.6 `?.` normative spec + cross-refs) · impl `49f0898e` (typer checkOptionalMemberAccess pass + §34 row + `?.` result-typing + 3 conformance cases 220→223 + 25 tests; agent addb6488118bf8610) · user-voice → scrml-support `10ea101`. Corpus migration ZERO. PA-independent R26 4/4 + adversarial (one `@`-sigil over-fire caught+fixed). Residuals filed: `g-etype046-map-bracket-read-narrow` (MED, §59.6 tension) · `g-etype046-write-lhs-and-fn-param` (LOW).
+## ✅ DONE this session (all PUSHED, origin 0/0 @ `60089ca8`)
+- **Freeze-blocker 1/8 `g-not-cell-render-null-throw` RESOLVED** (Option A + spec `?.`). §42.3.5 E-TYPE-046 + §42.3.6 `?.` (`097b5452`/`49f0898e`). Residuals: `g-etype046-map-bracket-read-narrow` (MED) · `g-etype046-write-lhs-and-fn-param` (LOW).
+- **Freeze-blocker 2/8 `g-is-literal-rhs-if-condition-drop` RESOLVED** ("reject `is <literal>`. fix"). §45.5 E-EQ-005 (`d98fc988`/`999981db`, mirror of E-EQ-002).
+- **Peter adopter bugs — ALL 6 CLOSED+commented on GitHub:** #18 Windows specifiers (`15f247d5`) · #19 SPA lift-target (`ccb1a5e6`) · #22 errorBoundary terse-`/`-closer (`a6745379`) · #23 for-of render-context gate (`b8c39827`) · #21 failable-match `::Ok` bind (`4d8140cb`, S211 crash-recover + S226 reconcile) · #20 `<request>` §6.7.7 settle-machine (`60089ca8`, GITI-001 reversal). All PA-R26 + adversarial. Conformance 220→229.
+- **W5b library-mode `?{}` emit LANDED** (`ec162418`) — flogence's SQL layer unblocked (2 coupled fixes; gap OPEN pending flogence field-R26). flogence pinged (needs:action).
+- **Standalone-tool target RATIFIED** ("ratify both kind=tool and library-with-lang") — two surfaces, `fn main(args):number`, main-returns→exit/main-blocks→stays-up. → user-voice S237. PA owes: SCOPE + dispatch.
 
-## 🧵 In-flight / next — 3 AGENTS RUNNING
-- **Push state:** E-TYPE-046 arc PUSHED (`13e47bef`, origin 0/0). E-EQ-005 SPEC `d98fc988` UNPUSHED (push with the E-EQ-005 impl landing). scrml-support `10ea101` pushed.
-- **AGENT 1 — E-EQ-005 (freeze-blocker 2/8 `g-is-literal-rhs-if-condition-drop`).** RULED "reject `is <literal>`. fix" + SPEC §45.5 landed `d98fc988`. Impl agent `a43387a3de13be837` (iso:worktree, S112-merge d98fc988): parser/typer reject value-RHS-on-`is` → E-EQ-005 (mirror of E-EQ-002) + §34 row + corpus scan + conformance + tests. On landing: file-delta → main, non-empty verify, R26, close gap, push.
-- **AGENT 2 — Peter #18 (Windows import specifiers).** agent `a117c9c3b5eb98fdc`. api.js posix-normalize specifiers; OS-independent test. Closes GitHub #18.
-- **AGENT 3 — Peter #19 (SPA lift_target tree-shake).** agent `a318c5691c5fc3bce`. Move `_scrml_lift_target` into lift chunk. Closes GitHub #19.
-- **QUEUED — Peter codegen wave (#20/#21/#22/#23)** — ALL LIVE (triaged delta [332], root causes confirmed in emitted JS). Fire after the 3 running agents land. **Partition (loci scoped):** #22 `<errorBoundary>` empty fallback → `emit-error-boundary.ts` (DEDICATED file, cleanly disjoint — parallel-safe) · #21 match-over-failable `::Ok(v)` bare-return + unbound `v` → `emit-control-flow.ts:2367` (the `cannot positionally bind` emit) · #23 for-of-over-reactive-in-plain-fn → list-render → `emit-logic.ts`/`emit-each.ts` classifier · #20 `<request>` §6.7.7 state-machine unwired → SPREAD (emit-control-flow/functions/client — murkiest, agent must scope; risk of emit-control-flow overlap with #21 → hold #20 or serialize vs #21). Plan: fire #21+#22+#23 parallel (disjoint loci), #20 solo/after. Intersect file-sets at dispatch + reconcile conformance baselines by hand (S211/S226).
-- **QUEUED — JS→LOGIC rename** → `E-CODEGEN-INVALID-LOGIC` (user-ratified "the longer error code"). ONE code (`E-CODEGEN-INVALID-JS`, ~219 refs across SPEC §34/api.js/validate-emit/tests/conformance/docs) + drop "JavaScript" from the message. Serialize after #18 (shares api.js) + the E-EQ-005 conformance landing.
-- **QUEUED — freeze-blockers 3-8:** enum-toEnum (`g-enum-toenum-not-lowered-server-side`) · CSRF/auth pair · typer-soundness pair · `g-fail-variant-payload-arity` (needs E-ERROR-010 mint — probe fail-only-vs-general first).
+## 🧵 In-flight — NONE (all agents landed; wrapping)
+- **JS→LOGIC rename DONE** (`99240c76`) — `E-CODEGEN-INVALID-JS`→`E-CODEGEN-INVALID-LOGIC`, 105 files, message de-JS'd, invariant grep→0 in active code, full suite green.
+- **W5b field-verified by flogence** → `g-library-mode-sql-no-db-context` RESOLVED. Next domino = the emit-library type-strip (`g-library-mode-no-typed-payload-match`, in NEXT-START #2).
+
+## 🧵 QUEUED (drive next)
+- **Standalone-tool target — SCOPE + build** (ratified). Write the SCOPE (two surfaces + `main()` emit contract; main-returns→exit / main-blocks→stays-up). flogence = consumer/R26; ping before build for the MCP-stdio-blocking-main emit review. Grounding: §43 execution-context kinds + §23.5 `capabilities=`.
+- **Freeze-blockers 3-8:** enum-toEnum (`g-enum-toenum-not-lowered-server-side`) · CSRF/auth pair · typer-soundness pair · `g-fail-variant-payload-arity` (needs E-ERROR-010 mint).
+- **Owed to flogence:** W5b field-R26 (they run it, ping me → I flip the gap); the standalone-tool SCOPE review.
+- **Deferred gaps (S237, all MED/LOW open):** `g-request-data-is-some-misroute` · `g-terse-closer-reparse-narrow` · `g-nested-match-in-arm-body` · the 2 g-etype046 residuals · W5b E-SQL-009-narrow residual.
 
 ## 🧾 Owed at wrap
-- Maps refresh (project-mapper incremental — watermark behind by the S235+S236 landing set).
-- MEMORY.md trim (over the 24.4KB limit).
-- reset-reserved impl fix (ENFORCE) · E-ERROR-010 mint (fail-variant-arity).
+- **⚠️ MAPS REFRESH — CRITICALLY OVERDUE (54 commits behind, watermark `2fb2bf1f`, 4-session deferral S234→S237).** Deferred AGAIN this session (tail of a 21-commit run; dispatches empirically found maps not-load-bearing — briefs carried exact loci). **Run `project-mapper` FIRST thing next boot** before any dispatch that would rely on maps. The staleness is now large enough to be a real risk.
+- MEMORY.md trim — **DONE S237** (was 26.3KB, tightened to 24.39KB under the 24.4KB limit; all 79 entries preserved).
+- reset-reserved impl fix (ENFORCE, `g-reset-reserved-identifier-unenforced`) · **E-ERROR-010 mint** (fail-variant-arity — part of freeze-blocker 8/`g-fail-variant-payload-arity`).
+- W5b field-R26 flogence-verified → gap RESOLVED (done). Owed to flogence: the standalone-tool SCOPE review + the type-strip fix ping.
 
 ## pa.md directives in force
 R1–R5 · Profile A · commit `timeout:600000` · **S236: `git show --stat` verify non-empty after file-delta commits + stage+commit in ONE bash** · S226 landing-concurrency (disjoint-verify / 3-way-merge-shared) · S219 PRIMARY-GOAL/orchestrate + memory-gated-commit · S215 adversarial-verify + 10× sample · S138 R26 (both directions) · S147 coherence · S88/S90/S99/S126 path-discipline · S227 dock-as-navigation.
