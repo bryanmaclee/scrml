@@ -80,6 +80,7 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
+import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn } from "./tool-program.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -19316,11 +19317,182 @@ function tryFireWasmCallCharNominal(
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// §64 Standalone Tool Target — `<program kind="tool">` validation.
+//
+// Runs on every file; a no-op unless a <program> declares `kind=`. The tool
+// target re-shapes the top-level emit to a plain runnable module (§64.1); these
+// checks fence the shape:
+//   - E-TOOL-002: `kind=` value other than "tool" (closed vocab v1), OR `kind=`
+//     on a NESTED <program> (§43 infers nested kinds — kind= is top-level only).
+//   - E-TOOL-001: kind="tool" with no top-level `function main` entry.
+//   - E-TOOL-004: `fn main` in a kind="tool" program (main is IMPURE — reads
+//     argv, calls process.exit, does `_{}` host I/O; `fn` §48.11 is PURE) →
+//     steer to `function main`.
+//   - E-TOOL-003: <page> child, markup body content, or client-reactive UI state
+//     inside a tool body (no html/client emit to host them; §64.4).
+// ---------------------------------------------------------------------------
+function spanOfNode(node: ASTNodeLike | null | undefined, fallback: Span): Span {
+  const sp = node && (node as { span?: unknown }).span;
+  return (sp && typeof sp === "object" ? (sp as Span) : fallback);
+}
+
+function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): void {
+  const allPrograms = findAllProgramNodes(fileAST);
+  if (allPrograms.length === 0) return;
+  const topLevel = findTopLevelProgramNode(fileAST);
+
+  // E-TOOL-002 (placement) — `kind=` on a NESTED <program> is invalid; §43
+  // infers nested execution-context kinds from attribute combinations, so an
+  // explicit top-level-only `kind=` there is a mistake.
+  for (const prog of allPrograms) {
+    if (prog === topLevel) continue;
+    if (!programHasKindAttr(prog)) continue;
+    const nestedKind = getProgramKind(prog) ?? "";
+    {
+      errors.push(new TSError(
+        "E-TOOL-002",
+        `E-TOOL-002: \`kind=\` is a TOP-LEVEL output-shape selector (§64) and is not ` +
+        `valid on a nested <program> (found \`kind="${nestedKind}"\`). Nested-<program> ` +
+        `execution contexts (worker / sidecar / wasm / server-endpoint) are INFERRED ` +
+        `from attribute combinations (§43) — remove the \`kind=\` from the nested ` +
+        `<program>.`,
+        spanOfNode(prog, fileSpan),
+      ));
+    }
+  }
+
+  // No `kind=` attribute at all on the top-level <program> → normal web app.
+  if (!programHasKindAttr(topLevel)) return;
+  const kind = getProgramKind(topLevel);
+
+  // E-TOOL-002 (value) — closed vocabulary v1: "tool" is the only legal value.
+  // A present-but-non-"tool" kind (incl. a bare `<program kind>` with an absent
+  // value → getProgramKind null) is invalid: the author wrote `kind`, signaling
+  // tool intent, but the value is not `"tool"`.
+  if (kind !== "tool") {
+    errors.push(new TSError(
+      "E-TOOL-002",
+      `E-TOOL-002: \`kind="${kind ?? ""}"\` is not a recognized <program> kind. The only ` +
+      `value in v1 is \`kind="tool"\` (§64 — the standalone-tool target: a plain ` +
+      `runnable module, no separate \`kind="service"\`; a long-running server is a ` +
+      `\`kind="tool"\` whose \`function main\` does not return). Use \`kind="tool"\` or ` +
+      `remove the \`kind=\` attribute for a web application.`,
+      spanOfNode(topLevel, fileSpan),
+    ));
+    return;
+  }
+
+  // kind="tool" — the tool-body validations.
+  // E-TOOL-001 / E-TOOL-004 — the `main` entry convention (§64.2).
+  const mainFn = findToolMainFn(fileAST);
+  if (!mainFn) {
+    errors.push(new TSError(
+      "E-TOOL-001",
+      `E-TOOL-001: \`<program kind="tool">\` declares no top-level \`function main\` ` +
+      `entry. A standalone tool SHALL declare exactly one \`function main(args: string[])\` ` +
+      `(optionally \`: number\` for the process exit code; §64.2/§64.3). Add a ` +
+      `\`function main\` — the emitted module runs \`main(process.argv.slice(2))\`.`,
+      spanOfNode(topLevel, fileSpan),
+    ));
+  } else if (mainFn.fnKind === "fn") {
+    errors.push(new TSError(
+      "E-TOOL-004",
+      `E-TOOL-004: \`fn main\` is not valid in a \`kind="tool"\` program — \`main\` is the ` +
+      `program's IMPURE entry point (it reads argv, calls \`process.exit\`, and does \`_{}\` ` +
+      `host I/O), and \`fn\` (§48.11) is the canonical PURE form which cannot hold those ` +
+      `side effects. Declare it \`function main(args: string[])\` (§64.2).`,
+      spanOfNode(mainFn, fileSpan),
+    ));
+  }
+
+  // E-TOOL-003 — no <page> / markup body / client-reactive UI state (§64.4).
+  // A tool has no html/client to host them; they are a hard error, never dropped.
+  const progChildren = ((topLevel as { children?: unknown }).children as ASTNodeLike[] | undefined) ?? [];
+  for (const child of progChildren) {
+    if (!child || typeof child !== "object") continue;
+    const ck = (child as { kind?: unknown }).kind as string | undefined;
+    if (ck === "markup") {
+      const tag = (child as { tag?: unknown }).tag as string | undefined;
+      const isPage = tag === "page";
+      errors.push(new TSError(
+        "E-TOOL-003",
+        `E-TOOL-003: ${isPage ? "a <page> route" : `a <${tag ?? "markup"}> markup element`} ` +
+        `is not valid inside a \`kind="tool"\` program. A tool emits a plain runnable module ` +
+        `with no html/client to host ${isPage ? "routes" : "markup"} (§64.4). The tool body ` +
+        `is logic + \`fn\`/\`function\`/\`type\` declarations + \`_{}\` + \`?{}\` + \`main\` only.`,
+        spanOfNode(child, fileSpan),
+      ));
+    } else if (ck === "text") {
+      const raw = String(((child as { value?: unknown }).value ?? (child as { content?: unknown }).content ?? "") as string);
+      if (raw.trim().length > 0) {
+        errors.push(new TSError(
+          "E-TOOL-003",
+          `E-TOOL-003: markup body text (\`${raw.trim().slice(0, 24)}\`) is not valid inside a ` +
+          `\`kind="tool"\` program — a tool emits a plain runnable module with no html to render ` +
+          `text (§64.4). The tool body is logic + declarations + \`main\` only.`,
+          spanOfNode(child, fileSpan),
+        ));
+      }
+    } else if (ck === "logic") {
+      const body = ((child as { body?: unknown }).body as ASTNodeLike[] | undefined) ?? [];
+      for (const stmt of body) {
+        if (!stmt || typeof stmt !== "object") continue;
+        const sk = (stmt as { kind?: unknown }).kind as string | undefined;
+        if (sk === "state-decl" || sk === "state") {
+          const nm = (stmt as { name?: unknown }).name;
+          errors.push(new TSError(
+            "E-TOOL-003",
+            `E-TOOL-003: client-reactive UI state${typeof nm === "string" ? ` (\`${nm}\`)` : ""} ` +
+            `is not valid inside a \`kind="tool"\` program — a tool emits a plain runnable module ` +
+            `with no client to drive reactivity (§64.4). Use a plain \`const\`/\`let\` local ` +
+            `inside \`function main\` (or a helper) instead of a reactive cell.`,
+            spanOfNode(stmt, fileSpan),
+          ));
+        }
+      }
+    }
+  }
+}
+
+// §23.2.4 (amended S238) — collect the foreign nodes admitted by the THIRD
+// bare-`_{}` form: a `_{}` in the body of a top-level `function` (incl. `main`)
+// of a `kind="tool"` program (§64). The admission is scoped to `function`
+// bodies (the impure form); a bare `_{}` in a pure `fn` helper stays
+// E-FOREIGN-004. Empty for a non-tool file.
+function collectToolAdmittedForeign(fileAST: FileAST): Set<unknown> {
+  const set = new Set<unknown>();
+  if (!isToolProgram(fileAST)) return set;
+  const collectForeign = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown>;
+    if (n.kind === "foreign") set.add(n);
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (Array.isArray(v)) for (const c of v) collectForeign(c);
+      else if (v && typeof v === "object") collectForeign(v);
+    }
+  };
+  for (const fn of collectTopLevelFunctionDecls(fileAST)) {
+    if ((fn as { fnKind?: unknown }).fnKind !== "function") continue;
+    const body = (fn as { body?: unknown }).body;
+    if (Array.isArray(body)) for (const stmt of body) collectForeign(stmt);
+  }
+  return set;
+}
+
 function checkForeignBlocks(
   nodes: ASTNodeLike[],
   programLang: string | null,
   errors: TSError[],
   fileSpan: Span,
+  // §23.2.4 (amended S238) — foreign nodes admitted by the THIRD form: a bare
+  // non-value-returning `_{}` in the body of a top-level `function`/`main` of a
+  // `kind="tool"` program (§64). Union'd into the admitted set below so they get
+  // the lang gate + stamp WITHOUT firing E-FOREIGN-004. Empty/absent for a
+  // normal web-app <program> (the bare-`_{}` rule is unchanged there).
+  toolAdmittedForeign?: Set<unknown> | null,
 ): void {
   const FOREIGN_INLINE_LANGS = new Set(["ts", "js"]);
 
@@ -19355,7 +19527,9 @@ function checkForeignBlocks(
       fired.add(n);
       const foreign = n as ASTNodeLike;
       const span = (foreign.span as Span | undefined) ?? fileSpan;
-      if (!admitted.has(foreign)) {
+      const isAdmitted = admitted.has(foreign)
+        || (toolAdmittedForeign != null && toolAdmittedForeign.has(foreign));
+      if (!isAdmitted) {
         // Non-value-returning bare `_{}` — not admitted by the §23.2.4 amendment.
         errors.push(new TSError(
           "E-FOREIGN-004",
@@ -20577,8 +20751,15 @@ function processFile(
   // E-FOREIGN-005) + lang stamp. Runs on every file (the foreign walk is a no-op
   // when there are no foreign nodes).
   {
+    // §64 — standalone-tool validation (E-TOOL-001..004). No-op unless a
+    // <program> declares `kind=`.
+    checkToolProgram(fileAST, errors, fileSpan);
     const _foreignProgramLang = resolveProgramLang(fileAST);
-    checkForeignBlocks(allNodes, _foreignProgramLang, errors, fileSpan);
+    // §23.2.4 (amended S238) — a bare `_{}` in a top-level `function`/`main`
+    // body of a kind="tool" program is its host-I/O boundary; admit it (no
+    // E-FOREIGN-004). Scoped to tool programs; empty otherwise.
+    const _toolAdmittedForeign = collectToolAdmittedForeign(fileAST);
+    checkForeignBlocks(allNodes, _foreignProgramLang, errors, fileSpan, _toolAdmittedForeign);
   }
 
   // Assemble TypedFileAST.

@@ -17630,7 +17630,20 @@ export function buildAST(bsOutput, tokenizerOverrides) {
       n => n && n.kind === "markup" && n.tag === "program"
     );
 
+    // §64 — a `kind="tool"` program emits a plain runnable MODULE (a CLI / server),
+    // not a web application, so the SPA-vs-multi-page-app filesystem inference is
+    // meaningless for it. Suppress W-PROGRAM-SPA-INFERRED on the tool target.
+    let _entryProgramIsTool = false;
     if (entryProgramNode) {
+      const _kindAttr = (entryProgramNode.attrs ?? []).find(a => a && a.name === "kind");
+      if (_kindAttr) {
+        const _kv = typeof _kindAttr.value === "string" ? _kindAttr.value
+          : (_kindAttr.value && typeof _kindAttr.value === "object" ? _kindAttr.value.value : null);
+        _entryProgramIsTool = typeof _kv === "string" && _kv.replace(/^["']|["']$/g, "").trim() === "tool";
+      }
+    }
+
+    if (entryProgramNode && !_entryProgramIsTool) {
       // Condition (2): zero <page> siblings in the <program> body.
       // <page> siblings live in entryProgramNode.children as markup nodes.
       const programChildren = Array.isArray(entryProgramNode.children)

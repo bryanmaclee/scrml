@@ -40,7 +40,7 @@ const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
 // route-handler path (generateServerJs) and the value-only path
 // (generateValueOnlyServerJs, g-const-only-module-no-server-emit) inline the
 // IDENTICAL helper — no drift.
-const SERVER_STRUCTURAL_EQ_HELPER = [
+export const SERVER_STRUCTURAL_EQ_HELPER = [
   "",
   "// --- §45 Structural equality helper (inlined for server, no client runtime here) ---",
   "function _scrml_structural_eq(a, b) {",

@@ -81,6 +81,12 @@ const ELEMENT_ATTR_REGISTRY = new Map();
 ELEMENT_ATTR_REGISTRY.set("program", {
   allowedAttrs: new Map([
     // §6 / §39 — program shape
+    // §64 — Standalone Tool Target output-shape selector. `kind="tool"` re-targets
+    // the top-level <program> emit from a web app to a plain runnable module.
+    // Value validation (closed vocab: only "tool"; top-level only) is owned by the
+    // typer (E-TOOL-002); registering here suppresses the W-ATTR-001 unknown-attr
+    // warning so the recognized attribute flows cleanly to the tool-emit path.
+    ["kind",          attrSpec({ supportsInterpolation: false })],
     ["db",            attrSpec({ supportsInterpolation: false })],
     ["tables",        attrSpec({ supportsInterpolation: false })],
     ["html",          attrSpec({ supportsInterpolation: false })],

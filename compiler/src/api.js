@@ -2446,6 +2446,12 @@ export function compileScrml(options = {}) {
       };
       for (const [filePath, output] of cgResult.outputs) {
         const base = basename(filePath, ".scrml");
+        // §64 — standalone-tool module (kind="tool"): a single runnable `<base>.js`.
+        if (output.toolJs) {
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir);
+          s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
+          pushArtifact(filePath, `${base}.js`, s);
+        }
         if (output.serverJs) {
           let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
@@ -2584,6 +2590,14 @@ export function compileScrml(options = {}) {
         //     bundled <outputDir>/_scrml/NAME.js shim, with the relative
         //     path computed from the file's actual targetDir (which may be
         //     nested under outputDir per F-COMPILE-001 Option A).
+        // §64 — a kind="tool" program emits a single runnable module `<base>.js`
+        // (NO html / client / CSRF / server-route split). Written and returned.
+        if (output.toolJs) {
+          const { targetDir } = pathFor(filePath, ".js");
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir);
+          s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
+          if (writeOutput(filePath, ".js", s)) fileCount++;
+        }
         if (output.serverJs) {
           const { targetDir } = pathFor(filePath, ".server.js");
           let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir);

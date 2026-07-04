@@ -17549,6 +17549,11 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-FOREIGN-004 | §23.2.4 | `_{}` in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (admitted: §23.4 sidecar + §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body + the S238 `kind="tool"` program-body `function`/`main` host-I/O form §64) | Error |
 | E-FOREIGN-005 | §23.2.4a | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (use a `use foreign:` sidecar §23.4 for an out-of-process service) | Error |
 | E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing becomes an async-IIFE parameter (§23.2.4a codegen), so the slice-local redeclares it — invalid JS. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaring IIFE fall through to the misleading post-emit E-CODEGEN-INVALID-LOGIC "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) | Error |
+| E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `: number` for the process exit code; §64.3) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-002 | §64 | A `kind=` value other than `"tool"` (closed vocabulary v1 — `"tool"` is the only legal value; a long-running server is a `kind="tool"` whose `function main` does not return, so there is no `kind="service"`), OR a `kind=` attribute on a NESTED `<program>` (`kind=` is a TOP-LEVEL output-shape selector; nested execution-context kinds are INFERRED from attribute combinations per §43). (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-003 | §64.4 | A `<page>` route, markup body content, or client-reactive UI state appears inside a `kind="tool"` program. A tool emits a plain runnable module with no html/client to host them (§64.1). The tool body is logic + `fn`/`function`/`type` declarations + `_{}` + `?{}` + `main` only. (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-005 | §64.6 | A `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit path does not yet inline. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), and §14 enum backing objects; NOT yet inlined → this code: value-native map/set (§59), `!{}`/`fail` error helpers, wire/protect. FAIL-CLOSED (§49 no-silent-bad-output): a loud compile error naming the missing helper instead of a silent runtime `ReferenceError` in the emitted module. Marks the v1 tool-emit helper-coverage boundary; closing a helper removes its E-TOOL-005. (S238 — ratified after the Surface-1 impl surfaced the value-native-map case.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
@@ -34572,6 +34577,7 @@ identically to a `<program db>` web app; only the emit shape differs.
 | `E-TOOL-002` | `kind=` value other than `"tool"` (closed vocab v1), OR `kind=` on a nested `<program>` (top-level only; §43 infers nested) | Error |
 | `E-TOOL-003` | `<page>` / markup body / client-reactive UI inside a `kind="tool"` program (no html/client emit) | Error |
 | `E-TOOL-004` | `fn main` in a `kind="tool"` program — `main` is impure; use `function main` (§64.2) | Error |
+| `E-TOOL-005` | a `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit does not yet inline (value-native maps/sets §59, `!{}`/`fail` error helpers, wire/protect) — FAIL-CLOSED: a loud compile error naming the missing helper, instead of a silent runtime `ReferenceError`. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), and §14 enum backing objects; this code marks the v1 tool-emit helper-coverage boundary — closing a helper removes its E-TOOL-005. Ratified S238. | Error |
 
 ### 64.7 Worked examples
 
@@ -34579,7 +34585,7 @@ identically to a `<program db>` web app; only the emit shape differs.
 // fleet.ts → fleet.scrml — run-and-exit CLI, db-bound
 <program kind="tool" lang="ts" db="./flogence.db">
     function main(args: string[]): number {
-        given args.length == 0 { _={ console.error("usage: fleet <cmd>") }= ; return 2 }
+        if args.length == 0 { _={ console.error("usage: fleet <cmd>") }= ; return 2 }
         … ?{ SELECT … }.all() …
         return 0
     }

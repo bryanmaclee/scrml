@@ -82,6 +82,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 // Ext 1 M1.2 + M1.3 — statement-grain body-DG + multi-batch CPS planner.
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
+import { isToolProgram, findToolMainFn } from "./tool-program.ts";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -3316,6 +3317,19 @@ export function runRI(input: RIInput): RIOutput {
   // function makes it potentially-callable from outside the project, so
   // it is never "dead" by RI's body-callee analysis alone.
   // CE wraps FileAST in `.ast`; unit tests pass bare FileAST. Try both.
+  // §64 — a `kind="tool"` program's `main` is the entry point invoked by the
+  // codegen-emitted harness (`main(process.argv.slice(2))`), not by any in-source
+  // caller — so RI's caller analysis sees it as "dead." Collect each tool file's
+  // `main` node so D4 never false-fires W-DEAD-FUNCTION on it. (Helper fns called
+  // by main already have callers via inverseCallerMap, so only `main` needs this.)
+  const toolMainFnNodes = new Set<unknown>();
+  for (const fileAST of files) {
+    if (isToolProgram(fileAST)) {
+      const m = findToolMainFn(fileAST);
+      if (m) toolMainFnNodes.add(m);
+    }
+  }
+
   const exportedFnNames = new Set<string>();
   for (const fileAST of files) {
     const exps = (fileAST.exports ?? ((fileAST as any).ast ? (fileAST as any).ast.exports : [])) as
@@ -3620,7 +3634,11 @@ export function runRI(input: RIInput): RIOutput {
     // entry points; never dead-warn.
     const isGenerator = (record.fnNode as any).isGenerator === true;
 
-    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator) {
+    // §64 — the tool `main` entry is invoked by the emitted harness, not an
+    // in-source caller; never dead-warn it.
+    const isToolMainEntry = toolMainFnNodes.has(record.fnNode);
+
+    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry) {
       const warn = new RIError(
         "W-DEAD-FUNCTION",
         `W-DEAD-FUNCTION: Function \`${fnName}\` has no callers, is not exported, ` +

@@ -58,6 +58,8 @@ import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
+import { generateToolJs } from "./emit-tool.ts";
+import { isToolProgram } from "../tool-program.ts";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
@@ -248,6 +250,8 @@ export interface CgFileOutput {
   serverJs?: string | null;
   clientJs?: string | null;
   libraryJs?: string | null;
+  /** §64 — generated standalone-tool module JS (kind="tool" programs). */
+  toolJs?: string | null;
   html?: string | null;
   css?: string | null;
   /** Generated bun:test JS output from ~{} test blocks (testMode only). */
@@ -879,6 +883,25 @@ export function runCG(input: CgInput): CgOutput {
     // paths → the subdir page opens a different (empty) file from the project
     // root. null for legacy single-file callers (handled verbatim downstream).
     (fileAST as any)._outputBaseDir = cgOutputBaseDir;
+
+    // ---------------------------------------------------------------------------
+    // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
+    // the emit from a web application (html + client.js + CSRF + server routes) to
+    // a PLAIN runnable ES module. Bypass emit-server / emit-html / emit-client /
+    // CSRF entirely and emit the tool module + main() harness (§64.1/§64.3).
+    // ---------------------------------------------------------------------------
+    if (isToolProgram(fileAST)) {
+      const toolJs: string = codegenStage("emit-tool", () =>
+        generateToolJs(fileAST as unknown as Record<string, unknown>, errors)
+      );
+      const toolOutput: CgFileOutput = {
+        sourceFile: filePath,
+        toolJs,
+      };
+      outputs.set(filePath, toolOutput);
+      continue;
+    }
+
     let serverJs: string | null = codegenStage("emit-server", () =>
       // §14.8.9 — thread the PA stage's ProtectAnalysis so emit-server can apply
       // protected-column egress redaction (server-fn response + SSR /__serverLoad).
