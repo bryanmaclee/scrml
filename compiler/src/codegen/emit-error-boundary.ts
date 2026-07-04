@@ -80,6 +80,103 @@ function normalizeTokenizedMarkup(s: string): string {
     .replace(/\s+>/g, ">");
 }
 
+/**
+ * Convert scrml's TERSE `/` markup-value closer into the explicit `</>` form so
+ * the isolated re-parse (BS -> TAB -> generateHtml) can lower it.
+ *
+ * A `fallback={<markup/>}` (SPEC §19.6.2) or a `renders <markup/>` clause may use
+ * the terse `/` closer — a `/` that closes the innermost open element, the value-
+ * boundary analog of `</>` (SPEC §19.6.2's canonical form is `{<div>...text/}`,
+ * the DOMINANT shape across the SPEC's boundary examples). The standalone re-parse
+ * only understands `</>` / `</tag>` closers; a bare terse `/` yields ZERO nodes,
+ * so the boundary's declared fallback markup silently compiled to an EMPTY string
+ * (`fallbackExpr === '""'`) — the boundary caught the error but rendered nothing
+ * (GitHub #22). Rewriting each terse `/` closer to `</>` restores the fallback.
+ *
+ * A `/` is a terse closer ONLY when an element is open (`depth > 0`) AND the `/`
+ * is at a closer position: immediately followed (ignoring whitespace) by end-of-
+ * fragment or by a `<` (the next sibling opener / an ancestor's `</>` closer).
+ * This preserves literal text slashes (`and/or`, `http://x`) — a `/` with a
+ * non-`<` character after it is text, not a closer. `${...}` interpolation spans
+ * (which may legitimately contain `<` / `/`) are copied verbatim, and quoted
+ * attribute strings are skipped. Idempotent on markup that already uses `</>`.
+ */
+function convertTerseClosers(s: string): string {
+  let out = "";
+  let i = 0;
+  const n = s.length;
+  let depth = 0;             // open markup element depth
+  let inD = false, inS = false; // inside a "..." / '...' attribute string
+  while (i < n) {
+    const c = s[i];
+    if (inD) { out += c; if (c === '"') inD = false; i++; continue; }
+    if (inS) { out += c; if (c === "'") inS = false; i++; continue; }
+    // Copy a `${ ... }` interpolation span verbatim (brace-balanced) — its
+    // interior may hold `<` / `/` that are NOT markup structure.
+    if (c === "$" && s[i + 1] === "{") {
+      let j = i + 2;
+      let braceDepth = 1;
+      while (j < n && braceDepth > 0) {
+        if (s[j] === "{") braceDepth++;
+        else if (s[j] === "}") braceDepth--;
+        j++;
+      }
+      out += s.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === '"') { inD = true; out += c; i++; continue; }
+    if (c === "'") { inS = true; out += c; i++; continue; }
+    if (c === "<") {
+      if (s[i + 1] === "/") {
+        // Explicit closer `</...>` or `</>` — copy through, pop one level.
+        let j = i + 2;
+        while (j < n && s[j] !== ">") j++;
+        if (j < n) j++; // include the closing `>`
+        out += s.slice(i, j);
+        if (depth > 0) depth--;
+        i = j;
+        continue;
+      }
+      if (/[A-Za-z]/.test(s[i + 1] ?? "")) {
+        // Opener `<tag ...>` or inline self-close `<tag/>` — scan to its `>`.
+        let j = i + 1;
+        let d = false, sq = false, selfClose = false;
+        while (j < n) {
+          const cc = s[j];
+          if (d) { if (cc === '"') d = false; j++; continue; }
+          if (sq) { if (cc === "'") sq = false; j++; continue; }
+          if (cc === '"') { d = true; j++; continue; }
+          if (cc === "'") { sq = true; j++; continue; }
+          if (cc === "/" && s[j + 1] === ">") { selfClose = true; j += 2; break; }
+          if (cc === ">") { j++; break; }
+          j++;
+        }
+        out += s.slice(i, j);
+        if (!selfClose) depth++;
+        i = j;
+        continue;
+      }
+      // A `<` not opening markup (e.g. a stray less-than) — copy literally.
+      out += c; i++; continue;
+    }
+    if (c === "/" && depth > 0 && s[i + 1] !== ">") {
+      // Terse closer only when the next non-whitespace char is end-of-fragment
+      // or a `<` markup token; otherwise it is a literal slash in text.
+      let k = i + 1;
+      while (k < n && /\s/.test(s[k] ?? "")) k++;
+      if (k >= n || s[k] === "<") {
+        out += "</>";
+        depth--;
+        i++;
+        continue;
+      }
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 export function compileBoundaryMarkup(
   rawMarkup: string,
   generateHtmlFn: (nodes: any[], ctxOrErrors: any) => string,
@@ -93,10 +190,15 @@ export function compileBoundaryMarkup(
   // delimited field marker embedded in a plain text node, then re-parse.
   const fields: string[] = [];
   const fieldInterp = /\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
-  const prepared = trimmed.replace(fieldInterp, (_m, name: string) => {
+  const withFields = trimmed.replace(fieldInterp, (_m, name: string) => {
     if (!fields.includes(name)) fields.push(name);
     return `${FIELD_SENTINEL}${name}${FIELD_SENTINEL}`;
   });
+  // Rewrite scrml's terse `/` markup-value closer to the explicit `</>` form the
+  // standalone re-parse understands (SPEC §19.6.2's `{<div>...text/}` shape);
+  // without this the fallback markup silently compiled to "" (GitHub #22). Run
+  // AFTER the field-interp pass so any remaining literal `${...}` span is opaque.
+  const prepared = convertTerseClosers(withFields);
 
   let html: string;
   try {

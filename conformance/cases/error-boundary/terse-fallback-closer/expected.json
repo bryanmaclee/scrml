@@ -1,0 +1,19 @@
+{
+  "id": "error-boundary-terse-fallback-closer",
+  "description": "errorBoundary §19.6.2 terse `/}` markup-value closer — a caught error variant WITHOUT a `renders` clause falls to a `fallback` whose markup uses the terse `/` closer (`{<div ...>text/}`, the DOMINANT form across the SPEC's boundary examples). loadItem('slow') fails LoadError.Timeout (no renders) at mount; the boundary's terse-closer fallback (eb-terse-fb) MUST render its declared markup + text, NOT an empty container. Regression guard for GitHub #22 — the terse closer previously re-parsed to ZERO nodes so the fallback silently compiled to \"\" and the boundary showed nothing. Sibling content outside the boundary survives (§19.6.4).",
+  "language-version": "1.0",
+  "spec": "§19.6.2",
+  "rationale": "§19.6.2 shows the canonical `fallback={<div>Something went wrong/}` terse-closer form; §19.6.3 priority #2 requires that a caught no-renders variant display the boundary's `fallback` markup. The terse `/` closer is the value-boundary analog of `</>` and MUST lower to the same DOM as the explicit-closer form (cf. error-boundary/no-renders-falls-to-fallback which uses `</>`). Timeout is a nullary no-renders variant -> eb-terse-fb shows with its text. NotFound's renders never fires (not the thrown variant). §19.6.6: the `!`-call inside the boundary needs no explicit handling -> the whole E-ERROR-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".eb-terse-fb", "count": 1, "text": "terse fallback shown" },
+      { "selector": ".eb-notfound", "count": 0 },
+      { "selector": ".eb-header", "text": "Header survives" },
+      { "selector": ".eb-footer", "text": "Footer survives" }
+    ]
+  }
+}
