@@ -1734,3 +1734,45 @@ export function iterableHasReactiveRefs(
   }
   return extractReactiveDeps(iterStr, null).size > 0;
 }
+
+/**
+ * Does a for-stmt body render markup (i.e. contain a `lift` statement)?
+ *
+ * This is the RENDER-CONTEXT discriminator for the reactive for-of lowering.
+ * Per SPEC §17.4 (Iteration — Tier 0), a `for` loop is a DOM list-render ONLY
+ * when its body `lift`s markup: `for (item of items) { lift <li>${item.name}</> }`.
+ * A `for` loop WITHOUT `lift` (SPEC §17.4a: "A `for` loop without `lift`…") is a
+ * plain loop — it iterates a value / produces a result, it does not render.
+ *
+ * GitHub #23 (Peter): a plain, non-render function that iterates a reactive cell —
+ *   `function unitLabelFor(num) { for (let p of @unitParts) { if (p.unit == num) return p.unit } }`
+ * — was mis-lowered to the reactive list-render path (`_scrml_render_list` /
+ * `_scrml_reconcile_list` + `document.createElement`/`_scrml_lift`) purely because
+ * the iterable held a reactive `@`-ref, with no check that the body is a render
+ * context. That emitted DOM code (E-SCOPE-001 / runtime `appendChild` throw) where
+ * a plain snapshot loop was intended. The reactive list-render lowering SHALL apply
+ * ONLY when this predicate holds; a reactive-iterable for-of whose body does NOT
+ * lift markup lowers to a plain `for (const x of <snapshot>) { … }` over the cell's
+ * current value (the iterable's `@`-refs still lower to `_scrml_reactive_get(...)`).
+ *
+ * The walk is recursive: a `lift` nested inside an `if`/`for`/`while`/match-arm
+ * body (e.g. `for (x of @xs) { if (x.ok) { lift <li/> } }`) still counts as a
+ * render context. Expression-tree fields (`exprNode`, `*Expr`) and `span` are not
+ * descended — only statement-body arrays.
+ *
+ * @param body — the for-stmt body statement array (`node.body`)
+ * @returns true if any `lift-expr` node exists anywhere in the body subtree
+ */
+export function forBodyLiftsMarkup(body: unknown): boolean {
+  if (!Array.isArray(body)) return false;
+  for (const node of body) {
+    if (!node || typeof node !== "object") continue;
+    if ((node as { kind?: unknown }).kind === "lift-expr") return true;
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "exprNode" || key.endsWith("Expr")) continue;
+      const v = (node as Record<string, unknown>)[key];
+      if (Array.isArray(v) && forBodyLiftsMarkup(v)) return true;
+    }
+  }
+  return false;
+}

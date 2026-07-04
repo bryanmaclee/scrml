@@ -4,7 +4,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
-import { iterableHasReactiveRefs } from "./reactive-deps.ts";
+import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
@@ -1836,7 +1836,13 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   const iterIsReactive = iterableHasReactiveRefs(forNode, opts.fnBodyRegistry ?? null);
   const body = forNode.body ?? [];
 
-  if (iterIsReactive) {
+  // GitHub #23 (Peter) — render-context gate, mirror of emit-control-flow.ts.
+  // Even nested inside a lift body, a for-of over a reactive cell is a DOM
+  // list-render ONLY when its OWN body `lift`s markup (SPEC §17.4). A nested
+  // data-loop (no `lift`, e.g. `for (t of @tasks) { total = total + t }`) is a
+  // plain snapshot loop, not a reconcile_list. Fall through to the plain-loop
+  // path when the body does not render.
+  if (iterIsReactive && forBodyLiftsMarkup(body)) {
     const wrapperVar = genVar('list_wrapper');
     const renderFn = genVar('render_list');
     const createFnVar = genVar('create_item');

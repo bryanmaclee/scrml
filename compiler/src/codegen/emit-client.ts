@@ -4,7 +4,7 @@ import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, collectMapVarNames, fileHasMapUsage } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { rewriteCodeSegments } from "./code-segments.ts";
@@ -982,8 +982,15 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         // a missed transitive case here would only happen if the TAB-time walker
         // returned `hasForStmt: false` when it should have been `true`, which
         // would be a TAB-time bug. The fallback is purely defensive.
+        // GitHub #23 (Peter) — MUST agree with emit-control-flow.ts:emitForStmt:
+        // the reactive list-render lowering (and thus the reconciliation/lift/
+        // deep_reactive chunks) fires ONLY when the for-of body actually `lift`s
+        // markup (render context, SPEC §17.4). A reactive-iterable for-of in a
+        // plain logic body (no `lift`) lowers to a plain snapshot loop and needs
+        // none of these chunks. Gating here keeps the runtime bundle minimal
+        // (no `_scrml_reconcile_list` shipped for a plain-loop-only file).
         const iterIsReactive = iterableHasReactiveRefs(node, fnRegistry);
-        if (iterIsReactive) {
+        if (iterIsReactive && forBodyLiftsMarkup(node.body)) {
           chunks.add("reconciliation");
           chunks.add("lift");
           chunks.add("deep_reactive"); // _scrml_effect_static

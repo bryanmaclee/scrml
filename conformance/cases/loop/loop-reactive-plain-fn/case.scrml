@@ -1,0 +1,15 @@
+${
+    <unitParts> = [{ id: 1, unit: "A1" }, { id: 2, unit: "B2" }]
+    function unitLabelFor(num) {
+        for (let p of @unitParts) {
+            if (p.unit == num) { return p.unit }
+        }
+        return "none"
+    }
+    function addPart() {
+        @unitParts = [...@unitParts, { id: 3, unit: "C3" }]
+    }
+}
+<button id="add" onclick=addPart()>Add</>
+<p id="found">${ unitLabelFor("B2") }</>
+<p id="missing">${ unitLabelFor("C3") }</>

@@ -1,0 +1,17 @@
+{
+  "id": "loop-reactive-plain-fn",
+  "description": "A plain (non-render) function iterating a reactive cell with `for (let p of @unitParts)` is a PLAIN LOOP over the cell's current snapshot — NOT a DOM list-render (GitHub #23 / SPEC §17.4: the list-render form requires a `lift` in the body). unitLabelFor returns the matched field or \"none\"; adding a part re-renders the snapshot-reading interpolations.",
+  "language-version": "1.0",
+  "spec": "§17.4",
+  "rationale": "§17.4 a for-of is a Tier-0 list-render ONLY when its body lifts markup; a for-of in a plain function body iterates the reactive cell's current value and returns a result. #found reads unitLabelFor(\"B2\") -> \"B2\" (matched); #missing reads unitLabelFor(\"C3\") -> \"none\" then, after one add-click appends {id:3,unit:\"C3\"}, re-renders to \"C3\" off the new snapshot.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#add" }],
+    "state": { "unitParts": [{ "id": 1, "unit": "A1" }, { "id": 2, "unit": "B2" }, { "id": 3, "unit": "C3" }] },
+    "domAnchored": [
+      { "selector": "#found", "text": "B2" },
+      { "selector": "#missing", "text": "C3" }
+    ]
+  }
+}

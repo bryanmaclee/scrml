@@ -4,7 +4,7 @@ import { emitLogicNode, emitLogicBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { iterableHasReactiveRefs, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
 
@@ -579,7 +579,22 @@ function _emitForStmtInner(
   // snapshot" unambiguous, so the predicate widening is sound.
   const iterIsReactive = iterableHasReactiveRefs(node, opts?.fnBodyRegistry ?? null);
 
-  if (iterIsReactive) {
+  // GitHub #23 (Peter) — the reactive DOM list-render lowering is RENDER-CONTEXT
+  // gated. Per SPEC §17.4 the list-render form is a for-of whose body `lift`s
+  // markup (`for (item of items) { lift <li/> }`); a for-of WITHOUT `lift`
+  // (§17.4a) is a plain loop. A plain, non-render function that iterates a
+  // reactive cell — `for (let p of @unitParts) { if (p.unit == num) return … }`
+  // — is NOT a list render: it iterates the cell's CURRENT snapshot value and
+  // returns a data result. Routing it to the reactive path emitted DOM code
+  // (`document.createElement`/`_scrml_lift`/`_scrml_reconcile_list`) where a
+  // plain loop was intended (silent exit-0 compile → E-SCOPE-001 / runtime
+  // `appendChild` throw). Gate on `forBodyLiftsMarkup` so the list-render fires
+  // ONLY when the body actually renders; otherwise fall through to the
+  // plain-loop path, which lowers the iterable's `@`-refs to
+  // `_scrml_reactive_get(...)` (the snapshot value) via emitExprField.
+  const bodyIsRender = forBodyLiftsMarkup(node.body);
+
+  if (iterIsReactive && bodyIsRender) {
     // Reactive for/lift path — §6.5.3 with keyed reconciliation
     const wrapperVar = genVar("list_wrapper");
     const renderFn = genVar("render_list");
