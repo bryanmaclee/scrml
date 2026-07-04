@@ -1210,12 +1210,20 @@ function flush() {
  * The element is appended to the nearest [data-scrml-lift-target] ancestor, or
  * document.body as a fallback.
  */
-let _scrml_lift_target = null;
 function _scrml_lift(factoryOrElement) {
   const container = _scrml_lift_target || document.querySelector("[data-scrml-lift-target]") || document.body;
   const el = typeof factoryOrElement === "function" ? factoryOrElement() : factoryOrElement;
   if (el) container.appendChild(el);
 }
+// Shared lift-target ambient — MUST stay INSIDE the 'lift' chunk (runtime-chunks.ts
+// marker = 'function _scrml_lift', the chunk runs to the next marker). Declared AFTER
+// the function so this decl travels WITH the chunk that reads it. In an SPA build the
+// previous chunk is tree-shaken; a decl placed BEFORE the marker vanishes and the
+// first dynamic <each> insert throws "_scrml_lift_target is not defined" (GitHub #19).
+// Module scope (not function scope) is required: generated client code assigns it via
+// a bare _scrml_lift_target = ... (emit-reactive-wiring.ts); _scrml_lift reads it by
+// closure at call-time (after module init, so no TDZ issue).
+let _scrml_lift_target = null;
 
 // ---------------------------------------------------------------------------
 // §6.7.3 Scope-aware cleanup registry

@@ -63,6 +63,26 @@ describe("RUNTIME_CHUNKS", () => {
     expect(RUNTIME_CHUNKS.lift).not.toContain("_scrml_timer_start");
   });
 
+  // GitHub #19 (Peter, peter-19-spa-lift-target-tree-shake): the shared
+  // `let _scrml_lift_target = null;` ambient MUST travel WITH the lift chunk.
+  // The chunk marker is `function _scrml_lift`, so a decl placed on the line
+  // BEFORE the function belongs to the PREVIOUS chunk — which is tree-shaken
+  // out of an SPA/embed build while `lift` is kept, leaving _scrml_lift_target
+  // undeclared. The first dynamic <each> insert then reads it and throws
+  // `_scrml_lift_target is not defined`. Fix: declare it INSIDE the lift chunk
+  // (after the function, still module scope for the generated writers).
+  test("lift chunk contains the _scrml_lift_target ambient declaration (GitHub #19)", () => {
+    expect(RUNTIME_CHUNKS.lift).toContain("function _scrml_lift");
+    expect(RUNTIME_CHUNKS.lift).toContain("let _scrml_lift_target = null;");
+  });
+
+  test("_scrml_lift_target ambient is declared in EXACTLY ONE chunk (no duplication)", () => {
+    const declaringChunks = RUNTIME_CHUNK_ORDER.filter(
+      (name) => (RUNTIME_CHUNKS[name] ?? "").includes("let _scrml_lift_target = null;"),
+    );
+    expect(declaringChunks).toEqual(["lift"]);
+  });
+
   test("scope chunk contains _scrml_register_cleanup and _scrml_destroy_scope", () => {
     expect(RUNTIME_CHUNKS.scope).toContain("_scrml_register_cleanup");
     expect(RUNTIME_CHUNKS.scope).toContain("_scrml_destroy_scope");
