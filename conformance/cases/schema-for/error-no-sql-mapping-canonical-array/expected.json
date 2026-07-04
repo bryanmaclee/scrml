@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-error-no-sql-mapping-canonical-array",
+  "description": "§41.15.8 compile-time rejection — the Doc struct has a field (tags) typed as an ARRAY in the SPEC's CANONICAL postfix `T[]` form (`tags: string[]`; cf. §34 + the `tabs: Tab[]` struct example at SPEC.md:9904). An array has no single scalar SQL column type, so it is rejected with E-SCHEMAFOR-NO-SQL-MAPPING. NOTE (trigger choice): this pins the CANONICAL `T[]` form specifically — the sibling error-no-sql-mapping case uses the heterogeneous-union trigger, and the postfix `T[]` array regressed silently (S236: the type-decl `raw` is tokenizer-JOINED as `string [ ]`, so a strict `endsWith(\"[]\")` in the struct-field type resolver dropped `T[]` to `asIs`, which mis-lowered to a scalar `text` column instead of firing). This case locks the fix so the canonical array form can never again be silently accepted.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.8 normative statement: a struct field whose declared type has no v1.0 SQL mapping (function types, Promise types, foreign-code types, deep-reactive proxy types, ARRAYS, or a non-`| not` union) SHALL emit E-SCHEMAFOR-NO-SQL-MAPPING at the type-system stage (§34). The SPEC's canonical struct-field array form is postfix `T[]` (§34; `tabs: Tab[]` at SPEC.md:9904). Resolution: exclude the field via omit:, OR persist the array via a separate table + FK (deferred to v1.next per OQ-SCH-4).",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-NO-SQL-MAPPING"],
+    "notCodes": []
+  }
+}

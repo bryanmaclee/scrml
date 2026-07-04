@@ -1,0 +1,13 @@
+${
+  import { schemaFor } from 'scrml:data'
+
+  type Doc:struct = {
+    title: string req
+    tags:  string[]
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Doc) }
+  </>
+</program>

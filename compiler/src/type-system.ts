@@ -2583,10 +2583,24 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
     return tAsIs();
   }
 
-  // Array: type[] — conservative: element type lookup then wrap.
-  if (trimmed.endsWith("[]")) {
-    const elementExpr = trimmed.slice(0, -2).trim();
-    return tArray(resolveTypeExpr(elementExpr, typeRegistry));
+  // Array: type[] (postfix, §34 / the SPEC's canonical struct-field array form,
+  // e.g. `tabs: Tab[]`) — conservative: element type lookup then wrap. The
+  // trailing `[]` is matched WHITESPACE-TOLERANTLY: a struct field's type is
+  // read from the type-decl's tokenizer-JOINED `raw` text, which re-serializes
+  // `string[]` as `string [ ]` (space-separated tokens). A strict `endsWith("[]")`
+  // misses that joined form, dropping `T[]` to `asIs` — which then silently
+  // mis-lowers to a scalar SQL column in schemaFor instead of firing
+  // E-SCHEMAFOR-NO-SQL-MAPPING (the array kind is lost). The empty-bracket
+  // requirement (`\[\s*\]`) keeps this from stealing the value-native map
+  // `[K: V]` (non-empty body → matched by the later map branch).
+  {
+    const postfixArray = trimmed.match(/\[\s*\]\s*$/);
+    if (postfixArray) {
+      const elementExpr = trimmed.slice(0, postfixArray.index).trim();
+      if (elementExpr.length > 0) {
+        return tArray(resolveTypeExpr(elementExpr, typeRegistry));
+      }
+    }
   }
 
   // §59.12 — Value-native SET type: `set[K]`. A set is a THIN DESUGAR over the
