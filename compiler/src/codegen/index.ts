@@ -71,7 +71,7 @@ import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } 
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
-import { collectTopLevelLogicStatements, containsSqlOrTransaction, getNodes } from "./collect.ts";
+import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -446,29 +446,59 @@ function computeToolAsyncImportedLocals(
   toolFileAST: unknown,
   files: unknown[],
 ): Set<string> {
+  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>());
+}
+
+/**
+ * The EXPORTED fn names of `fileAST` that are async — memoized + cross-file
+ * TRANSITIVE. A fn is async if it directly does `?{}` / `_{}`, transitively CALLS
+ * such a local fn, OR calls an async fn IMPORTED from another lib. The import
+ * graph is a DAG (cycles are E-IMPORT-002), and `memo` (keyed by filePath,
+ * registered BEFORE recursing) makes it cycle-safe + linear.
+ */
+function asyncExportNamesOf(
+  fileAST: unknown,
+  files: unknown[],
+  memo: Map<string, Set<string>>,
+): Set<string> {
+  const fp = (fileAST as any)?.filePath as string | undefined;
+  if (fp && memo.has(fp)) return memo.get(fp)!;
   const result = new Set<string>();
-  const tf = toolFileAST as any;
+  if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
+  // This file's OWN async imported locals seed its local async-coloring fixpoint.
+  const seed = asyncImportedLocalsOf(fileAST, files, memo);
+  for (const n of collectAsyncFnNamesFromFile(fileAST as never, seed)) result.add(n);
+  return result;
+}
+
+/**
+ * The LOCAL binding names in `fileAST` that bind an ASYNC fn imported from
+ * another `.scrml` lib (recursively resolved via `asyncExportNamesOf`). Used both
+ * as the tool's call-site await-set (§64 / Flag C) and as the cross-import seed
+ * for a db-context library's own async-coloring (W5b #2).
+ */
+function asyncImportedLocalsOf(
+  fileAST: unknown,
+  files: unknown[],
+  memo: Map<string, Set<string>>,
+): Set<string> {
+  const result = new Set<string>();
+  const tf = fileAST as any;
   const imports = (tf?.ast?.imports ?? tf?.imports ?? []) as any[];
   if (!Array.isArray(imports) || imports.length === 0) return result;
-  const toolPath = tf?.filePath as string | undefined;
-  if (!toolPath) return result;
-  const toolDir = dirname(toolPath);
-  const asyncByPath = new Map<string, Set<string>>();
-  const asyncNamesFor = (absSource: string): Set<string> => {
-    let cached = asyncByPath.get(absSource);
-    if (cached) return cached;
-    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
-    cached = srcFile ? collectAsyncFnNamesFromFile(srcFile) : new Set<string>();
-    asyncByPath.set(absSource, cached);
-    return cached;
-  };
+  const filePath = tf?.filePath as string | undefined;
+  if (!filePath) return result;
+  const baseDir = dirname(filePath);
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
     if (!imp.source.endsWith(".scrml")) continue;
-    const asyncNames = asyncNamesFor(resolve(toolDir, imp.source));
+    const absSource = resolve(baseDir, imp.source);
+    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    if (!srcFile) continue;
+    const asyncNames = asyncExportNamesOf(srcFile, files, memo);
     if (asyncNames.size === 0) continue;
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
-    // scrml libs export NAMED bindings only), so only the named arm can bind an
+    // scrml libs export NAMED bindings only), so only the named arm binds an
     // async imported fn. Await-color each named local whose EXPORTED name is
     // async in the resolved source module.
     for (const spec of (imp.specifiers ?? [])) {
@@ -1496,7 +1526,17 @@ export function runCG(input: CgInput): CgOutput {
     // `?{}` to lower and stays on `generateLibraryJs` (the A/B-landed path).
     let additiveLibraryJs: string | null = null;
     if (buildHasToolEntry && isLibraryShapedFile(fileAST)) {
-      const libHasSql = containsSqlOrTransaction(getNodes(fileAST as never) as never);
+      // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
+      // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
+      const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files);
+      // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
+      // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
+      // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with
+      // no `?{}` and no async imports is STAGED (§44.6) and stays on the A/B
+      // `generateLibraryJs` path (routing a sync fn through the server-boundary
+      // transaction `await` would be a SyntaxError).
+      const libInProcess = containsSql(getNodes(fileAST as never) as never)
+        || libAsyncImports.size > 0;
       const toolDepLibCtx: CompileContext = {
         filePath,
         fileAST,
@@ -1519,8 +1559,8 @@ export function runCG(input: CgInput): CgOutput {
         reachabilityRecord: reachabilityRecordInput,
       };
       additiveLibraryJs = codegenStage("emit-library", () =>
-        libHasSql
-          ? generateToolLibraryJs(toolDepLibCtx, errors)
+        libInProcess
+          ? generateToolLibraryJs(toolDepLibCtx, errors, libAsyncImports)
           : generateLibraryJs(toolDepLibCtx)
       ) || null;
     }

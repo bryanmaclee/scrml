@@ -264,3 +264,205 @@ function main(args: string[]): number {
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix-round (S215 /code-review) — async-coloring fixpoint, dropped export shapes,
+// no-`<db src>` reconciliation, transaction routing.
+// ---------------------------------------------------------------------------
+describe("W5b fix-round — async-coloring + export completeness + reconciliation", () => {
+  // (#1) call-graph FIXPOINT — an orchestrator `report()` that CALLS a `?{}`
+  // `loadRows()` (no own `?{}`) is async + awaits it (else `rows` is a Promise).
+  const OR_LIB = `<db src="sqlite:./o.db" tables="items" />
+\${
+export function ensureSchema() {
+  ?{\`CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)\`}.run()
+}
+export function seedItem(nm) {
+  ?{\`INSERT INTO items (name) VALUES (\${nm})\`}.run()
+}
+export function loadRows() {
+  return ?{\`SELECT id, name FROM items\`}.all()
+}
+export function report() {
+  const rows = loadRows()
+  return rows.length
+}
+}`;
+  const OR_TOOL = `<program kind="tool" lang="ts" db="sqlite:./o.db">
+\${ import { ensureSchema, seedItem, report } from "./orlib.scrml" }
+function main(args: string[]): number {
+  ensureSchema()
+  seedItem("a")
+  seedItem("b")
+  const n = report()
+  _={ console.log("report=" + n) }=
+  return 0
+}
+</program>`;
+
+  test("(#1) orchestrator fixpoint — report()→loadRows() async-colored + tool RUNS it", () => {
+    const { result, dist, dir } = compileMultiToDist({ orlib: OR_LIB, ortool: OR_TOOL }, ["ortool", "orlib"]);
+    try {
+      expect(errCodes(result)).toEqual([]);
+      const libJs = readFileSync(join(dist, "orlib.js"), "utf8");
+      // report() has NO own `?{}` but is TRANSITIVELY async → async + awaits loadRows.
+      expect(libJs).toContain("export async function report");
+      expect(libJs).toMatch(/const rows = await loadRows\(\)/);
+      // The tool awaits the transitively-async report().
+      const toolJs = readFileSync(join(dist, "ortool.js"), "utf8");
+      expect(toolJs).toContain("await report()");
+      rmSync(join(dist, "o.db"), { force: true });
+      const run = Bun.spawnSync({ cmd: ["bun", "ortool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.stderr.toString()).toBe("");
+      expect(run.stdout.toString()).toContain("report=2");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  test("(#1b) orchestrator fixpoint — .server.js ss1 report() also awaits loadRows", () => {
+    const { result, dist, dir } = compileMultiToDist({ orlib: OR_LIB, ortool: OR_TOOL }, ["ortool", "orlib"]);
+    try {
+      expect(errCodes(result)).toEqual([]);
+      const serverJs = readFileSync(join(dist, "orlib.server.js"), "utf8");
+      expect(serverJs).toContain("export async function report");
+      expect(serverJs).toMatch(/const rows = await loadRows\(\)/);
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  // (#2) CROSS-IMPORT async seed — a lib fn calling an async fn imported from
+  // ANOTHER lib is async + awaits it (else `fetchRow(id).name` → `x:undefined`),
+  // and the tool awaits the (transitively-cross-import-async) lib fn end-to-end.
+  test("(#2) cross-import async seed — label() calls imported async fetchRow → runs", () => {
+    const OTHER = `<db src="sqlite:./x.db" tables="rows" />
+\${
+export function ensureX() { ?{\`CREATE TABLE IF NOT EXISTS rows (id INTEGER PRIMARY KEY, name TEXT)\`}.run() }
+export function seedX(nm) { ?{\`INSERT INTO rows (name) VALUES (\${nm})\`}.run() }
+export function fetchRow(id) { return ?{\`SELECT id, name FROM rows WHERE id = \${id}\`}.get() }
+}`;
+    const DEP = `\${
+import { fetchRow } from "./other.scrml"
+export function label(id) {
+  const r = fetchRow(id)
+  return "x:" + r.name
+}
+}`;
+    const T2 = `<program kind="tool" lang="ts" db="sqlite:./x.db">
+\${ import { ensureX, seedX } from "./other.scrml" }
+\${ import { label } from "./dep.scrml" }
+function main(args: string[]): number {
+  ensureX()
+  seedX("alpha")
+  const s = label(1)
+  _={ console.log("label=" + s) }=
+  return 0
+}
+</program>`;
+    const { result, dist, dir } = compileMultiToDist({ other: OTHER, dep: DEP, t2: T2 }, ["t2", "dep", "other"]);
+    try {
+      expect(errCodes(result)).toEqual([]);
+      const depJs = readFileSync(join(dist, "dep.js"), "utf8");
+      expect(depJs).toContain("export async function label");
+      expect(depJs).toContain("await fetchRow(");
+      expect(depJs).toContain('from "./other.js"'); // .scrml → .js rewritten
+      const t2Js = readFileSync(join(dist, "t2.js"), "utf8");
+      expect(t2Js).toContain("await label(");
+      rmSync(join(dist, "x.db"), { force: true });
+      const run = Bun.spawnSync({ cmd: ["bun", "t2.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.stderr.toString()).toBe("");
+      expect(run.stdout.toString()).toContain("label=x:alpha");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  // (#3) a `?{}`-init export const is FAIL-CLOSED (E-CG-006), never silently
+  // dropped (the parser splits it; its `.get()`/`.all()` accessor is lost).
+  test("(#3) `?{}`-init export const → E-CG-006 fail-closed (not a silent drop)", () => {
+    const LIB = `<db src="sqlite:./c.db" tables="items" />
+\${
+export function ensureC() { ?{\`CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY)\`}.run() }
+export const total = ?{\`SELECT COUNT(*) AS c FROM items\`}.get().c
+}`;
+    const TOOL = `<program kind="tool" lang="ts" db="sqlite:./c.db">
+\${ import { ensureC, total } from "./clib.scrml" }
+function main(args: string[]): number { _={ console.log(total) }= return 0 }
+</program>`;
+    const { result, dir } = compileMultiToDist({ clib: LIB, ctool: TOOL }, ["ctool", "clib"]);
+    try {
+      expect(errCodes(result)).toContain("E-CG-006");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  // (#4) an exported enum is emitted WITH `export` so a consumer resolves it.
+  test("(#4) exported `type Status:enum` → `export const Status` in the lib module", () => {
+    const LIB = `<db src="sqlite:./e.db" tables="items" />
+\${
+export type Status:enum = { Open, Closed }
+export function ensureE() { ?{\`CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY)\`}.run() }
+export function countE() { const r = ?{\`SELECT COUNT(*) AS c FROM items\`}.get() return r.c }
+}`;
+    const TOOL = `<program kind="tool" lang="ts" db="sqlite:./e.db">
+\${ import { Status, ensureE, countE } from "./elib.scrml" }
+function main(args: string[]): number {
+  ensureE()
+  const c = countE()
+  _={ console.log("status=" + Status.Open + " c=" + c) }=
+  return 0
+}
+</program>`;
+    const { result, dist, dir } = compileMultiToDist({ elib: LIB, etool: TOOL }, ["etool", "elib"]);
+    try {
+      expect(errCodes(result)).toEqual([]);
+      const libJs = readFileSync(join(dist, "elib.js"), "utf8");
+      expect(libJs).toContain("export const Status = Object.freeze(");
+      rmSync(join(dist, "e.db"), { force: true });
+      const run = Bun.spawnSync({ cmd: ["bun", "etool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.stderr.toString()).toBe("");
+      expect(run.stdout.toString()).toContain("status=Open c=0");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  // (#5) a `?{}` library with NO `<db src>` routed in-process fails LOUD
+  // (E-SQL-009), NOT a silent `new SQL(":memory:")` (empty-db bad output).
+  test("(#5) `?{}` lib with no `<db src>` in a tool build → E-SQL-009 loud (not silent :memory:)", () => {
+    const LIB = `\${
+export function countThings() {
+  const r = ?{\`SELECT COUNT(*) AS c FROM things\`}.get()
+  return r.c
+}
+}`;
+    const TOOL = `<program kind="tool" lang="ts">
+\${ import { countThings } from "./nodblib.scrml" }
+function main(args: string[]): number { const c = countThings() _={ console.log(c) }= return 0 }
+</program>`;
+    const { result, dir } = compileMultiToDist({ nodblib: LIB, ndtool: TOOL }, ["ndtool", "nodblib"]);
+    try {
+      expect(errCodes(result)).toContain("E-SQL-009");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+
+  // (#6) a `<db src>` library with NO `?{}` (a pure/`fn`-only lib that still
+  // declares a db context) does NOT crash routing — it stays on generateLibraryJs
+  // (no async coloring needed) and the tool runs its pure fn.
+  test("(#6) `<db src>` lib with no `?{}` — no crash, pure fn callable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "w5b-nosql-"));
+    const dist = join(dir, "dist");
+    mkdirSync(dist, { recursive: true });
+    const dbFile = join(dir, "acct.db");
+    const db = new Database(dbFile);
+    db.run("CREATE TABLE acct (id INTEGER PRIMARY KEY)");
+    db.close();
+    writeFileSync(join(dir, "aclib.scrml"), `<db src="${dbFile}" tables="acct" />
+\${
+export fn label(n) { return "acct#" + n }
+}`);
+    writeFileSync(join(dir, "actool.scrml"), `<program kind="tool" lang="ts" db="${dbFile}">
+\${ import { label } from "./aclib.scrml" }
+function main(args: string[]): number { _={ console.log(label(7)) }= return 0 }
+</program>`);
+    try {
+      const result = compileScrml({ inputFiles: [join(dir, "actool.scrml"), join(dir, "aclib.scrml")], write: true, outputDir: dist, validateEmit: true, log: () => {} });
+      expect(errCodes(result)).toEqual([]);
+      const run = Bun.spawnSync({ cmd: ["bun", "actool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.stderr.toString()).toBe("");
+      expect(run.stdout.toString()).toContain("acct#7");
+    } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+  });
+});

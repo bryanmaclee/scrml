@@ -474,6 +474,29 @@ export function containsSqlOrTransaction(node: unknown): boolean {
 }
 
 /**
+ * W5b (S239) — the SQL-ONLY sibling of `containsSqlOrTransaction`: true iff the
+ * subtree contains a `?{}` SQL block (`sql` / `sql-ref`), EXCLUDING a
+ * `<transaction>` block. The in-process library routing gate (codegen/index.ts)
+ * and per-fn skip (emit-tool.ts) use this so a `<transaction>`-ONLY library — a
+ * still-STAGED shape (§44.6 / SPEC-ISSUE-018, no async-coloring seed) — does NOT
+ * route to the in-process `?{}` emit, where a sync fn + injected transaction
+ * `await` would be a SyntaxError.
+ */
+export function containsSql(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some((child) => containsSql(child));
+  const n = node as Record<string, unknown>;
+  const k = n.kind;
+  if (k === "sql" || k === "sql-ref") return true;
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    const v = n[key];
+    if (v && typeof v === "object" && containsSql(v)) return true;
+  }
+  return false;
+}
+
+/**
  * Determine whether an AST node is server-only and must NOT be emitted to
  * client JavaScript output.
  *

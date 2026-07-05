@@ -3,6 +3,7 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
+import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -643,14 +644,18 @@ function emitModuleValueExportLines(
   const constLines: string[] = [];
   const fnBlocks: string[] = [];
 
-  // W5b (S239, §44.7.1 / D5 GENERALIZE) — the names of this module's exported
-  // db fns (their body does `?{}` SQL / a transaction ANYWHERE). Consumed as the
-  // `serverFnNames` await-set so an in-process db fn calling another awaits it,
-  // and to force the `async` prefix (a `?{}` lowering injects `await`).
-  const dbFnNames = new Set<string>();
-  for (const [nm, fnNode] of fnDeclByName) {
-    if (Array.isArray(fnNode.body) && containsSqlOrTransaction(fnNode.body)) dbFnNames.add(nm);
-  }
+  // W5b (S239, §44.7.1 / D5 GENERALIZE) — async-coloring for the value exports:
+  // a FIXPOINT over the module's exported-fn call graph (shared with the tool-dep
+  // `generateToolLibraryJs` — emit-library-shared.computeAsyncFnNames), seeded by
+  // direct `?{}` / `_{}` bodies. A fn that DIRECTLY does `?{}` SQL, OR that
+  // transitively CALLS one (an orchestrator `report()` calling a `?{}`-doing
+  // `loadRows()`), is `async` and awaits its async callees — else the callee's
+  // Promise leaks un-awaited (`rows` is a Promise, `rows.length` is undefined).
+  const _sourceText = ((fileAST as any)?._sourceText ?? null) as string | null;
+  const asyncFnNames = computeAsyncFnNames(
+    Array.from(fnDeclByName.values()) as any[],
+    _sourceText,
+  );
 
   for (const logic of logicBlocks) {
     for (const stmt of (logic.body ?? [])) {
@@ -685,49 +690,28 @@ function emitModuleValueExportLines(
         if (isAlreadyDeclared(name)) continue;
         const fnNode = fnDeclByName.get(name);
         if (!fnNode || !Array.isArray(fnNode.body)) continue;
-        const isDbFn = dbFnNames.has(name);
-        // W5b / D5 GENERALIZE — a db fn (its body does `?{}` SQL / a transaction)
-        // emits as a REAL IN-PROCESS callable: the `?{}` lowers SERVER-boundary to
-        // `await _scrml_sql\`…\`` against the module's OWN connection (the same
-        // `_scrml_sql` handle the route handlers declare above), and the fn is
-        // `async` (the `?{}` lowering injects `await`). A server/in-process
-        // consumer (a `<program>` server fn OR a `kind="tool"`) importing this
-        // module by-name (`import { countItems } from "./x.server.js"`) then calls
-        // it directly — NO HTTP boundary, NO `const x = null` client stub. This is
-        // the server-half of W5b (the tool-half is emit-tool.ts generateToolLibraryJs);
-        // the browser client still fetches it over the retained HTTP route (§12.6).
+        const isAsync = asyncFnNames.has(name);
+        // W5b / D5 GENERALIZE — an ASYNC fn (its body does `?{}` SQL / `_{}`, OR it
+        // transitively CALLS one) emits as a REAL IN-PROCESS callable: the `?{}`
+        // lowers SERVER-boundary to `await _scrml_sql\`…\`` against the module's OWN
+        // connection, and it awaits its async peers (the fixpoint above). A server /
+        // in-process consumer importing this module by-name
+        // (`import { countItems } from "./x.server.js"`) calls it directly — NO HTTP
+        // boundary, NO `const x = null` client stub. The `_scrml_sql` handle is
+        // declared by the §44.2 Bug-3a injection, which scans the WHOLE assembled
+        // body (these ss1 lines INCLUDED — they are appended before that scan), so
+        // the handle is present whether or not a route handler also references it.
+        // The browser client still fetches it over the retained HTTP route (§12.6).
+        // This is the server-half of W5b (the tool-half is generateToolLibraryJs).
         //
-        // A NON-SQL server-only-body fn (a server-context `meta` / env / import
-        // operation, not a `?{}`) is out of W5b scope — it keeps its route handler
-        // and is skipped here (emitting a synchronous stub would null-out its
-        // resource access).
-        if (!isDbFn && bodyHasServerOnlyNode(fnNode.body)) continue;
-        const params: any[] = fnNode.params ?? [];
-        const paramSigs = params.map((p, i) => paramSignature(p, i));
-        const generatorStar: string = fnNode.isGenerator ? "*" : "";
-        const asyncPrefix: string = (isDbFn || fnNode.isAsync) ? "async " : "";
-        const declaredNames = new Set<string>(
-          params.map((p) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
-        );
-        // A db fn lowers SERVER-boundary (the in-process `?{}`→`await _scrml_sql`
-        // lowering) with the db-fn await-set; a pure fn lowers CLIENT-boundary
-        // (a synchronous body — server-boundary `match`-in-async-IIFE would make a
-        // non-async fn `await`, a SyntaxError; see fn-doc rationale).
-        const bodyCodes = emitFnShortcutBody(
-          fnNode.body,
-          isDbFn
-            ? { boundary: "server", serverFnNames: dbFnNames, declaredNames, insideFunctionBody: true }
-            : { boundary: "client", declaredNames, insideFunctionBody: true },
-          fnNode.fnKind,
-          fnNode.hasReturnType,
-        );
-        const out: string[] = [];
-        out.push(`export ${asyncPrefix}function${generatorStar} ${name}(${paramSigs.join(", ")}) {`);
-        for (const code of bodyCodes) {
-          for (const line of code.split("\n")) out.push(`  ${line}`);
-        }
-        out.push(`}`);
-        fnBlocks.push(out.join("\n"));
+        // A NON-async server-only-body fn (a server-context `meta` / env / import,
+        // OR a `<transaction>` — STAGED §44.6, not `?{}`-colored) is out of scope:
+        // it keeps its route handler and is skipped here (a synchronous stub would
+        // null-out its resource access or carry an un-awaitable body).
+        if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
+        // Shared per-fn emitter (emit-library-shared) — same async-coloring +
+        // boundary rule as the tool-dep `generateToolLibraryJs`.
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames }));
         continue;
       }
 
