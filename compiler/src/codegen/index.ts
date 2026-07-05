@@ -58,7 +58,7 @@ import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
-import { generateToolJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
+import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
@@ -71,7 +71,7 @@ import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } 
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
-import { collectTopLevelLogicStatements } from "./collect.ts";
+import { collectTopLevelLogicStatements, containsSqlOrTransaction, getNodes } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -1486,8 +1486,17 @@ export function runCG(input: CgInput): CgOutput {
     // tool's ES import (`import { fn } from "./dep.js"`) resolves. The two never
     // collide on disk (`<base>.js` vs `<base>.client.js`). A tool-free build
     // never enters this branch, so browser-app output is byte-identical.
+    //
+    // W5b (S239, §44.7.1) — a DB-CONTEXT library (a `?{}` fn resolving against
+    // the file's OWN `<db src>`) routes to `generateToolLibraryJs`: the tool is
+    // an in-process monolith with NO client boundary, so its imported db fn runs
+    // IN-PROCESS (`await _scrml_sql\`…\``, own connection) rather than as the
+    // client-facing HTTP-route + null-stub `generateLibraryJs` emits for a
+    // browser consumer. A pure-fn / `<foreign lang>`-only tool-dep lib has no
+    // `?{}` to lower and stays on `generateLibraryJs` (the A/B-landed path).
     let additiveLibraryJs: string | null = null;
     if (buildHasToolEntry && isLibraryShapedFile(fileAST)) {
+      const libHasSql = containsSqlOrTransaction(getNodes(fileAST as never) as never);
       const toolDepLibCtx: CompileContext = {
         filePath,
         fileAST,
@@ -1510,7 +1519,9 @@ export function runCG(input: CgInput): CgOutput {
         reachabilityRecord: reachabilityRecordInput,
       };
       additiveLibraryJs = codegenStage("emit-library", () =>
-        generateLibraryJs(toolDepLibCtx)
+        libHasSql
+          ? generateToolLibraryJs(toolDepLibCtx, errors)
+          : generateLibraryJs(toolDepLibCtx)
       ) || null;
     }
 
