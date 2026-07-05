@@ -14855,9 +14855,16 @@ without `export`).
   server function OR a `kind="tool"` (§64.5.1) — and the §12.6 HTTP-route +
   client fetch-stub for a browser consumer (the client cannot evaluate
   `_scrml_sql`). A pure-fn file that contains `?{}` but declares NO `<db src>`
-  block SHALL be a compile error (E-SQL-009, §44.7.1) — it has no connection
-  to resolve against, and a silent `:memory:` fallback would return empty
-  results at runtime.
+  block SHALL be a compile error (E-SQL-009, §44.7.1) — it has no connection to
+  resolve against, and a silent `new SQL(":memory:")` fallback would return empty
+  results at runtime. **Enforcement status (S239):** the in-process emit path
+  (`generateToolLibraryJs`, a db-context lib routed for a `kind="tool"` /
+  server consumer) FIRES E-SQL-009 here. The general typer-level gate — the same
+  hard error for the browser / `--mode library` emit paths, where a `?{}`-with-
+  no-`<db src>` file currently still emits the `:memory:` fallback — is a KNOWN
+  GAP tracked as `g-e-sql-009-no-db-src-not-fired` (a separate arc; wiring the
+  typer gate is corpus-breakage-risky and out of the W5b emit scope). The SPEC
+  states the SHALL normatively; the browser-path enforcement is pending.
 
 ### 21.6 Error Codes
 
@@ -22914,7 +22921,9 @@ SQL-resolution scope for any `?{}` inside the block, equivalent to a
 - A `<program db=>` ancestor in the importing page SHALL NOT override the
   pure-fn module's own `<db>` context — the module owns its connection.
 - A pure-fn file that contains `?{}` AND does not declare a `<db>` block
-  SHALL be a compile error (E-SQL-009).
+  SHALL be a compile error (E-SQL-009). Enforced in the in-process emit path
+  (`generateToolLibraryJs`, S239); the browser / `--mode library` typer-gate
+  enforcement is a KNOWN GAP (`g-e-sql-009-no-db-src-not-fired`) — see §21.5.1.
 - The module OWNS its connection: each imported module-with-db-context gets
   its OWN `_scrml_sql` handle built from its OWN `<db src>` (D2 — per-module
   handle). A `kind="tool"` (or `<program>`) importing N such libraries that
