@@ -553,7 +553,10 @@ export function generateToolLibraryJs(
         const m = raw.match(/^\s*export\s+(?:const|let)\s+[A-Za-z_$][\w$]*\s*=\s*([\s\S]+)$/);
         if (!m) continue;
         const init = m[1].trim();
-        if (!init || init.startsWith("<")) continue;
+        // Skip a markup-valued const (a component, mount-time) and a `?{}`-init
+        // const (a top-level server-only SQL read — not a plain value binding;
+        // out of the W5b `?{}`-fn scope).
+        if (!init || init.startsWith("<") || init.includes("?{")) continue;
         const initNode = parseExprToNode(init, filePath, 0);
         const lowered = emitExprField(initNode as never, init, { mode: "client" } as never);
         bodyLines.push(`export ${kind} ${name} = ${lowered};`);
