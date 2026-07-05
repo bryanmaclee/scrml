@@ -93,6 +93,83 @@ function collectGuardedExprs(node: unknown, out: ASTNode[]): void {
 }
 
 /**
+ * §23.6 (S238) — collect the inline value-returning `_={ … }=` foreign-code
+ * nodes reachable from a library logic block. These are attached as a
+ * `foreignNode` on the enclosing `const`/`let`-decl or `return-stmt` (the
+ * §23.2.2 attachment, mirroring `sqlNode` for `?{}`). The library whole-block
+ * slicer below emits raw source text, so without lowering the `_={ … }=` opener
+ * would leak into the importable `.js` verbatim (invalid) rather than emitting
+ * the §23.2.4a async-IIFE. We collect each attached foreign node here and splice
+ * its emit-logic `case "foreign"` lowering over its raw span — exactly as the
+ * guarded-expr path splices `!{}` lowerings. The `_{}` lang resolves against the
+ * file's top-level `<foreign lang=…>` (§23.6; stamped by the typer).
+ *
+ * Only the value-returning ATTACHED form is collected: a BARE `kind:"foreign"`
+ * statement is E-FOREIGN-004 (rejected upstream — never reaches clean codegen).
+ */
+function collectForeignNodes(node: unknown, out: ASTNode[]): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) collectForeignNodes(child, out);
+    return;
+  }
+  const n = node as ASTNode;
+  const fn = n.foreignNode as ASTNode | undefined;
+  if (fn && fn.kind === "foreign") out.push(fn);
+  for (const k of Object.keys(n)) {
+    if (k === "foreignNode") continue; // already captured above
+    const v = (n as Record<string, unknown>)[k];
+    if (v && typeof v === "object") collectForeignNodes(v, out);
+  }
+}
+
+/** True when `node`'s subtree contains an attached `foreignNode` (§23.2.2). */
+function subtreeHasForeign(node: unknown): boolean {
+  const found: ASTNode[] = [];
+  collectForeignNodes(node, found);
+  return found.length > 0;
+}
+
+/**
+ * §23.6 (S238) — locate the `fn`/`function` keyword offset of every
+ * `function-decl` whose body holds an inline `_={ … }=` foreign node. The
+ * lowered foreign IIFE injects a boundary `await` (§23.2.4a), so these exports
+ * must emit `async`. Returns `{ start, keywordLen }` where `start` is the
+ * keyword offset in `sourceText` and `keywordLen` is 2 (`fn`) or 8 (`function`)
+ * — the caller splices the keyword to `async function`.
+ */
+function collectAsyncFnKeywordTargets(
+  logicBody: unknown,
+  sourceText: string,
+): Array<{ start: number; keywordLen: number }> {
+  const out: Array<{ start: number; keywordLen: number }> = [];
+  const seen = new Set<number>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) walk(c); return; }
+    const n = node as ASTNode;
+    if (n.kind === "function-decl" && subtreeHasForeign(n)) {
+      const sp = n.span as Span | undefined;
+      if (sp && typeof sp.start === "number" && !seen.has(sp.start)) {
+        // The function-decl span starts at the `fn`/`function` keyword (the
+        // `export`/`pure`/`server` modifiers sit BEFORE it — see §21.5.1). An
+        // already-`async` keyword needs no rewrite.
+        const head = sourceText.slice(sp.start, sp.start + 9);
+        if (/^fn\b/.test(head)) { out.push({ start: sp.start, keywordLen: 2 }); seen.add(sp.start); }
+        else if (/^function\b/.test(head)) { out.push({ start: sp.start, keywordLen: 8 }); seen.add(sp.start); }
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = (n as Record<string, unknown>)[k];
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(logicBody);
+  return out;
+}
+
+/**
  * W5b (g-library-mode-sql-no-db-context) — collect the source-text spans of
  * every function declaration whose body carries a `?{}` SQL block / transaction
  * in a library file's logic block.
@@ -163,6 +240,7 @@ function pruneServerFnsAndLowerGuarded(
   blockStart: number,
   logicBody: unknown,
   sourceText: string,
+  errors: CGError[],
 ): string {
   const removals = collectSqlFnRemovalRanges(logicBody, sourceText);
 
@@ -190,6 +268,62 @@ function pruneServerFnsAndLowerGuarded(
     );
     if (lowered == null) continue;
     ops.push({ start: sp.start, end: sp.end, text: lowered });
+  }
+
+  // §23.6 (S238) — lower each inline value-returning `_={ … }=` foreign block to
+  // its §23.2.4a async-IIFE (emit-logic `case "foreign"`) and splice it over the
+  // raw `_={ … }=` span. Skip any foreign node inside a pruned server-fn span
+  // (that fn's whole body lives in `.server.js`, where emit-server lowers the
+  // foreign node itself — lowering here would splice into removed text). The
+  // lowered IIFE is clean JS (no scrml `not`/`is`/`fn`/`type` keywords) so it
+  // survives the downstream whole-block regex-transform pipeline.
+  //
+  // The lowering INJECTS the §23.2.4a boundary `await`, so the enclosing library
+  // export MUST become `async` (a `fn` emitted plain would carry a top-level
+  // `await` in a non-async function — invalid JS). We collect the fn-keyword
+  // offset of every function whose body holds a foreign node and rewrite its
+  // `fn`/`function` keyword to `async function` (the whole-block path's later
+  // `fn`→`function` regex leaves `async function` alone).
+  const foreignNodes: ASTNode[] = [];
+  collectForeignNodes(logicBody, foreignNodes);
+  const insideRemoval = (start: number, end: number): boolean =>
+    removals.some((r) => start >= r.start && end <= r.end);
+  // E-FOREIGN-006 crossing-shadow sink (§23.2.4a) — a dedicated narrow sink,
+  // drained into `errors` after lowering. Without it, emit-logic `case "foreign"`
+  // silently SKIPS the shadow check (`if (shadowed.length > 0 && sink)`) and
+  // emits a redeclaring IIFE, surfacing later as the misleading
+  // E-CODEGEN-INVALID-LOGIC "compiler defect". Mirrors emit-server's wiring.
+  const foreignCrossingErrors: CGError[] = [];
+  for (const f of foreignNodes) {
+    const sp = f.span as Span | undefined;
+    if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+    if (insideRemoval(sp.start, sp.end)) continue;
+    const lowered = emitLogicNode(
+      f as Parameters<typeof emitLogicNode>[0],
+      { foreignCrossingErrors } as unknown as Parameters<typeof emitLogicNode>[1],
+    );
+    if (lowered == null) continue;
+    // Drop a trailing `;` — the foreign node span sits mid-expression (the RHS of
+    // a `const`/`let` decl or a `return`), so a statement terminator here would
+    // split the surrounding statement.
+    ops.push({ start: sp.start, end: sp.end, text: lowered.replace(/;\s*$/, "") });
+  }
+  // Drain the crossing-shadow diagnostics into the live error stream. When a
+  // shadow fired, emit-logic returned a `null /* E-FOREIGN-006 … */` sentinel
+  // (spliced above) so the surrounding statement stays well-formed while the
+  // named error stops the build.
+  for (const e of foreignCrossingErrors) errors.push(e);
+
+  // Async-mark every function whose body holds a (non-removed) foreign node.
+  if (foreignNodes.length > 0) {
+    const asyncSpliced = new Set<number>();
+    for (const fn of collectAsyncFnKeywordTargets(logicBody, sourceText)) {
+      if (insideRemoval(fn.start, fn.start + fn.keywordLen)) continue;
+      if (asyncSpliced.has(fn.start)) continue;
+      asyncSpliced.add(fn.start);
+      // `fn X` → `async function X`; `function X` → `async function X`.
+      ops.push({ start: fn.start, end: fn.start + fn.keywordLen, text: "async function" });
+    }
   }
 
   if (ops.length === 0) return blockSource;
@@ -317,6 +451,7 @@ export function generateLibraryJs(
           logicSpan.start,
           logic.body,
           sourceText,
+          errors,
         );
         // Strip the ${ prefix and } suffix
         if (blockText.startsWith("${")) blockText = blockText.slice(2);

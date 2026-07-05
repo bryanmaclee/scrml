@@ -80,7 +80,7 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
-import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn } from "./tool-program.ts";
+import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes } from "./tool-program.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -19246,6 +19246,121 @@ function resolveProgramLang(fileAST: FileAST): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// §23.6 (S238) — Library Foreign-Language Declaration `<foreign lang="…">`.
+//
+// A pure-fn library file (§21.5 — `export` fns, NO top-level `<program>`) MAY
+// declare the foreign-code language for its `_{}` blocks with a top-level,
+// self-closing `<foreign lang="ts" />` (the `lang=` sibling of the §44.7.1
+// module-with-db-context `<db src>`). This CLOSES E-FOREIGN-003 for the library
+// shape: without an ancestor `<program lang>`, a library `_{}` had no `lang=`
+// to resolve. The block parses generically as a top-level `markup` node with
+// `tag: "foreign"` (no new parser code); these helpers READ it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `<foreign lang=…>` markup node in the file (top-level + any nested).
+ * Deep-walk — mirrors `findAllProgramNodes`. The nested walk lets
+ * E-FOREIGN-LANG-IN-PROGRAM catch a `<foreign lang>` an author placed INSIDE a
+ * `<program>` (not just as a top-level sibling). Matches `kind:"markup"` +
+ * `tag:"foreign"` — the `_{}` block (`kind:"foreign"`, no `tag`) is NOT matched.
+ */
+function findForeignLangNodes(fileAST: FileAST): ASTNodeLike[] {
+  const out: ASTNodeLike[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    const n = node as ASTNodeLike;
+    if (n.kind === "markup" && n.tag === "foreign") out.push(n);
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (Array.isArray(v)) for (const c of v) walk(c);
+      else if (v && typeof v === "object") walk(v);
+    }
+  };
+  for (const n of getToolNodes(fileAST) as ASTNodeLike[]) walk(n);
+  return out;
+}
+
+/** Read the `lang=` string of a `<foreign>` node (bare + string-literal shapes). */
+function foreignLangAttrValue(node: ASTNodeLike): string | null {
+  const attrs = node.attrs as Array<{ name: string; value: unknown }> | undefined;
+  if (!attrs) return null;
+  const langAttr = attrs.find((a) => a.name === "lang");
+  if (!langAttr) return null;
+  const v = langAttr.value as unknown;
+  let raw: string | null = null;
+  if (typeof v === "string") raw = v;
+  else if (v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string") {
+    raw = (v as { value: string }).value;
+  }
+  return raw === null ? null : raw.replace(/^["']|["']$/g, "").trim();
+}
+
+/**
+ * §23.6 — resolve the file's library foreign-language context: the `lang=` of
+ * the FIRST top-level `<foreign lang=…>` block, or null when the file declares
+ * none. Consulted by the `_{}` lang gate (below) as the library complement to
+ * `resolveProgramLang` — exactly as §44.7.1's `<db src>` resolves `?{}` without
+ * a `<program db>`.
+ */
+function resolveForeignLibraryLang(fileAST: FileAST): string | null {
+  const foreignNodes = findForeignLangNodes(fileAST);
+  if (foreignNodes.length === 0) return null;
+  return foreignLangAttrValue(foreignNodes[0]);
+}
+
+/**
+ * §23.6.4 — validate the top-level `<foreign lang=…>` declaration:
+ *   - E-FOREIGN-LANG-DUPLICATE — more than one top-level `<foreign lang>` (a
+ *     file has ONE foreign-language context, like ONE `<db src>` §44.7.1).
+ *   - E-FOREIGN-LANG-IN-PROGRAM — `<foreign lang>` in a file that ALSO declares
+ *     a top-level `<program>`; the two do NOT stack (§23.6.1) — a program file
+ *     carries `lang=` on `<program lang=>` (§23.2.1).
+ * No-op when the file declares no top-level `<foreign lang>`.
+ */
+function checkForeignLangLibraryDecl(fileAST: FileAST, errors: TSError[], fileSpan: Span): void {
+  const foreignNodes = findForeignLangNodes(fileAST);
+  if (foreignNodes.length === 0) return;
+
+  // E-FOREIGN-LANG-IN-PROGRAM — `<foreign lang>` in a file that ALSO declares a
+  // top-level `<program>`. The whole construct is misplaced here (lang goes on
+  // `<program lang=>`, §23.2.1), so fire on each block and do NOT also emit the
+  // library-only DUPLICATE — IN-PROGRAM is the single actionable diagnostic.
+  const prog = findTopLevelProgramNode(fileAST);
+  if (prog) {
+    for (const fn of foreignNodes) {
+      errors.push(new TSError(
+        "E-FOREIGN-LANG-IN-PROGRAM",
+        "E-FOREIGN-LANG-IN-PROGRAM: a `<foreign lang=…>` block is not valid in a file that " +
+        "also declares a top-level `<program>`. The two do not stack (§23.6.1) — declare the " +
+        "foreign-code language on the `<program lang=…>` attribute (§23.2.1) and remove the " +
+        "`<foreign lang=…>` block. `<foreign lang>` is the library-file surface (a file with " +
+        "`export` fns and NO `<program>`).",
+        spanOfNode(fn, fileSpan),
+      ));
+    }
+    return;
+  }
+
+  // E-FOREIGN-LANG-DUPLICATE — a library file has ONE foreign-language context.
+  // Fire on each block PAST the first (the first is the resolved context; each
+  // surplus is the surplus declaration to remove).
+  if (foreignNodes.length > 1) {
+    for (const extra of foreignNodes.slice(1)) {
+      errors.push(new TSError(
+        "E-FOREIGN-LANG-DUPLICATE",
+        "E-FOREIGN-LANG-DUPLICATE: more than one top-level `<foreign lang=…>` block " +
+        "in this file. A file has ONE foreign-language context (like ONE `<db src>`, " +
+        "§44.7.1) — keep a single `<foreign lang=…>` and remove the others (§23.6).",
+        spanOfNode(extra, fileSpan),
+      ));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §23.3 WASM call-char sigils — fail-closed Nominal recognizer (E-WASM-NOMINAL).
 //
 // SPEC §23.3 (call-char sigils `r{}`/`c{}`/`z{}` + the `extern` foreign-function
@@ -20754,7 +20869,16 @@ function processFile(
     // §64 — standalone-tool validation (E-TOOL-001..004). No-op unless a
     // <program> declares `kind=`.
     checkToolProgram(fileAST, errors, fileSpan);
-    const _foreignProgramLang = resolveProgramLang(fileAST);
+    // §23.6 (S238) — validate a top-level `<foreign lang=…>` library declaration
+    // (E-FOREIGN-LANG-DUPLICATE / E-FOREIGN-LANG-IN-PROGRAM). No-op when absent.
+    checkForeignLangLibraryDecl(fileAST, errors, fileSpan);
+    // Resolve the `_{}` foreign-lang context: the ancestor `<program lang=>`
+    // (§23.2.1) OR, for a §21.5 library file with no `<program>`, the top-level
+    // `<foreign lang=…>` (§23.6). Program wins if both are present — but that
+    // coexistence already fired E-FOREIGN-LANG-IN-PROGRAM above, and resolving
+    // to the program lang here keeps `_{}` from double-firing E-FOREIGN-003.
+    const _programLang = resolveProgramLang(fileAST);
+    const _foreignProgramLang = _programLang ?? resolveForeignLibraryLang(fileAST);
     // §23.2.4 (amended S238) — a bare `_{}` in a top-level `function`/`main`
     // body of a kind="tool" program is its host-I/O boundary; admit it (no
     // E-FOREIGN-004). Scoped to tool programs; empty otherwise.
