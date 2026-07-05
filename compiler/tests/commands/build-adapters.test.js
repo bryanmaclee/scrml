@@ -352,6 +352,16 @@ describe("discoverServerRoutes", () => {
     expect(result[0].routeNames).toContain("_scrml_route_get_users");
   });
 
+  test("discovers __ri_route_* inferred server-function routes (regression: these lack the _scrml_ prefix and were silently dropped → server functions 404 in a production build)", () => {
+    writeFileSync(
+      join(tmpDir, "index.server.js"),
+      `export const __ri_route_authenticate_1 = { path: "/_scrml/__ri_route_authenticate_1", method: "POST", handler: () => {} };`
+    );
+    const result = discoverServerRoutes(tmpDir);
+    expect(result).toHaveLength(1);
+    expect(result[0].routeNames).toContain("__ri_route_authenticate_1");
+  });
+
   test("ignores non-server.js files", () => {
     writeFileSync(join(tmpDir, "index.client.js"), "export const x = 1;");
     writeFileSync(join(tmpDir, "index.html"), "<html></html>");
@@ -374,6 +384,14 @@ describe("generateServerEntry", () => {
       { filename: "app.server.js", routeNames: ["_scrml_route_home"] },
     ]);
     expect(content).toContain('import { _scrml_route_home } from "./app.server.js"');
+  });
+
+  test("wires __ri_route_* server-function routes into the server entry (regression)", () => {
+    const content = generateServerEntry([
+      { filename: "index.server.js", routeNames: ["__ri_route_authenticate_1"] },
+    ]);
+    expect(content).toContain('import { __ri_route_authenticate_1 } from "./index.server.js"');
+    expect(content).toContain("__ri_route_authenticate_1");
   });
 });
 

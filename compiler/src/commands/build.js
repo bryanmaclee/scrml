@@ -167,7 +167,12 @@ export function discoverServerRoutes(outputDir) {
     //   export const _scrml_ws_handlers = { open, message, close } (WS handlers — not a route)
     const routeNames = [];
     const wsHandlerNames = [];
-    const exportRe = /export\s+const\s+(_scrml_\w+)\s*=/g;
+    // `_scrml_*` covers routes/session/endpoint/sse/cors/ws; `__ri_route_*` are
+    // the inferred server-function RPC routes (a `?{}`/host-touching function
+    // escalated to a route) — they do NOT carry the `_scrml_` prefix, so without
+    // this alternation `scrml build` silently drops every server-function route
+    // (they 404 in production while working under `scrml dev`).
+    const exportRe = /export\s+const\s+(_scrml_\w+|__ri_route_\w+)\s*=/g;
     let m;
     while ((m = exportRe.exec(source)) !== null) {
       const name = m[1];
