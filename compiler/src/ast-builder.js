@@ -52,6 +52,7 @@ import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statem
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
+import { isForeignLangLibDecl } from "./library-shape.js";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -17756,7 +17757,7 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   const isPureModuleFile =
     !hasProgramRoot &&
     nodes.length > 0 &&
-    nodes.every(n => n && n.kind !== "markup");
+    nodes.every(n => n && (n.kind !== "markup" || isForeignLangLibDecl(n)));
 
   // S98 (combined-lint-additions-s98 — Item 1): non-entry `<page>` file
   // suppression. Per SPEC §40.8: a multi-page app declares its top-level

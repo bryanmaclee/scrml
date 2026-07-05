@@ -17556,6 +17556,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TOOL-003 | §64.4 | A `<page>` route, markup body content, or client-reactive UI state appears inside a `kind="tool"` program. A tool emits a plain runnable module with no html/client to host them (§64.1). The tool body is logic + `fn`/`function`/`type` declarations + `_{}` + `?{}` + `main` only. (S238 — Standalone Tool Target, §64.) | Error |
 | E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) | Error |
 | E-TOOL-005 | §64.6 | A `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit path does not yet inline. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), and §14 enum backing objects; NOT yet inlined → this code: value-native map/set (§59), `!{}`/`fail` error helpers, wire/protect. FAIL-CLOSED (§49 no-silent-bad-output): a loud compile error naming the missing helper instead of a silent runtime `ReferenceError` in the emitted module. Marks the v1 tool-emit helper-coverage boundary; closing a helper removes its E-TOOL-005. (S238 — ratified after the Surface-1 impl surfaced the value-native-map case.) | Error |
+| E-TOOL-006 | §64.6 | A `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 library-shaped: exports-bearing, no top-level `<program>` / page markup). Such a dep emits no runnable `<base>.js`, so the tool's emitted `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED (§49 no-silent-bad-output) at compile time. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). (S239 fix-round — the §64 tool-import surface.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
@@ -34571,6 +34572,17 @@ dropped). The tool body is logic + `fn`/`function`/`type` declarations + `_{}` +
 exactly as a normal `<program>` (§23.2.1 / §44.2 / §23.5.4). `kind="tool"` + `db=` + W5b lowers `?{}`
 identically to a `<program db>` web app; only the emit shape differs.
 
+### 64.5.1 Imports
+
+A `kind="tool"` module emits REAL ES `import` statements for its declarations' imports (it has no
+browser `_scrml_modules` registry — that is the client-bundle mechanism). A local `.scrml` import maps
+to the imported library's emitted `<base>.js` (§21.5); a `scrml:NAME` / vendor specifier passes through
+to the standard stdlib/vendor resolution. A tool may import only an IMPORTABLE local `.scrml` module — a
+§21.5 library-shaped file (exports-bearing, no top-level `<program>` / page markup), which is what emits
+a runnable `<base>.js`. A tool importing a page-shaped / no-export `.scrml` is `E-TOOL-006` (fail-closed;
+§64.6). An async imported library fn (e.g. a `<foreign lang>` lib `export fn` whose `_{}` body makes it
+`export async function`, §23.6) is `await`ed at the tool's call sites (cross-import await-coloring).
+
 ### 64.6 Error codes (§34 catalog rows land with the impl)
 
 | Code | Trigger | Severity |
@@ -34580,6 +34592,7 @@ identically to a `<program db>` web app; only the emit shape differs.
 | `E-TOOL-003` | `<page>` / markup body / client-reactive UI inside a `kind="tool"` program (no html/client emit) | Error |
 | `E-TOOL-004` | `fn main` in a `kind="tool"` program — `main` is impure; use `function main` (§64.2) | Error |
 | `E-TOOL-005` | a `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit does not yet inline (value-native maps/sets §59, `!{}`/`fail` error helpers, wire/protect) — FAIL-CLOSED: a loud compile error naming the missing helper, instead of a silent runtime `ReferenceError`. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), and §14 enum backing objects; this code marks the v1 tool-emit helper-coverage boundary — closing a helper removes its E-TOOL-005. Ratified S238. | Error |
+| `E-TOOL-006` | a `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 — it has a top-level `<program>` / page markup or no `export`s), so no runnable `<base>.js` is emitted and the tool's `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED: a loud compile error instead of a silent runtime module-not-found. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). Ratified S239 (fix-round). | Error |
 
 ### 64.7 Worked examples
 

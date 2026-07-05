@@ -16,6 +16,8 @@
  * the typer (E-TOOL-002); these helpers only READ the attribute.
  */
 
+import { isForeignLangLibDecl } from "./library-shape.js";
+
 /** A loosely-typed AST node. */
 type ASTNodeLike = Record<string, unknown>;
 
@@ -69,6 +71,34 @@ export function findAllProgramNodes(fileAST: unknown): ASTNodeLike[] {
   };
   for (const n of getToolNodes(fileAST)) walk(n);
   return out;
+}
+
+/**
+ * True when the file is a §21.5 pure-fn LIBRARY file: no top-level `<program>`,
+ * exports-bearing, and its top-level nodes are all declarations (no page markup
+ * beyond a §23.6 `<foreign lang>` / §44.7.1 `<db src>` library-context decl).
+ *
+ * Mirrors the W5a auto-detect (api.js) + `isPureModuleFile` (ast-builder.js), so
+ * codegen can route such a file to the LIBRARY emit (`<base>.js`) when the BUILD
+ * contains a `kind="tool"` entry: a tool emits a plain runnable module whose
+ * `.scrml` deps must resolve to REAL `.js` modules (not browser client/server
+ * artifacts). Browser-app builds (no tool entry) are untouched — a lib there is
+ * still consumed via the client `_scrml_modules` registry (emit-client.ts).
+ */
+export function isLibraryShapedFile(fileAST: unknown): boolean {
+  if (!fileAST || typeof fileAST !== "object") return false;
+  const f = fileAST as ASTNodeLike;
+  // The AST fields (`hasProgramRoot` / `exports`) sit on the inner FileAST at the
+  // codegen stage (the file is a `{ filePath, ast, ... }` wrapper there) but at
+  // top level pre-codegen. Read whichever holds them (same fallback getToolNodes
+  // uses for `nodes`).
+  const inner = (f.ast as ASTNodeLike | undefined) ?? f;
+  if (inner.hasProgramRoot === true) return false;
+  const nodes = getToolNodes(fileAST);
+  if (nodes.length === 0) return false;
+  const exportsList = (inner.exports as unknown[] | undefined) ?? [];
+  if (exportsList.length === 0) return false;
+  return nodes.every((n) => n && (n.kind !== "markup" || isForeignLangLibDecl(n)));
 }
 
 /**

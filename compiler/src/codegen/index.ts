@@ -19,7 +19,7 @@
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
-import { basename, dirname, relative } from "path";
+import { basename, dirname, relative, resolve } from "path";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -58,8 +58,8 @@ import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
-import { generateToolJs } from "./emit-tool.ts";
-import { isToolProgram } from "../tool-program.ts";
+import { generateToolJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
+import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
@@ -435,6 +435,93 @@ function wrapClientBodyInIife(clientJs: string): string {
 }
 
 /**
+ * §64 / Flag C — the LOCAL names a tool imports that bind to an ASYNC library fn.
+ * A `<foreign lang>` lib's `export fn` compiles to `export async function` (its
+ * `_{}` body injects a §23.2.4a boundary await), so a tool importing + calling it
+ * must `await` the call. Resolves each local `.scrml` import to its source file
+ * (via the build's `files`), maps that file's async export names to the
+ * tool-local binding names. `scrml:`/vendor imports have their own await-coloring.
+ */
+function computeToolAsyncImportedLocals(
+  toolFileAST: unknown,
+  files: unknown[],
+): Set<string> {
+  const result = new Set<string>();
+  const tf = toolFileAST as any;
+  const imports = (tf?.ast?.imports ?? tf?.imports ?? []) as any[];
+  if (!Array.isArray(imports) || imports.length === 0) return result;
+  const toolPath = tf?.filePath as string | undefined;
+  if (!toolPath) return result;
+  const toolDir = dirname(toolPath);
+  const asyncByPath = new Map<string, Set<string>>();
+  const asyncNamesFor = (absSource: string): Set<string> => {
+    let cached = asyncByPath.get(absSource);
+    if (cached) return cached;
+    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    cached = srcFile ? collectAsyncFnNamesFromFile(srcFile) : new Set<string>();
+    asyncByPath.set(absSource, cached);
+    return cached;
+  };
+  for (const imp of imports) {
+    if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
+    if (!imp.source.endsWith(".scrml")) continue;
+    const asyncNames = asyncNamesFor(resolve(toolDir, imp.source));
+    if (asyncNames.size === 0) continue;
+    // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
+    // scrml libs export NAMED bindings only), so only the named arm can bind an
+    // async imported fn. Await-color each named local whose EXPORTED name is
+    // async in the resolved source module.
+    for (const spec of (imp.specifiers ?? [])) {
+      if (spec && asyncNames.has(spec.imported)) result.add(spec.local);
+    }
+  }
+  return result;
+}
+
+/**
+ * §64.6 E-TOOL-006 — a `kind="tool"` program may import only IMPORTABLE local
+ * `.scrml` modules (§21.5 library-shaped: exports-bearing, no `<program>`/page
+ * markup) — those are the ones that emit a runnable `<base>.js`. A tool importing
+ * a page-shaped / no-export `.scrml` gets NO `<base>.js`, so its emitted
+ * `import … from "./x.js"` would fail at runtime (`Cannot find module`). Fail
+ * CLOSED at compile time instead of shipping a broken module. `scrml:`/vendor
+ * imports are unaffected; a `.scrml` dep not in the build is MOD's E-IMPORT-005.
+ */
+function checkToolImportsAreImportable(
+  toolFileAST: unknown,
+  files: unknown[],
+  filePath: string,
+  errors: CGError[],
+): void {
+  const tf = toolFileAST as any;
+  const imports = (tf?.ast?.imports ?? tf?.imports ?? []) as any[];
+  if (!Array.isArray(imports) || imports.length === 0) return;
+  const toolDir = dirname(filePath);
+  for (const imp of imports) {
+    if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
+    if (!imp.source.endsWith(".scrml")) continue; // scrml:/vendor handled elsewhere
+    const absSource = resolve(toolDir, imp.source);
+    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    if (!srcFile) continue; // not compiled here → MOD E-IMPORT-005 owns this
+    if (isLibraryShapedFile(srcFile)) continue; // importable
+    const span = imp.span ?? { start: 0, end: 0, line: 1, col: 1 };
+    const jsTarget = imp.source.replace(/\.scrml$/, ".js");
+    errors.push(new CGError(
+      "E-TOOL-006",
+      `E-TOOL-006: the \`kind="tool"\` program imports \`${imp.source}\`, but that ` +
+      `module is not an importable library (§21.5): it declares a top-level ` +
+      `\`<program>\` / page markup or has no \`export\`s, so the compiler emits no ` +
+      `\`<base>.js\` for it — the tool's \`import … from "${jsTarget}"\` would then fail ` +
+      `at runtime (Cannot find module). A \`kind="tool"\` program may import only ` +
+      `library-shaped \`.scrml\` modules (exports-bearing, no \`<program>\` / page ` +
+      `markup) or \`scrml:\`/vendor modules. Refactor \`${imp.source}\` into a library, ` +
+      `or remove the import.`,
+      { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 1, col: span.col ?? 1 },
+    ));
+  }
+}
+
+/**
  * Run the Code Generator (CG, Stage 8).
  */
 export function runCG(input: CgInput): CgOutput {
@@ -795,6 +882,14 @@ export function runCG(input: CgInput): CgOutput {
     annotateDbScopes(nodes);
   }
 
+  // §64 A2 — a build containing a `kind="tool"` entry re-shapes how the tool's
+  // imported LIBRARY deps emit: a tool is a plain runnable module whose `.scrml`
+  // imports must resolve to REAL `.js` library modules (`<base>.js`), not browser
+  // client/server artifacts. In a tool-bearing build, a §21.5 library-shaped file
+  // is routed to the library emit even when the build-wide `mode` is `browser`.
+  // Pure browser-app builds (no tool entry) are byte-identical — this flag is off.
+  const buildHasToolEntry = files.some((f) => isToolProgram(f));
+
   // Process each file
   for (const fileAST of files) {
     const filePath = (fileAST as any).filePath as string;
@@ -891,8 +986,16 @@ export function runCG(input: CgInput): CgOutput {
     // CSRF entirely and emit the tool module + main() harness (§64.1/§64.3).
     // ---------------------------------------------------------------------------
     if (isToolProgram(fileAST)) {
+      // §64 / Flag C — cross-import await-coloring: find the LOCAL names the tool
+      // imports that bind to an ASYNC library fn (a `<foreign lang>` lib's
+      // `export fn` emits `export async function`), so `generateToolJs` awaits
+      // their call sites. `computeAsyncFnNames` only sees the tool's OWN fns.
+      // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
+      // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
+      checkToolImportsAreImportable(fileAST, files, filePath, errors);
+      const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files);
       const toolJs: string = codegenStage("emit-tool", () =>
-        generateToolJs(fileAST as unknown as Record<string, unknown>, errors)
+        generateToolJs(fileAST as unknown as Record<string, unknown>, errors, asyncImportedNames)
       );
       const toolOutput: CgFileOutput = {
         sourceFile: filePath,
@@ -1375,12 +1478,49 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     const fileWorkerBundles = workerBundlesPerFile.get(filePath);
+
+    // §64 A2 (ADDITIVE) — in a build that also emits a `kind="tool"`, a §21.5
+    // library-shaped file emits its normal browser artifacts (client.js +
+    // `_scrml_modules` registration, so co-resident browser `<page>` consumers
+    // keep working) AND, ADDITIONALLY, its library module `<base>.js` so the
+    // tool's ES import (`import { fn } from "./dep.js"`) resolves. The two never
+    // collide on disk (`<base>.js` vs `<base>.client.js`). A tool-free build
+    // never enters this branch, so browser-app output is byte-identical.
+    let additiveLibraryJs: string | null = null;
+    if (buildHasToolEntry && isLibraryShapedFile(fileAST)) {
+      const toolDepLibCtx: CompileContext = {
+        filePath,
+        fileAST,
+        routeMap: safeRouteMap,
+        depGraph: safeDepGraph,
+        protectedFields,
+        authMiddleware: authMW,
+        middlewareConfig: middlewareCfg,
+        csrfEnabled: false,
+        encodingCtx: null,
+        mode: "library",
+        testMode,
+        dbVar: "_scrml_sql",
+        workerNames: [],
+        errors,
+        registry: new BindingRegistry(),
+        derivedNames: collectDerivedVarNames(fileAST),
+        synthCellKeys: collectSynthCellKeys(fileAST),
+        analysis: analysis ?? null,
+        reachabilityRecord: reachabilityRecordInput,
+      };
+      additiveLibraryJs = codegenStage("emit-library", () =>
+        generateLibraryJs(toolDepLibCtx)
+      ) || null;
+    }
+
     const browserOutput: CgFileOutput = {
       sourceFile: filePath,
       html,
       css,
       clientJs,
       serverJs,
+      ...(additiveLibraryJs !== null && { libraryJs: additiveLibraryJs }),
       ...(testJs !== null && { testJs }),
       ...(machineTestJs !== null && { machineTestJs }),
       ...(fileWorkerBundles && { workerBundles: fileWorkerBundles }),

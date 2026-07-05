@@ -94,8 +94,11 @@ function bodyHasForeignOrSql(node: unknown): boolean {
  * async (it awaits). Call detection is a source-text scan of each fn's span for
  * `\bname\s*\(` — reliable and opacity-safe (it never re-parses).
  */
-function computeAsyncFnNames(fns: ASTNode[], sourceText: string | null): Set<string> {
-  const async = new Set<string>();
+function computeAsyncFnNames(fns: ASTNode[], sourceText: string | null, seedAsync?: Set<string>): Set<string> {
+  // Seed with cross-import async names (a tool's ASYNC imported library fns — a
+  // `<foreign lang>` lib `export fn` emits `export async function`) so the
+  // fixpoint also colors any LOCAL fn that calls one of them (§64 / Flag C).
+  const async = new Set<string>(seedAsync ?? []);
   const bodyTextByName = new Map<string, string>();
   for (const fn of fns) {
     const name = fn.name as string | undefined;
@@ -242,17 +245,105 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
 }
 
 /**
+ * The set of top-level function names in `fileAST` whose emit is `async` — a fn
+ * declared `async`, OR one whose body holds an inline `_{}` / `?{}` (the §23.2.4a
+ * async-IIFE injects a boundary `await`, forcing the enclosing fn async; this
+ * matches emit-library.ts's async-marking rule for library exports). Consumed by
+ * codegen/index.ts to await-color a TOOL's calls to ASYNC IMPORTED library fns:
+ * a `<foreign lang>` lib's `export fn runOpen` becomes `export async function`,
+ * so the importing tool must `await runOpen(...)`. `computeAsyncFnNames` only
+ * sees a file's LOCAL fns — this closes the cross-import boundary (§64 / Flag C).
+ */
+export function collectAsyncFnNamesFromFile(ctxOrFileAST: CompileContext | ASTNode): Set<string> {
+  const { fileAST } = resolveFileAST(ctxOrFileAST);
+  const out = new Set<string>();
+  for (const stmt of collectTopLevelStatements(fileAST)) {
+    if (!isFunctionDecl(stmt)) continue;
+    const name = stmt.name as string | undefined;
+    if (!name) continue;
+    if (stmt.isAsync === true || bodyHasForeignOrSql(stmt.body)) out.add(name);
+  }
+  return out;
+}
+
+/** True when `name` is a valid bare ECMAScript identifier (safe to emit
+ *  unquoted in an `import { … }` clause; a kebab/quoted export name is not). */
+function isValidJsIdentifier(name: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
+}
+
+/**
+ * Build the ES import header for the tool module from the file's `import-decl`
+ * nodes (§21.3 / §64). A tool has NO `_scrml_modules` registry — that is the
+ * browser client path (emit-client.ts); a standalone runnable module needs REAL
+ * ES imports so `bun <tool>.js` resolves its dependencies at runtime.
+ *
+ * Rewrites:
+ *   - a local `.scrml` source → the imported library's `.js` module (emitted
+ *     alongside per §21.5 library-emit; see codegen/index.ts A2 routing);
+ *   - `scrml:NAME` / vendor: / bare specifiers pass through UNCHANGED, so the
+ *     api.js write path (`rewriteStdlibImports` / `rewriteRelativeImportPaths`)
+ *     resolves them exactly as it does for server/library output.
+ *
+ * The scrml `pinned` binding-modifier (§21.8.1) is a scrml-scope identity
+ * contract, not an ES concept — it is dropped from the emitted `import`.
+ */
+function buildImportHeader(fileAST: ASTNode): string {
+  const imports = ((fileAST.imports as unknown)
+    ?? ((fileAST.ast as ASTNode | undefined)?.imports as unknown)
+    ?? []) as ASTNode[];
+  if (!Array.isArray(imports) || imports.length === 0) return "";
+  const lines: string[] = [];
+  for (const imp of imports) {
+    if (!imp || imp.kind !== "import-decl") continue;
+    const source = imp.source as string | null | undefined;
+    if (!source) continue;
+    // Local `.scrml` dep → its emitted `.js` library module; leave
+    // `scrml:`/vendor:/bare specifiers untouched (resolved at write time).
+    const jsSource = source.endsWith(".scrml")
+      ? source.replace(/\.scrml$/, ".js")
+      : source;
+    if (imp.isDefault === true) {
+      // Default imports resolve only against a VENDORED ES module (npm / a
+      // hand-written `.js`) — a scrml library exports NAMED bindings only, so a
+      // default import of a `.scrml` lib is rejected upstream by MOD
+      // (E-IMPORT-004) and never reaches emit. Emitted verbatim for the vendored
+      // case; the local binding name IS the export name (`names[0]`).
+      const names = (imp.names as string[] | undefined) ?? [];
+      if (names.length === 0) continue;
+      lines.push(`import ${names.join(", ")} from ${JSON.stringify(jsSource)};`);
+      continue;
+    }
+    const specs = (imp.specifiers as Array<{ imported: string; local: string }> | undefined) ?? [];
+    if (specs.length === 0) continue;
+    const named = specs
+      .map((sp) => {
+        // A quoted-string export name (a kebab-cased channel export, e.g.
+        // `import { "dispatch-board" as board }`) is NOT a valid bare JS
+        // identifier — emit it as a quoted module-export name so the ES import
+        // is syntactically valid.
+        const imported = isValidJsIdentifier(sp.imported) ? sp.imported : JSON.stringify(sp.imported);
+        return sp.imported === sp.local ? imported : `${imported} as ${sp.local}`;
+      })
+      .join(", ");
+    lines.push(`import { ${named} } from ${JSON.stringify(jsSource)};`);
+  }
+  return lines.length > 0 ? lines.join("\n") + "\n" : "";
+}
+
+/**
  * Generate the standalone-tool module JS for a `kind="tool"` program (§64).
  */
 export function generateToolJs(
   ctxOrFileAST: CompileContext | ASTNode,
   errors?: unknown[],
+  asyncImportedNames?: Set<string>,
 ): string {
   const { fileAST, filePath } = resolveFileAST(ctxOrFileAST);
   const sourceText = (fileAST._sourceText ?? null) as string | null;
   const stmts = collectTopLevelStatements(fileAST);
   const fns = stmts.filter(isFunctionDecl);
-  const asyncFnNames = computeAsyncFnNames(fns, sourceText);
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // Foreign crossing-shadow errors (E-FOREIGN-006) surface via this sink.
   const foreignCrossingErrors: unknown[] = [];
 
@@ -345,6 +436,12 @@ export function generateToolJs(
   // ---- db handle header (§44.2) — only when the tool uses `?{}`. -------------
   const dbHeader = buildDbHandleHeader(fileAST, body);
 
-  const header = (dbHeader ? dbHeader + "\n" : "") + (runtimeHeader ? runtimeHeader + "\n" : "");
+  // ---- import header (§21.3 / §64) — ES imports MUST lead the module. --------
+  const importHeader = buildImportHeader(fileAST);
+
+  const header =
+    (importHeader ? importHeader + "\n" : "") +
+    (dbHeader ? dbHeader + "\n" : "") +
+    (runtimeHeader ? runtimeHeader + "\n" : "");
   return header + body + "\n" + harness.join("\n") + "\n";
 }

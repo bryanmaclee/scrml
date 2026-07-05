@@ -29,6 +29,7 @@ import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency
 import { runTS, buildTypeRegistry } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
+import { isForeignLangLibDecl } from "./library-shape.js";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -528,7 +529,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  * @param {string} outputDir — absolute path of the output directory
  * @returns {string} — JS code with rewritten import paths
  */
-export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir) {
+export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null) {
   if (!jsCode || !sourceFilePath || !outputDir) return jsCode;
   const sourceDir = dirname(resolve(sourceFilePath));
   const outDir = resolve(outputDir);
@@ -547,6 +548,22 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir) {
       }
       // Resolve the import path from the source file's directory
       const absImportPath = resolve(sourceDir, relPath);
+      // F-COMPILE-001 Option A: a scrml-emitted library module (`<base>.js`)
+      // mirrors the source tree at the SAME relative position as its `.scrml`
+      // source, so the source-relative specifier is ALREADY correct for the
+      // output tree and must NOT be relocated — the same rationale as the
+      // `.server.js`/`.client.js` skip above, generalized to a bare-`.js`
+      // library module (the §64 standalone-tool import case: `import { fn }
+      // from "./lib.js"`). Skip ONLY when the `.js` corresponds to a `.scrml`
+      // source THIS build actually compiled (`emittedScrmlSources`) — NOT any
+      // filesystem basename coincidence. A genuinely vendored `./util.js` next
+      // to an unrelated, uncompiled `./util.scrml` still relocates correctly.
+      if (
+        emittedScrmlSources &&
+        emittedScrmlSources.has(absImportPath.replace(/\.js$/, ".scrml"))
+      ) {
+        return match;
+      }
       // Compute the relative path from the output directory. This becomes an
       // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
       // Windows `relative()` result would embed `\` and break the import.
@@ -1211,7 +1228,7 @@ export function compileScrml(options = {}) {
       return (
         fileAST.hasProgramRoot !== true &&
         nodes.length > 0 &&
-        nodes.every((n) => n && n.kind !== "markup") &&
+        nodes.every((n) => n && (n.kind !== "markup" || isForeignLangLibDecl(n))) &&
         exportsList.length > 0
       );
     });
@@ -2444,26 +2461,35 @@ export function compileScrml(options = {}) {
           gateArtifacts.push({ sourceFile, artifact, contents });
         }
       };
+      // §64 A2 — the set of `.scrml` sources THIS build compiled (their
+      // `<base>.js` outputs mirror the tree; see rewriteRelativeImportPaths).
+      const emittedScrmlSources = new Set(cgResult.outputs.keys());
       for (const [filePath, output] of cgResult.outputs) {
         const base = basename(filePath, ".scrml");
         // §64 — standalone-tool module (kind="tool"): a single runnable `<base>.js`.
         if (output.toolJs) {
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
         if (output.serverJs) {
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.server.js`, s);
         }
-        if (mode === "library") {
-          if (output.libraryJs) {
-            let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir);
-            s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
-            pushArtifact(filePath, `${base}.js`, s);
-          }
-        } else if (output.clientJs) {
+        // §64 A2 — INDEPENDENT (not else): a library-shaped output writes
+        // `<base>.js` (build-wide library mode OR a tool build's library dep),
+        // AND a browser output writes `<base>.client.js`. In a tool build an
+        // ADDITIVE library dep carries BOTH (it stays a browser page consumer's
+        // dep and becomes the tool's ES import). Pure browser-app outputs never
+        // carry `libraryJs`; pure library-mode outputs never carry `clientJs` —
+        // so this is byte-identical for both.
+        if (output.libraryJs) {
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources);
+          s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
+          pushArtifact(filePath, `${base}.js`, s);
+        }
+        if (output.clientJs) {
           const c = rewriteStdlibImports(output.clientJs, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
         }
@@ -2581,6 +2607,9 @@ export function compileScrml(options = {}) {
         return true;
       }
 
+      // §64 A2 — the set of `.scrml` sources THIS build compiled (their
+      // `<base>.js` outputs mirror the tree; see rewriteRelativeImportPaths).
+      const emittedScrmlSources = new Set(cgResult.outputs.keys());
       for (const [filePath, output] of cgResult.outputs) {
         // GITI-009 + OQ-2: post-codegen rewrites for emitted JS.
         //   - rewriteRelativeImportPaths: ./*.js relative imports point at
@@ -2594,38 +2623,39 @@ export function compileScrml(options = {}) {
         // (NO html / client / CSRF / server-route split). Written and returned.
         if (output.toolJs) {
           const { targetDir } = pathFor(filePath, ".js");
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
         if (output.serverJs) {
           const { targetDir } = pathFor(filePath, ".server.js");
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".server.js", s)) fileCount++;
         }
-        if (mode === 'library') {
-          // Library mode: write libraryJs as <base>.js (importable ES module)
-          if (output.libraryJs) {
-            const { targetDir } = pathFor(filePath, ".js");
-            let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir);
-            s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
-            if (writeOutput(filePath, ".js", s)) fileCount++;
-          }
-        } else {
-          // Browser mode: write clientJs as <base>.client.js + html
-          if (output.clientJs) {
-            // Client JS does not currently get GITI-009 relative-path rewrites
-            // (no existing test asserts that contract for client output) but
-            // it MUST get scrml:NAME rewrites — Bun fails to resolve any
-            // unresolved scrml:* in browser-loaded JS just as in server JS.
-            const { targetDir } = pathFor(filePath, ".client.js");
-            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
-            if (writeOutput(filePath, ".client.js", c)) fileCount++;
-          }
-          if (output.html) {
-            if (writeOutput(filePath, ".html", output.html)) fileCount++;
-          }
+        // §64 A2 — INDEPENDENT writes (not else): a library-shaped output writes
+        // `<base>.js`; a browser output writes `<base>.client.js` + html. A tool
+        // build's ADDITIVE library dep carries BOTH `libraryJs` (the tool's ES
+        // import) AND `clientJs` (a co-resident browser page's `_scrml_modules`
+        // dep). Filenames never collide. Pure browser-app / pure library-mode
+        // outputs carry only one, so both are byte-identical.
+        if (output.libraryJs) {
+          const { targetDir } = pathFor(filePath, ".js");
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources);
+          s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
+          if (writeOutput(filePath, ".js", s)) fileCount++;
+        }
+        if (output.clientJs) {
+          // Client JS does not currently get GITI-009 relative-path rewrites
+          // (no existing test asserts that contract for client output) but
+          // it MUST get scrml:NAME rewrites — Bun fails to resolve any
+          // unresolved scrml:* in browser-loaded JS just as in server JS.
+          const { targetDir } = pathFor(filePath, ".client.js");
+          const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+          if (writeOutput(filePath, ".client.js", c)) fileCount++;
+        }
+        if (output.html) {
+          if (writeOutput(filePath, ".html", output.html)) fileCount++;
         }
         if (output.css) {
           if (writeOutput(filePath, ".css", output.css)) fileCount++;

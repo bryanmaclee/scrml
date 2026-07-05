@@ -157,4 +157,31 @@ describe("W5a — auto-detect-library (no <program> + exports → library shapin
     // No library .js emitted — the file is not a pure-fn module (no exports).
     expect(r.libExists).toBe(false);
   });
+
+  // §5 — g-foreign-lang-cli-mode-detect (Blocker B): a top-level `<foreign
+  //      lang="ts" />` (§23.6) is a LIBRARY foreign-language declaration, not
+  //      disqualifying page markup. A foreign-only lib (lanes shape: `export fn`
+  //      + a `_{}` block, NO db) must AUTO-DETECT to library via the same W5a
+  //      path (mode unset) — previously it fell to browser (the `<foreign lang>`
+  //      markup node failed the `every(kind !== "markup")` predicate) and emitted
+  //      client/server/html with a null-stubbed export + no `<base>.js`.
+  test("§5 top-level <foreign lang> lib auto-detects library (mode unset)", () => {
+    const src = `<foreign lang="ts" />
+\${
+export fn runOpen(model, prompt) {
+  const out = _={ in: { model, prompt } model + " " + prompt }=
+  return out
+}
+}`;
+    const r = compileNoMode("foreign_lib", src);
+    expect(r.errors).toEqual([]);
+    // Auto-flipped to library: `<base>.js` emitted, NO browser client/html.
+    expect(r.libExists).toBe(true);
+    expect(r.clientExists).toBe(false);
+    expect(r.htmlExists).toBe(false);
+    // The `_{}` lowered to its §23.2.4a async IIFE; the export is a real callable
+    // (async), NOT a null stub.
+    expect(r.libraryJs).toMatch(/export async function runOpen/);
+    expect(r.libraryJs).not.toMatch(/runOpen\s*=\s*null/);
+  });
 });

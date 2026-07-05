@@ -17,7 +17,8 @@ import { describe, test, expect } from "bun:test";
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { compileScrml } from "../../src/api.js";
+import { compileScrml, rewriteRelativeImportPaths } from "../../src/api.js";
+import { generateToolJs } from "../../src/codegen/emit-tool.ts";
 import { Database } from "bun:sqlite";
 
 const acorn = require("acorn");
@@ -285,5 +286,289 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       proc.kill();
       try { rmSync(dir, { recursive: true }); } catch {}
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// §64 tool imports — g-tool-import-drop (A1 ES-import emit + A2 library-dep
+// emit) + Flag C (cross-import await-coloring). A kind="tool" module has NO
+// _scrml_modules registry (that is the browser client path) — it needs REAL ES
+// imports, and its imported .scrml library deps must emit runnable `<base>.js`.
+// ---------------------------------------------------------------------------
+
+// Multi-file: write each {name -> src} to a temp dir, compile ALL, write to
+// dist/, and return { result, dist, dir } for artifact + RUN assertions.
+function compileMultiToDist(files, entryOrder) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-tool-imp-"));
+  const dist = join(dir, "dist");
+  mkdirSync(dist, { recursive: true });
+  const paths = [];
+  for (const name of entryOrder) {
+    const p = join(dir, name + ".scrml");
+    writeFileSync(p, files[name]);
+    paths.push(p);
+  }
+  const result = compileScrml({ inputFiles: paths, write: true, outputDir: dist, log: () => {} });
+  return { result, dist, dir };
+}
+
+const PURE_LIB = `\${
+export fn addup(a, b) { return a + b }
+export fn multiply(a, b) { return a * b }
+}`;
+
+const FOREIGN_LIB = `<foreign lang="ts" />
+\${
+export fn runOpen(model, prompt) {
+  const out = _={ in: { model, prompt } model + " " + prompt }=
+  return out
+}
+}`;
+
+describe("§64 tool imports — g-tool-import-drop (A1/A2) + Flag C", () => {
+  test("A1: a tool emits an ES import for a local .scrml lib dep (mapped to .js)", () => {
+    const files = {
+      libpure: PURE_LIB,
+      toolpure: `<program kind="tool" lang="ts">
+import { addup } from "./libpure.scrml"
+function main(args: string[]): number {
+  const n = addup(2, 3)
+  _={ in: { n } console.log("sum=" + n) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dist, dir } = compileMultiToDist(files, ["toolpure", "libpure"]);
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      const toolJs = require("fs").readFileSync(join(dist, "toolpure.js"), "utf8");
+      // REAL ES import, .scrml mapped to .js, source-tree-relative (NOT ../).
+      expect(toolJs).toMatch(/import \{ addup \} from "\.\/libpure\.js";/);
+      expect(toolJs).not.toMatch(/\.\.\/libpure\.js/);
+      // A2 (ADDITIVE): the pure-fn lib dep emits a runnable library module
+      // `<base>.js` for the tool import. The additive floor ALSO keeps the
+      // normal browser artifacts (a co-resident `<page>` consumer's
+      // `_scrml_modules` dep), so `<base>.client.js` is emitted too — the two
+      // never collide on disk.
+      expect(existsSync(join(dist, "libpure.js"))).toBe(true);
+      expect(existsSync(join(dist, "libpure.client.js"))).toBe(true);
+      const libJs = require("fs").readFileSync(join(dist, "libpure.js"), "utf8");
+      expect(libJs).toMatch(/export function addup\(a, b\)/);
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("A R26: tool importing a pure lib RUNS the real fn (bun dist/tool.js)", () => {
+    const files = {
+      libpure: PURE_LIB,
+      toolpure: `<program kind="tool" lang="ts">
+import { addup } from "./libpure.scrml"
+function main(args: string[]): number {
+  const n = addup(2, 3)
+  _={ in: { n } console.log("sum=" + n) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dist, dir } = compileMultiToDist(files, ["toolpure", "libpure"]);
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      const run = Bun.spawnSync({ cmd: ["bun", "toolpure.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString()).toContain("sum=5");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("Flag C: a tool AWAITS an async imported foreign-lib fn (no [object Promise])", () => {
+    const files = {
+      lanes: FOREIGN_LIB,
+      toolc: `<program kind="tool" lang="ts">
+import { runOpen } from "./lanes.scrml"
+function main(args: string[]): number {
+  const line = runOpen("gpt", "hi")
+  _={ in: { line } console.log("line=" + line) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dist, dir } = compileMultiToDist(files, ["toolc", "lanes"]);
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      const toolJs = require("fs").readFileSync(join(dist, "toolc.js"), "utf8");
+      // the imported foreign fn is async → its call site is awaited.
+      expect(toolJs).toMatch(/await runOpen\(/);
+      // the foreign-only lib emitted an async library export.
+      const lanesJs = require("fs").readFileSync(join(dist, "lanes.js"), "utf8");
+      expect(lanesJs).toMatch(/export async function runOpen/);
+      const run = Bun.spawnSync({ cmd: ["bun", "toolc.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString()).toContain("line=gpt hi");
+      expect(run.stdout.toString()).not.toContain("[object Promise]");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("aliased + multiple-named imports preserve the alias in the ES import", () => {
+    const files = {
+      mathlib: PURE_LIB,
+      toolam: `<program kind="tool" lang="ts">
+import { addup as sum, multiply } from "./mathlib.scrml"
+function main(args: string[]): number {
+  const r = sum(2, 3)
+  const p = multiply(4, 5)
+  _={ in: { r, p } console.log("r=" + r + " p=" + p) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dist, dir } = compileMultiToDist(files, ["toolam", "mathlib"]);
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      const toolJs = require("fs").readFileSync(join(dist, "toolam.js"), "utf8");
+      expect(toolJs).toMatch(/import \{ addup as sum, multiply \} from "\.\/mathlib\.js";/);
+      const run = Bun.spawnSync({ cmd: ["bun", "toolam.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString()).toContain("r=5 p=20");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("scrml: stdlib import passes through emit-tool (rewritten to _scrml/ at write)", () => {
+    const src = `<program kind="tool" lang="ts">
+import { clamp } from "scrml:math"
+function main(args: string[]): number {
+  _={ in: {} console.log("clamped=" + clamp(15, 0, 10)) }=
+  return 0
+}
+</program>`;
+    const dir = mkdtempSync(join(tmpdir(), "scrml-tool-imp-"));
+    const dist = join(dir, "dist");
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(join(dir, "toolstd.scrml"), src);
+    const result = compileScrml({ inputFiles: [join(dir, "toolstd.scrml")], write: true, outputDir: dist, log: () => {} });
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      const toolJs = require("fs").readFileSync(join(dist, "toolstd.js"), "utf8");
+      // scrml:math was NOT mapped to .js; rewriteStdlibImports pointed it at _scrml/.
+      expect(toolJs).toMatch(/import \{ clamp \} from "\.\/_scrml\/math\.js";/);
+      expect(toolJs).not.toMatch(/from "scrml:math"/);
+      const run = Bun.spawnSync({ cmd: ["bun", "toolstd.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString()).toContain("clamped=10");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("a tool with NO imports emits no import header (byte-identical lead)", () => {
+    const src = `<program kind="tool" lang="ts">
+function main(args: string[]): number {
+  _={ in: {} console.log("hello") }=
+  return 0
+}
+</program>`;
+    const { out } = compileSource(src, { name: "toolni" });
+    expect(out.toolJs).toBeTruthy();
+    // no leading `import` line — the header is empty for a no-import tool.
+    expect(out.toolJs.trimStart().startsWith("import ")).toBe(false);
+    expect(out.toolJs.startsWith("// Generated standalone tool")).toBe(true);
+  });
+
+  test("#1 co-resident tool + browser <page> share a pure-fn helper (additive)", () => {
+    const files = {
+      helper: `\${ export fn addup(a, b) { return a + b } }`,
+      page: `<program>
+import { addup } from "./helper.scrml"
+<div>\${addup(2, 3)}</div>
+</program>`,
+      tool: `<program kind="tool" lang="ts">
+import { addup } from "./helper.scrml"
+function main(args: string[]): number {
+  _={ in: {} console.log("sum=" + addup(2, 3)) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dist, dir } = compileMultiToDist(files, ["tool", "page", "helper"]);
+    try {
+      expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+      // Additive floor: BOTH the library module (tool import) AND the browser
+      // client (the page's _scrml_modules registry dep) are emitted.
+      expect(existsSync(join(dist, "helper.js"))).toBe(true);
+      expect(existsSync(join(dist, "helper.client.js"))).toBe(true);
+      const toolJs = require("fs").readFileSync(join(dist, "tool.js"), "utf8");
+      expect(toolJs).toMatch(/import \{ addup \} from "\.\/helper\.js";/);
+      // The page's client still resolves the shared helper via _scrml_modules.
+      const pageClient = require("fs").readFileSync(join(dist, "page.client.js"), "utf8");
+      expect(pageClient).toMatch(/_scrml_modules\[/);
+      // The tool RUNS (real import resolves at runtime).
+      const run = Bun.spawnSync({ cmd: ["bun", "tool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString()).toContain("sum=5");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+});
+
+
+describe("§64 tool imports — fix-round hardening (#3/#4/#5/#6-7)", () => {
+  test("#3 relocation-skip keys on the compiled-source set (vendored .js still relocates)", () => {
+    const src = "/proj/tool.scrml", out = "/proj/dist";
+    const js = 'import { addup } from "./libpure.js";\nimport { x } from "./util.js";\n';
+    // libpure.scrml WAS compiled (its <base>.js mirrors the tree); util.scrml is
+    // an unrelated, uncompiled file next to a genuinely-vendored util.js.
+    const emitted = new Set(["/proj/libpure.scrml"]);
+    const rewritten = rewriteRelativeImportPaths(js, src, out, emitted);
+    expect(rewritten).toMatch(/from "\.\/libpure\.js"/);  // tree-mirror: unchanged
+    expect(rewritten).toMatch(/from "\.\.\/util\.js"/);   // vendored: relocated
+  });
+
+  test("#4 a quoted-kebab imported name emits syntactically valid JS", () => {
+    const fileAST = {
+      filePath: "/p/tool.scrml",
+      imports: [{
+        kind: "import-decl", source: "./board.scrml", isDefault: false,
+        names: ["dispatch-board"],
+        specifiers: [{ imported: "dispatch-board", local: "board" }],
+      }],
+      nodes: [{ kind: "logic", body: [{
+        kind: "function-decl", name: "main", params: ["args"],
+        hasReturnType: true, returnTypeAnnotation: "number", body: [],
+      }] }],
+    };
+    const js = generateToolJs(fileAST, []);
+    expect(js).toMatch(/import \{ "dispatch-board" as board \} from "\.\/board\.js";/);
+    expect(parsesClean(js)).toBe(true);
+  });
+
+  test("#5 tool importing a page-shaped/no-export .scrml → E-TOOL-006 (fail-closed)", () => {
+    const files = {
+      pagehelper: `<div>page content</div>\n\${ export fn addup(a, b) { return a + b } }`,
+      tool: `<program kind="tool" lang="ts">
+import { addup } from "./pagehelper.scrml"
+function main(args: string[]): number {
+  _={ in: {} console.log("s=" + addup(1, 2)) }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dir } = compileMultiToDist(files, ["tool", "pagehelper"]);
+    try {
+      expect(errCodes(result)).toContain("E-TOOL-006");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
+  });
+
+  test("#6/7 a DEFAULT import of a .scrml lib is rejected upstream (E-IMPORT-004)", () => {
+    const files = {
+      nlib: `\${ export fn addup(a, b) { return a + b } }`,
+      tool: `<program kind="tool" lang="ts">
+import Foo from "./nlib.scrml"
+function main(args: string[]): number {
+  _={ in: {} console.log("x") }=
+  return 0
+}
+</program>`,
+    };
+    const { result, dir } = compileMultiToDist(files, ["tool", "nlib"]);
+    try {
+      // scrml libs export NAMED bindings only — a default import can never bind,
+      // so the emit's default arm is unreachable (documented, not shipped wrong).
+      expect(errCodes(result)).toContain("E-IMPORT-004");
+    } finally { try { rmSync(dir, { recursive: true }); } catch {} }
   });
 });

@@ -89,7 +89,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `9b864e9d` — chore(s238): WRAP — hand-off CLOSE + changelog + known-gaps §0 + master-list + delta-log [370] + flogence R26 archived — **pushed**
+- `6f8adc5c` — chore(s238): WRAP addendum — flogence Surface-2 R26 (2 CLI toolchain blockers filed + prioritized) — **pushed**
 - `66a3afb1` — chore(s237): WRAP bookkeeping (RECOVER — c2ed7535 landed empty via the -F- stdin-heredoc staging-loss) — **pushed**
 - `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
 - `cfba6295` — chore(s235): WRAP — hand-off CLOSE + virtual-clock landing bookkeeping + debounce bug filed [288-289] — **pushed**

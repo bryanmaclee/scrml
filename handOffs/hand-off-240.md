@@ -1,0 +1,41 @@
+# scrml — Session 238 (CLOSE)
+
+**Date:** 2026-07-04. **Profile:** A — FULL (booted `/boot`). **A very high-throughput orchestration marathon:** opened + LARGELY CLOSED the freeze-blocker wave, built the ENTIRE standalone-tool target end-to-end (SCOPE → SPEC → both impl surfaces → flogence R26 validation), and built the canonical CSRF delivery. **12 commits, coherence 0/12, full suite 26640/0 throughout, conformance/test green.** Mechanical stream → `handOffs/delta-log.md` [351]–[369]. Prior close: `handOffs/hand-off-239.md` (S237).
+
+## 🚦 STATE @ S238 close
+- **git:** scrml HEAD `0d100c19`, **origin 0/12 (PUSHING at wrap)**, working tree clean. Commit gate Config B.
+- **Board:** HIGH **0** · MED **13** · LOW **14** · Nominal **7** (regenerated `state.ts --write`; MED 15→13). Tests **26640 pass / 0 fail / 211 skip**. Version 0.7.1.
+- **Worktrees:** CLEAN (main only). No deputy (retired S219).
+- **Inbox:** empty (all flogence msgs → read/). flogence R26 exchange archived.
+- **⚠️ MAPS:** watermark still `66a3afb1` (the S238 code churn — CSRF/typer/canonical-CSRF/both tool impls — is NOT in the maps; ~12 commits behind). project-mapper OVERFLOWED on a full-set refresh this session (201KB primary + big diff); a BOUNDED refresh works (did primary+error S238-open). **Next boot: bounded per-map refresh, OR the slim-primary arc (primary.map is 201KB/462L vs ~100L design intent — a candidate slim-to-thin-index arc, agent-confirmed).**
+
+## 🚀 NEXT-START — the standalone-tool arc TAIL + the queued board
+The standalone-tool target is **impl-complete + R26-validated** — a flagship landed this session. **The immediate next arc = the flogence 100%-scrml UNBLOCK — items 0a/0b/1/2 below ALL gate the same road (flogence re-ports fsp-core/lanes/fleet--route + confirms once they land):**
+0a. **⛔ BLOCKER A — `g-tool-import-drop`** (flogence Surface-2 R26; MED; blocks multi-file tools): a `<program kind="tool">` that imports from a `.scrml` lib emits the symbol but NO ES `import` → `ReferenceError`. `kind="tool"`-specific (no runtime registry + no ES import emitted; a normal `<program>` wires via `_scrml_modules`). Fix: emit real ES `import { X } from "./lib.js"` in the tool-emit path (emit-tool.ts / api.js tool-write). Blocks `fleet --route` + ANY multi-file tool (the S238 Surface-1 R26 missed it — self-contained fleet-tool). **Couples with 0b** — the lib must emit a runnable `.js`.
+0b. **⛔ BLOCKER B — `g-foreign-lang-cli-mode-detect`** (flogence Surface-2 R26; MED): the CLI has NO `--mode library`; its W5a auto-detect predicate (`api.js:1214` `nodes.every(n=>n.kind!=="markup")`) disqualifies a top-level `<foreign lang>` markup node → the lib falls to BROWSER mode → export null-stubbed, no `lib.js`. Fix (small/local): teach the predicate (+ `isPureModuleFile` in ast-builder.js) to treat `<foreign lang>` like `<db src>` (the tolerance `<db src>` already gets). **Flag C (post-A+B):** cross-import async await-coloring doesn't propagate. **METHODOLOGY LESSON:** the §23.6/§64 tests drove the `compileScrml` API, NOT the CLI (flogence's real consumer path) → API-green / CLI-broken. R26 MUST exercise the consumer's actual toolchain invocation (the CLI), not just the API.
+1. **CLEAN-PRINT primitive — RULED (a) by bryan: a NEW `print`/`println` clean-stdout primitive** (undecorated → stdout; the SCOPE's "native print, deferred v1", un-deferred by flogence's R26). This is THE residual blocking flogence's §64 claim-close: `log()` (§20.6 dev reactive-logger) decorates stdout `[server] … (file:line)`, but a CLI's stdout is PARSED (fleet's is). `log()` stays the decorated dev-logger everywhere; `print`/`println` is the honest CLI stdout primitive. → SPEC a small §-addition (grounding §20.6 log vs a new print) + impl (emit-tool.ts inlines `_scrml_print`=clean `console.log`/`process.stdout.write`) + tests. **flogence re-ports fleet + confirms after it lands.** Small arc, clean cold-start.
+2. **E-ROUTE-001-on-tool false-positive** (flogence, minor non-blocking): route-inference / protect-leak analysis runs on a `kind="tool"` that has NO routes → false E-ROUTE-001. Fix: skip route/protect analysis for `kind="tool"` (a tool has no routes by construction). Rides the clean-print arc. FILE a gap.
+3. **fail-variant-arity E-TYPE mint** (RATIFIED S238: general enum-variant-construction arity → a new `E-TYPE-0xx` [next free after 081], NOT E-ERROR-010). PA-probe-confirmed unchecked on ALL paths (fail + return + let; nullary-payload + over-supply). DISPATCH the fix (type-system.ts — was serialized behind the tool impls, now clear). `g-fail-variant-payload-arity` → flips on landing.
+4. **hostmethod-poison** (`g-typer-hostmethod-return-asis-and-anon-struct-poison`, MED, held S238) — F8 cross-fn soundness poison (only reproduces in a full file). type-system.ts. Serializes with #3.
+5. **Freeze-blocker set — where it stands:** of the S237 "~8," this session resolved the 2 CSRF + typer-bare-variant + the enum-toEnum GHOST (already resolved S221, hand-off was stale); remaining OPEN = fail-variant-arity (#3, ratified), hostmethod-poison (#4, held). The CSRF/auth pair + enum-toEnum are DONE. So the freeze-blocker wave is ~mostly closed.
+
+## 🧵 Owed / cross-repo
+- **flogence:** Surface-1 R26 done (WORKS, one residual = clean-print, #1). Surface-2 `<foreign lang>` LANDED → flogence ports fsp-core/lanes + fleet --route (pinged). Owed: ping flogence when clean-print lands → they re-port fleet + move down the 18 db-bound files.
+- **Surface-2 helper-coverage tail:** the tool v1-emit inlines ==/log/enums + `?{}`/`_{}`/db; NOT inlined → E-TOOL-005 fail-closed (value-native map/set §59, `!{}`/`fail` error helpers, wire/protect). flogence's field-test names the priority order (send code+E-TOOL-005). Gated on their porting.
+- **`<foreign>` element registration** (Surface-2 deferred): register in `attribute-registry.js` + §24.4 (defense-in-depth parity w/ `<db>`; no fix needed today — empirically no E-HTML-001/leak).
+- **emit-library type-strip** (`g-library-mode-no-typed-payload-match`, Road-B) — still open; NOT folded into Surface 2 (separate). flogence's typed harness needs it.
+
+## ✅ DONE this session (all PUSHED at wrap, 12 commits)
+- **Freeze-blocker wave (2 landed):** auth-path CSRF arc (`26c284db` — def-gating + session synchronizer token, R26 round-trip 9/9) · typer bare-variant (`d2be6591` — E-VARIANT-AMBIGUOUS at fn-return/state-decl, F4-refined).
+- **Canonical CSRF delivery (`9ab2b379`):** `/_scrml/session` GET projection (resolves @session-null) + `<meta name="csrf-token">` per-request via the §52.8 compose route + client-reads-meta → first-POST-passes; the 403-retry demoted to fallback. R26 22/22.
+- **Standalone-tool target — FULL ARC:** SCOPE + **SPEC §64 + §23.6 + §23.2.4 amendment** (`bdc8ef7a`) · **Surface-1 `<program kind="tool">` impl** (`72a90d31` — parser + typer E-TOOL-001..005 + the NEW emit-tool.ts plain-module path + §64.3 harness; R26 ran the emitted tools) · **Surface-2 `<foreign lang="ts" />` impl** (`0d100c19` — E-FOREIGN-003 closure + E-FOREIGN-LANG-* + emit-library). flogence R26 validated Surface-1 working end-to-end.
+- **Maps error.map + primary.map refreshed** (`0e27e4da`/`ed1bb24a`, bounded — full-set overflowed).
+
+## 🧾 Ratifications this session (→ user-voice S238)
+E-TYPE arity mint (fail-variant, general scope) · standalone-tool OQ1=(ii) return-type harness · OQ2=`<foreign lang="ts" />` (over terse `<lang ts/>`) · `function main` NOT `fn` (impure) + §23.2.4 tool-body-`_{}` admission · E-TOOL-005 fail-closed net · build-canonical CSRF delivery · clean-print = a NEW `print`/`println` primitive (a).
+
+## pa.md directives in force
+R1–R5 · Profile A · commit **PATHSPEC form** (`git commit -F <msg> -- <paths>` — the S238 empty-commit index-race fix; plain add+commit empties under concurrent worktree agents; `[[feedback_verify_commit_nonempty_after_file_delta]]` updated) · background-commit to dodge the Config-B post-commit-hook timeout · S236 verify-non-empty · S226 landing-concurrency · S227 dock · S219 orchestrate + default-GO · S215 adversarial · S138 R26 · S147 coherence · S88/S99/S126 path-discipline.
+
+## Tags
+#session-238 #close #standalone-tool-arc-complete #freeze-blocker-wave-mostly-closed #canonical-csrf #clean-print-ruled-a #maps-bounded-refresh-owed
