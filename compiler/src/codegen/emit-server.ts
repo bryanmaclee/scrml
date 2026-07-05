@@ -643,6 +643,15 @@ function emitModuleValueExportLines(
   const constLines: string[] = [];
   const fnBlocks: string[] = [];
 
+  // W5b (S239, §44.7.1 / D5 GENERALIZE) — the names of this module's exported
+  // db fns (their body does `?{}` SQL / a transaction ANYWHERE). Consumed as the
+  // `serverFnNames` await-set so an in-process db fn calling another awaits it,
+  // and to force the `async` prefix (a `?{}` lowering injects `await`).
+  const dbFnNames = new Set<string>();
+  for (const [nm, fnNode] of fnDeclByName) {
+    if (Array.isArray(fnNode.body) && containsSqlOrTransaction(fnNode.body)) dbFnNames.add(nm);
+  }
+
   for (const logic of logicBlocks) {
     for (const stmt of (logic.body ?? [])) {
       if (!stmt || stmt.kind !== "export-decl") continue;
@@ -671,25 +680,44 @@ function emitModuleValueExportLines(
         continue;
       }
 
-      // Exported pure function. Emit a plain `export function` ADDITIVELY.
+      // Exported function. Emit a plain `export function` ADDITIVELY.
       if (kind === "function" || kind === "fn") {
         if (isAlreadyDeclared(name)) continue;
         const fnNode = fnDeclByName.get(name);
         if (!fnNode || !Array.isArray(fnNode.body)) continue;
-        // Skip a server-OPERATION function (its body does `?{}` SQL / a
-        // transaction / server-context meta) — not a pure value export.
-        if (bodyHasServerOnlyNode(fnNode.body)) continue;
+        const isDbFn = dbFnNames.has(name);
+        // W5b / D5 GENERALIZE — a db fn (its body does `?{}` SQL / a transaction)
+        // emits as a REAL IN-PROCESS callable: the `?{}` lowers SERVER-boundary to
+        // `await _scrml_sql\`…\`` against the module's OWN connection (the same
+        // `_scrml_sql` handle the route handlers declare above), and the fn is
+        // `async` (the `?{}` lowering injects `await`). A server/in-process
+        // consumer (a `<program>` server fn OR a `kind="tool"`) importing this
+        // module by-name (`import { countItems } from "./x.server.js"`) then calls
+        // it directly — NO HTTP boundary, NO `const x = null` client stub. This is
+        // the server-half of W5b (the tool-half is emit-tool.ts generateToolLibraryJs);
+        // the browser client still fetches it over the retained HTTP route (§12.6).
+        //
+        // A NON-SQL server-only-body fn (a server-context `meta` / env / import
+        // operation, not a `?{}`) is out of W5b scope — it keeps its route handler
+        // and is skipped here (emitting a synchronous stub would null-out its
+        // resource access).
+        if (!isDbFn && bodyHasServerOnlyNode(fnNode.body)) continue;
         const params: any[] = fnNode.params ?? [];
         const paramSigs = params.map((p, i) => paramSignature(p, i));
         const generatorStar: string = fnNode.isGenerator ? "*" : "";
-        const asyncPrefix: string = fnNode.isAsync ? "async " : "";
+        const asyncPrefix: string = (isDbFn || fnNode.isAsync) ? "async " : "";
         const declaredNames = new Set<string>(
           params.map((p) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
         );
-        // Client-boundary lowering → synchronous body (see fn-doc rationale).
+        // A db fn lowers SERVER-boundary (the in-process `?{}`→`await _scrml_sql`
+        // lowering) with the db-fn await-set; a pure fn lowers CLIENT-boundary
+        // (a synchronous body — server-boundary `match`-in-async-IIFE would make a
+        // non-async fn `await`, a SyntaxError; see fn-doc rationale).
         const bodyCodes = emitFnShortcutBody(
           fnNode.body,
-          { boundary: "client", declaredNames, insideFunctionBody: true },
+          isDbFn
+            ? { boundary: "server", serverFnNames: dbFnNames, declaredNames, insideFunctionBody: true }
+            : { boundary: "client", declaredNames, insideFunctionBody: true },
           fnNode.fnKind,
           fnNode.hasReturnType,
         );
