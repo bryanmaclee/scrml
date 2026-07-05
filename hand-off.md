@@ -1,36 +1,53 @@
-# scrml — Session 239 (IN PROGRESS)
+# scrml — Session 239 (CLOSE)
 
-**Date:** 2026-07-04. **Profile:** A — FULL (booted `/boot`). Booted clean off the S238 close (`handOffs/hand-off-240.md`). This stub accrues S239 state; the wrap rewrites it fully.
+**Date:** 2026-07-05. **Profile:** A — FULL (booted `/boot`). A long single-arc session: **built the entire flogence 100%-scrml road** (W5a auto-detect + tool library imports + E-TOOL-006 LANDED; W5b in-process db library BUILT but HELD on the 3rd /code-review cycle), recovered an 11-hour dead agent to a clean landing, and **hardened the PA contract** (adversarial /code-review mandatory on our own codegen dispatches). Mechanical stream → `handOffs/delta-log.md` [372]–[38x].
 
-## 🚦 STATE @ S239 boot
-- **git:** HEAD `6f8adc5c`, **origin 0/1 — 1 unpushed** (the S238 WRAP-addendum commit `6f8adc5c`: delta-log [371] + the 2 flogence Surface-2 CLI-toolchain blockers filed). Working tree clean (pre-rotation). Commit gate Config B.
-- **Board (S238 close):** HIGH **0** · MED **13** · LOW **14** · Nominal **7**. Tests **26640/0/211**. Version 0.7.1.
-- **⚠️ MAPS:** watermark `66a3afb1` — ~12 commits stale (S238 CSRF/typer/tool-impls NOT in maps). Full-set project-mapper OVERFLOWS; use BOUNDED per-map refresh. Candidate arc: slim primary.map (201KB/462L → ~100L thin-index).
-- **Worktrees:** CLEAN (main only). No deputy (retired S219).
-- **Inbox:** empty (all flogence msgs → read/).
-- **Digest:** `handOffs/digest.md` is STALE (S218-era, head=9713d703) — DISTRUSTED per freshness guard; the S238 hand-off is current-truth.
+## ⚠️⚠️ CROSS-MACHINE — READ FIRST (user is switching machines)
+On the OTHER machine, before anything: `git -C <scrml> fetch origin && git -C <scrml> pull --rebase origin main`.
+- **main** is at the S239 wrap commit (A/B + E-TOOL-006 + all bookkeeping) — pushed.
+- **`origin/w5b-wip` @ `95fc65ff`** is the HELD W2/W5b work (the in-process db library — BUILT, full-suite-green, but 14 adversarial-review findings across 3 cycles; NOT landed). It is a real branch on origin — `git fetch` brings it. To continue: base a fresh agent worktree on `origin/w5b-wip` and dispatch the CONSOLIDATION fix round (below). Do NOT re-do the build — it's 90% there; it needs the detection-walker consolidation.
+- **scrml-support** main is at `374ec92` (the pa-contract S239 addendum) — pushed. `git -C ../scrml-support pull --rebase` too.
 
-## 🚀 NEXT-START (carry-forward from S238 — the flogence 100%-scrml unblock arc)
-All of 0a/0b/1/2 gate the SAME road (flogence re-ports fsp-core/lanes/fleet--route once they land):
-0a. **⛔ `g-tool-import-drop`** (MED) — `<program kind="tool">` emits the imported symbol but NO ES `import` → ReferenceError. Fix: emit real `import { X } from "./lib.js"` in the tool-emit path (emit-tool.ts / api.js tool-write). Blocks `fleet --route` + multi-file tools. Couples with 0b (lib must emit runnable `.js`).
-0b. **⛔ `g-foreign-lang-cli-mode-detect`** (MED) — CLI has no `--mode library`; the W5a auto-detect predicate (`api.js:1214` `nodes.every(n=>n.kind!=="markup")`) disqualifies a top-level `<foreign lang>` markup node → lib falls to BROWSER mode → export null-stubbed. Fix (small/local): teach the predicate (+ `isPureModuleFile` in ast-builder.js) to treat `<foreign lang>` like `<db src>`. **Flag C (post-A+B):** cross-import async await-coloring doesn't propagate. **LESSON:** §23.6/§64 tests drove the `compileScrml` API not the CLI → API-green/CLI-broken; R26 must exercise the CLI (flogence's real path).
-1. **CLEAN-PRINT primitive — RULED (a) by bryan:** a NEW `print`/`println` clean-stdout primitive (undecorated → stdout). `log()` (§20.6) stays the decorated dev-logger everywhere. Small SPEC §-addition (ground §20.6 log vs new print) + impl (emit-tool.ts inlines `_scrml_print` = clean `console.log`/`process.stdout.write`) + tests. flogence re-ports fleet + confirms after it lands.
-2. **`E-ROUTE-001-on-tool` false-positive** (minor non-blocking) — route/protect analysis runs on a `kind="tool"` with no routes. Fix: skip route/protect analysis for `kind="tool"`. Rides the clean-print arc. FILE a gap.
+## 🚦 STATE @ S239 close
+- **git:** scrml HEAD = the S239 wrap commit, origin PUSHED (coherence 0/0 at wrap). scrml-support `374ec92` pushed. **origin/w5b-wip `95fc65ff`** pushed (the held W2).
+- **Board:** HIGH 0 · MED (regen'd — see §0) · tests 26665/0/212 (on the w5b-wip branch; main is 26640-class + A/B's tests). Version 0.7.1.
+- **Worktrees:** the agent worktree cleaned at wrap; the branch survives on origin/w5b-wip.
+- **⚠️ MAPS:** watermark 66a3afb1 — now ~15+ commits stale (A/B + all S239). Bounded refresh owed (full-set overflows).
 
-## 🧵 Also queued (type-system.ts — serialized behind the tool arc)
-3. **fail-variant-arity E-TYPE mint** (RATIFIED S238) — general enum-variant-construction arity → new `E-TYPE-0xx` (next free after 081, NOT E-ERROR-010). Unchecked on ALL paths (fail+return+let; nullary + over-supply). `g-fail-variant-payload-arity`.
-4. **hostmethod-poison** (`g-typer-hostmethod-return-asis-and-anon-struct-poison`, MED, held S238) — F8 cross-fn soundness poison (full-file only). Serializes with #3.
+## ✅ LANDED + PUSHED this session
+- **A/B + E-TOOL-006 (`94e156c5`)** — the flogence CLI-toolchain unblock. `g-tool-import-drop` + `g-foreign-lang-cli-mode-detect` RESOLVED. Emit ES imports from a tool (A1) + additive `<base>.js` for a tool-dep lib (A2) + `<foreign lang>` CLI library-mode (B, shared `library-shape.js`) + Flag-C await-coloring. **E-TOOL-006** minted+ratified (fail-closed on a tool importing a non-importable `.scrml`). **Adversarial /code-review caught 4 real regressions** in the first cut → fix round → clean. Full suite 26652/0.
+- **pa-contract S239 addendum (`374ec92`, scrml-support)** — PA-side adversarial `/code-review` is MANDATORY on our OWN codegen dispatches (corrects the S215 false carve-out — the codegen agent can't run /code-review in-agent). Empirical: 4 (A/B) + 6 (W2) real bugs caught on our own dispatches. Memory `feedback_adversarial_verify_not_confirmatory` + MEMORY.md updated.
 
-## Owed / cross-repo
-- **flogence:** owed a ping when clean-print lands → they re-port fleet + move the 18 db-bound files. Surface-2 helper-coverage tail (map/set §59, `!{}`/`fail` helpers, wire/protect NOT inlined → E-TOOL-005 fail-closed) gated on their porting.
-- **`<foreign>` element registration** (Surface-2 deferred) — register in attribute-registry.js + §24.4 (defense-in-depth parity w/ `<db>`; empirically no leak).
-- **emit-library type-strip** (`g-library-mode-no-typed-payload-match`, Road-B) — still open; separate from Surface 2.
+## 🔴 HELD — W2/W5b (in-process db library) — the main NEXT-START
+**Option A / Finding E — RULED + generalize (bryan S239).** Implements **W5b** (the long-staged §44.7.1 cross-file-`?{}`-resolve — flogence's original 100%-scrml blocker). A `?{}` db library fn emits as a plain in-process server binding (own `<db src>` handle + `await _scrml_sql.unsafe`) instead of the null-stub → a tool (and any server consumer) imports+runs it in-process. **BUILT + full-suite-green (26665/0)** — the DONE bar passed (`bun dist/tool.js` → `count=2`; fleet-tool routes over the real db). SCOPE + design: `docs/changes/tool-library-in-process-consumption-2026-07-05/SCOPE.md` (read §0/§3/§8 + D8). Branch: **origin/w5b-wip @95fc65ff**.
 
-## 🔭 Strategic frame (from master-list §0 + user-voice S235)
-V1 = **scrml-LANGUAGE 1.0** (language split from compiler; conformance suite; compilers-as-implementations). Freeze bar RATIFIED = **high coverage first ("do it right")** — conformance pins EVERY claimed surface (~200-270 cases; at ~220). Remaining V1 = conformance coverage-GROWTH + D1/D2/D4 labeling, NOT big feature builds. The standalone-tool + flogence-unblock arc is the current adopter-driven thread within that.
+**WHY HELD:** 3 /code-review cycles (6 → fixed → 8 more). The 8 re-review findings incl. **web-app regressions** the fix round introduced by sharing the async-coloring machinery. **ROOT (the review named it): "four SQL/foreign detection walkers + two export-const regexes are hand-copied and already inconsistent."** Each patch round re-diverges. **The fix is CONSOLIDATION, not more patches.**
+
+**NEXT-SESSION dispatch = the W5b CONSOLIDATION fix round** (base a worktree on origin/w5b-wip):
+1. **ONE shared sql/foreign/transaction detection predicate** used by the routing gate (index.ts) + the async seed (`bodyHasForeignOrSql`) + the per-fn skip — they currently DISAGREE (e.g. routing accepts `sql-ref` but the async seed omits it → [3] sql-ref fns emit sync/null). Include ALL node kinds (`sql`/`sql-ref`/`sqlNode`/`foreign`/`foreignNode`/`transaction-block` as appropriate per caller).
+2. **Structural async, not text-regex.** `computeAsyncFnNames` colors via a `\bNAME\(` source-text regex → over-matches comments/strings ([6] web-app regression: `loadRows(` in a comment mis-colors a sync export async). Use `fnNode.isAsync` + the structural call-graph, not text.
+3. **Narrow the reroute gate** ([2] web-app REGRESSION — the meaty one): `buildHasToolEntry && isLibraryShapedFile` fires for EVERY library-shaped file, so a browser-consumed `?{}` lib gets rerouted to `generateToolLibraryJs` (whose E-CG-006 push FAILS THE BUILD) merely because a tool exists somewhere in the build. Gate on files a TOOL ACTUALLY IMPORTS (a tool-dep), not all library-shaped files.
+4. **Server-path parity** — emit-server's ss1 value-export path needs the same cross-import async seed ([1]) + must drain the foreign-crossing error sink ([7]) (both present on the tool path, missing on the server path).
+5. **Export-shape completeness** — `generateToolLibraryJs`'s regex-driven export emission drops destructured/no-init export consts ([4]) + silently skips a transaction-only fn in a mixed lib ([5]); `generateLibraryJs` (the old path) raw-sliced them. Either handle the shapes or fail-closed (never silent-drop).
+6. Full findings verbatim: `handOffs/delta-log.md` [38x] + the /code-review outputs (both runs) in `tasks/`. Re-run /code-review (S239 MANDATE) after the consolidation; land + wrap only when clean.
+
+**On landing W5b next session:** flip `g-tool-import-db-fn-null-stub` → resolved; the flogence F residual's crash-half is fixed by it.
+
+## 🧵 flogence — MILESTONE + owed
+- **`fleet --route` RUNS END-TO-END** (their 1251 msg, confirmed on A/B `94e156c5`) — the FIRST cross-file 100%-scrml tool: a `kind="tool"` imports a `<foreign lang>` lib, routes over the real db, flows exit codes, clean stdout (via `console.log` in `_{}`). The road is essentially open on the foreign-only + pure path.
+- **Owed:** ping flogence when W5b lands (they collapse fsp-route back into fsp-core + import `?{}` db fns directly). Their staged ports (`src/ports/`) are offered for our CLI regression corpus.
+- **2 new flogence residuals filed** (their 1251): **D** `g-foreign-multistmt-value-block-mislowers` (multi-stmt `_{}` ending in bare expr → invalid JS; workaround = explicit `return`); **F** `g-tool-over-imports-all-lib-exports` (tool over-imports the whole export set + resolves all to `.js`; crash-half fixed by W5b, over-import remains).
+
+## 📋 Queue (next session, after W5b consolidation)
+- W5b consolidation fix round (above) → land → ping flogence.
+- **clean-print** (#1, ruled (a)) — needs a design pass (print/println semantics · value-render · tool/server/everywhere · stderr) BEFORE SPEC+impl. flogence has a `console.log`-in-`_{}` escape hatch, so tools aren't blocked.
+- flogence residuals D + F (filed).
+- `g-e-sql-009-no-db-src-not-fired` (the typer-gate for no-`<db src>` `?{}` — corpus-breakage risk, own scoping).
+- Deprioritized: fail-variant-arity E-TYPE mint (#3) + hostmethod-poison (#4) — type-system.ts, serialized.
+- Bounded maps refresh (stale ~15+ commits).
 
 ## pa.md directives in force
-R1–R5 · Profile A · commit PATHSPEC form (`git commit -F <msg> -- <paths>`) · background-commit to dodge Config-B post-commit-hook timeout · S236 verify-non-empty · S226 landing-concurrency · S227 dock · S219 orchestrate + default-GO · S215 adversarial · S138 R26 · S147 coherence · S88/S99/S126 path-discipline.
+R1–R5 · Profile A · **S239 addendum — PA-side /code-review MANDATORY on our own codegen dispatches** (new this session) · commit PATHSPEC form · background-commit/-push to dodge Config-B gate timeout (foreground push needs timeout ≥300000; the 2min default kills it) · S236 verify-non-empty · S226 landing-concurrency · S219 orchestrate+default-GO · S215 adversarial · S138 R26 · S147 coherence · S88/S99/S126 path-discipline · S237 SendMessage-resume (used 2× this session to recover the 11h-dead agent).
 
 ## Tags
-#session-239 #boot #flogence-unblock-arc #clean-print-ruled-a #v1-conformance-coverage
+#session-239 #close #flogence-road-built #w5b-held-for-consolidation #e-tool-006 #pa-contract-hardened-adversarial #cross-machine-w5b-wip
