@@ -362,10 +362,19 @@ function tryLowerLiftEngineHandler(rawHandlerText, engineCtx) {
 // each's iter var (innermost-scope-wins per SPEC §17.7.3 — legal in any markup
 // context incl. lifted markup per §17.4; E-SYNTAX-064 correctly does NOT fire).
 //
-// `scopeVar` is null at the top markup level (no enclosing `for`); a nested
-// `<each>` there is malformed markup the caller still renders literally (no
-// regression). emit-each is loaded via `require()` to stay init-order safe
-// (mirrors the engine-handler helper above).
+// GITI-033 (S240) — `scopeVar` is null at the top markup level (no enclosing
+// `for`), e.g. an `<each>` nested in a ternary-markup consequent
+// (`${ show ? <ul><each in=rows>…</each></ul> : "" }`). Such an each iterates a
+// module/const/`@cell` source (NOT a for-loop var), which is VALID scrml — the
+// inner source resolves in the emitted closure scope with a null enclosing
+// scope var (its own `@.` body binds to the inner synthetic iter var, not the
+// enclosing scope). The pre-fix gate returned null on a null `scopeVar`, so the
+// each fell through to LITERAL element emission and its `${@.}` body leaked the
+// raw sigil → E-CODEGEN-INVALID-LOGIC. The fix routes a null-scope each through
+// the SAME shared handler (a genuinely malformed each — no in=/of= source — is
+// still rejected downstream by `eachBlockFromMarkupNode`, so the caller keeps
+// its literal-markup emission). emit-each is loaded via `require()` to stay
+// init-order safe (mirrors the engine-handler helper above).
 // ---------------------------------------------------------------------------
 
 /**
@@ -374,13 +383,19 @@ function tryLowerLiftEngineHandler(rawHandlerText, engineCtx) {
  * NOT a usable `<each>` (caller keeps its existing literal-markup emission).
  *
  * @param {object} eachMarkupNode — the generic `{kind:"markup", tag:"each"}` node.
- * @param {string|null} scopeVar — the enclosing `for`-loop variable name.
+ * @param {string|null} scopeVar — the enclosing `for`-loop variable name, or
+ *   null when the each sits at the top markup level (ternary-markup consequent,
+ *   iterating a module/const/`@cell` source — GITI-033).
  * @param {string} fragmentVar — the element/fragment to append the inner list to.
  * @param {object|null} engineCtx — the EachEngineCtx carrier (null = no engines).
  * @returns {string[]|null}
  */
 function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx) {
-  if (!scopeVar || typeof scopeVar !== "string") return null;
+  // GITI-033 — a null `scopeVar` (no enclosing `for`) is VALID: the each
+  // iterates a module/const/`@cell` source and routes through the SAME shared
+  // handler (which rejects a genuinely source-less each downstream). Only a
+  // non-null, non-string `scopeVar` is bad input.
+  if (scopeVar != null && typeof scopeVar !== "string") return null;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const each = require("./emit-each.ts");
   if (!each || typeof each.emitNestedEachFromMarkup !== "function") return null;

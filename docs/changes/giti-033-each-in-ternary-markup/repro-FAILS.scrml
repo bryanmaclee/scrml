@@ -1,0 +1,18 @@
+<program>
+  const strs = ["a", "b"]
+  const rows = [{ kind: "add", path: "x" }]
+  const show = true
+  <main>
+    ${ show ? <ul>
+        <each in=strs>
+          <li>${@.}</li>
+        </each>
+      </ul> : "" }
+
+    ${ show ? <ul>
+        <each in=rows key=@.path>
+          <li><span class="tag tag-${@.kind}">${@.kind}</span> ${@.path}</li>
+        </each>
+      </ul> : "" }
+  </main>
+</program>

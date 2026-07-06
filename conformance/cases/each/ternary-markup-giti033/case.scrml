@@ -1,0 +1,11 @@
+${
+    <rows> = [{ kind: "add", path: "a.txt" }, { kind: "mod", path: "b.txt" }]
+    <show> = true
+}
+<main id="root">
+    ${ @show ? <ul id="list">
+        <each in=@rows key=@.path>
+            <li class="row"><span class="tag tag-${@.kind}">${@.kind}</span> <span class="path">${@.path}</span></li>
+        </each>
+      </ul> : "" }
+</main>

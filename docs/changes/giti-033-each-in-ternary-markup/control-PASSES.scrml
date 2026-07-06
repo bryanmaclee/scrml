@@ -1,0 +1,10 @@
+<program>
+  const rows = [{ kind: "add", path: "x" }]
+  <main>
+    <ul>
+      <each in=rows key=@.path>
+        <li><span class="tag">${@.kind}</span> ${@.path}</li>
+      </each>
+    </ul>
+  </main>
+</program>

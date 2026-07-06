@@ -3458,6 +3458,56 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Returns the substituted ExprNode, or null when no markup is present (caller
    * falls back to plain safeParseExprToNode).
    */
+  // GITI-033 review #1 — collect the [start,end) spans of TEXT-position `${…}`
+  // interpolations in a tokenizer-spaced markup string. A `${` inside a `<…>`
+  // tag opener (an attribute value) is SKIPPED (the attribute tokenizer owns it);
+  // only interpolations in element text content are returned. The interpolation
+  // body is scanned STRING-LITERAL-aware (braces inside `"…"`/`'…'`/backtick are
+  // data, not structure) so a quoted `"}"` does not terminate the span early.
+  function collectTextInterpSpans(src) {
+    const spans = [];
+    let i = 0;
+    const n = src.length;
+    let inTag = false;        // between a `<` opener and its closing `>`
+    let tagQuote = null;      // active string delimiter while inside a tag opener
+    while (i < n) {
+      const c = src[i];
+      if (inTag) {
+        if (tagQuote !== null) {
+          if (c === "\\") { i += 2; continue; }
+          if (c === tagQuote) tagQuote = null;
+          i++; continue;
+        }
+        if (c === '"' || c === "'" || c === "`") { tagQuote = c; i++; continue; }
+        if (c === ">") { inTag = false; i++; continue; }
+        i++; continue;
+      }
+      if (c === "<") { inTag = true; i++; continue; }
+      if (c === "$" && src[i + 1] === "{") {
+        const start = i;
+        i += 2;
+        let depth = 1;
+        let q = null; // active string delimiter inside the interpolation body
+        while (i < n && depth > 0) {
+          const cc = src[i];
+          if (q !== null) {
+            if (cc === "\\") { i += 2; continue; }
+            if (cc === q) q = null;
+            i++; continue;
+          }
+          if (cc === '"' || cc === "'" || cc === "`") { q = cc; i++; continue; }
+          if (cc === "{") { depth++; i++; continue; }
+          if (cc === "}") { depth--; i++; if (depth === 0) break; continue; }
+          i++;
+        }
+        spans.push([start, i]); // end is one past the matching `}`
+        continue;
+      }
+      i++;
+    }
+    return spans;
+  }
+
   function parseExprWithMarkupValues(expr, startOffset) {
     if (!expr || typeof expr !== "string") return null;
     // Cheap gate: a markup opener in the tokenizer-spaced form is `<` followed
@@ -3565,7 +3615,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const markupSrc = expr.slice(a, b);
       let mkNode = null;
       try {
-        const liftToks = tokenizeLogic("lift " + markupSrc, 0, 1, 1, []);
+        // GITI-033 review #1 — a TEXT-position `${…}` interpolation inside this
+        // markup-value (`<li>${ @.k == "add" ? "}" : @.p }</li>`) must be handed
+        // to `tokenizeLogic` as a PRE-SPLIT child block so it emits ONE BLOCK_REF
+        // (→ `parseLiftTag` builds a logic child, interior preserved VERBATIM).
+        // With an empty children array the tokenizer re-lexed the `${…}` into
+        // separate STRING/PUNCT tokens which `parseLiftTag` rejoined as text via
+        // the delimiter-LESS token `.text` — dropping string-literal quotes
+        // (`"add"`→`add`) and turning a quoted `"}"` into a structural `}` that
+        // truncated the interpolation → E-CODEGEN-INVALID-LOGIC. The for-lift
+        // path never hit this because BS pre-splits its `${…}` as a real child.
+        // Attribute-position `${…}` (inside a `<…>` opener) is left to the
+        // attribute tokenizer. Offsets are shifted by the `"lift "` prefix (5).
+        const _LIFT_PREFIX = 5; // "lift ".length
+        const _interpChildren = collectTextInterpSpans(markupSrc).map(([s0, e0]) => ({
+          type: "logic",
+          raw: markupSrc.slice(s0, e0),
+          span: { start: _LIFT_PREFIX + s0, end: _LIFT_PREFIX + e0 },
+          children: [],
+        }));
+        const liftToks = tokenizeLogic("lift " + markupSrc, 0, 1, 1, _interpChildren);
         const liftNodes = parseLogicBody(liftToks, filePath, [], { type: "logic" }, counter, [], null);
         const lift = (liftNodes || []).find((n) => n.kind === "lift-expr");
         if (lift && lift.expr && lift.expr.kind === "markup" && lift.expr.node) {

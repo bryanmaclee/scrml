@@ -1,0 +1,24 @@
+{
+  "id": "each-ternary-markup-giti033",
+  "description": "GITI-033 merge-blocker. An <each> nested inside a ternary-markup consequent (${ @show ? <ul><each in=@rows>…</each></ul> : \"\" }) — iterating a module/cell source with NO enclosing for-loop — must lower like the identical each OUTSIDE the ternary. codes-half: E-CODEGEN-INVALID-LOGIC does NOT fire on the valid source. runtime-half: the list renders, the per-item TEXT body (${@.kind} / ${@.path}) interpolates the item values, and the per-item ATTRIBUTE (class=\"tag tag-${@.kind}\") lowers to the iter binding.",
+  "language-version": "1.0",
+  "spec": "§17.7.3",
+  "rationale": "§17.7.3 makes `@.` legal in ANY markup context (incl. a ternary-markup consequent); pre-fix the null-enclosing-scope gate dropped the lowering and the `@.` leaked raw → E-CODEGEN-INVALID-LOGIC. Anchored mode is impl-neutral (the each-container <div> wrapper is impl-private); .row count + tag/path text + the tag-<kind> class prove the body AND attribute interpolations render.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": {
+      "rows": [{ "kind": "add", "path": "a.txt" }, { "kind": "mod", "path": "b.txt" }],
+      "show": true
+    },
+    "domAnchored": [
+      { "selector": ".row", "count": 2 },
+      { "selector": ".tag-add", "count": 1 },
+      { "selector": ".tag-mod", "count": 1 },
+      { "selector": "#list li:first-child .tag", "text": "add" },
+      { "selector": "#list li:first-child .path", "text": "a.txt" },
+      { "selector": "#list li:first-child .tag", "attr": { "class": "tag tag-add" } }
+    ]
+  }
+}

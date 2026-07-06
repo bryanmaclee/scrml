@@ -419,7 +419,17 @@ export function emitEachMountHtml(node: EachBlockAstNode, _ctx: CompileContext):
 //      (active -> inactive removes the markup), so a single build cannot suffice.
 // ---------------------------------------------------------------------------
 
-/** Split a markup-text string into alternating literal / `${expr}` parts. */
+/**
+ * Split a markup-text string into alternating literal / `${expr}` parts.
+ *
+ * The `${expr}` terminator is found by `{`/`}` depth-counting, but braces INSIDE
+ * a string literal (`"…"`, `'…'`, backtick) are DATA, not structure — so the
+ * scan tracks an active string-delimiter and skips braces within it (respecting
+ * `\`-escapes). Without this, a lone/unmatched brace in a string literal (e.g.
+ * `${ @.k == "a" ? "}" : @.p }`) truncated the expr at the wrong `}` → the
+ * emitter shipped malformed JS → E-CODEGEN-INVALID-LOGIC (GITI-033 review #1).
+ * SHARED by `splitEachMarkupTextChildren` — that path is hardened identically.
+ */
 function splitMarkupTextInterp(value: string): Array<{ type: "text" | "expr"; v: string }> {
   const parts: Array<{ type: "text" | "expr"; v: string }> = [];
   let i = 0;
@@ -430,11 +440,20 @@ function splitMarkupTextInterp(value: string): Array<{ type: "text" | "expr"; v:
       if (buf) { parts.push({ type: "text", v: buf }); buf = ""; }
       let depth = 1;
       let j = i + 2;
+      let quote: string | null = null; // active string-literal delimiter, or null
       while (j < n && depth > 0) {
         const c = value[j];
-        if (c === "{") depth++;
-        else if (c === "}") depth--;
-        if (depth === 0) break;
+        if (quote !== null) {
+          // Inside a string literal — the matching UNESCAPED delimiter ends it;
+          // braces here are data and do NOT move the structural depth.
+          if (c === "\\") { j += 2; continue; }
+          if (c === quote) quote = null;
+          j++;
+          continue;
+        }
+        if (c === '"' || c === "'" || c === "`") { quote = c; j++; continue; }
+        if (c === "{") { depth++; j++; continue; }
+        if (c === "}") { depth--; if (depth === 0) break; j++; continue; }
         j++;
       }
       parts.push({ type: "expr", v: value.slice(i + 2, j) });
@@ -496,8 +515,23 @@ function rewriteEachScopeInExprNode(n: any, iterVarName: string): void {
   if (n.kind === "ident" && typeof n.name === "string" && n.name.includes("@")) {
     n.name = rewriteContextualSigil(n.name.replace(/@\s*\.\s*/g, "@."), iterVarName);
   }
-  if (n.kind === "markup" && Array.isArray(n.children)) {
-    n.children = splitEachMarkupTextChildren(n.children, iterVarName);
+  if (n.kind === "markup") {
+    // GITI-033 innermost-scope (§17.7.3) — a NESTED `<each>` REBINDS `@.` to its
+    // OWN item, so the enclosing per-item scope must NOT rewrite `@.` inside the
+    // inner each's BODY. Rewrite only the each's SOURCE/key attributes (which DO
+    // resolve in the enclosing scope, e.g. `in=@.files`), then STOP: the body's
+    // `@.` is lowered later against the INNER iter var by renderTemplateChildToJs.
+    // Descending here clobbered `<li>${@.}` → `${enclosingIterVar}` (every inner
+    // row rendered the OUTER item instead of the inner one).
+    const _tag = String((n as any).tag ?? (n as any).name ?? "");
+    if (_tag === "each") {
+      const _attrs = (n as any).attributes ?? (n as any).attrs;
+      if (Array.isArray(_attrs)) rewriteEachScopeInExprNode(_attrs, iterVarName);
+      return;
+    }
+    if (Array.isArray(n.children)) {
+      n.children = splitEachMarkupTextChildren(n.children, iterVarName);
+    }
   }
   for (const k of Object.keys(n)) {
     const v = (n as Record<string, unknown>)[k];
@@ -542,6 +576,34 @@ function emitEachPerItemMarkupValue(
   for (const l of maybeWrapEachPerItemEffect(body, iterVarName, indent)) lines.push(l);
 }
 
+/**
+ * Emit one `${expr}` interpolation (interior text already extracted) as a
+ * per-item text node. Under an active reconcile ctx bound to THIS iter var it is
+ * live-keyed (a stable text node + a per-item effect that re-resolves + re-reads
+ * on reconcile — Bug 64 / R28-1c); otherwise a static string append. SHARED by
+ * the `logic`-child branch AND the GITI-033 text-child `${...}`-split branch so
+ * the two emit byte-identical interpolation JS (no fork).
+ */
+function emitEachInterpExprToJs(
+  inner: string,
+  iterVarName: string,
+  fragmentVar: string,
+  lines: string[],
+  indent: string,
+): void {
+  const rewritten = lowerEachExpr(inner, iterVarName);
+  if (currentEachReconcileCtx() && currentEachReconcileCtx()!.iterVar === iterVarName) {
+    const _tnVar = `_scrml_each_tn_${nextLocalId()}`;
+    lines.push(`${indent}const ${_tnVar} = document.createTextNode("");`);
+    lines.push(`${indent}${fragmentVar}.appendChild(${_tnVar});`);
+    for (const _l of maybeWrapEachPerItemEffect(
+      [`${indent}${_tnVar}.textContent = String(${rewritten});`], iterVarName, indent,
+    )) lines.push(_l);
+  } else {
+    lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(String(${rewritten})));`);
+  }
+}
+
 function renderTemplateChildToJs(
   child: any,
   iterVarName: string,
@@ -566,6 +628,31 @@ function renderTemplateChildToJs(
     // ships the body verbatim; this keeps the per-item path parity-correct.
     if (parentIsRawContent) {
       lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(txt)}));`);
+      return;
+    }
+    // GITI-033 — a lifted-markup TEXT child can carry `${...}` interpolations
+    // VERBATIM (the ternary-markup / match-arm markup parser keeps `<li>${@.}` as
+    // a literal text child, unlike the for-lift path which hands us a `logic`
+    // node). Pre-fix this text branch ran `rewriteContextualSigil` over the whole
+    // string and JSON.stringify'd it, so `${@.kind}` shipped into the DOM as the
+    // literal text `${_scrml_each_item.kind}` (rendered, not interpolated). Split
+    // the text into literal + `${expr}` segments and lower each interpolation to
+    // a per-item (live-keyed) text node — the SAME emission as the `logic`-child
+    // branch. Guarded on the `${` presence, so a `logic`-node interpolation (the
+    // for-lift / Bug 72 path) never reaches here → that path stays byte-identical.
+    if (txt.includes("${")) {
+      for (const part of splitMarkupTextInterp(txt)) {
+        if (part.type === "text") {
+          if (part.v) {
+            const litRw = rewriteContextualSigil(part.v, iterVarName);
+            lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(litRw)}));`);
+          }
+        } else {
+          // Collapse the BS-padded sigil-dot before lowering (mirrors the logic
+          // branch's `inner` normalization) so `@ . kind` → `@.kind` lowers.
+          emitEachInterpExprToJs(part.v.replace(/\s*\.\s*/g, "."), iterVarName, fragmentVar, lines, indent);
+        }
+      }
       return;
     }
     // Non-empty literal text: rewrite `@.` to iterVar, then emit as text node.
@@ -742,22 +829,10 @@ function renderTemplateChildToJs(
     // bare idents (`contact.name` etc. — the iter var binding is the for-arg
     // of the factory closure). lowerEachExpr ADDS §42 predicate lowering
     // (`is some`/`is not`/`not`) when present — g-each-peritem-if-predicate C1.
-    let rewritten = lowerEachExpr(inner, iterVarName);
-    // Bug 64 / R28-1c (S159) — inside a reconciled per-item factory, make this
-    // `${...}` interpolation LIVE-KEYED: a stable text node + a live-keyed
-    // effect that re-resolves the item by key on every reconcile (and tracks
-    // item-field reads for in-place mutation). Outside a reconcile ctx (or for a
-    // binding not reading the active iter var) this is the unchanged static append.
-    if (currentEachReconcileCtx() && currentEachReconcileCtx()!.iterVar === iterVarName) {
-      const _tnVar = `_scrml_each_tn_${nextLocalId()}`;
-      lines.push(`${indent}const ${_tnVar} = document.createTextNode("");`);
-      lines.push(`${indent}${fragmentVar}.appendChild(${_tnVar});`);
-      for (const _l of maybeWrapEachPerItemEffect(
-        [`${indent}${_tnVar}.textContent = String(${rewritten});`], iterVarName, indent,
-      )) lines.push(_l);
-    } else {
-      lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(String(${rewritten})));`);
-    }
+    // Bug 64 / R28-1c (S159) — inside a reconciled per-item factory this becomes
+    // a LIVE-KEYED text node (re-resolve item by key on reconcile); outside a
+    // reconcile ctx it is the static string append. Shared emitter (GITI-033).
+    emitEachInterpExprToJs(inner, iterVarName, fragmentVar, lines, indent);
     return;
   }
 
@@ -934,7 +1009,7 @@ function renderTemplateChildToJs(
  * whitespace) fires. Order matters: lower `@.` FIRST so `rewriteAtCellAccess`
  * does not mis-consume the contextual sigil's `@`.
  */
-function rewriteIterValueExpr(text: string, iterVarName: string): string {
+function rewriteIterValueExpr(text: string, iterVarName: string | null): string {
   if (!text || typeof text !== "string") return text;
   let expr = text.replace(/@\s*\.\s*/g, "@.");
   expr = rewriteContextualSigil(expr, iterVarName);
@@ -1461,7 +1536,7 @@ function resolveMatchDiscriminantForItem(matchBlock: any, iterVarName: string): 
  * literals; the latter is left in-place since string-literal handling
  * is beyond the scope of this regex pass).
  */
-function rewriteContextualSigil(text: string, iterVarName: string): string {
+function rewriteContextualSigil(text: string, iterVarName: string | null): string {
   if (!text || typeof text !== "string") return text;
   // Match `@.` followed by optional dotted-ident chain. The `@.` followed by
   // end-of-string OR non-ident-char becomes the bare iter var.
@@ -2143,7 +2218,7 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
  */
 export function emitNestedEachFromMarkup(
   markupNode: any,
-  enclosingScopeVar: string,
+  enclosingScopeVar: string | null,
   fragmentVar: string,
   indent: string = "",
   engineCtx: EachEngineCtx | null = null,
