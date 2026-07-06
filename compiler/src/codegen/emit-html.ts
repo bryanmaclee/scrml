@@ -5,6 +5,7 @@ import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
+import { isRcdataElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
@@ -822,6 +823,81 @@ export function generateHtml(
     return out;
   })();
 
+  // 6nz-F4 — RCDATA content-model analysis.
+  //
+  // A reactive `${}` content interpolation inside an RCDATA element
+  // (`<textarea>`; SPEC §24.3.1 companion, SPEC.md:1141) must NOT lower to a
+  // `<span data-scrml-logic>` placeholder: inside RCDATA the span is literal
+  // text, not a mountable element, so the placeholder leaks verbatim as the
+  // element's value (the F4 bug — repro.scrml). This helper walks a candidate
+  // RCDATA element's children and, when at least one reactive interp is present,
+  // returns the ordered content parts (static text runs + reactive expression
+  // parts) so the caller can bind the concatenation to `.value` reactively and
+  // render the const-known parts as static first-paint content.
+  //
+  // Returns null when the content has NO reactive interp — pure-static text and
+  // const-folded interps already render correctly through the normal walk (the
+  // const-fold path emits inline text, never a span), so those fall through
+  // unchanged. Also returns null (bail) on any unsupported child shape (nested
+  // markup, value-control-flow / multi-statement / lift logic), preserving prior
+  // behavior for those unusual shapes rather than silently re-routing them.
+  function analyzeRcdataContent(
+    children: any[],
+  ): Array<{ kind: "static"; text: string } | { kind: "expr"; expr: string; exprNode: any }> | null {
+    const liveCtxForFold = ctxOrErrors && typeof ctxOrErrors === "object" && "fileAST" in ctxOrErrors
+      ? (ctxOrErrors as CompileContext)
+      : null;
+    let tryFoldInterpolation: ((exprNode: any, fileAST: any) => string | null) | null = null;
+    if (liveCtxForFold) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ tryFoldInterpolation } = require("./const-fold-env.ts") as {
+        tryFoldInterpolation: (exprNode: any, fileAST: any) => string | null;
+      });
+    }
+    const parts: Array<{ kind: "static"; text: string } | { kind: "expr"; expr: string; exprNode: any }> = [];
+    let hasReactive = false;
+    for (const child of children) {
+      if (!child || typeof child !== "object") continue;
+      if (child.kind === "text") {
+        parts.push({ kind: "static", text: String(child.value ?? child.text ?? "") });
+        continue;
+      }
+      if (child.kind === "comment") continue;
+      if (
+        child.kind === "logic" &&
+        Array.isArray(child.body) &&
+        child.body.length === 1 &&
+        child.body[0]?.kind === "bare-expr"
+      ) {
+        const bare = child.body[0];
+        const exprStr: string = bare.exprNode ? emitStringFromTree(bare.exprNode) : (bare.expr ?? "");
+        // Skip an empty / whitespace-only interp (e.g. a `${ }` that stringifies
+        // empty) — pushing it as an expr part would make the wiring emit
+        // `el.value = "" + ()` (a SyntaxError). Mirrors the each-path guard
+        // (`if (!inner) continue;`, eachRcdataValueExpr). Contributes nothing.
+        if (!exprStr.trim()) continue;
+        // Const-fold first — a compile-time-constant interp becomes a static
+        // text run (this is the SAME fold the normal logic-node path applies, so
+        // a const-only textarea never reaches the reactive path).
+        let folded: string | null = null;
+        if (liveCtxForFold && tryFoldInterpolation && bare.exprNode) {
+          folded = tryFoldInterpolation(bare.exprNode, liveCtxForFold.fileAST);
+        }
+        if (folded !== null) {
+          parts.push({ kind: "static", text: folded });
+          continue;
+        }
+        parts.push({ kind: "expr", expr: exprStr, exprNode: bare.exprNode });
+        hasReactive = true;
+        continue;
+      }
+      // Unsupported child shape — bail (fall through to the normal per-child walk).
+      return null;
+    }
+    if (!hasReactive) return null;
+    return parts;
+  }
+
   function emitNode(node: any): void {
     if (!node || typeof node !== "object") return;
 
@@ -1004,6 +1080,46 @@ export function generateHtml(
       const children: any[] = node.children ?? [];
       const isSelfClosing: boolean = node.selfClosing === true && children.length === 0;
       const isVoid: boolean = VOID_ELEMENTS.has(tag);
+
+      // 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion,
+      // SPEC.md:1141). When this is an RCDATA element (`<textarea>`) with reactive
+      // `${}` content interp, we bind the concatenated content to `.value`
+      // instead of emitting the (invalid-in-RCDATA) `<span data-scrml-logic>`
+      // placeholder. Computed here (before the open-tag close) so the
+      // `data-scrml-rcdata` selector attribute can be stamped into the opener.
+      // `_rcdataBindValueConflict` fires the edge-4 ruling: an explicit
+      // `bind:value` on the same textarea is the canonical (two-way) value binding
+      // (§5.4 / §6.2) and WINS — the redundant content interp is dropped + warned
+      // (W-RCDATA-BIND-VALUE-CONTENT-CONFLICT), never double-bound.
+      let _rcdataParts:
+        | Array<{ kind: "static"; text: string } | { kind: "expr"; expr: string; exprNode: any }>
+        | null = null;
+      let _rcdataPlaceholderId: string | null = null;
+      if (isRcdataElement(tag) && !isSelfClosing && !isVoid) {
+        _rcdataParts = analyzeRcdataContent(children);
+        if (_rcdataParts) {
+          const _bvAttr = attrs.find(
+            (a: any) => a && (a.name === "bind:value" || a.name === "bind:valueAsNumber"),
+          );
+          if (_bvAttr) {
+            // bind:value wins (edge-4 ruling); no placeholder is allocated, so the
+            // carve-out below drops the content (bind:value drives `.value`).
+            if (errors) {
+              errors.push(new CGError(
+                "W-RCDATA-BIND-VALUE-CONTENT-CONFLICT",
+                `W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: <${tag}> has BOTH a \`${_bvAttr.name}\` binding AND reactive \`\${...}\` body content.\n` +
+                `  These are contradictory value sources. \`${_bvAttr.name}\` is the canonical two-way value binding (§5.4 / §6.2) and takes precedence;\n` +
+                `  the reactive body interpolation is dropped (it would fight the binding for control of \`.value\`).\n` +
+                `  Resolution: keep \`${_bvAttr.name}\` and remove the \`\${...}\` body, or remove \`${_bvAttr.name}\` and keep the body (one-way display).`,
+                (node as any).span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+                "warning",
+              ));
+            }
+          } else {
+            _rcdataPlaceholderId = genVar("rcdata");
+          }
+        }
+      }
 
       if (tag === "errorBoundary" || tag === "errorboundary") {
         // SPEC §19.6 — markup-context error catch. The boundary wraps a subtree
@@ -2385,12 +2501,51 @@ export function generateHtml(
         }
       }
 
+      // 6nz-F4 — stamp the RCDATA `.value`-bind selector into the opener before
+      // the tag closes. Only when a placeholder was allocated (i.e. reactive
+      // content present AND no bind:value conflict).
+      if (_rcdataPlaceholderId) {
+        parts.push(` data-scrml-rcdata="${_rcdataPlaceholderId}"`);
+      }
+
       if (isSelfClosing || isVoid) {
         parts.push(" />");
         return;
       }
 
       parts.push(">");
+
+      // 6nz-F4 — RCDATA reactive content carve-out. Emit the const-known parts as
+      // static first-paint content (matching the bind:value model, where the
+      // client sets `.value` on load; a reactive-cell part contributes nothing to
+      // first paint and is filled by the effect), register ONE `rcdata-content`
+      // binding driving `el.value`, and close — WITHOUT walking children through
+      // the normal per-child path (which would emit the leaking span). On a
+      // bind:value conflict (_rcdataParts set but no placeholder), the content is
+      // dropped entirely (bind:value drives `.value`); we still skip the child
+      // walk so no span leaks.
+      if (_rcdataParts) {
+        if (_rcdataPlaceholderId) {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { escapeHtmlText } = require("./const-fold-env.ts") as {
+            escapeHtmlText: (s: string) => string;
+          };
+          for (const part of _rcdataParts) {
+            if (part.kind === "static" && part.text) {
+              parts.push(escapeHtmlText(part.text));
+            }
+          }
+          if (registry) {
+            registry.addLogicBinding({
+              kind: "rcdata-content",
+              placeholderId: _rcdataPlaceholderId,
+              rcdataParts: _rcdataParts,
+            });
+          }
+        }
+        parts.push(`</${tag}>`);
+        return;
+      }
 
       if (csrfEnabled && tag === "form") {
         const csrfId = genVar("csrf");

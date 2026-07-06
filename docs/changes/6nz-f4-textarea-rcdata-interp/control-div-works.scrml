@@ -1,0 +1,6 @@
+<program>
+${ @x = "hello" }
+<div class="app">
+    <div class="ta">${@x}</div>
+</div>
+</program>

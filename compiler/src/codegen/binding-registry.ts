@@ -114,7 +114,24 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content";
+
+  /**
+   * 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion, SPEC.md:1141).
+   * Set when `kind === "rcdata-content"`. A reactive `${}` content interpolation
+   * inside an RCDATA element (`<textarea>`) must NOT emit a
+   * `<span data-scrml-logic>` placeholder — inside RCDATA the span is literal
+   * text, not a mountable element (the F4 bug). Instead the element's concatenated
+   * content is bound to its `.value` reactively (the one-way read-side of the
+   * bind:value machinery). `rcdataParts` carries the ordered content parts:
+   * static text runs (const-known / literal) and reactive expression parts.
+   * emit-event-wiring locates the element via `data-scrml-rcdata="<placeholderId>"`
+   * and wires `el.value = <concatenation>` inside an `_scrml_effect`.
+   */
+  rcdataParts?: Array<
+    | { kind: "static"; text: string }
+    | { kind: "expr"; expr: string; exprNode: any }
+  >;
 
   // Conventional reactive / conditional binding fields.
   // Required for `kind === undefined` bindings (the default).

@@ -1,0 +1,7 @@
+<program>
+${ @x = "hello" }
+<div class="app">
+    <textarea class="ta" rows="2">${@x}</textarea>
+    <div class="ctl">control: ${@x}</div>
+</div>
+</program>

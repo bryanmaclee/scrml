@@ -994,6 +994,65 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
 
       // -----------------------------------------------------------------
+      // 6nz-F4 — RCDATA `.value` content bind (SPEC §24.3.1 companion).
+      //
+      // A reactive `${}` content interpolation inside a `<textarea>` cannot use
+      // the `<span data-scrml-logic>` placeholder (inside RCDATA it is literal
+      // text, not a mountable element). emit-html.ts stamped a
+      // `data-scrml-rcdata="<placeholderId>"` selector on the element and
+      // registered this binding carrying the ordered content parts. We reuse the
+      // one-way read-side of the bind:value machinery (`_scrml_effect(() =>
+      // el.value = <expr>)`, cf. emit-bindings.ts:608) — the concatenation of the
+      // static text runs (as string literals) and the reactive expression parts.
+      // The initial call sets `.value` on load; the effect re-runs on any reactive
+      // read → the textarea stays in sync (edges 1/3/6). Static-only / const-folded
+      // content never reaches here (emit-html routes it to inline text).
+      // -----------------------------------------------------------------
+      if (binding.kind === "rcdata-content" && placeholderId && Array.isArray(binding.rcdataParts)) {
+        // Build the concatenation. Leading `""` forces String coercion so a
+        // single numeric/boolean reactive part still assigns a string to `.value`.
+        const concatTerms: string[] = [`""`];
+        for (const part of binding.rcdataParts) {
+          if (part.kind === "static") {
+            if (part.text) concatTerms.push(JSON.stringify(part.text));
+          } else {
+            let partExpr = emitExprField(part.exprNode, part.expr, {
+              mode: "client",
+              derivedNames: ctx.derivedNames,
+              synthCellKeys: ctx.synthCellKeys,
+              ...engineExprCtxExtras,
+            });
+            // Name-encoding parity with the other interp paths: rewrite the
+            // reactive-cell keys inside the lowered expression to their encoded
+            // form (scan the lowered `_scrml_reactive_get("name")` reads).
+            if (encodingCtx && encodingCtx.enabled) {
+              const refSet = new Set<string>();
+              const reGet = /_scrml_reactive_get\("([^"]+)"\)/g;
+              let _gm: RegExpExecArray | null;
+              while ((_gm = reGet.exec(partExpr)) !== null) refSet.add(_gm[1]);
+              for (const ref of refSet) {
+                const enc = encodingCtx.encode(ref);
+                if (enc !== ref) {
+                  partExpr = partExpr.split(`_scrml_reactive_get("${ref}")`).join(`_scrml_reactive_get(${JSON.stringify(enc)})`);
+                }
+              }
+            }
+            concatTerms.push(`(${partExpr})`);
+          }
+        }
+        const valueExpr = concatTerms.join(" + ");
+        lines.push(`  {`);
+        lines.push(`    const el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
+        lines.push(`    if (el) {`);
+        lines.push(`      const _scrml_set_rcdata = function() { el.value = ${valueExpr}; };`);
+        lines.push(`      _scrml_set_rcdata();`);
+        lines.push(`      _scrml_effect(function() { _scrml_set_rcdata(); });`);
+        lines.push(`    }`);
+        lines.push(`  }`);
+        continue;
+      }
+
+      // -----------------------------------------------------------------
       // A1c C11 — `<errors of=expr/>` element wiring per binding.
       // -----------------------------------------------------------------
       if (binding.kind === "errors-element" && binding.anchorId && binding.errorsKey) {

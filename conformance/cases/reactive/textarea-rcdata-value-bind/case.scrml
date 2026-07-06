@@ -1,0 +1,8 @@
+${
+    <x> = "hello"
+    function change() {
+        @x = "world"
+    }
+}
+<button id="go" onclick=change()>go</>
+<textarea id="ta">${@x}</textarea>

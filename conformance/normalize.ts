@@ -197,6 +197,15 @@ export interface AnchoredAssertion {
   count?: number;
   /** Assert author attribute values on the first match. */
   attr?: Record<string, string>;
+  /**
+   * Assert the LIVE `.value` DOM property of the first match — the form-control
+   * value as reflected in the DOM (v1.0 scope, per this module's contract: "input
+   * value/checked as reflected in the DOM"). Distinct from `text`: a `<textarea>`
+   * whose `.value` is set by client JS keeps its original child text nodes, so
+   * `textContent` does NOT track `.value` — the 6nz-F4 RCDATA `.value` bind can
+   * only be asserted through this field.
+   */
+  value?: string;
 }
 
 function collapseWs(s: string): string {
@@ -239,6 +248,12 @@ export function runAnchored(
         if (got !== a.attr[k]) {
           failures.push('selector ' + a.selector + ": attr " + k + ' expected "' + a.attr[k] + '", got "' + got + '"');
         }
+      }
+    }
+    if (typeof a.value === "string") {
+      const got = (el as { value?: unknown }).value;
+      if (got !== a.value) {
+        failures.push('selector ' + a.selector + ': value expected "' + a.value + '", got "' + String(got) + '"');
       }
     }
   }

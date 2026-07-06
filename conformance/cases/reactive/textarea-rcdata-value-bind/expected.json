@@ -1,0 +1,14 @@
+{
+  "id": "reactive-textarea-rcdata-value-bind",
+  "description": "6nz-F4: a reactive ${@x} inside a <textarea> (RCDATA content model) binds the element's .value reactively instead of leaking a <span data-scrml-logic> placeholder as literal text. Clicking #go runs change() (@x: hello -> world); the textarea's live .value tracks the cell.",
+  "language-version": "1.0",
+  "spec": "§24.3.1",
+  "rationale": "§24.3.1 companion (SPEC.md:1141): <textarea> has an RCDATA content model — its body is raw text, so scrml's reactive interp placeholder span is invalid inside it (it renders verbatim). The fix binds the interp to .value (the one-way read-side of bind:value, §5.4). notCodes guards the sibling ruling: with NO bind:value present, the conflict lint must NOT fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-RCDATA-BIND-VALUE-CONTENT-CONFLICT"],
+    "input": [{ "click": "#go" }],
+    "state": { "x": "world" },
+    "domAnchored": [{ "selector": "#ta", "value": "world" }]
+  }
+}

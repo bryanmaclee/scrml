@@ -39,6 +39,7 @@
 import type { CompileContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
+import { isRcdataElement } from "../html-elements.js";
 
 // ---------------------------------------------------------------------------
 // Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
@@ -584,6 +585,75 @@ function emitEachPerItemMarkupValue(
  * the `logic`-child branch AND the GITI-033 text-child `${...}`-split branch so
  * the two emit byte-identical interpolation JS (no fork).
  */
+/**
+ * 6nz-F4 edge 5 — does an each per-item element carry a `bind:value` binding?
+ * When it does, the canonical two-way value binding wins and the RCDATA content
+ * carve-out is suppressed (parity with the top-level bind:value-conflict ruling
+ * W-RCDATA-BIND-VALUE-CONTENT-CONFLICT; the top-level path emits the warning).
+ */
+function eachHasBindValue(attrs: any[]): boolean {
+  return attrs.some(
+    (a) => a && (String(a.name ?? "") === "bind:value" || String(a.name ?? "") === "bind:valueAsNumber"),
+  );
+}
+
+/**
+ * 6nz-F4 edge 5 — build the `.value` concatenation expression for a `<textarea>`
+ * (RCDATA element) reactive body in an `<each>` per-item template. Inside RCDATA
+ * a child text node / interp is the element's VALUE, not mountable content, so
+ * the per-item factory must set `elVar.value` from the concatenated content
+ * rather than appending child text nodes. Returns the JS concatenation string,
+ * or null when the body carries NO interpolation (pure-static text renders fine
+ * as textarea content through the normal recursion) or an unsupported child
+ * shape is present (bail to the normal path — no behavior change).
+ */
+function eachRcdataValueExpr(children: any[], iterVarName: string): string | null {
+  const terms: string[] = [];
+  let hasInterp = false;
+  for (const child of children) {
+    if (!child || typeof child !== "object") continue;
+    if (child.kind === "text") {
+      const txt = String((child as any).value ?? (child as any).text ?? "");
+      if (txt.includes("${")) {
+        for (const part of splitMarkupTextInterp(txt)) {
+          if (part.type === "text") {
+            if (part.v) terms.push(JSON.stringify(rewriteContextualSigil(part.v, iterVarName)));
+          } else {
+            terms.push(`String(${lowerEachExpr(part.v.replace(/\s*\.\s*/g, "."), iterVarName)})`);
+            hasInterp = true;
+          }
+        }
+      } else if (txt) {
+        terms.push(JSON.stringify(rewriteContextualSigil(txt, iterVarName)));
+      }
+      continue;
+    }
+    if (child.kind === "comment") continue;
+    if (
+      child.kind === "logic" &&
+      Array.isArray((child as any).body) &&
+      (child as any).body.length === 1 &&
+      (child as any).body[0]?.kind === "bare-expr"
+    ) {
+      const stmt = (child as any).body[0];
+      // Markup-as-value in a textarea body is not a value-text case — bail.
+      if (exprNodeHasMarkupValue(stmt.exprNode)) return null;
+      const exprText = stmt.expr
+        ? String(stmt.expr)
+        : (stmt.exprNode ? emitStringFromTree(stmt.exprNode) : "");
+      const inner = exprText.replace(/\s*\.\s*/g, ".");
+      if (!inner) continue;
+      terms.push(`String(${lowerEachExpr(inner, iterVarName)})`);
+      hasInterp = true;
+      continue;
+    }
+    // Unsupported child shape — bail to the normal recursion.
+    return null;
+  }
+  if (!hasInterp) return null;
+  return terms.length > 0 ? terms.join(" + ") : `""`;
+}
+
 function emitEachInterpExprToJs(
   inner: string,
   iterVarName: string,
@@ -723,6 +793,21 @@ function renderTemplateChildToJs(
       renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx);
     }
 
+    // 6nz-F4 edge 5 — RCDATA (<textarea>) reactive body in an each per-item
+    // template. Inside RCDATA a child text node IS the element's value, so the
+    // per-item factory must set `elVar.value` from the concatenated body rather
+    // than appending child text nodes (which would not track `.value` reliably).
+    // Suppressed when a `bind:value` binding is present (that wins). Wrapped in
+    // the per-item effect so it re-resolves on reconcile.
+    const _rcdataValueExpr =
+      isRcdataElement(tagName) &&
+      !isShorthand &&
+      !eachHasBindValue(attrs) &&
+      Array.isArray((child as any).children) &&
+      (child as any).children.length > 0
+        ? eachRcdataValueExpr((child as any).children, iterVarName)
+        : null;
+
     if (isShorthand && shorthandExpr !== null) {
       // `:`-shorthand body — single-expression body becomes textContent.
       // Rewrite `@.` to iterVar so `<li : @.name>` → `item.name`.
@@ -731,6 +816,12 @@ function renderTemplateChildToJs(
       // live-keyed under a reconcile ctx so same-key reconcile reflects new data.
       for (const _l of maybeWrapEachPerItemEffect(
         [`${indent}${elVar}.textContent = String(${exprRewritten});`], iterVarName, indent,
+      )) lines.push(_l);
+    } else if (_rcdataValueExpr !== null) {
+      // eachRcdataValueExpr already yields a string (each interp term is
+      // String()-wrapped; static runs are JSON string literals), so no outer cast.
+      for (const _l of maybeWrapEachPerItemEffect(
+        [`${indent}${elVar}.value = ${_rcdataValueExpr};`], iterVarName, indent,
       )) lines.push(_l);
     } else if (Array.isArray((child as any).children) && (child as any).children.length > 0) {
       // Bare-body — recurse into children. SPEC §4.17 — when THIS element is a

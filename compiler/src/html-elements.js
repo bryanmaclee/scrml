@@ -260,7 +260,17 @@ const ELEMENT_DEFS = [
     ],
   },
   {
-    tag: "textarea", isVoid: false, domInterface: "HTMLTextAreaElement", attrs: [
+    // rcdata: true — <textarea> has an RCDATA (escapable-raw-text) content
+    // model in HTML: its body is raw text, so an element placed inside it
+    // (e.g. scrml's reactive `<span data-scrml-logic>` interp placeholder) is
+    // NOT a live element — it renders as literal text (6nz-F4 bug). Codegen
+    // (emit-html.ts) consults this flag to carve reactive `${}` content interp
+    // out of the span path and bind it to `.value` instead. (SPEC §24.3.1
+    // companion, SPEC.md:1141 — the anticipated non-self-closing <textarea>
+    // body case.) NOTE: <title> is the other HTML RCDATA element; it is not
+    // registered as an element here (only a GLOBAL_ATTRIBUTE), so it carries no
+    // rcdata row yet — a cheap follow-up if a `<title>` element form is added.
+    tag: "textarea", isVoid: false, rcdata: true, domInterface: "HTMLTextAreaElement", attrs: [
       ["name",         attr("string")],
       ["rows",         attr("number")],
       ["cols",         attr("number")],
@@ -501,6 +511,8 @@ for (const def of ELEMENT_DEFS) {
     attributes,
     isVoid: def.isVoid,
     rendersToDom: true,
+    // RCDATA content-model flag (6nz-F4). Default false; only `<textarea>` sets it.
+    rcdata: def.rcdata === true,
     domInterface: def.domInterface ?? "HTMLElement",
   });
 }
@@ -873,4 +885,18 @@ export function isHtmlElement(tagName) {
  */
 export function getAllElementNames() {
   return Array.from(REGISTRY.keys());
+}
+
+/**
+ * Check whether a tag name is an RCDATA (escapable-raw-text) HTML element
+ * (6nz-F4). Currently only `<textarea>`. Consulted by codegen to route a
+ * reactive `${}` content interpolation to a `.value` bind instead of the
+ * (invalid-in-RCDATA) `<span data-scrml-logic>` placeholder.
+ *
+ * @param {string} tagName
+ * @returns {boolean}
+ */
+export function isRcdataElement(tagName) {
+  const shape = REGISTRY.get(tagName.toLowerCase());
+  return shape != null && shape.rcdata === true;
 }
