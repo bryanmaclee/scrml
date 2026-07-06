@@ -91,6 +91,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `c18e8249` — chore(s241): WRAP — hand-off + changelog + delta-log [390-401] + user-voice + 8 gaps — **LOCAL-ONLY**
 - `caa8803b` — chore(s240): WRAP — hand-off + changelog + delta-log [383-389] + inbox processed — **pushed**
 - `e44ce893` — chore(s239): WRAP — A/B + E-TOOL-006 landed, PA contract hardened; W5b HELD on origin/w5b-wip (cross-machine) — **pushed**
 - `6f8adc5c` — chore(s238): WRAP addendum — flogence Surface-2 R26 (2 CLI toolchain blockers filed + prioritized) — **pushed**
@@ -98,7 +99,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
 - `cfba6295` — chore(s235): WRAP — hand-off CLOSE + virtual-clock landing bookkeeping + debounce bug filed [288-289] — **pushed**
 - `2fb2bf1f` — chore(s234): WRAP — hand-off CLOSE + changelog + known-gaps + master-list + 6 BRIEFs + delta-log [257-275] — **pushed**
-- `b24f3892` — chore(s233): WRAP — hand-off + changelog + master-list + architecture-skeleton RULING + delta-log [242-256] — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
