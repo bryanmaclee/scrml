@@ -7004,7 +7004,7 @@ The compiler SHALL escalate a function to a server route if ANY of the following
 
 1. The function accesses a resource not accessible from the client (e.g., a file-system-only database via Bun SQLite).
 2. The function's inferred return type or any intermediate type in its body includes a protected field (from `protect=` on an enclosing state block).
-3. Developer configuration declares that a specific module or function SHALL never run client-side. The `SERVER_ONLY_SCRML_MODULES` set names the canonical server-only stdlib modules; importing any of them — `scrml:auth`, `scrml:db`, `scrml:redis`, `scrml:fs`, `scrml:process`, `scrml:cron`, `scrml:oauth` — escalates the importing function. Direct uses of `process.{cwd,argv,platform,exit,uptime,memoryUsage}`, `Bun.cron`, and the wildcard import `import * as X from "bun"` are also recognized as server-only signals.
+3. Developer configuration declares that a specific module or function SHALL never run client-side. The `SERVER_ONLY_SCRML_MODULES` set names the canonical server-only stdlib modules; importing any of them — `scrml:auth`, `scrml:db`, `scrml:redis`, `scrml:fs`, `scrml:process`, `scrml:cron`, `scrml:oauth` — escalates the importing function. Direct uses of `process.{cwd,argv,platform,exit,uptime,memoryUsage}`, `Bun.cron`, and the wildcard import `import * as X from "bun"` are also recognized as server-only signals. The §20.7 `print()` / `println()` built-ins write host `process.stdout` and are likewise server-only signals — a web-`<program>` function calling them is server-placed; in a `kind="tool"` program (§64, no client boundary) they write the tool's stdout directly with no escalation.
 4. The function has an explicit `server` annotation (§52.10). **DEPRECATED** as of v0.next per Insight 26 (2026-05-08); see W-DEPRECATED-SERVER-MODIFIER (§34) and the deprecation cycle. Triggers 1, 2, 3, 5, 6, 7, and 8 cover every case the keyword previously communicated (Triggers 7 + 8 added 2026-06-10 — change-id `server-keyword-eliminate-2026-06-10` D2 — to close the two trigger-less classes that previously relied on the keyword: channel publisher functions and the middleware `handle()` escape hatch).
 5. **Caller-context propagation.** A function with no direct triggers (1-4) and no capture-taint, called only from server-classified callers and never from a client-classified function, SHALL escalate to server by inheritance. A function with at least one client-classified caller SHALL remain ambient (client-classified). A function with no callers at all SHALL NOT escalate via this trigger; see Trigger 6. (Added 2026-05-08 — Insight 26 Batch 1 precondition; whole-program analysis applied at the call-graph fixed-point. Implementation: `compiler/src/route-inference.ts` Step 5c.)
 6. **Dead-code unreached-warn.** A function declared but called from neither a server-classified context nor a client-classified context, not exported, not server-annotated, and not referenced from markup, SHALL fire `W-DEAD-FUNCTION` at its declaration site (§34). The function will be tree-shaken from the output. This trigger is diagnostic, not escalation: it surfaces the in-vacuum case where neither Trigger 1-3 nor Trigger 5 carries information about intended placement. (Added 2026-05-08 — Insight 26 Batch 1 precondition; complements Trigger 5 by catching empty-call-graph cases the call-graph fixed-point cannot resolve.)
@@ -14497,7 +14497,59 @@ This guarantees zero disruption to existing source that declared a local `log` (
 - `log()` SHALL render each argument value-faithfully (§20.6.4), not via host `JSON.stringify`.
 - A user-declared in-scope binding named `log` SHALL win over the builtin; the compiler SHALL emit info-level `W-LOG-SHADOWED` rather than rewriting the call. `log` SHALL NOT be a reserved identifier.
 
-**Cross-references:** §20.1 (`navigate()` — the location-transparent builtin precedent) · §12.4 (route analysis before codegen — the side-knowledge source) · §19.6.8 B5 + §51.0.H (the two outstanding "scrml's logging surface" promises this builtin backs) · §47.1.4 / §59.5 (canonical value discipline reused for deterministic rendering) · §19.12.7 / `test-bind` (the clean prod-strip precedent) · §38 (dev SSE channel — the later server→browser mirror leg).
+**Cross-references:** §20.1 (`navigate()` — the location-transparent builtin precedent) · §12.4 (route analysis before codegen — the side-knowledge source) · §19.6.8 B5 + §51.0.H (the two outstanding "scrml's logging surface" promises this builtin backs) · §47.1.4 / §59.5 (canonical value discipline reused for deterministic rendering) · §19.12.7 / `test-bind` (the clean prod-strip precedent) · §38 (dev SSE channel — the later server→browser mirror leg) · §20.7 (`print()`/`println()` — the clean-stdout program-output sibling).
+
+---
+
+### 20.7 `print()` / `println()` Built-ins (Clean Stdout)
+
+**Added S241 (ratified S238/S240 — a dedicated clean-stdout primitive; `log()` (§20.6) stays the decorated dev-logger everywhere).** SPEC-TEXT / **Nominal** — the codegen (emit-tool.ts inlines `_scrml_print`) is the follow-on wave; the named codes below land WITH the impl (Rule 4 / §60·§61·§64 named-codes-land-with-impl precedent). Consumer/R26: flogence (its CLI stdout is machine-parsed; `log()`'s `[server]…(file:line)` decoration broke it).
+
+`print(...args)` / `println(...args)` write their arguments to host **stdout** as **raw text** — no origin tag, no `file:line`, no side classification. They are the counterpart to `log()` for **program output** (a CLI's actual stdout, consumed and machine-parsed downstream), NOT diagnostics. The two SHALL NOT be conflated: `log()` is location-transparent decorated diagnostics stripped in production (§20.6.5); `print` / `println` are undecorated program output that SURVIVES production. **The line: `log` is for the developer; `print` is for the program's consumer.**
+
+#### 20.7.1 Signature and Semantics
+
+```scrml
+print(...args)      // writes args to stdout, NO trailing newline
+println(...args)    // writes args to stdout, then a single "\n"
+```
+
+- Both accept zero or more argument expressions. Arguments are **space-joined** (`println("a", "b")` emits `a b\n`) — the conventional print / `console.log` shape. `print()` with no args emits the empty string; `println()` with no args emits a bare newline.
+- Both are compiler-managed built-ins lowered at code generation (the `log()` / `navigate()` rewrite shape, §20.1 / §20.6) — NOT stdlib imports. The emitted form is `_scrml_print(<joined>)` for `print` and `_scrml_print(<joined> + "\n")` for `println`, where `_scrml_print` writes host `process.stdout`.
+- Statement-position; no usable return value (the emitted call evaluates to `not`), same as `log()`.
+
+#### 20.7.2 Arguments — string + primitive coercion
+
+A `print` / `println` argument SHALL be a **string**, **number**, or **boolean**. Coercion is the honest textual form: a `string` verbatim, a `number` as its decimal text, a `boolean` as `true` / `false`. A **non-primitive** argument — a struct, enum, array, value-native map (§59), markup-as-value, or `not` — is **`E-PRINT-NON-PRIMITIVE`**: clean stdout is intentional, machine-parsed output, so structured data SHALL be serialized explicitly (a serializer of the author's choosing) rather than rendered to a human-readable projection. This is the deliberate divergence from `log()`, whose §20.6.4 value-faithful render is a *human* projection — the wrong shape for a consumed stream.
+
+#### 20.7.3 Placement — host stdout is a server-only resource
+
+Host `process.stdout` is a server-only resource (§12.2 Trigger 3 — the `process.*` server-only-signal class). Consequently:
+
+- In a **web `<program>`**, a `function` that calls `print` / `println` is **server-placed** by Route Inference (§12), exactly like a function that touches `?{}` SQL or `Bun.*`. A `print` in a position the analysis forces client-only (e.g. it also reads a `const <name>` derived value) surfaces the ordinary §12 placement conflict (E-ROUTE-002) — there is no separate print-context code.
+- In a **`kind="tool"` program** (§64) there is no client boundary — the whole module is host-side — so `print` / `println` write the tool process's stdout directly with no escalation. This is the motivating case: a CLI whose stdout is parsed.
+
+#### 20.7.4 Production behavior — NOT stripped
+
+Unlike `log()` (§20.6.5, stripped to 0 bytes), `print` / `println` are **program output** and SHALL survive the production build verbatim. No strip pass SHALL remove them or their argument evaluation — stripping them would delete the program's behavior.
+
+#### 20.7.5 Shadowing — a user-declared `print` / `println` wins
+
+A user-declared in-scope binding named `print` / `println` wins; the built-in steps aside and the call is emitted as an ordinary call to the user's binding, with an info-level lint **`W-PRINT-SHADOWED`** at the shadowing use (the `W-LOG-SHADOWED` template, §20.6.7). `print` / `println` are NOT reserved identifiers. `W-PRINT-SHADOWED` is reserved for promotion to `E-PRINT-SHADOWED` at the end of the deprecation window once existing shadowing declarations migrate.
+
+#### 20.7.6 Normative Statements
+
+- `print(...args)` / `println(...args)` SHALL be compiler-managed built-ins lowered at code generation, NOT stdlib imports.
+- They SHALL write host `process.stdout` as raw text with NO origin tag / `file:line` / side classification (the deliberate contrast with `log()`, §20.6.2).
+- `println` SHALL append exactly one `"\n"`; `print` SHALL append nothing. Multiple arguments SHALL be space-joined.
+- An argument that is not a `string` / `number` / `boolean` SHALL be `E-PRINT-NON-PRIMITIVE`.
+- Host stdout SHALL be treated as a server-only resource: a web-`<program>` function calling `print` / `println` SHALL be server-placed per §12.2; a `kind="tool"` program SHALL write its process stdout directly.
+- In a production build, `print` / `println` SHALL survive verbatim (NOT stripped) — they are program output, not diagnostics.
+- A user-declared in-scope binding named `print` / `println` SHALL win over the built-in; the compiler SHALL emit info-level `W-PRINT-SHADOWED`. `print` / `println` SHALL NOT be reserved identifiers.
+
+**Named codes (land WITH the impl per Rule 4 / §60·§61·§64 precedent):** `E-PRINT-NON-PRIMITIVE` (Error — a non-primitive arg to `print` / `println`); `W-PRINT-SHADOWED` (Info — a user binding shadows the built-in; reserved `E-PRINT-SHADOWED`).
+
+**Cross-references:** §20.6 (`log()` — the decorated dev-logger sibling; the print-vs-log contract) · §20.1 (`navigate()` — the location-transparent-builtin lowering precedent) · §12.2 Trigger 3 (host stdout as a server-only resource) · §64 (`kind="tool"` — the primary consumer; §64.6 E-TOOL-005 gains `_scrml_print` in the tool-inlined helper set when the impl lands) · §23.2.4 (the bare-`_{}` host-I/O context a tool also uses).
 
 
 ---
@@ -34660,5 +34712,7 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 §40.8 (the web-app top-level program this re-targets) · §43 (nested execution contexts — orthogonal) ·
 §23.6 (`<foreign lang>` — the COMPLEMENT surface for imported libs; a tool is an entry point, a library
 is imported) · §23.2.4 (the amended bare-`_{}` context admission) · §23.5 (`capabilities=`) · §44 / W5b
-(`?{}` under `db=`) · §23.2 (`_{}` under `lang=`). Consumer/R26: flogence (fleet.ts db-only cleanest
+(`?{}` under `db=`) · §23.2 (`_{}` under `lang=`) · §20.7 (`print()` / `println()` — the clean-stdout program-output primitive a
+tool uses for machine-parsed output; §64.6 E-TOOL-005 gains `_scrml_print` in the tool-inlined helper set
+when the impl lands). Consumer/R26: flogence (fleet.ts db-only cleanest
 first; dispatch.ts db+`_{}`; the 18 db-bound files).
