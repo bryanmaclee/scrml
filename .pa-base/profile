@@ -1,0 +1,83 @@
+# .pa-base/profile — the scrml PA boot manifest (boot rehydrates from this; do not re-derive)
+# scrml · hand-authored (NOT /flobase-assembled — this is the reference PA flobase emulates).
+# The flobase /boot reads this to know the module-set + the Profile-A read-set. It does NOT
+# replace pa-scrml.md — it POINTS at it. Authority always defers to ../scrml-support/pa-scrml.md.
+
+IDENTITY:
+  git config user.name -> slugify -> first token -> read ../scrml-support/pa-profile-<slug>.md
+  bryan maclee -> bryan -> pa-profile-bryan.md   (default: bryan, if unset/unmatched)
+
+STACK:  scrml — the working compiler (TS/JS impl#1 of the scrml language, Bun-run).
+        Authoritative spec: compiler/SPEC.md · SPEC-INDEX.md · PIPELINE.md. Code<->spec drive each other.
+STAGE:  V1 = scrml-LANGUAGE 1.0 (compilers decoupled). Critical path = language frozen +
+        conformance-tested + impl#1(TS) conformant. FREEZE BAR = "do it right" / HIGH-coverage-first
+        (~220 of ~200-270 cases). Remaining V1 = conformance coverage-GROWTH + D1/D2/D4 labeling,
+        NOT big feature builds. In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
+        (compiler/self-host-v2/). Adopter-driven thread: flogence 100%-scrml (standalone-tool §64 +
+        W5b in-process db library).
+SCOPE:  large — compiler/src ~24.7K LOC · SPEC.md ~24K lines/~410k tokens · ~26.6K tests ·
+        18 stdlib modules · samples/ + examples/ · lsp/ + editors/. Single operator (bryan) / two machines.
+GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-on).
+  - pre-commit hook: `bun test compiler/tests/{unit,integration,conformance} --bail` (0 failures = contract).
+  - pre-push (config B, this machine): FULL `bun run test` (~5min) — NEVER --no-verify without authz.
+  - conformance: `bun conformance/run.ts` (69->~220 cases; DATA-not-TS; the language-1.0 gate).
+  - R26 EMPIRICAL (S138): HIGH codegen fixes re-compile real adopter .scrml on the post-fix baseline
+    before claim-closed (regression-tests-pass != empirical-pass). Reverse-direction: verify-before-dispatch.
+  - S239 ADVERSARIAL: PA-side `/code-review high` (or finder fan-out) on EVERY codegen/compiler-source
+    dispatch BEFORE landing — our own pipeline too (the dev-agent can't run it in-agent). Land only if clean.
+  - MERGE-BLOCKER for a claimed surface: a conformance case pinning it (both codes-half + runtime-half).
+
+MODULES:
+  loaded:    CORE (~/.claude/CLAUDE.md), role-pa (-> pa-scrml.md), continuity (delta-log + flogence digest),
+             maps, stack-pack-scrml
+  on-demand: role-dpa (deliberation/DD + debate), role-spa (execution throughput; the conformance-authoring
+             + self-host lineups), pa-global (~/.claude/pa-global.md — deep-dive/debate/registry/dispatch)
+  satellites: dpa-scrml.md · spa-scrml.md · vpa-scrml.md · cpa-scrml.md (in ../scrml-support/)
+  dropped:   none permanently (vPA deputy ELIMINATED S219 — maintenance reverts to PA-at-wrap)
+
+PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT):
+  read IN FULL, in order (the pa-scrml.md "Session-start checklist"):
+  0. flogence digest (STATE only):  bun ../flogence/scripts/digest.ts scrml --fresh   (~1k tok; drill delta-log on demand)
+  1. ../scrml-support/pa-scrml.md         IN FULL   (the two-party contract — 5 Rules, dispatch, wrap, all addenda)
+  2. docs/PA-SCRML-PRIMER.md              IN FULL   (the language-expert snapshot)
+  3. compiler/SPEC-INDEX.md               IN FULL   (the spec navigation map; SPEC.md is too big to full-read)
+  4. master-list.md §0                    IN FULL   (the live v0.next/V1 phase dashboard)
+  5. hand-off.md                          (current session state — PLAN + open threads)
+  6. ../scrml-support/user-voice-scrml.md (last ~10 CONTENTFUL entries; skip acks/"go"/"keep driving")
+  7. ../scrml-support/pa-profile-<slug>.md (the per-user personal layer — register + voice ledger)
+PROFILE-B read-set (THIN/execution — ONE landed-spec arc whose hand-off+brief carry the sweep):
+  ../scrml-support/pa-core-scrml.md + hand-off.md + the NAMED landed-spec sections + .claude/maps/ + digest.
+  scope_blindness guardrail: escalate to A if the arc needs design/context the thin reads don't carry.
+  DEFAULT = Profile A when the user gives no signal. The USER picks; PA may recommend, never auto-switch.
+
+CONTINUITY store (PA is single-writer to main's HEAD + durable state):
+  live hand-off: hand-off.md   rotate -> handOffs/hand-off-<N>.md
+  delta-log: handOffs/delta-log.md (PA-written terse stream; flogence bridge.ts consumes it for the digest)
+  changelog: docs/changelog.md   gaps: docs/known-gaps.md (+ `bun scripts/state.ts` §0 rollup)
+  inbox: handOffs/incoming/ (move read -> read/)   outboxes: sibling handOffs/incoming/ (the ONE write exception)
+  memory: ~/.claude/projects/-home-bryan-scrmlMaster-scrml/memory/ (per-machine; pa.md is the cross-machine carrier)
+
+MAP: .claude/maps/primary.map.md   (Task-Shape Routing; project-mapper refresh at wrap step 6c)
+
+CROSS-MACHINE (S43 — the thing a thin boot drops; two machines, each a separate clone):
+  AT BOOT, fetch+pull --rebase for scrml AND ../scrml-support (the storage hub) BEFORE reading state.
+  scrml-support drifting behind origin = pa-scrml.md/PRIMER-refs/user-voice go STALE or MISSING -> a thinned boot.
+  (This exact miss happened S240: scrml-support was 141 commits behind; pa-scrml.md read as absent.)
+  AT WRAP, surface push-state for every repo touched; NEVER silent unpushed work.
+
+PROJECT-INTENT: scrml is "the future of how programming is done for the browser" (Rule 2) — a WHOLE-STACK
+  compiler: the developer writes markup+logic+style+data in one .scrml; the compiler owns routing, server/
+  client split (INFERRED, §12), fetch, serialization, reactivity, SQL (?{}), realtime (<channel>), auth
+  (session + @currentUser + protect=), deploy (scrml build --target fly|railway|render|docker). NOT a view
+  layer over a BaaS — scrml IS the backend. V1 = language-1.0 (freeze on high coverage). The mitosis (many
+  smaller compiler/language PAs + a near-autonomous conformance-driven compiler build) is the near horizon.
+
+CONVENTIONS (the load-bearing ones; full text in pa-scrml.md):
+  5 Rules (no-marketing-unprompted · full-production-fidelity · right-beats-easy · SPEC-normative · shoot-straight/
+  field-directness) · Profile A default · commit-to-main ONLY after explicit in-session authorization ·
+  commit PATHSPEC form + background-commit (dodge config-B post-commit-hook timeout; foreground push needs
+  timeout>=300000) · S147 coherence (origin/main...HEAD 0/0 after push) · S226 landing-concurrency (3-way-merge
+  shared files) · S67 file-delta landing · S88/S90/S99/S126 worktree isolation + path discipline · S136 BRIEF.md
+  archival · S219 orchestrate-don't-grind + default-GO (only a blocking-Q pauses) · S227 dock (query-not-grep) ·
+  `---` answer-delimiter · scope principle (current-truth-only in scrml; stale -> scrml-support) · doc-currency
+  status: enum + same-landing supersession.
