@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 16 |
+| MED | 18 |
 | LOW | 14 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -37,6 +37,16 @@
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
 
 ---
+
+## §S241 — gaps filed S241 (2026-07-06)
+
+### G-MARKUP-VALUE-ATTR-INTERP-STRING-BRACE — a `${…}` in an ATTRIBUTE string value inside a recovered markup-value bails the whole markup-value when the interp body contains a nested quote/brace — `NEW S241; MED; open` (GITI-034)
+
+Surfaced by the GITI-033 fix-round adversarial review (Finding #2), confirmed as a SEPARATE parser-layer bug (NOT the GITI-033 text-interp path, which is fixed at `2cf70c8a`). In `parseExprWithMarkupValues` (`ast-builder.js` ~3524-3600) the markup-span scanner (the `kD`/`kS`/`kT` string-delimiter tracker that finds the `<markup>` extent inside a `${ cond ? <markup> : "" }` expression) is **not `${…}`-interpolation-aware inside attribute string values**: a nested `"` inside an attribute-position interpolation prematurely closes the attribute string, unbalancing the span scan → the whole markup-value recovery bails and the markup is serialized back as broken source. **Confirmed probe** (general to any recovered markup-value): `<li class="x-${ @.k == "a" ? "}" : "z" }">` → `_scrml_render_value(el, show ? < ul > < each … "a "?)` (broken). The balanced no-nested-quote attribute case (`? "y" : "z"` with the trigger being the nested QUOTE that re-closes the attr string) compiles clean. Distinct from the (fixed) GITI-033 text-interp path — which is why the GITI-033 fix deliberately did NOT touch it. **Does NOT block giti** (status.scrml/land.scrml attribute interps are `class="tag tag-${@.kind}"` — no nested string literal in the interp). **Fix (not scoped):** make the markup-span scanner in `parseExprWithMarkupValues` skip `${…}` interpolation bodies (string-literal-aware) when tracking the attribute-string delimiter, so a `"` inside an interp does not close the attribute string. Same GITI-032/033 family (conditional-markup lowering). <!-- @gap id=g-markup-value-attr-interp-string-brace sev=MED status=open -->
+
+### G-MACHINE-TESTS-MODERN-ENGINE-VACUOUS — `--emit-machine-tests` (§51.13) emits a vacuous "no qualifying machines" test for the modern `<engine>` state-child `rule=` form — the generator reads the legacy `machine.rules` structure the modern form doesn't populate — `NEW S241; MED; open`
+
+The `--emit-machine-tests` flag (§51.13, `emit-machine-property-tests.ts`) emits a `<base>.machine.test.js` that is **runnable standalone** (imports only `bun:test`, zero scrml deps — verified: copied out-of-tree, `1 pass`) but is **vacuous for the modern `<engine>` state-child `rule=` form** — the non-deprecated canonical engine surface. The generator gates on `machine.rules` (`emit-machine-property-tests.ts:503` — `if (!machine.rules || machine.rules.length === 0)` → `// Skipped <var>: empty rule set.` → a bare `test("no qualifying machines", () => expect(true).toBe(true))`). Modern `<engine>` state-child `rule=` transitions populate a DIFFERENT structure (state-child metadata) that the generator never reads, so `machine.rules` is empty and NO real property tests are generated. **Verified 3-for-3 on modern engines** (`engine-modern-001-basic`, `engine-011-internal-rule`, `engine-009-hierarchy-basic` — all emit the vacuous skip despite full `Idle→Loading→Done`-style rule graphs); `machine-basic` too. The generator IS live for the legacy `<machine>`/transitions-block arrow-rule form that `parseMachineRules` populates (the `gauntlet-s26/machine-property-tests*` suite exercises that and passes). **The suite does NOT cover modern-engine machine-test emission**, so the vacuous output is a SILENT gap (no failing test guards it). **Surfaced S241** during the PA-side investigation of flogence's "compiler-as-oracle" ledger ask #2 (machine-tests as a consumable gate). **Impact:** the `<machine>`→`<engine>` migration left `--emit-machine-tests` un-ported to the modern surface; "every scrml repo has a free author-written-tests-not-required contract" does NOT hold for modern engines. Ties to V1/freeze (machine-tests as a conformance-relevant surface, §51.13) + the flogence oracle loop. **Fix (not scoped yet):** re-point the generator at the modern state-child `rule=` graph (build `m.rules` from the engine state-child metadata + `governedTypeVariants`), + add suite coverage that a modern engine emits non-vacuous property tests. NOT a trivial re-wire (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the `m.rules` shape). <!-- @gap id=g-machine-tests-modern-engine-vacuous sev=MED status=open -->
 
 ## §S236 — gaps filed S236 (2026-07-03)
 
