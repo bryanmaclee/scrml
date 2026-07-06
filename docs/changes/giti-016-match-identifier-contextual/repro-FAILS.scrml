@@ -1,0 +1,9 @@
+<program>
+${
+    export function v(raw) {
+        const match = raw.match(/x/)
+        const name = match is some ? match[1] : "fb"
+        return name
+    }
+}
+</program>
