@@ -1,0 +1,18 @@
+{
+  "id": "server-fn-sse-generator-binding-seed-survives",
+  "description": "§37.5 SSE `server function*` reactive binding must not clobber the cell's declaration seed (GITI-035). `<status> = { state: Phase.Idle, n: 0 }` seeds the cell; `@status = tick()` binds an SSE generator stream to it. BEFORE any stream event arrives, a synchronous `@status.n` / `@status.state` render MUST read the SEED (n=0, Idle), never null — the buggy lowering emitted a spurious `_scrml_reactive_set(status, null)` that clobbered the seed and crashed the initial paint ('Cannot read properties of null'). RUNTIME half (no input, no SSE event fired): #n reads the seed's n (0), the <match> renders the Idle arm (#idle present, #active absent), and state.status is the intact seed struct. domAnchored — the async EventSource open + the <match>/interp containers are impl-private.",
+  "language-version": "1.0",
+  "spec": "§37.5",
+  "rationale": "§37.5: assigning a `server function*` call to an `@` cell binds the cell to the stream; 'each SSE event updates the variable'. The update is EVENT-driven — the bind itself must not write a value. Between the declaration and the first event (including the initial paint) the cell holds its declared SEED, a §42.1 DEFINED value, so a synchronous field read is legal and returns the seed, never null. The correct lowering keeps the seed set + the SSE subscription and emits no null value-set (and no null-returning reset thunk, which would re-clobber the seed on reset and double-subscribe). This is the two-step seed+rebind form of §37.5's `<cell> = gen()` binding; the codes-half proves it compiles clean, the runtime-half proves the seed survives to first paint.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "status": { "state": "Idle", "n": 0 } },
+    "domAnchored": [
+      { "selector": "#n", "text": "n: 0" },
+      { "selector": "#idle", "count": 1 },
+      { "selector": "#active", "count": 0 }
+    ]
+  }
+}

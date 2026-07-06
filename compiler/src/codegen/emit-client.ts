@@ -2397,13 +2397,25 @@ export function generateClientJs(ctx: CompileContext): string {
     // (an EventSource is not awaitable and produces many values over time).
     // Instead: seed the cell to absence and SUBSCRIBE via the stub's trailing
     // message callback, routing every event to `_scrml_reactive_set`.
-    //   reactive_set(N, sse_X(args))      -> reactive_set(N, undefined);
+    //   reactive_set(N, sse_X(args))      -> reactive_set(N, null);
     //                                         sse_X(args, d => reactive_set(N, d));
     //   init_set(N, () => sse_X(args))    -> init_set(N, () => {
     //                                          sse_X(args, d => reactive_set(N, d));
     //                                          return null; });
     // (null is the canonical JS absence representation — §42.5/§42.8; the render
     // path treats null/undefined identically as `not`.)
+    //
+    // GITI-035 (seed-survives): the null-seed / null-returning-thunk above is
+    // correct ONLY when the cell is bound SOLELY by `@N = gen()`. When the cell
+    // ALSO has a declaration seed — `<N> = { ... }` emits a prior
+    // `_scrml_reactive_set("N", <seed>)` (value) + `_scrml_init_set("N", ...)`
+    // (reset thunk) — that seed MUST own the value until the first SSE event.
+    // Re-seeding to `null` clobbers the typed seed and crashes a synchronous
+    // `@N.<field>` render on initial paint; the null-returning reset thunk both
+    // re-clobbers on reset and double-subscribes. So each `build` below is passed
+    // `hasPriorForCell` (a prior same-head set for THIS cell exists earlier in the
+    // module): when true, the reactive_set form emits ONLY the subscription and the
+    // init_set form is suppressed (the declaration seed/thunk owns those slots).
     clientStage(ctx, "post-sse-reactive-bind", () => {
     for (const [, mangledName] of fnNameMap) {
       if (!/^_scrml_sse_/.test(mangledName)) continue;
@@ -2416,7 +2428,7 @@ export function generateClientJs(ctx: CompileContext): string {
       const rewriteForm = (
         setHead: string,
         valuePrefix: string,
-        build: (nameArg: string, args: string) => string,
+        build: (nameArg: string, args: string, hasPriorForCell: boolean) => string,
       ): void => {
         let i = 0;
         const out: string[] = [];
@@ -2482,8 +2494,20 @@ export function generateClientJs(ctx: CompileContext): string {
           let stmtEnd = outerClose + 1;
           if (clientCode[stmtEnd] === ";") stmtEnd++;
           const args = clientCode.slice(callStart + callPrefix.length, k);
+          // GITI-035: does this cell already carry a declaration-emitted set/thunk
+          // of the SAME shape EARLIER in the emitted module (a `<cell> = seed` seed
+          // for the reactive_set form, or its reset init-thunk for the init_set
+          // form)? If so, the SSE rewrite must NOT introduce a null value — the seed
+          // owns the pre-first-event value and MUST survive until the first stream
+          // event. Scan strictly before this match for a prior same-head set for
+          // this exact cell name (`nameArg` carries its own quotes, so the probe is
+          // cell-specific and encoding-agnostic). A cell bound ONLY via `@cell =
+          // gen()` (no separate `<cell>` seed) has no prior — GITI-026's original
+          // null-seed path is preserved for it.
+          const hasPriorForCell =
+            clientCode.lastIndexOf(`${setHead}${nameArg},`, setIdx - 1) >= 0;
           out.push(clientCode.slice(i, setIdx));
-          out.push(build(nameArg, args));
+          out.push(build(nameArg, args, hasPriorForCell));
           i = stmtEnd;
         }
         clientCode = out.join("");
@@ -2496,17 +2520,34 @@ export function generateClientJs(ctx: CompileContext): string {
         return `${mangledName}(${callArgs})`;
       };
 
-      // Form 1: the init-time `_scrml_reactive_set("N", sse_X(args));`. Seed the
-      // cell to absence — canonical JS `null` per SPEC §42.5/§42.8 (the runtime
-      // treats null/undefined identically; `null` avoids W-CG-UNDEFINED-INTERP).
-      rewriteForm("_scrml_reactive_set(", "", (nameArg, args) =>
-        `_scrml_reactive_set(${nameArg}, null);\n${subscribe(nameArg, args)};`,
+      // Form 1: the init-time `_scrml_reactive_set("N", sse_X(args));`.
+      // GITI-035: if the cell ALSO carries a declaration seed (`<N> = {...}` emits
+      // a prior `_scrml_reactive_set("N", <seed>)`), emit ONLY the subscription —
+      // the seed owns the value until the first SSE event, so re-seeding to `null`
+      // here would CLOBBER the typed seed and crash a synchronous `@N.<field>`
+      // render on initial paint. When there is NO prior seed (the cell is bound
+      // solely by `@N = gen()`, GITI-026's original form), seed the cell to absence
+      // (canonical JS `null` per SPEC §42.5/§42.8 — the runtime treats
+      // null/undefined identically; `null` avoids W-CG-UNDEFINED-INTERP) then
+      // subscribe.
+      rewriteForm("_scrml_reactive_set(", "", (nameArg, args, hasPriorForCell) =>
+        hasPriorForCell
+          ? `${subscribe(nameArg, args)};`
+          : `_scrml_reactive_set(${nameArg}, null);\n${subscribe(nameArg, args)};`,
       );
-      // Form 2: the reset thunk `_scrml_init_set("N", () => sse_X(args));` —
-      // re-subscribe (side-effect) and return absence (null) so reset re-seeds
-      // the cell rather than storing the EventSource object.
-      rewriteForm("_scrml_init_set(", "() =>", (nameArg, args) =>
-        `_scrml_init_set(${nameArg}, () => { ${subscribe(nameArg, args)}; return null; });`,
+      // Form 2: the reset thunk `_scrml_init_set("N", () => sse_X(args));`.
+      // GITI-035: if the cell ALSO carries a declaration init-thunk (a prior
+      // `_scrml_init_set("N", ...)`), SUPPRESS the SSE reset thunk entirely. That
+      // declaration thunk already re-seeds the cell correctly on `reset(@N)` and
+      // remains the last-registered thunk for this cell; the SSE reset thunk would
+      // (a) `return null`, re-clobbering the seed on reset, and (b) re-subscribe,
+      // DOUBLING the live SSE subscription. When there is NO prior init-thunk,
+      // keep the reset thunk: re-subscribe (side-effect) and return absence (null)
+      // so reset re-seeds the cell rather than storing the EventSource object.
+      rewriteForm("_scrml_init_set(", "() =>", (nameArg, args, hasPriorForCell) =>
+        hasPriorForCell
+          ? ``
+          : `_scrml_init_set(${nameArg}, () => { ${subscribe(nameArg, args)}; return null; });`,
       );
     }
     });

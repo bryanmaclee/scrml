@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Idle  Active }
+    server function* tick() {
+        while (true) { yield { state: Phase.Active, n: 1 } }
+    }
+    <status> = { state: Phase.Idle, n: 0 }
+    @status = tick()
+}
+<p id="n">n: ${@status.n}</p>
+<div id="phase">
+    <match for=Phase on=@status.state>
+        <Idle><span id="idle">idle</span></Idle>
+        <Active><span id="active">active</span></Active>
+    </match>
+</div>

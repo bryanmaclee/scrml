@@ -290,6 +290,59 @@ function installServerStubFetch(serverStub: ServerStub): () => void {
   };
 }
 
+/**
+ * Install a minimal, NEVER-FIRING `globalThis.EventSource` for the duration of
+ * one `run()`. happy-dom provides no EventSource, so a client that opens an SSE
+ * stream (a `server function*` reactive binding, §37.5) throws `EventSource is
+ * not defined` at module-init. This hermetic stub lets that construction succeed
+ * and models the PRE-FIRST-EVENT window: it opens no connection and dispatches no
+ * message, so the bound cell shows its declaration SEED until (in a real browser)
+ * the first stream event arrives. That pre-event window is exactly the GITI-035
+ * seed-survival contract (the seed must not be clobbered to null). Returns a
+ * restore thunk. Installed ONLY when the emitted client constructs an
+ * EventSource, so the global env is byte-identical for every non-SSE case.
+ *
+ * NOTE (future extension): driving actual SSE events into a case would build on
+ * this stub (a registry of live instances + a driver verb); no case does today.
+ */
+function installNoopEventSource(): () => void {
+  const g = globalThis as any;
+  const real = g.EventSource;
+  class NoopEventSource {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 2;
+    url: string;
+    readyState: number;
+    withCredentials: boolean;
+    onmessage: ((ev: any) => void) | null = null;
+    onerror: ((ev: any) => void) | null = null;
+    onopen: ((ev: any) => void) | null = null;
+    _listeners: Record<string, Array<(ev: any) => void>> = {};
+    constructor(url: string, init?: { withCredentials?: boolean }) {
+      this.url = String(url);
+      // CONNECTING — never advances to OPEN (there is no server); never fires.
+      this.readyState = 0;
+      this.withCredentials = !!(init && init.withCredentials);
+    }
+    addEventListener(type: string, cb: (ev: any) => void): void {
+      (this._listeners[type] = this._listeners[type] || []).push(cb);
+    }
+    removeEventListener(type: string, cb: (ev: any) => void): void {
+      const a = this._listeners[type];
+      if (a) this._listeners[type] = a.filter((f) => f !== cb);
+    }
+    close(): void {
+      this.readyState = 2; // CLOSED
+    }
+  }
+  g.EventSource = NoopEventSource;
+  return () => {
+    if (real === undefined) delete g.EventSource;
+    else g.EventSource = real;
+  };
+}
+
 function ensureFreshDom(): void {
   // A fresh window per run isolates DOMContentLoaded listeners + state from the
   // prior run (verified: re-register drops old listeners). unregister() is async.
@@ -319,6 +372,9 @@ export async function run(
   // run (restored in finally). Absent serverStub → fetch is untouched.
   const restoreFetch =
     Object.keys(serverStub).length > 0 ? installServerStubFetch(serverStub) : null;
+  // §37.5 SSE binding — a never-firing EventSource stub, installed below only
+  // when the emitted client actually opens a stream (assigned inside the try).
+  let restoreEventSource: (() => void) | null = null;
 
   // Virtual clock — installed just before the eval (so timer arming at module-
   // init + on DOMContentLoaded funnels through it) and restored in finally.
@@ -338,6 +394,13 @@ export async function run(
     const out = result.outputs ? result.outputs.get(file) : undefined;
     const html = (out && out.html) || "";
     const clientJs = (out && out.clientJs) || "";
+
+    // §37.5 SSE binding: happy-dom has no EventSource. Install a never-firing
+    // stub for this run ONLY when the emitted client constructs one — models the
+    // pre-first-event window (the cell shows its seed). See installNoopEventSource.
+    if (clientJs.includes("new EventSource")) {
+      restoreEventSource = installNoopEventSource();
+    }
 
     // Mirror the browser harness: extract <body> inner, strip <script>, mount.
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -375,6 +438,7 @@ export async function run(
     rmSync(dir, { recursive: true, force: true });
     delete (globalThis as any).__scrml_conformance;
     if (restoreFetch) restoreFetch();
+    if (restoreEventSource) restoreEventSource();
     clock.restore();
   }
 }
