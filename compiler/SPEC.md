@@ -11524,6 +11524,24 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   separator (the `=>`/`->` arrow within an arm); widening it to accept commas is rejected for
   language cohesion (one canonical separator). (S144 Cluster D — Bug Y.)
 
+- **`match` is a contextual keyword** (GITI-016, bryan S241 — Option A; modeled on the `to` §14.12
+  and `from` §21.3 precedents). The token `match` SHALL be reserved ONLY where it opens a
+  match-expression — the value-return / statement position `match <subject> { <arm>+ }` whose brace
+  block carries at least one arm marker (a `:>` / `=>` / `->` arm separator or a `case` arm keyword) —
+  and as the `<match>` structural element (§18.0.1). Everywhere else `match` SHALL be a legal
+  identifier. In particular the conventional regex-result binding SHALL compile without change:
+  ```scrml
+  const match = raw.match(/(\d+)/)
+  const first = match is some ? match[1] : "fallback"   // `match` is the identifier; `is some` is §42
+  ```
+  `match` used as a member (`obj.match`), a call (`raw.match(re)`), an index (`match[1]`), a function
+  or object-method name (`function match(a, b) { … }`), a parameter, or an assignment target is the
+  identifier, never the keyword. Disambiguation is deterministic and requires NO diagnostic: a `match`
+  immediately followed by an operator / `is` / `=` / `?` / `:` / `,` / `)` / `.` (the value-use tells),
+  or by a `{` with no subject, or reaching a statement boundary before any arm-bearing brace block, is
+  the identifier. A shadow declaration in a position where `match` IS reserved still surfaces
+  **E-RESERVED-IDENTIFIER** (§34); the contextual demotion does not weaken that reservation.
+
 **Worked example — unit variants:**
 ```scrml
 match direction {
@@ -17641,6 +17659,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
+| W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts`.) | Info |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |

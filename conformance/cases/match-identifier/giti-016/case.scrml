@@ -1,0 +1,14 @@
+${
+    type Phase:enum = { Idle, Done }
+    <phase>: Phase = .Idle
+    <extracted>: string = "none"
+    const <label> = match @phase { .Idle :> "idle"  .Done :> "done" }
+    function run() {
+        const match = "id-42".match(/(\d+)/)
+        @extracted = match is some ? match[1] : "none"
+        @phase = Phase.Done
+    }
+}
+<button id="go" onclick=run()>Go</>
+<p id="label">${@label}</>
+<p id="extracted">${@extracted}</>

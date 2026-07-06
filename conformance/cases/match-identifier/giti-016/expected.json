@@ -1,0 +1,17 @@
+{
+  "id": "match-identifier-giti-016",
+  "description": "GITI-016 — `match` is a CONTEXTUAL keyword (§18.2, bryan S241 Option A). A variable named `match` (the conventional regex-result name, `const match = raw.match(/x/)`) is a legal identifier: `match is some ? match[1] : …` compiles (no misleading E-SCOPE-001 on `is`) and the regex-result path runs. A real value-return match (`match @phase { .Idle :> … }`) still lowers — the over-disambiguation guard.",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "Option A: `match` is reserved ONLY in the value-return / statement match-expression position `match <subject> { <arms> }`; elsewhere it is an ordinary identifier (mirrors the `to` §14.12 / `from` §21.3 contextual keywords). Clicking #go runs `const match = \"id-42\".match(/(\\d+)/)` and `@extracted = match is some ? match[1] : \"none\"` (regex-result path → \"42\") while also advancing @phase to Done so the real derived match recomputes @label to \"done\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "input": [{ "click": "#go" }],
+    "state": { "phase": "Done", "extracted": "42", "label": "done" },
+    "domAnchored": [
+      { "selector": "#label", "text": "done" },
+      { "selector": "#extracted", "text": "42" }
+    ]
+  }
+}

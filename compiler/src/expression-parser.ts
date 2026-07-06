@@ -1809,6 +1809,39 @@ function preprocessMapLiterals(s: string): string {
   return result;
 }
 
+/**
+ * §18.2 (GITI-016) — does `arms` (the interior of a `match … { … }` brace block)
+ * carry at least one top-level match arm — a `:>` or `->` separator at bracket
+ * depth 0? A value-return match ALWAYS has `pattern :> body` arms; a false brace
+ * (an object literal, a following code block) does not. Skips string literals and
+ * nested `()`/`[]`/`{}` so a `:>` inside a body / string never counts.
+ *
+ * Per §18.2 the separator is `:>` (canonical) or the deprecated aliases `=>` /
+ * `->` — all three count. A genuine identifier use of `match` always carries a
+ * tell-operator immediately after `match` (caught by the early-out at the call
+ * site) or no brace at all, so the `=>` form cannot mis-fire on an object literal
+ * reached through those paths.
+ */
+function matchArmsHaveTopLevelArm(arms: string): boolean {
+  let depth = 0;
+  let str: string | null = null;
+  for (let i = 0; i < arms.length; i++) {
+    const c = arms[i];
+    if (str) { if (c === "\\") i++; else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+    // `:>` / `=>` / `->` at depth 0 — whitespace-tolerant (the block-splitter
+    // space-pads operators, so `:>` may arrive as `: >`, `->` as `- >`, etc.).
+    if (depth === 0 && (c === ":" || c === "-" || c === "=")) {
+      let j = i + 1;
+      while (j < arms.length && /\s/.test(arms[j])) j++;
+      if (arms[j] === ">") return true;
+    }
+  }
+  return false;
+}
+
 /** Pre-process `match subject { arms }` expressions. */
 function preprocessMatchExprs(s: string): string {
   // Find `match` followed by an expression and a brace block
@@ -1841,6 +1874,22 @@ function preprocessMatchExprs(s: string): string {
     }
     const matchEnd = i;
     const armsRaw = s.slice(braceIdx + 1, i - 1).trim();
+
+    // §18.2 (GITI-016) — `match` is a CONTEXTUAL keyword. Only treat this
+    // `match …{…}` as a value-return match-expression when Option A holds;
+    // otherwise `match` is an ordinary identifier and is left verbatim (so a
+    // `match is some ? {…} : {…}` ternary no longer mis-lowers on the wrong `{`).
+    //   (a) member position — `.match` (`obj.match`) is a member access.
+    if (matchStart > 0 && s[matchStart - 1] === ".") continue;
+    //   (b) identifier-usage early-out — `match` immediately followed by `is` /
+    //       `=` / a binary/logical operator / `?` / `:` / `,` / `)` is a value use.
+    if (/^(?:is\b|instanceof\b|in\b|as\b|=>|==|===|=|\?|:|,|\)|\]|&&|\|\||[&|^%*/<>])/.test(subjectRaw)) continue;
+    //   (c) the robust tell — the brace block MUST carry a top-level `:>`/`->`
+    //       arm (§18.2); a false brace (object literal / code block) has none.
+    if (!matchArmsHaveTopLevelArm(armsRaw)) continue;
+    //   (d) statement boundary — a new statement keyword between `match` and the
+    //       `{` means the brace belongs to that statement, not a match arm-block.
+    if (/(?:^|\n)\s*(?:const|let|var|return|if|else|for|while|do|function|fn|type|import|export|switch|try)\b/.test(subjectRaw)) continue;
 
     matches.push({ index: matchStart, end: matchEnd, raw: s.slice(matchStart, matchEnd) });
   }

@@ -152,6 +152,140 @@ function makeToken(kind: string, text: string, start: number, end: number, line:
 }
 
 // ---------------------------------------------------------------------------
+// §18.2 — `match` is a CONTEXTUAL keyword (GITI-016, bryan S241 Option A)
+// ---------------------------------------------------------------------------
+//
+// `match` mirrors the `to` (§14.12) / `from` (§21.3) contextual keywords: it is
+// reserved ONLY in the value-return / statement match-expression position
+//
+//     match <subject> { <arm> :> <body> … }
+//
+// where the brace block holds at least one top-level arm marker — a `:>` / `=>`
+// / `->` separator or a `case` arm keyword (§18.2). Anywhere else it is an
+// ordinary identifier — the conventional regex-result name:
+//
+//     const match = raw.match(/x/)
+//     const name  = match is some ? match[1] : "fb"   // `is some` → §42 absence
+//     obj.match  ·  raw.match(re)  ·  match[1]  ·  function f(match) { … }
+//
+// The lexer classifies `match` context-free as KEYWORD (it is in KEYWORDS so a
+// shadow decl still fires E-RESERVED where §18.2 reserves it). This pass then
+// re-scans the finished token stream and DEMOTES a `match` KEYWORD token to
+// IDENT wherever it does NOT open a real match-expression. Every downstream
+// match dispatch (ast-builder `parseOneMatchAsExpr`, the statement-form match
+// parser, `preprocessMatchExprs`) gates on `kind === "KEYWORD"`, so a demoted
+// `match` flows through the ordinary expression path untouched — and the prior
+// mis-parse (`match is some` → subject `is` → `E-SCOPE-001: Undeclared
+// identifier 'is'`) can no longer arise.
+//
+// The STRUCTURAL `<match for=T>` block form (§18.0.1) is captured as raw markup
+// by the block-splitter and never reaches this tokenizer, so it is untouched.
+
+/** Statement-starting keywords: encountering one at subject top level means the
+ *  `{` we might reach belongs to a following statement, not a match arm-block.
+ *  Expression keywords (`typeof`/`new`/`await`/`in`/`instanceof`/`this`/`not`/…)
+ *  are deliberately EXCLUDED — they can appear inside a subject expression. */
+const MATCH_SUBJECT_BOUNDARY_KEYWORDS = new Set([
+  "const", "let", "var", "return", "if", "else", "for", "while", "do",
+  "function", "fn", "server", "type", "import", "export", "switch", "try",
+  "throw", "break", "continue", "lift", "use", "transaction", "fail", "when",
+]);
+
+/** PUNCT/OPERATOR (and a few KEYWORD) tokens that CANNOT begin a match subject:
+ *  when one immediately follows `match`, the `match` is being used as a value /
+ *  identifier (`match is`, `match =`, `match ?`, `match ,`, `match )`, …). This
+ *  is the fast early-out of Option A #2; the forward scan (#1/#3) is the robust
+ *  backstop for every remaining shape. Deliberately conservative — it lists only
+ *  tokens that can never start an expression, so it can never demote a real
+ *  match-expression. */
+const MATCH_IDENTIFIER_TELL_TOKENS = new Set([
+  "=", "==", "===", "!=", "!==", "=>", ":>", "->", "?", "??", "?.", ":", ",",
+  ")", "]", "}", ";", "&&", "||", "&", "|", "^", "*", "/", "%", "**",
+  "<<", ">>", ">>>", "<=", ">=", "+=", "-=", "*=", "/=", "%=",
+  "&=", "|=", "^=", "&&=", "||=", "??=", ".",
+]);
+const MATCH_IDENTIFIER_TELL_KEYWORDS = new Set(["is", "instanceof", "in", "as"]);
+
+/** Does the balanced `{ … }` block opening at `tokens[openIdx]` (a `{` PUNCT)
+ *  contain a top-level (`depth === 1`) match arm marker? A value-return / stmt
+ *  match ALWAYS has arm rows; a method / plain block does not. This is the
+ *  robust §18.2 disambiguator. The markers are the arm separators — `:>`
+ *  (canonical) or the deprecated aliases `=>` / `->` (§18.2) — plus a leading
+ *  `case` arm keyword. `:>`/`=>` are single OPERATOR tokens; `->` tokenizes as
+ *  `-` `>` (two PUNCT); `case` is a KEYWORD. Keeping the arm-marker requirement
+ *  (rather than accepting any brace) avoids demoting neither side: a method
+ *  named `match` (`{ match(x) { return x } }`) has no arm marker → identifier. */
+function braceBlockHasTopLevelArm(tokens: Token[], openIdx: number): boolean {
+  let depth = 0;
+  for (let i = openIdx; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.text === "{") { depth++; continue; }
+    if (t.text === "}") { depth--; if (depth === 0) return false; continue; }
+    if (depth !== 1) continue;
+    // Contiguous `:>` / `=>` (single OPERATOR token).
+    if (t.kind === "OPERATOR" && (t.text === ":>" || t.text === "=>")) return true;
+    // Split forms — `->` is always two tokens (`-` `>`); `:>` / `=>` split when
+    // the source space-pads the operator (`: >` / `= >`).
+    if ((t.text === "-" || t.text === ":" || t.text === "=") && tokens[i + 1]?.text === ">") return true;
+    // A leading `case` arm keyword (statement-form match arm rows).
+    if (t.kind === "KEYWORD" && t.text === "case") return true;
+  }
+  return false;
+}
+
+/** Option A: is the `match` KEYWORD at `tokens[k]` the start of a real
+ *  match-expression? Scans the subject (which may hold balanced `()`/`[]`) for
+ *  the first top-level `{ … }` block, without crossing a statement boundary, and
+ *  requires that block to carry a top-level arm marker (see
+ *  `braceBlockHasTopLevelArm`). */
+function matchKeywordOpensMatchExpr(tokens: Token[], k: number): boolean {
+  const prev = tokens[k - 1];
+  // Member position (`obj.match`, `raw.match(re)`) or decl-name position
+  // (`function match(…)`) — never a match-expression keyword.
+  if (prev) {
+    if (prev.text === "." || prev.text === "?.") return false;
+    if (prev.kind === "KEYWORD" && (prev.text === "function" || prev.text === "fn")) return false;
+  }
+  const next = tokens[k + 1];
+  if (!next || next.kind === "EOF") return false;
+  // Fast early-out: `match` used as a value (operator / separator follows).
+  if (MATCH_IDENTIFIER_TELL_TOKENS.has(next.text)) return false;
+  if (next.kind === "KEYWORD" && MATCH_IDENTIFIER_TELL_KEYWORDS.has(next.text)) return false;
+
+  // Robust scan: walk the subject to the first top-level `{`.
+  let subjDepth = 0; // depth of () and [] within the subject
+  for (let i = k + 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.kind === "EOF") return false;
+    if (subjDepth === 0) {
+      if (t.text === "{") return braceBlockHasTopLevelArm(tokens, i);
+      // A statement boundary or an enclosing closer ends the subject region:
+      // the `match` cannot be a match-expression here.
+      if (t.text === ";" || t.text === "}" || t.text === ")" || t.text === "]") return false;
+      if (t.kind === "KEYWORD" && MATCH_SUBJECT_BOUNDARY_KEYWORDS.has(t.text)) return false;
+      if (t.text === "(" || t.text === "[") { subjDepth++; continue; }
+    } else {
+      if (t.text === "(" || t.text === "[" || t.text === "{") subjDepth++;
+      else if (t.text === ")" || t.text === "]" || t.text === "}") subjDepth--;
+    }
+  }
+  return false;
+}
+
+/**
+ * Post-tokenization pass: demote every `match` KEYWORD token that does NOT open
+ * a real match-expression (per Option A) to an IDENT, making `match` a usable
+ * identifier everywhere else. Mutates `tokens` in place. See the §18.2 note above.
+ */
+export function reclassifyContextualMatch(tokens: Token[]): void {
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (t.kind !== "KEYWORD" || t.text !== "match") continue;
+    if (!matchKeywordOpensMatchExpr(tokens, k)) t.kind = "IDENT";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event-handler attribute helpers (S97 — SPEC §5.2.3 bare-form parser fix)
 // ---------------------------------------------------------------------------
 
@@ -1777,6 +1911,9 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
   }
 
   tokens.push(makeToken("EOF", "", absOff(), absOff(), line, col));
+  // §18.2 — demote `match` KEYWORD → IDENT wherever it is not a real
+  // match-expression, so it can be used as an ordinary identifier (GITI-016).
+  reclassifyContextualMatch(tokens);
   return tokens;
 }
 
