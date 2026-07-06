@@ -445,32 +445,85 @@ function exprTreeContainsSqlRef(node: unknown): boolean {
 }
 
 /**
- * W5b (g-library-mode-sql-no-db-context) — deep structural scan for a `?{}` SQL
- * node (`sql` / `sql-ref`) or a `transaction-block` ANYWHERE beneath `node`.
+ * W5b (S239) — the CANONICAL structural node-kind sets for server-only /
+ * boundary-crossing detection, defined ONCE so the several emit-detection
+ * predicates (here + emit-library-shared / emit-tool / emit-server / index) can
+ * NEVER silently drift on which kinds count. (The S239 consolidation review
+ * found 7 hand-copied walkers, several already inconsistent on `sql-ref` /
+ * `transaction-block` — e.g. an async seed that missed `sql-ref` emitted a
+ * `sql-ref` lib fn sync/un-awaited.)
  *
- * Unlike `isServerOnlyNode` (a single-node classifier that inspects a statement
- * in isolation and, for the chained `const r = ?{...}.get()` form, relies on an
- * `emitStringFromTree` round-trip that yields a comment placeholder instead of
- * the `?{` sigil), this walks the full node tree by node KIND, so it catches a
- * `?{}` nested in a const/let init or a return-expr. Used by:
- *   - the §12.6 library-mode discriminator (emit-server.ts) to retain a
- *     `?{}`-bearing fn's route-handler wrapper (its server home);
- *   - the library `.js` emitter (emit-library.ts) to prune a `?{}`-bearing fn
- *     from the client-facing artifact (a raw `?{}` there is invalid JS, §2.2.1).
- * `span` is skipped to keep the walk on structural fields only.
+ *   - SQL          — a `?{}` block: `sql` (the promoted statement form) and
+ *                    `sql-ref` (the chained `?{...}.get()` expression form) are
+ *                    BOTH SQL. A walker that catches one but not the other is a
+ *                    bug, not a distinction.
+ *   - FOREIGN      — a `<foreign lang>` block (an async host-language crossing).
+ *   - TRANSACTION  — a `<transaction>` block. STAGED (§44.6 / SPEC-ISSUE-018):
+ *                    server-only for a skip/route decision, but NOT a `?{}`-class
+ *                    async signal, so the in-process emit + async seed EXCLUDE it
+ *                    (a sync fn carrying a server-boundary transaction `await`
+ *                    would be a SyntaxError).
  */
-export function containsSqlOrTransaction(node: unknown): boolean {
+const SQL_KINDS: readonly string[] = ["sql", "sql-ref"];
+const FOREIGN_KINDS: readonly string[] = ["foreign"];
+const TRANSACTION_KINDS: readonly string[] = ["transaction-block"];
+
+/**
+ * The ONE structural walker underneath the emit-detection predicates. Deep-scans
+ * `node` for any node whose `.kind` is in a SELECTED category, walking every
+ * structural field (skipping `span`). The named predicates below are thin,
+ * documented selections over it — category membership lives ONLY in the
+ * `*_KINDS` sets above.
+ *
+ * Structural-by-kind: an attached `.sqlNode` / `.foreignNode` prop is a plain
+ * object field, so it is recursed into and matched by its OWN `.kind` — the
+ * pre-consolidation explicit `n.sqlNode || n.foreignNode` presence check is
+ * subsumed (and made precise) by the recursive walk.
+ */
+export function bodyContains(
+  node: unknown,
+  sel: { sql?: boolean; foreign?: boolean; transaction?: boolean },
+): boolean {
   if (!node || typeof node !== "object") return false;
-  if (Array.isArray(node)) return node.some((child) => containsSqlOrTransaction(child));
+  if (Array.isArray(node)) return node.some((child) => bodyContains(child, sel));
   const n = node as Record<string, unknown>;
-  const k = n.kind;
-  if (k === "sql" || k === "sql-ref" || k === "transaction-block") return true;
+  const k = n.kind as string | undefined;
+  if (typeof k === "string") {
+    if (sel.sql && SQL_KINDS.includes(k)) return true;
+    if (sel.foreign && FOREIGN_KINDS.includes(k)) return true;
+    if (sel.transaction && TRANSACTION_KINDS.includes(k)) return true;
+  }
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
-    if (v && typeof v === "object" && containsSqlOrTransaction(v)) return true;
+    if (v && typeof v === "object" && bodyContains(v, sel)) return true;
   }
   return false;
+}
+
+/**
+ * W5b — deep structural scan for a `?{}` SQL node (`sql` / `sql-ref`) OR a
+ * `transaction-block` ANYWHERE beneath `node`. Used by the §12.6 library-mode
+ * discriminator (emit-server.ts) to retain a `?{}`/transaction-bearing fn's
+ * route-handler wrapper (its server home), and by the library `.js` emitter
+ * (emit-library.ts) to prune a `?{}`-bearing fn from the client-facing artifact
+ * (a raw `?{}` there is invalid JS, §2.2.1).
+ */
+export function containsSqlOrTransaction(node: unknown): boolean {
+  return bodyContains(node, { sql: true, transaction: true });
+}
+
+/**
+ * W5b (S239) — the SQL-ONLY sibling of `containsSqlOrTransaction`: true iff the
+ * subtree contains a `?{}` SQL block (`sql` / `sql-ref`), EXCLUDING a
+ * `<transaction>` block. The in-process library routing gate (codegen/index.ts)
+ * and per-fn skip (emit-tool.ts) use this so a `<transaction>`-ONLY library — a
+ * still-STAGED shape (§44.6 / SPEC-ISSUE-018, no async-coloring seed) — does NOT
+ * route to the in-process `?{}` emit, where a sync fn + injected transaction
+ * `await` would be a SyntaxError.
+ */
+export function containsSql(node: unknown): boolean {
+  return bodyContains(node, { sql: true });
 }
 
 /**

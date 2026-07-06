@@ -27,11 +27,14 @@
  */
 
 import type { CompileContext } from "./context.ts";
-import { getNodes } from "./collect.ts";
+import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
+import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
+import { emitExprField } from "./emit-expr.ts";
+import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 import { paramSignature } from "./utils.ts";
 
@@ -70,65 +73,6 @@ function collectTopLevelStatements(fileAST: ASTNode): ASTNode[] {
 /** A statement is a function declaration. */
 function isFunctionDecl(stmt: ASTNode): boolean {
   return stmt.kind === "function-decl";
-}
-
-/** Deep-scan a fn body's AST for a directly-async signal (`_{}`/`?{}`). */
-function bodyHasForeignOrSql(node: unknown): boolean {
-  if (!node || typeof node !== "object") return false;
-  const n = node as ASTNode;
-  if (n.kind === "foreign" || n.kind === "sql") return true;
-  if (n.foreignNode || n.sqlNode) return true;
-  for (const k of Object.keys(n)) {
-    if (k === "span") continue;
-    const v = n[k];
-    if (Array.isArray(v)) { for (const c of v) if (bodyHasForeignOrSql(c)) return true; }
-    else if (v && typeof v === "object") { if (bodyHasForeignOrSql(v)) return true; }
-  }
-  return false;
-}
-
-/**
- * Compute the set of tool fn names that must be emitted `async` (and whose call
- * sites must be awaited). Seed = fns that directly do `?{}`/`_{}`/`async`; then
- * fixpoint-propagate over the call graph: a fn that calls an async fn is itself
- * async (it awaits). Call detection is a source-text scan of each fn's span for
- * `\bname\s*\(` — reliable and opacity-safe (it never re-parses).
- */
-function computeAsyncFnNames(fns: ASTNode[], sourceText: string | null, seedAsync?: Set<string>): Set<string> {
-  // Seed with cross-import async names (a tool's ASYNC imported library fns — a
-  // `<foreign lang>` lib `export fn` emits `export async function`) so the
-  // fixpoint also colors any LOCAL fn that calls one of them (§64 / Flag C).
-  const async = new Set<string>(seedAsync ?? []);
-  const bodyTextByName = new Map<string, string>();
-  for (const fn of fns) {
-    const name = fn.name as string | undefined;
-    if (!name) continue;
-    const span = fn.span as { start?: number; end?: number } | undefined;
-    const text = sourceText && span && typeof span.start === "number" && typeof span.end === "number"
-      ? sourceText.slice(span.start, span.end)
-      : "";
-    bodyTextByName.set(name, text);
-    if (fn.isAsync === true || bodyHasForeignOrSql(fn.body)) async.add(name);
-  }
-  // Fixpoint — a fn calling any async fn becomes async.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const fn of fns) {
-      const name = fn.name as string | undefined;
-      if (!name || async.has(name)) continue;
-      const text = bodyTextByName.get(name) ?? "";
-      for (const asyncName of async) {
-        if (asyncName === name) continue;
-        if (new RegExp(`\\b${asyncName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(`).test(text)) {
-          async.add(name);
-          changed = true;
-          break;
-        }
-      }
-    }
-  }
-  return async;
 }
 
 /** Format ONE tool function-declaration parameter: strip its `:Type`, keep a
@@ -254,16 +198,21 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
  * so the importing tool must `await runOpen(...)`. `computeAsyncFnNames` only
  * sees a file's LOCAL fns — this closes the cross-import boundary (§64 / Flag C).
  */
-export function collectAsyncFnNamesFromFile(ctxOrFileAST: CompileContext | ASTNode): Set<string> {
+export function collectAsyncFnNamesFromFile(
+  ctxOrFileAST: CompileContext | ASTNode,
+  seedAsync?: Set<string>,
+): Set<string> {
   const { fileAST } = resolveFileAST(ctxOrFileAST);
-  const out = new Set<string>();
-  for (const stmt of collectTopLevelStatements(fileAST)) {
-    if (!isFunctionDecl(stmt)) continue;
-    const name = stmt.name as string | undefined;
-    if (!name) continue;
-    if (stmt.isAsync === true || bodyHasForeignOrSql(stmt.body)) out.add(name);
-  }
-  return out;
+  const sourceText = (fileAST._sourceText ?? null) as string | null;
+  // FIXPOINT over the file's call graph — an EXPORTED fn that is TRANSITIVELY
+  // async (calls a `?{}`/`_{}` fn without its OWN `?{}` — e.g. a `report()`
+  // calling a db `loadRows()`) is async too, so the importing tool `await`s it.
+  // A direct-only scan would leave `report()` un-awaited → `[object Promise]`.
+  // `seedAsync` carries this file's OWN async IMPORTED locals (a fn calling an
+  // async fn imported from ANOTHER lib is async), so the transitive coloring is
+  // cross-file-complete (the caller resolves it recursively + memoized).
+  const fns = collectTopLevelStatements(fileAST).filter(isFunctionDecl);
+  return computeAsyncFnNames(fns, sourceText, seedAsync);
 }
 
 /** True when `name` is a valid bare ECMAScript identifier (safe to emit
@@ -429,19 +378,256 @@ export function generateToolJs(
     for (const e of foreignCrossingErrors) errors.push(e);
   }
 
-  // ---- runtime-helper header — inline the helpers the body references (§45
-  // structural-eq, §20.6 log), fail-closed on any un-inlined `_scrml_*` dep. ----
+  // Module headers (§21.3 imports · §44.2 Bun.SQL handle · inlined runtime
+  // helpers) — shared with generateToolLibraryJs; must LEAD the module.
+  const header = assembleModuleHeaders(fileAST, filePath, body, errors);
+  return header + body + "\n" + harness.join("\n") + "\n";
+}
+
+/**
+ * Shared header assembly for a standalone / in-process module (`generateToolJs`
+ * and `generateToolLibraryJs`): the ES import header, the Bun.SQL db handle(s)
+ * (from the file's OWN `<db src>` / `<program db=>`), and the inlined runtime
+ * helpers the body references — in module-LEADING order (ES imports hoist).
+ */
+function assembleModuleHeaders(fileAST: ASTNode, filePath: string, body: string, errors?: unknown[]): string {
   const runtimeHeader = buildRuntimeHelperHeader(body, filePath, errors);
-
-  // ---- db handle header (§44.2) — only when the tool uses `?{}`. -------------
   const dbHeader = buildDbHandleHeader(fileAST, body);
-
-  // ---- import header (§21.3 / §64) — ES imports MUST lead the module. --------
   const importHeader = buildImportHeader(fileAST);
-
-  const header =
+  return (
     (importHeader ? importHeader + "\n" : "") +
     (dbHeader ? dbHeader + "\n" : "") +
-    (runtimeHeader ? runtimeHeader + "\n" : "");
-  return header + body + "\n" + harness.join("\n") + "\n";
+    (runtimeHeader ? runtimeHeader + "\n" : "")
+  );
+}
+
+/**
+ * W5b (#5) — true when the module references a `_scrml_sql` handle for which NO
+ * `<db src>` / `<program db=>` scope exists: the genuine no-connection case that
+ * `buildDbHandleHeader` would otherwise paper over with a silent `new
+ * SQL(":memory:")` fallback (empty db → silent-bad-output at runtime). The
+ * in-process emit fires E-SQL-009 on this rather than shipping the `:memory:`
+ * stub — the loud half of the §21.5.1 / §44.7.1 reconciliation (the general
+ * typer-level gate for the browser/library paths is the tracked gap
+ * `g-e-sql-009-no-db-src-not-fired`).
+ */
+function dbHandleMissingScope(fileAST: ASTNode, body: string): boolean {
+  const used = new Set<string>();
+  const re = /\b_scrml_sql(?:_\d+)?\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) used.add(m[0]);
+  if (used.size === 0) return false;
+  const scopes = collectDbScopes(fileAST as never);
+  for (const id of used) if (!scopes.get(id)) return true;
+  return false;
+}
+
+/**
+ * §44.7.1 W5b (S239) — generate the IN-PROCESS library module JS for a db-bound
+ * library consumed by a tool (or any server-side / in-process consumer, per the
+ * D5 GENERALIZE ruling). Unlike the client-facing `generateLibraryJs` — which
+ * PRUNES every `?{}` fn because a browser fetches it over a generated HTTP route
+ * (§12.6) — this emits each exported fn as a REAL in-process callable:
+ *
+ *   - a `?{}` fn lowers to `await _scrml_sql\`…\`` against the module's OWN
+ *     `<db src>` connection (§44.7.1 — the module owns its connection; a
+ *     `<program db=>` in the importer does NOT override it),
+ *   - a `_{}` foreign fn lowers to the §23.2.4a async IIFE,
+ *   - a pure fn stays a plain synchronous `export function`.
+ *
+ * NO HTTP route, NO client null-stub, NO `main` harness (a library is imported,
+ * not run). REUSES the proven `generateToolJs` machinery: `computeAsyncFnNames`
+ * (async coloring), `emitLogicNode`/`emitFnShortcutBody` at `boundary:"server"`
+ * (the in-process `?{}` / `_{}` lowering), `buildDbHandleHeader` (the Bun.SQL
+ * handle from `collectDbScopes`), `buildRuntimeHelperHeader` (helper inlining),
+ * and `buildImportHeader` (real ES imports).
+ *
+ * Only db-context tool-dep libraries are routed here (codegen/index.ts); a
+ * pure-fn / `<foreign lang>`-only tool-dep lib stays on `generateLibraryJs`
+ * (the A/B-landed path — no `?{}` to lower, no regression risk).
+ */
+export function generateToolLibraryJs(
+  ctxOrFileAST: CompileContext | ASTNode,
+  errors?: unknown[],
+  asyncImportedNames?: Set<string>,
+): string {
+  const { fileAST, filePath } = resolveFileAST(ctxOrFileAST);
+  const sourceText = (fileAST._sourceText ?? null) as string | null;
+  const stmts = collectTopLevelStatements(fileAST);
+  const fns = stmts.filter(isFunctionDecl);
+  // Async-coloring: fixpoint over the call graph (a fn transitively calling an
+  // async fn is itself async), seeded by direct `?{}`/`_{}` bodies AND the
+  // CROSS-IMPORT async names — a lib fn calling an async fn imported from ANOTHER
+  // lib must await it too (mirrors generateToolJs's Flag-C seed).
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
+  const foreignCrossingErrors: unknown[] = [];
+
+  // Exported type names (`export type X:enum`) — used to `export` the emitted
+  // enum backing objects so a consumer's `import { X }` resolves.
+  const exportedTypeNames = new Set<string>();
+  for (const s of stmts) {
+    if (s.kind === "export-decl" && s.exportKind === "type" && typeof s.exportedName === "string") {
+      exportedTypeNames.add(s.exportedName as string);
+    }
+  }
+
+  const bodyLines: string[] = [];
+  bodyLines.push("// Generated in-process library module — scrml compiler output (§44.7.1 W5b)");
+  bodyLines.push('// A db-bound library consumed IN-PROCESS (by a `kind="tool"` or a server');
+  bodyLines.push("// module): its `?{}` fns run against the module's OWN <db src> connection.");
+  bodyLines.push("// ES module: import { name } from './this-file.js'");
+  bodyLines.push("");
+
+  // §14 enum type declarations → frozen runtime objects. An in-process module
+  // bypasses the client/server bundles that normally emit them, so emit here —
+  // WITH `export` for the exported enums (a consumer imports them by name).
+  const enumDefLines = emitEnumVariantObjects(fileAST);
+  if (enumDefLines.length > 0) {
+    for (const l of enumDefLines) {
+      const nm = l.match(/^const ([A-Za-z_$][\w$]*) =/);
+      bodyLines.push(nm && exportedTypeNames.has(nm[1]) ? "export " + l : l);
+    }
+    bodyLines.push("");
+  }
+
+  for (const stmt of stmts) {
+    if (isFunctionDecl(stmt)) {
+      const name = (stmt.name ?? "anon") as string;
+      // `main` never belongs in a library (a library is imported, not run).
+      if (name === "main") continue;
+      // A `<transaction>`-bearing fn with NO plain `?{}` is a STAGED shape
+      // (§44.6 / SPEC-ISSUE-018) — it is not async-colored (the seed omits
+      // transaction), so a server-boundary transaction `await` would land in a
+      // sync fn (SyntaxError). The routing gate keeps transaction-ONLY libs off
+      // this path; this guards a MIXED `?{}`+`<transaction>` lib. FAIL-CLOSED for
+      // an EXPORTED such fn (never a silent drop → the importing tool would hit a
+      // runtime "export not found"); a non-exported transaction helper is skipped.
+      if (containsSqlOrTransaction(stmt.body) && !containsSql(stmt.body)) {
+        if (stmt.fromExport === true && errors) {
+          errors.push(new CGError(
+            "E-CG-006",
+            `E-CG-006: the exported library function \`${name}\` contains only a ` +
+            `\`<transaction>\` block (no plain \`?{}\` SQL). In-process emission of a ` +
+            `transaction-bearing function is STAGED (§44.6 / SPEC-ISSUE-018) and cannot ` +
+            `yet be consumed in-process by a \`kind="tool"\` — split the transaction into ` +
+            `\`?{}\` statements, or remove the import of \`${name}\`.`,
+            (stmt.span as { file?: string; start?: number; end?: number; line?: number; col?: number })
+              ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+        continue;
+      }
+      bodyLines.push(emitLibraryFnMember(stmt, {
+        isExported: stmt.fromExport === true,
+        asyncFnNames,
+        foreignCrossingErrors,
+      }));
+      bodyLines.push("");
+      continue;
+    }
+
+    if (stmt.kind === "export-decl") {
+      const kind = stmt.exportKind as string | undefined;
+      const name = stmt.exportedName as string | undefined;
+      // function/fn — the paired `function-decl` (fromExport) above emitted it.
+      if (kind === "function" || kind === "fn") continue;
+      // type — no runtime value (the enum object, if any, is emitted above).
+      if (kind === "type") continue;
+      // value const/let — parse the initializer + lower it (client boundary,
+      // synchronous). A markup-valued const is a component (mount-time), skip.
+      if (kind === "const" || kind === "let") {
+        if (!name) continue;
+        const raw = String(stmt.raw ?? "");
+        // Tolerate an optional `: <type>` annotation between NAME and `=`
+        // (`export const MAX: number = 3`) — a valid, idiomatic shape. The type is
+        // between NAME and `=` so it is naturally stripped (m[1] is the init only),
+        // exactly as the client/page lowering strips it.
+        const m = raw.match(/^\s*export\s+(?:const|let)\s+[A-Za-z_$][\w$]*\s*(?::\s*[^=]+?)?\s*=\s*([\s\S]+)$/);
+        if (!m) {
+          // A `?{}`-init export const (`export const total = ?{...}.get().c`) is
+          // SPLIT by the parser — the export-decl `raw` ends at `=` and the SQL
+          // becomes a separate node whose trailing `.get().c` accessor does NOT
+          // survive lowering. It cannot emit cleanly as a plain in-process const →
+          // FAIL-CLOSED (never a silent drop). Steer to a server fn. Any OTHER
+          // non-matching shape falls to the pre-existing silent skip: with the
+          // `: <type>` tolerance above there is no known valid-but-unemittable
+          // shape, and a destructured `export const { … }` never reaches here (the
+          // parser leaves its exportedName null → filtered at `if (!name)` above),
+          // so a hard error here would only risk regressing an unforeseen valid one.
+          const emptyInit = /^\s*export\s+(?:const|let)\s+[A-Za-z_$][\w$]*\s*(?::\s*[^=]+?)?\s*=\s*$/.test(raw);
+          if (emptyInit && errors) {
+            errors.push(new CGError(
+              "E-CG-006",
+              `E-CG-006: the exported binding \`${name}\` is initialized by a top-level \`?{}\` SQL ` +
+              `read, which cannot be emitted as a plain in-process library const (§44.7.1 W5b — the ` +
+              `parser splits the initializer and its \`.get()\`/\`.all()\` accessor is lost). Hoist the ` +
+              `query into an exported server function — \`export function ${name}() { return ?{...} }\` ` +
+              `— and call it, instead of \`export const ${name} = ?{...}\`.`,
+              (stmt.span as { file?: string; start?: number; end?: number; line?: number; col?: number })
+                ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            ));
+          }
+          continue;
+        }
+        const init = m[1].trim();
+        // A markup-valued const is a COMPONENT (mount-time), not a runtime value.
+        if (!init || init.startsWith("<")) continue;
+        const initNode = parseExprToNode(init, filePath, 0);
+        const lowered = emitExprField(initNode as never, init, { mode: "client" } as never);
+        bodyLines.push(`export ${kind} ${name} = ${lowered};`);
+        bodyLines.push("");
+        continue;
+      }
+      // re-export / re-export-all — rewrite a local `.scrml` source to its
+      // emitted `.js` (a tool/in-process module uses real ES module resolution).
+      if (kind === "re-export" || kind === "re-export-all") {
+        const raw = String(stmt.raw ?? "").trim();
+        if (raw) { bodyLines.push(raw.replace(/\.scrml(["'])/g, ".js$1")); bodyLines.push(""); }
+        continue;
+      }
+      // rename / local (`export { a as b }` / `export { x }`) — re-export a
+      // binding already declared in this module; emit the raw clause verbatim.
+      if (kind === "rename" || kind === "local") {
+        const raw = String(stmt.raw ?? "").trim();
+        if (raw) { bodyLines.push(raw); bodyLines.push(""); }
+        continue;
+      }
+      // channel / other — not a runtime VALUE export in an in-process lib (v1).
+      continue;
+    }
+
+    // type-decl — scrml type syntax, no JS.
+    if (stmt.kind === "type-decl") continue;
+    // Other top-level logic (a non-exported const/let helper). Lower synchronous.
+    const code = emitLogicNode(stmt as never, { boundary: "client" } as never);
+    if (code && code.trim()) { bodyLines.push(code); bodyLines.push(""); }
+  }
+
+  // Drain any E-FOREIGN-006 crossing-shadow diagnostics the foreign lowering
+  // collected (§23.2.4a) into the live error stream.
+  if (errors && foreignCrossingErrors.length > 0) {
+    for (const e of foreignCrossingErrors) errors.push(e);
+  }
+
+  const body = bodyLines.join("\n");
+
+  // A db-context lib routed here whose `?{}` has NO `<db src>` would fall back to
+  // `new SQL(":memory:")` (empty db, silent-bad-output). Fire E-SQL-009 in the
+  // emit path so it fails LOUD rather than shipping the stub (the general
+  // typer-level gate is tracked as `g-e-sql-009-no-db-src-not-fired`).
+  if (dbHandleMissingScope(fileAST, body) && errors) {
+    errors.push(new CGError(
+      "E-SQL-009",
+      "E-SQL-009: a `?{}` SQL block in an in-process library file resolves against no database " +
+      "connection — the file declares no top-level `<db src=\"...\">` block (a module-with-db-context, " +
+      "§44.7.1) and no `<program db=>` ancestor applies. Add a `<db src=\"...\">` block to the library, " +
+      "or move the `?{}` server function to a file that has one.",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+
+  // Headers must LEAD the module (ES imports hoist): ES imports, the Bun.SQL db
+  // handle (the module's OWN <db src>, §44.7.1), and inlined runtime helpers the
+  // in-process fn bodies reference — assembled shared with generateToolJs.
+  return assembleModuleHeaders(fileAST, filePath, body, errors) + body + "\n";
 }

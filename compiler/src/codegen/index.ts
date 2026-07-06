@@ -58,7 +58,7 @@ import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
-import { generateToolJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
+import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
@@ -71,7 +71,7 @@ import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } 
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
-import { collectTopLevelLogicStatements } from "./collect.ts";
+import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -446,29 +446,59 @@ function computeToolAsyncImportedLocals(
   toolFileAST: unknown,
   files: unknown[],
 ): Set<string> {
+  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>());
+}
+
+/**
+ * The EXPORTED fn names of `fileAST` that are async — memoized + cross-file
+ * TRANSITIVE. A fn is async if it directly does `?{}` / `_{}`, transitively CALLS
+ * such a local fn, OR calls an async fn IMPORTED from another lib. The import
+ * graph is a DAG (cycles are E-IMPORT-002), and `memo` (keyed by filePath,
+ * registered BEFORE recursing) makes it cycle-safe + linear.
+ */
+function asyncExportNamesOf(
+  fileAST: unknown,
+  files: unknown[],
+  memo: Map<string, Set<string>>,
+): Set<string> {
+  const fp = (fileAST as any)?.filePath as string | undefined;
+  if (fp && memo.has(fp)) return memo.get(fp)!;
   const result = new Set<string>();
-  const tf = toolFileAST as any;
+  if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
+  // This file's OWN async imported locals seed its local async-coloring fixpoint.
+  const seed = asyncImportedLocalsOf(fileAST, files, memo);
+  for (const n of collectAsyncFnNamesFromFile(fileAST as never, seed)) result.add(n);
+  return result;
+}
+
+/**
+ * The LOCAL binding names in `fileAST` that bind an ASYNC fn imported from
+ * another `.scrml` lib (recursively resolved via `asyncExportNamesOf`). Used both
+ * as the tool's call-site await-set (§64 / Flag C) and as the cross-import seed
+ * for a db-context library's own async-coloring (W5b #2).
+ */
+function asyncImportedLocalsOf(
+  fileAST: unknown,
+  files: unknown[],
+  memo: Map<string, Set<string>>,
+): Set<string> {
+  const result = new Set<string>();
+  const tf = fileAST as any;
   const imports = (tf?.ast?.imports ?? tf?.imports ?? []) as any[];
   if (!Array.isArray(imports) || imports.length === 0) return result;
-  const toolPath = tf?.filePath as string | undefined;
-  if (!toolPath) return result;
-  const toolDir = dirname(toolPath);
-  const asyncByPath = new Map<string, Set<string>>();
-  const asyncNamesFor = (absSource: string): Set<string> => {
-    let cached = asyncByPath.get(absSource);
-    if (cached) return cached;
-    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
-    cached = srcFile ? collectAsyncFnNamesFromFile(srcFile) : new Set<string>();
-    asyncByPath.set(absSource, cached);
-    return cached;
-  };
+  const filePath = tf?.filePath as string | undefined;
+  if (!filePath) return result;
+  const baseDir = dirname(filePath);
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
     if (!imp.source.endsWith(".scrml")) continue;
-    const asyncNames = asyncNamesFor(resolve(toolDir, imp.source));
+    const absSource = resolve(baseDir, imp.source);
+    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    if (!srcFile) continue;
+    const asyncNames = asyncExportNamesOf(srcFile, files, memo);
     if (asyncNames.size === 0) continue;
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
-    // scrml libs export NAMED bindings only), so only the named arm can bind an
+    // scrml libs export NAMED bindings only), so only the named arm binds an
     // async imported fn. Await-color each named local whose EXPORTED name is
     // async in the resolved source module.
     for (const spec of (imp.specifiers ?? [])) {
@@ -887,8 +917,62 @@ export function runCG(input: CgInput): CgOutput {
   // imports must resolve to REAL `.js` library modules (`<base>.js`), not browser
   // client/server artifacts. In a tool-bearing build, a §21.5 library-shaped file
   // is routed to the library emit even when the build-wide `mode` is `browser`.
-  // Pure browser-app builds (no tool entry) are byte-identical — this flag is off.
-  const buildHasToolEntry = files.some((f) => isToolProgram(f));
+  //
+  // W5b (S239) — the additive `<base>.js` emit + the in-process `?{}` reroute
+  // must fire ONLY for the files a tool ACTUALLY (transitively) imports, NOT for
+  // every library-shaped file merely because SOME tool exists in the build. The
+  // pre-consolidation gate keyed on "any tool present", so a browser-consumed
+  // `?{}` library that no tool imports was rerouted through the in-process emit
+  // and FAILED THE BUILD (E-CG-006 / E-SQL-009) whenever an unrelated tool was in
+  // the same build. `toolDepFiles` = the transitive closure of every tool's
+  // `.scrml` imports (a dep that imports another lib pulls it in too — the tool's
+  // `import` chain resolves the whole closure at runtime). Empty in a tool-free
+  // build, so pure browser-app output stays byte-identical.
+  const toolDepFiles = new Set<string>();
+  {
+    const byPath = new Map<string, any>();
+    for (const f of files) {
+      const p = (f as any)?.filePath as string | undefined;
+      if (p) byPath.set(p, f);
+    }
+    const visitDeps = (fa: any): void => {
+      const fp = fa?.filePath as string | undefined;
+      const baseDir = fp ? dirname(fp) : "";
+      const followEdge = (src: unknown): void => {
+        if (typeof src !== "string" || !src.endsWith(".scrml")) return;
+        const abs = resolve(baseDir, src);
+        if (toolDepFiles.has(abs)) return; // recorded → dedup + cycle-safe
+        const dep = byPath.get(abs);
+        if (!dep) return; // not compiled here (MOD E-IMPORT-005 owns it)
+        toolDepFiles.add(abs);
+        visitDeps(dep); // transitive
+      };
+      // import-decl edges (`import { x } from "./dep.scrml"`).
+      const imports = (fa?.ast?.imports ?? fa?.imports ?? []) as any[];
+      if (Array.isArray(imports)) {
+        for (const imp of imports) {
+          if (imp && imp.kind === "import-decl") followEdge(imp.source);
+        }
+      }
+      // re-export edges (`export { x } from "./dep.scrml"` / `export * from
+      // "./dep.scrml"`) — carried on export-decl nodes as `reExportSource`, NOT in
+      // the `imports` array. The tool/in-process emit rewrites these to `./dep.js`
+      // (emit-tool re-export path), so the re-exported lib's `<base>.js` MUST also
+      // be emitted or the tool's `export … from "./dep.js"` fails at runtime
+      // (Cannot find module). Without following this edge a re-export FACADE dep
+      // strands its target — a regression vs the old "emit for every library-shaped
+      // file" gate.
+      const nodes = (getNodes(fa as never) as any[]) ?? [];
+      if (Array.isArray(nodes)) {
+        for (const nd of nodes) {
+          if (nd && nd.kind === "export-decl" && typeof nd.reExportSource === "string") {
+            followEdge(nd.reExportSource);
+          }
+        }
+      }
+    };
+    for (const f of files) if (isToolProgram(f)) visitDeps(f);
+  }
 
   // Process each file
   for (const fileAST of files) {
@@ -978,6 +1062,16 @@ export function runCG(input: CgInput): CgOutput {
     // paths → the subdir page opens a different (empty) file from the project
     // root. null for legacy single-file callers (handled verbatim downstream).
     (fileAST as any)._outputBaseDir = cgOutputBaseDir;
+
+    // W5b (S239) — stash the module's cross-import async seed: the LOCAL names
+    // that bind an async fn imported from ANOTHER lib. emit-server's ss1
+    // value-export path (emitModuleValueExportLines) reads it so a server-exported
+    // fn that (transitively) calls a cross-lib async import is colored async and
+    // awaits it — parity with the tool path (which passes the same seed straight
+    // into computeAsyncFnNames). Stashed here because emit-server has no `files`
+    // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
+    // early-returns empty for an import-free file, so the cost is ~O(1) there.
+    (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files);
 
     // ---------------------------------------------------------------------------
     // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
@@ -1486,8 +1580,27 @@ export function runCG(input: CgInput): CgOutput {
     // tool's ES import (`import { fn } from "./dep.js"`) resolves. The two never
     // collide on disk (`<base>.js` vs `<base>.client.js`). A tool-free build
     // never enters this branch, so browser-app output is byte-identical.
+    //
+    // W5b (S239, §44.7.1) — a DB-CONTEXT library (a `?{}` fn resolving against
+    // the file's OWN `<db src>`) routes to `generateToolLibraryJs`: the tool is
+    // an in-process monolith with NO client boundary, so its imported db fn runs
+    // IN-PROCESS (`await _scrml_sql\`…\``, own connection) rather than as the
+    // client-facing HTTP-route + null-stub `generateLibraryJs` emits for a
+    // browser consumer. A pure-fn / `<foreign lang>`-only tool-dep lib has no
+    // `?{}` to lower and stays on `generateLibraryJs` (the A/B-landed path).
     let additiveLibraryJs: string | null = null;
-    if (buildHasToolEntry && isLibraryShapedFile(fileAST)) {
+    if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
+      // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
+      // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
+      const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files);
+      // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
+      // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
+      // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with
+      // no `?{}` and no async imports is STAGED (§44.6) and stays on the A/B
+      // `generateLibraryJs` path (routing a sync fn through the server-boundary
+      // transaction `await` would be a SyntaxError).
+      const libInProcess = containsSql(getNodes(fileAST as never) as never)
+        || libAsyncImports.size > 0;
       const toolDepLibCtx: CompileContext = {
         filePath,
         fileAST,
@@ -1510,7 +1623,9 @@ export function runCG(input: CgInput): CgOutput {
         reachabilityRecord: reachabilityRecordInput,
       };
       additiveLibraryJs = codegenStage("emit-library", () =>
-        generateLibraryJs(toolDepLibCtx)
+        libInProcess
+          ? generateToolLibraryJs(toolDepLibCtx, errors, libAsyncImports)
+          : generateLibraryJs(toolDepLibCtx)
       ) || null;
     }
 

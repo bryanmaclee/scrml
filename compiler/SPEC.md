@@ -7118,7 +7118,7 @@ The compiler inserts `await` automatically per §13.
 
 - This subsection is silent-correct behavior: suppressing an unreachable, never-fetched route handler is not a developer-observable error or warning, and the compiler SHALL NOT emit a diagnostic for it. (The library-module cross-file "server route generation" lifecycle is itself a staged, not-yet-fully-realized capability per §44.7.1; this subsection does not violate any fixed emission mandate.)
 
-> **Implementation note (non-normative).** The suppression is gated, additionally, on the function emitting cleanly as a plain export in the library JS today. A body-content-escalated function whose body carries a top-level server-only node (inline `?{}` / transaction) does not yet emit cleanly as a plain library export (that case is the staged pure-fn-library lifecycle of §44.7.1 / §21.5.1; cf. E-SQL-009) and retains its current behavior — suppressing its handler would strand it with neither a working export nor an endpoint. The clean import-escalated shape — a plain `export function` importing e.g. `scrml:fs` — is the case this subsection suppresses.
+> **Implementation note (non-normative).** The clean import-escalated shape — a plain `export function` importing e.g. `scrml:fs` — is suppressed to a plain library export. A body-content-escalated function whose body carries an inline **`?{}`** SQL node now ALSO emits cleanly: as of W5b (S239, §44.7.1) a module-with-db-context resolves its `?{}` against its own `<db src>` and emits a consumer-shaped callable — the client-facing library `<base>.js` prunes the `?{}` fn (browser consumers fetch it over the retained §12.6 route), while the server-side / in-process artifact (`<base>.server.js` ss1 export, and the `kind="tool"` `<base>.js`) carries the REAL in-process db callable (`await _scrml_sql`…``, own connection; §64.5.1). A `<transaction>` body remains staged (§44.6 — transactions deferred to SPEC-ISSUE-018) and retains its current route-handler behavior; suppressing its handler would strand it with neither a working export nor an endpoint.
 
 ---
 
@@ -14845,10 +14845,26 @@ without `export`).
 - Importing such an export from another file SHALL succeed for the name
   resolution (§21.6 E-IMPORT-004 SHALL NOT fire on a recognized name).
 - The runtime contract for a server-modifier-carrying export across files
-  (notably `?{}` SQL resolution in pure-fn files) is described in §44.7
-  E-SQL-009. Until that contract is fully implemented (see SPEC §44.7
-  + W5-FOLLOW dispatch), pure-fn files containing `?{}` server functions
-  produce a hard error so adopters do not get silent runtime failures.
+  (notably `?{}` SQL resolution in pure-fn files) is IMPLEMENTED as of
+  F-AUTH-002 W5b (S239 — `tool-library-in-process-consumption-2026-07-05`).
+  A pure-fn file that declares its own top-level `<db src>` (a
+  module-with-db-context, §44.7.1) resolves its `?{}` server functions
+  against that connection and emits a **consumer-shaped** callable: an
+  **in-process binding** (`export async function f(){ … await _scrml_sql`…` … }`,
+  own connection) for a server-side / in-process consumer — a `<program>`
+  server function OR a `kind="tool"` (§64.5.1) — and the §12.6 HTTP-route +
+  client fetch-stub for a browser consumer (the client cannot evaluate
+  `_scrml_sql`). A pure-fn file that contains `?{}` but declares NO `<db src>`
+  block SHALL be a compile error (E-SQL-009, §44.7.1) — it has no connection to
+  resolve against, and a silent `new SQL(":memory:")` fallback would return empty
+  results at runtime. **Enforcement status (S239):** the in-process emit path
+  (`generateToolLibraryJs`, a db-context lib routed for a `kind="tool"` /
+  server consumer) FIRES E-SQL-009 here. The general typer-level gate — the same
+  hard error for the browser / `--mode library` emit paths, where a `?{}`-with-
+  no-`<db src>` file currently still emits the `:memory:` fallback — is a KNOWN
+  GAP tracked as `g-e-sql-009-no-db-src-not-fired` (a separate arc; wiring the
+  typer gate is corpus-breakage-risky and out of the W5b emit scope). The SPEC
+  states the SHALL normatively; the browser-path enforcement is pending.
 
 ### 21.6 Error Codes
 
@@ -22905,13 +22921,26 @@ SQL-resolution scope for any `?{}` inside the block, equivalent to a
 - A `<program db=>` ancestor in the importing page SHALL NOT override the
   pure-fn module's own `<db>` context — the module owns its connection.
 - A pure-fn file that contains `?{}` AND does not declare a `<db>` block
-  SHALL be a compile error (E-SQL-009).
-- The fully-realized cross-file lifecycle (auto-detection of pure-fn files,
-  emission as ES module, server route generation, importing-page wiring)
-  is being implemented in stages. As of F-AUTH-002 W5, the export-modifier
-  parsing is implemented (§21.5.1); the cross-file emission lifecycle is
-  scheduled for follow-up dispatches (W5a auto-detect-library, W5b
-  cross-file-?{}-resolve).
+  SHALL be a compile error (E-SQL-009). Enforced in the in-process emit path
+  (`generateToolLibraryJs`, S239); the browser / `--mode library` typer-gate
+  enforcement is a KNOWN GAP (`g-e-sql-009-no-db-src-not-fired`) — see §21.5.1.
+- The module OWNS its connection: each imported module-with-db-context gets
+  its OWN `_scrml_sql` handle built from its OWN `<db src>` (D2 — per-module
+  handle). A `kind="tool"` (or `<program>`) importing N such libraries that
+  each point at the same db file opens N connections; SQLite tolerates this
+  (acceptable v1). A shared-handle optimization is deferred.
+- The cross-file emission lifecycle is IMPLEMENTED (W5a auto-detect-library,
+  S238; **W5b cross-file-`?{}`-resolve, S239** —
+  `tool-library-in-process-consumption-2026-07-05`). A module-with-db-context
+  emits its `?{}` server functions **consumer-shaped** (D5 GENERALIZE):
+    - a **browser** consumer gets the §12.6 HTTP route + client fetch-stub
+      (the client cannot evaluate `_scrml_sql`); the client-facing library
+      `<base>.js` prunes the `?{}` fn (it is fetched over the route);
+    - a **server-side / in-process** consumer — a `<program>` server function
+      importing the module's `<base>.server.js`, OR a `kind="tool"` importing
+      its `<base>.js` — gets a REAL in-process callable: the `?{}` lowers to
+      `await _scrml_sql`…`` against the module's own connection, no HTTP
+      boundary, no client null-stub. One authored `?{}` fn, both shapes.
 
 
 ### 44.8 Parser: Bracket-Matched `?{` Scanner (F-SQL-001)
@@ -34582,6 +34611,16 @@ to the standard stdlib/vendor resolution. A tool may import only an IMPORTABLE l
 a runnable `<base>.js`. A tool importing a page-shaped / no-export `.scrml` is `E-TOOL-006` (fail-closed;
 §64.6). An async imported library fn (e.g. a `<foreign lang>` lib `export fn` whose `_{}` body makes it
 `export async function`, §23.6) is `await`ed at the tool's call sites (cross-import await-coloring).
+
+**In-process db-bound library imports (W5b, §44.7.1).** A tool MAY import a db-bound library fn — a
+`?{}` server function of a module-with-db-context (a library declaring its own `<db src>`). The imported
+`<base>.js` carries the REAL in-process db callable (`export async function f(){ … await _scrml_sql`…` … }`),
+NOT a client fetch-stub: the tool is an in-process monolith with no client boundary, so it runs the SQL
+directly. The tool and the imported library EACH own their db connection (§44.7.1 — the module owns its
+connection; a `<program db=>` / `kind="tool" db=` on the importer does NOT override the library's own
+`<db src>`). The `?{}` fn is `async` and is `await`ed at the tool's call sites (same cross-import
+await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit; the server-module half
+(a `<program>` server fn importing the library's `<base>.server.js`) is the §44.7.1 ss1 in-process export.
 
 ### 64.6 Error codes (§34 catalog rows land with the impl)
 

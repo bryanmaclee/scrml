@@ -89,6 +89,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `e44ce893` — chore(s239): WRAP — A/B + E-TOOL-006 landed, PA contract hardened; W5b HELD on origin/w5b-wip (cross-machine) — **pushed**
 - `6f8adc5c` — chore(s238): WRAP addendum — flogence Surface-2 R26 (2 CLI toolchain blockers filed + prioritized) — **pushed**
 - `66a3afb1` — chore(s237): WRAP bookkeeping (RECOVER — c2ed7535 landed empty via the -F- stdin-heredoc staging-loss) — **pushed**
 - `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
@@ -96,7 +97,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `2fb2bf1f` — chore(s234): WRAP — hand-off CLOSE + changelog + known-gaps + master-list + 6 BRIEFs + delta-log [257-275] — **pushed**
 - `b24f3892` — chore(s233): WRAP — hand-off + changelog + master-list + architecture-skeleton RULING + delta-log [242-256] — **pushed**
 - `e7455a68` — chore(s232): WRAP — autonomous board-drive [9 landings] · 3 D3-bugs resolved · V1-security floor · conformance 51→69 · pushed — **pushed**
-- `66a3e616` — chore(s231): WRAP — D3 conformance suite BUILT (51/gated/OQ1-resolved) + V1-scoping done + capability-vocab ratified — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

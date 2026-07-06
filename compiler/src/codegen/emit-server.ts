@@ -3,6 +3,7 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
+import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -580,6 +581,7 @@ function emitModuleValueExportLines(
   fileAST: any,
   filePath: string,
   assembledBody: string,
+  errors?: CGError[],
 ): string[] {
   // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
   // collectLogicBlocks — exported value decls live in the file's logic body.
@@ -643,6 +645,31 @@ function emitModuleValueExportLines(
   const constLines: string[] = [];
   const fnBlocks: string[] = [];
 
+  // W5b (S239, §44.7.1 / D5 GENERALIZE) — async-coloring for the value exports:
+  // a FIXPOINT over the module's exported-fn call graph (shared with the tool-dep
+  // `generateToolLibraryJs` — emit-library-shared.computeAsyncFnNames), seeded by
+  // direct `?{}` / `_{}` bodies. A fn that DIRECTLY does `?{}` SQL, OR that
+  // transitively CALLS one (an orchestrator `report()` calling a `?{}`-doing
+  // `loadRows()`), is `async` and awaits its async callees — else the callee's
+  // Promise leaks un-awaited (`rows` is a Promise, `rows.length` is undefined).
+  const _sourceText = ((fileAST as any)?._sourceText ?? null) as string | null;
+  // W5b (S239) — the CROSS-IMPORT async seed (LOCAL names binding an async fn
+  // imported from another lib), stashed on the fileAST by codegen/index.ts (which
+  // has the build's `files`). Parity with the tool path: without it, a
+  // server-exported fn that only transitively calls a cross-lib async import via
+  // its imported local is emitted sync → the callee's Promise leaks un-awaited.
+  const asyncImportedSeed = ((fileAST as any)?._asyncImportedLocals as Set<string> | undefined);
+  const asyncFnNames = computeAsyncFnNames(
+    Array.from(fnDeclByName.values()) as any[],
+    _sourceText,
+    asyncImportedSeed,
+  );
+  // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
+  // async ss1 fn body surface via this sink (parity with the tool path — the
+  // pre-consolidation server path dropped them silently). Drained into `errors`
+  // after the loop.
+  const foreignCrossingErrors: unknown[] = [];
+
   for (const logic of logicBlocks) {
     for (const stmt of (logic.body ?? [])) {
       if (!stmt || stmt.kind !== "export-decl") continue;
@@ -671,40 +698,60 @@ function emitModuleValueExportLines(
         continue;
       }
 
-      // Exported pure function. Emit a plain `export function` ADDITIVELY.
+      // Exported function. Emit a plain `export function` ADDITIVELY.
       if (kind === "function" || kind === "fn") {
         if (isAlreadyDeclared(name)) continue;
         const fnNode = fnDeclByName.get(name);
         if (!fnNode || !Array.isArray(fnNode.body)) continue;
-        // Skip a server-OPERATION function (its body does `?{}` SQL / a
-        // transaction / server-context meta) — not a pure value export.
-        if (bodyHasServerOnlyNode(fnNode.body)) continue;
-        const params: any[] = fnNode.params ?? [];
-        const paramSigs = params.map((p, i) => paramSignature(p, i));
-        const generatorStar: string = fnNode.isGenerator ? "*" : "";
-        const asyncPrefix: string = fnNode.isAsync ? "async " : "";
-        const declaredNames = new Set<string>(
-          params.map((p) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
-        );
-        // Client-boundary lowering → synchronous body (see fn-doc rationale).
-        const bodyCodes = emitFnShortcutBody(
-          fnNode.body,
-          { boundary: "client", declaredNames, insideFunctionBody: true },
-          fnNode.fnKind,
-          fnNode.hasReturnType,
-        );
-        const out: string[] = [];
-        out.push(`export ${asyncPrefix}function${generatorStar} ${name}(${paramSigs.join(", ")}) {`);
-        for (const code of bodyCodes) {
-          for (const line of code.split("\n")) out.push(`  ${line}`);
-        }
-        out.push(`}`);
-        fnBlocks.push(out.join("\n"));
+        const isAsync = asyncFnNames.has(name);
+        // W5b / D5 GENERALIZE — an ASYNC fn (its body does `?{}` SQL / `_{}`, OR it
+        // transitively CALLS one) emits as a REAL IN-PROCESS callable: the `?{}`
+        // lowers SERVER-boundary to `await _scrml_sql\`…\`` against the module's OWN
+        // connection, and it awaits its async peers (the fixpoint above). A server /
+        // in-process consumer importing this module by-name
+        // (`import { countItems } from "./x.server.js"`) calls it directly — NO HTTP
+        // boundary, NO `const x = null` client stub. The `_scrml_sql` handle is
+        // declared by the §44.2 Bug-3a injection, which scans the WHOLE assembled
+        // body (these ss1 lines INCLUDED — they are appended before that scan), so
+        // the handle is present whether or not a route handler also references it.
+        // The browser client still fetches it over the retained HTTP route (§12.6).
+        // This is the server-half of W5b (the tool-half is generateToolLibraryJs).
+        //
+        // A NON-async server-only-body fn (a server-context `meta` / env / import,
+        // OR a `<transaction>` — STAGED §44.6, not `?{}`-colored) is out of scope:
+        // it keeps its route handler and is skipped here (a synchronous stub would
+        // null-out its resource access or carry an un-awaitable body).
+        if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
+        // Shared per-fn emitter (emit-library-shared) — same async-coloring +
+        // boundary rule as the tool-dep `generateToolLibraryJs`, incl. the
+        // foreign-crossing sink (S239 parity fix).
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, foreignCrossingErrors }));
         continue;
       }
 
       // All other export kinds (type / re-export / re-export-all / rename /
       // local / channel) have NO runtime VALUE export here — skip.
+    }
+  }
+
+  // Drain any E-FOREIGN-006 crossing-shadow diagnostics collected while lowering
+  // the async ss1 fn bodies into the live error stream (parity with emit-tool) —
+  // DEDUPED: a fn emitted on BOTH the route-handler path (which already drained
+  // its OWN foreign sink earlier in this same generateServerJs) and this ss1
+  // value-export path would otherwise report the SAME crossing twice. Push an ss1
+  // diagnostic only when no identical one (code + span + message) is already
+  // present — a purely ss1-exported foreign fn (no route handler) still surfaces.
+  if (errors && foreignCrossingErrors.length > 0) {
+    for (const e of foreignCrossingErrors) {
+      const ec = e as CGError;
+      const es = ec.span as { start?: number; end?: number };
+      const dup = errors.some((x) => {
+        const xs = x.span as { start?: number; end?: number };
+        return x.code === ec.code && x.message === ec.message
+          && (xs?.start ?? -1) === (es?.start ?? -1)
+          && (xs?.end ?? -1) === (es?.end ?? -1);
+      });
+      if (!dup) errors.push(ec);
     }
   }
 
@@ -3428,7 +3475,7 @@ export function generateServerJs(
   // restored so no OTHER file's `_scrml_*_<N>` suffix shifts.
   {
     const _veSnapshot = getVarCounter();
-    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"));
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
   }
