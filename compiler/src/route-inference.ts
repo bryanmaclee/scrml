@@ -83,6 +83,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
+import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -444,6 +445,13 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   { pattern: /\bprocess\.exit\s*\(/, resourceType: "process.exit" },
   { pattern: /\bprocess\.uptime\s*\(/, resourceType: "process.uptime" },
   { pattern: /\bprocess\.memoryUsage\s*\(/, resourceType: "process.memoryUsage" },
+  // §20.7 print()/println() are NOT in this string-scanned table — a raw-source
+  // regex false-matches `print(` inside a STRING LITERAL / COMMENT (`@msg =
+  // "call print(x)"`), spuriously escalating a pure-client function. They are
+  // detected at the AST level instead (`exprNodeCallsPrintBuiltin`, the
+  // bare-expr branch of walkBodyForTriggers) — a genuine builtin CallExpr,
+  // never a string's contents — which also honors the §20.7.5 shadow (a user
+  // `function print` is not the builtin, so it does not escalate).
   // Bun.cron — Bun ≥1.3.12 in-process scheduler. Server-only.
   { pattern: /\bBun\.cron\b/, resourceType: "Bun.cron" },
   // env() built-in is server-only unless prefixed with `public`
@@ -498,6 +506,50 @@ const SERVER_ONLY_SCRML_MODULES = new Set<string>([
 function detectServerOnlyResource(expr: string): string | null {
   for (const { pattern, resourceType } of SERVER_ONLY_PATTERNS) {
     if (pattern.test(expr)) return resourceType;
+  }
+  return null;
+}
+
+/**
+ * §20.7 — AST-level detection of a genuine `print()` / `println()` builtin
+ * CallExpr anywhere in an expression tree. This is the STRING/COMMENT-SAFE
+ * replacement for a raw-source regex: a call node's callee is a real
+ * `{kind:"ident", name:"print"|"println"}`, never the contents of a string
+ * literal (a `lit` node) or a comment — so `@msg = "call print(x)"` never
+ * matches. A member call (`obj.print(...)`, callee.kind==="member") is
+ * excluded, and a name the file SHADOWS via `function print` / `println`
+ * (§20.7.5) is skipped (it resolves to the user fn, not the host-stdout
+ * builtin, so it must not force server placement). Returns the matched builtin
+ * name (`"print"` / `"println"`) or null.
+ */
+function exprNodeCallsPrintBuiltin(
+  node: unknown,
+  shadowed: Set<string>,
+): "print" | "println" | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  const callee = n.callee as Record<string, unknown> | undefined;
+  if (
+    n.kind === "call" &&
+    callee && typeof callee === "object" &&
+    callee.kind === "ident" &&
+    (callee.name === "print" || callee.name === "println") &&
+    !shadowed.has(callee.name as string)
+  ) {
+    return callee.name as "print" | "println";
+  }
+  for (const k in n) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        const hit = exprNodeCallsPrintBuiltin(c, shadowed);
+        if (hit) return hit;
+      }
+    } else if (v && typeof v === "object") {
+      const hit = exprNodeCallsPrintBuiltin(v, shadowed);
+      if (hit) return hit;
+    }
   }
   return null;
 }
@@ -911,6 +963,14 @@ export function walkBodyForTriggers(
    * external callers.
    */
   importedServerNamespaces: Set<string> = new Set(),
+  /**
+   * §20.7.5 — the subset of `["print","println"]` the file SHADOWS via a
+   * top-level `function print` / `println`. A shadowed name resolves to the
+   * user function, NOT the host-stdout builtin, so it does NOT server-escalate.
+   * Defaults to empty (no shadow) for back-compat with self-host RI / external
+   * callers.
+   */
+  printBuiltinsShadowed: Set<string> = new Set(),
 ): WalkResult {
   const triggers: EscalationReason[] = [];
   const callees: string[] = [];
@@ -1046,6 +1106,26 @@ export function walkBodyForTriggers(
           resourceType,
           span: node.span,
         });
+      }
+
+      // §20.7 Trigger 1 (host stdout) — AST-level, NOT string-scanned. A genuine
+      // `print()` / `println()` builtin CallExpr writes host process.stdout (a
+      // §12.2 Trigger-3 server-only resource), so a web-`<program>` fn calling
+      // it is server-placed. Detected on the parsed `exprNode` (never a string
+      // literal's contents / a comment — the fix for the raw-source false-match),
+      // honoring the file's print/println shadow set (§20.7.5). Coverage matches
+      // the former regex: print/println are statement-position (§20.7.1), so they
+      // surface as a bare-expr, the only place detectServerOnlyResource ran.
+      const printExprNode = (node as any).exprNode;
+      if (printExprNode) {
+        const printBuiltin = exprNodeCallsPrintBuiltin(printExprNode, printBuiltinsShadowed);
+        if (printBuiltin !== null) {
+          triggers.push({
+            kind: "server-only-resource",
+            resourceType: `${printBuiltin}() (host stdout)`,
+            span: node.span,
+          });
+        }
       }
 
       // D2c (Insight 26): server-only namespace import member access.
@@ -1364,6 +1444,7 @@ export function walkBodyForTriggers(
           filePath,
           isWorkerBody,
           importedServerNamespaces,
+          printBuiltinsShadowed,
         );
         for (const t of nested.triggers) {
           if (t.kind === "server-only-resource" || t.kind === "protected-field-access") {
@@ -2943,6 +3024,10 @@ export function runRI(input: RIInput): RIOutput {
     // Per-file imported server namespaces (Insight 26 D2c).
     const fileImportedNamespaces = perFileImportedServerNamespaces.get(filePath) ?? new Set<string>();
 
+    // §20.7.5 — per-file print/println shadow set (a top-level `function print`
+    // wins over the builtin, so its calls must NOT server-escalate).
+    const filePrintShadowed = new Set(filePrintBuiltinsShadowed(fileAST));
+
     for (const fnNode of fnNodes) {
       const fnNodeId = makeFunctionNodeId(filePath, fnNode);
 
@@ -2966,6 +3051,7 @@ export function runRI(input: RIInput): RIOutput {
         filePath,
         isWorkerBody,
         fileImportedNamespaces,
+        filePrintShadowed,
       );
 
       // -------------------------------------------------------------

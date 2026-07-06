@@ -14,7 +14,7 @@ import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
-import { SERVER_LOG_HELPER } from "./log-loc.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename } from "node:path";
 import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames } from "./scheduling.ts";
@@ -923,6 +923,11 @@ export function generateValueOnlyServerJs(fileAST: any): string {
   }
   if (emitted.includes("_scrml_log(")) {
     emitted = injectAfterHeader(emitted, SERVER_LOG_HELPER);
+  }
+  // §20.7 — print()/println() clean-stdout helper (a server-placed value-export
+  // fn that calls print writes the server process's stdout).
+  if (emitted.includes("_scrml_print(")) {
+    emitted = injectAfterHeader(emitted, SERVER_PRINT_HELPER);
   }
 
   return emitted;
@@ -3632,6 +3637,20 @@ export function generateServerJs(
       finalEmitted = SERVER_LOG_HELPER + finalEmitted;
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_LOG_HELPER + finalEmitted.slice(headerEndIdx);
+    }
+  }
+
+  // §20.7 — print()/println() server helper inlining. A web-`<program>` fn that
+  // calls print/println is server-placed (§12.2 Trigger 3 — host stdout is a
+  // server-only resource), so its `_scrml_print(` lowering surfaces on the
+  // server bundle. Inline the raw-stdout helper at the post-header boundary,
+  // mirroring the _scrml_log inlining above. Gated purely on the emitted call.
+  if (finalEmitted.includes("_scrml_print(")) {
+    const headerEndIdx = finalEmitted.indexOf("\n\n");
+    if (headerEndIdx === -1) {
+      finalEmitted = SERVER_PRINT_HELPER + finalEmitted;
+    } else {
+      finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_PRINT_HELPER + finalEmitted.slice(headerEndIdx);
     }
   }
 

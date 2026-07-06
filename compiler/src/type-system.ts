@@ -4170,6 +4170,262 @@ function checkRenderShadowing(
 }
 
 // ---------------------------------------------------------------------------
+// §20.7.5 / W-PRINT-SHADOWED — print()/println() builtin shadowing nudge
+// ---------------------------------------------------------------------------
+
+/**
+ * §20.7.5 (mirror §20.6.7) — A user-declared `function print` / `fn println`
+ * WINS over the `print()` / `println()` clean-stdout builtins (§20.7): the
+ * builtin steps aside and the call is emitted as an ordinary call to the user
+ * function (no raw-stdout write). Rather than let that happen silently, fire an
+ * info-level `W-PRINT-SHADOWED` at the declaration so the author knows the
+ * builtin is inactive for that name.
+ *
+ * The W- prefix routes to `result.warnings` (non-fatal). Reserved for promotion
+ * to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate.
+ * `print` / `println` are NOT reserved identifiers — declaring `function print`
+ * is legal (this lint, not E-RESERVED-IDENTIFIER). Fires once per declaration.
+ */
+function checkPrintShadowing(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const FN_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
+  const seen = new WeakSet<object>();
+  function walk(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (FN_KINDS.has(n.kind as string) && (n.name === "print" || n.name === "println")) {
+      const which = n.name as string;
+      const span = ((n.span as Span | undefined) ?? fileSpan);
+      errors.push(new TSError(
+        "W-PRINT-SHADOWED",
+        `W-PRINT-SHADOWED: this \`${which}\` declaration shadows the clean-stdout ` +
+        `\`${which}()\` builtin (§20.7). Calls to \`${which}(...)\` resolve to THIS ` +
+        `function and do NOT write host stdout. Remove this declaration to adopt ` +
+        `the builtin. (\`${which}\` is not a reserved identifier; this is an ` +
+        `info-level nudge, not an error.)`,
+        span,
+        "info",
+      ));
+    }
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  for (const node of topNodes) walk(node);
+}
+
+// ---------------------------------------------------------------------------
+// §20.7.2 / E-PRINT-NON-PRIMITIVE — a print()/println() arg must be primitive
+// ---------------------------------------------------------------------------
+
+/** Classify a scrml value-shape for the print() arg check. */
+type PrintArgClass = "primitive" | "nonprimitive" | "unknown";
+
+/**
+ * Classify a raw `:T` type-annotation string for the E-PRINT-NON-PRIMITIVE
+ * check. Best-effort (mirrors gauntlet-phase3 `classifyTypeAnnotation`): a
+ * `number` / `string` / `bool` head is primitive; an array (`T[]`), value-map
+ * (`[K:V]`), inline-struct (`{...}`), or capitalized nominal (struct / enum /
+ * opaque) head is non-primitive; `asIs` and anything unrecognized is unknown
+ * (never flagged, so the check cannot false-positive on an escape hatch). A
+ * union is classified by its FIRST member (so `Color | not` is non-primitive,
+ * `string | not` stays primitive — narrowing is the author's to resolve).
+ */
+function classifyPrintTypeAnnot(annot: string | undefined): PrintArgClass {
+  if (!annot || typeof annot !== "string") return "unknown";
+  let s = annot.trim();
+  if (s.startsWith(":")) s = s.slice(1).trim();
+  // Union → first member.
+  s = s.split("|")[0].trim();
+  if (!s) return "unknown";
+  // Array `T[]`.
+  if (s.endsWith("[]")) return "nonprimitive";
+  // Value-native map `[K:V]` / set `[K]` (§59).
+  if (s.startsWith("[")) return "nonprimitive";
+  // Inline struct `{ ... }`.
+  if (s.startsWith("{")) return "nonprimitive";
+  // Drop a refinement / payload suffix `Type(pred)` — classify the head.
+  const parenIdx = s.indexOf("(");
+  const head = (parenIdx === -1 ? s : s.slice(0, parenIdx)).trim();
+  if (head === "number" || head === "string" || head === "bool" || head === "boolean") {
+    return "primitive";
+  }
+  if (head === "asIs") return "unknown";
+  // A capitalized nominal head is a struct / enum / opaque type — non-primitive.
+  if (/^[A-Z]/.test(head)) return "nonprimitive";
+  return "unknown";
+}
+
+/**
+ * §20.7.2 — enforce that every argument to the `print()` / `println()`
+ * clean-stdout builtins (§20.7) is a `string` / `number` / `boolean`. A
+ * non-primitive argument — a struct, enum, array, value-native map (§59),
+ * markup-as-value, or `not` — is `E-PRINT-NON-PRIMITIVE`: clean stdout is
+ * intentional machine-parsed output, so structured data must be serialized
+ * explicitly (the deliberate divergence from `log()`'s human-readable render).
+ *
+ * The classifier is CONSERVATIVE: it flags only shapes it can positively prove
+ * non-primitive (a collection/markup/`not` literal, or an identifier bound to a
+ * non-primitive-typed decl). Any expression whose type it cannot resolve
+ * (member access, a call result, arithmetic, `asIs`) is left unflagged — the
+ * check never false-positives, at the cost of not catching every case
+ * statically (a v1 bound; a full-inference upgrade is additive).
+ *
+ * A user-shadowed `print` / `println` (a file-level `function print`) is NOT
+ * the builtin, so its calls are skipped (name-precise, mirrors the emit-side
+ * shadow yield).
+ */
+function checkPrintArgs(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const FN_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
+  // Pass 1 — which of print/println are shadowed by a user fn decl? + collect
+  // name → value-class bindings from let/const/tilde/lin/state decls.
+  const shadowed = new Set<string>();
+  const bindings = new Map<string, PrintArgClass>();
+  const DECL_KINDS = new Set(["let-decl", "const-decl", "tilde-decl", "lin-decl", "state-decl"]);
+  {
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (!v || typeof v !== "object") return;
+      if (Array.isArray(v)) { for (const c of v) visit(c); return; }
+      if (seen.has(v as object)) return;
+      seen.add(v as object);
+      const n = v as Record<string, unknown>;
+      if (FN_KINDS.has(n.kind as string) && (n.name === "print" || n.name === "println")) {
+        shadowed.add(n.name as string);
+      }
+      if (DECL_KINDS.has(n.kind as string) && typeof n.name === "string") {
+        let cls = classifyPrintTypeAnnot(n.typeAnnotation as string | undefined);
+        if (cls === "unknown") {
+          const lit = classifyPrintArgExpr(n.initExpr, bindings);
+          // Only a POSITIVE literal init informs the binding (a plain
+          // ident/member init is left unknown so a later print does not flag
+          // on an unresolved chain).
+          if (lit === "nonprimitive" || lit === "primitive") cls = lit;
+        }
+        bindings.set(n.name as string, cls);
+      }
+      for (const k in n) {
+        if (k === "span") continue;
+        visit(n[k]);
+      }
+    };
+    for (const node of topNodes) visit(node);
+  }
+
+  // Pass 2 — every print()/println() CallExpr; classify each arg.
+  const seen = new WeakSet<object>();
+  const visit = (v: unknown): void => {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { for (const c of v) visit(c); return; }
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    const n = v as Record<string, unknown>;
+    if (
+      n.kind === "call" &&
+      n.callee && typeof n.callee === "object" &&
+      (n.callee as Record<string, unknown>).kind === "ident" &&
+      ((n.callee as Record<string, unknown>).name === "print" ||
+        (n.callee as Record<string, unknown>).name === "println") &&
+      !shadowed.has((n.callee as Record<string, unknown>).name as string) &&
+      Array.isArray(n.args)
+    ) {
+      const which = (n.callee as Record<string, unknown>).name as string;
+      for (const arg of n.args as unknown[]) {
+        const cls = classifyPrintArgExpr(arg, bindings);
+        if (cls === "nonprimitive") {
+          const a = arg as Record<string, unknown>;
+          const span = ((a?.span as Span | undefined) ?? (n.span as Span | undefined) ?? fileSpan);
+          const label = describePrintArg(a);
+          errors.push(new TSError(
+            "E-PRINT-NON-PRIMITIVE",
+            `E-PRINT-NON-PRIMITIVE: \`${which}()\` writes raw stdout, so every argument ` +
+            `must be a \`string\` / \`number\` / \`boolean\` — but this argument is ${label} ` +
+            `(§20.7.2). Serialize the structured value explicitly (e.g. via a JSON or ` +
+            `custom serializer) before printing; \`print\` does not render structured data ` +
+            `to a human-readable projection the way \`log()\` (§20.6.4) does.`,
+            span,
+          ));
+        }
+      }
+    }
+    for (const k in n) {
+      if (k === "span") continue;
+      visit(n[k]);
+    }
+  };
+  for (const node of topNodes) visit(node);
+}
+
+/** A short human label for the offending print arg (for the diagnostic). */
+function describePrintArg(a: Record<string, unknown> | null | undefined): string {
+  if (!a || typeof a !== "object") return "a non-primitive value";
+  switch (a.kind) {
+    case "array": return "an array";
+    case "object": return "a struct / object";
+    case "map-lit": return "a value-native map (§59)";
+    case "markup-value": return "markup-as-value";
+    case "lit": return a.litType === "not" ? "the absence value `not`" : "a non-primitive value";
+    case "ident": return `the non-primitive-typed value \`${String(a.name ?? "")}\``;
+    default: return "a non-primitive value";
+  }
+}
+
+/**
+ * Classify a print() argument ExprNode. Positively-provable non-primitive
+ * shapes (collection / markup / `not` literal, or an ident bound to a
+ * non-primitive decl) return "nonprimitive"; a proven-primitive literal / ident
+ * returns "primitive"; everything else is "unknown" (never flagged).
+ */
+function classifyPrintArgExpr(
+  node: unknown,
+  bindings: Map<string, PrintArgClass>,
+): PrintArgClass {
+  if (!node || typeof node !== "object") return "unknown";
+  const n = node as Record<string, unknown>;
+  switch (n.kind) {
+    case "lit": {
+      const lt = n.litType as string | undefined;
+      if (lt === "number" || lt === "string" || lt === "template" || lt === "bool") {
+        return "primitive";
+      }
+      if (lt === "not") {
+        // A user-source `null` / `undefined` token is E-SYNTAX-042's to report;
+        // don't double-fire. A canonical `not` argument is non-primitive.
+        if (n.raw === "null" || n.raw === "undefined") return "unknown";
+        return "nonprimitive";
+      }
+      return "unknown";
+    }
+    case "array":
+    case "object":
+    case "map-lit":
+    case "markup-value":
+      return "nonprimitive";
+    case "ident": {
+      let name = typeof n.name === "string" ? n.name : "";
+      if (name.startsWith("@")) name = name.slice(1);
+      if (!name) return "unknown";
+      return bindings.get(name) ?? "unknown";
+    }
+    default:
+      // member / index / call / binary / ternary / unary / cast / match / …
+      // — not statically resolvable here; conservatively unknown.
+      return "unknown";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §4.18.7 / W-DISPLAY-TEXT-OVERQUOTE — over-quoted display text in a nested
 // plain-markup free-text body inside a code-default-body context
 // ---------------------------------------------------------------------------
@@ -6406,6 +6662,14 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // plain call rather than the builtin lowering. `log` is NOT a reserved
   // keyword (so `function log` stays legal — it is the shadowing case).
   "log",
+  // §20.7 — print() / println() clean-stdout program-output builtins. Lowered
+  // at codegen (emit-expr.ts) to `_scrml_print(<joined>)`. Allowlisted so a
+  // bare `print(...)` / `println(...)` call (no user-declared `function print`)
+  // does NOT fire E-SCOPE-001. When a user DOES declare `print`/`println` in
+  // scope, that binding wins (shadowing) → info-level W-PRINT-SHADOWED. Neither
+  // is a reserved keyword (so `function print` stays legal — the shadow case).
+  "print",
+  "println",
   // §6.7.9 — animationFrame(callback) game-loop builtin. Registered by the
   // tokenizer + handled by the §6.7.9 lifecycle checker + lowered at codegen
   // (the scrml builtin with auto scope-cancellation; the raw host
@@ -20297,6 +20561,12 @@ function processFile(
     // render` shadows the render() client component-render builtin; info-level
     // nudge (mirrors W-LOG-SHADOWED).
     checkRenderShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §20.7.5 / W-PRINT-SHADOWED — a user-declared `function print` / `println`
+    // shadows the clean-stdout builtin; info-level nudge (mirrors W-LOG-SHADOWED).
+    checkPrintShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §20.7.2 / E-PRINT-NON-PRIMITIVE — a print()/println() arg must be a
+    // string / number / boolean; a struct/enum/array/map/markup/`not` is rejected.
+    checkPrintArgs(fnFieldTopNodes, errors, fileSpan);
     // §14 / E-TYPE-ANY-FORBIDDEN — `any` is not a type in scrml (S174 hard
     // line). Reject the literal type-token `any` in every type-annotation
     // position; `asIs` is the sanctioned untyped escape hatch.

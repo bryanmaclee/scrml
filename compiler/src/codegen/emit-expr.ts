@@ -96,6 +96,19 @@ export function setRenderShadowedInFile(on: boolean): void {
   _renderShadowedInFile = !!on;
 }
 
+// §20.7 (shadowing) — PER-FILE set: which of the `print` / `println` builtins
+// does the current file shadow via a top-level `function print` / `fn println`?
+// A shadowed name yields to the user binding across the whole file (mirrors
+// `_logShadowedInFile`, but name-precise so `function println` shadows ONLY
+// `println`). A LOCAL `let print` / param is handled scope-precisely via
+// EmitExprContext.declaredNames.
+let _printShadowedNames: Set<string> = new Set();
+
+/** Set the per-file print/println shadowing names (file-level `function print`). */
+export function setPrintShadowedNames(names: Iterable<string>): void {
+  _printShadowedNames = new Set(names);
+}
+
 // g-markup-session-read-undeclared (S228 ruling) — PER-FILE flag: is the
 // compiler-provided `@session` window-scoped auth projection ACTIVE for this
 // file? Set by runCG to (auth configured for the file) AND (the file does NOT
@@ -2397,6 +2410,42 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     return args.length > 0
       ? `_scrml_log(${tagArgs}, ${args})`
       : `_scrml_log(${tagArgs})`;
+  }
+
+  // §20.7 — print() / println() clean-stdout program-output builtins.
+  //
+  // Lowers `print(...args)` → `_scrml_print(<space-joined args>)` and
+  // `println(...args)` → `_scrml_print(<space-joined args> + "\n")`, where
+  // `_scrml_print` writes host `process.stdout` as RAW text (no origin tag /
+  // file:line / side classification — the deliberate contrast with log()).
+  // Args are space-joined at codegen (§20.7.1); each arg is parenthesized so a
+  // low-precedence arg (ternary, `+`) composes correctly with the `+ " " +`
+  // joiners. String concatenation coerces number/boolean args to their textual
+  // form; the typer's E-PRINT-NON-PRIMITIVE (§20.7.2) already rejects any
+  // non-primitive arg. Statement-position, no usable return value.
+  //
+  // Shadowing (§20.7.5): a user-declared in-scope `print` / `println` binding
+  // WINS — the builtin steps aside and the call falls through to the generic
+  // call path (the §47 name-encoding + fnNameMap post-pass rewrites it to the
+  // user fn's encoded name, mirroring render()). The info-level W-PRINT-SHADOWED
+  // is fired at the declaration by the type pass (`checkPrintShadowing`).
+  //
+  // Production (§20.7.4): print/println are PROGRAM OUTPUT — NOT stripped. No
+  // `_logProductionStrip`-style branch here; the call survives verbatim.
+  if (node.callee.kind === "ident" && (node.callee.name === "print" || node.callee.name === "println")) {
+    const name = node.callee.name;
+    const userDeclared = _printShadowedNames.has(name)
+      || !!(ctx.declaredNames && ctx.declaredNames.has(name));
+    if (!userDeclared) {
+      const isPrintln = name === "println";
+      const parts = node.args.map((a) => `(${emitExpr(a, ctx)})`);
+      let joined = parts.length === 0 ? '""' : parts.join(' + " " + ');
+      if (isPrintln) joined = parts.length === 0 ? '"\\n"' : `${joined} + "\\n"`;
+      return `_scrml_print(${joined})`;
+    }
+    // Shadowed → fall through to the generic call path below (callee stays
+    // `print`/`println`, rewritten to the user fn's encoded name by the
+    // fnNameMap post-pass, exactly like the render() shadow case).
   }
 
   const call = node.optional ? "?.(" : "(";

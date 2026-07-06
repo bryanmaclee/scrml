@@ -26,6 +26,7 @@ import { compile } from "./adapters/impl1-ts.ts";
 import {
   run,
   runServer,
+  runTool,
   runAnchored,
   type InputStep,
   type AnchoredAssertion,
@@ -86,6 +87,11 @@ export interface ExpectedCase {
     /** §52.8 first-paint assertions ({contains,notContains}) on the composed SSR
      *  HTML. Presence enables SSR mode (requires `serverDb`). */
     firstPaint?: FirstPaintAssertion;
+    /** §20.7 / §64 — a `kind="tool"` program's exact stdout. Its presence
+     *  selects the tool-run half: compile the tool, RUN the emitted `.js` with
+     *  `bun`, and assert the captured stdout EQUALS this string (byte-exact —
+     *  print()/println() write RAW, undecorated program output). */
+    stdout?: string;
   };
 }
 
@@ -163,7 +169,8 @@ export function hasRuntimeHalf(c: LoadedCase): boolean {
     e.state !== undefined ||
     e.serverStub !== undefined ||
     e.serverDb !== undefined ||
-    e.firstPaint !== undefined
+    e.firstPaint !== undefined ||
+    e.stdout !== undefined
   );
 }
 
@@ -237,6 +244,22 @@ export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
   if (!hasRuntimeHalf(c)) return [];
   const e = c.expected.expect;
   const failures: string[] = [];
+
+  // §20.7 / §64 — `stdout` selects the tool-run half: a `kind="tool"` program
+  // has no client boundary (no DOM), so compile + RUN the emitted module with
+  // `bun` and assert its captured stdout byte-for-byte. Standalone (returns
+  // early — a tool case carries no dom/state/server half).
+  if (e.stdout !== undefined) {
+    const tr = runTool(c.source, c.auxFiles);
+    if (tr.stdout !== e.stdout) {
+      failures.push(
+        "stdout mismatch:\n    expected: " + JSON.stringify(e.stdout) +
+          "\n    got:      " + JSON.stringify(tr.stdout) +
+          (tr.stderr ? "\n    stderr:   " + JSON.stringify(tr.stderr) : ""),
+      );
+    }
+    return failures;
+  }
 
   // E-ADAPTER: `serverDb` selects server-eval mode (run the REAL emitted server
   // handlers so the §14.8.9 redaction sink + §52.8 SSR compose execute); absent

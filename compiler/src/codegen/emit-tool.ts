@@ -32,7 +32,7 @@ import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember } from ".
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
-import { SERVER_LOG_HELPER } from "./log-loc.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
@@ -137,6 +137,10 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string): string {
 const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_structural_eq(", src: SERVER_STRUCTURAL_EQ_HELPER },
   { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
+  // §20.7 — print()/println() clean-stdout builtin. Joining this inlined set
+  // means a `_scrml_print(` reference is INLINED (not an E-TOOL-005 gap): a
+  // `kind="tool"` program is the primary print consumer (its stdout is parsed).
+  { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
 ];
 
 // Runtime-helper identifiers the tool module legitimately DEFINES itself (the

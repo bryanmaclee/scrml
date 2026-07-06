@@ -1,0 +1,7 @@
+<program kind="tool" lang="ts">
+    function main(args: string[]): number {
+        println("hello", 42)
+        print("no-newline")
+        return 0
+    }
+</program>

@@ -1,0 +1,14 @@
+{
+  "id": "print-tool-println-clean-stdout",
+  "description": "§20.7 / §64 — a `kind=\"tool\"` program uses the clean-stdout builtins. `println(\"hello\", 42)` space-joins its args and appends one newline; `print(\"no-newline\")` writes raw text with NO trailing newline. Both write host process.stdout as RAW, UNDECORATED program output — no [server]/[client] origin tag, no (file:line), no side classification (the deliberate contrast with log() §20.6). The (b) runtime half compiles the tool, RUNS the emitted module with `bun`, and asserts the captured stdout is EXACTLY \"hello 42\\nno-newline\". No diagnostics fire (E-PRINT-NON-PRIMITIVE stays silent — every arg is string/number).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/print-builtin-compile.test.js",
+  "spec": "§20.7",
+  "rationale": "§20.7 normative statements: print/println SHALL write host process.stdout as raw text with NO origin tag / file:line / side classification; `println` SHALL append exactly one \"\\n\" and `print` SHALL append nothing; multiple arguments SHALL be space-joined; number args coerce to their decimal text (42 -> \"42\"). In a `kind=\"tool\"` program (§64, no client boundary) print/println write the tool process's stdout directly with no escalation — this is the motivating case (a CLI whose stdout is machine-parsed, the flogence R26 driver). The byte-exact stdout assertion is the merge-blocker: it proves the program output survives to a real process boundary UNDECORATED, which the log() decoration (`[server]…(file:line)`) broke.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PRINT-NON-PRIMITIVE", "W-PRINT-SHADOWED", "E-TOOL-005"],
+    "notCodePrefixes": ["E-PRINT-"],
+    "stdout": "hello 42\nno-newline"
+  }
+}

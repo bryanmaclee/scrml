@@ -67,8 +67,8 @@ import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
-import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed } from "./log-loc.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -723,6 +723,9 @@ export function runCG(input: CgInput): CgOutput {
     // component-render builtin; the render() hijack then yields to the user fn
     // (so the §47 name-encoding + fnNameMap post-pass repairs the call site).
     setRenderShadowedInFile(fileDeclaresRender(fileAST));
+    // §20.7 — a file-level `function print` / `println` shadows that builtin;
+    // the print/println lowering then yields to the user fn (name-precise).
+    setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
     // g-markup-session-read-undeclared — default the `@session` projection-active
     // flag OFF; worker bundles carry no auth session projection. Re-set per-file
     // in the main emit loop once auth middleware is resolved.
@@ -984,6 +987,8 @@ export function runCG(input: CgInput): CgOutput {
     setLogShadowedInFile(fileDeclaresLog(fileAST));
     // ss16 C3 — a file-level `function render` shadows the render() builtin.
     setRenderShadowedInFile(fileDeclaresRender(fileAST));
+    // §20.7 — a file-level `function print` / `println` shadows that builtin.
+    setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
     // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
     // resolution below (needs `authMW`, resolved later in this iteration).
     setSessionProjectionActive(false);

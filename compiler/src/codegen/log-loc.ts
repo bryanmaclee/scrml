@@ -154,6 +154,20 @@ export function fileDeclaresLog(fileAST: unknown): boolean {
 }
 
 /**
+ * §20.7 — the print/println builtins a file shadows via a top-level
+ * `function print` / `fn println` (any scope). Returns the subset of
+ * `["print", "println"]` the file declares — each shadowed name yields to the
+ * user binding across the whole file (mirrors `fileDeclaresLog`, name-precise
+ * so a `function println` shadows ONLY `println`, not the `print` builtin).
+ */
+export function filePrintBuiltinsShadowed(fileAST: unknown): string[] {
+  const out: string[] = [];
+  if (fileDeclaresFn(fileAST, "print")) out.push("print");
+  if (fileDeclaresFn(fileAST, "println")) out.push("println");
+  return out;
+}
+
+/**
  * ss16 C3 — True when the file declares a `function render` / `fn render`
  * (any scope). Such a decl shadows the `render()` client component-render
  * builtin; the emitter yields to the user fn (mirrors `fileDeclaresLog`).
@@ -240,5 +254,32 @@ function _scrml_log(side, loc) {
   if (typeof console !== "undefined" && typeof console.log === "function") {
     try { console.log(line); } catch (e) { /* never throw */ }
   }
+}
+`;
+
+// ---------------------------------------------------------------------------
+// §20.7 — print() / println() clean-stdout runtime helper.
+//
+// `print`/`println` write host `process.stdout` as RAW text — no origin tag,
+// no `file:line`, no side classification (the deliberate contrast with
+// `_scrml_log`). The codegen lowering (emit-expr.ts) pre-joins the args with a
+// single space and appends `"\n"` for `println`, so this helper receives ONE
+// already-joined string and writes it verbatim. Unlike `_scrml_log`, print is
+// PROGRAM OUTPUT — it is NOT stripped in production.
+//
+// Inlined into a `kind="tool"` module (emit-tool.ts TOOL_RUNTIME_HELPERS) and
+// into a web-app server bundle (emit-server.ts) whenever a `_scrml_print(`
+// reference survives — the same on-use inline pattern as SERVER_LOG_HELPER.
+// The `String(s)` fallback is defensive: E-PRINT-NON-PRIMITIVE (§20.7.2)
+// already rejects non-primitive args at type-check, so `s` is a string here.
+// ---------------------------------------------------------------------------
+export const SERVER_PRINT_HELPER: string = String.raw`
+// --- §20.7 print() / println() runtime (raw stdout, no decoration) ---
+function _scrml_print(s) {
+  try {
+    if (typeof process !== "undefined" && process.stdout && typeof process.stdout.write === "function") {
+      process.stdout.write(typeof s === "string" ? s : String(s));
+    }
+  } catch (e) { /* never throw */ }
 }
 `;

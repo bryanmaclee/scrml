@@ -663,6 +663,57 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
   }
 }
 
+// ===========================================================================
+// (b) runtime-effect half — runTool(source) -> { stdout } (§20.7 / §64).
+// ===========================================================================
+//
+// A `kind="tool"` program (§64) has no client boundary — it emits a single
+// runnable module whose stdout IS the program output. The §20.7 print()/
+// println() builtins write that stdout as RAW text (no [server] decoration).
+// This runner compiles the tool, writes the emitted `.js`, RUNS it with `bun`
+// (a real subprocess — the only way to observe host process.stdout faithfully),
+// and returns the captured stdout for the case's `expect.stdout` assertion.
+
+export interface ToolRunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * Compile a `kind="tool"` scrml program, run the emitted module with `bun`,
+ * and capture its stdout/stderr/exit-code. The subprocess run is load-bearing:
+ * print()/println() write host `process.stdout`, which an in-process DOM
+ * harness cannot observe — only a real process boundary does.
+ */
+export function runTool(source: string, auxFiles: Record<string, string> = {}): ToolRunResult {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-conf-tool-"));
+  try {
+    const file = writeCaseFiles(dir, source, auxFiles);
+    const result = compileScrml({
+      inputFiles: [file],
+      write: false,
+      outputDir: join(dir, "out"),
+      log: () => {},
+    }) as { outputs?: Map<string, { toolJs?: string }> };
+    const out = result.outputs ? result.outputs.get(file) : undefined;
+    const toolJs = (out && out.toolJs) || "";
+    if (!toolJs) {
+      return { stdout: "", stderr: "no toolJs emitted (not a kind=\"tool\" program?)", exitCode: 1 };
+    }
+    const jsFile = join(dir, "case.tool.js");
+    writeFileSync(jsFile, toolJs);
+    const proc = Bun.spawnSync(["bun", jsFile], { cwd: dir });
+    return {
+      stdout: new TextDecoder().decode(proc.stdout),
+      stderr: new TextDecoder().decode(proc.stderr),
+      exitCode: proc.exitCode ?? 0,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // Re-export the anchored-assertion runner + types so the corpus runner imports a
 // single adapter surface.
 export { runAnchored };
