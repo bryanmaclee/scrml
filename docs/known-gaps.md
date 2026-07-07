@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 20 |
-| LOW | 15 |
+| MED | 21 |
+| LOW | 16 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
@@ -70,6 +70,12 @@ Not a spec-vs-impl DRIFT gap — a **design-ruled WORTH-BUILDING feature** (BaaS
 
 ### G-BLOCK-ANALYSIS-EMIT-FOREIGN-UNDERSCORE — `--emit-block-analysis` crashes on a multi-stmt foreign `_{}` file (E-CODEGEN-INVALID-LOGIC) — `NEW S243; MED; open (flogence-reported, triage)`
 flogence reports `flogence/src/models/delta-log.scrml` FAILS `--emit-block-analysis` emission with `E-CODEGEN-INVALID-LOGIC`. flogence isolated it to NOT be the enum (minimal-repro'd); the likely root is **residual-D**: a multi-statement foreign `_{}` block mis-lowering to `return (…)` (a single-expression wrap around multiple statements). Because `--emit-block-analysis` runs codegen, a codegen mis-lower on the foreign `_{}` path surfaces as an emit failure. This is NOT a block-analysis-sidecar defect (the sidecar reads the resolved AST; the failure is upstream in codegen's foreign-`_{}` lowering). **To triage:** R26-reproduce on `delta-log.scrml` at current HEAD → minimize to the foreign `_{}` shape → locate the multi-stmt-`_{}`→`return(…)` mis-lower (grep the foreign/`_{}` codegen path) → fix + a reject/round-trip conformance case. Cross-ref: the S243 oracle block-analysis dispatch (`block-analysis-type-members-2026-07-06`) is a DIFFERENT change — additive type-member emit — and does NOT touch this codegen path, so it neither fixes nor worsens this. Authority: flogence inbox `handOffs/incoming/read/2026-07-06-1018-…-oracle-ask6…` §"Noted-separate (NOT part of this ask)". <!-- @gap id=g-block-analysis-emit-foreign-underscore sev=MED status=open -->
+
+### G-HTTP-CLIENT-INLINE-PRIVATE-HELPER-DROP — the client-runtime chunk inliner drops private helpers that exported fns reference → ReferenceError in the client bundle — `NEW S243; MED; open`
+Surfaced by the S243 auth-flows dispatch (`verifyJwtJwks` default JWKS fetch). The client-runtime chunk inliner `_inlineSiblingShimImports` copies only a shim's EXPORTED functions into the inlined client chunk, NOT the private helpers those exports transitively reference. `compiler/runtime/stdlib/http.js`'s `get`/`post`/`put`/`del`/`patch` ALL call a private `_request`; the inliner copies `get` but drops `_request`, so any client-inlined `scrml:http` call throws `ReferenceError: _request is not defined`. Confirmed by the agent running the real inliner (emitted names include `httpGet` but not `_request`). **General, not auth-specific** — affects ANY client-inlined `scrml:http` use. Server bundling is fine (`bundleStdlibForRun` copies http.js whole). Auth now degrades gracefully (`verifyJwtJwks` maps the ReferenceError → `{valid:false, reason:"jwks-fetch-unavailable"}`) — a band-aid, not the fix. **To triage:** the inliner must copy the transitive private-helper closure of each exported fn it inlines (or bundle the shim whole client-side). Verify + minimize at triage. Authority: S243 auth-flows review finding #4 + agent scope-verdict. <!-- @gap id=g-http-client-inline-private-helper-drop sev=MED status=open -->
+
+### G-NATIVE-PARSER-5TH-EXPORT-HOIST-DROP — the WIP native-parser export-hoist scanner drops a file's 5th top-level export — `NEW S243; LOW; open (native-swap readiness)`
+Surfaced by the S243 auth-flows dispatch (adding `export function verifyJwtJwks` gave `stdlib/auth/jwt.scrml` 5 top-level source exports). The WIP native parser's hoist scanner (`compiler/native-parser`) captured only 4 — it DROPPED the 5th (`verifyJwtJwks`). The LIVE/production parser is UNAFFECTED (all functional tests green; adopter-invisible) — a native-swap-readiness gap only. It flipped the fixture-coupled dual-pipeline canary from LIVE-HOIST-MISCLASSIFY(explained) → DIFF-hoist-count(unexplained); the dispatch reframed the canary honestly + re-baselined the within-node allowlist (Rule 2 — did NOT contort valid stdlib to appease the WIP parser). **To triage (native-swap team):** fix the native export-hoist to capture the 5th (restores LIVE-HOIST-MISCLASSIFY), or re-point the smoke at another exports-axis corpus file; verify the exact export-count threshold at triage. Authority: S243 auth-flows agent note #2. <!-- @gap id=g-native-parser-5th-export-hoist-drop sev=LOW status=open -->
 
 ## §S236 — gaps filed S236 (2026-07-03)
 
