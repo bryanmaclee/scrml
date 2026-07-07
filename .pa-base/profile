@@ -38,6 +38,9 @@ MODULES:
 PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT):
   read IN FULL, in order (the pa-scrml.md "Session-start checklist"):
   0. flogence digest (STATE only):  bun ../flogence/scripts/digest.ts scrml --fresh   (~1k tok; drill delta-log on demand)
+  0.5. active-sessions board (UNCONDITIONAL, both profiles): read ../scrml-support/handOffs/active-sessions/S*.md + claims.md;
+       LIVE sibling => you are a SUCCESSOR (partition by write-footprint · dispatches CLAIMED-not-lost · defer only the WRAP);
+       REGISTER your own S<N>.md even when SOLO (else a pre-wrap successor boots blind — the S243 miss). See CONCURRENT-SESSIONS below.
   1. ../scrml-support/pa-scrml.md         IN FULL   (the two-party contract — 5 Rules, dispatch, wrap, all addenda)
   2. docs/PA-SCRML-PRIMER.md              IN FULL   (the language-expert snapshot)
   3. compiler/SPEC-INDEX.md               IN FULL   (the spec navigation map; SPEC.md is too big to full-read)
@@ -64,6 +67,19 @@ CROSS-MACHINE (S43 — the thing a thin boot drops; two machines, each a separat
   scrml-support drifting behind origin = pa-scrml.md/PRIMER-refs/user-voice go STALE or MISSING -> a thinned boot.
   (This exact miss happened S240: scrml-support was 141 commits behind; pa-scrml.md read as absent.)
   AT WRAP, surface push-state for every repo touched; NEVER silent unpushed work.
+
+CONCURRENT-SESSIONS (S242/S243 — the pre-wrap-next-session-start pattern; read-set step 0.5 is the boot half):
+  >1 PA session live (cross-machine OR a successor booted BEFORE the predecessor wraps) => the
+  `../scrml-support/handOffs/active-sessions/` board is the present-tense partition signal (the hand-off is a
+  boot snapshot; the delta-log/digest are past-tense single-writer + collide cross-machine). Boot step 0.5 is
+  UNCONDITIONAL: REGISTER your S<N>.md at boot even solo (a solo session that skips it is invisible to its own
+  later successor — the S243 miss, which made the S244 pre-wrap boot false-alarm S243's live Realtime-P1 agent
+  as "lost"), and READ the board before taking work. A LIVE sibling => SUCCESSOR-mode: full session on
+  NON-intersecting write-footprints; sibling in-flight dispatches are CLAIMED not lost (no false alarms); only
+  the WRAP defers (needs the predecessor's full hand-off + wrap signal). S-number minted at the serial wrap
+  point. v2-hardened protocol: `active-sessions/README.md` (footprint claims + claims.md CAS via ff-only push +
+  lease-until + pre-push self-revalidation). Durable home: a flobase `continuity`/`concurrent-sessions` module
+  (README names it; proposal routed to flogence S244). This is the scrml reference flobase emulates until then.
 
 PROJECT-INTENT: scrml is "the future of how programming is done for the browser" (Rule 2) — a WHOLE-STACK
   compiler: the developer writes markup+logic+style+data in one .scrml; the compiler owns routing, server/
