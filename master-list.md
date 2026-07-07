@@ -94,6 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `3b399ab0` — chore(s242): WRAP — hand-off + changelog + delta-log [402-414] + master-list; BaaS #3 introspect landed, realtime DD, Peter PA (no push, no maps) — **LOCAL-ONLY**
 - `87b57b30` — chore(s241): WRAP — hand-off + changelog + delta-log [390-401] + user-voice + 8 gaps — **pushed**
 - `caa8803b` — chore(s240): WRAP — hand-off + changelog + delta-log [383-389] + inbox processed — **pushed**
 - `e44ce893` — chore(s239): WRAP — A/B + E-TOOL-006 landed, PA contract hardened; W5b HELD on origin/w5b-wip (cross-machine) — **pushed**
@@ -101,7 +102,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `66a3afb1` — chore(s237): WRAP bookkeeping (RECOVER — c2ed7535 landed empty via the -F- stdin-heredoc staging-loss) — **pushed**
 - `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
 - `cfba6295` — chore(s235): WRAP — hand-off CLOSE + virtual-clock landing bookkeeping + debounce bug filed [288-289] — **pushed**
-- `2fb2bf1f` — chore(s234): WRAP — hand-off CLOSE + changelog + known-gaps + master-list + 6 BRIEFs + delta-log [257-275] — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

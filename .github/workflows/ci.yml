@@ -1,0 +1,46 @@
+# CI — the authoritative full-suite gate (clean env, async).
+#
+# Rationale (gate-layering, flogence gate-layering-methodology-2026-07-06 + scrml S242/S243):
+#   types (always-on local) · pre-commit fast subset (source-controlled, every commit — the
+#   ~2min unit+integration+conformance net) · **CI full suite (HERE — the authoritative gate;
+#   the browser/lsp/commands/self-host/gauntlet delta lives here)** · R26 behavior-verify +
+#   adversarial /code-review (the PA's judgment gates).
+#
+# A clean ubuntu-latest runner has NO env-floor — the ~7 browser whitespace-assertion tests that
+# false-fail on some local machines get the env they need here, so the whole false-fail class
+# disappears at origin. Async → never blocks a local push.
+#
+# TUNING (owner supplies the specifics a template can't see):
+#   - self-host tests (compiler/tests/self-host/) may need `bun run scripts/rebuild-self-host-dist.ts`
+#     before the suite on a clean checkout (dist files are gitignored) — add a build step if the first
+#     run reports missing self-host dist.
+#   - consider splitting a fast job (pre-commit subset) + a full job, or a matrix, once the baseline runs.
+#   - `paths-ignore` below is a runner-minutes saver on docs-only pushes (NOT correctness — the docs-only
+#     annoyance is already gone locally once the full suite is off the synchronous pre-push).
+
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'handOffs/**'
+      - 'docs/**'
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        run: bun install --frozen-lockfile
+      - name: Populate browser-test fixtures (samples/compilation-tests/dist)
+        run: bun run pretest
+      - name: Full test suite
+        run: bun test compiler/tests/
