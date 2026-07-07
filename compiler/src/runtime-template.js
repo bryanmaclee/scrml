@@ -132,6 +132,10 @@ export function _inlineSiblingShimImports(source, shimDir, emitted) {
     const siblingPath = join(shimDir, spec);
     const siblingSource = readFileSync(siblingPath, "utf8");
     const siblingDir = dirname(siblingPath);
+    // The sibling file's OWN top-level defined names (its exports AND its
+    // unexported private helpers). Feeds the same-file private-helper closure
+    // below so a def like `get` drags in the `_request` it calls.
+    const siblingDefinedNames = _collectTopLevelDefinedNames(siblingSource);
 
     for (const binding of _parseImportBindings(clause)) {
       const { imported, local } = binding;
@@ -159,6 +163,24 @@ export function _inlineSiblingShimImports(source, shimDir, emitted) {
         );
         emitted.add(local);
         continue;
+      }
+      // Same-file private-helper closure (S245 — g-http-client-inline-private-
+      // helper-drop). The recursion above only follows the sibling's cross-file
+      // `import` statements; it never scans the extracted def's BODY for the
+      // sibling's OWN top-level helpers. But `get`/`post`/… call an unexported
+      // `_request`; `uploadFile` calls `multipart`; `withDefaults`/`withAuth`
+      // reference the sibling exports `get`/`post`/… — none via an `import`. So
+      // inline the transitive closure of same-file top-level names this def
+      // references, in dependency order, BEFORE the importing def itself.
+      for (const helperDef of _collectSameFilePrivateHelpers(
+        siblingSource,
+        def,
+        siblingDefinedNames,
+        new Set([imported, local]),
+        emitted,
+        ownNames,
+      )) {
+        preludeParts.push(helperDef);
       }
       preludeParts.push(def);
       emitted.add(local);
@@ -201,6 +223,82 @@ function _collectTopLevelDefinedNames(source) {
   while ((m = fnRe.exec(source)) !== null) names.add(m[1]);
   const constRe = /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm;
   while ((m = constRe.exec(source)) !== null) names.add(m[1]);
+  return names;
+}
+
+/**
+ * Collect the transitive closure of SAME-FILE top-level definitions that an
+ * extracted sibling definition references but that the import-recursion never
+ * inlines (they arrive via a same-file reference, not an `import` statement).
+ *
+ * `get`/`post`/… call an unexported `_request`; `uploadFile` calls the exported
+ * `multipart`; `withDefaults`/`withAuth` reference the sibling exports
+ * `get`/`post`/… . Without this pass a client-inlined `get` emits a call to an
+ * undefined `_request` — `ReferenceError: _request is not defined` (S245 bug
+ * g-http-client-inline-private-helper-drop).
+ *
+ * Each helper is extracted UNDER ITS ORIGINAL NAME (the def body references it
+ * by original name — only the imported symbol itself is `as`-renamed) and
+ * returned in dependency order (a helper's own deps precede it, so const/arrow
+ * helpers resolve top-to-bottom). `emitted` is mutated for dedup and cycle
+ * termination; a name already in `emitted`, in the importing shim's `ownNames`
+ * (that def wins — mirrors the :143 collision rule), or in `skipNames` (the
+ * imported symbol plus its local alias) is not re-inlined.
+ *
+ * Over-approximation is SAFE and under-approximation is the bug, so the body
+ * scan is a deliberately conservative word-boundary identifier scan — it may
+ * harmlessly pull a helper mentioned only in a string/comment; it must never
+ * MISS one. No string/comment-aware cleverness here.
+ */
+function _collectSameFilePrivateHelpers(
+  siblingSource,
+  seedDef,
+  siblingDefinedNames,
+  skipNames,
+  emitted,
+  ownNames,
+) {
+  const parts = [];
+  const visit = (body) => {
+    for (const name of _scanIdentifierRefs(body)) {
+      if (!siblingDefinedNames.has(name)) continue; // not a same-file top-level def
+      if (skipNames.has(name)) continue;            // the imported symbol / its alias
+      if (emitted.has(name)) continue;              // already inlined (dedup / cycle)
+      if (ownNames.has(name)) continue;             // importing shim's def wins (:143)
+      const helperDef = _extractTopLevelDefinition(siblingSource, name, name);
+      if (helperDef === null) continue;             // defensive — name has no extractable def
+      emitted.add(name);     // mark BEFORE recursing so a helper cycle terminates
+      visit(helperDef);      // a private helper may call further same-file privates
+      parts.push(helperDef); // post-order push → a helper's deps land before it
+    }
+  };
+  visit(seedDef);
+  return parts;
+}
+
+// Collect the set of identifier-like tokens `text` references BARE. Deliberately
+// NOT string/comment-aware — over-approximation there is safe for the same-file
+// private-helper closure (S245) and under-approximation is the bug.
+//
+// It DOES skip member-access-position identifiers (`obj.name`, `obj?.name`): a
+// top-level binding is only ever referenced BARE, never after a property `.`, so
+// excluding those removes false positives (e.g. `_request`'s `opts.retry` token
+// spuriously matching the exported `retry` — whose body carries raw `Math.*`,
+// which would breach the §26/S176 single-`scrml:math`-source runtime invariant)
+// WITHOUT ever missing a real reference. A leading `.` that is part of a `...`
+// spread is NOT member access, so `...defaults` still references top-level
+// `defaults`.
+function _scanIdentifierRefs(text) {
+  const names = new Set();
+  const idRe = /[A-Za-z_$][\w$]*/g;
+  let m;
+  while ((m = idRe.exec(text)) !== null) {
+    const i = m.index;
+    // Member access `X.name` / `X?.name` — skip. A single leading `.` whose own
+    // predecessor is also `.` is a `...` spread (a bare reference) — keep it.
+    if (i > 0 && text[i - 1] === "." && text[i - 2] !== ".") continue;
+    names.add(m[0]);
+  }
   return names;
 }
 
