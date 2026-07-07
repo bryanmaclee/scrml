@@ -853,6 +853,27 @@ REGISTRY.set("each", {
 });
 
 // ---------------------------------------------------------------------------
+// <onchange> — the `<channel watches=>` change-feed handler (SPEC §38.13.3).
+//
+// A scrml-defined STRUCTURAL element (NOT an HTML element), valid ONLY inside a
+// `watches=` `<channel>` body. It carries no attributes; its body is per-variant
+// arms over the compiler-synthesized `RowChange` enum (§38.13.2), reusing the
+// §18.0.1 match-block arm grammar + §51.0.B.1 payload binding. Registered here
+// (rendersToDom:false) so it is a known structural element for the block
+// splitter / type system rather than an unknown HTML tag whose arm children
+// (`<Inserted>` …) would fire E-COMPONENT-035. Codegen expansion is Phase 2.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("onchange", {
+  tag: "onchange",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+  ]),
+  isVoid: false,
+  rendersToDom: false,  // structural — the client-side dispatch codegen is Phase 2
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

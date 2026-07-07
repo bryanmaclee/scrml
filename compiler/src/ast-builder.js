@@ -248,6 +248,7 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
   onTransition: "an `<onTransition>` element belongs as a child of `<engine>` (§51.0.H)",
   onTimeout:    "an `<onTimeout>` element belongs inside an engine state-child (§51.0.M)",
   onIdle:       "an `<onIdle>` element belongs at engine root, sibling of state-children (§51.0.R)",
+  onchange:     "an `<onchange>` element belongs inside a `<channel watches=<table>>` body (§38.13.3)",
   // NOTE: <match> is intentionally NOT in this table. Block-form <match> is
   // markup-as-value (§18.0.1 + §1.4 L1 pillar) — it is grammatical wherever a
   // value-yielding expression sits, including `${...}` markup-emit contexts
@@ -15000,6 +15001,84 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           path,          // required string URL (null → E-ENDPOINT-PATH-MISSING above)
           method,        // recognized HTTP method (invalid/missing → E-ENDPOINT-METHOD-INVALID)
           acceptsRaw,    // raw enum type-ref text (W3 resolves against §14/§53)
+          arms,          // MatchArmEntry[] from parseMatchArms (§18.0.1 reuse)
+          span,
+          openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
+        };
+      }
+      // ----------------------------------------------------------------
+      // <onchange> handler (SPEC §38.13.3 — realtime feed over external DB
+      // writes; Phase 1 parser). `<onchange>` is the `watches=` channel change-
+      // feed handler: a typed dispatch over the compiler-synthesized `RowChange`
+      // (§38.13.2). Its body is `<Variant>` arms — the §18.0.1 `<match>` arm
+      // grammar + §51.0.B.1 payload binding, REUSED verbatim (the same inbound-
+      // typed-dispatch shape as `<endpoint>`, §61.2). It carries NO opener attrs
+      // (RowChange is compiler-synthesized), so this dispatch is simpler than
+      // `<endpoint>`: capture the arms raw, tokenize via parseMatchArms, return
+      // an `onchange-decl` node. The SYM pass (symbol-table.ts) validates
+      // placement (watches= channel only → E-STRUCTURAL-ELEMENT-MISPLACED),
+      // exhaustiveness over RowChange's 3 variants, and the read-only forbidden
+      // set. Codegen (client `__change` dispatch) is Phase 2 — a `watches=`
+      // channel emits nothing functional in Phase 1.
+      if (block.name === "onchange") {
+        const onchangeRaw = (block.raw || "").trim();
+
+        // Find the opener `>` (brace/paren/bracket/string aware — the arm bodies
+        // may carry `>` inside `{...}` / strings). Mirrors the endpoint finder.
+        function _findOnchangeOpenerEnd(str) {
+          let depth = 0, parenDepth = 0, bracketDepth = 0, inDQ = false, inSQ = false;
+          for (let i = 0; i < str.length; i++) {
+            const c = str[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
+          }
+          return -1;
+        }
+
+        const ocOpenerEnd = _findOnchangeOpenerEnd(onchangeRaw);
+
+        // Capture armsRaw: BS captures the body as text-node children via
+        // STRUCTURAL_RAW_BODY_ELEMENTS (mirrors <endpoint>). Concatenate the raw
+        // text of those children; fall back to a raw slice when absent.
+        let armsRaw = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              armsRaw += child.raw;
+            }
+          }
+        }
+        if (!armsRaw && ocOpenerEnd >= 0) {
+          armsRaw = onchangeRaw.slice(ocOpenerEnd + 1);
+          armsRaw = armsRaw.replace(/<\s*\/\s*(?:onchange)?\s*>\s*$/, "");
+        }
+        armsRaw = armsRaw.trim();
+
+        // §38.13.3 — the arm grammar REUSES the §18.0.1 `<match>` block-form arm
+        // parser VERBATIM (parseMatchArms), identical to `<endpoint>`. Each
+        // `<Variant(payload) : expr>` / `<Variant>...</>` / `<Variant/>` arm
+        // becomes a structured entry. W (Phase 1) just tokenizes — exhaustiveness
+        // over RowChange's 3 variants + arm validity is the SYM pass.
+        let arms = [];
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { parseMatchArms } = require("./match-statechild-parser.ts");
+          const parsed = parseMatchArms(armsRaw);
+          if (parsed && Array.isArray(parsed.arms)) arms = parsed.arms;
+        } catch (_e) { arms = []; }
+
+        return {
+          id: ++counter.next,
+          kind: "onchange-decl",
           arms,          // MatchArmEntry[] from parseMatchArms (§18.0.1 reuse)
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,

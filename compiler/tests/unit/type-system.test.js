@@ -1929,7 +1929,10 @@ describe("§35 State Type Registry", () => {
       // render-expr-primitive: <render of=X/> render-expression primitive (SPEC §19.x) is
       //   structural — non-DOM (codegen expands to a placeholder span + per-variant
       //   `renders` dispatch on the held value).
-      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each", "render"]);
+      // §38.13.3 realtime feed: <onchange> is the `watches=` channel change-feed
+      //   handler — a scrml structural element (non-DOM; client-side dispatch is
+      //   the Phase-2 codegen wave).
+      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each", "render", "onchange"]);
       for (const [name, st] of reg) {
         if (nonDomElements.has(name)) {
           expect(st.isHtml).toBe(false);

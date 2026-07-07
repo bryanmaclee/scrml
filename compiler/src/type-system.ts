@@ -81,6 +81,17 @@ import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes } from "./tool-program.ts";
+// §38.13 (realtime feed over external DB writes) — synthesize the per-feed
+// `RowChange` enum from the watched table's `<schema>` row shape + PK. Phase 1
+// stamps the synthesized descriptor onto the `watches=` channel node for the
+// Phase-2 codegen wave (client `__change` dispatch); no diagnostics here (those
+// live in the SYM pass, symbol-table.ts).
+import {
+  synthesizeRowChange,
+  collectSchemaTables,
+  readLiteralIdentAttr,
+  isWatchesChannel,
+} from "./channel-watches.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -11634,6 +11645,23 @@ function annotateNodes(
 
     if (value.kind === "variable-ref") {
       const name = value.name as string;
+      // §38.13.1 — `watches=<table>` / `key=<column>` on a `<channel watches=>`
+      // are STATIC LITERAL identifiers (the watched table name / the PK-column
+      // override), NOT scope references. The block-splitter parsed the bare
+      // identifier as a `variable-ref`; skip the scope check so `watches=orders`
+      // / `key=id` never false-fire E-SCOPE-001 (the §38.13 SYM pass validates
+      // the table/column against the `<schema>` instead). The exemption is gated
+      // on the channel actually BEING a `watches=` feed (isWatchesChannel) — a
+      // `key=` on a NON-watches channel has no §38.13 validator, so it must still
+      // scope-check normally (an unresolved bare ident stays an E-SCOPE-001,
+      // mirroring the value-shape-awareness of the neighboring
+      // TS_SPEC_BARE_LITERAL_ATTRS exemption that deliberately keeps catching typos).
+      if (
+        (attr.name === "watches" || attr.name === "key") &&
+        parent && isWatchesChannel(parent)
+      ) {
+        return;
+      }
       // Bug `g-bare-literal-attr-value` (sPA ss3) — VALUE-SHAPE-AWARE exemption
       // for the spec-typed bare-literal STRUCTURAL attrs (TS_SPEC_BARE_LITERAL_ATTRS,
       // declared at module scope). When an allowlisted attr's value is a bare
@@ -20571,6 +20599,11 @@ function processFile(
     // line). Reject the literal type-token `any` in every type-annotation
     // position; `asIs` is the sanctioned untyped escape hatch.
     checkAnyTypeForbidden(typeDecls, fnFieldTopNodes, errors, fileSpan);
+    // §38.13.2 — synthesize the per-feed `RowChange` for every `watches=`
+    // channel from the watched table's `<schema>` row shape + primary key.
+    // Stamps `node._rowChangeSynth` for the Phase-2 codegen wave. Zero
+    // diagnostics (SYM owns the six §38.13.8 codes).
+    annotateWatchesRowChange(fnFieldTopNodes);
     // §4.18.7 / W-DISPLAY-TEXT-OVERQUOTE — a `"..."` literal that is the sole
     // content of a plain-markup element nested inside a code-default body
     // (engine state-child / match arm / `:`-shorthand) renders LITERAL quotes
@@ -21180,6 +21213,60 @@ function processFile(
 /**
  * Run the Type System (TS, Stage 6) — sub-stages TS-A, TS-B, TS-C, TS-F, and TS-G.
  */
+/**
+ * §38.13.2 — synthesize the per-feed `RowChange` enum for every `watches=`
+ * channel in the file and stamp it onto the channel node (`_rowChangeSynth`).
+ *
+ * `RowChange:enum = { Inserted(row: <RowT>), Updated(row: <RowT>), Deleted(key: <PKT>) }`
+ * where `<RowT>` is the struct of the watched table's columns and `<PKT>` is the
+ * primary-key type (the `id`-convention, or the channel's `key=` override). The
+ * descriptor is consumed by the Phase-2 codegen wave (the client `__change`
+ * dispatch into the `<onchange>` arms). Phase 1 produces it so the synthesis is
+ * exercised end-to-end; a table the SYM pass already flagged
+ * (E-CHANNEL-WATCHES-UNKNOWN-TABLE) yields no stamp (nothing to synthesize).
+ */
+function annotateWatchesRowChange(nodes: ASTNodeLike[] | undefined): void {
+  if (!Array.isArray(nodes) || nodes.length === 0) return;
+
+  // Single gate walk: collect any `watches=` channel node. The common case is
+  // ZERO — a file with no `watches=` channel returns after this one walk WITHOUT
+  // parsing the schema (collectSchemaTables) or a second traversal.
+  const watchesChannels: ASTNodeLike[] = [];
+  const visited = new WeakSet<object>();
+  const stack: unknown[] = [...nodes];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (Array.isArray(node)) { for (const n of node) stack.push(n); continue; }
+    if (visited.has(node as object)) continue;
+    visited.add(node as object);
+    if (isWatchesChannel(node)) watchesChannels.push(node as ASTNodeLike);
+    const rec = node as Record<string, unknown>;
+    for (const k of Object.keys(rec)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      const v = rec[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  if (watchesChannels.length === 0) return;
+
+  // A `watches=` channel exists — NOW resolve the schema (reuse the shared
+  // collectSchemaTables; runs only when a feed is actually present) and stamp
+  // the synthesized RowChange onto each feed for the Phase-2 codegen wave.
+  const schemaTables = collectSchemaTables(nodes);
+  if (schemaTables.size === 0) return;
+  for (const node of watchesChannels) {
+    const tableName = readLiteralIdentAttr(node, "watches");
+    const keyOverride = readLiteralIdentAttr(node, "key");
+    if (!tableName) continue;
+    const table = schemaTables.get(tableName.toLowerCase());
+    if (table) {
+      (node as Record<string, unknown>)._rowChangeSynth =
+        synthesizeRowChange({ name: table.name, columns: table.columns as any }, keyOverride);
+    }
+  }
+}
+
 export function runTS(input: {
   files: FileAST[];
   protectAnalysis: ProtectAnalysis;

@@ -17809,6 +17809,12 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-CHANNEL-006 | §38.9 | `onclient:*` handler function declared as `server function` | Error |
 | E-CHANNEL-007 | §38.11 | `name=` (or `topic=`) attribute value contains `${...}` interpolation; static literal required | Error |
 | E-CHANNEL-SERVER-CELL-READ | §38.4, §38.6.1 | A SERVER-context channel function (an `onserver:*` handler, or a function escalated to the server by a `broadcast()`/`disconnect()` call or another §12.2 trigger such as a `?{}` SQL block) READS a channel-declared cell. Channel cells are CLIENT-HELD (§38.4 — no server-authoritative store), so the read has no server-side value (`undefined` at request time → a downstream `[...@cell, x]` crashes silently). Operate on the message payload / function arguments and broadcast a value derived from them (§38.6.1). A channel-cell WRITE runs on the client and syncs automatically (§38.4, RULING A). A CLIENT-side function reading a channel cell is fine (the client holds the cell). (Added 2026-06-12 — change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A.) | Error |
+| E-CHANNEL-WATCHES-DRIVER | §38.13.1, §38.13.7 | A `<channel watches=<table>>` feed is declared but the program's database driver is not `postgres` (SQLite / MySQL / no db). The v1 change-capture substrate is Postgres LISTEN/NOTIFY (§38.13.7 — the only substrate the compiler can fully own and emit); `watches=` REQUIRES `<program db="postgres://…">` or a `<db src>` resolving to the `postgres` driver (§44.2). Use Postgres, or drop `watches=`. (Realtime-external-db-writes, §38.13.8.) | Error |
+| E-CHANNEL-WATCHES-UNKNOWN-TABLE | §38.13.1 | A `<channel watches=<table>>` names a table not declared in any `<schema>` in the program. The compiler needs the table's row shape + primary key to synthesize `RowChange` (§38.13.2) and emit the change capture (§38.13.7); an undeclared table has neither. Declare the table in a `<schema>`, or fix the table name. (§38.13.8.) | Error |
+| E-CHANNEL-WATCHES-CLIENT-WRITE | §38.13.4 | A `<channel watches=<table>>` body declares a V5-strict synced cell (`<x> = init`) or a client→server write path. A `watches=` feed is a READ-ONLY server→client change-feed (§38.13.4) — it has no bidirectional §38.4 sync path. Apply changes to program-scope cells from `<onchange>` instead (typically a paired §52 collection, §38.13.5). Remove the synced-cell declaration. (§38.13.8.) | Error |
+| E-CHANNEL-WATCHES-BROADCAST | §38.13.4, §38.6 | A `broadcast()` / `disconnect()` call appears inside a `<channel watches=<table>>` body. A `watches=` feed is fed by the database change capture, NOT by app-side fan-out (§38.13.4) — it has no app broadcast. Use an ordinary `broadcast()` channel (§38.6) for app-controlled fan-out. Remove the call. (A tighter sibling of `E-CHANNEL-004`; §38.13.8.) | Error |
+| W-CHANNEL-WATCHES-NO-PK | §38.13.2 | A `<channel watches=<table>>` watches a table with no derivable primary key (no `primary key` column, no `id` column) and declares no `key=<column>` override. The feed keys its `Deleted` deltas by the primary key (§38.13.2) — without one it cannot key its deltas. Add a primary key / `id` column to the `<schema>` table, or add `key=<column>` to the channel. (§38.13.8.) | Warning |
+| W-CHANNEL-WATCHES-NO-CONSUMER | §38.13.3 | A `<channel watches=<table>>` feed declares no `<onchange>` handler — nothing consumes the change feed. Per §38.13.3 a `watches=` channel body contains exactly one `<onchange>` element (the typed dispatch over the synthesized `RowChange`). Add an `<onchange>` handler, or drop `watches=`. (§38.13.8.) | Warning |
 | E-FN-001 | §48.3.1 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | §48.3.2 | DOM mutation call inside a `fn` body | Error |
 | E-FN-003 | §48.3.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function | Error |
@@ -20242,9 +20248,9 @@ artifacts (per §38.12.6) and so does not trigger E-SQL-009.
 
   <channel name="orders-feed" watches=orders>   <!-- §38.13: live deltas from EXTERNAL commits to `orders` -->
       <onchange>
-          | Inserted row :> { @orders = [...@orders, row] }
-          | Updated  row :> { @orders = @orders.map(r => r.id == row.id ? row : r) }
-          | Deleted  key :> { @orders = @orders.filter(r => r.id != key) }
+          <Inserted(row) : { @orders = [...@orders, row] }>
+          <Updated(row) : { @orders = @orders.map(r => r.id == row.id ? row : r) }>
+          <Deleted(key) : { @orders = @orders.filter(r => r.id != key) }>
       </onchange>
   </channel>
 
@@ -20274,9 +20280,9 @@ A `watches=` channel body contains exactly one `<onchange>` element: a typed dis
 
 ```scrml
 <onchange>
-    | Inserted row :> { … }      <!-- row : the full inserted row -->
-    | Updated  row :> { … }      <!-- row : the full post-update row -->
-    | Deleted  key :> { … }      <!-- key : the primary key of the deleted row -->
+    <Inserted(row) : { … }>      <!-- row : the full inserted row -->
+    <Updated(row) : { … }>       <!-- row : the full post-update row -->
+    <Deleted(key) : { … }>       <!-- key : the primary key of the deleted row -->
 </onchange>
 ```
 

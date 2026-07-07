@@ -144,6 +144,14 @@ const STRUCTURAL_RAW_BODY_ELEMENTS = new Set([
   // ast-builder.js re-tokenize the arms via parseMatchArms without firing
   // E-CTX-003 on the opener-without-closer arms.
   "endpoint",
+  // §38.13.3 (realtime-external-db-writes) — `<onchange>` is the `watches=`
+  // change-feed handler. Its body is per-variant `<Inserted>`/`<Updated>`/
+  // `<Deleted>` arms over the synthesized `RowChange` (§38.13.2), the §18.0.1
+  // `<match>` arm grammar REUSED — exactly like `<endpoint>`. Capturing the body
+  // raw lets the `block.name === "onchange"` dispatch in ast-builder.js re-
+  // tokenize the arms via parseMatchArms without firing E-CTX-003 on the
+  // opener-without-closer `:`-shorthand arms.
+  "onchange",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -205,6 +213,13 @@ const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
   // (`<api>` §60 needed NEITHER set — its body is bare endpoint lines, not
   // nested `<Variant>` openers.)
   "endpoint",
+  // §38.13.3 (realtime-external-db-writes) — same reasoning as `endpoint`/`match`
+  // above. `<onchange>` is a `watches=` change-feed handler whose `<Variant>` arm
+  // body trips the compound-lift heuristic; the exemption lets BS fall through to
+  // the regular markup-opener path → a `type=markup name=onchange` block whose
+  // body the STRUCTURAL_RAW_BODY_ELEMENTS gate captures raw for the onchange
+  // dispatch.
+  "onchange",
 ]);
 
 // ---------------------------------------------------------------------------

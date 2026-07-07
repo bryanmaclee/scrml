@@ -205,6 +205,13 @@ ELEMENT_ATTR_REGISTRY.set("channel", {
     ["name",       attrSpec({ supportsInterpolation: false })],   // VP-3 surface (F-CHANNEL-001)
     ["topic",      attrSpec({ supportsInterpolation: false })],
     ["reconnect",  attrSpec({ supportsInterpolation: false })],
+    // §38.13 — realtime feed over external DB writes. `watches=<table>` marks
+    // the channel a server-fed read-only change-feed; `key=<column>` overrides
+    // the PK used to key its deltas. Both are STATIC LITERAL identifiers (no
+    // `${...}` interpolation — parallel to `name=`/`topic=` per §38.11), so both
+    // declare supportsInterpolation:false (VP-3 flags a silent-interp value).
+    ["watches",    attrSpec({ supportsInterpolation: false })],
+    ["key",        attrSpec({ supportsInterpolation: false })],
     // §38.5 — auth= replaces the legacy `protect=` channel attribute (S80,
     // 2026-05-11). The WS upgrade gate is auth-shaped, not protect-shaped.
     ["auth",       attrSpec({
@@ -428,6 +435,24 @@ ELEMENT_ATTR_REGISTRY.set("each", {
     ["as",   attrSpec({ supportsInterpolation: false })],   // iteration-variable name override
     ["key",  attrSpec({ supportsInterpolation: false })],   // diff-key override
   ]),
+});
+
+// ---------------------------------------------------------------------------
+// <onchange> — the `<channel watches=>` change-feed handler (SPEC §38.13.3).
+//
+// A scrml-defined structural element valid ONLY inside a `watches=` `<channel>`
+// body. It carries NO attributes — its body is per-variant arms over the
+// compiler-synthesized `RowChange` enum (§38.13.2), reusing the §18.0.1 match-
+// block arm grammar + §51.0.B.1 payload binding (the same inbound-typed-
+// dispatch shape as `<endpoint accepts=:enum>`, §61.2). Registered here so
+// VP-1 does not warn on the (attribute-less) element and so its misplacement
+// outside a `watches=` channel is caught (`E-STRUCTURAL-ELEMENT-MISPLACED`,
+// SYM pass). New scrml-special structural elements MUST be added here per
+// primer §12 amendment.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("onchange", {
+  allowedAttrs: new Map([]),
 });
 
 // ---------------------------------------------------------------------------

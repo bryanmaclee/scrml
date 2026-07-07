@@ -492,21 +492,27 @@ function harvestRawCreateTables(text: string, out: Map<string, string>): void {
  * the raw form reaches NEITHER `parseSchemaBlock` NOR the `?{}` walker and
  * E-PA-002 false-fires even though the author DID supply DDL.
  */
+/**
+ * Concatenate the `text`-kind children of a `<schema>` state node into its raw
+ * body text (the same shape schema-differ's `parseSchemaBlock` consumers read).
+ * Hoisted to module scope + exported so the §38.13 `<channel watches=>` machinery
+ * (channel-watches.ts) reuses ONE implementation rather than duplicating it.
+ */
+export function collectSchemaBodyText(node: unknown): string {
+  const children = (node as { children?: ASTNode[] } | null | undefined)?.children;
+  if (!Array.isArray(children)) return "";
+  let text = "";
+  for (const c of children) {
+    if (c && (c as { kind?: string }).kind === "text" &&
+        typeof (c as { value?: unknown }).value === "string") {
+      text += (c as { value: string }).value;
+    }
+  }
+  return text;
+}
+
 function extractSchemaCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
   const result = new Map<string, string>();
-
-  const collectSchemaBodyText = (node: ASTNode): string => {
-    const children = (node as { children?: ASTNode[] }).children;
-    if (!Array.isArray(children)) return "";
-    let text = "";
-    for (const c of children) {
-      if (c && (c as { kind?: string }).kind === "text" &&
-          typeof (c as { value?: unknown }).value === "string") {
-        text += (c as { value: string }).value;
-      }
-    }
-    return text;
-  };
 
   const visit = (value: unknown, depth: number): void => {
     if (value === null || typeof value !== "object" || depth > 64) return;

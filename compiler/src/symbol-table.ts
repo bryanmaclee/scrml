@@ -118,6 +118,7 @@ import {
   forEachCallInExprNode,
   emitStringFromTree,
   forEachResetExprInExprNode,
+  parseExprToNode,
 } from "./expression-parser.ts";
 import {
   ARRAY_MUTATING_METHODS,
@@ -173,6 +174,18 @@ import type { MatchArmEntry, MatchArmAttr } from "./match-statechild-parser.ts";
 // PASS 20 block-form `<match>` exhaustiveness narrows to the subset when the
 // `on=expr` value's declared type is an enum-subset refinement (§18.0.1).
 import { parseEnumSubsetAnnotation } from "./enum-subset-refinement.ts";
+
+// §38.13 (realtime feed over external DB writes) — the `<channel watches=>`
+// front-end machinery: schema/driver/PK reads + RowChange synthesis. Used by
+// the watches-channel validation (walkValidateWatchesChannels) below.
+import {
+  collectSchemaTables,
+  resolveProgramDbDriver,
+  derivePrimaryKey,
+  readLiteralIdentAttr,
+  isWatchesChannel,
+  ROWCHANGE_VARIANT_NAMES,
+} from "./channel-watches.ts";
 
 // Unit CC (S123 — companion to V-kill): per-file exemption list for the
 // E-WRITE-NOT-IN-LOGIC-CONTEXT diagnostic. The 110-ish-file pre-S123 corpus
@@ -8928,6 +8941,366 @@ function walkValidateChannels(
   //    isShared:true, regardless of containing channel context.
   const visitedShared = new WeakSet<object>();
   walkSharedModifier(ast.nodes, errors, filePath, visitedShared);
+
+  // 3. §38.13 — `<channel watches=<table>>` realtime-feed validation (Phase 1):
+  //    the six §38.13.8 diagnostics + `<onchange>` arm exhaustiveness +
+  //    `<onchange>` placement (valid only inside a watches= channel body).
+  walkValidateWatchesChannels(ast, errors, filePath);
+}
+
+/**
+ * §38.13 — `<channel watches=<table>>` realtime-feed validation (Phase 1
+ * front-end). Fires the six §38.13.8 diagnostics, checks `<onchange>` arm
+ * exhaustiveness over the synthesized `RowChange`'s three variants, and rejects
+ * a misplaced `<onchange>` (one not inside a `watches=` channel body).
+ *
+ * The RowChange RUNTIME synthesis (RowT / PKT types) is type-system.ts's
+ * concern; this SYM pass needs only the fixed variant NAMES (`Inserted` /
+ * `Updated` / `Deleted`) for exhaustiveness, plus the schema table set (for
+ * E-CHANNEL-WATCHES-UNKNOWN-TABLE), the PK derivability (for
+ * W-CHANNEL-WATCHES-NO-PK), and the program driver (for
+ * E-CHANNEL-WATCHES-DRIVER) — all from `channel-watches.ts`.
+ *
+ * The trigger-DDL emission + LISTEN bridge + client `__change` dispatch are
+ * Phase 2 (a separate codegen wave); a `watches=` channel is RECOGNIZED,
+ * VALIDATED, and fail-closed here without emitting any runtime.
+ */
+function walkValidateWatchesChannels(
+  ast: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const nodes = ast?.nodes;
+  if (!nodes) return;
+
+  const schemaTables = collectSchemaTables(nodes);
+  const driver = resolveProgramDbDriver(nodes);
+
+  // Collect every `onchange-decl` node + the subset that sits inside a
+  // `watches=` channel body (validly placed). A `watches=` channel validation
+  // marks its own `<onchange>` as validly placed; any remaining onchange-decl
+  // is a misplacement (E-STRUCTURAL-ELEMENT-MISPLACED).
+  const validlyPlacedOnchange = new WeakSet<object>();
+  const allOnchange: any[] = [];
+  const visited = new WeakSet<object>();
+
+  const walk = (node: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (node.kind === "onchange-decl") allOnchange.push(node);
+
+    if (isWatchesChannel(node)) {
+      validateWatchesChannel(node, schemaTables, driver, validlyPlacedOnchange, errors, filePath);
+    }
+
+    for (const k of Object.keys(node)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      walk(node[k]);
+    }
+  };
+  walk(nodes);
+
+  // §38.13.3 — `<onchange>` is valid ONLY inside a `watches=` channel body.
+  // An onchange-decl not inside one reuses `E-STRUCTURAL-ELEMENT-MISPLACED`
+  // (§4.15 / §24.4).
+  for (const oc of allOnchange) {
+    if (validlyPlacedOnchange.has(oc)) continue;
+    errors.push({
+      code: "E-STRUCTURAL-ELEMENT-MISPLACED",
+      message:
+        `E-STRUCTURAL-ELEMENT-MISPLACED: \`<onchange>\` is valid only inside a ` +
+        `\`<channel watches=<table>>\` body (§38.13.3). It is the change-feed ` +
+        `handler for a \`watches=\` channel; outside that locus there is no ` +
+        `\`RowChange\` to dispatch. Move the \`<onchange>\` inside a ` +
+        `\`watches=\` channel, or remove it. (§4.15 / §24.4 + §34.)`,
+      span: oc.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      severity: "error",
+    });
+  }
+}
+
+/**
+ * Validate ONE `<channel watches=<table>>` node (§38.13). Fires:
+ *   - E-CHANNEL-WATCHES-DRIVER      (non-postgres driver, §38.13.1)
+ *   - E-CHANNEL-WATCHES-UNKNOWN-TABLE (table not `<schema>`-declared, §38.13.1)
+ *   - W-CHANNEL-WATCHES-NO-PK       (no derivable PK and no key=, §38.13.2)
+ *   - W-CHANNEL-WATCHES-NO-CONSUMER (no `<onchange>` handler, §38.13.3)
+ *   - E-CHANNEL-WATCHES-CLIENT-WRITE (synced-cell decl in the body, §38.13.4)
+ *   - E-CHANNEL-WATCHES-BROADCAST   (broadcast()/disconnect() call, §38.13.4)
+ *   - E-MATCH-NOT-EXHAUSTIVE        (`<onchange>` arms miss a RowChange variant)
+ * and marks the channel's `<onchange>` as validly placed.
+ */
+function validateWatchesChannel(
+  channelNode: any,
+  schemaTables: Map<string, { name: string; columns: any[] }>,
+  driver: "sqlite" | "postgres" | "mysql" | null,
+  validlyPlacedOnchange: WeakSet<object>,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = channelNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const tableName = readLiteralIdentAttr(channelNode, "watches");
+  if (!tableName) return; // defensive — isWatchesChannel guaranteed non-null
+  const keyOverride = readLiteralIdentAttr(channelNode, "key");
+
+  // Best-effort channel label from name=.
+  const nameLit = readLiteralIdentAttr(channelNode, "name");
+  const chanLabel = nameLit ? `\`<channel name="${nameLit}" watches=${tableName}>\`` : `\`<channel watches=${tableName}>\``;
+
+  // --- E-CHANNEL-WATCHES-DRIVER (§38.13.1) — Postgres-only. -----------------
+  if (driver !== "postgres") {
+    const shown = driver ?? "(no postgres db resolved)";
+    errors.push({
+      code: "E-CHANNEL-WATCHES-DRIVER",
+      message:
+        `E-CHANNEL-WATCHES-DRIVER: ${chanLabel} uses \`watches=\` but the ` +
+        `program's database driver resolves to \`${shown}\`. Per §38.13.1 / ` +
+        `§38.13.7 a \`watches=\` change-feed REQUIRES a Postgres database ` +
+        `(\`<program db="postgres://…">\` or a \`<db src>\` resolving to the ` +
+        `\`postgres\` driver, §44.2) — the LISTEN/NOTIFY capture is Postgres-only ` +
+        `in v1. Use Postgres, or drop \`watches=\`. (§34.)`,
+      span,
+      severity: "error",
+    });
+  }
+
+  // --- E-CHANNEL-WATCHES-UNKNOWN-TABLE (§38.13.1) --------------------------
+  const table = schemaTables.get(tableName.toLowerCase());
+  if (!table) {
+    errors.push({
+      code: "E-CHANNEL-WATCHES-UNKNOWN-TABLE",
+      message:
+        `E-CHANNEL-WATCHES-UNKNOWN-TABLE: ${chanLabel} watches table ` +
+        `\`${tableName}\`, but no \`<schema>\` in the program declares a table ` +
+        `named \`${tableName}\`. Per §38.13.1 the \`watches=\` table SHALL be ` +
+        `\`<schema>\`-declared — the compiler needs the row shape + primary key ` +
+        `to synthesize \`RowChange\` (§38.13.2) and emit the change capture ` +
+        `(§38.13.7). Declare the table in a \`<schema>\`, or fix the table name. ` +
+        `(§34.)`,
+      span,
+      severity: "error",
+    });
+  } else {
+    // --- W-CHANNEL-WATCHES-NO-PK (§38.13.2) -------------------------------
+    const pk = derivePrimaryKey(
+      { name: table.name, columns: table.columns as any },
+      keyOverride,
+    );
+    if (!pk) {
+      errors.push({
+        code: "W-CHANNEL-WATCHES-NO-PK",
+        message:
+          `W-CHANNEL-WATCHES-NO-PK: ${chanLabel} watches table \`${tableName}\`, ` +
+          `which has no derivable primary key (no \`primary key\` column, no ` +
+          `\`id\` column) and the channel declares no \`key=\` override. Per ` +
+          `§38.13.2 the feed keys its \`Deleted\` deltas by the primary key — ` +
+          `without one it cannot key its deltas. Add a primary key / \`id\` ` +
+          `column to the \`<schema>\` table, or add \`key=<column>\` to the ` +
+          `channel. (§34.)`,
+        span,
+        severity: "warning",
+      });
+    }
+  }
+
+  // --- Find the `<onchange>` handler in this channel's subtree. -----------
+  const onchange = findOnchangeDecl(channelNode);
+  if (onchange) {
+    validlyPlacedOnchange.add(onchange);
+
+    // --- E-MATCH-NOT-EXHAUSTIVE — arms cover RowChange's 3 variants. -----
+    const arms: any[] = Array.isArray(onchange.arms) ? onchange.arms : [];
+    const hasWildcard = arms.some((a) => a && a.isWildcard === true);
+    const armVariants = new Set(
+      arms.filter((a) => a && a.isWildcard !== true).map((a) => a.variantName),
+    );
+    if (!hasWildcard) {
+      const missing = ROWCHANGE_VARIANT_NAMES.filter((v) => !armVariants.has(v));
+      if (missing.length > 0) {
+        errors.push({
+          code: "E-MATCH-NOT-EXHAUSTIVE",
+          message:
+            `E-MATCH-NOT-EXHAUSTIVE: ${chanLabel} \`<onchange>\` is missing arm(s) ` +
+            `for RowChange variant(s): ${missing.map((v) => `.${v}`).join(", ")}. ` +
+            `Per §38.13.3 the \`<onchange>\` arms SHALL be exhaustive over the ` +
+            `synthesized \`RowChange\` (\`Inserted\` / \`Updated\` / \`Deleted\`, ` +
+            `§38.13.2) — reusing the §18 exhaustiveness family. Add the missing ` +
+            `arm(s), or add a wildcard \`<_>\` catch-all. (§34.)`,
+          span: onchange.span ?? span,
+          severity: "error",
+        });
+      }
+    }
+  } else {
+    // --- W-CHANNEL-WATCHES-NO-CONSUMER (§38.13.3) ------------------------
+    errors.push({
+      code: "W-CHANNEL-WATCHES-NO-CONSUMER",
+      message:
+        `W-CHANNEL-WATCHES-NO-CONSUMER: ${chanLabel} is a \`watches=\` feed with ` +
+        `no \`<onchange>\` handler — nothing consumes the change feed. Per ` +
+        `§38.13.3 a \`watches=\` channel body contains exactly one \`<onchange>\` ` +
+        `element (the typed dispatch over \`RowChange\`). Add an \`<onchange>\` ` +
+        `handler, or drop \`watches=\`. (§34.)`,
+      span,
+      severity: "warning",
+    });
+  }
+
+  // --- Read-only forbidden set (§38.13.4). ---------------------------------
+  scanWatchesChannelForbiddenSet(channelNode, chanLabel, errors, filePath, span);
+}
+
+/**
+ * Find the (first) `onchange-decl` node inside a `<channel>` node's subtree.
+ * Bounded recursive descent; the channel body nests the handler under `logic`
+ * wrappers, so a shallow child scan is insufficient.
+ */
+function findOnchangeDecl(channelNode: any): any {
+  const visited = new WeakSet<object>();
+  const stack: any[] = [channelNode];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (Array.isArray(node)) { for (const n of node) stack.push(n); continue; }
+    if (visited.has(node)) continue;
+    visited.add(node);
+    if (node !== channelNode && node.kind === "onchange-decl") return node;
+    for (const k of Object.keys(node)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      const v = node[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  return null;
+}
+
+/**
+ * §38.13.4 read-only forbidden set. A `watches=` channel is a one-way
+ * server->client feed:
+ *   - a V5-strict synced-cell decl (`<x> = init`) in the body ->
+ *     E-CHANNEL-WATCHES-CLIENT-WRITE (a read-only feed has no §38.4 sync path);
+ *   - a `broadcast()` / `disconnect()` call in the body ->
+ *     E-CHANNEL-WATCHES-BROADCAST (the feed is DB-fed, not app-fanned).
+ * Fires once per channel per class (the first offending site).
+ */
+function scanWatchesChannelForbiddenSet(
+  channelNode: any,
+  chanLabel: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  channelSpan: SYMDiagnostic["span"],
+): void {
+  let firedClientWrite = false;
+  let firedBroadcast = false;
+
+  // A bare `broadcast(...)` / `disconnect(...)` PRIMITIVE call — an AST
+  // call-shape check (NOT a raw-text regex), matching E-CHANNEL-004's fidelity.
+  // `forEachCallInExprNode` visits CallExpr nodes; a bare call has an `ident`
+  // callee, so a MEMBER call (`audit.broadcast(row)` — `member` callee) and a
+  // STRING literal (`log("re-broadcast(x)")` — `lit` node) never match.
+  const exprHasBroadcastCall = (exprNode: any): boolean => {
+    if (!exprNode || typeof exprNode !== "object") return false;
+    let hit = false;
+    forEachCallInExprNode(exprNode as any, (call: any) => {
+      const callee = call?.callee;
+      if (callee && callee.kind === "ident" &&
+          (callee.name === "broadcast" || callee.name === "disconnect")) {
+        hit = true;
+      }
+    });
+    return hit;
+  };
+  // Best-effort parse of a raw arm body (a shorthand arm body is an expression);
+  // a multi-statement / markup body that does not parse cleanly yields no call.
+  const rawHasBroadcastCall = (raw: string): boolean => {
+    if (typeof raw !== "string" || raw.trim().length === 0) return false;
+    let node: any = null;
+    try { node = parseExprToNode(raw, filePath, 0); } catch { node = null; }
+    return exprHasBroadcastCall(node);
+  };
+  const fireBroadcast = (span: SYMDiagnostic["span"]): void => {
+    firedBroadcast = true;
+    errors.push({
+      code: "E-CHANNEL-WATCHES-BROADCAST",
+      message:
+        `E-CHANNEL-WATCHES-BROADCAST: ${chanLabel} calls \`broadcast()\` / ` +
+        `\`disconnect()\` in its body, but a \`watches=\` channel is fed by ` +
+        `the database change capture, NOT by app-side fan-out (§38.13.4). ` +
+        `A \`watches=\` feed has no app broadcast — use an ordinary ` +
+        `\`broadcast()\` channel (§38.6) for app-controlled fan-out. Remove ` +
+        `the call. (A tighter sibling of E-CHANNEL-004; §34.)`,
+      span: span ?? channelSpan,
+      severity: "error",
+    });
+  };
+
+  const visited = new WeakSet<object>();
+  const stack: any[] = [channelNode];
+  while (stack.length > 0) {
+    if (firedClientWrite && firedBroadcast) break;
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (Array.isArray(node)) { for (const n of node) stack.push(n); continue; }
+    if (visited.has(node)) continue;
+    visited.add(node);
+
+    // Synced-cell declaration: a NON-const structural V5-strict decl
+    // (`<x> = init`). A V5-strict DERIVED const (`const <x> = expr`, isConst:true
+    // / shape:"derived") is READ-ONLY and legal in a read-only feed body — it has
+    // no bidirectional sync path to forbid — so it does NOT fire.
+    if (
+      !firedClientWrite &&
+      node.kind === "state-decl" &&
+      node.structuralForm === true &&
+      node.isConst !== true &&
+      node.shape !== "derived"
+    ) {
+      firedClientWrite = true;
+      errors.push({
+        code: "E-CHANNEL-WATCHES-CLIENT-WRITE",
+        message:
+          `E-CHANNEL-WATCHES-CLIENT-WRITE: ${chanLabel} declares a synced cell ` +
+          `\`<${node.name ?? "?"}> = …\` in its body, but a \`watches=\` channel ` +
+          `is a READ-ONLY server->client feed (§38.13.4) — it has no bidirectional ` +
+          `§38.4 sync path. Apply changes to program-scope cells from \`<onchange>\` ` +
+          `instead (typically a paired §52 collection). Remove the synced-cell ` +
+          `declaration. (§34.)`,
+        span: node.span ?? channelSpan,
+        severity: "error",
+      });
+    }
+
+    // broadcast()/disconnect() call — AST call-shape check over the node's
+    // parsed ExprNode field(s); no raw-text regex, so a member call / string
+    // literal / comment never false-fires.
+    if (!firedBroadcast) {
+      if (exprHasBroadcastCall(node.exprNode) ||
+          exprHasBroadcastCall(node.valueExpr) ||
+          exprHasBroadcastCall(node.initExpr)) {
+        fireBroadcast(node.span);
+      } else if (Array.isArray(node.arms)) {
+        // Scan <onchange> arm bodies (captured raw) with the SAME call-shape
+        // fidelity — `audit.broadcast(row)` in an arm does NOT fire.
+        for (const a of node.arms) {
+          if (a && typeof a.bodyRaw === "string" && rawHasBroadcastCall(a.bodyRaw)) {
+            fireBroadcast(a.span ?? node.span);
+            break;
+          }
+        }
+      }
+    }
+
+    for (const k of Object.keys(node)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      const v = node[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
 }
 
 /**
