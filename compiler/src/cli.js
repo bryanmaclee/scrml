@@ -7,6 +7,7 @@
  *   scrml dev <file.scrml|dir> [options]
  *   scrml build <dir> [options]
  *   scrml migrate <file|dir> [options]
+ *   scrml introspect <postgres-url> [options]
  *   scrml promote --match|--engine <file|dir> [options]
  *   scrml --help
  *   scrml --version
@@ -44,6 +45,7 @@ Usage:
   scrml generate <type> [options]            Scaffold adopter-owned source (e.g. \`scrml generate auth\`)
   scrml migrate <file|dir> [options]         Apply automated source rewrites for deprecated patterns
   scrml promote --match|--engine <file|dir>  Promote tier-1 if-else → <match> or <match> → <engine> (CLI surface; impl pending)
+  scrml introspect <postgres-url> [options]  Read a live Postgres schema and emit scrml <schema> source
 
 Options (compile / dev):
   --output-dir, -o <dir>  Output directory (default: dist/ next to input)
@@ -87,6 +89,11 @@ Options (promote):
   Status: CLI surface locked; AST→AST rewrite implementation pending.
   See docs/changes/promotion-ergonomics/SCOPE.md.
 
+Options (introspect):
+  --out <file>          Write emitted <schema> source to <file> (default: stdout)
+  --table <name>        Emit only the named table (default: all base tables)
+  Status: Postgres-only (v1).
+
 Options (global):
   --help, -h            Show this message
   --version             Print version
@@ -104,7 +111,7 @@ let subcommand = args[0];
 let subArgs = args.slice(1);
 
 // Fall through: if first arg is a .scrml file or a directory, treat as compile
-if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "promote" && subcommand !== "generate") {
+if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "promote" && subcommand !== "generate" && subcommand !== "introspect") {
   // Check if it looks like a file or directory rather than a subcommand
   const looksLikeInput = subcommand.endsWith(".scrml") || (() => {
     try { return statSync(subcommand).isDirectory(); } catch { return false; }
@@ -145,4 +152,7 @@ if (subcommand === "init") {
 } else if (subcommand === "generate") {
   const { runGenerate } = await import("./commands/generate.js");
   await runGenerate(subArgs);
+} else if (subcommand === "introspect") {
+  const { runIntrospect } = await import("./commands/introspect.js");
+  await runIntrospect(subArgs);
 }

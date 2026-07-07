@@ -634,3 +634,581 @@ function generate12StepRebuild(desiredTable, actualTable, driver = "sqlite") {
 
   return lines;
 }
+
+// ---------------------------------------------------------------------------
+// Postgres schema introspection (`scrml introspect`, BaaS #3)
+//
+// The inverse of the SQLite `readActualSchema` + `generateCreateTable` path:
+// read a LIVE Postgres database's structure and emit the equivalent scrml
+// `<schema>` SOURCE text (NOT SQL DDL). Eases adopter migration. Additive.
+//
+// PRINCIPLE — SELF-VERIFYING EMIT. `parseSchemaBlock` (this file) is a regex
+// parser with real footguns (`[^}]*` table body, line-split columns, a
+// `default\(([^)]+)\)` paren-delimited capture, an in-string predicate-name
+// scanner). Rather than enumerate those footguns one-by-one, emitScrmlSchemaSource
+// GUARANTEES its output round-trips: it re-parses its OWN output via
+// parseSchemaBlock and drops any field (default / FK reference / column / table)
+// that does NOT survive identically — WITH a W-INTROSPECT-* warning naming what
+// was dropped and why. This is the honest best-effort-migration model (Prisma
+// db pull / Drizzle introspect: emit what round-trips, loudly flag the rest).
+//
+// v1 scope (SPEC §39): base tables · columns · single-column PRIMARY KEY /
+// NOT NULL / UNIQUE / DEFAULT / single-column FOREIGN KEY · the PG-type map.
+// Composite constraints, function/expression defaults, and non-representable
+// identifiers are SKIPPED-with-a-warning, never silently corrupted. Out of
+// scope: CHECK → shared-core recovery, indexes, enums, views, non-public
+// schemas, sequences (serial → integer).
+// ---------------------------------------------------------------------------
+
+/**
+ * Postgres `information_schema.columns.data_type` (and common pg_catalog short
+ * aliases) → scrml `<schema>` column type (SPEC §39.4:
+ * text | integer | real | blob | boolean | timestamp). `real` and `boolean`
+ * are valid §39.4 column types, so the numeric / boolean families map without
+ * loss. Types with no scrml equivalent fall through mapPgTypeToScrml's default
+ * to `text` + a warning.
+ */
+const PG_TYPE_MAP = {
+  // integer family
+  "integer": "integer", "int": "integer", "int2": "integer", "int4": "integer",
+  "int8": "integer", "smallint": "integer", "bigint": "integer",
+  "smallserial": "integer", "serial": "integer", "bigserial": "integer",
+  // text family
+  "text": "text", "varchar": "text", "character varying": "text",
+  "char": "text", "character": "text", "bpchar": "text", "citext": "text",
+  // boolean
+  "boolean": "boolean", "bool": "boolean",
+  // real family
+  "numeric": "real", "decimal": "real", "real": "real",
+  "double precision": "real", "float4": "real", "float8": "real",
+  // timestamp family
+  "timestamp": "timestamp", "timestamp without time zone": "timestamp",
+  "timestamptz": "timestamp", "timestamp with time zone": "timestamp",
+  "date": "timestamp",
+};
+
+/**
+ * Map a raw Postgres data_type string to a scrml `<schema>` column type.
+ * Returns `{ scrmlType, unmapped }` — `unmapped: true` (with `scrmlType: "text"`)
+ * when the PG type has no scrml equivalent, so the caller can raise
+ * W-INTROSPECT-TYPE-UNMAPPED.
+ *
+ * @param {string} pgType
+ * @returns {{ scrmlType: "text"|"integer"|"real"|"boolean"|"timestamp", unmapped: boolean }}
+ */
+export function mapPgTypeToScrml(pgType) {
+  const key = String(pgType ?? "").trim().toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(PG_TYPE_MAP, key)) {
+    return { scrmlType: PG_TYPE_MAP[key], unmapped: false };
+  }
+  return { scrmlType: "text", unmapped: true };
+}
+
+/**
+ * Whether a scrml identifier (table or column name) is representable in
+ * `<schema>` source. parseSchemaBlock scans names with `\w+`, so a Postgres
+ * name that is non-`\w` (`"user-profiles"`, `"my col"`, a quoted reserved word)
+ * cannot round-trip and MUST NOT be emitted verbatim.
+ */
+function isRepresentableIdentifier(name) {
+  return typeof name === "string" && /^[A-Za-z_]\w*$/.test(name);
+}
+
+/**
+ * Strip a single trailing Postgres type-cast from a default expression. The
+ * cast type may be schema-qualified (`::public.mood`), quoted (`::"My Type"`),
+ * multi-word (`::character varying`), and/or an array (`::int[]`).
+ */
+function stripPgCast(s) {
+  return s.replace(/::(?:"?\w+"?\.)?"?\w[\w ]*"?(\[\])?$/, "").trim();
+}
+
+/**
+ * Whether a (cast-stripped, paren-normalized) Postgres default is a scrml
+ * `default(<literal>)` LITERAL (SPEC §39 `default '(' literal ')'`): a number,
+ * a boolean, a bare keyword (`CURRENT_TIMESTAMP`), or a single-quoted string
+ * with NO parens inside. NOTE: this is a NECESSARY-not-sufficient screen — the
+ * self-verify (defaultRoundTrips) is the final authority, catching literals that
+ * still mis-parse (`'{}'` braces, embedded newlines, in-string predicate names).
+ */
+function isEmittableDefaultLiteral(s) {
+  if (typeof s !== "string" || s === "") return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) return true;            // number
+  if (/^(?:true|false)$/i.test(s)) return true;            // boolean
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) return true;     // bare keyword (CURRENT_TIMESTAMP, …)
+  if (/^'(?:[^'()]|'')*'$/.test(s)) return true;           // single-quoted string, no parens inside
+  return false;
+}
+
+/**
+ * Classify a Postgres `column_default` for emission (the SEMANTIC screen; the
+ * self-verify is the SYNTACTIC authority on top). Returns:
+ *   { kind: "none" }                   — NULL / empty → drop, no warning
+ *   { kind: "sequence" }               — `nextval(...)` → drop, no warning
+ *                                        (serial → integer; documented mapping)
+ *   { kind: "literal", value }         — a candidate scrml default(<literal>)
+ *   { kind: "expression", value: raw } — a non-literal default (function call /
+ *                                        expression) → drop + W-INTROSPECT-
+ *                                        DEFAULT-DROPPED
+ *
+ * Postgres wraps a negative-numeric default in parens (`DEFAULT -1` serializes
+ * as `(-1)`); that wrapping pair is stripped so the literal survives (a negative
+ * literal IS representable — `default(-1)` round-trips).
+ *
+ * @param {string|null|undefined} rawDef
+ */
+function classifyPgDefault(rawDef) {
+  if (typeof rawDef !== "string") return { kind: "none" };
+  const trimmed = rawDef.trim();
+  if (trimmed === "") return { kind: "none" };
+  // Sequence-backed serial/identity default — dropped (serial → integer).
+  if (/^nextval\s*\(/i.test(trimmed)) return { kind: "sequence" };
+  let candidate = stripPgCast(trimmed);
+  // Postgres parenthesizes negative numeric defaults: `(-1)` → `-1`.
+  const parenNum = candidate.match(/^\(\s*(-?\d+(?:\.\d+)?)\s*\)$/);
+  if (parenNum) candidate = parenNum[1];
+  if (isEmittableDefaultLiteral(candidate)) return { kind: "literal", value: candidate };
+  return { kind: "expression", value: trimmed };
+}
+
+/**
+ * SELF-VERIFY probe: does `default(<literal>)` survive a round-trip through
+ * parseSchemaBlock IN ISOLATION? Emits a minimal one-column probe schema and
+ * confirms the parsed column recovered EXACTLY this default and introduced NO
+ * spurious shared-core predicate (an in-string predicate name like `'req'`) and
+ * NO extra table/column (a `}` in the literal truncates the probe body). The
+ * probe is byte-faithful to the real emission (same `{ … }` body + line shape),
+ * so any breakage that would occur in context also breaks the probe.
+ */
+function defaultRoundTrips(scrmlType, literal) {
+  const probe = `<schema>\n  _probe {\n    _col: ${scrmlType} default(${literal})\n  }\n</>`;
+  const parsed = parseSchemaBlock(probe);
+  if (parsed.tables.length !== 1) return false;
+  const t = parsed.tables[0];
+  if (t.name !== "_probe" || t.columns.length !== 1) return false;
+  const c = t.columns[0];
+  return c.name === "_col"
+    && c.default === literal
+    && (c.sharedCorePredicates?.length ?? 0) === 0;
+}
+
+/**
+ * SELF-VERIFY probe: does `references <table>(<column>)` survive a round-trip?
+ * A target whose NAME collides with a shared-core predicate (`references max(id)`)
+ * re-parses as BOTH a reference AND a spurious `max(id)` predicate — that is a
+ * structural divergence, so the reference is dropped.
+ */
+function referencesRoundTrips(refTable, refColumn) {
+  const probe = `<schema>\n  _probe {\n    _col: integer references ${refTable}(${refColumn})\n  }\n</>`;
+  const parsed = parseSchemaBlock(probe);
+  if (parsed.tables.length !== 1) return false;
+  const t = parsed.tables[0];
+  if (t.name !== "_probe" || t.columns.length !== 1) return false;
+  const c = t.columns[0];
+  return c.name === "_col"
+    && c.references != null
+    && c.references.table === refTable
+    && c.references.column === refColumn
+    && (c.sharedCorePredicates?.length ?? 0) === 0;
+}
+
+/**
+ * Push a composite-constraint skip warning (shared by the PK/UNIQUE and FK
+ * grouping loops).
+ */
+function pushCompositeSkip(warnings, tableName, type, cols) {
+  warnings.push(
+    `W-INTROSPECT-COMPOSITE-CONSTRAINT-SKIPPED: table "${tableName}" ${type} ` +
+    `(${cols.join(", ")}) is a composite (multi-column) constraint — scrml ` +
+    `<schema> supports single-column constraints only (v1); skipped. Re-add it ` +
+    `via a ?{} migration block.`,
+  );
+}
+
+/**
+ * Read every base-table name in the current schema (used by the CLI to build a
+ * helpful "available tables" list when `--table <name>` names a missing table).
+ *
+ * @param {object} sql — a Bun.SQL tagged-template handle (async)
+ * @returns {Promise<string[]>}
+ */
+export async function readTableNamesPg(sql) {
+  const rows = await sql`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE'
+      AND table_schema = current_schema()
+      AND table_name <> '_scrml_migrations'
+    ORDER BY table_name
+  `;
+  return rows.map((r) => r.table_name);
+}
+
+/**
+ * Read the actual schema from a LIVE Postgres database via `information_schema`
+ * — the ASYNC Postgres sibling of the sync SQLite `readActualSchema`.
+ *
+ * Returns the SAME structure as readActualSchema, extended per column with
+ * `unique` + `references`. Column `type` is the RAW Postgres `data_type` string;
+ * emitScrmlSchemaSource maps it. Composite (multi-column) constraints are
+ * SKIPPED with a W-INTROSPECT-COMPOSITE-CONSTRAINT-SKIPPED warning.
+ *
+ * When `opts.tableFilter` is set, only that table is read (the filter is pushed
+ * into the `information_schema.tables` WHERE clause, PARAMETERIZED — never
+ * string-interpolated) so warnings are naturally scoped to the requested table.
+ *
+ * @param {object} sql — a Bun.SQL tagged-template handle (async)
+ * @param {{ tableFilter?: string|null }} [opts]
+ * @returns {Promise<{ tables: Array<object>, warnings: string[] }>}
+ */
+export async function readActualSchemaPg(sql, opts = {}) {
+  const tableFilter = opts.tableFilter ?? null;
+  const warnings = [];
+  const tables = [];
+
+  const tableRows = tableFilter
+    ? await sql`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_type = 'BASE TABLE'
+          AND table_schema = current_schema()
+          AND table_name <> '_scrml_migrations'
+          AND table_name = ${tableFilter}
+        ORDER BY table_name
+      `
+    : await sql`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_type = 'BASE TABLE'
+          AND table_schema = current_schema()
+          AND table_name <> '_scrml_migrations'
+        ORDER BY table_name
+      `;
+
+  for (const t of tableRows) {
+    const tableName = t.table_name;
+
+    const columnRows = await sql`
+      SELECT column_name, data_type, is_nullable, column_default, ordinal_position
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = ${tableName}
+      ORDER BY ordinal_position
+    `;
+
+    // PRIMARY KEY / UNIQUE columns. The kcu join is correlated on
+    // constraint_name + table_schema + TABLE_NAME (Postgres constraint names
+    // are unique per-table, NOT schema-global, so the table_name correlation
+    // prevents a same-named constraint on another table from cross-contaminating).
+    const pkUniqueRows = await sql`
+      SELECT tc.constraint_type,
+             tc.constraint_name AS constraint_name,
+             kcu.column_name    AS column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+       AND tc.table_schema   = kcu.table_schema
+       AND tc.table_name     = kcu.table_name
+      WHERE tc.table_schema = current_schema()
+        AND tc.table_name   = ${tableName}
+        AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+      ORDER BY tc.constraint_name, kcu.ordinal_position
+    `;
+
+    // FOREIGN KEY columns + targets. Uses referential_constraints so each child
+    // column is paired with its parent column by POSITION
+    // (kcu.position_in_unique_constraint = ccu.ordinal_position) — not
+    // "first ccu row" (which mis-pairs / cross-contaminates). Correlated on
+    // table_name as above.
+    const fkRows = await sql`
+      SELECT tc.constraint_name AS constraint_name,
+             kcu.column_name    AS column_name,
+             kcu.ordinal_position AS key_ordinal,
+             ccu.table_name     AS foreign_table,
+             ccu.column_name    AS foreign_column
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+       AND tc.table_schema   = kcu.table_schema
+       AND tc.table_name     = kcu.table_name
+      JOIN information_schema.referential_constraints rc
+        ON tc.constraint_name    = rc.constraint_name
+       AND tc.constraint_schema  = rc.constraint_schema
+      JOIN information_schema.key_column_usage ccu
+        ON rc.unique_constraint_name   = ccu.constraint_name
+       AND rc.unique_constraint_schema = ccu.constraint_schema
+       AND kcu.position_in_unique_constraint = ccu.ordinal_position
+      WHERE tc.table_schema = current_schema()
+        AND tc.table_name   = ${tableName}
+        AND tc.constraint_type = 'FOREIGN KEY'
+      ORDER BY tc.constraint_name, kcu.ordinal_position
+    `;
+
+    const pkCols = new Set();
+    const uniqueCols = new Set();
+    const fkByColumn = new Map();
+
+    // PK/UNIQUE grouping — composite (>1 distinct column) is skipped + warned.
+    const pkuGroups = new Map();
+    for (const r of pkUniqueRows) {
+      let g = pkuGroups.get(r.constraint_name);
+      if (!g) { g = { type: r.constraint_type, columns: [] }; pkuGroups.set(r.constraint_name, g); }
+      g.columns.push(r.column_name);
+    }
+    for (const [, g] of pkuGroups) {
+      const cols = [...new Set(g.columns)];
+      if (cols.length > 1) { pushCompositeSkip(warnings, tableName, g.type, cols); continue; }
+      if (g.type === "PRIMARY KEY") pkCols.add(cols[0]);
+      else uniqueCols.add(cols[0]);
+    }
+
+    // FK grouping — composite is skipped + warned; single-column keeps its
+    // position-paired target.
+    const fkGroups = new Map();
+    for (const r of fkRows) {
+      let g = fkGroups.get(r.constraint_name);
+      if (!g) { g = { rows: [] }; fkGroups.set(r.constraint_name, g); }
+      g.rows.push(r);
+    }
+    for (const [, g] of fkGroups) {
+      const cols = [...new Set(g.rows.map((r) => r.column_name))];
+      if (cols.length > 1) { pushCompositeSkip(warnings, tableName, "FOREIGN KEY", cols); continue; }
+      const row = g.rows[0];
+      fkByColumn.set(row.column_name, { table: row.foreign_table, column: row.foreign_column });
+    }
+
+    const columns = columnRows.map((c) => ({
+      name: c.column_name,
+      type: c.data_type || "text",       // RAW pg type; emitter maps it
+      notNull: c.is_nullable === "NO",
+      default: c.column_default ?? null,  // RAW pg default; emitter classifies it
+      primaryKey: pkCols.has(c.column_name),
+      unique: uniqueCols.has(c.column_name),
+      references: fkByColumn.get(c.column_name) ?? null,
+      // CHECK constraints are NOT recovered in v1 (readActualSchema punts too).
+      sharedCorePredicates: [],
+    }));
+
+    tables.push({ name: tableName, columns });
+  }
+
+  return { tables, warnings };
+}
+
+/**
+ * Render a resolved emit-model (tables → columns, all pieces already
+ * representable) to scrml `<schema>` source text.
+ */
+function renderSchemaModel(model) {
+  const lines = ["<schema>"];
+  for (const table of model) {
+    lines.push(`  ${table.name} {`);
+    for (const col of table.columns) {
+      const parts = [`${col.name}: ${col.scrmlType}`];
+      if (col.primaryKey) parts.push("primary key");
+      if (col.emittedNotNull) parts.push("not null");
+      if (col.emittedUnique) parts.push("unique");
+      if (col.references) parts.push(`references ${col.references.table}(${col.references.column})`);
+      if (col.default !== null) parts.push(`default(${col.default})`);
+      lines.push(`    ${parts.join(" ")}`);
+    }
+    lines.push("  }");
+  }
+  lines.push("</>");
+  return lines.join("\n") + "\n";
+}
+
+function sameRef(a, b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return a.table === b.table && a.column === b.column;
+}
+
+/**
+ * Does a parsed column (from parseSchemaBlock) match the emit-model column
+ * EXACTLY, in every representable field? (The emit-model already reflects PK
+ * suppression, so emittedNotNull/emittedUnique are the tokens actually emitted.)
+ */
+function parsedColumnMatches(m, p) {
+  return !!p
+    && p.scrmlType === m.scrmlType
+    && !!p.primaryKey === m.primaryKey
+    && !!p.notNull === m.emittedNotNull
+    && !!p.unique === m.emittedUnique
+    && sameRef(p.references ?? null, m.references)
+    && (p.default ?? null) === (m.default ?? null)
+    && (p.sharedCorePredicates?.length ?? 0) === 0;
+}
+
+/**
+ * Emit scrml `<schema>` SOURCE text from an actual-schema structure (as read by
+ * readActualSchemaPg) — the source-emitting inverse of generateCreateTable.
+ *
+ * SELF-VERIFYING: the output is GUARANTEED to round-trip through parseSchemaBlock.
+ * The pipeline is (1) build an emit-model applying the semantic guards
+ * (identifier / type / composite / default classification), (2) per-field probe
+ * every default + FK reference and drop any that does not round-trip in
+ * isolation, (3) render, then (4) a whole-schema self-verify that re-parses the
+ * rendered source and drops (one per bounded pass) any column/table that still
+ * diverges. Every drop emits a W-INTROSPECT-* warning naming what + why.
+ *
+ * @param {{ tables: Array<object> }} actual
+ * @param {{ tableFilter?: string|null }} [opts]
+ * @returns {{ source: string, warnings: string[], emittedTables: string[], droppedCount: number }}
+ */
+export function emitScrmlSchemaSource(actual, opts = {}) {
+  const warnings = [];
+  let droppedCount = 0;
+  const tableFilter = opts.tableFilter ?? null;
+  const allTables = Array.isArray(actual?.tables) ? actual.tables : [];
+  const filtered = tableFilter ? allTables.filter((t) => t.name === tableFilter) : allTables;
+
+  // (1) Build the emit-model, applying the semantic guards.
+  const model = [];
+  for (const table of filtered) {
+    if (!isRepresentableIdentifier(table.name)) {
+      warnings.push(
+        `W-INTROSPECT-IDENTIFIER-UNREPRESENTABLE: table "${table.name}" has a name ` +
+        `that is not a valid scrml identifier (letters/digits/underscore, ` +
+        `non-digit leading char) — the whole table was skipped. Rename it, or ` +
+        `map it by hand.`,
+      );
+      droppedCount++;
+      continue;
+    }
+    const cols = [];
+    for (const col of table.columns ?? []) {
+      if (!isRepresentableIdentifier(col.name)) {
+        warnings.push(
+          `W-INTROSPECT-IDENTIFIER-UNREPRESENTABLE: column "${table.name}.${col.name}" ` +
+          `has a name that is not a valid scrml identifier — the column was ` +
+          `skipped. Rename it, or map it by hand.`,
+        );
+        droppedCount++;
+        continue;
+      }
+      const { scrmlType, unmapped } = mapPgTypeToScrml(col.type);
+      if (unmapped) {
+        warnings.push(
+          `W-INTROSPECT-TYPE-UNMAPPED: column "${table.name}.${col.name}" has ` +
+          `Postgres type "${col.type}" with no scrml column-type equivalent — ` +
+          `emitted as \`text\`. Review and adjust if a tighter type applies.`,
+        );
+      }
+
+      // FK reference — identifier-guarded here; self-verified below.
+      let ref = null;
+      if (col.references && col.references.table && col.references.column) {
+        if (isRepresentableIdentifier(col.references.table) &&
+            isRepresentableIdentifier(col.references.column)) {
+          ref = { table: col.references.table, column: col.references.column };
+        } else {
+          warnings.push(
+            `W-INTROSPECT-IDENTIFIER-UNREPRESENTABLE: column "${table.name}.${col.name}" ` +
+            `references "${col.references.table}(${col.references.column})", whose name ` +
+            `is not a valid scrml identifier — the references clause was dropped.`,
+          );
+          droppedCount++;
+        }
+      }
+
+      // Default — semantic classification here; self-verified below.
+      let dflt = null;
+      const cls = classifyPgDefault(col.default);
+      if (cls.kind === "literal") {
+        dflt = cls.value;
+      } else if (cls.kind === "expression") {
+        warnings.push(
+          `W-INTROSPECT-DEFAULT-DROPPED: column "${table.name}.${col.name}" has a ` +
+          `non-literal Postgres default \`${cls.value}\` — scrml <schema> ` +
+          `default(...) is literal-only (SPEC §39), so it was dropped. Set this ` +
+          `default in application code or a ?{} block.`,
+        );
+        droppedCount++;
+      }
+      // kind "none" (NULL) / "sequence" (nextval → serial) drop silently.
+
+      cols.push({
+        name: col.name,
+        scrmlType,
+        primaryKey: !!col.primaryKey,
+        emittedNotNull: !!col.notNull && !col.primaryKey,
+        emittedUnique: !!col.unique && !col.primaryKey,
+        references: ref,
+        default: dflt,
+      });
+    }
+    model.push({ name: table.name, columns: cols });
+  }
+
+  // (2) Per-field self-verify probes — drop any default / reference that does
+  // not round-trip in isolation (braces / newlines / in-string predicate names
+  // in a literal; a predicate-named FK target).
+  for (const table of model) {
+    for (const col of table.columns) {
+      if (col.default !== null && !defaultRoundTrips(col.scrmlType, col.default)) {
+        warnings.push(
+          `W-INTROSPECT-DEFAULT-DROPPED: column "${table.name}.${col.name}" default ` +
+          `\`${col.default}\` does not round-trip through the scrml <schema> parser ` +
+          `(reserved shape — brace / newline / parser-reserved token) — dropped.`,
+        );
+        col.default = null;
+        droppedCount++;
+      }
+      if (col.references !== null && !referencesRoundTrips(col.references.table, col.references.column)) {
+        warnings.push(
+          `W-INTROSPECT-REFERENCE-DROPPED: column "${table.name}.${col.name}" reference ` +
+          `to "${col.references.table}(${col.references.column})" does not round-trip ` +
+          `(target name collides with a scrml schema predicate) — the references ` +
+          `clause was dropped.`,
+        );
+        col.references = null;
+        droppedCount++;
+      }
+    }
+  }
+
+  // (3) + (4) Render, then whole-schema self-verify: re-parse the rendered
+  // source and drop (one per bounded pass) any column/table that still diverges
+  // from the emit-model, until the source round-trips exactly. Belt over the
+  // per-field probes — guarantees the INVARIANT even for a shape they missed.
+  let source = renderSchemaModel(model);
+  const totalCols = model.reduce((n, t) => n + t.columns.length, 0);
+  for (let pass = 0; pass <= totalCols + 1; pass++) {
+    const parsed = parseSchemaBlock(source);
+    const parsedByName = new Map(parsed.tables.map((t) => [t.name, t]));
+    let dropped = false;
+    outer:
+    for (const table of model) {
+      const pt = parsedByName.get(table.name);
+      if (!pt) {
+        warnings.push(
+          `W-INTROSPECT-TABLE-DROPPED: table "${table.name}" does not round-trip ` +
+          `through the scrml <schema> parser — dropped.`,
+        );
+        model.splice(model.indexOf(table), 1);
+        droppedCount++;
+        dropped = true;
+        break outer;
+      }
+      const pcByName = new Map(pt.columns.map((c) => [c.name, c]));
+      for (const col of table.columns) {
+        if (!parsedColumnMatches(col, pcByName.get(col.name))) {
+          warnings.push(
+            `W-INTROSPECT-COLUMN-DROPPED: column "${table.name}.${col.name}" does not ` +
+            `round-trip through the scrml <schema> parser — dropped.`,
+          );
+          table.columns.splice(table.columns.indexOf(col), 1);
+          droppedCount++;
+          dropped = true;
+          break outer;
+        }
+      }
+    }
+    if (!dropped) break;
+    source = renderSchemaModel(model);
+  }
+
+  const emittedTables = model.filter((t) => t.columns.length > 0).map((t) => t.name);
+  return { source, warnings, emittedTables, droppedCount };
+}
