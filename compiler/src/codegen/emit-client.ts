@@ -8,6 +8,7 @@ import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup,
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { rewriteCodeSegments } from "./code-segments.ts";
+import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
@@ -2722,39 +2723,44 @@ export function generateClientJs(ctx: CompileContext): string {
     return result;
   })(clientCode));
   clientStage(ctx, "post-protected-field-scan", () => {
-  // ss22 (2026-06-25): the E-CG-001 invariant ("a protected DB field must not
-  // reach the client bundle") is a CODE-POSITION property — a genuine leak is a
-  // member access (`row.ssn`) of the protected field in shipped client code.
-  // The raw `\.field\b` regex over the whole final bundle ALSO matched the
-  // field name where it appears inside a STRING LITERAL or COMMENT (e.g. a
-  // user-authored label `"Enter your row.ssn"` or a `// row.ssn` note) — those
-  // are display text / comments, NOT a member access of the protected column,
-  // so the fire was spurious (CHECK-POSITION false-positive, not a real leak).
+  // §14.8.9 server->client confidentiality BACKSTOP: a protected DB field must
+  // NOT reach the client bundle. A genuine leak is an ACCESS of the protected
+  // field in CODE position (`row.ssn`, `row["ssn"]`, `const {ssn} = row`). The
+  // field NAME inside a STRING LITERAL / COMMENT / REGEX (a user-authored label
+  // `"Enter your row.ssn"` or a `// row.ssn` note) is display text, NOT an
+  // access, so it must NOT fire (CHECK-POSITION false-positive, not a leak).
   //
-  // Build a code-only view of the FINAL (post-transform) bundle via the shared
-  // code-segment fence (rewriteCodeSegments — the same splitter used by the
-  // fn-name mangle). rewriteCodeSegments passes ONLY code segments to its
-  // callback (string-literal / comment / regex content is emitted verbatim and
-  // never handed to the callback), so collecting those callback segments yields
-  // a code-position-only view. Join with "\n" — a non-`.`, non-word separator —
-  // so a `.field` match can never be fabricated across the gap left by an
-  // elided string/comment span. Then run the member-access regex against that
-  // view: a genuine `.ssn` member access in CODE position still fires (safety
-  // invariant preserved); a `.ssn` inside a string/comment no longer does.
-  // `${...}` template interpolations are CODE (the fence descends into them), so
-  // a real leak interpolated into client markup still fires.
-  const codeParts: string[] = [];
-  rewriteCodeSegments(clientCode, seg => { codeParts.push(seg); return seg; });
-  const codeOnlyClient = codeParts.join("\n");
-  for (const field of protectedFields) {
-    const fieldRegex = new RegExp(`\\.${escapeRegex(field)}\\b`);
-    if (fieldRegex.test(codeOnlyClient)) {
+  // This is an ACORN-EXACT, FAIL-CLOSED scan (see egress-field-scan.ts). The
+  // emitted client JS is valid JavaScript by construction, so acorn resolves
+  // regex-vs-division EXACTLY — closing the `const of = 2; of / row.ssn / 2`
+  // division-mis-scanned-as-regex evasion that the earlier shared-fence
+  // (`rewriteCodeSegments`, mask-biased for the fn-name mangle) leaked past.
+  // `${...}` template interpolations remain CODE (a real interpolated leak still
+  // fires). If acorn cannot parse the bundle the egress is UNVERIFIABLE →
+  // fail-closed (fire E-CG-001), never silently pass.
+  if (protectedFields.size > 0) {
+    const egress = scanClientEgress(clientCode, protectedFields);
+    if (egress.parseError) {
       errors.push(new CGError(
         "E-CG-001",
-        `E-CG-001: Protected field \`${field}\` found in client JS output. ` +
-        `This indicates an upstream invariant violation.`,
+        `E-CG-001: could not verify the client JS bundle for protected-field egress ` +
+        `— the emitted client JavaScript did not parse` +
+        (egress.parseErrorMessage ? ` (${egress.parseErrorMessage})` : ``) + `. ` +
+        `The §14.8.9 confidentiality backstop fails CLOSED: an unverifiable bundle is ` +
+        `treated as a potential leak. This indicates a compiler defect (malformed client emit).`,
         { file: filePath, start: 0, end: 0, line: 1, col: 1 },
       ));
+    } else {
+      for (const field of protectedFields) {
+        if (egress.fieldsInCodePosition.has(field)) {
+          errors.push(new CGError(
+            "E-CG-001",
+            `E-CG-001: Protected field \`${field}\` found in client JS output. ` +
+            `This indicates an upstream invariant violation.`,
+            { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+      }
     }
   }
   });

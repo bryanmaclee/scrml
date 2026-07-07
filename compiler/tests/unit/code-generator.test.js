@@ -562,6 +562,76 @@ describe("§6: Protected fields absent from client JS", () => {
     expect(cgErrors.length).toBeGreaterThanOrEqual(1);
     expect(cgErrors[0].message).toContain("ssn");
   });
+
+  // g-ecg001-protected-field-regex-division-evasion (HIGH, S244) — the acorn-exact
+  // egress scan (egress-field-scan.ts) closes a SILENT bypass of the §14.8.9
+  // confidentiality backstop. The old scan built its code-position view from
+  // `rewriteCodeSegments`, whose `regexAllowedAfter` treats `/` after a word like
+  // `of`/`in` (valid VARIABLE NAMES) as a regex opener. So the DIVISION
+  // `const of = 2; of / row.ssn / 2` was mis-scanned as a regex literal, swallowing
+  // `.ssn` out of the view → E-CG-001 did NOT fire → the protected field shipped to
+  // the client with no error. acorn resolves `of` as an identifier → `/` is division,
+  // so `.ssn` stays visible and the leak now fires.
+  test("regex-division evasion (`of` as a variable) now fires E-CG-001", () => {
+    const fnNode = makeFunctionDecl("leak", [
+      makeBareExpr("const of = 2;", span(110)),
+      makeBareExpr("const r = of / row.ssn / 2;", span(120)),
+    ], [], { span: span(100) });
+    const ast = makeFileAST("/test/app.scrml", [makeLogicBlock([fnNode], span(90))]);
+    const routeMap = makeRouteMap([{
+      functionNodeId: "/test/app.scrml::100", boundary: "client",
+      escalationReasons: [], generatedRouteName: null, serverEntrySpan: null,
+    }]);
+    const views = new Map();
+    views.set("db::1", {
+      stateBlockId: "db::1", dbPath: "/test/db.sqlite",
+      tables: new Map([["users", {
+        tableName: "users", fullSchema: [], clientSchema: [],
+        protectedFields: new Set(["ssn"]),
+      }]]),
+    });
+    const result = runCG({
+      files: [ast], routeMap, depGraph: makeDepGraph(),
+      protectAnalysis: makeProtectAnalysis(views),
+    });
+    // The leak is present in the emitted client JS as a real member access...
+    const out = result.outputs.get("/test/app.scrml");
+    expect(out.clientJs).toContain("row.ssn");
+    // ...and the scan must now catch it (previously it silently leaked).
+    const cgErrors = result.errors.filter(e => e.code === "E-CG-001");
+    expect(cgErrors.length).toBeGreaterThanOrEqual(1);
+    expect(cgErrors[0].message).toContain("ssn");
+  });
+
+  // Fail-closed: if the emitted client JS does not parse, the egress cannot be
+  // verified — the backstop must fire a "could not verify" E-CG-001, NEVER silently
+  // pass (a silent pass on parse-failure would be a NEW bypass: emit unparseable JS
+  // to skip the guard).
+  test("unparseable client JS fails CLOSED with a verification E-CG-001", () => {
+    const fnNode = makeFunctionDecl("bad", [
+      makeBareExpr("const x = = = ;", span(110)),
+    ], [], { span: span(100) });
+    const ast = makeFileAST("/test/app.scrml", [makeLogicBlock([fnNode], span(90))]);
+    const routeMap = makeRouteMap([{
+      functionNodeId: "/test/app.scrml::100", boundary: "client",
+      escalationReasons: [], generatedRouteName: null, serverEntrySpan: null,
+    }]);
+    const views = new Map();
+    views.set("db::1", {
+      stateBlockId: "db::1", dbPath: "/test/db.sqlite",
+      tables: new Map([["users", {
+        tableName: "users", fullSchema: [], clientSchema: [],
+        protectedFields: new Set(["ssn"]),
+      }]]),
+    });
+    const result = runCG({
+      files: [ast], routeMap, depGraph: makeDepGraph(),
+      protectAnalysis: makeProtectAnalysis(views),
+    });
+    const cgErrors = result.errors.filter(e => e.code === "E-CG-001");
+    expect(cgErrors.length).toBeGreaterThanOrEqual(1);
+    expect(cgErrors.some(e => /could not verify/i.test(e.message))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
