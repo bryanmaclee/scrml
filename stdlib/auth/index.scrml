@@ -3,7 +3,8 @@ ${
     // ---------------------------------------------------------------------------
     // scrml:auth — authentication utilities
     //
-    // Re-exports JWT and password functions. Also provides:
+    // Re-exports JWT (incl. verifyJwtJwks RS256/JWKS), password, and the
+    // magic-link / email-verify / password-reset flows. Also provides:
     //   - createRateLimiter: in-memory rate limiter for auth endpoints
     //   - generateTotpSecret / verifyTotp: RFC 6238 TOTP (2FA)
     //
@@ -11,8 +12,13 @@ ${
     //   ${ import { signJwt, verifyJwt, hashPassword, createRateLimiter } from 'scrml:auth' }
     // ---------------------------------------------------------------------------
 
-    export { signJwt, verifyJwt, decodeJwt } from './jwt.scrml'
+    export { signJwt, verifyJwt, verifyJwtJwks, decodeJwt } from './jwt.scrml'
     export { hashPassword, verifyPassword, generatePassword } from './password.scrml'
+    export {
+        requestMagicLink, verifyMagicLink,
+        requestEmailVerification, verifyEmail,
+        requestPasswordReset, verifyResetToken, resetPassword
+    } from './flows.scrml'
 
     /**
      * Create an in-memory rate limiter.

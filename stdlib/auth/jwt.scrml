@@ -13,6 +13,7 @@ ${
     // ---------------------------------------------------------------------------
 
     import { safeCall, safeCallAsync, HostError } from 'scrml:host'
+    import { get } from 'scrml:http'
 
     /**
      * JwtError — error type for scrml:auth/jwt failable operations.
@@ -202,6 +203,228 @@ ${
         }
     }
 
+    /**
+     * Verify a JWT against a remote JWKS (JSON Web Key Set), pinned to RS256.
+     *
+     * Composition: decode the header -> PIN alg to RS256 -> fetch the JWKS
+     * (cached by url with TTL) -> match the JWK by kid (refetch once on a
+     * kid-miss for key rotation) -> RSASSA-PKCS1-v1_5 / SHA-256 verify ->
+     * validate exp / nbf / iss / aud.
+     *
+     * @param token   — the JWT string
+     * @param jwksUrl — the JWKS endpoint (e.g. an OIDC provider's jwks_uri)
+     * @param opts    — { issuer?, audience?, cache?, ttl=3600, clockToleranceSec=60 }
+     *   cache — an injected scrml:store handle (get/set) caching the JWKS by url.
+     * @returns { valid, payload?, reason? }
+     *
+     * SECURITY — the algorithm is HARD-PINNED to RS256. The header `alg` is
+     * read and anything other than exactly "RS256" is rejected BEFORE any key
+     * lookup or signature check. This blocks the JWKS alg-confusion family:
+     * `alg:none` (unsigned) and `alg:HS256` re-signed with the RSA *public*
+     * key as an HMAC secret. Verification is NEVER dispatched off the token's
+     * own alg into an HMAC path.
+     *
+     * Example:
+     *   const res = verifyJwtJwks(token, "https://issuer/.well-known/jwks.json", {
+     *       issuer: "https://issuer",
+     *       audience: "my-api",
+     *   })
+     *   if (res.valid) { @currentUser = res.payload }
+     */
+    export function verifyJwtJwks(token, jwksUrl, opts) {
+        const options = opts is some ? opts : {}
+        const clockTolerance = options.clockToleranceSec is some ? options.clockToleranceSec : 60
+        const ttl = options.ttl is some ? options.ttl : 3600
+        const cache = options.cache
+
+        // 1. Structural decode of the header + payload. Malformed -> reject.
+        const decoded = decodeJwtParts(token) !{
+            | ::DecodeFailed(m) -> not
+        }
+        if (decoded is not) return { valid: false, reason: "malformed" }
+
+        // 2. Alg-pin: RS256 ONLY. Blocks alg:none and alg:HS256-with-pubkey.
+        //    Checked BEFORE any key fetch or signature check, so a confused
+        //    alg can never reach a signature path.
+        if (decoded.header.alg != "RS256") {
+            return { valid: false, reason: "alg-not-allowed" }
+        }
+
+        // 3. Resolve the signing JWK by kid; refetch once on a kid-miss so a
+        //    rotated signing key is picked up.
+        let jwks = cache is some ? cache.get(jwksUrl) : not
+        let freshlyFetched = false
+        if (jwks is not) {
+            jwks = fetchJwks(jwksUrl)
+            if (cache is some && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
+            freshlyFetched = true
+        }
+        let jwk = selectJwk(jwks, decoded.header.kid)
+        if (jwk is not && decoded.header.kid is some && !freshlyFetched) {
+            jwks = fetchJwks(jwksUrl)
+            if (cache is some && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
+            jwk = selectJwk(jwks, decoded.header.kid)
+        }
+        if (jwk is not) {
+            // no-kid + multiple keys is ambiguous; name it distinctly (aligns
+            // with the runtime shim).
+            const many = jwks is some && Array.isArray(jwks.keys) && jwks.keys.length > 1
+            const reason = (decoded.header.kid is some || !many) ? "key-not-found" : "kid-ambiguous"
+            return { valid: false, reason: reason }
+        }
+
+        // 4. Verify the RS256 signature. crypto.subtle.importKey/verify are
+        //    async-throwing host APIs — wrap in safeCallAsync (auto-awaited per
+        //    §13.2.1). A thrown / rejected value is an invalid signature.
+        const signatureBytes = base64urlDecode(decoded.signature)
+        const ok = safeCallAsync(() => {
+            return crypto.subtle.importKey(
+                "jwk",
+                jwk,
+                { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+                false,
+                ["verify"]
+            ).then(cryptoKey => crypto.subtle.verify(
+                "RSASSA-PKCS1-v1_5",
+                cryptoKey,
+                signatureBytes,
+                new TextEncoder().encode(decoded.signingInput)
+            ))
+        }) !{
+            | ::Thrown(msg, name) -> {
+                return { valid: false, reason: "invalid" }
+            }
+        }
+        if (!ok) return { valid: false, reason: "invalid" }
+
+        // 5. Claim validation — only AFTER the signature is proven authentic.
+        //    exp/nbf are coerced to Number: a string-typed exp otherwise makes
+        //    `now > exp + tol` NaN (an expiry bypass). A non-numeric exp/nbf is
+        //    rejected fail-closed rather than trusted.
+        const now = Math.floor(Date.now() / 1000)
+        const payload = decoded.payload
+        if (payload.exp is some) {
+            const expN = numericClaim(payload.exp)
+            if (!Number.isFinite(expN)) return { valid: false, reason: "invalid" }
+            if (now > expN + clockTolerance) return { valid: false, reason: "expired" }
+        }
+        if (payload.nbf is some) {
+            const nbfN = numericClaim(payload.nbf)
+            if (!Number.isFinite(nbfN)) return { valid: false, reason: "invalid" }
+            if (now < nbfN - clockTolerance) return { valid: false, reason: "not-yet-valid" }
+        }
+        if (options.issuer is some && payload.iss != options.issuer) {
+            return { valid: false, reason: "issuer-mismatch" }
+        }
+        if (options.audience is some && !audienceMatches(payload.aud, options.audience)) {
+            return { valid: false, reason: "audience-mismatch" }
+        }
+
+        return { valid: true, payload: payload }
+    }
+
+    /**
+     * Fetch a JWKS from a url. Server-inferred via scrml:http get(). Returns an
+     * empty key set on a non-2xx / absent response so the caller rejects with
+     * "key-not-found" rather than crashing. (The runtime shim additionally maps
+     * a ReferenceError from a client-inlined default fetch to a graceful
+     * "jwks-fetch-unavailable" reason — the client-inline path drops http.js's
+     * private helper; inject opts.fetchJwks or verify server-side.)
+     */
+    function fetchJwks(url) {
+        const resp = get(url)
+        if (resp is not || !resp.ok) {
+            return { keys: [] }
+        }
+        return resp.data
+    }
+
+    /**
+     * Decode a JWT into its header, payload, signing input and signature.
+     *
+     * @returns { header, payload, signingInput, signature } or `not` on a
+     *          structural (non-3-part) token.
+     * @fails JwtError::DecodeFailed if base64url-decode or JSON.parse throws.
+     */
+    function decodeJwtParts(token) ! -> JwtError {
+        if (!token || typeof token != "string") return not
+        const parts = token.split(".")
+        if (parts.length != 3) return not
+        const headerJson = safeCall(() => new TextDecoder().decode(base64urlDecode(parts[0]))) !{
+            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+        }
+        const payloadJson = safeCall(() => new TextDecoder().decode(base64urlDecode(parts[1]))) !{
+            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+        }
+        const header = safeCall(() => JSON.parse(headerJson)) !{
+            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+        }
+        const payload = safeCall(() => JSON.parse(payloadJson)) !{
+            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+        }
+        // JSON.parse("null") / a JSON array or primitive does NOT throw — a header
+        // or payload that is not a plain object is malformed. Fail closed here so
+        // header.alg / payload.exp downstream never dereferences a non-object.
+        if (isPlainObject(header) is not || isPlainObject(payload) is not) return not
+        return {
+            header: header,
+            payload: payload,
+            signingInput: `${parts[0]}.${parts[1]}`,
+            signature: parts[2]
+        }
+    }
+
+    /**
+     * True when v is a plain object (not `not`, not an array, not a primitive).
+     */
+    fn isPlainObject(v) {
+        return v is some && typeof v == "object" && !Array.isArray(v)
+    }
+
+    /**
+     * True when a JWKS actually carries keys — only a non-empty keyset is usable
+     * (and cacheable); caching an empty/failed set would poison the cache for the
+     * full TTL.
+     */
+    fn hasKeys(jwks) {
+        return jwks is some && Array.isArray(jwks.keys) && jwks.keys.length > 0
+    }
+
+    /**
+     * Select the JWK to verify against: exact kid match, else the sole key
+     * when the token carries no kid, else `not` (kid-miss or ambiguous).
+     */
+    fn selectJwk(jwks, kid) {
+        const keys = jwks is some && Array.isArray(jwks.keys) ? jwks.keys : []
+        if (kid is some && kid != "") {
+            const match = keys.find(k => k.kid == kid)
+            return match is some ? match : not
+        }
+        if (keys.length == 1) return keys[0]
+        return not
+    }
+
+    /**
+     * True when the token's `aud` (string or array) intersects the expected
+     * audience (string or array).
+     */
+    fn audienceMatches(aud, expected) {
+        const audList = Array.isArray(aud) ? aud : [aud]
+        const wantList = Array.isArray(expected) ? expected : [expected]
+        return wantList.some(w => audList.includes(w))
+    }
+
+    /**
+     * Coerce a JWT NumericDate claim (exp/nbf) to a finite number, or NaN when
+     * it is not a usable number. Blocks the string-typed-exp expiry bypass; the
+     * caller fail-closes on a non-finite result.
+     */
+    fn numericClaim(v) {
+        if (typeof v == "number") return Number.isFinite(v) ? v : Number.NaN
+        if (typeof v == "string" && v.trim() != "") return Number(v)
+        return Number.NaN
+    }
+
     ~{
         import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
 
@@ -230,6 +453,18 @@ ${
         assertFalsy(r2 is some)
         const r3 = decodeJwt("") !{ ::DecodeFailed(m) -> not }
         assertFalsy(r3 is some)
+
+        // verifyJwtJwks — alg-pinning is enforced BEFORE any JWKS fetch or
+        // crypto, so an alg:none (or alg:HS256-with-pubkey) token is rejected
+        // with reason "alg-not-allowed" and no network call is made.
+        const noneHeader = btoa(JSON.stringify({ alg: "none", typ: "JWT" }))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+        const nonePayload = btoa(JSON.stringify({ sub: "1" }))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+        const noneToken = `${noneHeader}.${nonePayload}.`
+        const rNone = verifyJwtJwks(noneToken, "https://issuer/jwks.json", {})
+        assertFalsy(rNone.valid)
+        assertEqual(rNone.reason, "alg-not-allowed")
     }
 }
 </program>

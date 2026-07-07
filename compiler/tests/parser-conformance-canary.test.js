@@ -536,10 +536,12 @@ describe("dual-pipeline-canary — countSourceExportLines", () => {
     expect(countSourceExportLines(42)).toBe(0);
   });
 
-  test("matches the jwt.scrml source-witness count (4)", () => {
+  test("matches the jwt.scrml source-witness count (5)", () => {
     const path = __dirname + "/../../stdlib/auth/jwt.scrml";
     const src = readFileSync(path, "utf8");
-    expect(countSourceExportLines(src)).toBe(4);
+    // 5 top-level exports: JwtError, signJwt, verifyJwt, decodeJwt, verifyJwtJwks
+    // (verifyJwtJwks added by baas-auth-flows-jwks-2026-07-06).
+    expect(countSourceExportLines(src)).toBe(5);
   });
 });
 
@@ -849,12 +851,22 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
   // drives both pipelines from source, so these tests wire the entire chain:
   // both parsers + the diff + the detector + the verdict.
 
-  test("the real jwt.scrml corpus file classifies LIVE-HOIST-MISCLASSIFY (exports-axis)", () => {
+  // NOTE (baas-auth-flows-jwks-2026-07-06): adding `export function verifyJwtJwks`
+  // gave jwt.scrml 5 top-level source exports, but the NATIVE hoist scanner
+  // captures only 4 (it drops the 5th, verifyJwtJwks). jwt.scrml therefore no
+  // longer exhibits the clean exports-axis LIVE-HOIST-MISCLASSIFY (which needs
+  // native == source exports while live undercounts); it now classifies as an
+  // UNEXPLAINED DIFF-hoist-count (live=1 AND native=4, both < 5 source exports).
+  // FOLLOW-UP for the native-parser swap: fix the export-hoist drop (restores
+  // LIVE-HOIST-MISCLASSIFY here) OR re-point this smoke at another exports-axis
+  // corpus file. The synthetic LIVE-HOIST-MISCLASSIFY unit tests in this file
+  // ("exports-axis (jwt.scrml shape)") still cover the classifier branch directly.
+  test("the real jwt.scrml corpus file classifies DIFF-hoist-count (native under-hoists the 5th export)", () => {
     const path = __dirname + "/../../stdlib/auth/jwt.scrml";
     const src = readFileSync(path, "utf8");
     const v = classifyDivergence(path, src);
-    expect(v.class).toBe("LIVE-HOIST-MISCLASSIFY");
-    expect(v.explained).toBe(true);
+    expect(v.class).toBe("DIFF-hoist-count");
+    expect(v.explained).toBe(false);
     expect(v.detail.liveHoist.exports).toBe(1);
     expect(v.detail.nativeHoist.exports).toBe(4);
   });

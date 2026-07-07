@@ -6415,21 +6415,28 @@
     "MISSING-FIELD": 178,
     "SPAN-COORD": 174
   },
+  "stdlib/auth/flows.scrml": {
+    "COUNT-LENGTH": 4,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 14,
+    "SPAN-COORD": 1
+  },
   "stdlib/auth/index.scrml": {
     "COUNT-LENGTH": 2,
     "EXTRA-FIELD": 43,
-    "FIELD-SHAPE": 22,
+    "FIELD-SHAPE": 26,
     "KIND-NAME": 7,
-    "MISSING-FIELD": 99,
-    "SPAN-COORD": 15
+    "MISSING-FIELD": 108,
+    "SPAN-COORD": 17
   },
   "stdlib/auth/jwt.scrml": {
-    "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 61,
-    "FIELD-SHAPE": 20,
+    "COUNT-LENGTH": 8,
+    "EXTRA-FIELD": 38,
+    "FIELD-SHAPE": 23,
     "KIND-NAME": 11,
-    "MISSING-FIELD": 56,
-    "SPAN-COORD": 16
+    "MISSING-FIELD": 66,
+    "SPAN-COORD": 20
   },
   "stdlib/auth/password.scrml": {
     "COUNT-LENGTH": 4,

@@ -1,0 +1,244 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:auth/flows — magic-link / email-verify / password-reset flows
+    //
+    // Each flow is a request*/verify* pair over three collaborators:
+    //   - a high-entropy token (generateToken(32) = 256 bits),
+    //   - a caller-supplied TTL store (a scrml:store handle with get/set/delete),
+    //   - a caller-INJECTED sendEmail (no built-in mailer ships here).
+    //
+    // These are server-only by inference: scrml:crypto + the store's bun:sqlite
+    // escalate the importing functions to the server (§12.2). No keyword
+    // annotation is required.
+    //
+    // SECURITY properties (each a non-negotiable acceptance criterion):
+    //   - Single-use: verify* does get-THEN-delete; a consumed token is gone.
+    //     A second verify returns { valid: false, reason: "used-or-invalid" }.
+    //   - Purpose-binding: each flow is used with its OWN store namespace
+    //     (createStore(db, "magic-link") vs "email-verify" vs "pwreset"). There
+    //     is no purpose field ON the token — namespace-per-purpose IS the
+    //     mechanism. A token minted in one namespace is not-found in another, so
+    //     a reset token cannot be replayed as a magic link.
+    //   - Enumeration resistance: request* returns a NEUTRAL result ({ ok:true })
+    //     regardless of whether the address maps to a real account, and NEVER
+    //     returns the token (the token travels only via the injected email). The
+    //     caller decides whether a given address should actually be sent to.
+    //   - TTL: the request embeds an authoritative expiresAt in the stored record
+    //     AND passes ttl to the store; verify* rejects an expired record.
+    // ---------------------------------------------------------------------------
+
+    import { generateToken } from 'scrml:crypto'
+    import { hashPassword } from './password.scrml'
+    import { safeCallAsync } from 'scrml:host'
+
+    /**
+     * Shared request half — mint + store a token, optionally send the email,
+     * and return a neutral result. `purpose` selects the store namespace at the
+     * caller and the email subject here.
+     */
+    function requestTokenFlow(email, opts, purpose, defaultTtl) {
+        const options = opts is some ? opts : {}
+        const store = options.store
+        const sendEmail = options.sendEmail
+        const baseUrl = options.baseUrl is some ? options.baseUrl : ""
+        // A non-numeric ttl (e.g. "15m") would compute Date.now() + NaN = NaN — a
+        // never-expiring token. Fall back to the default for anything non-numeric
+        // (the runtime shim rejects it loudly at mint time).
+        const ttl = (typeof options.ttl == "number" && Number.isFinite(options.ttl)) ? options.ttl : defaultTtl
+
+        const token = generateToken(32)
+        const record = { email: email, purpose: purpose, expiresAt: Date.now() + ttl * 1000 }
+        if (store is some) store.set(token, record, ttl)
+
+        const link = `${baseUrl}?token=${token}`
+        if (sendEmail is some) {
+            // Enumeration resistance: a send failure (e.g. an SMTP 550 for an
+            // unknown recipient) MUST NOT change the neutral result, or request*
+            // becomes an account-existence oracle. Swallow via safeCallAsync.
+            safeCallAsync(() => sendEmail(email, { subject: subjectFor(purpose), link: link, token: token })) !{
+                | ::Thrown(m, n) -> not
+            }
+        }
+        // Neutral — never leak the token or the account's existence to the caller.
+        return { ok: true }
+    }
+
+    /**
+     * Peek — validate a token WITHOUT consuming it: found + right purpose + not
+     * expired. `expectedPurpose` is the defense-in-depth backstop ON TOP of the
+     * per-flow store namespace; a wrong-purpose or not-found token is rejected
+     * and left intact (a cross-submitted token stays usable for its own flow).
+     */
+    function peekTokenFlow(token, opts, expectedPurpose) {
+        const options = opts is some ? opts : {}
+        const store = options.store
+        if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
+
+        const record = store.get(token) !{
+            | ::ParseFailed(m) -> not
+        }
+        if (record is not) return { valid: false, reason: "used-or-invalid" }
+        if (expectedPurpose is some && record.purpose != expectedPurpose) {
+            return { valid: false, reason: "used-or-invalid" }
+        }
+        // Fail-closed: a missing / non-finite expiresAt is treated as expired
+        // (mirrors the JWKS exp path), never accepted as a never-expiring token.
+        if (!Number.isFinite(record.expiresAt) || record.expiresAt <= Date.now()) {
+            return { valid: false, reason: "expired" }
+        }
+        return { valid: true, email: record.email }
+    }
+
+    /**
+     * Verify — single-use: peek + consume. The token is deleted only when found
+     * for the right purpose (valid or expired); a not-found / wrong-purpose token
+     * is left intact. NOTE: with the default SQLite store (store TTL == logical
+     * ttl) an expired row is lazily removed and reads as "used-or-invalid"; the
+     * distinct "expired" reason surfaces only when the store still returns a
+     * logically-expired record.
+     */
+    function verifyTokenFlow(token, opts, expectedPurpose) {
+        const options = opts is some ? opts : {}
+        const result = peekTokenFlow(token, options, expectedPurpose)
+        if (result.valid || result.reason == "expired") {
+            if (options.store is some && token) options.store.delete(token)
+        }
+        return result
+    }
+
+    fn subjectFor(purpose) {
+        if (purpose == "magic-link")   return "Your sign-in link"
+        if (purpose == "email-verify") return "Verify your email address"
+        return "Reset your password"
+    }
+
+    /**
+     * Magic-link sign-in. Namespace the store as "magic-link".
+     *
+     * Example:
+     *   const store = createStore("./auth.db", "magic-link")
+     *   requestMagicLink(email, { store, sendEmail, baseUrl: "https://app/login", ttl: 900 })
+     *   // ... user clicks the emailed link ...
+     *   const res = verifyMagicLink(token, { store })
+     *   if (res.valid) { issueSession(res.email) }
+     */
+    export function requestMagicLink(email, opts) {
+        return requestTokenFlow(email, opts, "magic-link", 900)
+    }
+    export function verifyMagicLink(token, opts) {
+        return verifyTokenFlow(token, opts, "magic-link")
+    }
+
+    /**
+     * Email-verification. Namespace the store as "email-verify". Longer TTL (24h).
+     */
+    export function requestEmailVerification(email, opts) {
+        return requestTokenFlow(email, opts, "email-verify", 86400)
+    }
+    export function verifyEmail(token, opts) {
+        return verifyTokenFlow(token, opts, "email-verify")
+    }
+
+    /**
+     * Password-reset. Namespace the store as "pwreset". The caller updates the
+     * hash after a valid verify — or use resetPassword to compose the steps.
+     */
+    export function requestPasswordReset(email, opts) {
+        return requestTokenFlow(email, opts, "pwreset", 3600)
+    }
+    export function verifyResetToken(token, opts) {
+        return verifyTokenFlow(token, opts, "pwreset")
+    }
+
+    /**
+     * Reset a password end-to-end. The ordering closes BOTH the caller-lockout
+     * AND the TOCTOU race:
+     *   A. validate updateHash presence — sync, no token risk (a misconfiguration
+     *      must not burn the token);
+     *   B. consume the token ATOMICALLY (verifyTokenFlow's sync get-then-delete —
+     *      of two concurrent calls the first wins, the second sees not-found);
+     *   C. hash + persist (the token is already consumed; a transient throw here
+     *      burns it — acceptable: no reuse, the user re-requests).
+     *
+     * Example:
+     *   const res = resetPassword(token, form.newPassword, {
+     *       store,
+     *       updateHash: (email, hash) => ?{`UPDATE users SET password_hash = ${hash} WHERE email = ${email}`}.run()
+     *   })
+     */
+    export function resetPassword(token, newPassword, opts) {
+        const options = opts is some ? opts : {}
+        // A — updateHash presence (no token touched yet → retryable on misconfig).
+        const updateHash = options.updateHash
+        if (updateHash is not) return { valid: false, reason: "no-update-hash" }
+        // B — atomic single-use consume (existence + expiry + purpose + delete).
+        const result = verifyTokenFlow(token, options, "pwreset")
+        if (!result.valid) return result
+        // C — hash + persist (token already consumed; a throw does not reopen reuse).
+        const hash = hashPassword(newPassword)
+        updateHash(result.email, hash)
+        return { valid: true, email: result.email }
+    }
+
+    ~{
+        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
+
+        // A tiny in-memory stub store (get/set/delete) standing in for a
+        // scrml:store namespace, plus a sendEmail stub that captures the token.
+        fn makeStubStore() {
+            const m = new Map()
+            return {
+                get(key)          { const v = m.get(key); return v is some ? v : not }
+                set(key, value)   { m.set(key, value) }
+                delete(key)       { m.delete(key) }
+            }
+        }
+
+        let captured = not
+        const sendEmail = (to, info) => { captured = info.token }
+
+        const magicStore = makeStubStore()
+
+        // request never returns the token — it is captured only via the email.
+        const req = requestMagicLink("user@example.com", { store: magicStore, sendEmail: sendEmail, baseUrl: "https://app/login" })
+        assertTruthy(req.ok)
+        assertTruthy(captured is some)
+
+        // verify succeeds once.
+        const ok = verifyMagicLink(captured, { store: magicStore })
+        assertTruthy(ok.valid)
+        assertEqual(ok.email, "user@example.com")
+
+        // Single-use: a second verify fails (the token was consumed).
+        const reuse = verifyMagicLink(captured, { store: magicStore })
+        assertFalsy(reuse.valid)
+        assertEqual(reuse.reason, "used-or-invalid")
+
+        // Purpose-binding (namespace): a magic-link token replayed against a
+        // DIFFERENT namespace (pwreset) is not-found — cross-purpose replay fails.
+        const magicStore2 = makeStubStore()
+        let captured2 = not
+        const sendEmail2 = (to, info) => { captured2 = info.token }
+        requestMagicLink("user@example.com", { store: magicStore2, sendEmail: sendEmail2 })
+        const pwStore = makeStubStore()
+        const crossed = verifyResetToken(captured2, { store: pwStore })
+        assertFalsy(crossed.valid)
+        assertEqual(crossed.reason, "used-or-invalid")
+
+        // Purpose-binding (defense-in-depth): even in ONE mis-wired shared store,
+        // the record's purpose is checked — a magic-link token is rejected by the
+        // reset verifier AND is NOT consumed, so it still verifies for its own flow.
+        const shared = makeStubStore()
+        let captured3 = not
+        const sendEmail3 = (to, info) => { captured3 = info.token }
+        requestMagicLink("user@example.com", { store: shared, sendEmail: sendEmail3 })
+        const wrongPurpose = verifyResetToken(captured3, { store: shared })
+        assertFalsy(wrongPurpose.valid)
+        assertEqual(wrongPurpose.reason, "used-or-invalid")
+        // Not burned by the wrong-purpose attempt:
+        const stillGood = verifyMagicLink(captured3, { store: shared })
+        assertTruthy(stillGood.valid)
+    }
+}
+</program>
