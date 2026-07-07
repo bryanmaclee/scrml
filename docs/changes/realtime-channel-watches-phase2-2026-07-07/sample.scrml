@@ -1,0 +1,15 @@
+<program db="postgres://localhost/app">
+  <orders authority="server" table=orders>
+      id: int
+      status: string
+      total: number
+  </>
+  <orders> @orders
+  <channel name="orders-feed" watches=orders>
+      <onchange>
+          <Inserted(row) : { @orders = [...@orders, row] }>
+          <Updated(row) : { @orders = @orders.map(r => r.id == row.id ? row : r) }>
+          <Deleted(key) : { @orders = @orders.filter(r => r.id != key) }>
+      </onchange>
+  </channel>
+</program>

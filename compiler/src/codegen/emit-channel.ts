@@ -1,5 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitLogicNode } from "./emit-logic.js";
+import { emitExprField } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 
 /**
@@ -588,6 +589,132 @@ export function collectChannelAttrHandlerNames(
 }
 
 // ---------------------------------------------------------------------------
+// §38.13 realtime `watches=` feed — client `<onchange>` dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * The single `<onchange>` decl child of a `watches=` `<channel>` node, or null.
+ * Phase 1 stamps `node._rowChangeSynth` on a valid `watches=` channel and parses
+ * its `<onchange>` body into an `onchange-decl` child (§38.13.3).
+ */
+function findOnchangeDecl(node: any): any | null {
+  const kids = Array.isArray(node?.children) ? node.children : [];
+  for (const k of kids) {
+    if (k && typeof k === "object" && k.kind === "onchange-decl") return k;
+  }
+  return null;
+}
+
+/**
+ * Parse the single positional payload binding name (`row` / `key`) from an
+ * `<onchange>` arm's `payloadBindingsRaw` (§51.0.B.1 — reused). Returns null for
+ * a discard `_` or an empty binding (a no-payload arm).
+ */
+function onchangeArmBindingName(raw: string | undefined | null): string | null {
+  const t = (raw ?? "").trim();
+  if (t === "" || t === "_") return null;
+  // Single positional binding — take the first comma-part, drop a `field:` label.
+  const first = t.split(",")[0].trim();
+  const colon = first.indexOf(":");
+  const local = (colon >= 0 ? first.slice(colon + 1) : first).trim();
+  return local || null;
+}
+
+/**
+ * Split a §4.18 code-default arm body into top-level statements — brace / paren /
+ * bracket / string / template aware — stripping a single outer `{ … }` wrapper.
+ * The `<onchange>` arm bodies patch program-scope `@`-cells (§38.13.3); each
+ * statement is lowered independently by `emitExprField` (client mode). A single
+ * statement wrapped across a line at bracket-depth 0 should parenthesise its
+ * continuation (the depth-0 newline is a statement separator, scrml-native).
+ */
+function splitCodeBodyStatements(bodyRaw: string): string[] {
+  let t = (bodyRaw ?? "").trim();
+  if (t.startsWith("{") && t.endsWith("}")) t = t.slice(1, -1).trim();
+  const out: string[] = [];
+  let depth = 0, inDQ = false, inSQ = false, inTick = false, start = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+    if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+    if (inTick) { if (c === "`") inTick = false; else if (c === "\\") i++; continue; }
+    if (c === '"') { inDQ = true; continue; }
+    if (c === "'") { inSQ = true; continue; }
+    if (c === "`") { inTick = true; continue; }
+    if (c === "{" || c === "(" || c === "[") { depth++; continue; }
+    if (c === "}" || c === ")" || c === "]") { if (depth > 0) depth--; continue; }
+    if ((c === ";" || c === "\n") && depth === 0) {
+      const seg = t.slice(start, i).trim();
+      if (seg) out.push(seg);
+      start = i + 1;
+    }
+  }
+  const last = t.slice(start).trim();
+  if (last) out.push(last);
+  return out;
+}
+
+/**
+ * Build the `if (_d.__type === "__change") { … }` client dispatch for a
+ * `watches=` channel (§38.13.3). For each `<onchange>` arm, bind its payload
+ * local — `_d.row` for `Inserted` / `Updated`, `_d.key` for `Deleted` (the
+ * pinned `__change` frame, §38.13.7) — then run the arm's code-default body
+ * (lowered by `emitExprField` in client mode, so `@`-cell reads/writes become
+ * `_scrml_reactive_get`/`_scrml_reactive_set`). A wildcard `_` arm is a catch-all
+ * (no payload bind). Exhaustiveness over `RowChange` was validated in Phase 1.
+ */
+function buildOnchangeDispatchLines(node: any, filePath: string, errors: CGError[]): string[] {
+  const onchange = findOnchangeDecl(node);
+  const arms: any[] = Array.isArray(onchange?.arms) ? onchange.arms : [];
+  if (arms.length === 0) return [];
+
+  const lowerBody = (arm: any): string[] => {
+    if (arm?.bodyForm === "self-closing") return [];
+    const stmts = splitCodeBodyStatements(typeof arm?.bodyRaw === "string" ? arm.bodyRaw : "");
+    const out: string[] = [];
+    for (const s of stmts) {
+      let js: string;
+      try {
+        js = emitExprField(null, s, { mode: "client" } as any);
+      } catch (e) {
+        errors.push(new CGError(
+          "E-CODEGEN-INVALID-LOGIC",
+          `E-CODEGEN-INVALID-LOGIC: could not lower an <onchange> arm body to valid output (§38.13.3): ${(e as Error).message}`,
+          (arm?.span ?? node?.span ?? {}),
+          "error",
+        ));
+        js = "/* onchange arm lowering failed */ void 0";
+      }
+      out.push(`${js};`);
+    }
+    return out;
+  };
+
+  const lines: string[] = [];
+  lines.push(`        if (_d.__type === "__change") {`);
+  lines.push(`          // §38.13.3 — dispatch the RowChange delta into the <onchange> arms`);
+  let wildcard: any = null;
+  for (const arm of arms) {
+    if (arm?.isWildcard) { wildcard = arm; continue; }
+    const variant = typeof arm?.variantName === "string" ? arm.variantName : null;
+    if (!variant) continue;
+    const local = onchangeArmBindingName(arm?.payloadBindingsRaw);
+    // Inserted / Updated carry the full row; Deleted carries only the key.
+    const src = variant === "Deleted" ? "_d.key" : "_d.row";
+    const bind = local ? `const ${local} = ${src}; ` : "";
+    const body = lowerBody(arm).join(" ");
+    lines.push(`          if (_d.op === ${JSON.stringify(variant)}) { ${bind}${body} return; }`);
+  }
+  if (wildcard) {
+    const body = lowerBody(wildcard).join(" ");
+    lines.push(`          { ${body} return; }`);
+  }
+  lines.push(`          return;`);
+  lines.push(`        }`);
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Client JS emission
 // ---------------------------------------------------------------------------
 
@@ -622,6 +749,15 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`    ${wsVar}.onmessage = (e) => {`);
   lines.push(`      try {`);
   lines.push(`        const _d = JSON.parse(e.data);`);
+
+  // §38.13.3 — a `watches=` realtime feed dispatches the server-published
+  // `__change` frame into the typed `<onchange>` arms. Emitted UNCONDITIONALLY
+  // for a watches channel (it has no `__sync` synced cells — §38.13.4). Gated on
+  // the Phase-1 `_rowChangeSynth` stamp (present only on a valid `watches=`
+  // channel), so an ordinary §38.4 / §38.6 channel is byte-identical.
+  if (node && node._rowChangeSynth) {
+    for (const l of buildOnchangeDispatchLines(node, filePath, errors)) lines.push(l);
+  }
 
   if (sharedVars.length > 0) {
     lines.push(`        if (_d.__type === "__sync") {`);
@@ -721,6 +857,182 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   lines.push(`    return ok ? void 0 : new Response("WebSocket upgrade failed", { status: 400 });`);
   lines.push(`  },`);
   lines.push(`};`);
+
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// §38.13.7 realtime `watches=` feed — server-side change capture
+// (Postgres LISTEN/NOTIFY). Trigger install via Bun.SQL (`_scrml_sql`) +
+// a dedicated `pg` session connection for notification delivery (Bun.SQL
+// v1.3.13 exposes NO LISTEN/NOTIFY subscription API — only `onconnect`/
+// `onclose`). SERVER-ONLY: the connection string / DDL / bridge never appear
+// in client output. Postgres-only; gated on a resolved `_rowChangeSynth` + PK.
+// ---------------------------------------------------------------------------
+
+/** Sanitise an identifier into a safe lowercase SQL/JS identifier segment. */
+function sqlSafeIdent(name: string): string {
+  const s = String(name ?? "").replace(/[^A-Za-z0-9_]/g, "_");
+  return (/^[0-9]/.test(s) ? "_" + s : s) || "ch";
+}
+
+/** Double-quote a Postgres identifier (table / column), escaping embedded `"`. */
+function pgQuoteIdent(name: string): string {
+  return '"' + String(name ?? "").replace(/"/g, '""') + '"';
+}
+
+/**
+ * Build the Postgres trigger + trigger-function install DDL for one `watches=`
+ * channel (§38.13.7). Idempotent re-install each boot IS the drift-reconcile
+ * (no separate reconcile pass). Uses `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`
+ * (works on PG < 14; `CREATE OR REPLACE TRIGGER` would require PG 14+).
+ * `CREATE OR REPLACE FUNCTION` + `json_build_object` set the floor at **PG 9.4+**.
+ * The trigger `pg_notify`s only the primary key (Postgres NOTIFY caps at 8000
+ * bytes); the listener re-SELECTs the full row (§38.13.7).
+ */
+export function buildWatchesTriggerDDL(
+  safeName: string,
+  table: string,
+  pkColumn: string,
+): { fnDDL: string; dropTrigDDL: string; createTrigDDL: string; notifyChannel: string } {
+  const notifyChannel = `scrml_${safeName}`;
+  const fnName = `scrml_notify_${safeName}`;
+  const trgName = `scrml_trg_${safeName}`;
+  const qT = pgQuoteIdent(table);
+  const qPk = pgQuoteIdent(pkColumn);
+  const fnDDL =
+    `CREATE OR REPLACE FUNCTION ${fnName}() RETURNS trigger AS $BODY$ ` +
+    `BEGIN PERFORM pg_notify('${notifyChannel}', json_build_object(` +
+    `'op', TG_OP, 'key', CASE WHEN TG_OP = 'DELETE' THEN OLD.${qPk} ELSE NEW.${qPk} END)::text); ` +
+    `RETURN NULL; END; $BODY$ LANGUAGE plpgsql;`;
+  const dropTrigDDL = `DROP TRIGGER IF EXISTS ${trgName} ON ${qT};`;
+  const createTrigDDL =
+    `CREATE TRIGGER ${trgName} AFTER INSERT OR UPDATE OR DELETE ON ${qT} ` +
+    `FOR EACH ROW EXECUTE FUNCTION ${fnName}();`;
+  return { fnDDL, dropTrigDDL, createTrigDDL, notifyChannel };
+}
+
+/**
+ * Emit the server-boot change-capture block for every `watches=` channel in a
+ * file (§38.13.7). For each feed: (1) install the trigger+function idempotently
+ * via `_scrml_sql.unsafe(...)`; (2) open a dedicated `pg` session connection,
+ * `LISTEN` on the feed's channel, and on each notification re-SELECT the changed
+ * row by PK (INSERT/UPDATE) or forward the key (DELETE), publishing the pinned
+ * `{ __type:"__change", op, row|key }` frame to the channel topic via
+ * `globalThis._scrml_active_server.publish`. Reconnect-on-drop. Multi-instance
+ * is free (each instance holds its own LISTEN — no cross-instance backbone).
+ *
+ * Returns `[]` (byte-identical to a non-realtime build) when there is no
+ * postgres connection or no PK-resolved `watches=` feed. A `watches=` channel
+ * whose table has no derivable PK (`_rowChangeSynth.pkColumn === null`,
+ * W-CHANNEL-WATCHES-NO-PK) is SKIPPED here — the feed cannot key its deltas, so
+ * no capture is emitted (the client `<onchange>` dispatch stays, but inert).
+ */
+export function emitChannelWatchesServerBoot(
+  channelNodes: any[],
+  pgConnStr: string | null,
+  errors: CGError[],
+  filePath: string,
+  protectedColsByTable: Map<string, Set<string>> | null = null,
+  projectReconnectDefault: number | null = null,
+): string[] {
+  const feeds = channelNodes.filter(
+    (n) => n && n._rowChangeSynth && typeof n._rowChangeSynth.pkColumn === "string" && n._rowChangeSynth.pkColumn,
+  );
+  if (feeds.length === 0 || !pgConnStr) return [];
+
+  const lines: string[] = [];
+  lines.push("");
+  lines.push("// --- §38.13.7 realtime watches= feed: DB change capture (Postgres LISTEN/NOTIFY) ---");
+  lines.push("// Compiler-emitted, SERVER-ONLY. Trigger install via Bun.SQL (_scrml_sql); notification");
+  lines.push("// delivery via a dedicated pg session connection — Bun.SQL v1.3.13 has NO LISTEN API.");
+  lines.push("// Min Postgres: 9.4 (json_build_object). PgBouncer: this connection MUST be session-mode");
+  lines.push("// (transaction pooling breaks LISTEN). Multi-instance-safe: each instance holds its own LISTEN.");
+  lines.push(`const _SCRML_WATCHES_CONN = ${JSON.stringify(pgConnStr)};`);
+  lines.push("const _SCRML_WATCHES_RECONNECT_MS = 2000;");
+  lines.push("");
+
+  // (1) Trigger install — one function + trigger pair per feed, idempotent.
+  lines.push("async function _scrml_watches_install_triggers() {");
+  lines.push("  try {");
+  for (const node of feeds) {
+    const { name, safeName, topic } = extractChannelAttrs(node, projectReconnectDefault);
+    void name; void topic;
+    const synth = node._rowChangeSynth;
+    const ident = sqlSafeIdent(safeName);
+    const { fnDDL, dropTrigDDL, createTrigDDL } = buildWatchesTriggerDDL(ident, synth.table, synth.pkColumn);
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(fnDDL)});`);
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(dropTrigDDL)});`);
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(createTrigDDL)});`);
+  }
+  lines.push("  } catch (_e) {");
+  lines.push('    console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
+  lines.push("  }");
+  lines.push("}");
+  lines.push("");
+
+  // (2) Per-feed LISTEN bridge (dedicated pg session connection).
+  const listenFnNames: string[] = [];
+  for (const node of feeds) {
+    const { safeName, topic } = extractChannelAttrs(node, projectReconnectDefault);
+    const synth = node._rowChangeSynth;
+    const ident = sqlSafeIdent(safeName);
+    const listenFn = `_scrml_watches_listen_${ident}`;
+    listenFnNames.push(listenFn);
+    const notifyChannel = `scrml_${ident}`;
+    const qT = pgQuoteIdent(synth.table);
+    const qPk = pgQuoteIdent(synth.pkColumn);
+    lines.push(`// LISTEN bridge for <channel watches=${JSON.stringify(synth.table)}> topic ${JSON.stringify(topic)}`);
+    lines.push(`function ${listenFn}() {`);
+    lines.push(`  import("pg").then((_pgMod) => {`);
+    lines.push(`    const _PgClient = (_pgMod.default && _pgMod.default.Client) || _pgMod.Client;`);
+    lines.push(`    const _client = new _PgClient({ connectionString: _SCRML_WATCHES_CONN });`);
+    lines.push(`    const _retry = () => { try { _client.removeAllListeners && _client.removeAllListeners(); } catch (_e) {} setTimeout(${listenFn}, _SCRML_WATCHES_RECONNECT_MS); };`);
+    lines.push(`    _client.on("error", _retry);`);
+    lines.push(`    _client.on("end", _retry);`);
+    lines.push(`    _client.on("notification", async (_msg) => {`);
+    lines.push(`      let _p; try { _p = JSON.parse(_msg.payload); } catch (_e) { return; }`);
+    lines.push(`      const _server = globalThis._scrml_active_server;`);
+    lines.push(`      if (!_server) return;`);
+    lines.push(`      if (_p.op === "DELETE") {`);
+    lines.push(`        _server.publish(${JSON.stringify(topic)}, JSON.stringify({ __type: "__change", op: "Deleted", key: _p.key }));`);
+    lines.push(`        return;`);
+    lines.push(`      }`);
+    lines.push(`      try {`);
+    // §14.8.9 — the re-SELECT is a hand-emitted `SELECT *` whose row is published
+    // to every subscriber (a client egress). Mirror the SSR /__serverLoad Tier-1
+    // sink: TAG the hand-emitted rows with the table's protected columns (the raw
+    // `.unsafe` result is NOT `?{}`-tagged), then REDACT the published row so a
+    // `protect=` column never crosses the feed. When the table has no protected
+    // column the emit is byte-identical (no tag / no redact).
+    const _protCols = protectedColsByTable ? protectedColsByTable.get(synth.table) : undefined;
+    const _hasProt = !!(_protCols && _protCols.size > 0);
+    const _selectSql = `SELECT * FROM ${qT} WHERE ${qPk} = $1`;
+    if (_hasProt) {
+      lines.push(`        const _rows = _scrml_protect_tag(await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]), ${JSON.stringify([..._protCols!])});`);
+    } else {
+      lines.push(`        const _rows = await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]);`);
+    }
+    lines.push(`        const _row = _rows && _rows[0];`);
+    lines.push(`        if (!_row) return;`);
+    lines.push(`        const _variant = _p.op === "INSERT" ? "Inserted" : "Updated";`);
+    const _rowExpr = _hasProt ? "_scrml_protect_redact(_row)" : "_row";
+    lines.push(`        _server.publish(${JSON.stringify(topic)}, JSON.stringify({ __type: "__change", op: _variant, row: ${_rowExpr} }));`);
+    lines.push(`      } catch (_e) {}`);
+    lines.push(`    });`);
+    lines.push(`    _client.connect().then(() => _client.query(${JSON.stringify(`LISTEN ${notifyChannel}`)})).catch(_retry);`);
+    lines.push(`  }).catch((_e) => {`);
+    lines.push(`    console.error("[scrml] realtime watches= feed needs the 'pg' package (Bun.SQL has no LISTEN API):", _e && _e.message);`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+  }
+
+  // (3) Boot — install triggers, then start every LISTEN loop.
+  lines.push("_scrml_watches_install_triggers().then(() => {");
+  for (const fn of listenFnNames) lines.push(`  ${fn}();`);
+  lines.push('}).catch((_e) => { console.error("[scrml] watches= boot failed:", _e && _e.message); });');
+  lines.push("");
 
   return lines;
 }

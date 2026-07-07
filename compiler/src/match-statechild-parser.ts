@@ -306,6 +306,14 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     let inDQ = false;
     let inSQ = false;
     let angleDepth = 0;
+    // Code-expression nesting depth ({ } / ( ) / [ ]). A `>` inside a §4.18
+    // code-default arm body — the arrow `=>`, a comparison `a > b`, or `>=` —
+    // is an OPERATOR, not the opener terminator. Without this, a shorthand
+    // body like `<Updated(row) : { @rows = @rows.map(r => …) }>` truncated at
+    // the `>` of `=>` (the realtime `<onchange>` arms, §38.13.3, all use
+    // `.map(r => …)` / `.filter(r => …)`). Mirrors `_findOnchangeOpenerEnd`'s
+    // brace/paren/bracket tracking in ast-builder.js.
+    let codeDepth = 0;
     while (p < len) {
       const c = armsRaw[p];
       if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") p++; p++; continue; }
@@ -325,11 +333,18 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
         }
         continue;
       }
-      // Nested markup-as-value: a `<` (not a closer `</`) opens a nested tag.
-      // Track angle depth so the nested element's own `>` does not terminate the
-      // opener; a `</...>` closer decrements at its `>`.
-      if (c === "<") { angleDepth++; p++; continue; }
+      // Bare code-expression nesting (a §4.18 code-default body `{ … }`, a
+      // parenthesised sub-expression, an array/index). `${…}` was consumed
+      // above, so a `{` reached here is a bare code brace.
+      if (c === "{" || c === "(" || c === "[") { codeDepth++; p++; continue; }
+      if (c === "}" || c === ")" || c === "]") { if (codeDepth > 0) codeDepth--; p++; continue; }
+      // Nested markup-as-value: a `<` (not a closer `</`) opens a nested tag —
+      // but ONLY at code-depth 0. Inside a code body a `<` is a comparison
+      // operator (`a < b`), which must NOT pollute the markup angle depth.
+      if (c === "<") { if (codeDepth === 0) angleDepth++; p++; continue; }
       if (c === ">") {
+        // A `>` inside a code expression (arrow / comparison) is opaque.
+        if (codeDepth > 0) { p++; continue; }
         if (angleDepth > 0) { angleDepth--; p++; continue; }
         return p; // the opener's terminating `>`
       }

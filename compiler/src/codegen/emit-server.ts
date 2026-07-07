@@ -6,7 +6,7 @@ import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
-import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
+import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
@@ -3437,6 +3437,25 @@ export function generateServerJs(
       );
       for (const l of chServerLines) lines.push(l);
     }
+
+    // §38.13.7 — realtime watches= feed server capture (Postgres LISTEN/NOTIFY).
+    // Emits the trigger install + per-feed LISTEN bridge ONLY for a postgres
+    // program with >=1 PK-resolved watches= channel; byte-identical (empty) for
+    // a SQLite / no-db build or a non-watches channel set.
+    const _pgScope = Array.from(collectDbScopes(fileAST).values()).find(
+      (s) => s.driver === "postgres",
+    );
+    // §14.8.9 — the watches re-SELECT + publish is a NEW compiler-emitted client
+    // egress; pass the protected-column map so the LISTEN bridge tag-then-redacts
+    // the published row (mirror of the SSR /__serverLoad Tier-1 hand-emitted SELECT).
+    const _watchesBootLines = emitChannelWatchesServerBoot(
+      channelNodes,
+      _pgScope ? _pgScope.connectionString : null,
+      errors,
+      filePath ?? "",
+      _protectActive ? _protectCtx.protectedByTable : null,
+    );
+    for (const l of _watchesBootLines) lines.push(l);
   }
 
   // S35 insight 22 — per-file WinterCG fetch handler + aggregate `routes`

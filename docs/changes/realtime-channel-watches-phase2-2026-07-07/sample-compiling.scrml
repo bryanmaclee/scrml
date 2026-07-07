@@ -1,0 +1,32 @@
+<!--
+  Compiling acceptance vehicle for §38.13 watches= Phase 2.
+
+  The literal SPEC/brief worked example (sample.scrml) uses a §52
+  `<orders authority="server" table=orders>` decl + a `<orders> @orders` mount
+  to declare the table shape. Under the CURRENT front-end those §52 forms do NOT
+  compile (a bare `<orders> @orders` mount fires E-CTX-001/E-CTX-003; a bare
+  authority decl fires E-SCOPE-001) — pre-existing §52-surface gaps UNRELATED to
+  watches. See progress.md BLOCKER 1.
+
+  This variant declares the watched table via a `<schema>` block (what Phase-1's
+  collectSchemaTables reads to synthesize RowChange) and exercises the FULL Phase-2
+  codegen: RowChange synth -> client `__change` dispatch + server LISTEN capture.
+  It compiles clean (only W-PROGRAM-SPA-INFERRED) and is the acceptance vehicle
+  used by channel-watches-phase2-runtime.test.js.
+-->
+<program db="postgres://localhost/app">
+  <schema>
+    orders {
+      id: int primary key
+      status: string
+      total: number
+    }
+  </schema>
+  <channel name="orders-feed" watches=orders>
+      <onchange>
+          <Inserted(row) : { @orders = [...@orders, row] }>
+          <Updated(row) : { @orders = @orders.map(r => r.id == row.id ? row : r) }>
+          <Deleted(key) : { @orders = @orders.filter(r => r.id != key) }>
+      </onchange>
+  </channel>
+</program>
