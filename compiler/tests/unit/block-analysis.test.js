@@ -338,12 +338,17 @@ describe("serializeBlockAnalysis / buildBlockAnalysisJson — serialization", ()
     expect(parsed.version).toBe(1);
     expect(parsed.file).toBe("examples/demo/page.scrml");
     expect(parsed.blocks).toHaveLength(5);
-    // Fixed key order on every block: id, kind, name, span, reads, writes, footprintDepth.
+    // blocks[0] is the TrafficLight enum (type block, earliest span). Type
+    // blocks carry the additive typeShape + bodySpan + members alongside the
+    // existing fields, in fixed key order (the determinism contract).
     expect(Object.keys(parsed.blocks[0])).toEqual([
       "id",
       "kind",
       "name",
+      "typeShape",
       "span",
+      "bodySpan",
+      "members",
       "reads",
       "writes",
       "footprintDepth",

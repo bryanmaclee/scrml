@@ -29,6 +29,28 @@
  *     "footprintDepth": "shallow"     // honesty marker (transitive = later slice)
  *   }
  *
+ * Additionally, per `type` block (fn/component/engine/channel are UNCHANGED):
+ *   "typeShape": "enum",              // struct | enum | error | refinement
+ *   "members": [                      // struct fields / enum variants, source order
+ *     { "name": "Sha", "memberKind": "variant", "typeText": "(hash:string)",
+ *       "span": { "start": 812, "end": 828 },
+ *       "args": [ { "name": "hash", "typeText": "string",
+ *                   "span": { "start": 816, "end": 827 } } ] }
+ *   ]
+ * And per block of EVERY kind:
+ *   "bodySpan": { "start": 780, "end": 831 }   // tight body-close (see below)
+ *
+ * ALL member/arg spans + `bodySpan` are ABSOLUTE byte offsets into the RAW
+ * source — the SAME basis as `span.start`/`.end` — so a consumer slices one
+ * member out with `source.slice(m.span.start, m.span.end)` directly (a struct
+ * field's span covers `name: type`; a variant's covers `Name(args)`). `bodySpan`
+ * ends at the entity's body-close (`}`), NOT in the trailing trivia `span.end`
+ * includes (which, for a `type` decl, runs into the following token — the
+ * splice-welds-`}appState>` workaround the consumers carried). `typeShape` /
+ * `members` are `type`-only; every existing field is byte-unchanged on every
+ * block kind (purely additive). Member NAMES + KINDS are drift-guarded against
+ * the compiler's canonical `parseStructBody` / `parseEnumBody`.
+ *
  * `line`/`endLine` are the load-bearing diff-scope fields — raw `git diff` line
  * ranges map onto source lines, so the consumer compares against `span.line`
  * (which TAB maps back to the original source), NOT byte offsets (SCOPE §3).
@@ -100,6 +122,60 @@ export interface BlockSpan {
   endLine: number;
 }
 
+/** A byte-offset span `[start, end)` into the RAW source — the SAME coordinate
+ *  basis as `BlockSpan.start`/`.end`. A consumer slices it directly:
+ *  `source.slice(span.start, span.end)`. */
+export interface ByteSpan {
+  /** Byte offset of the first character. */
+  start: number;
+  /** Byte offset one past the last character. */
+  end: number;
+}
+
+/** The structural shape of a `type` block. `"error"` (§19.3) is field-bearing
+ *  like a struct — the type-system parses its body with `parseStructBody`, so it
+ *  carries `field` members. `"refinement"` is the catch-all for any type the
+ *  type-system resolves to NO fields (aliases, unions, predicated refinements,
+ *  and `tuple`, which resolves to `tAsIs`) — those carry `members: []`. */
+export type TypeShape = "struct" | "enum" | "error" | "refinement";
+
+/** Whether a `type` member is a struct field or an enum variant. */
+export type MemberKind = "field" | "variant";
+
+/** One constructor argument of an enum variant. Named args carry their declared
+ *  name; positional args get the compiler's stable `_0` / `_1` / … key — the
+ *  SAME synthetic key `parseEnumBody` assigns (§18.7 positional bindings). */
+export interface MemberArg {
+  /** Declared arg name, or the positional `_<i>` key. */
+  name: string;
+  /** Verbatim source surface of the arg's type. */
+  typeText: string;
+  /** Absolute `[start, end)` covering this arg (name + type when named, or the
+   *  bare type when positional). */
+  span: ByteSpan;
+}
+
+/** One member of a `type` block — a struct field or an enum variant. Emitted in
+ *  SOURCE ORDER. */
+export interface TypeMember {
+  /** Field name (struct) or variant name (enum). */
+  name: string;
+  memberKind: MemberKind;
+  /** struct field → the verbatim source surface of the field's TYPE (the text
+   *  after the `:`). enum variant → the verbatim payload signature `(...)`, or
+   *  `""` for a unit variant. Load-bearing: lifts merge-collision detection from
+   *  name-only to name+type (identical member on both sides = auto-resolvable). */
+  typeText: string;
+  /** Absolute `[start, end)` covering the FULL member (field name → type, or
+   *  variant name → arg-tuple close), EXCLUDING any bar-form `.` prefix and any
+   *  trailing `renders` clause. splice-one-member is a pure
+   *  `source.slice(span.start, span.end)`. */
+  span: ByteSpan;
+  /** Enum variants ONLY: the constructor arg-tuple, in source order (empty for a
+   *  unit variant). Absent on struct fields. */
+  args?: MemberArg[];
+}
+
 /** One block in the file's block-analysis projection. */
 export interface BlockAnalysisBlock {
   /** `<relpath>::<name>` — the lease anchor (dock's existing key). */
@@ -113,6 +189,19 @@ export interface BlockAnalysisBlock {
   writes: string[];
   /** Honesty marker — v1 is uniformly `"shallow"` (no call-graph). */
   footprintDepth: "shallow";
+  /** Tight span bounded at the entity's body-close (the `}` / last content
+   *  char), absolute offsets — UNLIKE `span.end`, which may run past the close
+   *  into trailing trivia (or, for a `type` decl, into the FOLLOWING token). A
+   *  consumer splices `[bodySpan.start, bodySpan.end)` without a re-derivation.
+   *  Precise (brace-bounded) for `type` blocks; trailing-trivia-trimmed for the
+   *  other kinds. Present on EVERY block kind (additive). */
+  bodySpan: ByteSpan;
+  /** `type` blocks ONLY — the structural shape. Absent on other kinds. */
+  typeShape?: TypeShape;
+  /** `type` blocks ONLY — struct fields / enum variants in SOURCE ORDER (an
+   *  honest-empty `[]` for a refinement / body-less type, or when no source is
+   *  threaded). Absent on other kinds. */
+  members?: TypeMember[];
 }
 
 /** Top-level artifact shape. Honest-empty `{ version, file, blocks: [] }` for a
@@ -234,6 +323,419 @@ function projectSpan(span: SpanShape | undefined, source: string | undefined): B
 }
 
 // ---------------------------------------------------------------------------
+// Type member projection (struct fields + enum variants)
+//
+// OFFSET BASIS: every member `span`, arg `span`, and the block `bodySpan` is
+// ABSOLUTE byte offsets into the RAW source — the SAME basis as the block
+// `span.start`/`.end`. A consumer slices them directly (`source.slice(a, b)`),
+// so splice-one-member is a pure slice.
+//
+// GRAMMAR OF RECORD: the member NAMES + KINDS this produces are drift-guarded
+// (block-analysis-type-members.test.js) to equal the compiler's canonical
+// `parseStructBody` / `parseEnumBody` output. We parse the VERBATIM source, NOT
+// the node's `raw` — the AST builder rebuilds `raw` from tokens with normalized
+// whitespace, stripped comments, and re-quoted strings, so `raw` offsets do NOT
+// map back to the source. Comments are masked (blanked to spaces, offsets
+// preserved) before structural scanning so a `:` / `(` / delimiter inside a
+// trailing `// …` comment never mis-splits a member.
+// ---------------------------------------------------------------------------
+
+/** Derive the `typeShape` from the type-decl's `typeKind` modifier. Everything
+ *  that is not `struct` / `enum` is the `refinement` catch-all (alias, union,
+ *  predicated refinement, tuple) — those carry no members. */
+function deriveTypeShape(typeKind: string): TypeShape {
+  if (typeKind === "struct") return "struct";
+  if (typeKind === "enum") return "enum";
+  // §19.3 — a user-defined error type is field-bearing (the type-system parses
+  // its body with parseStructBody), so it gets struct-shaped `field` members.
+  // `tuple` + aliases resolve to no fields (tAsIs) → the refinement catch-all.
+  if (typeKind === "error") return "error";
+  return "refinement";
+}
+
+/**
+ * Return a same-length copy of `s` with every COMMENT character replaced by a
+ * space (offsets preserved 1:1) — so top-level structure scanning is not fooled
+ * by a `:` / `,` / `(` sitting in a comment the canonical `parseStructBody` /
+ * `parseEnumBody` never sees (the AST builder strips comments from `raw`).
+ * String literals are left verbatim — a `//` inside a string is NOT a comment —
+ * and NEWLINES are preserved (they are member delimiters).
+ */
+function maskComments(s: string): string {
+  const out = s.split("");
+  const n = s.length;
+  let i = 0;
+  while (i < n) {
+    const ch = s[i];
+    // String literal — skip to the matching delimiter (honor `\` escape).
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < n) {
+        if (s[i] === "\\") { i += 2; continue; }
+        if (s[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    // Line comment — blank through end of line (keep the newline: it delimits).
+    if (ch === "/" && s[i + 1] === "/") {
+      while (i < n && s[i] !== "\n") { out[i] = " "; i++; }
+      continue;
+    }
+    // Block comment — blank through the closing `*/` (newlines stay newlines).
+    if (ch === "/" && s[i + 1] === "*") {
+      out[i] = " "; out[i + 1] = " "; i += 2;
+      while (i < n) {
+        if (s[i] === "*" && s[i + 1] === "/") { out[i] = " "; out[i + 1] = " "; i += 2; break; }
+        if (s[i] !== "\n") out[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return out.join("");
+}
+
+/** Skip a string literal in `masked` starting at the opening delimiter `i`;
+ *  returns the index just past the closing delimiter. */
+function skipMaskedString(masked: string, i: number, hi: number): number {
+  const quote = masked[i];
+  i++;
+  while (i < hi) {
+    if (masked[i] === "\\") { i += 2; continue; }
+    if (masked[i] === quote) { i++; break; }
+    i++;
+  }
+  return i;
+}
+
+/**
+ * Split `masked[lo, hi)` on any char in `delims` at bracket-depth 0 and OUTSIDE
+ * string literals, returning each part's `[start, end)` (indices into `masked`,
+ * which shares coordinates with the source). Mirrors `type-system.splitTopLevel`
+ * (bracket-depth aware) but tracks strings and yields spans, not strings.
+ */
+function splitTopLevelSpans(
+  masked: string,
+  lo: number,
+  hi: number,
+  delims: Set<string>,
+): Array<{ start: number; end: number }> {
+  const parts: Array<{ start: number; end: number }> = [];
+  let depth = 0;
+  let partStart = lo;
+  let i = lo;
+  while (i < hi) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, hi); continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; i++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; i++; continue; }
+    if (depth === 0 && delims.has(ch)) {
+      parts.push({ start: partStart, end: i });
+      partStart = i + 1;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  if (partStart < hi) parts.push({ start: partStart, end: hi });
+  return parts;
+}
+
+/**
+ * Locate the type body's outer `{ … }` in a PRE-MASKED decl buffer (comments
+ * already blanked). Returns the opening `{` + its matching `}`, buffer-relative
+ * (add the buffer's base offset for absolute positions). Returns undefined for a
+ * brace-less type (a refinement, alias, `type X: struct` with no body, or the
+ * bar-form enum).
+ */
+function findBracesInMasked(masked: string): { open: number; close: number } | undefined {
+  const len = masked.length;
+  // First `{` (a type-decl header carries no brace) is the body opener.
+  let open = -1;
+  for (let i = 0; i < len; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, len) - 1; continue; }
+    if (ch === "{") { open = i; break; }
+  }
+  if (open === -1) return undefined;
+  let depth = 0;
+  for (let i = open; i < len; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, len) - 1; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) return { open, close: i }; }
+  }
+  return undefined;
+}
+
+/**
+ * Bound a BRACE-LESS type body in a PRE-MASKED decl buffer — the §14.4 bar-form
+ * enum (`type X:enum = .A | .B`) AND a refinement / alias RHS (`type A = string
+ * | number`). The AST builder discards the tight expression span (only the
+ * OVERSHOOTING decl span + the normalized `raw` survive), so we recover the body
+ * extent from the buffer: `end` = the first top-level `}` (the enclosing `${}`
+ * close) or a newline NOT continued by a leading `|` (trailing-trimmed).
+ * `memberStart` (buffer-relative) is where a bar-form enum's variant list begins
+ * — just past the top-level `=` — or -1 when there is no `=`.
+ *
+ * Bounding `end` here is what keeps a refinement's `bodySpan` from welding the
+ * FOLLOWING decl (`span.end` runs into the next token). Returns undefined for an
+ * empty body. All offsets are buffer-relative.
+ */
+function findBraceLessBody(masked: string): { memberStart: number; end: number } | undefined {
+  const len = masked.length;
+  let depth = 0;
+  let eq = -1;
+  let end = len;
+  let i = 0;
+  while (i < len) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, len); continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; i++; continue; }
+    if (ch === ")" || ch === "]") { depth--; i++; continue; }
+    if (ch === "}") { if (depth === 0) { end = i; break; } depth--; i++; continue; }
+    if (depth === 0 && ch === "=" && eq === -1) { eq = i; i++; continue; }
+    if (depth === 0 && ch === "\n") {
+      let j = i + 1;
+      while (j < len && /[ \t\r]/.test(masked[j])) j++;
+      if (masked[j] !== "|") { end = i; break; } // a leading `|` continues the list
+    }
+    i++;
+  }
+  while (end > 0 && /\s/.test(masked[end - 1])) end--;
+  if (end <= 0) return undefined;
+  let memberStart = -1;
+  if (eq !== -1) {
+    memberStart = eq + 1;
+    while (memberStart < end && /\s/.test(masked[memberStart])) memberStart++;
+    if (memberStart >= end) memberStart = -1;
+  }
+  return { memberStart, end };
+}
+
+
+/** Match the paren opened at `openIdx` in `masked` within `[.., hi)`; returns
+ *  the index of the closing `)`, or -1 when unbalanced. */
+function matchParen(masked: string, openIdx: number, hi: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < hi; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, hi) - 1; continue; }
+    if (ch === "(") depth++;
+    else if (ch === ")") { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+/** Index of the FIRST `:` at paren/brace/bracket depth 0 (outside strings) in
+ *  `masked[lo, hi)`, or -1. A `:` nested inside a type — `fn(e:Event)`, `{x:int}`
+ *  — is NOT a name/type separator, so a depth-0 scan is load-bearing for
+ *  positional-vs-named arg classification (§18.7). */
+function firstTopLevelColon(masked: string, lo: number, hi: number): number {
+  let depth = 0;
+  for (let i = lo; i < hi; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, hi) - 1; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (depth === 0 && ch === ":") return i;
+  }
+  return -1;
+}
+
+/** Is `masked[i]` a word-start of the keyword `word` at depth 0 (boundary before,
+ *  and — for `renders`/`transitions` — the required follower)? Generic helper. */
+function isKeywordAt(masked: string, i: number, word: string): boolean {
+  if (!masked.startsWith(word, i)) return false;
+  const before = i === 0 ? "" : masked[i - 1];
+  return i === 0 || !/[A-Za-z0-9_$]/.test(before);
+}
+
+/** §51.2 — index at which the trailing `transitions { … }` block begins (so it
+ *  is never mis-read as a variant), or `masked.length` when absent. Mirrors the
+ *  canonical `parseEnumBody` transitions scan. */
+function findTransitionsCut(masked: string): number {
+  const n = masked.length;
+  let depth = 0;
+  let i = 0;
+  while (i < n) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, n); continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; i++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; i++; continue; }
+    if (depth === 0 && isKeywordAt(masked, i, "transitions")) {
+      let j = i + "transitions".length;
+      while (j < n && /\s/.test(masked[j])) j++;
+      if (masked[j] === "{") return i;
+    }
+    i++;
+  }
+  return n;
+}
+
+/** Index of a top-level `renders` keyword within `masked[ps, pe)` (a rendering
+ *  annotation on an enum variant, not part of its type identity), or -1. */
+function findRendersCut(masked: string, ps: number, pe: number): number {
+  let depth = 0;
+  for (let i = ps; i < pe; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipMaskedString(masked, i, pe) - 1; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (depth === 0 && isKeywordAt(masked, i, "renders")) {
+      const after = i + "renders".length < pe ? masked[i + "renders".length] : " ";
+      const before = i > ps ? masked[i - 1] : " ";
+      if (/\s/.test(before) && /\s/.test(after)) return i;
+    }
+  }
+  return -1;
+}
+
+/** Trim leading/trailing whitespace off `[ps, pe)` using `masked` (so a trailing
+ *  comment — already blanked to spaces — is trimmed away). Returns the tightened
+ *  `[start, end)` (start >= end signals an empty part). */
+function trimSpan(masked: string, ps: number, pe: number): { start: number; end: number } {
+  let s = ps;
+  let e = pe;
+  while (s < e && /\s/.test(masked[s])) s++;
+  while (e > s && /\s/.test(masked[e - 1])) e--;
+  return { start: s, end: e };
+}
+
+/**
+ * Parse a struct body's fields from the VERBATIM source over the member-list
+ * region `[innerStart, innerEnd)` (inside the braces). Mirrors `parseStructBody`
+ * recognition (`name: typeExpr`, split on top-level `,` / newline; the same
+ * field-name regex) but tracks absolute offsets + keeps `typeText` verbatim.
+ */
+function parseStructMembers(source: string, maskedDecl: string, declBase: number, innerStart: number, innerEnd: number): TypeMember[] {
+  const base = innerStart;
+  const inner = source.slice(base, innerEnd);
+  const masked = maskedDecl.slice(innerStart - declBase, innerEnd - declBase);
+  const parts = splitTopLevelSpans(masked, 0, masked.length, new Set([",", "\n"]));
+  const members: TypeMember[] = [];
+  for (const part of parts) {
+    const { start: ps, end: pe } = trimSpan(masked, part.start, part.end);
+    if (ps >= pe) continue;
+    const colonIdx = firstTopLevelColon(masked, ps, pe);
+    if (colonIdx === -1) continue;
+    // Field name (trim any whitespace between name and the colon).
+    let nameEnd = colonIdx;
+    while (nameEnd > ps && /\s/.test(masked[nameEnd - 1])) nameEnd--;
+    const name = inner.slice(ps, nameEnd);
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) continue;
+    // Field type (verbatim, leading whitespace after the colon skipped).
+    let typeStart = colonIdx + 1;
+    while (typeStart < pe && /\s/.test(masked[typeStart])) typeStart++;
+    const typeText = inner.slice(typeStart, pe);
+    members.push({
+      name,
+      memberKind: "field",
+      typeText,
+      span: { start: base + ps, end: base + pe },
+    });
+  }
+  return members;
+}
+
+/**
+ * Parse an enum variant's constructor arg-tuple from `masked[lo, hi)` (the
+ * interior of the payload parens). Named args → declared name + verbatim type;
+ * positional args → the `_<i>` synthetic key `parseEnumBody` assigns, keyed on
+ * the arg's tuple INDEX (an empty part from a trailing comma consumes an index).
+ */
+function parseVariantArgs(
+  inner: string,
+  masked: string,
+  base: number,
+  lo: number,
+  hi: number,
+): MemberArg[] {
+  const argParts = splitTopLevelSpans(masked, lo, hi, new Set([","]));
+  const args: MemberArg[] = [];
+  for (let i = 0; i < argParts.length; i++) {
+    const { start: ps, end: pe } = trimSpan(masked, argParts[i].start, argParts[i].end);
+    if (ps >= pe) continue; // empty (e.g. trailing comma) — index consumed, no arg
+    // Depth-aware: only a `:` at bracket depth 0 separates a named arg's
+    // `name: type`. A `:` nested in the type (`fn(e:Event)`, `{x:int}`) means the
+    // arg is POSITIONAL and the whole slice is its typeText. (Canonical
+    // parseEnumBody uses a non-depth-aware indexOf here and mis-keys such args —
+    // a deliberate, more-correct divergence; the drift-guard corpus excludes it.)
+    const colonIdx = firstTopLevelColon(masked, ps, pe);
+    if (colonIdx === -1) {
+      // Positional — synthesize `_<i>` (the parseEnumBody convention).
+      args.push({ name: `_${i}`, typeText: inner.slice(ps, pe), span: { start: base + ps, end: base + pe } });
+      continue;
+    }
+    let nameEnd = colonIdx;
+    while (nameEnd > ps && /\s/.test(masked[nameEnd - 1])) nameEnd--;
+    const argName = inner.slice(ps, nameEnd);
+    let typeStart = colonIdx + 1;
+    while (typeStart < pe && /\s/.test(masked[typeStart])) typeStart++;
+    args.push({
+      name: argName,
+      typeText: inner.slice(typeStart, pe),
+      span: { start: base + ps, end: base + pe },
+    });
+  }
+  return args;
+}
+
+/**
+ * Parse an enum body's variants from the VERBATIM source over the member-list
+ * region `[innerStart, innerEnd)` (inside the braces, or the bar-form variant
+ * list of a brace-less enum). Mirrors `parseEnumBody` variant
+ * recognition (split on top-level newline / `,` / `|`; strip bar-form `.` and a
+ * trailing `renders` clause; cut the `transitions {}` block; the same
+ * uppercase-initial variant-name regex) but tracks absolute offsets + verbatim
+ * payload signature, and resolves each variant's constructor args.
+ */
+function parseEnumMembers(source: string, maskedDecl: string, declBase: number, innerStart: number, innerEnd: number): TypeMember[] {
+  const base = innerStart;
+  const inner = source.slice(base, innerEnd);
+  const masked = maskedDecl.slice(innerStart - declBase, innerEnd - declBase);
+  const variantsEnd = findTransitionsCut(masked);
+  const parts = splitTopLevelSpans(masked, 0, variantsEnd, new Set(["\n", ",", "|"]));
+  const members: TypeMember[] = [];
+  for (const part of parts) {
+    const trimmed = trimSpan(masked, part.start, part.end);
+    if (trimmed.start >= trimmed.end) continue;
+    const ps = trimmed.start;
+    // Cut a trailing `renders …` clause off the structural view.
+    const rIdx = findRendersCut(masked, ps, trimmed.end);
+    let core = rIdx === -1 ? trimmed.end : rIdx;
+    while (core > ps && /\s/.test(masked[core - 1])) core--;
+    if (ps >= core) continue;
+    // Variant name — skip a bar-form leading `.`.
+    let a = ps;
+    if (masked[a] === ".") { a++; while (a < core && /\s/.test(masked[a])) a++; }
+    let nameEnd = a;
+    while (nameEnd < core && /[A-Za-z0-9_]/.test(masked[nameEnd])) nameEnd++;
+    const name = inner.slice(a, nameEnd);
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) continue;
+    const parenIdx = masked.indexOf("(", nameEnd);
+    if (parenIdx === -1 || parenIdx >= core) {
+      // Unit variant.
+      members.push({ name, memberKind: "variant", typeText: "", span: { start: base + a, end: base + nameEnd }, args: [] });
+      continue;
+    }
+    const closeParen = matchParen(masked, parenIdx, core);
+    if (closeParen === -1) {
+      // Unbalanced payload — degrade to a unit-shaped member (never throw).
+      members.push({ name, memberKind: "variant", typeText: "", span: { start: base + a, end: base + nameEnd }, args: [] });
+      continue;
+    }
+    const args = parseVariantArgs(inner, masked, base, parenIdx + 1, closeParen);
+    const typeText = inner.slice(parenIdx, closeParen + 1); // verbatim "(...)"
+    members.push({ name, memberKind: "variant", typeText, span: { start: base + a, end: base + closeParen + 1 }, args });
+  }
+  return members;
+}
+
+// ---------------------------------------------------------------------------
 // Channel name extraction (mirrors emit-channel.ts attr read)
 // ---------------------------------------------------------------------------
 
@@ -308,11 +810,87 @@ function projectBlock(
     writes = footprint.writes;
   }
 
+  const id = `${relPath}::${name}`;
+  const typeShape: TypeShape | undefined = kind === "type"
+    ? deriveTypeShape(typeof node.typeKind === "string" ? node.typeKind : "")
+    : undefined;
+
+  // bodySpan — a tight `[start, end)` bounded at the entity's body-close, so a
+  // consumer can splice `[start, end)` without welding trailing trivia (the
+  // `span.end` overshoot). For `type` blocks the close is the body `}` (or, for
+  // a brace-less bar-form enum / refinement, the end of the RHS) — a type decl's
+  // `span.end` runs PAST it into the following token (the systemic
+  // g-decl-span-overshoot remainder). For the other kinds we trim trailing
+  // whitespace/newline off `span.end`. Never claims more than `span`.
+  let bodyEnd = span.end;
+  let members: TypeMember[] = [];
+  if (typeof source === "string") {
+    let closeEnd: number | undefined;
+    if (kind === "type") {
+      // Mask comments over THIS decl's span ONCE, then thread the buffer to the
+      // brace/region scans + the member parse (no per-call re-mask).
+      const declBase = span.start;
+      const maskedDecl = maskComments(source.slice(declBase, Math.min(span.end, source.length)));
+      let region: { start: number; end: number } | undefined; // ABSOLUTE inner region
+      const braces = findBracesInMasked(maskedDecl);
+      if (braces) {
+        region = { start: declBase + braces.open + 1, end: declBase + braces.close };
+        closeEnd = declBase + braces.close + 1;
+      } else {
+        // Brace-less body: a bar-form enum variant list OR a refinement / alias
+        // RHS. Bounding bodyEnd here is what stops a refinement's bodySpan from
+        // welding the FOLLOWING decl.
+        const body = findBraceLessBody(maskedDecl);
+        if (body) {
+          closeEnd = declBase + body.end;
+          if (typeShape === "enum" && body.memberStart !== -1) {
+            region = { start: declBase + body.memberStart, end: declBase + body.end };
+          }
+        }
+      }
+      if (region) {
+        // struct + error (§19.3) are field-bearing (the type-system parses both
+        // with parseStructBody); enum yields variants; refinement / tuple resolve
+        // to no fields (tAsIs) → empty members.
+        if (typeShape === "struct" || typeShape === "error") {
+          members = parseStructMembers(source, maskedDecl, declBase, region.start, region.end);
+        } else if (typeShape === "enum") {
+          members = parseEnumMembers(source, maskedDecl, declBase, region.start, region.end);
+        }
+      }
+    }
+    if (closeEnd !== undefined) {
+      bodyEnd = closeEnd;
+    } else {
+      // Trailing-trivia trim (non-type block, or a body-less type with no `=`).
+      let e = Math.min(span.end, source.length);
+      while (e > span.start && /\s/.test(source[e - 1])) e--;
+      bodyEnd = e;
+    }
+  }
+  const bodySpan: ByteSpan = { start: span.start, end: bodyEnd };
+
+  if (kind === "type") {
+    return {
+      id,
+      kind,
+      name,
+      typeShape: typeShape as TypeShape,
+      span,
+      bodySpan,
+      members,
+      reads,
+      writes,
+      footprintDepth: "shallow",
+    };
+  }
+
   return {
-    id: `${relPath}::${name}`,
+    id,
     kind,
     name,
     span,
+    bodySpan,
     reads,
     writes,
     footprintDepth: "shallow",
