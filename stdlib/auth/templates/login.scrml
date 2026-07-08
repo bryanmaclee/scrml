@@ -64,7 +64,7 @@
         @submitting = true
 
         const result = loginServer(@email, @password)
-        if (result.error != "") {
+        if (result.error is some) {
           @errorMessage = result.error
           @submitting = false
           return
