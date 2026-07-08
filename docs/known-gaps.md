@@ -15,10 +15,10 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 1 |
-| MED | 21 |
+| HIGH | 0 |
+| MED | 19 |
 | LOW | 16 |
-| Nominal (spec-ahead-of-impl) | 8 |
+| Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
 > The four data rows above are a GENERATED artifact derived from the `<!-- @gap … -->` tokens — run `bun scripts/state.ts --write` to refresh (and `--check` to gate). For WHAT closed each arc, see [`docs/changelog.md`](changelog.md); the old per-severity "Closed-this-arc" narrative cells were retired (DD3 Fork 2B, `dd3-state-self-evidence-2026-06-07`).

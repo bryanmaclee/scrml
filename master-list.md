@@ -94,6 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `f9d37153` — chore(s244): WRAP — CSS-native model (SPEC §65 draft) + E-CG-001 HIGH + flobase boot fix + string-blind reverted — **LOCAL-ONLY**
 - `02425f54` — chore(s243): WRAP — hand-off CLOSE + changelog + delta-log [415]-[432] + BRIEF-P1 — **LOCAL-ONLY**
 - `3b399ab0` — chore(s242): WRAP — hand-off + changelog + delta-log [402-414] + master-list; BaaS #3 introspect landed, realtime DD, Peter PA (no push, no maps) — **LOCAL-ONLY**
 - `87b57b30` — chore(s241): WRAP — hand-off + changelog + delta-log [390-401] + user-voice + 8 gaps — **pushed**
@@ -101,7 +102,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `e44ce893` — chore(s239): WRAP — A/B + E-TOOL-006 landed, PA contract hardened; W5b HELD on origin/w5b-wip (cross-machine) — **pushed**
 - `6f8adc5c` — chore(s238): WRAP addendum — flogence Surface-2 R26 (2 CLI toolchain blockers filed + prioritized) — **pushed**
 - `66a3afb1` — chore(s237): WRAP bookkeeping (RECOVER — c2ed7535 landed empty via the -F- stdin-heredoc staging-loss) — **pushed**
-- `57de558a` — chore(s236): WRAP — hand-off CLOSE + changelog + user-voice + freeze-readiness + delta-log [321-323] — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
