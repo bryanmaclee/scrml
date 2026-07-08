@@ -20247,7 +20247,7 @@ artifacts (per §38.12.6) and so does not trigger E-SQL-009.
 
 ### 38.13 Realtime Feed over External DB Writes — `<channel watches=>`
 
-> **Implemented (S245, 2026-07-07; Postgres-only).** Phase 1 landed the front-end — recognition, `RowChange` synthesis, `<onchange>` typing, and the six `E-/W-CHANNEL-WATCHES-*` diagnostics (`52c5afec`). Phase 2 landed the runtime — the server-boot Postgres trigger install + `pg_notify`, a compiler-bundled `pg` per-instance `LISTEN` bridge that re-SELECTs the changed row by PK and publishes the `{ __type:"__change", op, row|key }` frame, the client `__change`→`<onchange>` dispatch, and §14.8.9 protect-egress redaction of the published row. **Known follow-ups** (see §38.13.9 + `docs/changes/realtime-channel-watches-phase2-2026-07-07/`): the §52 `authority="server" table=` composition in the worked example below is not yet compilable (declare the watched table via a `<schema>` block today); `pg` bundling into the standalone `scrml build` deploy; live-Postgres end-to-end verification.
+> **Implemented (S245, 2026-07-07; Postgres-only).** Phase 1 landed the front-end — recognition, `RowChange` synthesis, `<onchange>` typing, and the six `E-/W-CHANNEL-WATCHES-*` diagnostics (`52c5afec`). Phase 2 landed the runtime — the server-boot Postgres trigger install + `pg_notify`, a compiler-bundled `pg` per-instance `LISTEN` bridge that re-SELECTs the changed row by PK and publishes the `{ __type:"__change", op, row|key }` frame, the client `__change`→`<onchange>` dispatch, and §14.8.9 protect-egress redaction of the published row. **Known follow-ups** (see §38.13.9 + `docs/changes/realtime-channel-watches-phase2-2026-07-07/`): the §52 `authority="server" table=` composition now resolves the watched table's shape from the §52 authority type-decl's declared fields (the type-decl must sit in its canonical `${...}` logic placement, §52.3.5; the markup-context form in a `<program>` body is not a recognised §52 decl) — see the worked example below; `pg` bundling into the standalone `scrml build` deploy; live-Postgres end-to-end verification.
 
 §38.4–§38.6 realtime carries changes that originate **through a scrml write path** — a client cell-write (auto-sync, §38.4) or a server-fn `broadcast()` (§38.6). §52.6.7 documents the canonical *server-side* variant (explicit `?{}`-write **then** `broadcast()` in one server fn). All of these presume a **scrml call site**. A change that commits to the database from **outside the app** — another service, `psql`, a foreign-language ORM, a second scrml instance's `?{}` — has **no scrml function to fan out from**, so §52.6.7's "compose the two verbs at the same site" answer is unavailable by construction, and connected clients never learn of the change.
 
@@ -20256,12 +20256,17 @@ artifacts (per §38.12.6) and so does not trigger E-SQL-009.
 ```scrml
 <program db="postgres://…">
 
-  <orders authority="server" table=orders>     <!-- §52: initial load + SSR + the reactive @orders collection -->
-      id: int
-      status: string
-      total: number
-  </>
-  <orders> @orders
+  ${
+      // §52 Tier-1: Order is server-authoritative, backed by the `orders`
+      // table — it owns the collection (initial load + SSR + the
+      // re-fetch-on-reconnect authoritative @orders state).
+      <Order authority="server" table="orders">
+          id: int
+          status: string
+          total: number
+      </>
+      <Order> @orders
+  }
 
   <channel name="orders-feed" watches=orders>   <!-- §38.13: live deltas from EXTERNAL commits to `orders` -->
       <onchange>
@@ -20271,19 +20276,35 @@ artifacts (per §38.12.6) and so does not trigger E-SQL-009.
       </onchange>
   </channel>
 
+  <main>
+      <ul>
+          <each in=@orders key=@.id>
+              <li : @.status>
+          </each>
+      </ul>
+  </main>
+
 </program>
 ```
 
+> The §52 `authority="server"` type-decl is declared in a `${...}` logic block
+> (its canonical placement, §52.3.5) so the compiler recognises it and resolves
+> the watched table's row shape + `id`-PK from its declared fields — a
+> `<schema>` block is not required when the watched table is a §52 authority
+> collection (§38.13.5). The `<onchange>` arms patch the §52 `@orders`
+> collection by primary key; the §52 store owns the collection, the feed
+> carries the deltas.
+
 #### 38.13.1 The `watches=` attribute
 
-- `watches=<table>` names a database table the channel mirrors. The value is a **static literal table identifier** (no `${...}` interpolation — parallel to `name=`/`topic=` per §38.11) and SHALL name a table declared in a `<schema>` in the same program (the compiler needs the row shape + primary key to synthesize `RowChange` (§38.13.2) and emit the capture DDL (§38.13.7)). An unknown table SHALL emit `E-CHANNEL-WATCHES-UNKNOWN-TABLE`.
+- `watches=<table>` names a database table the channel mirrors. The value is a **static literal table identifier** (no `${...}` interpolation — parallel to `name=`/`topic=` per §38.11) and SHALL name a table whose row shape + primary key the compiler can resolve in the same program — declared **either** by a `<schema>` block (§39) **or** by a §52 `authority="server" table=<table>` collection (whose declared fields ARE the columns; §38.13.5 composition). The shape is needed to synthesize `RowChange` (§38.13.2) and emit the capture DDL (§38.13.7). When a `<schema>` and a §52 authority collection both declare the same table name the `<schema>` is authoritative. A table declared by NEITHER SHALL emit `E-CHANNEL-WATCHES-UNKNOWN-TABLE`.
 - A `watches=` channel is still a channel: `name=` (required — its WS route `/_scrml_ws/<name>`) and `topic=` (defaults to `name`) apply as in §38.3. The compiler publishes captured changes to the channel's active topic; clients subscribed to the topic receive them.
 - `watches=` REQUIRES a Postgres database (`<program db="postgres://…">` / a `<db src>` resolving to the `postgres` driver, §44.2). On the `sqlite` or `mysql` driver it SHALL emit `E-CHANNEL-WATCHES-DRIVER` (see §38.13.7 for the driver rationale).
 - `watches=` is orthogonal to `auth=` / `reconnect=` (they compose normally — a feed MAY be auth-gated).
 
 #### 38.13.2 The synthesized `RowChange` enum
 
-For a `watches=<T>` channel the compiler **synthesizes** a per-feed change type from `T`'s `<schema>` row shape:
+For a `watches=<T>` channel the compiler **synthesizes** a per-feed change type from `T`'s row shape — its `<schema>` columns, or the declared fields of a §52 `authority="server" table=T` collection (§38.13.5):
 
 ```
 RowChange:enum = { Inserted(row: <RowT>), Updated(row: <RowT>), Deleted(key: <PKT>) }

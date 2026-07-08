@@ -98,3 +98,32 @@ describe("CONF-CHANNEL-WATCHES §38.13.8", () => {
     ]) expect(all).not.toContain(c);
   });
 });
+
+// §38.13.5 — a watches= feed sources its table shape from a §52
+// `authority="server" table=<T>` collection (the store owns the collection, the
+// feed carries the deltas). The §52 TYPE decl (canonical `${...}` placement,
+// §52.3.5) carries the row shape inline — no `<schema>` block is required.
+const AUTH_ORDERS = `  \${
+    <Order authority="server" table="orders">
+      id: int
+      status: string
+      total: number
+    </>
+    <Order> @orders
+  }`;
+const pg52 = (body) => `<program db="postgres://localhost/app">\n${AUTH_ORDERS}\n${body}\n</program>\n`;
+
+describe("CONF-CHANNEL-WATCHES §38.13.5 — §52 authority as the shape source", () => {
+  test("POS: §52 authority collection (no <schema>) → NO E-CHANNEL-WATCHES-UNKNOWN-TABLE", () => {
+    const { errors, warnings } = compile(pg52(`  <channel name="orders-feed" watches=orders>\n${ONCHANGE}\n  </channel>`), "auth52");
+    const all = [...errors, ...warnings].map((d) => d.code);
+    expect(all).not.toContain("E-CHANNEL-WATCHES-UNKNOWN-TABLE");
+    expect(all).not.toContain("E-MATCH-NOT-EXHAUSTIVE");
+    expect(all).not.toContain("W-CHANNEL-WATCHES-NO-PK"); // id-PK derivable from the §52 decl
+  });
+
+  test("NEG: a table declared by NEITHER <schema> NOR §52 still fires E-CHANNEL-WATCHES-UNKNOWN-TABLE", () => {
+    const { errors } = compile(pg52(`  <channel name="ghost-feed" watches=ghosts>\n${ONCHANGE}\n  </channel>`), "auth52unknown");
+    expect(errors.some((e) => e.code === "E-CHANNEL-WATCHES-UNKNOWN-TABLE")).toBe(true);
+  });
+});

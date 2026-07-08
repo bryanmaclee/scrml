@@ -98,17 +98,49 @@ export function isWatchesChannel(node: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Schema table collection — reads every `<schema>` block in the file so a
-// `watches=<T>` channel can resolve T's row shape + primary key.
+// Watch-table collection — resolves a `watches=<T>` channel's row shape + PK
+// from TWO sources, in precedence order:
+//
+//   1. `<schema>`-declared tables (§38.13.1) — the schema-of-record. Later
+//      duplicate declarations of a name are ignored (first-declaration-wins,
+//      matching protect-analyzer.ts).
+//   2. §52 Tier-1 server-authority TYPE decls (§52.3.5 —
+//      `< Name authority="server" table="X"> id: int  status: string </>`).
+//      Per §38.13.5 a `watches=` feed COMPOSES with a §52 `authority="server"`
+//      store: the store owns the collection (initial load + SSR + re-fetch),
+//      the feed carries the deltas by primary key. The type-decl's colon-field
+//      body IS the table shape (§52.3.3 — `table=` maps the declared fields to
+//      the DDL), already parsed by the ast-builder `tryParseServerAuthorityDecl`
+//      recogniser into the node's structured `typedAttrs` + `attrs`. We read
+//      that structured output — we do NOT re-scan the decl text by hand.
+//
+// A `<schema>` table and a §52 authority table naming the same table both
+// declare a shape; the `<schema>` wins (it is the authoritative DDL source).
+// A `watches=X` naming a table declared by NEITHER still resolves to nothing,
+// so the caller fires `E-CHANNEL-WATCHES-UNKNOWN-TABLE`.
+//
+// NOTE ON THE §52 READER: the codegen `collectServerAuthorityTypes`
+// (collect.ts) returns the INSTANCE `state-decl` nodes (`serverAuthorityTable`)
+// for the read-authority SELECT*/SSR wiring — those carry the table name but
+// NOT the column shape. The columns live on the sibling TYPE decl
+// (`state-constructor-def.typedAttrs`), which is what a `watches=` shape read
+// needs, so we walk the type-decl node directly here.
 // ---------------------------------------------------------------------------
 
 /**
- * Walk the AST collecting every `<schema>`-declared table, keyed by the
- * lower-cased table name. Later duplicate declarations of a table name are
- * ignored (first-declaration-wins, matching protect-analyzer.ts).
+ * Walk the AST collecting every `watches=`-resolvable table, keyed by the
+ * lower-cased table name. Merges `<schema>`-declared tables (precedence) with
+ * §52 server-authority type-decl tables (§38.13.5 composition fallback).
  */
 export function collectSchemaTables(nodes: any): Map<string, WatchTable> {
   const result = new Map<string, WatchTable>();
+  collectSchemaBlockTables(nodes, result);
+  collectServerAuthorityWatchTables(nodes, result);
+  return result;
+}
+
+/** Source 1 — `<schema>`-declared tables (§38.13.1). Populates `result`. */
+function collectSchemaBlockTables(nodes: any, result: Map<string, WatchTable>): void {
   const visited = new WeakSet<object>();
 
   const visit = (value: any, depth: number): void => {
@@ -151,7 +183,61 @@ export function collectSchemaTables(nodes: any): Map<string, WatchTable> {
   };
 
   visit(nodes, 0);
-  return result;
+}
+
+/**
+ * Source 2 — §52 Tier-1 server-authority TYPE decls (§52.3.5 / §38.13.5).
+ * Reads each recognised `< Name authority="server" table="X"> field: Type </>`
+ * type-decl node (`kind:"state-constructor-def"`, gated on `authority="server"`)
+ * and derives a `WatchTable` from its `table=` attr (the table name) + its
+ * `typedAttrs` (the declared columns). `<schema>` tables already in `result`
+ * take precedence, so a name declared by BOTH keeps the `<schema>` shape.
+ *
+ * §52 typed-attrs carry no `primary key` constraint marker (§52 uses the
+ * `id`-field convention, §52.3 / §41.16), so every derived column is
+ * `primaryKey:false` and `derivePrimaryKey` falls to the `id`-convention (or
+ * the channel's `key=` override) — exactly §38.13.2's PK derivation.
+ */
+function collectServerAuthorityWatchTables(nodes: any, result: Map<string, WatchTable>): void {
+  const visited = new WeakSet<object>();
+
+  const visit = (value: any, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (visited.has(value)) return;
+    visited.add(value);
+
+    if (
+      value.kind === "state-constructor-def" &&
+      readLiteralIdentAttr(value, "authority") === "server"
+    ) {
+      const tableName = readLiteralIdentAttr(value, "table");
+      const typedAttrs: any[] = Array.isArray(value.typedAttrs) ? value.typedAttrs : [];
+      if (tableName && typedAttrs.length > 0) {
+        const key = tableName.toLowerCase();
+        if (!result.has(key)) {
+          const columns: WatchColumn[] = typedAttrs
+            .map((f: any) => ({
+              name: String(f.name ?? "").trim(),
+              scrmlType: String(f.typeExpr ?? f.type ?? "asIs").trim().toLowerCase(),
+              primaryKey: false,
+            }))
+            .filter((c) => c.name.length > 0);
+          if (columns.length > 0) result.set(key, { name: tableName, columns });
+        }
+      }
+    }
+
+    for (const k of Object.keys(value)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      visit(value[k], depth + 1);
+    }
+  };
+
+  visit(nodes, 0);
 }
 
 // ---------------------------------------------------------------------------
