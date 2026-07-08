@@ -6830,8 +6830,8 @@
   },
   "stdlib/time/index.scrml": {
     "COUNT-LENGTH": 6,
-    "EXTRA-FIELD": 143,
-    "FIELD-SHAPE": 84,
+    "EXTRA-FIELD": 151,
+    "FIELD-SHAPE": 85,
     "KIND-NAME": 30,
     "MISSING-FIELD": 408,
     "SPAN-COORD": 62

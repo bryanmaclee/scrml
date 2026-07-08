@@ -8,7 +8,7 @@ ${
     //
     // Scope (v0.2.0):
     //   - Authorization-code grant with PKCE (RFC 6749, RFC 7636)
-    //   - Refresh-token grant (with optional rotation per RFC 8693)
+    //   - Refresh-token grant (with optional rotation per RFC 6749 §6)
     //   - Userinfo fetch (OpenID Connect)
     //   - Token revocation (RFC 7009)
     //   - Provider presets: google, github, microsoft, discord
@@ -290,7 +290,7 @@ ${
     /**
      * Refresh an access token using a refresh token.
      *
-     * Per RFC 8693, providers MAY rotate the refresh token — the response's
+     * Per RFC 6749 §6 (+ the OAuth 2.0 Security BCP), providers MAY rotate — the response's
      * `refreshToken` field will be the new one to persist (or absent, in
      * which case continue using the existing one).
      *

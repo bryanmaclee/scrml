@@ -179,13 +179,15 @@ export function debounce(fn, delay) {
 export function throttle(fn, limit) {
   let inThrottle = false;
   let lastArgs = null;
-  return function (...args) {
+  let timer = null;
+  function throttled(...args) {
     if (!inThrottle) {
       fn.apply(this, args);
       inThrottle = true;
-      setTimeout(() => {
+      timer = setTimeout(() => {
         inThrottle = false;
-        if (lastArgs) {
+        timer = null;
+        if (lastArgs !== null) {
           fn.apply(this, lastArgs);
           lastArgs = null;
         }
@@ -193,7 +195,27 @@ export function throttle(fn, limit) {
     } else {
       lastArgs = args;
     }
+  }
+  throttled.cancel = function () {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    inThrottle = false;
+    lastArgs = null;
   };
+  throttled.flush = function () {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+      inThrottle = false;
+      if (lastArgs !== null) {
+        fn.apply(this, lastArgs);
+        lastArgs = null;
+      }
+    }
+  };
+  return throttled;
 }
 
 export function sleep(ms) {

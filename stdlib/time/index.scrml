@@ -283,21 +283,26 @@ ${
      * Throttle a function. The throttled function invokes fn at most once per
      * `limit` milliseconds, leading edge by default.
      *
-     * IMPORTANT: Same timer cleanup caveat as debounce.
+     * The returned function carries `.cancel()` (drop the pending trailing call
+     * and clear its timer) and `.flush()` (run the pending trailing call now),
+     * mirroring `debounce` — so callers can actually clean up its timer.
      *
      * Example:
      *   const handleScroll = throttle(updateScrollPosition, 16)
+     *   // later: handleScroll.cancel()
      */
     export function throttle(fn, limit) {
         let inThrottle = false
         let lastArgs = not
-        return function(...args) {
+        let timer = not
+        function throttled(...args) {
             if (!inThrottle) {
                 fn.apply(this, args)
                 inThrottle = true
-                setTimeout(() => {
+                timer = setTimeout(() => {
                     inThrottle = false
-                    if (lastArgs) {
+                    timer = not
+                    if (lastArgs is some) {
                         fn.apply(this, lastArgs)
                         lastArgs = not
                     }
@@ -306,6 +311,26 @@ ${
                 lastArgs = args
             }
         }
+        throttled.cancel = function() {
+            if (timer is some) {
+                clearTimeout(timer)
+                timer = not
+            }
+            inThrottle = false
+            lastArgs = not
+        }
+        throttled.flush = function() {
+            if (timer is some) {
+                clearTimeout(timer)
+                timer = not
+                inThrottle = false
+                if (lastArgs is some) {
+                    fn.apply(this, lastArgs)
+                    lastArgs = not
+                }
+            }
+        }
+        return throttled
     }
 
     /**

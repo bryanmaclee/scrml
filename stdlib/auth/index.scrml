@@ -23,8 +23,8 @@ ${
     /**
      * Create an in-memory rate limiter.
      *
-     * Tracks requests per key (e.g., IP address or user ID) within a sliding
-     * time window. Uses an in-memory Map — does not persist across server restarts.
+     * Tracks requests per key (e.g., IP address or user ID) within a fixed
+     * (tumbling) time window. Uses an in-memory Map — does not persist across restarts.
      *
      * @param options — { windowMs: number, max: number }
      *   windowMs — time window in milliseconds (e.g., 15 * 60 * 1000 for 15min)
