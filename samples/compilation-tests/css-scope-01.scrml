@@ -92,7 +92,6 @@ ${
             line-height: 1.5;
         }
         <h2 class="card-title">${title}</>
-        ${...}
     </>
 }
 
