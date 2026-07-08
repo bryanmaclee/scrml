@@ -42,6 +42,7 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs } from "./codegen/emit-server.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
+import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
 import { runNRBatch } from "./name-resolver.ts";
@@ -1548,6 +1549,36 @@ export function compileScrml(options = {}) {
   const attrAllowlistResult = stage("VP-1", () => runAttributeAllowlist({ files: ceResults }));
   collectErrors("VP-1", attrAllowlistResult.errors);
 
+  // Stage 3.4: CSS-CONFLICT — the §65.2 flat-specificity conflict checker.
+  // The styling analog of an exhaustive `match`: an UNCONDITIONAL same-property
+  // overlap on a provably-shared element, between two component-scope `#{}`
+  // selector rules at the same precedence level, is `E-STYLE-CONFLICT` (hard) —
+  // scrml deletes specificity (§65.2), so the compiler refuses to silently pick
+  // a winner. The fail-closed residue (unprovable pairs, dynamic markup, and the
+  // program-level escape hatch) is the soft, non-blocking `W-STYLE-CONFLICT-POSSIBLE`.
+  //
+  // Runs on the POST-CE AST so `collectCssBlocks` tags component-scoped blocks
+  // (`_componentScope`) reliably (E-COMPONENT-021 fixed). Implements the three
+  // ratified Wave-1 calibration carve-outs (§65.2.4 R1–R3): R1 universal-`*` /
+  // bare-root rules layer (no fire); R2 class×class base+modifier is soft in
+  // Wave 1 (hard deferred to Wave-2 `style=[a,b]`); R3 program-scope soft is
+  // FILE-BOUNDED (fire only on a provable local overlap — never the 2941-warning
+  // unbounded firehose). Pushed through `collectErrors` so the `E-`/`W-` prefix +
+  // severity partition `E-STYLE-CONFLICT` into `result.errors` (fatal) and
+  // `W-STYLE-CONFLICT-POSSIBLE` into `result.warnings` (non-fatal). Wrapped in
+  // try/catch — a styling-analysis defect must never crash a valid compile.
+  for (const ceFile of ceResults) {
+    try {
+      const cssConflictDiags = checkCssConflicts(ceFile);
+      for (const d of cssConflictDiags) {
+        collectErrors("CSS-CONFLICT", [d], d.filePath || ceFile.filePath || null);
+        if (verbose) log(`  [CSS-CONFLICT] ${d.filePath}:${d.line} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [CSS-CONFLICT] pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
   // Stage 4: PA (all files)
   const _runPA = selfHostModules?.runPA ?? runPA;
   const paResult = stage("PA", () => _runPA({ files: ceResults }));
@@ -2453,7 +2484,13 @@ export function compileScrml(options = {}) {
       !(e.code?.startsWith("W-")
         || e.code?.startsWith("I-")
         || e.severity === "warning"
-        || e.severity === "info"));
+        || e.severity === "info"
+        // E-STYLE-CONFLICT (§65.2) is a CSS same-property ambiguity — ORTHOGONAL
+        // to JS emission. It is still fatal in the final result partition (fails
+        // the build), but it must NOT gate the emitted-JS validity check: a
+        // co-occurring E-CODEGEN-INVALID-LOGIC in the SAME run would otherwise be
+        // masked (the style conflict does not make codegen emit invalid JS).
+        || e.code === "E-STYLE-CONFLICT"));
     if (validateEmit && !hasPriorFatalError && cgResult.outputs) {
       const gateArtifacts = [];
       const pushArtifact = (sourceFile, artifact, contents) => {
