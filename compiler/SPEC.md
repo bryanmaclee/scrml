@@ -34957,7 +34957,7 @@ No specificity weighting. **All scrml-emitted selectors are specificity-flat.** 
 
 An **UNCONDITIONAL** same-property overlap on a **provably-shared element**, between two rules **at the same precedence level** (§65.5), is `E-STYLE-CONFLICT`. Two rules that both set `color` on an element that provably matches both, with no distinguishing condition and no author-declared order, are ambiguous → the author disambiguates. This is styling's analog of an exhaustive `match`: the compiler will not silently pick.
 
-The canonical shape is **two component-scope `#{}` selector rules** that both provably match one element in the scope's markup (a broad `button {}` fighting a specific `.btn {}` on a `<button class="btn">` — today's silent bug). The other shape is two **ambient** applied style-values (NOT an explicit ordered `style=[a,b]` list) that both set `P` on one element.
+The canonical shape is **two component-scope `#{}` selector rules** that both provably match one element in the scope's markup (a broad `button {}` fighting a specific `.btn {}` on a `<button class="btn">` — today's silent bug). The other shape is two **ambient** applied style-values (NOT an explicit ordered `style=[a,b]` list) that both set `P` on one element. Three Wave-1 calibration carve-outs (§65.2.4 R1–R3) narrow this: universal-`*`/bare-root rules layer instead of conflict (R1); a `class × class` base/modifier overlap starts soft until Wave-2 gives it a fix (R2); program-scope soft is file-bounded (R3).
 
 #### 65.2.2 Conditional rules = deterministic layers, not conflicts
 
@@ -34988,6 +34988,16 @@ The checker decides, for two same-property rules R1/R2: is there an element both
 - program-level global `#{}` (no donut → unbounded element set → not enumerable; the global escape hatch inherently gets the weaker guarantee — §65.9, OQ-8).
 
 **The fail-closed rule:** a pair the checker can **neither** prove-disjoint **nor** prove-shared SHALL be surfaced (err toward flagging the risk), but as the **soft** `W-STYLE-CONFLICT-POSSIBLE`, not the hard block. A legitimately-disjoint-but-unprovable pair is *warned*, not *rejected*. Hard `E-STYLE-CONFLICT` is reserved for **proven** ambiguity. This split is what keeps the guarantee real without a false-positive wall adopters would disable — and its boundary is the one make-or-break risk (§65.11 MVP gate).
+
+**Wave-1 calibration carve-outs (R1–R3 — ratified 2026-07-08 from the §65.11 dry-run).** The decidable/fail-closed *axis* above is sound, but the §65.11 corpus dry-run found the line drawn one notch too eager on three nameable cases. These carve-outs are normative for the Wave-1 checker:
+
+- **R1 — universal `*` and bare-root (`html`, `body`) rules are a LOWER LAYER, not a same-level conflict.** A user-authored `*` / `html` / `body` selector rule is an author-reset floor (the same *kind* of thing as the built-in reset §65.3.4 and `<defaults>` §65.3.3), resolved **below** class/id/specific author rules in the §65.5 precedence order. An overlap between a `*`/`html`/`body` rule and a class/id/specific rule is therefore a deterministic **layer**, NOT `E-STYLE-CONFLICT`. (`* { padding: 0 }` vs `.btn { padding: 16px }` is not ambiguous — the author expects the specific rule to win; flagging it is a false positive on the commonest opening lines of a stylesheet. This carve-out removed 65% of would-be-hard findings in the dry-run with zero loss of real signal.)
+
+- **R2 — a `class × class` base+modifier same-property overlap starts SOFT in Wave 1, promotes to HARD in Wave 2.** Two *class* selectors that provably both match one element (`<button class="btn btn-op">`) and set the same property, differing only by a base/modifier relationship (`.btn` + `.btn-op`), are real source-order fragility (the §65.2.1 conflict by the letter). But the §65-blessed fix — ordered composition `style=[base, modifier]` (§65.4.4) — is a **Wave-2** primitive, so a hard block in Wave 1 has no migration target to route the author to. Wave 1 SHALL emit this case as **soft** (`W-STYLE-CONFLICT-POSSIBLE`, non-blocking, names both loci); it **promotes to hard `E-STYLE-CONFLICT` in Wave 2** alongside `style=[a,b]`. (BEM is the single most common CSS methodology; this is the affordability hedge §65.11 demands.)
+
+- **R3 — the program-scope soft diagnostic is FILE-BOUNDED, not per-pair-unbounded.** Program-level global `#{}` resolves against the **file's own enumerable markup** (a bounded set per file); the checker fires `W-STYLE-CONFLICT-POSSIBLE` ONLY on a provable **local** (same-file) overlap, NOT on every same-property program-rule pair. The "could match cross-file" reach is the documented **weaker guarantee** of the global escape hatch (§65.9, OQ-8) — a doc-level nudge, NOT a per-pair warning. (The literal "unbounded → soft-per-pair" reading fired 2941 warnings across 49 files in the dry-run — a firehose adopters would mute wholesale.)
+
+**With R1 + R2 the residual hard false-positive rate on the existing corpus is 0** — safe to ship the Wave-1 hard error. Today's corpus exercises the hard path only thinly (3 component-scoped `#{}`); confidence rests on the dry-run's WHAT-IF projection, and the boundary is **re-validated after Wave-2** grows the component-scoped surface (§65.11).
 
 #### 65.2.5 `:where()`-flat emission (the flat-specificity mechanism)
 
@@ -35117,12 +35127,13 @@ Conditional application reuses the **`class:`-family** (§5.5.2) sibling: **`sty
 One fixed chain, reasoned top-to-bottom, **no `(id,class,type)` arithmetic anywhere** (§Rulings row 5):
 
 ```
-applied style=  >  component-scope `#{}` selector rule  >  <defaults> / DOM-inherited  >  built-in reset  >  browser initial
+applied style=  >  class / id / specific author rule (component-scope `#{}`)  >  universal `*` / bare-root (`html`, `body`) author rule  >  <defaults> / DOM-inherited  >  built-in reset  >  browser initial
 ```
 
 - **Applied `style=` is the per-instance override** and WINS over the target's own scope selector rule (inline-beats-class intuition — `style=` IS the per-instance override). This **REVISES** the DD axis-2 provisional "local rule > applied style-value"; §Rulings row 5 is authoritative.
 - An explicit `style=[a, b]` list resolves internally by author order (last-in-list wins, §65.4.4) before competing as the single "applied `style=`" level.
 - Tailwind `utilities` (§26) sit **below** the component-scope author rules (utilities-LOW) but above `<defaults>` — see the `@layer` order in §65.8. A co-located scope rule beats a global utility (axiom-consistent).
+- **R1 (§65.2.4 calibration):** a universal `*` or bare-root (`html`/`body`) author rule is an author-reset floor — it resolves *below* class/id/specific author rules (above `<defaults>`), so a `*`/`html`/`body` rule overlapping a specific rule is a deterministic layer, not `E-STYLE-CONFLICT`.
 - Across levels the chain **orders** (never a conflict); *within* a level an unconditional same-property overlap is `E-STYLE-CONFLICT` (§65.2.1).
 
 ### 65.6 Reactive theming — the named-variant reactive selector
@@ -35216,6 +35227,8 @@ Tailwind stays as the **atomic escape hatch** — not replaced (its utility thes
 
 Wave 1 SHALL **build + dry-run the `E-STYLE-CONFLICT` checker on the existing `#{}` corpus surface** (83 files / 187 blocks — verified 2026-07-07) and **tune the decidable / fail-closed boundary (§65.2.4) BEFORE the hard error ships.** The predictability *guarantee* is the whole thesis, and its teeth depend entirely on that boundary: too eager → it blocks legitimate code and adopters disable the lint (the guarantee dies as a convention); too lax → fail-open silent last-wins (the guarantee was never real). Only a corpus-wide dry-run (hard-error rate, `W-STYLE-CONFLICT-POSSIBLE` rate, false-positive audit) can calibrate the boundary. This is the single make-or-break risk, and the reason Wave 1 is scoped to *run the checker on the existing `#{}` and tune it* before any new syntax lands.
 
+**Dry-run outcome (2026-07-08).** The dry-run ran (analyzer `compiler/scripts/css-conflict-dryrun.ts`; report `docs/changes/css-wave1-conflict-checker-dryrun-2026-07-07/CALIBRATION-REPORT.md`). The real analyzable surface is **625 grouped rules across 62 program + 3 component scopes** (the "187 blocks" was a textual `#{` grep inflated by comments/prose; the 83-file count is correct). **Zero hard `E-STYLE-CONFLICT` fires on the corpus as-is** — every conflict is program-level (soft) and only 3 trivial component-scoped `#{}` exist, so the hard path is exercised only by the WHAT-IF projection (program overlaps re-imagined component-scoped): **20 would-be-hard = 13 universal-`*` reset (false positives → R1) + 7 BEM base+modifier (real-by-letter, no Wave-1 fix → R2)**, plus a 2941-warning program firehose (→ R3). **R1/R2/R3 ratified 2026-07-08** (§65.2.4); with R1+R2 the residual hard false-positive rate is **0 → the Wave-1 hard error is safe to ship**. Because only 3 component scopes exist today, the hard-path boundary is **re-validated after Wave-2** grows the component-scoped surface.
+
 ### 65.12 Deferred / open questions (marked OPEN — NOT designed here)
 
 Deferred Tier-3 open questions (per the DD §Rulings):
@@ -35224,7 +35237,8 @@ Deferred Tier-3 open questions (per the DD §Rulings):
 - **OQ-5 — `@keyframes` / `@font-face` / counter namespacing.** Globally-named at-rules inside a component collide globally (last-wins), un-scopable by `@scope`. Auto-namespace (component-owned, `Card__spin`; PA lean) or `E-STYLE-KEYFRAMES-COLLISION` on leak? **OPEN** (the one place scrml might have to name-mangle — animation names have no `@scope` remedy).
 - **OQ-6 — a content-treatment primitive for un-owned subtrees.** A blessed `prose`-shaped primitive as the explicit home for un-owned-subtree (slotted/projected/markdown) descendant styling, or is §26.6 `prose` + "make a component" enough? The `E-STYLE-VALUE-DESCENDANT` message routes here. **OPEN.**
 - **OQ-7 — `@apply` (§26.8) vs style-value, long-term.** Both compose reusable treatments (`@apply` composes *utilities*; a style-value composes *declarations + tokens*). Keep both, or does a style-value + an "apply-utilities-into-a-style-value" form subsume `@apply`? **OPEN.**
-- **OQ-8 — global program-level `#{}` disposition.** No donut → unbounded element set → only the soft `W-STYLE-CONFLICT-POSSIBLE` (§65.2.4). Accept the weaker guarantee for the global escape hatch, or discourage/deprecate raw global *selector* `#{}` in favor of `<defaults>` + `<theme>`? **OPEN.**
+- **OQ-8 — global program-level `#{}` disposition.** No donut → unbounded element set → only the soft `W-STYLE-CONFLICT-POSSIBLE` (§65.2.4). Accept the weaker guarantee for the global escape hatch, or discourage/deprecate raw global *selector* `#{}` in favor of `<defaults>` + `<theme>`? **OPEN.** (R3 (§65.2.4) file-bounds the *diagnostic*; this OQ is the broader disposition.)
+- **OQ-9 — shorthand ↔ longhand "same property" overlap (§65.11 dry-run).** §65.2.4 says "two rules that both set `P`," but `* { margin }` vs `.x { margin-bottom }` and `.btn { border }` vs `.btn-op { border-color }` are a shorthand + longhand that *partially* overlap. Does "same property" include shorthand/longhand? If yes, the checker needs a shorthand-expansion table (`background` → `background-color`, …); if no, they silently co-apply (a predictability hole). The dry-run flagged 14 such pairs (mostly on the reset/BEM classes R1+R2 already cover). PA lean: yes, expand (a Wave-2 detail). **OPEN.**
 
 ### 65.13 Worked adopter example (a themed app)
 
