@@ -4,7 +4,7 @@
 **Date:** 2026-07-07
 **Status:** draft
 **for:** SPEC §65 (Nominal) — the scrml-native CSS model (new top-level section; **the number `65` is the next-available top-level § as of this draft — assign at apply, section-relative, do NOT hardcode the number**)
-**Classification:** SPEC-TEXT / **Nominal** (spec-ahead-of-implementation). v1.next / post-freeze. The model SURFACE + the `E-STYLE-*` / `W-STYLE-*` / `E-THEME-*` / `E-DEFAULTS-*` diagnostic codes are **NAMED** here; their **§34 catalog rows land WITH the impl wave** per Rule 4 / the §38.13 · §60 · §61 · §64 named-codes-land-with-impl precedent. **NONE at this landing.**
+**Classification:** SPEC-TEXT / **Nominal** (spec-ahead-of-implementation). **Wave 1 = V1.0 gate · Waves 2–3 + Full = v1.next** (bryan-elevated 2026-07-07: CSS is the third native leg / language identity, not a post-freeze nicety — but only the guarantee-on-what-ships gates 1.0; see §65.15). The model SURFACE + the `E-STYLE-*` / `W-STYLE-*` / `E-THEME-*` / `E-DEFAULTS-*` diagnostic codes are **NAMED** here; their **§34 catalog rows land WITH the impl wave** per Rule 4 / the §38.13 · §60 · §61 · §64 named-codes-land-with-impl precedent. **NONE at this landing.**
 **authority:** `../../../../scrml-support/docs/deep-dives/css-scrml-fication-2026-07-07.md` DD (axes 1–3 LOCKED; §Rulings — 9 ratified decisions 2026-07-07) + bryan rulings 2026-07-07. Rulings are LOCKED; this text is built FROM them, not a re-litigation.
 
 > **This is a DRAFT the PA reviews before it is applied to `SPEC.md`.** It does NOT touch `compiler/SPEC.md`. It is not committed as a SPEC change. Apply at a clean landing per the instructions below.
@@ -29,7 +29,7 @@
 
 > **Nominal (spec-ahead-of-implementation).** This section is normative for the SURFACE (the styling model, the resolution algorithm, the `<theme>`/`<defaults>` structural elements, the `style=`-value application, and the named diagnostics). The compiler wiring — the conflict-checker pass, `:where()`-flat emission on scoped `#{}`, the `@layer` order emission, the reset block, token → `:root` custom-property lowering, the `style`-value type + `style=` value-shape dispatch, and the `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-*` diagnostics — is the follow-on impl wave that flips this banner. Sequencing: §65.13.
 
-> **FINALIZED — 2026-07-07 (bryan: "your leans, wrap").** The 5 under-specified points flagged below (the `OPEN (PA to close)` markers) are RESOLVED to the PA leans; the applying editor honors these:
+> **FINALIZED — 2026-07-07 (bryan: "your leans, wrap") · FOLDED into the body sections 2026-07-07 (S246).** The 5 under-specified points are RESOLVED to the PA leans and now **inlined in their body sections** (the `OPEN (PA to close)` markers are removed). This block is retained as the decision record — the body is authoritative:
 > 1. **Theme-variant surface (§65.6).** `<theme>` declares named variant sub-blocks (`.Light`/`.Dark`) over a shared base; the variant set is an enum-like type, bound to a **user-declared** reactive cell via `<theme for=@appMode>` (mirrors engine `for=`). The mode cell is an ORDINARY adopter-named reactive cell of the theme-variant type — **`@mode` is NOT reserved.** `@appMode = .Dark` switches (one `:root` custom-property-set write). `@media (prefers-color-scheme)` auto-bind coexists as sugar for binding that cell to the media signal.
 > 2. **Built-in reset (§65.3 / OQ-9).** Ships a modern-consensus MINIMAL reset (`box-sizing:border-box` on `*,::before,::after`; margin-zero on the flow set; `img/picture/video/canvas/svg` → `display:block; max-width:100%`; form controls inherit font; sane `body` line-height/min-height) in its own **lowest** `reset` layer (everything beats it). Opt out via **`<program reset="none">`**.
 > 3. **`!important` interop escape (§65.7).** KEEP the familiar CSS `!important` glyph. **`E-STYLE-IMPORTANT-INTERNAL`** fires when it targets a property the compiler can resolve scrml-internally (precedence is guaranteed → `!important` there is a bug). ALLOWED (with info-lint **`W-STYLE-IMPORTANT-INTEROP`**) only where the target is NOT scrml-resolvable (beating foreign/vendored/un-isolable CSS) — the sole sanctioned use.
@@ -164,9 +164,15 @@ A **`<defaults>`** structural element (§65.9, §D — NOT `<base>`: that is a s
 
 #### 65.3.4 The built-in reset (opt-out-able, its own bottom layer)
 
-A **built-in sane reset** ships (`box-sizing: border-box`, zeroed default margins, sensible element defaults) so no reset-boilerplate is needed. It lives in the bottom **`reset`** `@layer` (§65.8) — *below* everything author — so a reset rule and an author rule for one property are **layered** (deterministic), never a same-layer overlap; `E-STYLE-CONFLICT` fires only *within* a layer. The reset is **opt-out-able**. It is the **one** sanctioned universal global block — justified because a reset is genuinely app-wide (every app wants it), reconciling with the §26.7 "no per-utility global preflight block" minimalism axiom (scrml avoids a *per-utility* global var block, but a small, fixed, universal reset is sanctioned).
+A **built-in sane reset** ships so no reset-boilerplate is needed. It is a **modern-consensus minimal reset** (frozen + documented; §Rulings row-2 finalization):
 
-> **OPEN (PA to close with bryan).** OQ-9 ruled "a built-in reset ships, opt-out-able, in its own layer," but did NOT fix (a) *which* reset (the exact frozen, documented ruleset) nor (b) the *opt-out syntax*. Both are under-specified — see §65.12.
+- `box-sizing: border-box` on `*, ::before, ::after`;
+- margin zeroed on the flow set (`body`, headings, paragraphs, lists, `figure`, `blockquote`, `hr`, `fieldset`);
+- `img, picture, video, canvas, svg` → `display: block; max-width: 100%`;
+- form controls (`input, button, textarea, select`) inherit `font`;
+- a sane `body` (readability `line-height`; `min-height: 100vh`).
+
+It lives in the bottom **`reset`** `@layer` (§65.8) — *below* everything author — so a reset rule and an author rule for one property are **layered** (deterministic), never a same-layer overlap; `E-STYLE-CONFLICT` fires only *within* a layer. **Opt out via `<program reset="none">`** — drops the whole `reset` layer. It is the **one** sanctioned universal global block — justified because a reset is genuinely app-wide (every app wants it), reconciling with the §26.7 "no per-utility global preflight block" minimalism axiom (scrml avoids a *per-utility* global var block, but a small, fixed, universal reset is sanctioned).
 
 ### 65.4 Axis 3 — style-as-value (mirrors Pillar 1 markup-as-value)
 
@@ -240,30 +246,49 @@ applied style=  >  component-scope `#{}` selector rule  >  <defaults> / DOM-inhe
 - Tailwind `utilities` (§26) sit **below** the component-scope author rules (utilities-LOW) but above `<defaults>` — see the `@layer` order in §65.8. A co-located scope rule beats a global utility (axiom-consistent).
 - Across levels the chain **orders** (never a conflict); *within* a level an unconditional same-property overlap is `E-STYLE-CONFLICT` (§65.2.1).
 
-### 65.6 Reactive theming — the named-variant reactive selector (`@mode`)
+### 65.6 Reactive theming — the named-variant reactive selector
 
-`<theme>` tokens are **reactive**. Theming is a **named-variant reactive selector** (§Rulings row 3): a reactive selector cell (conventionally `@mode`) holds the active variant; switching it (`@mode = .Dark`) re-binds the active custom-property set with **one `:root` custom-property write**, natively propagated to every explicit use site, **zero re-render**. Because every use site *explicitly references* the token (`color: ink`), the whole page flips together — with **no** `[data-theme] .foo` global override selectors, no specificity war, no `!important`. The theme is a **value channel**, not a cascade.
-
-A `<theme>` MAY also re-bind token values by a **media condition** (a deterministic layer):
+`<theme>` tokens are **reactive**. Theming is a **named-variant reactive selector** (§Rulings row 3): the `<theme>` block declares named **variant sub-blocks** (`.Light`, `.Dark`, …) that each re-bind a subset of tokens **over the shared base**, and binds to an **ordinary adopter-named reactive cell** via **`<theme for=@cell>`** — mirroring the engine `for=` binding. The variant set (`.Light`/`.Dark`) is an **enum-like type**; the bound cell holds the active variant. **`@mode` is a convention, NOT a reserved name** — the adopter names the cell.
 
 ```scrml
-<theme>
-    ink   = #0f172a;
+<mode> = .Light                   // ordinary reactive cell; variant type flows from <theme for=@mode> below
+
+<theme for=@mode>                 // bind the theme to that cell (mirrors engine for=)
+    ink   = #0f172a;              // shared base tokens
     paper = #ffffff;
-    @media (prefers-color-scheme: dark) {   // token VALUES re-bind by a media condition
+    brand = #2563eb;
+    .Dark {                       // the .Dark variant re-binds a subset over the base
         ink   = #e2e8f0;
         paper = #0f172a;
     }
 </theme>
 ```
 
-> **OPEN (PA to close with bryan).** §Rulings row 3 names the manual switch (`@mode = .Dark`) and the DD §4.3 shows the `@media` re-bind form, but the **`<theme>` variant-block declaration syntax** for a *named* variant set (how `<theme>` declares the `.Light` / `.Dark` token bundles that `@mode` selects, vs the `@media` auto form) is under-specified. Whether `@mode` is a reserved cell name or an ordinary reactive enum cell the adopter names, and how the variant blocks bind, is for the PA to close (§65.12).
+Switching the cell (`@mode = .Dark`) re-binds the active custom-property set with **one `:root` custom-property write**, natively propagated to every explicit use site, **zero re-render**. Because every use site *explicitly references* the token (`color: ink`), the whole page flips together — with **no** `[data-theme] .foo` global override selectors, no specificity war, no `!important`. The theme is a **value channel**, not a cascade.
+
+A `<theme>` MAY also bind the variant to a **media condition** — sugar for binding the cell to a media signal (a deterministic layer), instead of (or alongside) manual switching:
+
+```scrml
+<theme for=@mode>
+    ink   = #0f172a;
+    paper = #ffffff;
+    @media (prefers-color-scheme: dark) {   // auto-bind: the media signal selects the variant
+        ink   = #e2e8f0;
+        paper = #0f172a;
+    }
+</theme>
+```
+
+> **Variant-type declaration — PINNED (bryan, 2026-07-07): inference-from-`for=`.** The bound cell is declared **bare** (`<mode> = .Light`); its variant type **flows from the `<theme for=@mode>` binding** — exactly the engine `for=` pattern (§14.10 bare-variant inference). The `<theme>` is the **single owner** of the variant set — no separate enum, no duplication, no floating type name. An explicit annotation is not required. (A bare `.Light` with no in-scope `<theme for=>` binding to type it is `E-VARIANT-AMBIGUOUS` as usual — the binding is what supplies the type context.)
 
 ### 65.7 `!important` — no internal use; one interop-only escape
 
-Internal precedence is **guaranteed** (§65.5) → internal `!important` is a bug. `!important` in a scrml-author `#{}` / style-value SHALL emit `E-STYLE-IMPORTANT-INTERNAL` (§Rulings row 6 — "forbidden internally"). Exactly **one** interop-only escape exists: a narrow, lint-gated `!` form **only** for out-ranking an un-isolable third-party/foreign `!important` (a vendored/CDN stylesheet whose `!important` still inverts `@layer` precedence — a foreign important-in-a-lower-layer beats a scrml normal-in-a-higher-layer per CSS `@layer` semantics). Normal (non-important) foreign CSS is handled purely by the `thirdparty` layer being *below* author (§65.8) — no escape needed there.
+Internal precedence is **guaranteed** (§65.5) → internal `!important` is a bug. The surface keeps the **familiar CSS `!important` glyph** (§Rulings row 6 — no new sigil); the compiler distinguishes by whether the target is scrml-resolvable:
 
-> **OPEN (PA to close with bryan).** The exact **surface spelling** of the interop-only escape (§Rulings row 6 "one interop-only escape, lint-gated") is not fixed. See §65.12.
+- `!important` targeting a property the compiler **can resolve scrml-internally** (precedence is already guaranteed → the `!important` is redundant-at-best, masking-a-bug-at-worst) SHALL emit **`E-STYLE-IMPORTANT-INTERNAL`**.
+- `!important` targeting a property the compiler **cannot resolve** — out-ranking an un-isolable third-party/foreign `!important` (a vendored/CDN stylesheet whose `!important` inverts `@layer` precedence, since a foreign important-in-a-lower-layer beats a scrml normal-in-a-higher-layer per CSS `@layer` semantics) — is **ALLOWED**, carrying an **info-lint `W-STYLE-IMPORTANT-INTEROP`** (the sole sanctioned use, made visible). This is the one interop-only escape.
+
+Normal (non-important) foreign CSS is handled purely by the `thirdparty` layer being *below* author (§65.8) — no escape needed there.
 
 ### 65.8 Tailwind (§26) relationship — the atomic escape hatch, one fixed `@layer` order
 
@@ -320,7 +345,7 @@ Deferred Tier-3 per the DD §Rulings (PA leans recorded inline in the DD; do NOT
 - **OQ-7 — `@apply` (§26.8) vs style-value, long-term.** Both compose reusable treatments (`@apply` composes *utilities*; a style-value composes *declarations + tokens*). Keep both, or does a style-value + an "apply-utilities-into-a-style-value" form subsume `@apply`? **OPEN.**
 - **OQ-8 — global program-level `#{}` disposition.** No donut → unbounded element set → only the soft `W-STYLE-CONFLICT-POSSIBLE` (§65.2.4). Accept the weaker guarantee for the global escape hatch, or discourage/deprecate raw global *selector* `#{}` in favor of `<defaults>` + `<theme>`? **OPEN.**
 
-**Additionally under-specified for SPEC prose (surfaced by this draft — PA to close with bryan; see the returned summary):** the reset ruleset + opt-out syntax (§65.3.4); the `<theme>` named-variant declaration syntax + whether `@mode` is reserved (§65.6); the `!important` interop-escape surface spelling (§65.7); the `E-DEFAULTS-MISUSE`/`W-STYLE-DEFAULTS-DEAD`/`E-STYLE-IMPORTANT-INTERNAL` code spellings (DD used the pre-rename `-BASE-` forms and named no internal-important code); and `<theme>`/`<defaults>` placement scope (program-scope assumed; page-scope override not addressed).
+**The 5 finalizations are now FOLDED into their body sections** (reset ruleset + opt-out → §65.3.4 · theme-variant `<theme for=@cell>` binding → §65.6 · `!important` interop spelling → §65.7 · code spellings → §65.10 · `<theme>`/`<defaults>` program-scope placement → §65.9). They were surfaced by this draft and closed to the PA leans (bryan "your leans, wrap", 2026-07-07); the `OPEN (PA to close)` markers are removed. Only the Tier-3 OQs above remain genuinely open. (Page-level `<theme>`/`<defaults>` override is deferred to v1.next — §65.9 finalization.)
 
 ### 65.13 Worked adopter example (a themed app)
 
@@ -329,7 +354,9 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
 ```scrml
 <program>
 
-  <theme>                                     // §65.3.2 — named values; lower to :root custom properties
+  <mode> = .Light                             // §65.6 — theme-variant cell; type flows from <theme for=@mode> (bare-variant inference §14.10; @mode is a convention, NOT reserved)
+
+  <theme for=@mode>                           // §65.3.2 — named values; lower to :root custom properties; bound to @mode
       brand   = #2563eb;
       danger  = #dc2626;
       line    = #e2e8f0;
@@ -337,8 +364,8 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
       paper   = #ffffff;
       space-4 = 1rem;
       space-6 = 1.5rem;
-      .Dark {                                 // §65.6 — the named variant `@mode` selects (variant-block
-          ink   = #e2e8f0;                    //          syntax is OPEN — see §65.6 note)
+      .Dark {                                 // §65.6 — the variant @mode selects; re-binds a subset over the base
+          ink   = #e2e8f0;
           paper = #0f172a;
       }
   </theme>
@@ -348,8 +375,6 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
       a     { color: brand; }
       label { font-weight: 600; }             // a `.class` here → E-DEFAULTS-MISUSE
   </defaults>
-
-  <mode>: Theme = .Light                      // the reactive selector cell (§65.6); switch flips :root once
 
   const field = #{                            // §65.4 — a FLAT-single-element style VALUE
       display: block; width: 100%;
@@ -396,16 +421,18 @@ Corpus reality (verified 2026-07-07): **83 of 4946 `.scrml` files use `#{}` (187
 | Program-level global `#{}` selector CSS | **KEPT** (escape hatch) but *discouraged* in favor of `<defaults>` + `<theme>`; gets only the soft `W-STYLE-CONFLICT-POSSIBLE` (unbounded scope — §65.2.4). | 0 forced; nudge only (OQ-8). |
 | Corpus `<theme>` / `<base>` **state-cell** names (verified live — the §65.9 collision) | `<theme>` is RECLAIMED as the structural element (§65.9); the handful of corpus cells migrate to a different cell name. `<base>` cells are unaffected (`<base>` is NOT reclaimed — element-defaults are `<defaults>`). | Small, bounded — a rename of the handful of `<theme>` cells (Rule 2 migration backlog). |
 
-**`<theme>` / `<defaults>` / `style=<value>` / `style=[…]` / `style:name=` are all NEW opt-in surfaces** — adopt incrementally, file by file. **Net: additive, near-zero forced migration** — the only forced changes are the genuine `E-STYLE-CONFLICT` conflicts (today-bugs) and the `<theme>`-cell renames. A v1.next additive layer, not a breaking rewrite — which is why it is post-freeze-appropriate (§65.13 sequencing / §8 of the DD).
+**`<theme>` / `<defaults>` / `style=<value>` / `style=[…]` / `style:name=` are all NEW opt-in surfaces** — adopt incrementally, file by file. **Net: additive, near-zero forced migration** — the only forced changes are the genuine `E-STYLE-CONFLICT` conflicts (today-bugs) and the `<theme>`-cell renames. An additive layer, not a breaking rewrite. **Wave 1 gates V1.0** (bryan-elevated 2026-07-07 — the third native leg is language identity); Waves 2–3 stay v1.next. Additive-ness is exactly what keeps even the 1.0-gating wave freeze-safe: it adds diagnostics + opt-in surfaces, it does not rewrite existing emission (§65.14 table).
 
 ### 65.15 Implementation status (Nominal) — the waves
 
 SPEC-TEXT only at this landing. Sequencing (ship the guarantee on what exists first; add new syntax last):
 
-- **Wave 1 — harden what already ships.** The axis-1 conflict-checker on the existing component `#{}` surface (`E-STYLE-CONFLICT` for the decidable core, §65.2.4) + `:where()`-flat emission (already proven for `prose`) + the built-in reset layer + `<theme>`/tokens (blessed named-value channel over §25) + `--explain-style`. **Gated on the §65.11 corpus dry-run.**
-- **Wave 2 — style-as-value.** `const chrome = #{}` + `style=<value>` + `style=[a,b]` + `style:name=` + the `<defaults>` layer + the §65.5 precedence order formalized + the `E-STYLE-VALUE-*` codes.
-- **Wave 3 — integration + edges.** Tailwind `@layer` integration (§65.8) + token unification (OQ-3) + `@keyframes` namespacing (OQ-5) + `@layer thirdparty` interop + the `!important` interop escape (§65.7) + optional same-property utility-collision detection (OQ-2b).
-- **Full.** Conditional-axis conflict recursion (`@media`×`@container` → `E-STYLE-CONDITION-OVERLAP`), the fail-closed `W-STYLE-CONFLICT-POSSIBLE` over dynamic markup, the LSP resolved-style hover.
+**V1.0 scope (bryan-elevated 2026-07-07): Wave 1 gates the 1.0 freeze; Waves 2–3 + Full are v1.next.** CSS is the third native leg (language identity), not a v1.next nicety — but the 1.0 bar is the *guarantee on what already ships* (Wave 1), not the new authoring surfaces (style-as-value, Tailwind integration), which come after.
+
+- **Wave 1 (V1.0 gate) — harden what already ships.** The axis-1 conflict-checker on the existing component `#{}` surface (`E-STYLE-CONFLICT` for the decidable core, §65.2.4) + `:where()`-flat emission (already proven for `prose`) + the built-in reset layer + `<theme>`/tokens (blessed named-value channel over §25) + `--explain-style`. **Gated on the §65.11 corpus dry-run.**
+- **Wave 2 (v1.next) — style-as-value.** `const chrome = #{}` + `style=<value>` + `style=[a,b]` + `style:name=` + the `<defaults>` layer + the §65.5 precedence order formalized + the `E-STYLE-VALUE-*` codes.
+- **Wave 3 (v1.next) — integration + edges.** Tailwind `@layer` integration (§65.8) + token unification (OQ-3) + `@keyframes` namespacing (OQ-5) + `@layer thirdparty` interop + the `!important` interop escape (§65.7) + optional same-property utility-collision detection (OQ-2b).
+- **Full (v1.next).** Conditional-axis conflict recursion (`@media`×`@container` → `E-STYLE-CONDITION-OVERLAP`), the fail-closed `W-STYLE-CONFLICT-POSSIBLE` over dynamic markup, the LSP resolved-style hover.
 
 The §34 catalog rows for every `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-*` code land **with the wave that implements each** (Rule 4). The build-cost profile is favorable — mostly *add a checker + light emission deltas on existing infra*, not a CSS-pipeline rebuild; the single large item (and single largest risk) is the conflict-checker's decidability core (§65.11).
 
@@ -443,12 +470,12 @@ Add `<theme>` and `<defaults>` to the §4.15 (block-grammar) and §24.4 (not-HTM
 
 | Element | Owning section | Attribute slots (parse-time) | Body form |
 |---|---|---|---|
-| `<theme>` (§65, **Nominal**) | §65.3.2 / §65.6 | (none — token bindings + optional `@media` / named-variant blocks in the body) | bare-body of `name = value;` token bindings + optional `@media (...)` / `.Variant { … }` re-bind blocks (variant-block syntax OPEN — §65.6) |
+| `<theme>` (§65, **Nominal**) | §65.3.2 / §65.6 | `for=@cell` (binds the variant set to an ordinary reactive cell, §65.6) | bare-body of `name = value;` token bindings + optional `.Variant { … }` variant re-bind blocks over the shared base + optional `@media (...)` auto-bind sugar (§65.6) |
 | `<defaults>` (§65, **Nominal**) | §65.3.3 | (none) | bare-body of **bare-element** rules only (`a { … }`, `body { … }`); a `.class`/`#id`/combinator selector → `E-DEFAULTS-MISUSE` |
 
 **§4.15 / §24.4 normative additions (Nominal):**
 
-- `<theme>` and `<defaults>` are scrml-defined structural elements (NOT HTML) valid at **program scope** (children of `<program>`, siblings of `<page>` — page-scope override is OPEN, §65.12). Use outside a valid locus is `E-STRUCTURAL-ELEMENT-MISPLACED`.
+- `<theme>` and `<defaults>` are scrml-defined structural elements (NOT HTML) valid at **program scope** (children of `<program>`, siblings of `<page>`) for v1; page-scope override is **deferred to v1.next** (§65.9 finalization). Use outside a valid locus is `E-STRUCTURAL-ELEMENT-MISPLACED`.
 - The names `theme` / `defaults` (any case) SHALL NOT be valid component/user-type names — `E-NAME-COLLIDES-RESERVED` (the §4.15/§24.4 reserved-identifier rule). **`<theme>` reclaims the identifier from the corpus state-cell usage** per the §65.9 keyword-collision principle (the handful of live `<theme>` cells migrate — §65.14); `<base>` is deliberately **NOT** reclaimed (a standard HTML element — element-defaults are `<defaults>`).
 - The compiler SHALL NOT apply HTML attribute validation to `<theme>`/`<defaults>`; their body-forms are defined in §65.3.
 
@@ -463,6 +490,6 @@ Add `<theme>` and `<defaults>` to the §4.15 (block-grammar) and §24.4 (not-HTM
 
 ## Frontmatter recap + returned-to-PA checklist
 
-- **status:** draft · **for:** SPEC §65 (Nominal) · **authority:** css-scrml-fication-2026-07-07 DD + bryan rulings 2026-07-07.
+- **status:** draft · **fold-pass DONE (S246, 2026-07-07)** — the 5 finalizations inlined into the body (§65.3.4/§65.6/§65.7/§65.9/§65.10), the §65.13 example reconciled (`<theme for=@mode>`), §65.12 pruned to Tier-3 OQs only; APPLY-READY pending bryan sign-off + the SPEC.md hot-doc-lock window (after S245's §38.13 land). · **for:** SPEC §65 (Nominal) · **authority:** css-scrml-fication-2026-07-07 DD + bryan rulings 2026-07-07.
 - **Named codes** (§65.10; §34 rows land WITH the impl per Rule 4): `E-STYLE-CONFLICT`, `E-STYLE-CONDITION-OVERLAP`, `W-STYLE-CONFLICT-POSSIBLE`, `E-STYLE-VALUE-DESCENDANT`, `E-STYLE-VALUE-NOT-STYLE`, `E-THEME-TOKEN-UNKNOWN`, `E-DEFAULTS-MISUSE`, `W-STYLE-DEFAULTS-DEAD`, `E-STYLE-IMPORTANT-INTERNAL`, `E-STYLE-KEYFRAMES-COLLISION` (OQ-5, deferred). Reused: `E-STRUCTURAL-ELEMENT-MISPLACED`, `E-NAME-COLLIDES-RESERVED`.
 - **Reconciliations the applying editor must honor** (DD text that predates the rulings): (1) the DD §2 resolution box (steps 1–2 order) is stale vs Ruling 5 — the applied `style=` wins (§65.1/§65.5); (2) the DD §3.5 `E-STYLE-CONFLICT` "a rule + an applied style-value" case is superseded by Ruling 5 (that pair is precedence-ordered, not a conflict — §65.2.1).
