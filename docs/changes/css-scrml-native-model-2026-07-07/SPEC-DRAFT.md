@@ -410,7 +410,7 @@ You can look at `<input type="email" style=field …>` and **know** it is styled
 
 ### 65.14 Migration + back-compat — additive layer, near-zero forced migration
 
-Corpus reality (verified 2026-07-07): **83 of 4946 `.scrml` files use `#{}` (187 blocks)** — CSS is a *sparse* surface; the dominant pattern is flat-declaration inline `#{}`.
+Corpus reality (verified 2026-07-07): **83 of ~1650 `.scrml` files use `#{}` (187 blocks)** — CSS is a *sparse* surface; the dominant pattern is flat-declaration inline `#{}`.
 
 | Today | Under §65 | Migration cost |
 |---|---|---|
