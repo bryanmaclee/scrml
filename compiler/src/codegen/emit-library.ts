@@ -3,6 +3,7 @@ import { getNodes } from "./collect.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { emitLogicNode } from "./emit-logic.js";
+import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
 import type { CompileContext } from "./context.ts";
@@ -341,6 +342,113 @@ function pruneServerFnsAndLowerGuarded(
 }
 
 /**
+ * §21.2 / §21.5 (export-enum-library-emit) — emit the runtime representation of
+ * every ENUM type-decl in a library / type-module file, `export`-prefixed when
+ * the enum was exported.
+ *
+ * An enum is NOT a TS-erasable type: it lowers to a runtime binding
+ * `const X = Object.freeze({ …variant constructors…, variants:[…] })` (the SAME
+ * shape a program / client bundle emits — reused verbatim via the shared
+ * `emitEnumVariantObjects`, mirroring emit-tool.ts's standalone-module emit). A
+ * consumer that `import { X }` and constructs `X.Variant(…)` — or `match`es on a
+ * held value — REFERENCES this binding, so erasing it (the pre-fix behavior)
+ * left the import resolving to `undefined`.
+ *
+ * Exportedness is keyed on the type-decl's `fromExport` flag — the synthetic
+ * `type-decl` the ast-builder appends for `export type X:enum = {…}` (§21.2).
+ * A NON-exported enum still gets a module-local `const` (the model's own helpers
+ * may reference it); STRUCT / type-ALIAS decls carry no runtime binding (pure
+ * types, TS-erased) and are omitted here. Per §21.2 the exported enum resolves
+ * "the same way as a non-exported type" — hence the shared-emitter reuse.
+ */
+function emitEnumRuntimeReps(fileAST: Record<string, unknown>): string[] {
+  const inner = fileAST.ast as Record<string, unknown> | undefined;
+  const typeDecls =
+    ((fileAST.typeDecls ?? inner?.typeDecls) as ASTNode[] | undefined) ?? [];
+  const exportedEnumNames = new Set<string>();
+  for (const decl of typeDecls) {
+    if (
+      decl && decl.kind === "type-decl" && decl.typeKind === "enum" &&
+      decl.fromExport === true && typeof decl.name === "string"
+    ) {
+      exportedEnumNames.add(decl.name as string);
+    }
+  }
+  const out: string[] = [];
+  for (const line of emitEnumVariantObjects(fileAST)) {
+    const m = line.match(/^const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/);
+    out.push(m && exportedEnumNames.has(m[1]) ? `export ${line}` : line);
+  }
+  return out;
+}
+
+/**
+ * Remove every scrml `type` declaration from a raw library block, TOGETHER WITH
+ * any leading `export ` (§21.2 Form 2) — so the strip never leaves a dangling
+ * `export` keyword (the malformed-JS bug that tripped E-CODEGEN-INVALID-LOGIC).
+ * Three decl forms:
+ *   1. braced spec  — `[export] type Name[:kind] = { … }`   (brace-aware: an enum
+ *      body's nested `renders {}` / `transitions {}` is removed WHOLE)
+ *   2. legacy self-host — `[export] type:kind Name { … }`
+ *   3. brace-less alias — `[export] type Name[:kind] = <rhs>`   (`type Id = int`)
+ *
+ * ENUM decls are stripped here too — their value-bearing `Object.freeze` rep is
+ * emitted separately by `emitEnumRuntimeReps`. STRUCT / ALIAS decls are pure
+ * types with no runtime binding, so removal is their complete lowering.
+ */
+function stripScrmlTypeDecls(text: string): string {
+  // Braced forms — brace-aware so a nested `{…}` in the body is consumed whole.
+  const openerRe =
+    /\b(?:export\s+)?type\b(?:\s*:\s*(?:enum|struct)\s+[A-Za-z_$][A-Za-z0-9_$]*|\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*\w+)?\s*=)\s*\{/g;
+  let result = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = openerRe.exec(text)) !== null) {
+    const openerStart = m.index;
+    const braceStart = openerStart + m[0].length - 1; // index of the `{`
+    let depth = 0;
+    let i = braceStart;
+    for (; i < text.length; i++) {
+      if (text[i] === "{") depth++;
+      else if (text[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+    }
+    result += text.slice(last, openerStart);
+    last = i;
+    openerRe.lastIndex = i;
+  }
+  result += text.slice(last);
+  // Brace-less alias — `[export] type Name[:kind] = <rhs>` (no braces).
+  return result.replace(
+    /\b(?:export\s+)?type\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*\w+)?\s*=\s*[^\n;{}]+;?/g,
+    "",
+  );
+}
+
+/**
+ * Strip scrml TYPE ANNOTATIONS from emitted `function` signatures — the param
+ * annotations (`name: Type`) and the return type (`-> Type`) are scrml/TS syntax,
+ * invalid in the ES-module output. Scoped to the signature between `function
+ * NAME(` and the opening `{`, so it never touches object literals / ternaries in
+ * the body. Untyped signatures pass through byte-unchanged (`a, b` → `a, b`). A
+ * model-library file may declare typed pure helpers — `export fn f(x: int) ->
+ * string { … }` — that the raw-text whole-block slicer would otherwise leak
+ * verbatim (no stdlib module exercises this; delta-log is the first adopter).
+ */
+function cleanFnSignatures(text: string): string {
+  return text.replace(
+    /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)\s*(?:->\s*[^{;]+?)?\s*\{/g,
+    (_match, name: string, params: string) => {
+      const cleaned = params
+        .split(",")
+        .map((p) => p.split(":")[0].trim())
+        .filter((p) => p.length > 0)
+        .join(", ");
+      return `function ${name}(${cleaned}) {`;
+    },
+  );
+}
+
+/**
  * Generate ES module output for a scrml file in library mode.
  *
  * Library mode emits importable ES modules — no browser runtime, no IIFE,
@@ -388,6 +496,16 @@ export function generateLibraryJs(
   lines.push("// Generated library module — scrml compiler output");
   lines.push("// ES module: import { name } from './this-file.js'");
   lines.push("");
+
+  // §21.2/§21.5 — an exported enum is a VALUE-bearing runtime binding, not a
+  // TS-erasable type. Emit each enum's `Object.freeze` rep (export-prefixed when
+  // exported) up front so a consumer's `import { X }` + `X.Variant(…)` / `match`
+  // resolves at runtime. Struct/alias decls stay pure types (no runtime rep).
+  const enumReps = emitEnumRuntimeReps(fileAST);
+  if (enumReps.length > 0) {
+    for (const repLine of enumReps) lines.push(repLine);
+    lines.push("");
+  }
 
   // ---------------------------------------------------------------------------
   // Collect logic blocks from the AST
@@ -458,13 +576,14 @@ export function generateLibraryJs(
         if (blockText.endsWith("}")) blockText = blockText.slice(0, -1);
         blockText = blockText.trim();
         if (blockText) {
-          // Strip scrml type declarations. Two syntax forms exist:
-          // 1. Spec syntax: `type Name:kind = { ... }` (colon after name, equals before braces)
-          // 2. Legacy/self-host syntax: `type:kind Name { ... }` (colon after type keyword)
-          blockText = blockText.replace(/\btype\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*\w+)?\s*=\s*\{[^]*?\}/g, "");
-          blockText = blockText.replace(/\btype\s*:\s*(?:enum|struct)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{[^]*?\}/g, "");
+          // §21.2/§21.5 — remove scrml `type` decls (incl. any leading
+          // `export`, so no dangling `export` is left); enum runtime reps are
+          // emitted up top by emitEnumRuntimeReps, struct/alias are pure types.
+          blockText = stripScrmlTypeDecls(blockText);
           // Convert fn → function
           blockText = blockText.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          // Strip scrml type annotations from the emitted fn signatures.
+          blockText = cleanFnSignatures(blockText);
           // Strip inline ^{} meta
           blockText = stripInlineMeta(blockText);
           // Extract meta imports: destructuring and namespace
@@ -645,11 +764,8 @@ export function generateLibraryJs(
 
         // Post-process gap regions: compile scrml-specific syntax to JS
         if (region.isGap) {
-          // Strip scrml type declarations. Two syntax forms exist:
-          // 1. Spec syntax: `type Name:kind = { ... }` (colon after name, equals before braces)
-          // 2. Legacy/self-host syntax: `type:kind Name { ... }` (colon after type keyword)
-          text = text.replace(/\btype\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*\w+)?\s*=\s*\{[^]*?\}/g, "");
-          text = text.replace(/\btype\s*:\s*(?:enum|struct)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{[^]*?\}/g, "");
+          // §21.2/§21.5 — remove scrml `type` decls incl. any leading `export`.
+          text = stripScrmlTypeDecls(text);
           // Convert `fn name` to `function name` for complete fn declarations in gaps
           text = text.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip bare `fn` keywords that are fragments (fn keyword without a name —
@@ -666,6 +782,9 @@ export function generateLibraryJs(
           // the fn keyword for the next declaration leaks into this node's span)
           text = text.replace(/\bfn\s*$/g, "").trimEnd();
         }
+
+        // Strip scrml type annotations from emitted fn signatures (gap + non-gap).
+        text = cleanFnSignatures(text);
 
         // Strip inline ^{ } meta expressions — replace with just the body content.
         // Must handle nested braces: ^{ JSON.stringify({ a, b }) } → JSON.stringify({ a, b })

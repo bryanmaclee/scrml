@@ -1,0 +1,8 @@
+${
+    export type Pointer:enum = { Sha(hash: string), None }
+    export type Config:struct = { timeout: int }
+    type Id = int
+    export fn label(seq: number, kind: string) -> string {
+        return kind
+    }
+}

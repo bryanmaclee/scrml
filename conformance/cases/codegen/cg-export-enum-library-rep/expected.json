@@ -1,0 +1,12 @@
+{
+  "id": "cg-export-enum-library-rep",
+  "description": "§21.2/§21.5 — a type/module file (only `${ export ... }`, no markup/CSS) with an EXPORTED enum compiles to a JS module WITHOUT E-CODEGEN-INVALID-LOGIC. An exported enum is a VALUE-bearing runtime binding (`export const X = Object.freeze({...})`), not a TS-erasable type — the library emitter previously stripped `type X:kind = {...}` but not the leading `export`, leaving a dangling `export` that tripped the emit gate. The exported STRUCT and the brace-less type-ALIAS carry no runtime binding (pure types, erased with their `export` prefix). The typed pure fn (`fn f(x: int) -> string`) lowers with its scrml annotations stripped. Codes-level: the whole compile is clean; the E-CODEGEN-* / E-EXPORT-* / E-IMPORT-* families stay silent. The construct-at-runtime half is exercised by compiler/tests/integration/export-enum-library-emit.test.js (real `import()` + `X.Variant(...)` + match).",
+  "language-version": "1.0",
+  "spec": "§21.2 (export type X:kind resolves the same way as a non-exported type) / §21.5 (a type/module file emits a JS module with the exported bindings as its sole output)",
+  "rationale": "§21.2 mandates an `export type X:enum` produce a `type-decl` + `export-decl` whose downstream codegen resolves X 'the same way as a non-exported type' — i.e. a program's enum runtime rep, then exported. §21.5 mandates a pure-type/module file emit a JS module with the exported bindings as its sole output. An exported enum's binding IS its runtime `Object.freeze` object. This proves the module compiles clean (no dangling-export malformation) with the enum value-rep exported and the struct/alias pure-types erased.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "notCodePrefixes": ["E-CODEGEN-", "E-EXPORT-", "E-IMPORT-"]
+  }
+}
