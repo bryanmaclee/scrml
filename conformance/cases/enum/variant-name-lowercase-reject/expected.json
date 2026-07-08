@@ -1,0 +1,12 @@
+{
+  "id": "enum-variant-name-lowercase-reject",
+  "description": "§14.4 the enum variant name is bounded (codes): a lowercase (non-uppercase) variant name (`type Kind:enum = { rule, disp }`) is not valid — §14.4: \"Enum variant names SHALL begin with an uppercase letter.\" It fires E-ENUM-VARIANT-CASE, naming the offending variant and steering to the capitalized rename (`rule` -> `Rule`). notCodes pins that the CLEAN reject REPLACES the old silent miscompile: before this rule the lowercase variant was SILENTLY DROPPED — omitted from the emitted enum runtime rep with NO diagnostic — so it reached codegen and vanished (a consumer importing `Kind` got `undefined`). The diagnostic now fires at the enum parse/type stage BEFORE codegen, so no E-CODEGEN-INVALID-LOGIC leak. Incidental codes (e.g. W-PROGRAM-001) ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§14.4",
+  "rationale": "§14.4: enum variant names SHALL begin with an uppercase letter, and the compiler SHALL ERROR on a violation (S245 ruling — keep the rule, error rather than silent-drop). The check fires in `parseEnumBody` (type-system.ts), upstream of codegen, once per offending variant. Only the variant NAME is checked; payload FIELD names (`shade` in `Green(shade:int)`) are lowercase by convention and are NOT flagged.",
+  "expect": {
+    "codes": ["E-ENUM-VARIANT-CASE"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "severity": { "E-ENUM-VARIANT-CASE": "error" }
+  }
+}

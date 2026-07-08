@@ -1,0 +1,4 @@
+${
+    type Kind:enum = { rule, disp }
+}
+<p id="p">enum case</>

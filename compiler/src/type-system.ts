@@ -1711,6 +1711,35 @@ function parseEnumBody(
 ): { variants: VariantDef[]; transitionRules: TransitionRule[] | null } {
   const variants: VariantDef[] = [];
 
+  // \u00a714.4 \u2014 enum variant AND type names SHALL begin with an uppercase
+  // letter. A violation is a hard error (E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE),
+  // NOT a silent drop: pre-S245 a lowercase variant was simply omitted from the
+  // emitted enum runtime rep with NO diagnostic, so a consumer importing the enum
+  // got `undefined` (a silent miscompile of a spec-violating construct). Fire the
+  // diagnostic here \u2014 upstream of codegen \u2014 so the enum fails compilation
+  // loudly instead of vanishing.
+  //
+  // `pushCaseError` dedups by code+message so the two-pass buildTypeRegistry
+  // re-parse (Pass 2 + Pass 3 both call parseEnumBody with the SAME `errors`
+  // array) surfaces each distinct violation exactly once.
+  const pushCaseError = (code: string, message: string): void => {
+    if (!errors || !fileSpan) return;
+    if (errors.some(e => e.code === code && e.message === message)) return;
+    errors.push(new TSError(code, message, fileSpan));
+  };
+  const suggestUppercase = (n: string): string =>
+    n.length > 0 ? n[0].toUpperCase() + n.slice(1) : n;
+
+  // \u00a714.4 \u2014 enum TYPE name case. Checked before the empty-body early
+  // return so `type color:enum = { }` still fires.
+  if (typeName && !/^[A-Z]/.test(typeName)) {
+    pushCaseError(
+      "E-ENUM-TYPE-CASE",
+      "E-ENUM-TYPE-CASE: enum type name `" + typeName + "` must begin with an " +
+      "uppercase letter (\u00a714.4). Rename it `" + suggestUppercase(typeName) + "`.",
+    );
+  }
+
   let body = raw.trim();
   if (body.startsWith("{")) body = body.slice(1);
   if (body.endsWith("}")) body = body.slice(0, -1);
@@ -1833,7 +1862,19 @@ function parseEnumBody(
 
         const name = text;
         if (!name) continue;
-        if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) continue;  // must start with uppercase
+        // \u00a714.4 \u2014 variant name SHALL begin with an uppercase letter. A
+        // non-uppercase leading char is a hard error, NOT a silent drop.
+        if (!/^[A-Z]/.test(name)) {
+          pushCaseError(
+            "E-ENUM-VARIANT-CASE",
+            "E-ENUM-VARIANT-CASE: enum variant `" + name + "`" +
+            (typeName ? " in enum `" + typeName + "`" : "") +
+            " must begin with an uppercase letter (\u00a714.4). Rename it `" +
+            suggestUppercase(name) + "`.",
+          );
+          continue;
+        }
+        if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) continue;  // other malformation \u2014 leave as-is
         variants.push({ name, payload: null, renders });
       }
     } else {
@@ -1841,6 +1882,19 @@ function parseEnumBody(
       let name = trimmed.slice(0, parenIdx).trim();
       // Strip a single leading `.` (bar-form parity with the unit-variant arm).
       if (name.startsWith(".")) name = name.slice(1).trim();
+      // \u00a714.4 \u2014 variant NAME case (see the unit-variant arm). Only the
+      // variant name is checked; payload FIELD names (e.g. `shade` in
+      // `Green(shade:int)`) are lowercase by convention and are NOT flagged.
+      if (name && !/^[A-Z]/.test(name)) {
+        pushCaseError(
+          "E-ENUM-VARIANT-CASE",
+          "E-ENUM-VARIANT-CASE: enum variant `" + name + "`" +
+          (typeName ? " in enum `" + typeName + "`" : "") +
+          " must begin with an uppercase letter (\u00a714.4). Rename it `" +
+          suggestUppercase(name) + "`.",
+        );
+        continue;
+      }
       if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) continue;
 
       // Find the closing paren for the payload, then check for `renders` after it.

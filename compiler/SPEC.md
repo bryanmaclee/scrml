@@ -7647,8 +7647,8 @@ type Shape:enum = {
 - Variants are declared one per line inside `{ }`.
 - A variant with no parentheses is a unit variant (carries no payload).
 - A variant with `(field:type, ...)` is a payload variant. Each named field has a type annotation.
-- Enum variant names SHALL begin with an uppercase letter.
-- Enum type names SHALL begin with an uppercase letter.
+- Enum variant names SHALL begin with an uppercase letter. A violation is a hard error (**E-ENUM-VARIANT-CASE**, §34), fired at the enum parse/type stage upstream of codegen — NOT a silent drop. Only the variant name is checked; payload field names are lowercase by convention and are not flagged.
+- Enum type names SHALL begin with an uppercase letter. A violation is a hard error (**E-ENUM-TYPE-CASE**, §34).
 
 #### 14.4.0 Transition Rules Cross-Reference
 
@@ -18154,6 +18154,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ENGINE-019 | §51.11 | Machine `audit @varName` clause references an undeclared reactive, or the clause appears more than once per machine. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:2053, 8488`.) | Error |
 | E-ENGINE-020 | §51 | Pre-S25 sentence form `<machine Name for Type>` is rejected. Use the canonical `<machine for=Type>` (or modern `<engine>`) form. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:9047`.) | Error |
 | E-ENGINE-021 | §51 | Invalid or unsupported temporal rule, or a temporal rule with an invalid duration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:2648, 2795`.) | Error |
+| E-ENUM-VARIANT-CASE | §14.4 | Enum variant name does not begin with an uppercase letter (`type Kind:enum = { rule }`). §14.4: "Enum variant names SHALL begin with an uppercase letter." Before this rule the lowercase variant was SILENTLY DROPPED — omitted from the emitted enum runtime rep with no diagnostic, so it reached codegen and vanished (a consumer importing the enum got `undefined`, a silent miscompile). Fires at the enum parse/type stage, upstream of codegen, once per offending variant. Only the variant NAME is checked; payload FIELD names (`shade` in `Green(shade:int)`) are lowercase by convention and are NOT flagged. Resolution: capitalize the variant (`rule` → `Rule`). (Catalog addition S245 — export-enum-library dog-food; emitted at `compiler/src/type-system.ts` `parseEnumBody`.) | Error |
+| E-ENUM-TYPE-CASE | §14.4 | Enum type name does not begin with an uppercase letter (`type color:enum = { ... }`). §14.4: "Enum type names SHALL begin with an uppercase letter." Distinct from the name-resolver's `W-CASE-001` (a WARNING that fires only when a lowercase type name shadows an HTML element, e.g. `div`); E-ENUM-TYPE-CASE fires on ANY lowercase enum type name as a hard error, at the enum parse/type stage. Resolution: capitalize the type name (`color` → `Color`). (Catalog addition S245; emitted at `compiler/src/type-system.ts` `parseEnumBody`.) | Error |
 | E-TIMEOUT-001 | §51.0.M | `<timeout>` element is missing the required `delay` attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:782`.) | Error |
 | E-TIMEOUT-002 | §51.0.M | `<timeout>` `delay` attribute value is zero or negative. The delay must be a positive integer (milliseconds). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:802`.) | Error |
 | E-REPLAY-001 | §51.14 | A replay-mode block references a non-replay-safe primitive (e.g., uncontrolled side-effect, non-deterministic source). The error message names the specific primitive. Replay mode requires every effect to be deterministic + idempotent. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:8560, 8569`.) | Error |

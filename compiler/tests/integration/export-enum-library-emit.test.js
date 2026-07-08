@@ -228,20 +228,21 @@ describe("export-enum-library-emit §8: R26 flogence delta-log.scrml", () => {
   const R26 = "/home/bryan-maclee/scrmlMaster/flogence/src/models/delta-log.scrml";
 
   test.skipIf(!existsSync(R26))(
-    "compiles clean (plain) with exported enum runtime reps",
+    "errors on Kind's lowercase variants (E-ENUM-VARIANT-CASE, §14.4) — pending flogence uppercase migration",
     () => {
       const src = readFileSync(R26, "utf8");
-      const { errorCodes, libraryJs, libPath } = compileLib("delta-log-r26", src);
-      expect(errorCodes).toHaveLength(0);
-      // The SPEC-conformant (uppercase-variant) enums export as runtime reps.
-      expect(libraryJs).toContain("export const Pointer = Object.freeze(");
-      expect(libraryJs).toContain("export const VpaDirective = Object.freeze(");
-      nodeCheck(libPath);
+      const { errorCodes } = compileLib("delta-log-r26", src);
+      // delta-log's `Kind:enum = { rule, disp, land, ... }` uses lowercase
+      // variants (a §14.4 violation). The S245 enum-variant-uppercase-error fix
+      // now fires E-ENUM-VARIANT-CASE LOUDLY instead of silently dropping them.
+      // Its uppercase enums (Pointer/VpaDirective) are conformant and will export
+      // as runtime reps once `Kind` is uppercased (flogence migration follow-up).
+      expect(errorCodes).toContain("E-ENUM-VARIANT-CASE");
     },
   );
 
   test.skipIf(!existsSync(R26))(
-    "the --emit-block-analysis sidecar path (result.blockAnalyses()) succeeds",
+    "the --emit-block-analysis path also surfaces E-ENUM-VARIANT-CASE (no silent pass)",
     () => {
       const src = readFileSync(R26, "utf8");
       const filePath = join(TMP, "delta-log-ba.scrml");
@@ -257,12 +258,13 @@ describe("export-enum-library-emit §8: R26 flogence delta-log.scrml", () => {
       const errorCodes = (result.errors || [])
         .filter((e) => e.severity == null || e.severity === "error")
         .map((e) => e.code);
-      expect(errorCodes).toHaveLength(0);
-      // --emit-block-analysis is a post-compile sidecar step; it requires a clean
-      // compile (E-CODEGEN-INVALID-LOGIC is raised during CG, before it runs).
+      // delta-log errors on its lowercase `Kind` variants in this mode too — the
+      // E-ENUM-VARIANT-CASE diagnostic fires at the enum parse stage, upstream of
+      // both codegen and the --emit-block-analysis sidecar. (Once flogence
+      // uppercases `Kind`, the sidecar path runs clean; the original
+      // g-block-analysis-emit-foreign-underscore codegen defect stays fixed.)
+      expect(errorCodes).toContain("E-ENUM-VARIANT-CASE");
       expect(typeof result.blockAnalyses).toBe("function");
-      const analyses = result.blockAnalyses();
-      expect(Array.isArray(analyses)).toBe(true);
     },
   );
 });
