@@ -152,6 +152,18 @@ const STRUCTURAL_RAW_BODY_ELEMENTS = new Set([
   // tokenize the arms via parseMatchArms without firing E-CTX-003 on the
   // opener-without-closer `:`-shorthand arms.
   "onchange",
+  // §65.3.2 / §65.6 (css-wave1-theme-tokens) — `<theme>` is the scrml-native
+  // CSS token block. Its body is NOT markup children — it is bare
+  // `name = value;` token bindings + `.Variant { … }` re-bind sub-blocks +
+  // optional `@media (...) { … }` auto-bind sugar (§65.6). Capturing the body
+  // raw lets the `block.name === "theme"` dispatch in ast-builder.js hand the
+  // body to a dedicated theme-body parser (parseThemeBody) instead of the
+  // markup/state child machinery, which would otherwise choke on the bare
+  // `ink = #0f172a;` assignments and the `.Dark { … }` / `@media (…) { … }`
+  // brace sub-blocks. Only the BLOCK form (`<theme …> … </theme>` / `</>`) is
+  // captured here; the state-decl shape `<theme> = value` is reclaimed (§65.9 —
+  // the corpus cells migrate, §65.14).
+  "theme",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -220,6 +232,14 @@ const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
   // body the STRUCTURAL_RAW_BODY_ELEMENTS gate captures raw for the onchange
   // dispatch.
   "onchange",
+  // §65.3.2 / §65.6 (css-wave1-theme-tokens) — same reasoning as `onchange`
+  // above. `<theme for=@mode> ink = #0f172a; … .Dark { … } </theme>` is a
+  // scrml-native CSS token container, NOT a compound state-decl. Its `.Variant`
+  // brace sub-blocks + bare `name = value;` bindings trip the compound-lift
+  // heuristic; the exemption lets BS fall through to the regular markup-opener
+  // path → a `type=markup name=theme` block whose body the
+  // STRUCTURAL_RAW_BODY_ELEMENTS gate captures raw for the theme dispatch.
+  "theme",
 ]);
 
 // ---------------------------------------------------------------------------

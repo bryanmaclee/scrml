@@ -7,7 +7,7 @@
 ${
   <counter> = 0
   <message> = "hello"
-  <theme> = "dark"
+  <themeMode> = "dark"
 }
 
 <div>
@@ -17,7 +17,7 @@ ${
 ^{
   @counter += 1
   @message = "updated by meta"
-  @theme = "light"
+  @themeMode = "light"
 }
 
 </program>

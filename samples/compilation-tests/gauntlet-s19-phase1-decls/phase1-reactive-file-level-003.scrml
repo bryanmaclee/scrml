@@ -7,7 +7,7 @@
 // bare top-level declarations (§40.8). See E-STATE-UNDECLARED §6.1.1 V-kill.
 <program>
     <count> = 0
-    <theme> = "light"
+    <themeMode> = "light"
 
-    <p>${@theme} / ${@count}</>
+    <p>${@themeMode} / ${@count}</>
 </>

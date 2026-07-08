@@ -8,7 +8,7 @@
         <isActive> = false
         <loading> = false
         <hasError> = false
-        <theme> = "dark"
+        <themeMode> = "dark"
     }
 
     <div id="toggle-target" class:active=@isActive>
@@ -23,7 +23,7 @@
         Toggle
     </button>
 
-    <div id="themed-card" class="card card-${@theme}">
+    <div id="themed-card" class="card card-${@themeMode}">
         Themed card
     </div>
 </div>

@@ -82,7 +82,7 @@ describe("class-binding §1: initial reactive variable values", () => {
 
   test("@theme starts as 'dark'", () => {
     const api = loadSample();
-    expect(api.get("theme")).toBe("dark");
+    expect(api.get("themeMode")).toBe("dark");
   });
 });
 
@@ -288,14 +288,14 @@ describe("class-binding §11: template literal class — @theme='dark' → card-
 describe("class-binding §12: set @theme='light' → class updates to card-light", () => {
   test("#themed-card class updates to 'card card-light' when @theme set to 'light'", () => {
     const api = loadSample();
-    api.set("theme", "light");
+    api.set("themeMode", "light");
     const el = document.querySelector("#themed-card");
     expect(el.className).toContain("card-light");
   });
 
   test("#themed-card class no longer contains 'card-dark' after @theme set to 'light'", () => {
     const api = loadSample();
-    api.set("theme", "light");
+    api.set("themeMode", "light");
     const el = document.querySelector("#themed-card");
     expect(el.className).not.toContain("card-dark");
   });
@@ -314,7 +314,7 @@ describe("class-binding §13: template literal static 'card' prefix always prese
 
   test("#themed-card still has 'card' in class after @theme changes to 'light'", () => {
     const api = loadSample();
-    api.set("theme", "light");
+    api.set("themeMode", "light");
     const el = document.querySelector("#themed-card");
     expect(el.className).toContain("card");
   });
@@ -327,7 +327,7 @@ describe("class-binding §13: template literal static 'card' prefix always prese
 
   test("#themed-card class is 'card card-light' after @theme set to 'light'", () => {
     const api = loadSample();
-    api.set("theme", "light");
+    api.set("themeMode", "light");
     const el = document.querySelector("#themed-card");
     expect(el.className).toBe("card card-light");
   });

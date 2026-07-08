@@ -376,13 +376,13 @@ describe("C4 §C4.9 — Select + enum-typed cell → toEnum coercion", () => {
 
 <program>
 \${
-<theme> = <select/>
+<themeMode> = <select/>
 let initial = .Light
 }
-<theme/>
+<themeMode/>
 </program>`;
     const { js } = compile(source);
-    // Note: the @theme cell's init expression is .Light, which buildEnumVarMap
+    // Note: the @themeMode cell's init expression is .Light, which buildEnumVarMap
     // matches against Theme variants. Render-by-tag dispatch then picks up the
     // enum-coercion path.
     // The cell init must be an enum variant ref for the enum coercion to kick in.
@@ -407,12 +407,12 @@ let initial = .Light
 
 <program>
 \${
-<theme> = <select/>
+<themeMode> = <select/>
 }
-<theme/>
+<themeMode/>
 </program>`;
     const { js, registry } = compile(source);
-    // The cell @theme is declared without an init (Shape 2 with renderSpec); its
+    // The cell @themeMode is declared without an init (Shape 2 with renderSpec); its
     // init is empty, so buildEnumVarMap won't pick it up via init-string match.
     // This test documents that v0 render-by-tag enum coercion via init-string
     // matching mirrors the source-level path's behavior.

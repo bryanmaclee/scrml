@@ -202,11 +202,11 @@ describe("footprintForBlock — write shapes", () => {
 describe("footprintForBlock — read shapes", () => {
   test("RHS / arg reads are collected; string-literal `@x` is NOT a read", () => {
     const src = `<page>
-  <theme> = "dark"
+  <themeMode> = "dark"
   <total> = 0
   \${
     function read() {
-      const t = @theme
+      const t = @themeMode
       const msg = "use @ignored here"
       const r = compute(@total)
     }
@@ -214,7 +214,7 @@ describe("footprintForBlock — read shapes", () => {
   <h1>x</h1>
 </page>`;
     const fp = fnFootprint(src, "read");
-    expect(fp.reads).toContain("theme");
+    expect(fp.reads).toContain("themeMode");
     expect(fp.reads).toContain("total");
     // `@ignored` lives inside a string literal — extractReactiveDepsFromExprNode
     // is string-literal-aware, so it is NOT a read.

@@ -45,6 +45,7 @@ import {
 } from "./tokenizer.ts";
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
+import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -15002,6 +15003,92 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           method,        // recognized HTTP method (invalid/missing → E-ENDPOINT-METHOD-INVALID)
           acceptsRaw,    // raw enum type-ref text (W3 resolves against §14/§53)
           arms,          // MatchArmEntry[] from parseMatchArms (§18.0.1 reuse)
+          span,
+          openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
+        };
+      }
+      // ----------------------------------------------------------------
+      // <theme> token block (SPEC §65.3.2 / §65.6 — css-wave1-theme-tokens).
+      // `<theme [for=@cell]> … </theme>` is the scrml-native CSS token block.
+      // BS captures its body raw (STRUCTURAL_RAW_BODY_ELEMENTS) because the body
+      // is NOT markup — it is bare `name = value;` token bindings + `.Variant
+      // { … }` re-bind sub-blocks + optional `@media (…) { … }` auto-bind sugar
+      // (§65.6). This dispatch extracts the optional `for=@cell` binding + hands
+      // the body to the dedicated parseThemeBody, returning a `theme-decl` node.
+      //
+      // Phase A (recognition + typer): produce the node + the parsed token /
+      // variant / media shape; the typer infers the `for=@cell` variant type
+      // (bare-variant inference §14.10) + registers the tokens. Phase B (codegen)
+      // lowers the tokens to `:root` custom properties, wires the reactive
+      // switching, and fires E-THEME-TOKEN-UNKNOWN at use sites.
+      if (block.name === "theme") {
+        const themeRaw = (block.raw || "").trim();
+
+        // Opener-end finder — brace/paren/bracket/string aware (mirrors the
+        // endpoint/onchange finders; a `>` inside a `for=${…}` never appears
+        // for `<theme>`, but the aware scan keeps parity + robustness).
+        function _findThemeOpenerEnd(str) {
+          let depth = 0, parenDepth = 0, bracketDepth = 0, inDQ = false, inSQ = false;
+          for (let k = 0; k < str.length; k++) {
+            const ch = str[k];
+            if (inDQ) { if (ch === '"') inDQ = false; else if (ch === "\\") k++; continue; }
+            if (inSQ) { if (ch === "'") inSQ = false; else if (ch === "\\") k++; continue; }
+            if (ch === '"') { inDQ = true; continue; }
+            if (ch === "'") { inSQ = true; continue; }
+            if (ch === "{") { depth++; continue; }
+            if (ch === "}") { if (depth > 0) depth--; continue; }
+            if (ch === "(") { parenDepth++; continue; }
+            if (ch === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (ch === "[") { bracketDepth++; continue; }
+            if (ch === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (ch === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return k;
+          }
+          return -1;
+        }
+
+        const thOpenerEnd = _findThemeOpenerEnd(themeRaw);
+        const opener = thOpenerEnd >= 0 ? themeRaw.slice(0, thOpenerEnd) : themeRaw;
+
+        // Extract the optional `for=@cell` binding (sigil stripped). Bare
+        // scrml-native reference — no `${…}` interpolation (attribute-registry).
+        let forCell = null;
+        const forMatch = opener.match(/\bfor\s*=\s*@?([A-Za-z_$][A-Za-z0-9_$]*)/);
+        if (forMatch) forCell = forMatch[1];
+
+        // Capture the body raw: BS delivers it as text-node children (mirrors
+        // onchange/endpoint). Concatenate; fall back to a raw slice.
+        let bodyRaw = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              bodyRaw += child.raw;
+            }
+          }
+        }
+        if (!bodyRaw && thOpenerEnd >= 0) {
+          bodyRaw = themeRaw.slice(thOpenerEnd + 1);
+          bodyRaw = bodyRaw.replace(/<\s*\/\s*(?:theme)?\s*>\s*$/, "");
+        }
+
+        // Position the body in the original source (for token spans). The body
+        // begins just past the opener `>`; advance baseLine over any newlines in
+        // the opener so token spans land on the right line.
+        const openerText = thOpenerEnd >= 0 ? themeRaw.slice(0, thOpenerEnd + 1) : themeRaw;
+        let openerNewlines = 0;
+        for (let k = 0; k < openerText.length; k++) if (openerText[k] === "\n") openerNewlines++;
+        const bodyOffset = (span.start ?? 0) + (thOpenerEnd >= 0 ? thOpenerEnd + 1 : 0);
+        const bodyLine = (span.line ?? 1) + openerNewlines;
+
+        const parsed = parseThemeBody(bodyRaw, bodyOffset, bodyLine, 1, filePath);
+
+        return {
+          id: ++counter.next,
+          kind: "theme-decl",
+          forCell,                     // bound reactive-cell name (§65.6), or null
+          baseTokens: parsed.baseTokens,   // §65.3.2 base (default) token bindings
+          variants: parsed.variants,       // §65.6 `.Variant { … }` re-bind sub-blocks
+          mediaBinds: parsed.mediaBinds,   // §65.6 `@media (…) { … }` auto-bind sugar
+          malformed: parsed.malformed,     // best-effort recovery record
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };

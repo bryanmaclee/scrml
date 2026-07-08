@@ -1,5 +1,5 @@
 // Attribute template literal with @var interpolation.
 <program>
-    ${ <theme> = "dark" }
-    <div class="card card-${@theme}">content</div>
+    ${ <themeMode> = "dark" }
+    <div class="card card-${@themeMode}">content</div>
 </program>

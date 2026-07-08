@@ -7317,6 +7317,65 @@ function fileDeclaresReactiveCell(fileAST: FileAST, name: string): boolean {
   return found;
 }
 
+/**
+ * §65.6 (css-wave1-theme-tokens) — collect the `<theme for=@cell>` bindings.
+ *
+ * A `<theme for=@mode>` OWNS the variant set that types the bound cell `@mode`
+ * (the engine `for=` pattern; §65.6). The variant set = the explicit `.Variant`
+ * sub-block names declared in the theme body. The cell's own initializer variant
+ * (`<mode> = .Light`) is the DEFAULT (base, no override); it is folded in at the
+ * state-decl site (the base name is only known from the init). So a bare `.Light`
+ * / `.Dark` at `@mode` positions resolves against this synthetic set (bare-variant
+ * inference §14.10) instead of firing E-VARIANT-AMBIGUOUS.
+ *
+ * Returns `cellName -> sub-block variant names`. Order-independent (a full
+ * upfront scan), so a `<mode> = .Light` decl that PRECEDES its `<theme for=@mode>`
+ * in source still resolves.
+ */
+function collectThemeCellVariants(fileAST: FileAST): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (n.kind === "theme-decl" && typeof n.forCell === "string" && n.forCell) {
+      const variants: string[] = [];
+      if (Array.isArray(n.variants)) {
+        for (const v of n.variants as Array<{ variant?: unknown }>) {
+          if (v && typeof v.variant === "string" && v.variant) variants.push(v.variant);
+        }
+      }
+      // Multiple `<theme for=@same>` blocks (unusual) union their variant sets.
+      const prior = out.get(n.forCell) ?? [];
+      out.set(n.forCell, [...new Set([...prior, ...variants])]);
+    }
+    for (const k of ["body", "children", "bodyChildren", "branches", "nodes"]) {
+      if (Array.isArray(n[k])) visit(n[k]);
+    }
+  };
+  visit(((fileAST as unknown as { ast?: { nodes?: unknown } }).ast?.nodes)
+    ?? (fileAST as unknown as { nodes?: unknown }).nodes
+    ?? []);
+  return out;
+}
+
+/**
+ * §65.6 — extract a bare-variant name (`.Light` → `Light`) from a state-decl
+ * init ExprNode. Returns null when the init is not a bare variant.
+ */
+function extractThemeInitVariant(initExpr: unknown): string | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  const node = initExpr as { kind?: string; name?: string };
+  if (typeof node.name === "string" && node.name.length > 1 && node.name[0] === "." &&
+      /^[A-Z][A-Za-z0-9_]*$/.test(node.name.slice(1))) {
+    return node.name.slice(1);
+  }
+  return null;
+}
+
 function annotateNodes(
   fileAST: FileAST,
   scopeChain: ScopeChain,
@@ -7330,6 +7389,12 @@ function annotateNodes(
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
+
+  // §65.6 (css-wave1-theme-tokens) — `<theme for=@cell>` variant-set ownership.
+  // Built once, consulted at the `state-decl` case so a `<mode> = .Light` cell
+  // bound by a `<theme for=@mode>` infers its variant type from the theme (the
+  // engine `for=` pattern), instead of firing E-VARIANT-AMBIGUOUS.
+  const themeCellVariants = collectThemeCellVariants(fileAST);
 
   function functionBoundary(fnNode: ASTNodeLike): "server" | "client" {
     if (!routeMap || !routeMap.functions) return "client";
@@ -9777,6 +9842,35 @@ function annotateNodes(
                     (prior.resolvedType as PredicatedType).baseType === "enum"))
               ) {
                 bvCtxType = prior.resolvedType;
+              }
+            }
+            // §65.6 (css-wave1-theme-tokens) — theme-bound cell variant inference.
+            // A `<mode> = .Light` cell bound by a `<theme for=@mode>` infers its
+            // variant type from the theme (the engine `for=` pattern; §14.10
+            // bare-variant inference). The theme OWNS the variant set: the explicit
+            // `.Variant` sub-blocks PLUS the cell's own initializer (the base /
+            // default variant, whose NAME is only knowable here from the init).
+            // Applies only when the cell is otherwise untyped (no annotation, no
+            // prior enum bind) AND the init IS a bare variant — synthesizing the
+            // enum so the bare init resolves and downstream `@mode == .Dark` /
+            // `@mode = .Dark` carry the enum context, instead of a spurious
+            // E-VARIANT-AMBIGUOUS. Setting `resolvedType` binds the cell (~line
+            // 9911) with the synthetic enum for those downstream positions.
+            if (!bvCtxType && !reactAnnot && typeof n.name === "string" && n.name.length > 0
+                && themeCellVariants.has(n.name)
+                && (resolvedType.kind === "asIs" || resolvedType.kind === "unknown")) {
+              const _initVariant = extractThemeInitVariant(reactInitExprNode);
+              if (_initVariant) {
+                const _subBlocks = themeCellVariants.get(n.name)!;
+                const _names = [...new Set([_initVariant, ..._subBlocks])];
+                const _cap = n.name.charAt(0).toUpperCase() + n.name.slice(1);
+                const _themeEnum = tEnum(
+                  `Theme_${_cap}`,   // synthetic theme-owned variant set (§65.6)
+                  _names.map(nm => ({ name: nm, payload: null, renders: null })),
+                  null,
+                );
+                bvCtxType = _themeEnum;
+                resolvedType = _themeEnum;
               }
             }
             // S96 — binary-expr comparison-site pre-pass, parity with

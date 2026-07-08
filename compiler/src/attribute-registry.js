@@ -456,6 +456,37 @@ ELEMENT_ATTR_REGISTRY.set("onchange", {
 });
 
 // ---------------------------------------------------------------------------
+// <theme> — the scrml-native CSS token block (SPEC §65.3.2 / §65.6,
+// css-wave1-theme-tokens).
+//
+// A scrml-defined structural element valid at program scope (§65.9). Its ONE
+// optional attribute is `for=@cell` — the reactive-cell binding (§65.6, the
+// engine `for=` pattern) whose variant set the `<theme>` OWNS (bare-variant
+// inference §14.10). The value is a bare scrml-native `@cell` reference — no
+// `${…}` interpolation. Registered here so VP-1 does not warn on `for=` and so a
+// typo'd attribute is surfaced. The body-form (`name = value;` tokens +
+// `.Variant { … }` + `@media (…) { … }`) is defined in §65.3 and parsed by the
+// theme-body-parser, NOT the HTML attribute machinery.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("theme", {
+  allowedAttrs: new Map([
+    ["for", attrSpec({ supportsInterpolation: false })],   // §65.6 — the bound reactive cell
+  ]),
+});
+
+// ---------------------------------------------------------------------------
+// <defaults> — app-wide bare-element defaults (SPEC §65.3.3 / §65.9). Reserved
+// as a structural element alongside `<theme>` (§65.9), but the body-form + the
+// `E-DEFAULTS-*` behaviour are the Wave-2 impl. Registered here (no attributes)
+// so VP-1 does not treat it as an unknown HTML element in the interim.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("defaults", {
+  allowedAttrs: new Map([]),
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

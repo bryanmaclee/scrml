@@ -1,5 +1,5 @@
 // Ghost-pattern: React `className={expr}` — not scrml.
 <program>
-    ${ <theme> = "dark" }
-    <div className={@theme}>hi</div>
+    ${ <themeMode> = "dark" }
+    <div className={@themeMode}>hi</div>
 </program>

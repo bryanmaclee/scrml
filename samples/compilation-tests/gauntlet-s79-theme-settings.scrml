@@ -153,36 +153,36 @@ ${
     type Theme:enum = { Light, Dark, System }
 
     // reactive defaults
-    <theme> = Theme.Light
+    <themeMode> = Theme.Light
     <fontSize> = 16
     <username> = ""
 
     // derive background color from current theme — used in preview section
     // assumption: match as expression assigned to @var works inline here
-    <bgColor> = match @theme {
+    <bgColor> = match @themeMode {
         .Light  => "#ffffff"
         .Dark   => "#1a1a1a"
         .System => "#f0f0f0"
     }
 
     // derive a human-readable theme label — needed in summary
-    <themeLabel> = match @theme {
+    <themeLabel> = match @themeMode {
         .Light  => "Light"
         .Dark   => "Dark"
         .System => "System"
     }
 
     function setTheme(t) {
-        @theme = t
+        @themeMode = t
         // re-derive dependent values when theme changes
         // assumption: match expressions don't auto-recompute — must re-assign manually
         // (in Vue this would be a computed, here I treat it as explicit re-assignment)
-        @bgColor = match @theme {
+        @bgColor = match @themeMode {
             .Light  => "#ffffff"
             .Dark   => "#1a1a1a"
             .System => "#f0f0f0"
         }
-        @themeLabel = match @theme {
+        @themeLabel = match @themeMode {
             .Light  => "Light"
             .Dark   => "Dark"
             .System => "System"
@@ -218,9 +218,9 @@ ${
 // --- root container — class:dark= and class:light= toggle on theme state ---
 // assumption: class:system= follows the same pattern, just not in the challenge spec
 <div class="app"
-    class:light=(@theme == Theme.Light)
-    class:dark=(@theme == Theme.Dark)
-    class:system=(@theme == Theme.System)
+    class:light=(@themeMode == Theme.Light)
+    class:dark=(@themeMode == Theme.Dark)
+    class:system=(@themeMode == Theme.System)
 >
 
     <h1>Settings</>
@@ -232,15 +232,15 @@ ${
             // assumption: class:active= on each button to show which is selected
             // Vue developer instinct — should feel the same as class binding there
             <button class="btn"
-                class:active=(@theme == Theme.Light)
+                class:active=(@themeMode == Theme.Light)
                 onclick=setTheme(Theme.Light)
             >Light</>
             <button class="btn"
-                class:active=(@theme == Theme.Dark)
+                class:active=(@themeMode == Theme.Dark)
                 onclick=setTheme(Theme.Dark)
             >Dark</>
             <button class="btn"
-                class:active=(@theme == Theme.System)
+                class:active=(@themeMode == Theme.System)
                 onclick=setTheme(Theme.System)
             >System</>
         </div>
@@ -275,14 +275,14 @@ ${
         </>
     </div>
 
-    // --- theme preview --- match on @theme for descriptive text
+    // --- theme preview --- match on @themeMode for descriptive text
     <div class="section">
         <p class="section-title">Preview</>
         <div class="preview-block">
             ${
                 // match expression lifted as content — checks all three arms
                 // assumption: lift of a string interpolation works here
-                lift match @theme {
+                lift match @themeMode {
                     .Light  => "You are in Light mode. Clean, bright, easy on paper."
                     .Dark   => "You are in Dark mode. Easy on the eyes at night."
                     .System => "Following System preference. Adapts to your OS setting."

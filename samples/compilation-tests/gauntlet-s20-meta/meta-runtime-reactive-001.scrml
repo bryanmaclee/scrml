@@ -3,12 +3,12 @@
 
 <program>
 ${
-  <theme> = "dark"
+  <themeMode> = "dark"
 }
 
 <div>
   ^{
-    if (meta.get("theme") == "dark") {
+    if (meta.get("themeMode") == "dark") {
       meta.emit("<p>Dark mode</p>")
     } else {
       meta.emit("<p>Light mode</p>")
