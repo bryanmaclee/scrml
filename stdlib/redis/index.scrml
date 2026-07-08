@@ -59,8 +59,11 @@ ${
      * @param seconds — TTL in seconds
      */
     export async function setex(key, value, seconds) {
-        await redis.set(key, value)
-        await redis.expire(key, seconds)
+        // Atomic SET-with-expiry (single round-trip). A separate set + expire
+        // would leave a key with NO ttl if the process died between the two
+        // calls — a silent cache-eviction bug for the "set a value AND its
+        // expiration together" contract this function promises. SETEX key sec value.
+        await redis.send("SETEX", [key, seconds, value])
     }
 
     /**

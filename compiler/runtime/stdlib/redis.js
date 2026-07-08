@@ -37,8 +37,9 @@ export async function set(key, value) {
 }
 
 export async function setex(key, value, seconds) {
-  await redis.set(key, value);
-  await redis.expire(key, seconds);
+  // Atomic SET-with-expiry (single round-trip). Separate set + expire would
+  // leave a key with NO ttl if the process died between them. SETEX key sec value.
+  await redis.send("SETEX", [key, seconds, value]);
 }
 
 export async function del(key) {

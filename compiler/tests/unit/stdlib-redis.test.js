@@ -60,7 +60,7 @@ const stubRedis = {
 
 async function get(key) { return await stubRedis.get(key); }
 async function set(key, value) { await stubRedis.set(key, value); }
-async function setex(key, value, seconds) { await stubRedis.set(key, value); await stubRedis.expire(key, seconds); }
+async function setex(key, value, seconds) { await stubRedis.send("SETEX", [key, seconds, value]); }
 async function del(key) { await stubRedis.del(key); }
 async function exists(key) { return await stubRedis.exists(key); }
 async function expire(key, seconds) { await stubRedis.expire(key, seconds); }
@@ -89,10 +89,10 @@ describe("scrml:redis — shape", () => {
     expect(await get("missing")).toBeNull();
   });
 
-  test("R2 setex calls set then expire in order", async () => {
+  test("R2 setex issues a single atomic SETEX", async () => {
     stubLog = [];
     await setex("session", "abc", 60);
-    expect(stubLog).toEqual([["set", "session", "abc"], ["expire", "session", 60]]);
+    expect(stubLog).toEqual([["send", "SETEX", ["session", 60, "abc"]]]);
   });
 
   test("R3 del removes key; exists reports presence", async () => {
