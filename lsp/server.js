@@ -55,6 +55,8 @@ import {
   buildDefinitionLocation,
   buildDocumentSymbols,
   buildHover,
+  buildSemanticTokens,
+  SEMANTIC_TOKENS_LEGEND,
 } from "./handlers.js";
 
 import {
@@ -139,6 +141,15 @@ connection.onInitialize((params) => {
       // error codes. The client filters by kind via codeActionKinds.
       codeActionProvider: {
         codeActionKinds: [CodeActionKind.QuickFix],
+      },
+      // Semantic tokens — context-exact syntax highlighting driven by the
+      // compiler's own parse (block-splitter context oracle + native lexer),
+      // retiring reliance on regex vim/TextMate grammars. Full-document only
+      // for v1 (range/delta = follow-on). The legend maps our emitted
+      // type indices to standard SemanticTokenTypes names, cross-editor safe.
+      semanticTokensProvider: {
+        legend: SEMANTIC_TOKENS_LEGEND,
+        full: true,
       },
     },
   };
@@ -279,6 +290,19 @@ connection.onCodeAction((params) => {
     workspace,
     filePath,
   );
+});
+
+// Semantic tokens (full document) — context-exact highlighting. The handler
+// logic lives in handlers.js (`buildSemanticTokens`) so it can be unit-tested
+// without a transport. It NEVER throws: on any BS/lex failure it returns an
+// empty `{ data: [] }`, so a mid-keystroke broken buffer degrades gracefully
+// (the editor keeps the last good highlighting rather than erroring).
+connection.languages.semanticTokens.on((params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return { data: [] };
+  const text = document.getText();
+  const analysis = fileAnalysis.get(params.textDocument.uri);
+  return buildSemanticTokens(text, analysis);
 });
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,8 @@ import {
   CompletionItemKind,
   MarkupKind,
   SymbolKind,
+  SemanticTokensBuilder,
+  SemanticTokenTypes,
 } from "vscode-languageserver/node";
 
 // Import compiler stages directly. Same set as server.js.
@@ -38,6 +40,13 @@ import { runPA } from "../compiler/src/protect-analyzer.js";
 import { runRI } from "../compiler/src/route-inference.js";
 import { runTS } from "../compiler/src/type-system.js";
 import { runDG } from "../compiler/src/dependency-graph.js";
+
+// Semantic-tokens leaf tokenizer — the native lexer. Verified tolerant (never
+// throws) across the whole .scrml corpus + truncation fuzz; carries a maxIters
+// guard + error recovery + always-appends-EOF. See docs/changes/
+// lsp-semantic-tokens-2026-07-08/progress.md (Phase 0).
+import { lex } from "../compiler/native-parser/lex.js";
+import { TokenKind } from "../compiler/native-parser/token.js";
 
 // L2 — workspace cache for cross-file go-to-def + diagnostics.
 import {
@@ -2516,4 +2525,620 @@ export function buildCompletions(text, offset, analysis, workspace) {
   }
 
   return items;
+}
+
+// ===========================================================================
+// Semantic tokens (LSP `textDocument/semanticTokens/full`)
+// ===========================================================================
+//
+// Context-exact syntax highlighting driven by the compiler's own parse
+// (compiler-as-oracle), retiring reliance on regex vim/TextMate grammars.
+//
+// Two compiler surfaces cooperate:
+//   1. block-splitter (`splitBlocks`) is the CONTEXT ORACLE — it paints each
+//      byte of the source with its scrml context (markup / logic / css / sql /
+//      state / comment / ...). This is what makes highlighting context-exact:
+//      a `class` inside `<div class=…>` is an attribute (property), not the JS
+//      `class` keyword; a bareword inside `#{…}` is a CSS property, not a var.
+//   2. the native lexer (`lex`) is the LEAF TOKENIZER — it returns positioned
+//      `{ kind, text, span:{start,end,line,col} }` tokens over the whole
+//      document. Verified tolerant (never throws) across the whole .scrml
+//      corpus + truncation fuzz.
+//
+// Both are wrapped in try/catch here; on any failure the handler returns an
+// empty token set rather than throwing (editors send broken buffers on every
+// keystroke — mirrors how `analyzeText` guards BS/TAB).
+//
+// TokenKind -> LSP SemanticTokenTypes mapping (STANDARD names, cross-editor
+// safe). v1 is LEXICAL: roles come from the lexer + context, not from deep AST
+// analysis (AST role-enrichment — enumMember, function-call targets, type vs
+// var — is a noted follow-on).
+//
+//   context   construct                       -> SemanticTokenType
+//   -------   ---------                        -> ------------------
+//   any       Kw* / BoolLit (if/return/is/fn…) -> keyword
+//   any       StringLit / TemplateChunk        -> string
+//   any       NumberLit                        -> number
+//   any       RegexLit                         -> regexp
+//   any       // and /* */ (lexer-skipped)     -> comment  (gap scan)
+//   any       <!-- --> (markup)                -> comment  (BS comment block)
+//   logic     Ident                            -> variable
+//   logic     @reactive (ScrmlAt)              -> variable
+//   logic     operators / sigils (+,=>,~,?. …) -> operator
+//   markup    tag / component name             -> type
+//   markup    attribute name                   -> property
+//   markup    type annotation `field(Type)`    -> type
+//   markup    @reactive ref                    -> variable
+//   markup    ${ … } embedded logic            -> (logic mapping)
+//   css       property before `:`              -> property
+//   sql       ?{ … } keyword (SELECT/FROM/…)   -> keyword
+//   sql       string / number                  -> string / number
+//   sql       -- and /* */                     -> comment
+//
+// Full-document only (`full: true`). Range/delta tokens = follow-on.
+
+const SEM_TOKEN_TYPES = [
+  SemanticTokenTypes.keyword,   // 0
+  SemanticTokenTypes.string,    // 1
+  SemanticTokenTypes.number,    // 2
+  SemanticTokenTypes.comment,   // 3
+  SemanticTokenTypes.variable,  // 4
+  SemanticTokenTypes.operator,  // 5
+  SemanticTokenTypes.type,      // 6
+  SemanticTokenTypes.property,  // 7
+  SemanticTokenTypes.regexp,    // 8
+];
+
+/**
+ * The semantic-tokens legend. `server.js` advertises this in the
+ * `semanticTokensProvider` capability; the client uses it to decode the
+ * flat token-type indices we emit. No modifiers in v1.
+ */
+export const SEMANTIC_TOKENS_LEGEND = {
+  tokenTypes: SEM_TOKEN_TYPES,
+  tokenModifiers: [],
+};
+
+const SEM_TYPE_INDEX = Object.fromEntries(SEM_TOKEN_TYPES.map((t, i) => [t, i]));
+
+// Every `Kw*` TokenKind plus the boolean literal -> keyword.
+const SEM_KEYWORD_KINDS = new Set([
+  ...Object.keys(TokenKind).filter((k) => k.startsWith("Kw")).map((k) => TokenKind[k]),
+  TokenKind.BoolLit,
+]);
+
+// Brackets, separators and trivia get NO semantic token (kept uncolored to
+// reduce noise). Everything that is not a keyword / literal / identifier and
+// not in this set is treated as an operator.
+const SEM_SKIP_KINDS = new Set([
+  TokenKind.LParen, TokenKind.RParen, TokenKind.LBrace, TokenKind.RBrace,
+  TokenKind.LBracket, TokenKind.RBracket, TokenKind.Comma, TokenKind.Semicolon,
+  TokenKind.Newline, TokenKind.Whitespace, TokenKind.EOF,
+]);
+
+// SQL keywords for the `?{ … }` sub-scanner (uppercased lookup). Reuses the
+// completion provider's list so the two never drift.
+const SEM_SQL_KEYWORDS = new Set(SQL_KEYWORDS);
+
+/**
+ * Map a lexer token to its semantic type when it appears in LOGIC context
+ * (inside `${ … }`, function bodies, `!{}`/`^{}` blocks, top-level code, or
+ * an embedded escape). Returns a legend type name or null (no token).
+ */
+function semLogicType(tok) {
+  const kind = tok.kind;
+  if (SEM_KEYWORD_KINDS.has(kind)) return "keyword";
+  switch (kind) {
+    case TokenKind.StringLit:
+    case TokenKind.TemplateChunk:
+      return "string";
+    case TokenKind.NumberLit:
+      return "number";
+    case TokenKind.RegexLit:
+      return "regexp";
+    case TokenKind.Ident:
+      // A lone `$` is the logic-escape sigil, not a variable.
+      return tok.text === "$" ? "operator" : "variable";
+    case TokenKind.ScrmlAt:
+    case TokenKind.BareVariant:
+    case TokenKind.InputStateRef:
+      return "variable";
+    default:
+      return SEM_SKIP_KINDS.has(kind) ? null : "operator";
+  }
+}
+
+/**
+ * Build an offset -> { line, char } positioner (both 0-based for LSP). Line
+ * starts are precomputed once so each lookup is a binary search.
+ */
+function makePositioner(text) {
+  const lineStarts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") lineStarts.push(i + 1);
+  }
+  return function posOf(offset) {
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    let line = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (lineStarts[mid] <= offset) {
+        line = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return { line, char: offset - lineStarts[line] };
+  };
+}
+
+/**
+ * Emit a semantic token for the span [start, end), splitting on newlines so no
+ * single token ever crosses a line (semantic tokens are single-line).
+ */
+function semEmit(out, text, posOf, start, end, type) {
+  if (type == null || end <= start) return;
+  let segStart = start;
+  for (let i = start; i < end; i++) {
+    if (text[i] === "\n") {
+      if (i > segStart) {
+        const p = posOf(segStart);
+        out.push({ line: p.line, char: p.char, length: i - segStart, type });
+      }
+      segStart = i + 1;
+    }
+  }
+  if (end > segStart) {
+    const p = posOf(segStart);
+    out.push({ line: p.line, char: p.char, length: end - segStart, type });
+  }
+}
+
+/**
+ * Build a per-offset context map from the block-splitter. Each offset carries
+ * the nearest non-`text` ancestor context (so CSS/SQL bodies, which the
+ * splitter stores as `text` children, keep their parent context). Returns null
+ * if the splitter throws (the caller then treats everything as logic).
+ */
+function buildSemContextMap(text) {
+  let bs;
+  try {
+    bs = splitBlocks("<lsp-semantic-tokens>", text);
+  } catch {
+    return null;
+  }
+  const map = new Array(text.length).fill(null);
+  const paint = (block, inherited) => {
+    const eff = block.type === "text" ? inherited : block.type;
+    const s = block.span?.start ?? 0;
+    const e = Math.min(block.span?.end ?? 0, text.length);
+    for (let i = s; i < e; i++) map[i] = eff;
+    for (const c of block.children || []) paint(c, eff);
+  };
+  // Top-level uncovered regions (top-level type decls, imports, statements)
+  // stay null -> treated as logic. Top-level text blocks inherit logic too.
+  for (const b of bs.blocks || []) paint(b, null);
+  return { map, blocks: bs.blocks || [] };
+}
+
+// Context groups: collapse the splitter's fine-grained contexts to the four
+// tokenization strategies below.
+function semGroupOf(ctx) {
+  switch (ctx) {
+    case "markup":
+    case "state":
+      return "markup";
+    case "css":
+      return "css";
+    case "sql":
+      return "sql";
+    // logic / error-effect / meta / foreign / comment / null -> logic mapping.
+    default:
+      return "logic";
+  }
+}
+
+/**
+ * Sub-scan a `?{ … }` SQL block (the native lexer emits it as one atomic
+ * `SqlBlock` token). Colors SQL keywords, string/number literals and
+ * `--` / `/* *​/` comments; leaves identifiers and punctuation uncolored.
+ */
+function semScanSql(out, text, posOf, sqlText, base) {
+  const n = sqlText.length;
+  let i = 0;
+  while (i < n) {
+    const c = sqlText[i];
+    // whitespace
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; continue; }
+    // -- line comment (SQL native)
+    if (c === "-" && sqlText[i + 1] === "-") {
+      let j = i + 2;
+      while (j < n && sqlText[j] !== "\n" && sqlText[j] !== "\r") j++;
+      semEmit(out, text, posOf, base + i, base + j, "comment");
+      i = j;
+      continue;
+    }
+    // /* */ block comment
+    if (c === "/" && sqlText[i + 1] === "*") {
+      let j = i + 2;
+      while (j < n && !(sqlText[j] === "*" && sqlText[j + 1] === "/")) j++;
+      j = Math.min(n, j + 2);
+      semEmit(out, text, posOf, base + i, base + j, "comment");
+      i = j;
+      continue;
+    }
+    // // line comment (universal)
+    if (c === "/" && sqlText[i + 1] === "/") {
+      let j = i + 2;
+      while (j < n && sqlText[j] !== "\n" && sqlText[j] !== "\r") j++;
+      semEmit(out, text, posOf, base + i, base + j, "comment");
+      i = j;
+      continue;
+    }
+    // string literal
+    if (c === "'" || c === '"' || c === "`") {
+      let j = i + 1;
+      while (j < n && sqlText[j] !== c) {
+        if (sqlText[j] === "\\") j++;
+        j++;
+      }
+      j = Math.min(n, j + 1);
+      semEmit(out, text, posOf, base + i, base + j, "string");
+      i = j;
+      continue;
+    }
+    // number literal
+    if (c >= "0" && c <= "9") {
+      let j = i + 1;
+      while (j < n && /[0-9._]/.test(sqlText[j])) j++;
+      semEmit(out, text, posOf, base + i, base + j, "number");
+      i = j;
+      continue;
+    }
+    // word — keyword or bareword
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_]/.test(sqlText[j])) j++;
+      const word = sqlText.slice(i, j);
+      if (SEM_SQL_KEYWORDS.has(word.toUpperCase())) {
+        semEmit(out, text, posOf, base + i, base + j, "keyword");
+      }
+      i = j;
+      continue;
+    }
+    i++;
+  }
+}
+
+/**
+ * Scan the GAPS between adjacent lexer tokens for `//` and `/* *​/` comments.
+ * The native lexer consumes (and drops) these comments, so a gap that contains
+ * a comment marker is genuinely a comment — strings/templates/regex have
+ * already been carved out as their own tokens, so there are no false hits from
+ * markers inside literals.
+ *
+ * CONTEXT-GATED (context-exact guarantee): the block-splitter context at the
+ * marker offset decides whether a marker is a comment at all —
+ *   - `//`  is a comment ONLY in JS `logic` context. In markup prose it is
+ *           ordinary text (a URL `http://…`) and in CSS it is a URL inside
+ *           `url(http://…)`; firing there swallows the rest of the line
+ *           (e.g. a `</p>` close tag or `color: red }`). The splitter carves
+ *           genuine `//` comments as their own `comment` blocks, so a real
+ *           comment always resolves to a NON-null logic-group context; a `//`
+ *           in markup/CSS makes the splitter fail (unclosed context) and leaves
+ *           the offset unpainted (null) — so we require a non-null logic ctx.
+ *   - `/* *​/` is a comment in `logic` AND `css` (CSS block comments), but not
+ *           in markup prose or SQL. The splitter does NOT carve these as
+ *           `comment` blocks, and a genuine top-level `/* *​/` sits in an
+ *           unpainted (null → logic) region, so null is allowed for this marker.
+ * SQL (`--`, `//`, `/* *​/`) is handled by `semScanSql` on the atomic `?{…}`
+ * SqlBlock token, so it never reaches the gap scanner and is not double-handled.
+ */
+function semScanCommentGaps(out, text, posOf, tokens, ctxMap) {
+  // Same context-lookup idiom as `semWalkTokens`: null ctx → logic group.
+  const rawCtxAt = (off) => (ctxMap ? ctxMap[off] : null);
+  const groupAt = (off) => semGroupOf(rawCtxAt(off) ?? "logic");
+  const scanGap = (s, e) => {
+    let i = s;
+    while (i < e) {
+      const c = text[i];
+      if (c === "/" && (text[i + 1] === "/" )) {
+        // `//` comment only in a *painted* logic context (never in markup/CSS,
+        // where a null-fallback logic group would otherwise mis-fire on a URL).
+        if (rawCtxAt(i) != null && groupAt(i) === "logic") {
+          let j = i + 2;
+          while (j < e && text[j] !== "\n" && text[j] !== "\r") j++;
+          semEmit(out, text, posOf, i, j, "comment");
+          i = j;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      if (c === "/" && text[i + 1] === "*") {
+        // `/* *​/` comment in logic OR css (null → logic allowed: genuine
+        // top-level block comments sit in unpainted regions).
+        const g = groupAt(i);
+        if (g === "logic" || g === "css") {
+          let j = i + 2;
+          while (j < e && !(text[j] === "*" && text[j + 1] === "/")) j++;
+          j = Math.min(e, j + 2);
+          semEmit(out, text, posOf, i, j, "comment");
+          i = j;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      i++;
+    }
+  };
+  let prevEnd = 0;
+  for (const t of tokens) {
+    if (t.kind === TokenKind.EOF) continue;
+    const s = t.span?.start ?? 0;
+    if (s > prevEnd) scanGap(prevEnd, s);
+    prevEnd = Math.max(prevEnd, t.span?.end ?? 0);
+  }
+  if (prevEnd < text.length) scanGap(prevEnd, text.length);
+}
+
+/** Emit comment tokens for every block the splitter classified as `comment`
+ *  (covers markup `<!-- -->`, which the lexer tokenizes as operators). */
+function semScanCommentBlocks(out, text, posOf, blocks) {
+  const walk = (b) => {
+    if (b.type === "comment" && b.span) {
+      // A line-comment block spans up to and including its trailing CRLF; trim
+      // the newline chars so a CRLF `//` comment token doesn't carry the
+      // invisible `\r`. Block comments (`/* */`, `<!-- -->`) end at their closer
+      // and carry no trailing newline, so this is a no-op for them.
+      let end = Math.min(b.span.end, text.length);
+      while (end > b.span.start && (text[end - 1] === "\n" || text[end - 1] === "\r")) end--;
+      semEmit(out, text, posOf, b.span.start, end, "comment");
+    }
+    for (const c of b.children || []) walk(c);
+  };
+  for (const b of blocks) walk(b);
+}
+
+/**
+ * Walk the lexer token stream, assigning a semantic type per token based on
+ * its block-splitter context. Markup and CSS use small state machines; `${…}`
+ * escapes inside markup/css switch to logic mapping until their braces close;
+ * `?{…}` (atomic SqlBlock) is sub-scanned.
+ */
+function semWalkTokens(out, text, posOf, tokens, ctxMap) {
+  const ctxAt = (off) => {
+    if (!ctxMap) return "logic";
+    const c = ctxMap[off];
+    return c == null ? "logic" : c;
+  };
+  const emit = (tok, type) => semEmit(out, text, posOf, tok.span.start, tok.span.end, type);
+
+  // Markup state machine flags.
+  let expectTagName = false;   // just saw `<` (or `</`) — next ident is the tag
+  let tagContinuation = false; // just saw `.` after a tag name — namespaced tag
+  let tagJustEmitted = false;  // the previous markup token was a tag-name part
+  let inTag = false;           // between tag name and `>` — reading attributes
+  let attrValueNext = false;   // just saw `=` — next token is the attr value
+  let parenDepth = 0;          // inside `field(Type)` — annotation parens
+
+  // `${ … }` escape state (used inside markup/css).
+  let escapeReturn = null;     // non-null while inside an escape (group to resume)
+  let escapeDepth = 0;
+
+  const resetMarkup = () => {
+    expectTagName = false;
+    tagContinuation = false;
+    tagJustEmitted = false;
+    inTag = false;
+    attrValueNext = false;
+    parenDepth = 0;
+  };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const kind = t.kind;
+    if (kind === TokenKind.EOF || kind === TokenKind.Newline || kind === TokenKind.Whitespace) {
+      continue;
+    }
+
+    // `?{ … }` — atomic in any context; sub-scan and move on.
+    if (kind === TokenKind.SqlBlock) {
+      semScanSql(out, text, posOf, t.text, t.span.start);
+      continue;
+    }
+
+    // Inside a `${ … }` escape: full logic mapping + brace tracking.
+    if (escapeReturn !== null) {
+      if (kind === TokenKind.LBrace) { escapeDepth++; emit(t, "operator"); continue; }
+      if (kind === TokenKind.RBrace) {
+        escapeDepth--;
+        emit(t, "operator");
+        if (escapeDepth <= 0) escapeReturn = null;
+        continue;
+      }
+      const ty = semLogicType(t);
+      if (ty) emit(t, ty);
+      continue;
+    }
+
+    const group = semGroupOf(ctxAt(t.span.start));
+
+    // `${` escape opener inside markup/css: `$` immediately followed by `{`.
+    if (
+      (group === "markup" || group === "css") &&
+      kind === TokenKind.Ident && t.text === "$" &&
+      i + 1 < tokens.length &&
+      tokens[i + 1].kind === TokenKind.LBrace &&
+      tokens[i + 1].span.start === t.span.end
+    ) {
+      emit(t, "operator");
+      emit(tokens[i + 1], "operator");
+      escapeReturn = group;
+      escapeDepth = 1;
+      attrValueNext = false;
+      i++; // consume the `{`
+      continue;
+    }
+
+    if (group === "logic") {
+      const ty = semLogicType(t);
+      if (ty) emit(t, ty);
+      continue;
+    }
+
+    if (group === "css") {
+      if (kind === TokenKind.StringLit || kind === TokenKind.TemplateChunk) { emit(t, "string"); continue; }
+      if (kind === TokenKind.NumberLit) { emit(t, "number"); continue; }
+      if (kind === TokenKind.Ident) {
+        // Property name: an identifier (or a contiguous hyphenated run like
+        // `font-size` — the lexer splits it into Ident `-` Ident) whose next
+        // meaningful token is `:`. Merge the run into one `property` token.
+        let last = i;
+        while (
+          tokens[last + 1] && tokens[last + 2] &&
+          tokens[last + 1].kind === TokenKind.Minus &&
+          tokens[last + 2].kind === TokenKind.Ident &&
+          tokens[last + 1].span.start === tokens[last].span.end &&
+          tokens[last + 2].span.start === tokens[last + 1].span.end
+        ) {
+          last += 2;
+        }
+        const after = tokens[last + 1];
+        if (after && after.kind === TokenKind.Colon) {
+          semEmit(out, text, posOf, t.span.start, tokens[last].span.end, "property");
+          i = last;
+        }
+        continue;
+      }
+      continue; // selectors, values, punctuation -> uncolored
+    }
+
+    // group === "markup" (also `state` declaration openers). Snapshot whether
+    // the previous markup token was a tag-name part, then clear the flag — only
+    // the tag-name emit below re-sets it.
+    const prevWasTag = tagJustEmitted;
+    tagJustEmitted = false;
+
+    if (kind === TokenKind.ScrmlAt) { emit(t, "variable"); attrValueNext = false; continue; }
+    if (kind === TokenKind.StringLit || kind === TokenKind.TemplateChunk) { emit(t, "string"); attrValueNext = false; continue; }
+    if (kind === TokenKind.NumberLit) { if (attrValueNext) emit(t, "number"); attrValueNext = false; continue; }
+    if (kind === TokenKind.RegexLit) { emit(t, "regexp"); attrValueNext = false; continue; }
+
+    if (kind === TokenKind.LessThan) { resetMarkup(); expectTagName = true; continue; }
+    if (kind === TokenKind.Slash) { continue; }   // part of `</` or `/>`
+    if (kind === TokenKind.GreaterThan) { resetMarkup(); continue; }
+
+    if (kind === TokenKind.LParen) { if (inTag) parenDepth++; continue; }
+    if (kind === TokenKind.RParen) { if (inTag && parenDepth > 0) parenDepth--; continue; }
+
+    // Namespaced tag `<Foo.Bar>` — a `.` right after a tag-name part means the
+    // next identifier continues the tag name (still a `type`).
+    if (kind === TokenKind.Dot) {
+      if (inTag && prevWasTag) tagContinuation = true;
+      continue;
+    }
+
+    if (kind === TokenKind.Assign) { if (inTag) attrValueNext = true; continue; }
+
+    // Identifier-like: tag name, attribute name, type annotation, or the attr
+    // value. `class` etc. arrive here as `Kw*`, so accept keyword kinds too.
+    const identLike = kind === TokenKind.Ident || SEM_KEYWORD_KINDS.has(kind);
+    if (identLike) {
+      if (expectTagName || tagContinuation) {
+        emit(t, "type");
+        expectTagName = false;
+        tagContinuation = false;
+        tagJustEmitted = true;
+        inTag = true;
+      } else if (attrValueNext) {
+        // bareword attribute value -> treat as a variable reference
+        emit(t, "variable");
+        attrValueNext = false;
+      } else if (inTag) {
+        emit(t, parenDepth > 0 ? "type" : "property");
+      }
+      continue;
+    }
+
+    // Any other token in markup structural position -> uncolored.
+    attrValueNext = false;
+  }
+}
+
+/**
+ * Compute the readable (pre-encoding) semantic-token list for `text`. Returns
+ * a sorted, overlap-free array of `{ line, char, length, type }` (all 0-based;
+ * `type` is a legend type name). NEVER throws — returns `[]` on any failure.
+ *
+ * `analysis` is accepted for signature parity / future AST role-enrichment but
+ * v1 derives everything from the source text (robust even when analysis is
+ * null, e.g. a buffer that failed BS/TAB).
+ */
+export function computeSemanticTokens(text, analysis) {
+  if (typeof text !== "string" || text.length === 0) return [];
+  try {
+    const posOf = makePositioner(text);
+    const out = [];
+
+    const ctx = buildSemContextMap(text);
+    const ctxMap = ctx?.map ?? null;
+
+    let tokens = [];
+    try {
+      tokens = lex(text);
+    } catch {
+      tokens = [];
+    }
+
+    semWalkTokens(out, text, posOf, tokens, ctxMap);
+    semScanCommentGaps(out, text, posOf, tokens, ctxMap);
+    if (ctx?.blocks) semScanCommentBlocks(out, text, posOf, ctx.blocks);
+
+    // Sort by (line, char) — required by SemanticTokensBuilder's delta encoding.
+    out.sort((a, b) => a.line - b.line || a.char - b.char || b.length - a.length);
+
+    // Drop exact duplicates and overlaps (a comment gap + a BS comment block can
+    // both cover the same `//`; overlapping tokens break the delta encoding).
+    const result = [];
+    let lastLine = -1;
+    let lastEnd = -1;
+    let seen = "";
+    for (const tk of out) {
+      const key = `${tk.line}:${tk.char}:${tk.length}:${tk.type}`;
+      if (key === seen) continue;
+      if (tk.line === lastLine && tk.char < lastEnd) continue; // overlap
+      result.push(tk);
+      seen = key;
+      lastLine = tk.line;
+      lastEnd = tk.char + tk.length;
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the LSP-encoded semantic tokens for `text` (the value returned from a
+ * `textDocument/semanticTokens/full` request). Uses `SemanticTokensBuilder` to
+ * delta-encode. NEVER throws — returns an empty `{ data: [] }` on any failure.
+ */
+export function buildSemanticTokens(text, analysis) {
+  const builder = new SemanticTokensBuilder();
+  let tokens = [];
+  try {
+    tokens = computeSemanticTokens(text, analysis);
+  } catch {
+    tokens = [];
+  }
+  for (const tk of tokens) {
+    const typeIndex = SEM_TYPE_INDEX[tk.type];
+    if (typeIndex == null) continue;
+    builder.push(tk.line, tk.char, tk.length, typeIndex, 0);
+  }
+  return builder.build();
 }
