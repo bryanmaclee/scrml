@@ -94,14 +94,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `f9d37153` — chore(s244): WRAP — CSS-native model (SPEC §65 draft) + E-CG-001 HIGH + flobase boot fix + string-blind reverted — **LOCAL-ONLY**
-- `02425f54` — chore(s243): WRAP — hand-off CLOSE + changelog + delta-log [415]-[432] + BRIEF-P1 — **LOCAL-ONLY**
-- `3b399ab0` — chore(s242): WRAP — hand-off + changelog + delta-log [402-414] + master-list; BaaS #3 introspect landed, realtime DD, Peter PA (no push, no maps) — **LOCAL-ONLY**
+- `fe91bb26` — chore(s245): WRAP — hand-off CLOSE + delta-log [438]-[446] + changelog + gap-state regen — **pushed**
+- `f9d37153` — chore(s244): WRAP — CSS-native model (SPEC §65 draft) + E-CG-001 HIGH + flobase boot fix + string-blind reverted — **pushed**
+- `02425f54` — chore(s243): WRAP — hand-off CLOSE + changelog + delta-log [415]-[432] + BRIEF-P1 — **pushed**
+- `3b399ab0` — chore(s242): WRAP — hand-off + changelog + delta-log [402-414] + master-list; BaaS #3 introspect landed, realtime DD, Peter PA (no push, no maps) — **pushed**
 - `87b57b30` — chore(s241): WRAP — hand-off + changelog + delta-log [390-401] + user-voice + 8 gaps — **pushed**
 - `caa8803b` — chore(s240): WRAP — hand-off + changelog + delta-log [383-389] + inbox processed — **pushed**
 - `e44ce893` — chore(s239): WRAP — A/B + E-TOOL-006 landed, PA contract hardened; W5b HELD on origin/w5b-wip (cross-machine) — **pushed**
 - `6f8adc5c` — chore(s238): WRAP addendum — flogence Surface-2 R26 (2 CLI toolchain blockers filed + prioritized) — **pushed**
-- `66a3afb1` — chore(s237): WRAP bookkeeping (RECOVER — c2ed7535 landed empty via the -F- stdin-heredoc staging-loss) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
@@ -242,9 +242,19 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 
 ---
 
-## I. Stdlib (16 modules — user-facing; `compiler` is self-host)
+## I. Stdlib (20 runtime modules — user-facing; `compiler` is self-host)
 
-`stdlib/` — auth (3), compiler (17), crypto (1), data (3), format (1), fs (1), http (1), path (1), process (1), router (1), store (2), test (1), time (1)
+`stdlib/` runtime modules (`.scrml` source; each also has a hand-written
+`compiler/runtime/stdlib/<mod>.js` host shim) — auth (4), cron (1), crypto (1),
+data (8), format (1), fs (1), host (1), http (1), math (1), mcp (1), oauth (6),
+path (1), process (1), random (1), redis (1), regex (1), router (1), store (2),
+test (1), time (1). Plus `compiler` (16) — self-host reference copies (primary at
+`../scrml-native/`; deferred post-v1.0.0).
+
+> **Coverage note (S247 sweep, `docs/audits/stdlib-completeness-2026-07-08.md`):** all 20
+> runtime modules are complete — zero incomplete stubs across ~200 exports; the deliberate
+> stubs (host/mcp → JS-host runtime, formFor/tableFor/schemaFor/parseVariant → MOD-stage
+> compiler-resolved) are verified-backed.
 
 ---
 
