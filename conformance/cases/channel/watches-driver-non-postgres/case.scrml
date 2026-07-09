@@ -1,0 +1,19 @@
+<program db="sqlite:app.db">
+
+  <schema>
+    orders {
+      id: int primary key
+      status: string
+      total: number
+    }
+  </schema>
+
+  <channel name="orders-feed" watches=orders>
+    <onchange>
+      <Inserted(row) : print(row)>
+      <Updated(row) : print(row)>
+      <Deleted(key) : print(key)>
+    </onchange>
+  </channel>
+
+</program>

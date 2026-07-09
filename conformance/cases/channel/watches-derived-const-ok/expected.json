@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-derived-const-ok",
+  "description": "§38.13.4 — a V5-strict DERIVED const (`const <threshold> = @maxTotal * 2`) inside a `watches=` channel body does NOT fire E-CHANNEL-WATCHES-CLIENT-WRITE. A derived const is READ-ONLY — it has no bidirectional §38.4 sync path to forbid, so only a genuine non-const synced cell (`<x> = init`) is forbidden. Locks the CLIENT-WRITE fidelity boundary.",
+  "language-version": "1.0",
+  "spec": "§38.13.4, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.4 forbids a V5-strict synced cell (`<x> = init`) in a `watches=` body because it implies a client->server write path. A DERIVED const is read-only (no sync path), so it is legal and E-CHANNEL-WATCHES-CLIENT-WRITE does NOT fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-WATCHES-CLIENT-WRITE"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-"]
+  }
+}

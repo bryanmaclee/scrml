@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-key-override",
+  "description": "§38.13.2 — a `watches=events key=label` channel over a PK-less table supplies the delta key via the `key=<column>` override, so W-CHANNEL-WATCHES-NO-PK does NOT fire (paired positive-companion to channel-watches-no-pk). The override resolves `label` as the Deleted key type.",
+  "language-version": "1.0",
+  "spec": "§38.13.2, §38.13.1",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.2: an explicit `key=<column>` attribute on the `<channel>` overrides the id-field PK convention. With `key=label` naming a real column, the feed can key its Deleted deltas, so W-CHANNEL-WATCHES-NO-PK stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-CHANNEL-WATCHES-NO-PK", "E-CHANNEL-WATCHES-UNKNOWN-TABLE"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-"]
+  }
+}

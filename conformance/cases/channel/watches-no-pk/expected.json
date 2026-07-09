@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-no-pk",
+  "description": "§38.13.2 — a `watches=events` feed over a table with no derivable primary key (no `primary key` column, no `id` column) and no `key=` override fires W-CHANNEL-WATCHES-NO-PK (Warning, not Error — cross-stream partition). The feed keys its `Deleted` deltas by the PK; without one it cannot key its deltas.",
+  "language-version": "1.0",
+  "spec": "§38.13.2, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.2: a table with no derivable id/PK and no `key=` SHALL emit W-CHANNEL-WATCHES-NO-PK — the feed cannot key its Deleted deltas. It is a WARNING (the feed's Inserted/Updated arms still work); asserted against the warnings stream (S92/S93 partition).",
+  "expect": {
+    "codes": ["W-CHANNEL-WATCHES-NO-PK"],
+    "notCodes": ["E-CHANNEL-WATCHES-UNKNOWN-TABLE", "E-CHANNEL-WATCHES-DRIVER"],
+    "severity": { "W-CHANNEL-WATCHES-NO-PK": "warning" }
+  }
+}

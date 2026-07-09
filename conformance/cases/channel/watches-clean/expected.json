@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-clean",
+  "description": "§38.13 — a canonical valid `<channel watches=orders>` over a Postgres-declared `<schema>` table with an id PK and an exhaustive 3-arm `<onchange>` fires NONE of the §38.13 diagnostics. The compile-shape proof that the synthesized RowChange (Inserted/Updated/Deleted) is recognized, its arms type-check, exhaustiveness passes, and placement is valid — client-observable without a live Postgres.",
+  "language-version": "1.0",
+  "spec": "§38.13, §38.13.1, §38.13.2, §38.13.3",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13: a valid `watches=` feed on the postgres driver, over a `<schema>`-declared table with a derivable PK, consumed by an exhaustive `<onchange>`, is well-formed — none of the six §38.13.8 codes, E-MATCH-NOT-EXHAUSTIVE, or E-STRUCTURAL-ELEMENT-MISPLACED fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-NOT-EXHAUSTIVE", "E-STRUCTURAL-ELEMENT-MISPLACED", "E-SCOPE-001"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-", "W-CHANNEL-WATCHES-", "E-CHANNEL-0"]
+  }
+}

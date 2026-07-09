@@ -1,0 +1,13 @@
+<program db="postgres://localhost/app">
+
+  <schema>
+    orders {
+      id: int primary key
+      status: string
+      total: number
+    }
+  </schema>
+
+  <channel name="orders-feed" watches=orders></channel>
+
+</program>

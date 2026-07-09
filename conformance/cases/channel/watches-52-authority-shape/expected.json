@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-52-authority-shape",
+  "description": "§38.13.5 — a `watches=orders` feed sources its table shape from a §52 `authority=\"server\" table=\"orders\"` collection (canonical ${...} placement, §52.3.5) with NO `<schema>` block. The §52 authority decl's declared fields ARE the columns, so E-CHANNEL-WATCHES-UNKNOWN-TABLE does NOT fire and the id-PK is derivable (no W-CHANNEL-WATCHES-NO-PK). The `<onchange>` arms patch the §52 @orders collection by primary key.",
+  "language-version": "1.0",
+  "spec": "§38.13.5, §38.13.1, §52.3.5",
+  "source-test": "compiler/tests/conformance/conf-CHANNEL-WATCHES.test.js",
+  "rationale": "§38.13.5: `watches=` carries deltas; a §52 `authority=\"server\" table=<T>` cell owns the collection. They compose — the watched table's row shape resolves from the §52 authority type-decl's declared fields, so the table is 'declared' for the §38.13.1 gate and UNKNOWN-TABLE stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-WATCHES-UNKNOWN-TABLE", "E-MATCH-NOT-EXHAUSTIVE", "E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-", "W-CHANNEL-WATCHES-"]
+  }
+}

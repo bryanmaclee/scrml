@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-broadcast-member-call-ok",
+  "description": "§38.13.4 — a MEMBER call `audit.broadcast(row)` in an `<onchange>` arm does NOT fire E-CHANNEL-WATCHES-BROADCAST. The forbidden-set check is an AST call-shape check (a bare `broadcast()`/`disconnect()` primitive), NOT a raw-text regex — a member method call is a different function and stays silent. Locks the fidelity boundary a naive regex-based impl#2 would violate.",
+  "language-version": "1.0",
+  "spec": "§38.13.4, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.4 forbids the channel primitive `broadcast()`/`disconnect()`. A member call `audit.broadcast(row)` invokes a method on `audit`, not the primitive, so E-CHANNEL-WATCHES-BROADCAST does NOT fire (AST call-shape fidelity, not text match).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-WATCHES-BROADCAST"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-"]
+  }
+}

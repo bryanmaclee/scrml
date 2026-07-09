@@ -1,0 +1,14 @@
+{
+  "id": "channel-onchange-misplaced",
+  "description": "§38.13.3 — an `<onchange>` inside an ordinary (non-`watches=`) channel fires E-STRUCTURAL-ELEMENT-MISPLACED. `<onchange>` is a scrml-defined structural element valid ONLY inside a `watches=` channel body (§4.15 / §24.4); outside that locus there is no RowChange to dispatch.",
+  "language-version": "1.0",
+  "spec": "§38.13.3, §4.15, §24.4, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.3: `<onchange>` is valid ONLY inside a `watches=` channel body; an `<onchange>` elsewhere reuses E-STRUCTURAL-ELEMENT-MISPLACED (§4.15 / §24.4).",
+  "expect": {
+    "codes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodes": ["E-MATCH-NOT-EXHAUSTIVE", "E-CHANNEL-WATCHES-DRIVER"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-", "W-CHANNEL-WATCHES-"],
+    "severity": { "E-STRUCTURAL-ELEMENT-MISPLACED": "error" }
+  }
+}

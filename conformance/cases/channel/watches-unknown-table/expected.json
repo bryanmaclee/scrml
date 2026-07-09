@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-unknown-table",
+  "description": "§38.13.1 — a `<channel watches=widgets>` naming a table declared by NO `<schema>` (and no §52 authority collection) fires E-CHANNEL-WATCHES-UNKNOWN-TABLE. The compiler needs the table's row shape + PK to synthesize RowChange (§38.13.2) and emit the capture (§38.13.7); an undeclared table has neither.",
+  "language-version": "1.0",
+  "spec": "§38.13.1, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.1: the `watches=` table SHALL name a table whose row shape + PK the compiler can resolve — declared by a `<schema>` block or a §52 `authority=\"server\" table=` collection. A table declared by NEITHER SHALL emit E-CHANNEL-WATCHES-UNKNOWN-TABLE.",
+  "expect": {
+    "codes": ["E-CHANNEL-WATCHES-UNKNOWN-TABLE"],
+    "notCodes": ["E-CHANNEL-WATCHES-DRIVER"],
+    "severity": { "E-CHANNEL-WATCHES-UNKNOWN-TABLE": "error" }
+  }
+}

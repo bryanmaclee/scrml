@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-broadcast-forbidden",
+  "description": "§38.13.4 — a bare `broadcast()` primitive call inside a `watches=` channel body fires E-CHANNEL-WATCHES-BROADCAST. The feed is fed by the database change capture, NOT by app-side fan-out; it has no app broadcast (a tighter sibling of E-CHANNEL-004).",
+  "language-version": "1.0",
+  "spec": "§38.13.4, §38.6, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.4: a `watches=` channel SHALL NOT call `broadcast()` / `disconnect()` — the feed is fed by the database capture, not by app broadcast. Such a call SHALL emit E-CHANNEL-WATCHES-BROADCAST.",
+  "expect": {
+    "codes": ["E-CHANNEL-WATCHES-BROADCAST"],
+    "notCodes": [],
+    "severity": { "E-CHANNEL-WATCHES-BROADCAST": "error" }
+  }
+}

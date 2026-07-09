@@ -1,0 +1,13 @@
+{
+  "id": "channel-watches-driver-non-postgres",
+  "description": "§38.13.1 — a `<channel watches=>` feed on a non-Postgres (sqlite) driver fires E-CHANNEL-WATCHES-DRIVER. The v1 change-capture substrate is Postgres LISTEN/NOTIFY (§38.13.7 — the only substrate the compiler fully owns/emits); watches= REQUIRES the postgres driver.",
+  "language-version": "1.0",
+  "spec": "§38.13.1, §38.13.7, §38.13.8",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.1: `watches=` REQUIRES a Postgres database. On the sqlite/mysql driver it SHALL emit E-CHANNEL-WATCHES-DRIVER — the LISTEN/NOTIFY capture is Postgres-only in v1.",
+  "expect": {
+    "codes": ["E-CHANNEL-WATCHES-DRIVER"],
+    "notCodes": [],
+    "severity": { "E-CHANNEL-WATCHES-DRIVER": "error" }
+  }
+}

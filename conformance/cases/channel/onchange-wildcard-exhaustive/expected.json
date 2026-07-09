@@ -1,0 +1,13 @@
+{
+  "id": "channel-onchange-wildcard-exhaustive",
+  "description": "§38.13.3 — a single `Inserted` arm plus a wildcard `<_>` catch-all satisfies exhaustiveness over the synthesized RowChange, so E-MATCH-NOT-EXHAUSTIVE does NOT fire (paired positive-companion to channel-onchange-not-exhaustive). §38.13.3: `A wildcard _ arm is legal.`",
+  "language-version": "1.0",
+  "spec": "§38.13.3",
+  "source-test": "compiler/tests/unit/channel-watches-diagnostics.test.js",
+  "rationale": "§38.13.3: the `<onchange>` arms SHALL be exhaustive over RowChange's three variants — but a wildcard `<_>` catch-all satisfies exhaustiveness (reusing the §18 family). So a partial arm-set + wildcard is well-formed and E-MATCH-NOT-EXHAUSTIVE stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-NOT-EXHAUSTIVE", "W-CHANNEL-WATCHES-NO-CONSUMER"],
+    "notCodePrefixes": ["E-CHANNEL-WATCHES-"]
+  }
+}

@@ -1,0 +1,18 @@
+<program db="postgres://localhost/app">
+
+  <schema>
+    events {
+      label: string
+      ts: number
+    }
+  </schema>
+
+  <channel name="events-feed" watches=events>
+    <onchange>
+      <Inserted(row) : print(row)>
+      <Updated(row) : print(row)>
+      <Deleted(key) : print(key)>
+    </onchange>
+  </channel>
+
+</program>
