@@ -51,6 +51,13 @@
  * Callers add the match-block's span.start to get absolute positions.
  */
 
+// url-comment-match-engine (2026-07-09) — reuse the block-splitter's URL
+// detector so a URL in arm PROSE (`See http://x`) is NOT eaten as a `//` line
+// comment by `skipMatchComment` below. ONE source of truth (SPEC §27-preserving:
+// only a genuine URL is exempted; a real `// comment` still strips). See the
+// `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
+import { urlSlashesAt } from "./block-splitter.js";
+
 // §24 HTML void elements — self-terminating, admit no children. A void
 // opener (bare `<input>` or self-closed `<input/>`) inside a match-arm body
 // must NOT be treated as a nesting container by `findArmCloser`; otherwise a
@@ -101,6 +108,14 @@ function skipMatchComment(s: string, i: number): number {
   const c2 = s[i + 1];
   // `//` line comment (SPEC §27.1 — universal).
   if (c === "/" && c2 === "/") {
+    // url-comment-match-engine (2026-07-09): a `//` that is part of a URL VALUE
+    // in arm prose (`<Idle> <p>See http://x</p> </>`) is DATA, not a comment.
+    // Eating it to end-of-line would swallow the arm's `</p>` / `</>` closer and
+    // derail `findArmCloser`'s nesting depth → a spurious E-MATCH-PARSE-001
+    // ("arm has no matching closer"). Return `i` unchanged so the caller treats
+    // it as ordinary prose. (SPEC §27 preserved — a genuine `// comment`, with
+    // whitespace/line-start before the `//`, is NOT a URL and still strips.)
+    if (urlSlashesAt(s, i)) return i;
     let j = i + 2;
     while (j < s.length && s[j] !== "\n") j++;
     return j;

@@ -551,3 +551,48 @@ export function commentExtent(cursor) {
     if (form === CommentForm.Line) return lineCommentExtent(cursor);
     return htmlCommentExtent(cursor);
 }
+
+// urlSlashesAt — calculation. TRUE when the `//` at the cursor is part of a URL
+// VALUE (a scheme separator `://`, or inside a CSS `url(...)` token) rather than
+// a `//` line comment. Mirrors the JS block-splitter's urlSlashesAt.
+//
+// SPEC §27.1 keeps `//` a UNIVERSAL comment valid in ALL contexts, but a bare
+// URL is DATA, not a comment: markup prose (`Visit http://x`) must not have its
+// `//` eaten as a Line comment (swallowing the line's `</p>` closer → spurious
+// E-MARKUP-002 / E-CTX-001). The markup trampoline (emitComment) consults this
+// so a prose URL survives as text. Logic bodies (`${...}`, dispatchInLogic)
+// keep JS `//` semantics — their URLs are quoted strings — so they do NOT
+// consult this. Pure: reads cursor.source around cursor.pos, no advance/write.
+export function urlSlashesAt(cursor) {
+    const source = cursor.source;
+    const slashPos = cursor.pos;
+    // (a) Scheme separator: a `:` immediately before the `//`.
+    if (slashPos > 0 && source.charAt(slashPos - 1) === ":") return true;
+    // (b) Inside a CSS `url(...)` token on the current physical line.
+    let lineStart = slashPos;
+    while (lineStart > 0 && source.charCodeAt(lineStart - 1) !== 10) {
+        lineStart = lineStart - 1;
+    }
+    let inUrl = false;
+    for (let i = lineStart; i < slashPos; i = i + 1) {
+        if (inUrl) {
+            if (source.charAt(i) === ")") inUrl = false;
+            continue;
+        }
+        // Detect a `url(` token (case-insensitive) at an identifier boundary —
+        // so `curl(` / `blur(` do not false-match.
+        if (
+            (source.charAt(i) === "u" || source.charAt(i) === "U") &&
+            (source.charAt(i + 1) === "r" || source.charAt(i + 1) === "R") &&
+            (source.charAt(i + 2) === "l" || source.charAt(i + 2) === "L") &&
+            source.charAt(i + 3) === "("
+        ) {
+            const before = i > 0 ? source.charAt(i - 1) : "";
+            if (!/[A-Za-z0-9_\-]/.test(before)) {
+                inUrl = true;
+                i = i + 3;
+            }
+        }
+    }
+    return inUrl;
+}

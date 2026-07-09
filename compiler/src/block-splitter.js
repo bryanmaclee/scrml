@@ -469,6 +469,70 @@ function skipTriviaForCompoundScan(source, len, startPos) {
 }
 
 /**
+ * url-in-comment (2026-07) — decide whether the `//` at `slashPos` is part of a
+ * URL VALUE rather than a `//` line comment.
+ *
+ * SPEC §27.1 keeps `//` a UNIVERSAL comment valid in ALL contexts (incl. CSS
+ * per §27.2's `/* *\/` and `//` row, and markup). But a bare URL is DATA, not a
+ * comment: a CSS `url(http://x)` / protocol-relative `url(//cdn)` value, or
+ * markup prose (`Visit http://x`), must not have its `//` eaten as a line
+ * comment — doing so swallows the rest of the line (incl. the closing `}` of a
+ * `#{}` block or a `</p>` closer), unwinds context depth, and surfaces a
+ * spurious E-CTX-001/003 "unclosed" (the confirmed miscompile this fixes).
+ *
+ * A `//` is treated as URL content when, on its current physical line, EITHER:
+ *   (a) it is immediately preceded by `:` — a scheme separator
+ *       (`http://`, `https://`, `ws://`, `file://`, …), OR
+ *   (b) it sits inside an unclosed `url(` token (CSS protocol-relative
+ *       `url(//cdn…)` where no scheme `:` precedes the `//`).
+ *
+ * This is deliberately NARROW: it fires only on genuine URLs. A real
+ * `// comment` line has whitespace (or line-start) before the `//`, so it is
+ * NOT matched and still strips normally — SPEC §27 comment behaviour is
+ * preserved. The caller SHALL apply this ONLY in CSS + markup-text contexts
+ * (NOT logic/SQL, where URLs live in quoted strings already handled by
+ * openStringQuoteAt), so JS/SQL `//` comment semantics are untouched.
+ *
+ * Exported (url-comment-match-engine, 2026-07-09) so the `<match>` /
+ * `<engine>` arm re-tokenizers (match-statechild-parser.ts `skipMatchComment`,
+ * engine-statechild-parser.ts `skipCommentOrString`) reuse ONE source of truth
+ * for URL detection — a URL in arm PROSE must not have its `//` eaten as a line
+ * comment by the arm scanner's own `//` handler (which would swallow the arm's
+ * `</>` / `</Variant>` closer → a spurious E-MATCH-PARSE-001 /
+ * E-ENGINE-STATE-CHILD-MISSING). Same SPEC §27-preserving narrowness: only a
+ * genuine URL is exempted; a real `// comment` still strips.
+ */
+export function urlSlashesAt(source, slashPos) {
+  // (a) Scheme separator: a `:` immediately before the `//`.
+  if (slashPos > 0 && source[slashPos - 1] === ":") return true;
+  // (b) Inside a CSS `url(...)` token on the current physical line.
+  let lineStart = slashPos;
+  while (lineStart > 0 && source[lineStart - 1] !== "\n") lineStart--;
+  let inUrl = false;
+  for (let i = lineStart; i < slashPos; i++) {
+    if (inUrl) {
+      if (source[i] === ")") inUrl = false;
+      continue;
+    }
+    // Detect a `url(` token (case-insensitive) at an identifier boundary — so
+    // `curl(` / `blur(` do not false-match.
+    if (
+      (source[i] === "u" || source[i] === "U") &&
+      (source[i + 1] === "r" || source[i + 1] === "R") &&
+      (source[i + 2] === "l" || source[i + 2] === "L") &&
+      source[i + 3] === "("
+    ) {
+      const before = i > 0 ? source[i - 1] : "";
+      if (!/[A-Za-z0-9_\-]/.test(before)) {
+        inUrl = true;
+        i += 3; // skip past `rl(` (loop `i++` covers the `u`)
+      }
+    }
+  }
+  return inUrl;
+}
+
+/**
  * Read the lowercased tag name starting at `nameStart` (the first
  * post-`<` or post-`</` byte). Returns `{ name, nameEnd }` where `nameEnd`
  * is the position immediately after the last name byte. Returns name=""
@@ -680,6 +744,11 @@ function findStructuralBodyEnd(source, startPos, outerTagName) {
     // the documented narrow edge case with an entity-escape workaround, same as the
     // S109 main-loop ruling.)
     if (c === "/" && source[i + 1] === "/") {
+      // url-in-comment (2026-07): a `//` that is part of a URL VALUE in this
+      // raw-body text (`<match>`/`<each>` arm prose — `See http://x`) is DATA,
+      // not a comment; skipping it as a line comment would swallow the rest of
+      // the line incl. a `</p>` / `</match>` closer and derail the tag-stack.
+      if (urlSlashesAt(source, i)) { i += 2; continue; }
       i = skipLineComment(source, i);
       continue;
     }
@@ -1991,7 +2060,14 @@ export function splitBlocks(filePath, source) {
       // R28-BUG-3 (S143): skip `//` line / `/* */` block comments (SPEC §27.1)
       // so a comment body containing `<` / quote chars cannot derail the
       // depth count or string-state tracking of the compound-span scan.
-      if (c === "/" && source[p + 1] === "/") { p = skipLineComment(source, p); continue; }
+      // url-in-comment (2026-07): a `//` that is part of a URL VALUE (`://`
+      // scheme or CSS `url(...)`) in this compound body is DATA, not a comment;
+      // skipping it would eat a `</>` / `</NAME>` closer and corrupt the span.
+      if (c === "/" && source[p + 1] === "/") {
+        if (urlSlashesAt(source, p)) { p += 2; continue; }
+        p = skipLineComment(source, p);
+        continue;
+      }
       if (c === "/" && source[p + 1] === "*") { p = skipBlockComment(source, p); continue; }
       if (c === '"') { inDouble = true; p++; continue; }
       if (c === "'") { inSingle = true; p++; continue; }
@@ -2261,6 +2337,22 @@ export function splitBlocks(filePath, source) {
           }
           continue;
         }
+      }
+      // url-in-comment (2026-07): a `//` that is part of a URL VALUE is DATA,
+      // not a comment — see urlSlashesAt. This applies in CSS (`#{}`, a brace
+      // context) and markup-text (non-brace) only; logic/SQL/meta/etc. keep
+      // JS/SQL `//` comment semantics (their URLs are quoted strings, handled
+      // by the openStringQuoteAt branch above). SPEC §27 keeps `//` a universal
+      // comment; this narrow carve-out only exempts genuine URLs so a bare
+      // `url(http://x)` / `Visit http://x` no longer swallows the line's closer.
+      const _urlTopFrame = topFrame();
+      const _urlExemptCtx =
+        !topIsBraceContext() ||
+        (_urlTopFrame !== null && _urlTopFrame.type === "css");
+      if (_urlExemptCtx && urlSlashesAt(source, curPos)) {
+        beginText();
+        step(); step(); // consume the `//` as raw content, resume scanning
+        continue;
       }
       flushText();
       const commentStart = curPos;

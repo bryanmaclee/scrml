@@ -74,6 +74,14 @@ import type {
   MessageArmEntry,
 } from "./symbol-table";
 
+// url-comment-match-engine (2026-07-09) — reuse the block-splitter's URL
+// detector so a URL in a state-child's PROSE body (`<Idle rule=.X> <p>Docs at
+// https://x</p> </>`) is NOT eaten as a `//` line comment by
+// `skipCommentOrString` below. ONE source of truth (SPEC §27-preserving: only a
+// genuine URL is exempted; a real `// comment` still strips). See the
+// `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
+import { urlSlashesAt } from "./block-splitter.js";
+
 /**
  * HTML void elements (mirrors `block-splitter.js` VOID_ELEMENTS). Their opener
  * tags never have a matching closer in source text. The closer-finder routines
@@ -1341,6 +1349,15 @@ function skipCommentOrString(s: string, i: number): number {
 
   // Line comment: `// ... \n`
   if (c === "/" && c2 === "/") {
+    // url-comment-match-engine (2026-07-09): a `//` that is part of a URL VALUE
+    // in a state-child's prose body (`<Idle rule=.X> <p>Docs at https://x</p>
+    // </>`) is DATA, not a comment. Eating it to end-of-line would swallow the
+    // state-child's `</p>` / `</>` closer and derail the body-scan's nesting →
+    // a spurious E-ENGINE-STATE-CHILD-MISSING (the scanner walks past the real
+    // closer). Return `i` unchanged so the caller treats it as ordinary prose.
+    // (SPEC §27 preserved — a genuine `// comment`, with whitespace/line-start
+    // before the `//`, is NOT a URL and still strips.)
+    if (urlSlashesAt(s, i)) return i;
     let j = i + 2;
     while (j < s.length && s[j] !== "\n") j++;
     if (j < s.length) j++; // consume the newline

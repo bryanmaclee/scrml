@@ -57,6 +57,7 @@ import {
     noteBraceClose,
     recognizeCommentForm,
     commentExtent,
+    urlSlashesAt,
 } from "./block-context.js";
 // MK2.1/MK2.2 — the TagFrame <tag>-tree engine. MK2.1: recognizeOpener
 // tokenizes a `<ident ...>` opener in one pass + pushes a TagFrame.
@@ -482,6 +483,16 @@ export function flushTextRun(run, cursor, ctx) {
 export function emitComment(run, cursor, ctx) {
     const form = recognizeCommentForm(cursor);
     if (form === null) return false;
+
+    // url-in-comment (2026-07): in markup text a `//` that is part of a URL
+    // VALUE (`Visit http://x` prose, `url(...)`) is DATA, not a comment —
+    // consuming it as a Line comment would swallow the rest of the line incl.
+    // the `</p>` closer (spurious E-MARKUP-002 / E-CTX-001). SPEC §27 keeps `//`
+    // a universal comment; this narrow carve-out only exempts genuine URLs (a
+    // real `// comment` has whitespace/line-start before it → not matched). Only
+    // the Line form is URL-bearing; `<!-- -->` is unaffected. Mirrors the JS
+    // block-splitter urlSlashesAt fix.
+    if (form === "Line" && urlSlashesAt(cursor)) return false;
 
     // The comment ends a text run.
     flushTextRun(run, cursor, ctx);

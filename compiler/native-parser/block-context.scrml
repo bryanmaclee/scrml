@@ -789,4 +789,58 @@ ${
         if (form == CommentForm.Line) return lineCommentExtent(cursor)
         return htmlCommentExtent(cursor)
     }
+
+    // urlSlashesAt — CALCULATION (pure fn). TRUE when the `//` at the cursor is
+    // part of a URL VALUE (a scheme separator `://`, or inside a CSS `url(...)`
+    // token) rather than a `//` line comment. Mirrors the JS block-splitter's
+    // urlSlashesAt.
+    //
+    // SPEC §27.1 keeps `//` a UNIVERSAL comment valid in ALL contexts, but a
+    // bare URL is DATA, not a comment: markup prose (`Visit http://x`) must not
+    // have its `//` eaten as a Line comment (swallowing the line's `</p>` closer
+    // -> spurious E-MARKUP-002 / E-CTX-001). The markup trampoline (emitComment)
+    // consults this so a prose URL survives as text. Logic bodies keep JS `//`
+    // semantics (their URLs are quoted strings) and do NOT consult this. Pure:
+    // reads cursor.source around cursor.pos, no advance/write.
+    export fn urlSlashesAt(cursor) {
+        const source = cursor.source
+        const slashPos = cursor.pos
+        // (a) Scheme separator: a `:` immediately before the `//`.
+        if (slashPos > 0 && source.charAt(slashPos - 1) == ":") return true
+        // (b) Inside a CSS `url(...)` token on the current physical line.
+        let lineStart = slashPos
+        while (lineStart > 0 && source.charCodeAt(lineStart - 1) != 10) {
+            lineStart = lineStart - 1
+        }
+        let inUrl = false
+        let i = lineStart
+        while (i < slashPos) {
+            if (inUrl) {
+                if (source.charAt(i) == ")") {
+                    inUrl = false
+                }
+                i = i + 1
+                continue
+            }
+            // Detect a `url(` token (case-insensitive) at an identifier
+            // boundary — so `curl(` / `blur(` do not false-match.
+            const isU = source.charAt(i) == "u" || source.charAt(i) == "U"
+            const isR = source.charAt(i + 1) == "r" || source.charAt(i + 1) == "R"
+            const isL = source.charAt(i + 2) == "l" || source.charAt(i + 2) == "L"
+            const isParen = source.charAt(i + 3) == "("
+            if (isU && isR && isL && isParen) {
+                let beforeCode = -1
+                if (i > 0) {
+                    beforeCode = source.charCodeAt(i - 1)
+                }
+                const isIdentBoundary = (beforeCode >= 65 && beforeCode <= 90) || (beforeCode >= 97 && beforeCode <= 122) || (beforeCode >= 48 && beforeCode <= 57) || beforeCode == 95 || beforeCode == 45
+                if (!isIdentBoundary) {
+                    inUrl = true
+                    i = i + 3
+                }
+            }
+            i = i + 1
+        }
+        return inUrl
+    }
 }
