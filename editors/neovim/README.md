@@ -88,66 +88,40 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ### 3. Syntax Highlighting
 
-scrml does not yet have its own Tree-sitter grammar, but a Tree-sitter highlights query
-(`queries/scrml/highlights.scm`) ships in this directory and can be used with an
-adapter parser. For full setups, you have several options:
+Three ways to highlight `.scrml`, from best to baseline:
 
-#### Option A: Use vim syntax highlighting
+#### Option A (recommended): LSP semantic tokens
 
-Add basic syntax rules to `~/.config/nvim/syntax/scrml.vim`:
+Neovim 0.9+ applies **context-exact** highlighting from the language server's own
+parse (the compiler is the source of truth — no separate grammar to drift). If the
+LSP is attached (step 2), semantic-token highlighting works automatically once the
+server advertises the `semanticTokens` capability. This is the highest-fidelity
+option and needs no local grammar file.
 
-```vim
-" Basic scrml syntax highlighting
-if exists("b:current_syntax")
-  finish
-endif
+#### Option B: Ship the vim syntax file (baseline / LSP-off fallback)
 
-" Comments
-syn match scrmlComment "//.*$"
+A region-aware vim syntax grammar ships in this directory. It scopes each scrml
+context (`${}` logic · `?{}` sql · `#{}` css · `^{}` meta · `~{}` test · `!{}`
+error · markup) so keywords don't bleed into markup text and `>` only highlights
+when it closes a tag:
 
-" Strings
-syn region scrmlString start=/"/ end=/"/ skip=/\\"/
-syn region scrmlString start=/`/ end=/`/ skip=/\\`/
-
-" Reactive variables
-syn match scrmlReactive "@[a-zA-Z_][a-zA-Z0-9_]*"
-
-" Keywords
-syn keyword scrmlKeyword lift match is enum struct fn pure server let const lin type import export from as function return if else for while of in async await navigate
-
-" Context delimiters
-syn match scrmlDelimiter "\${"
-syn match scrmlDelimiter "?{"
-syn match scrmlDelimiter "\^{"
-syn match scrmlDelimiter "#{"
-
-" Tags
-syn match scrmlTag "<\/\?[a-zA-Z][a-zA-Z0-9-]*"
-syn match scrmlTagClose "</[a-zA-Z][a-zA-Z0-9-]*>"
-
-" Numbers
-syn match scrmlNumber "\<\d\+\(\.\d\+\)\?\>"
-
-" Highlight links
-hi def link scrmlComment Comment
-hi def link scrmlString String
-hi def link scrmlReactive Identifier
-hi def link scrmlKeyword Keyword
-hi def link scrmlDelimiter Special
-hi def link scrmlTag Tag
-hi def link scrmlTagClose Tag
-hi def link scrmlNumber Number
-
-let b:current_syntax = "scrml"
+```bash
+mkdir -p ~/.config/nvim/syntax
+cp editors/neovim/syntax/scrml.vim ~/.config/nvim/syntax/scrml.vim
 ```
 
-#### Option B: Use a TextMate grammar plugin
+This is a regex approximation — vim syntax cannot fully parse scrml's nested
+contexts — but it is the correct baseline and the fallback when the LSP is not
+attached. Semantic tokens (Option A) layer on top of it.
 
-If you use a plugin that supports TextMate grammars (such as nvim-textmate), point it at:
+#### Option C: TextMate grammar plugin
 
-```
-editors/vscode/syntaxes/scrml.tmLanguage.json
-```
+If you use a plugin that supports TextMate grammars (such as nvim-textmate), point
+it at `editors/vscode/syntaxes/scrml.tmLanguage.json`.
+
+> A Tree-sitter highlights query (`queries/scrml/highlights.scm`) also ships here,
+> but scrml has no Tree-sitter grammar yet, so it needs an adapter parser to drive
+> it. Prefer Option A or B.
 
 ## Verification
 

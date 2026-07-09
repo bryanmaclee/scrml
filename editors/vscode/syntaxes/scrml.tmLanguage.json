@@ -10,9 +10,13 @@
     { "include": "#sql-block" },
     { "include": "#logic-block" },
     { "include": "#test-block" },
+    { "include": "#theme-element" },
+    { "include": "#defaults-element" },
+    { "include": "#onchange-element" },
     { "include": "#css-inline-block" },
     { "include": "#style-block" },
     { "include": "#error-effect-block" },
+    { "include": "#structural-open-tag" },
     { "include": "#markup-self-closing" },
     { "include": "#markup-close-tag" },
     { "include": "#markup-open-tag" },
@@ -90,6 +94,10 @@
         { "include": "#number" },
         { "include": "#boolean" },
         { "include": "#invalid-null-undefined" },
+        { "include": "#theme-element" },
+        { "include": "#defaults-element" },
+        { "include": "#onchange-element" },
+        { "include": "#structural-open-tag" },
         { "include": "#markup-self-closing" },
         { "include": "#markup-close-tag" },
         { "include": "#markup-open-tag" },
@@ -159,6 +167,7 @@
     },
 
     "css-inline-block": {
+      "comment": "§9.1 / §65 scoped-CSS body. Handles BOTH flat declarations (prop:value pairs) and selector rules (.foo { ... }) — the nested-brace-aware #css-body means an inner `}` (closing a selector rule) no longer prematurely closes the whole block (the pre-S246 mangling bug). A #{} in expression position (const x = #{...}) is a §65.4 style-VALUE; same body grammar.",
       "name": "meta.embedded.block.css.scrml",
       "begin": "#\\{",
       "beginCaptures": {
@@ -169,11 +178,55 @@
         "0": { "name": "punctuation.definition.block.css.end.scrml" }
       },
       "patterns": [
+        { "include": "#css-body" }
+      ]
+    },
+
+    "css-body": {
+      "comment": "Shared CSS declaration grammar — used by #{} (§9.1/§65), <defaults> bare-element rules, and every nested selector/at-rule block. Recurses through #css-nested-block so brace-balanced selector rules do not leak.",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#css-at-rule" },
+        { "include": "#css-nested-block" },
+        { "include": "#css-selector" },
         { "include": "#css-property" },
         { "include": "#string-double" },
-        { "include": "#number" },
-        { "include": "#comment" }
+        { "include": "#string-single" },
+        { "include": "#hex-color" },
+        { "include": "#number" }
       ]
+    },
+
+    "css-nested-block": {
+      "comment": "A brace-balanced nested CSS block (a selector rule body, an @media/@container body, an &:state layer). Consuming its own `{ ... }` is what stops the first inner `}` from closing the enclosing #{} (the mangling fix).",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.css.begin.scrml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.css.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#css-body" }
+      ]
+    },
+
+    "css-at-rule": {
+      "comment": "@media / @container / @supports / @layer / @scope / @keyframes / @font-face — §65.2.2 deterministic-layer at-rules. Must precede #reactive-variable so @media is not mis-scoped as a reactive cell.",
+      "match": "@[a-zA-Z-]+",
+      "name": "keyword.control.at-rule.css.scrml"
+    },
+
+    "css-selector": {
+      "comment": "A leading class / nesting selector inside a CSS body (.badge, .card-title, .Dark variant sub-block, &:focus, &[busy]).",
+      "match": "\\.[-A-Za-z_][-A-Za-z0-9_]*|&[:\\[][^\\s{]*",
+      "name": "entity.other.attribute-name.css.scrml"
+    },
+
+    "hex-color": {
+      "match": "#[0-9a-fA-F]{3,8}\\b",
+      "name": "constant.other.color.rgb-value.css.scrml"
     },
 
     "css-property": {
@@ -181,6 +234,165 @@
       "captures": {
         "1": { "name": "support.type.property-name.css" }
       }
+    },
+
+    "theme-element": {
+      "comment": "§65.3.2 / §65.9 <theme> structural element. Body = named token declarations (name = value;), .Variant sub-blocks (§65.6 reactive theming), and @media auto-bind blocks. `for=@cell` mirrors the engine for= binding (§65.6). The negative lookahead excludes the legacy corpus state-cell shape `<theme> = expr` / `<theme>: T = expr` (§65.9 keyword-collision — those are cells, not the structural element).",
+      "begin": "(<)(theme)\\b(?![^>]*>\\s*[:=])(?=[\\s/>])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" }
+      },
+      "end": "(</)(theme)?\\s*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" },
+        "3": { "name": "punctuation.definition.tag.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#theme-body" }
+      ]
+    },
+
+    "theme-body": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#theme-for-attribute" },
+        { "include": "#tag-open-close" },
+        { "include": "#css-at-rule" },
+        { "include": "#theme-nested-block" },
+        { "include": "#css-selector" },
+        { "include": "#theme-token-decl" },
+        { "include": "#css-property" },
+        { "include": "#string-double" },
+        { "include": "#string-single" },
+        { "include": "#hex-color" },
+        { "include": "#number" }
+      ]
+    },
+
+    "theme-nested-block": {
+      "comment": "A .Variant / @media sub-block inside <theme> — re-binds a subset of tokens over the base (§65.6). Recurses into #theme-body so nested token decls keep the token scope.",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.css.begin.scrml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.css.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#theme-body" }
+      ]
+    },
+
+    "theme-for-attribute": {
+      "comment": "<theme for=@cell> — the reactive-variant binding (mirrors engine for=; §65.6).",
+      "match": "\\b(for)\\s*(=)\\s*(@[a-zA-Z_][a-zA-Z0-9_.]*)",
+      "captures": {
+        "1": { "name": "support.type.property-name.engine.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "variable.other.reactive.scrml" }
+      }
+    },
+
+    "theme-token-decl": {
+      "comment": "§65.3.2 named token declaration inside <theme> — `brand = #2563eb;`. The identifier lowers to a :root custom property. Distinguished from a css-property by the `=` (vs `:`).",
+      "match": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)",
+      "captures": {
+        "1": { "name": "entity.name.theme.token.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" }
+      }
+    },
+
+    "tag-open-close": {
+      "comment": "The `>` (and `/>`) that terminates a structural-element open tag whose body is handled by the enclosing begin/end rule.",
+      "match": "/?>",
+      "name": "punctuation.definition.tag.end.scrml"
+    },
+
+    "defaults-element": {
+      "comment": "§65.3.3 / §65.9 <defaults> structural element — app-wide bare-element defaults (a { }, label { }). Body reuses the full CSS selector-rule grammar. Negative lookahead excludes a `<defaults> = expr` state-cell decl (keyword-collision insurance).",
+      "begin": "(<)(defaults)\\b(?![^>]*>\\s*[:=])(?=[\\s/>])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" }
+      },
+      "end": "(</)(defaults)?\\s*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" },
+        "3": { "name": "punctuation.definition.tag.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#tag-open-close" },
+        { "include": "#css-body" }
+      ]
+    },
+
+    "onchange-element": {
+      "comment": "§38.13.3 <onchange> — the typed, exhaustive client-side change-feed handler inside a <channel watches=> body. Its arms dispatch over the synthesized RowChange enum (§38.13.2). Negative lookahead excludes an `<onchange> = expr` state-cell decl (keyword-collision insurance).",
+      "begin": "(<)(onchange)\\b(?![^>]*>\\s*[:=])(?=[\\s/>])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" }
+      },
+      "end": "(</)(onchange)?\\s*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" },
+        "3": { "name": "punctuation.definition.tag.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#tag-open-close" },
+        { "include": "#rowchange-arm" }
+      ]
+    },
+
+    "rowchange-arm": {
+      "comment": "§38.13.2/§38.13.3 RowChange match-arm — <Inserted(row) : { ... }> / <Updated(row) : { ... }> / <Deleted(key) : { ... }>. The variant name is the enum discriminant; the (payload) binds the row/key; the code-default body runs client-side.",
+      "begin": "(<)(Inserted|Updated|Deleted)\\b",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "variable.other.enummember.rowchange.variant.scrml" }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.tag.end.scrml" }
+      },
+      "patterns": [
+        {
+          "comment": "The (payload) binding — the bound row / key name.",
+          "match": "(\\()\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\))",
+          "captures": {
+            "1": { "name": "punctuation.definition.parameters.begin.scrml" },
+            "2": { "name": "variable.parameter.scrml" },
+            "3": { "name": "punctuation.definition.parameters.end.scrml" }
+          }
+        },
+        {
+          "comment": "The arm separator between the payload and the body.",
+          "match": ":",
+          "name": "punctuation.separator.match-arm.scrml"
+        },
+        { "include": "#nested-braces" },
+        { "include": "#logic-block-inner" }
+      ]
+    },
+
+    "structural-open-tag": {
+      "comment": "scrml-defined structural elements (§4.15/§24.4) whose bodies are ordinary markup/logic — <channel>, <program>, <page>, <engine>, <schema>, <endpoint>, <errors>, <render>, <match>, <onTransition>, <onTimeout>, <onIdle>, <each>. Scoped distinctly from HTML tags so the language surface reads apart. <theme>/<defaults>/<onchange> have their own begin/end blocks (special bodies) and are intentionally excluded here.",
+      "begin": "(<)(channel|program|page|engine|machine|schema|endpoint|errors|render|match|onTransition|onTimeout|onIdle|each|api)(?=[\\s/>])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.scrml" },
+        "2": { "name": "entity.name.tag.structural.scrml" }
+      },
+      "end": ">|(?=/>)|(?=/\\s*$)|(?=$)",
+      "patterns": [
+        { "include": "#tag-attribute" }
+      ]
     },
 
     "style-block": {
@@ -250,7 +462,14 @@
       "patterns": [
         { "include": "#protect-attribute" },
         { "include": "#bind-attribute" },
+        { "include": "#conditional-style-attribute" },
         { "include": "#class-binding-attribute" },
+        { "include": "#style-list-attribute" },
+        { "include": "#style-value-attribute" },
+        { "include": "#authority-attribute" },
+        { "include": "#realtime-attribute" },
+        { "include": "#authority-flag-attribute" },
+        { "include": "#snippet-component-keyword" },
         { "include": "#event-attribute" },
         { "include": "#if-attribute" },
         { "include": "#engine-attribute" },
@@ -258,6 +477,95 @@
         { "include": "#predicate-bareword-attribute" },
         { "include": "#generic-attribute" }
       ]
+    },
+
+    "conditional-style-attribute": {
+      "comment": "§65.4.5 conditional style application — style:invalid=@hasError applies the style-value while the reactive cond holds (the class:-family sibling).",
+      "match": "(style:[a-zA-Z][a-zA-Z0-9_-]*)(=)(@[a-zA-Z_][a-zA-Z0-9_.]*|\\$\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "support.type.property-name.conditional-style.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "variable.other.reactive.scrml" }
+      }
+    },
+
+    "style-list-attribute": {
+      "comment": "§65.4.4 ordered style-value composition — style=[a, b] (last-in-list wins). The style-VALUEs inside are named #{}-value bindings.",
+      "begin": "(style)(=)(\\[)",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.style-list.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "punctuation.definition.list.begin.scrml" }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.list.end.scrml" }
+      },
+      "patterns": [
+        { "include": "#reactive-variable" },
+        {
+          "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+          "name": "variable.other.style-value.scrml"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.list.scrml"
+        }
+      ]
+    },
+
+    "style-value-attribute": {
+      "comment": "§65.4.2 style-as-value application by value-shape — style=name (a #{}-value binding), style=@expr (reactive). style=\"...\" quoted-literal raw CSS falls through to #generic-attribute (back-compat pass-through).",
+      "patterns": [
+        {
+          "match": "(style)(=)(@[a-zA-Z_][a-zA-Z0-9_.]*)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.style-value.scrml" },
+            "2": { "name": "punctuation.separator.key-value.scrml" },
+            "3": { "name": "variable.other.reactive.scrml" }
+          }
+        },
+        {
+          "match": "(style)(=)([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.style-value.scrml" },
+            "2": { "name": "punctuation.separator.key-value.scrml" },
+            "3": { "name": "variable.other.style-value.scrml" }
+          }
+        }
+      ]
+    },
+
+    "authority-attribute": {
+      "comment": "§52 state-authority attributes — authority=\"server\"|\"local\" and its required table=\"...\" on a server-authoritative state-type decl (§52.3).",
+      "match": "\\b(authority|table)(=)(\"[^\"]*\")",
+      "captures": {
+        "1": { "name": "support.type.property-name.authority.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "string.quoted.double.scrml" }
+      }
+    },
+
+    "realtime-attribute": {
+      "comment": "§38.13.1 <channel watches=<table>> — the realtime change-feed source table (a static literal table identifier, no ${} interpolation).",
+      "match": "\\b(watches)(=)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "support.type.property-name.realtime.scrml" },
+        "2": { "name": "punctuation.separator.key-value.scrml" },
+        "3": { "name": "entity.name.type.table.scrml" }
+      }
+    },
+
+    "authority-flag-attribute": {
+      "comment": "§52.4 <var server> — the bare `server` flag attribute marking an instance-level server-authoritative cell (§6.1.5 decl-attr).",
+      "match": "\\b(server)\\b(?=[\\s>/])",
+      "name": "storage.modifier.authority.server.scrml"
+    },
+
+    "snippet-component-keyword": {
+      "comment": "§15/§16 snippet / component type keywords used as prop type annotations (title: snippet) inside a component's props={...}.",
+      "match": "\\b(snippet|component)\\b",
+      "name": "keyword.other.type.scrml"
     },
 
     "class-binding-attribute": {
@@ -419,12 +727,12 @@
 
     "logic-keywords": {
       "name": "keyword.control.scrml",
-      "match": "\\b(let|const|lin|var|if|else|else-if|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct|engine|machine|errors|onTransition|onTimeout|onIdle|channel|schema|program|not|req|fail|pinned|reset|derived|history|given|partial|when|transaction|test-bind)\\b"
+      "match": "\\b(let|const|lin|var|if|else|else-if|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct|engine|machine|errors|onTransition|onTimeout|onIdle|onchange|channel|schema|program|render|snippet|component|theme|defaults|watches|authority|not|req|fail|pinned|reset|derived|history|given|partial|when|transaction|test-bind)\\b"
     },
 
     "top-level-keywords": {
       "name": "keyword.control.scrml",
-      "match": "\\b(type|enum|struct|import|export|from|as|engine|machine|channel|schema|program|pinned)\\b"
+      "match": "\\b(type|enum|struct|import|export|from|as|engine|machine|channel|schema|program|theme|defaults|onchange|component|snippet|pinned)\\b"
     },
 
     "multi-word-keywords": {
