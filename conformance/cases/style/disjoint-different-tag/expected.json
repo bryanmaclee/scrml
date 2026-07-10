@@ -1,0 +1,12 @@
+{
+  "id": "style-disjoint-different-tag",
+  "description": "§65.2.4 — `button {}` and `a {}` both set `color`, but an element has exactly one tag name, so they are PROVABLY DISJOINT (no element can match both). No overlap → no diagnostic. This proves the checker does not false-fire on two same-property rules that simply cannot co-target an element.",
+  "language-version": "1.0",
+  "spec": "§65.2.4",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 decidable core: `tag × tag` with DIFFERENT tags is provably disjoint (an element has exactly one tag name). Two rules that cannot share any element are not a conflict; neither the hard nor the soft diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STYLE-CONFLICT", "W-STYLE-CONFLICT-POSSIBLE"]
+  }
+}

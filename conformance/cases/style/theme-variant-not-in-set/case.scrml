@@ -1,0 +1,14 @@
+<program>
+
+  <mode> = .Light
+
+  <theme for=@mode>
+      ink = #0f172a;
+      .Dark {
+          ink = #e2e8f0;
+      }
+  </theme>
+
+  <button onclick=(@mode = .Nonexistent)>x</button>
+
+</program>

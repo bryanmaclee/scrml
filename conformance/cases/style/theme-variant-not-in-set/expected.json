@@ -1,0 +1,13 @@
+{
+  "id": "style-theme-variant-not-in-set",
+  "description": "§65.6 — the `<theme>` is the single OWNER of the variant set. It declares base + `.Dark`, so the variant type of `@mode` is `{ Light, Dark }`. Reassigning `@mode = .Nonexistent` (a variant NOT in the theme) is checked against the theme's variant set and fires E-TYPE-063 (error). This proves the theme's variant set is enforced downstream — you cannot switch to a variant the theme does not define.",
+  "language-version": "1.0",
+  "spec": "§65.6",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§65.6: the theme owns the variant set (no separate enum, no duplication). The inferred variant type of `@mode` includes only the base (`Light`, from the initial `.Light`) + the declared `.Dark`. A reassign to `.Nonexistent` is a non-member of that set → E-TYPE-063 (variant not in the type). The cell IS typed (by the theme), so this is a type error, NOT E-VARIANT-AMBIGUOUS.",
+  "expect": {
+    "codes": ["E-TYPE-063"],
+    "notCodes": ["E-VARIANT-AMBIGUOUS"],
+    "severity": { "E-TYPE-063": "error" }
+  }
+}

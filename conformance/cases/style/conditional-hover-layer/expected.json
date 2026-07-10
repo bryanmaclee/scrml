@@ -1,0 +1,12 @@
+{
+  "id": "style-conditional-hover-layer",
+  "description": "§65.2.2 — a state rule (`:hover`) wins WHILE its condition holds; that is a deterministic LAYER over the base, not a conflict. `.btn { color: red }` + `.btn:hover { color: blue }` on one element is the 95% case (base + hover) and fires NEITHER E-STYLE-CONFLICT nor W-STYLE-CONFLICT-POSSIBLE. The error fires exactly where a human would be surprised (an unconditional both-match), and nowhere else.",
+  "language-version": "1.0",
+  "spec": "§65.2.2",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.2: a `:hover`/`:focus`/`[attr]`/`@media`/`@container` rule is a deterministic layer over the base while its condition holds — well-defined, local, predictable — NOT a conflict. This carve-out (base + conditional) is what keeps the guarantee affordable; it never fires an error.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STYLE-CONFLICT", "W-STYLE-CONFLICT-POSSIBLE"]
+  }
+}

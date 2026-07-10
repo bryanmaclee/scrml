@@ -1,0 +1,13 @@
+{
+  "id": "style-conflict-tag-x-class",
+  "description": "§65.2.1 — the flagship. Two UNCONDITIONAL component-scope `#{}` rules (`button {}` and `.btn {}`) both provably match one element (`<button class=\"btn\">`) and set the same property (`color`) at the same precedence level → E-STYLE-CONFLICT (hard, error). The styling analog of an exhaustive `match`: the compiler refuses to silently pick a winner. The HARD path is exercised only by a component scope (`@scope`-donut bounded, decidable element set); no soft W-STYLE-CONFLICT-POSSIBLE fires.",
+  "language-version": "1.0",
+  "spec": "§65.2.1, §65.2.4",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.1: an UNCONDITIONAL same-property overlap on a provably-shared element, between two rules at the same precedence level, is E-STYLE-CONFLICT. The `tag × class` shape (broad `button` fighting specific `.btn` on a `<button class=\"btn\">`) is the canonical shape (§65.2.4 decidable core). Component scope is decidable → HARD-eligible. E-STYLE-CONFLICT partitions into the fatal errors stream (§65.10 Error row); the soft W-STYLE-CONFLICT-POSSIBLE is NOT emitted for a proven overlap.",
+  "expect": {
+    "codes": ["E-STYLE-CONFLICT"],
+    "notCodes": ["W-STYLE-CONFLICT-POSSIBLE"],
+    "severity": { "E-STYLE-CONFLICT": "error" }
+  }
+}

@@ -1,0 +1,16 @@
+<program>
+
+  <mode> = .Light
+
+  <theme for=@mode>
+      ink   = #0f172a;
+      paper = #ffffff;
+      .Dark {
+          ink   = #e2e8f0;
+          paper = #0f172a;
+      }
+  </theme>
+
+  <button onclick=(@mode = .Dark)>toggle</button>
+
+</program>

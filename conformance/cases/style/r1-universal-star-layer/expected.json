@@ -1,0 +1,12 @@
+{
+  "id": "style-r1-universal-star-layer",
+  "description": "§65.2.4 R1 — a universal `*` rule is an author-reset FLOOR (a LOWER layer, §65.5), not a same-level conflict. `* { padding: 0 }` overlapping `.btn { padding: 16px }` on `<button class=\"btn\">` is a deterministic layer (the author expects the specific rule to win), NOT E-STYLE-CONFLICT. The commonest opening lines of a stylesheet must not false-fire — neither the hard error nor the soft warning.",
+  "language-version": "1.0",
+  "spec": "§65.2.4, §65.5",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 R1 (ratified 2026-07-08): universal `*` / bare-root (`html`/`body`) rules resolve BELOW class/id/specific author rules in the §65.5 precedence order — an overlap between them and a specific rule is a deterministic LAYER, not a conflict. This carve-out removed 65% of would-be-hard findings in the §65.11 dry-run with zero loss of real signal.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STYLE-CONFLICT", "W-STYLE-CONFLICT-POSSIBLE"]
+  }
+}

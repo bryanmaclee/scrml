@@ -1,0 +1,13 @@
+<program>
+
+  const Card = <div props={}>
+      #{
+          *    { padding: 0; }
+          .btn { padding: 16px; }
+      }
+      <button class="btn">Go</button>
+  </>
+
+  <Card/>
+
+</program>

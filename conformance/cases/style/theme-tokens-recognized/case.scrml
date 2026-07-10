@@ -1,0 +1,11 @@
+<program>
+
+  <theme>
+      brand  = #2563eb;
+      danger = #dc2626;
+      line   = #e2e8f0;
+  </theme>
+
+  <div>hi</div>
+
+</program>

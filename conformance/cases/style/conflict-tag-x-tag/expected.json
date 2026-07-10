@@ -1,0 +1,13 @@
+{
+  "id": "style-conflict-tag-x-tag",
+  "description": "§65.2.4 — two component-scope `#{}` rules on the SAME tag (`button {}` twice) that unconditionally set the same property (`color`) provably match the same element (an element has exactly one tag name → same tag = shared) → E-STYLE-CONFLICT (hard, error). The `tag × tag` decidable shape.",
+  "language-version": "1.0",
+  "spec": "§65.2.4, §65.2.1",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 decidable core: `tag × tag` (same tag → provably shared; different tag → provably disjoint). Two `button` rules setting `color` unconditionally, at the same precedence level, is a proven same-property overlap → hard E-STYLE-CONFLICT. No soft diagnostic on a proven overlap.",
+  "expect": {
+    "codes": ["E-STYLE-CONFLICT"],
+    "notCodes": ["W-STYLE-CONFLICT-POSSIBLE"],
+    "severity": { "E-STYLE-CONFLICT": "error" }
+  }
+}

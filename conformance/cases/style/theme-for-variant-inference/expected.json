@@ -1,0 +1,12 @@
+{
+  "id": "style-theme-for-variant-inference",
+  "description": "§65.6 — reactive theming variant-type inference from `for=`. The bound cell is declared BARE (`<mode> = .Light`); its variant type is INFERRED from the `<theme for=@mode>` binding (§14.10 bare-variant inference — the engine `for=` pattern). The `<theme>` is the single owner of the variant set (`.Light`/`.Dark`), so `<mode> = .Light` does NOT fire E-VARIANT-AMBIGUOUS and the `@mode = .Dark` toggle write resolves against the theme's variant set. Clean compile.",
+  "language-version": "1.0",
+  "spec": "§65.6",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§65.6: `@mode` is a convention, NOT a reserved name — the adopter names the cell, declared bare, and the variant type flows from `<theme for=@mode>` (§14.10). Because the theme supplies the type context, the bare `.Light` is NOT ambiguous (no E-VARIANT-AMBIGUOUS), and a reassign to a DECLARED variant (`.Dark`) type-checks (no E-TYPE-063). The toggle write also gives `@mode` a consumer so the reactive cell is live. This is the positive half of the bracketing pair with `bare-variant-no-theme-ambiguous`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VARIANT-AMBIGUOUS", "E-TYPE-063", "E-STRUCTURAL-ELEMENT-MISPLACED"]
+  }
+}

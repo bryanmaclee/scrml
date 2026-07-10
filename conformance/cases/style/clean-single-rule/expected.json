@@ -1,0 +1,13 @@
+{
+  "id": "style-clean-single-rule",
+  "description": "§65.2 baseline — a single component-scope `#{}` rule (`.btn { color }`) targeting one element fires NOTHING. The no-false-positive floor: the conflict checker only speaks on an actual overlap. This is the clean-compile proof that the added checker is additive (§65.14) and does not perturb a well-formed scoped stylesheet.",
+  "language-version": "1.0",
+  "spec": "§65.2",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.14: the §65.2 conflict-checker is ADDED on top of the KEPT §9.1 scoped `#{}` emission — new diagnostics only. A well-formed single-rule component scope trips neither the hard nor the soft diagnostic. The whole `E-STYLE-*` / `W-STYLE-*` family stays silent on clean code.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-STYLE-", "W-STYLE-"]
+  }
+}

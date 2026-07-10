@@ -1,0 +1,13 @@
+{
+  "id": "style-conflict-id-x-class",
+  "description": "§65.2.4 `id × *` — an id selector (`#go {}`) and a class selector (`.btn {}`) both unconditionally set `color` and provably match one element (`<button id=\"go\" class=\"btn\">`). Under flat specificity the id carries NO extra weight (there is no `(id,class,type)` arithmetic, §65.5), so this is a same-level ambiguity → E-STYLE-CONFLICT (hard, error). This is the shape CSS would silently resolve id-beats-class; scrml refuses.",
+  "language-version": "1.0",
+  "spec": "§65.2.4, §65.5",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 lists `id × *` as a decidable shape (shared iff some element in the scope carries the intersection). §65.5: specificity is deleted — no id-beats-class tiebreak — so an id rule and a class rule that both match one element and set the same property are at the SAME precedence level → hard E-STYLE-CONFLICT.",
+  "expect": {
+    "codes": ["E-STYLE-CONFLICT"],
+    "notCodes": ["W-STYLE-CONFLICT-POSSIBLE"],
+    "severity": { "E-STYLE-CONFLICT": "error" }
+  }
+}

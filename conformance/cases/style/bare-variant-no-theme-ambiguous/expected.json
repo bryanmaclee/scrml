@@ -1,0 +1,13 @@
+{
+  "id": "style-bare-variant-no-theme-ambiguous",
+  "description": "§65.6 — the negative half. A bare variant cell (`<mode> = .Light`) with NO in-scope `<theme for=@mode>` binding to supply the type context is E-VARIANT-AMBIGUOUS (error). This is the bracketing proof that the `<theme for=>` binding IS the variant-type source (§14.10): remove the theme and the same bare `.Light` cell can no longer be typed. Pairs with `theme-for-variant-inference` (add the theme → the ambiguity clears).",
+  "language-version": "1.0",
+  "spec": "§65.6",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§65.6: a bare `.Light` with no in-scope `<theme for=>` binding to supply the type context is E-VARIANT-AMBIGUOUS. The theme is the SINGLE owner of the variant set; without it there is no floating enum/type name to resolve `.Light` against. This is the direct negative of the infer-from-`for=` positive — proving the binding, not a convention, carries the type.",
+  "expect": {
+    "codes": ["E-VARIANT-AMBIGUOUS"],
+    "notCodePrefixes": ["E-THEME-"],
+    "severity": { "E-VARIANT-AMBIGUOUS": "error" }
+  }
+}

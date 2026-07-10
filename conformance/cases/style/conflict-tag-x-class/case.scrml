@@ -1,0 +1,13 @@
+<program>
+
+  const Card = <div props={}>
+      #{
+          button { color: red; }
+          .btn    { color: blue; }
+      }
+      <button class="btn">Go</button>
+  </>
+
+  <Card/>
+
+</program>

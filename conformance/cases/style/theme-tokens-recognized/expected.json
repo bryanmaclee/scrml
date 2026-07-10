@@ -1,0 +1,13 @@
+{
+  "id": "style-theme-tokens-recognized",
+  "description": "§65.3.2 / §65.9 — a program-scope `<theme>` structural element declaring named token VALUES (`brand`/`danger`/`line`) is RECOGNIZED (parses to a theme-decl node) and is a valid locus (program scope, §65.9). No parse / context / structural-placement error fires: `<theme>` is reclaimed as a scrml-defined structural element (§65.9), NOT a misplaced element or an unknown tag. Phase-A recognition proof.",
+  "language-version": "1.0",
+  "spec": "§65.3.2, §65.9",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§65.9: `<theme>` is a scrml-defined structural element (sibling of `<program>`/`<page>`), valid at program scope. §65.3.2: it declares named token values. A well-formed program-scope `<theme>` block fires none of E-STRUCTURAL-ELEMENT-MISPLACED / E-CTX-001 / E-CTX-003 / E-SYNTAX-002, and no E-THEME-* code (the token block is valid). NOTE (Nominal): use-site token lowering (`color: brand` → `var(--brand)`) + E-THEME-TOKEN-UNKNOWN are Phase-B codegen (not yet emitted); this case asserts only the Phase-A recognition contract.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED", "E-CTX-001", "E-CTX-003", "E-SYNTAX-002"],
+    "notCodePrefixes": ["E-THEME-"]
+  }
+}

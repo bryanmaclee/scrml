@@ -1,0 +1,12 @@
+{
+  "id": "style-disjoint-attr-values",
+  "description": "§65.2.4 — mutually-exclusive attribute VALUES on one attribute (`[type=\"submit\"]` vs `[type=\"button\"]`) are provably disjoint: no single element can carry both `type` values at once. Two rules both setting `color` on those disjoint selectors is not a conflict → no diagnostic.",
+  "language-version": "1.0",
+  "spec": "§65.2.4",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 decidable core: attribute-presence and mutually-exclusive attribute values on one attribute (`[type=\"submit\"]` vs `[type=\"button\"]`) are provably disjoint. The checker proves no shared element and stays silent — neither hard nor soft.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STYLE-CONFLICT", "W-STYLE-CONFLICT-POSSIBLE"]
+  }
+}

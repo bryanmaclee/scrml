@@ -1,0 +1,13 @@
+{
+  "id": "style-r2-bem-modifier-soft",
+  "description": "§65.2.4 R2 — a `class × class` base+modifier same-property overlap (`.btn` + `.btn-op` on `<button class=\"btn btn-op\">`) is real source-order fragility (a §65.2.1 conflict by the letter), but its §65-blessed fix — ordered `style=[base, modifier]` (§65.4.4) — is a Wave-2 primitive. So Wave 1 emits it SOFT (W-STYLE-CONFLICT-POSSIBLE, non-blocking, info) and does NOT hard-block: there is no migration target to route the author to yet. Promotes to hard E-STYLE-CONFLICT in Wave 2.",
+  "language-version": "1.0",
+  "spec": "§65.2.4",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4 R2 (ratified 2026-07-08): a `class × class` base/modifier overlap starts SOFT in Wave 1 (W-STYLE-CONFLICT-POSSIBLE, partitions to the non-fatal warnings stream at info severity), NOT the hard E-STYLE-CONFLICT — a Wave-1 hard block has no migration target (ordered `style=[a,b]` is Wave 2). BEM is the single most common CSS methodology; this is the affordability hedge §65.11 demands. The hard error MUST NOT fire here.",
+  "expect": {
+    "codes": ["W-STYLE-CONFLICT-POSSIBLE"],
+    "notCodes": ["E-STYLE-CONFLICT"],
+    "severity": { "W-STYLE-CONFLICT-POSSIBLE": "info" }
+  }
+}

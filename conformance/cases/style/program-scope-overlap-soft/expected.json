@@ -1,0 +1,13 @@
+{
+  "id": "style-program-scope-overlap-soft",
+  "description": "§65.2.4 R3 / §65.9 OQ-8 — a PROGRAM-level `#{}` is the global escape hatch (no `@scope` donut → the unbounded-cross-file element space is not enumerable), so it inherently gets the WEAKER guarantee: the same `button {}` × `.btn {}` overlap that HARD-fires in a component scope fires only the SOFT W-STYLE-CONFLICT-POSSIBLE (info, non-blocking) at program scope. R3 file-bounds it to a provable LOCAL (same-file) overlap, not the literal per-pair firehose.",
+  "language-version": "1.0",
+  "spec": "§65.2.4, §65.9",
+  "source-test": "compiler/tests/unit/css-conflict-check.test.js",
+  "rationale": "§65.2.4: program scope = escape hatch → SOFT only (never the hard E-STYLE-CONFLICT). R3 (ratified 2026-07-08): the program-scope soft diagnostic is FILE-BOUNDED — it fires ONLY on a provable local same-file overlap (here `button`/`.btn` both match the file's own `<button class=\"btn\">`), NOT on every same-property program-rule pair (the 2941-warning firehose the literal reading produced). The paired component-scope case (`conflict-tag-x-class`) HARD-fires the identical selector overlap — this is the bracketing proof that scope decides hard-vs-soft.",
+  "expect": {
+    "codes": ["W-STYLE-CONFLICT-POSSIBLE"],
+    "notCodes": ["E-STYLE-CONFLICT"],
+    "severity": { "W-STYLE-CONFLICT-POSSIBLE": "info" }
+  }
+}

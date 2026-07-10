@@ -1,0 +1,10 @@
+<program>
+
+  #{
+      button { color: red; }
+      .btn    { color: blue; }
+  }
+
+  <button class="btn">Go</button>
+
+</program>

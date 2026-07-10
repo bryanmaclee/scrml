@@ -1,0 +1,14 @@
+<program>
+
+  const Card = <div props={}>
+      #{
+          input[type="submit"] { color: red; }
+          input[type="button"] { color: blue; }
+      }
+      <input type="submit"/>
+      <input type="button"/>
+  </>
+
+  <Card/>
+
+</program>
