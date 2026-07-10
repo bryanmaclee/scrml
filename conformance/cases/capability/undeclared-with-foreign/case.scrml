@@ -1,0 +1,4 @@
+<program lang="ts">
+use foreign:ml { predict }
+<div>hi</div>
+</>

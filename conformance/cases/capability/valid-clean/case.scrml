@@ -1,0 +1,3 @@
+<program capabilities=[network("api.example.com")]>
+<div>hi</div>
+</>

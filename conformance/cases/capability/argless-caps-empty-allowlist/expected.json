@@ -1,0 +1,12 @@
+{
+  "id": "capability-argless-caps-empty-allowlist",
+  "description": "§23.5.2 — the arg-bearing caps declared with NO parens (`network`, `spawn`, `env`) declare the capability with an EMPTY allow-list ('this scope reaches the network / spawns / reads env, hosts/cmds/vars unspecified'). Combined here with the presence-only `db`. A multi-token list mixing the no-parens form with `db` is well-formed — the no-parens form is the valid `arg-cap` branch of the §23.5.2 EBNF.",
+  "language-version": "1.0",
+  "spec": "§23.5.2, §23.5.3",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.2: `capability-token ::= arg-cap '(' string-literal … ')' | arg-cap | 'db'` — an arg-cap with no parens is a valid token declaring an empty allow-list (v1.0 records intent; the allow-list gains teeth at enforcement, §23.5.6). No E-FOREIGN-CAPABILITY-UNKNOWN, no E-SCOPE-001, no W-ATTR-001.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOREIGN-CAPABILITY-UNKNOWN", "E-SCOPE-001", "W-ATTR-001"]
+  }
+}

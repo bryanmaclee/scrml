@@ -1,0 +1,16 @@
+{
+  "id": "capability-undeclared-with-foreign",
+  "description": "§23.5.5 — a foreign-code construct (`use foreign:ml` sidecar, §23.4) with NO `capabilities=` on any ancestor `<program>` is governed by the empty (declare-nothing) set, so the presence-nudge W-FOREIGN-UNDECLARED-CAPABILITY fires (Info). The lint nudges the author to declare the scope's intended capability surface. It is PRESENCE-only (opacity bound §23.2.3 — it never inspects the foreign interior). Advisory (Info) — never blocks the build.",
+  "language-version": "1.0",
+  "spec": "§23.5.5, §23.5.7",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.5: the compiler SHALL emit W-FOREIGN-UNDECLARED-CAPABILITY (Info) when a foreign construct is governed by an empty capability set. Here no ancestor declares `capabilities=` → empty → the lint fires as Info (partitions into result.warnings; CLI exit driven by the co-occurring E-FOREIGN-SIDECAR-NOMINAL, which is the §23.4 Nominal fail-closed). No E-SCOPE-001.",
+  "expect": {
+    "codes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-FOREIGN-SIDECAR-NOMINAL"],
+    "notCodes": ["E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN"],
+    "severity": {
+      "W-FOREIGN-UNDECLARED-CAPABILITY": "info",
+      "E-FOREIGN-SIDECAR-NOMINAL": "error"
+    }
+  }
+}

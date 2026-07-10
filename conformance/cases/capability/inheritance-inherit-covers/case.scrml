@@ -1,0 +1,5 @@
+<program capabilities=[network("api.example.com")]>
+  <program name="probe" lang="ts">
+    use foreign:probe { run }
+  </>
+</>

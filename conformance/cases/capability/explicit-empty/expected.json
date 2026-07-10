@@ -1,0 +1,12 @@
+{
+  "id": "capability-explicit-empty",
+  "description": "§23.5.2 — `capabilities=[]` is the explicit declare-nothing form (equivalent to an omitted attribute, §23.5.4). With NO foreign-code construct present it COMPILES CLEAN: the empty bracket parses to a zero-token capability list (no E-SCOPE-001, no W-ATTR-001), and because no foreign construct is governed, the §23.5.5 presence-nudge W-FOREIGN-UNDECLARED-CAPABILITY does NOT fire (the lint keys on a foreign construct, not on the empty declaration itself).",
+  "language-version": "1.0",
+  "spec": "§23.5.2, §23.5.4, §23.5.5",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.2: `capabilities=[]` = declare-nothing. The empty list is well-formed (no unknown token). The presence-nudge lint (§23.5.5) fires only on a FOREIGN construct under an empty set — with no `_{}`/WASM/sidecar here, it stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001", "W-ATTR-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-FOREIGN-UNDECLARED-CAPABILITY"]
+  }
+}

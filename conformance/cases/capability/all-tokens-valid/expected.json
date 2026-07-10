@@ -1,0 +1,12 @@
+{
+  "id": "capability-all-tokens-valid",
+  "description": "§23.5.3 — every token of the CLOSED v1 vocabulary in one `capabilities=[…]` list: the five arg-bearing caps with string-literal args (`network`, `fs-read`, `fs-write`, `spawn`, `env`) plus the presence-only boolean `db`. All six are recognized (E-FOREIGN-CAPABILITY-UNKNOWN does not fire), the hyphenated `fs-read`/`fs-write` are parsed as capability KEYWORDS (not two idents), and none of the token names resolve as scope refs.",
+  "language-version": "1.0",
+  "spec": "§23.5.2, §23.5.3",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.3: the v1 vocabulary is exactly { network, fs-read, fs-write, spawn, env, db }. A list using all six with well-formed args is valid — no E-FOREIGN-CAPABILITY-UNKNOWN, no E-SCOPE-001, no W-ATTR-001.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOREIGN-CAPABILITY-UNKNOWN", "E-SCOPE-001", "W-ATTR-001"]
+  }
+}

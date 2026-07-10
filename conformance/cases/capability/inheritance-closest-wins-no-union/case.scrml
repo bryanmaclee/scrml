@@ -1,0 +1,5 @@
+<program capabilities=[network("api.example.com")]>
+  <program name="svc" lang="ts" capabilities=[]>
+    use foreign:svc { run }
+  </>
+</>

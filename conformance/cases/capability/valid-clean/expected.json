@@ -1,0 +1,12 @@
+{
+  "id": "capability-valid-clean",
+  "description": "§23.5.2 — the SPEC's own advisory worked example `capabilities=[network(\"api.example.com\")]` on the top-level `<program>` COMPILES CLEAN. It is an advisory, non-blocking declaration (§23.5.1); the capability token list is special-parsed (NOT a general expression), so `network` is a capability KEYWORD, never a scope ref. The regression anchor for the fail-closed-Nominal invariant: pre-impl-wave this hard-failed with a misleading fatal E-SCOPE-001 (`network` undeclared) plus a W-ATTR-001 unknown-attribute warning.",
+  "language-version": "1.0",
+  "spec": "§23.5.1, §23.5.2, §23.5.3, §4.12.2",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.1: a well-formed `capabilities=[…]` declaration is advisory and non-blocking — it MUST NOT hard-fail. The token list is recognized (E-FOREIGN-CAPABILITY-UNKNOWN does not fire on a valid token), the attribute is registered (no W-ATTR-001), and its tokens never resolve as scope refs (no E-SCOPE-001). Only the incidental W-PROGRAM-SPA-INFERRED remains.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001", "W-ATTR-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-FOREIGN-UNDECLARED-CAPABILITY"]
+  }
+}

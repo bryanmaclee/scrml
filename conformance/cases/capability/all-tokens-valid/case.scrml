@@ -1,0 +1,3 @@
+<program capabilities=[network("a.com"), fs-read("/etc/x"), fs-write("/var/y"), spawn("ls"), env("HOME"), db]>
+<div>hi</div>
+</>

@@ -159,6 +159,17 @@ ELEMENT_ATTR_REGISTRY.set("program", {
       supportsInterpolation: false,
       allowedValues: ["dev-only", "always"],
     })],
+    // §23.5.2 — capability DECLARATION (S232 SPEC; impl wave 2026-07-10). The
+    // value is a bracketed list of capability tokens `{ network, fs-read,
+    // fs-write, spawn, env, db }` (§23.5.3), NOT a general expression — the
+    // ast-builder special-parses the `capabilities=[…]` value into a
+    // capability-token list so its tokens never resolve as scope refs (no
+    // E-SCOPE-001) and an unrecognized token fires E-FOREIGN-CAPABILITY-UNKNOWN.
+    // Registering here suppresses the incidental W-ATTR-001 (the attribute is
+    // recognized). Valid at top-level AND nested per the §4.12.2 attr-table row.
+    // supportsInterpolation:false — the token list is a compile-time declaration,
+    // not a runtime-interpolated value.
+    ["capabilities",  attrSpec({ supportsInterpolation: false })],
   ]),
 });
 

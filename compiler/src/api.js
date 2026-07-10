@@ -734,6 +734,10 @@ export function compileScrml(options = {}) {
      *     (default "warn"; set "off" for adopters whose codebase relies on
      *      custom CSS class names — the lint produces acknowledged
      *      false positives there per SPEC §34 / §26.5).
+     *   lintForeignUndeclaredCapability — W-FOREIGN-UNDECLARED-CAPABILITY
+     *     (default fires; set "off" for the SPEC §28 knob
+     *      `lint.foreign-undeclared-capability = off` — an author who genuinely
+     *      wants an undeclared foreign scope suppresses the §23.5.5 presence-nudge).
      * Unknown keys are silently ignored. Adopters can pass
      * `{ compilerSettings: { lintTailwindUnrecognizedClass: "off" } }`
      * from a project-level config loader.
@@ -1939,6 +1943,13 @@ export function compileScrml(options = {}) {
     routeMap: riResult.routeMap,
     importedTypesByFile,
   }));
+  // §23.5.5 / §28 — `lint.foreign-undeclared-capability = off` suppression. The
+  // W-FOREIGN-UNDECLARED-CAPABILITY presence-nudge always computes in TS; drop it
+  // here when the adopter has turned the knob off (mirrors the Tailwind lint
+  // suppression pattern — `compilerSettings.lintForeignUndeclaredCapability`).
+  if (compilerSettings.lintForeignUndeclaredCapability === "off" && Array.isArray(tsResult.errors)) {
+    tsResult.errors = tsResult.errors.filter((e) => e.code !== "W-FOREIGN-UNDECLARED-CAPABILITY");
+  }
   collectErrors("TS", tsResult.errors);
 
   // S66 promote-bridge: if an external caller has set the typed-AST capture

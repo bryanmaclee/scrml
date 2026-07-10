@@ -1,0 +1,13 @@
+{
+  "id": "capability-inheritance-inherit-covers",
+  "description": "§23.5.4 — inheritance covers a nested foreign construct. The OUTER `<program>` declares `capabilities=[network(\"api.example.com\")]`; the INNER `<program name=\"probe\">` declares NO `capabilities=`, so it INHERITS the closest ancestor's set (the outer's non-empty `network`). The `use foreign:probe` construct is therefore governed by a NON-empty set → W-FOREIGN-UNDECLARED-CAPABILITY does NOT fire. The positive complement to the no-union case: when the inner does not re-declare, it inherits the outer's declaration.",
+  "language-version": "1.0",
+  "spec": "§23.5.4, §23.5.5",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.4: if a nested `<program>` does not declare `capabilities=`, the governing set is the CLOSEST ancestor that does — here the outer non-empty `network`. A foreign construct under a non-empty inherited set is declared, so the §23.5.5 presence-nudge stays silent. E-FOREIGN-SIDECAR-NOMINAL co-occurs (the §23.4 sidecar runtime is Nominal).",
+  "expect": {
+    "codes": ["E-FOREIGN-SIDECAR-NOMINAL"],
+    "notCodes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-ATTR-001"],
+    "severity": { "E-FOREIGN-SIDECAR-NOMINAL": "error" }
+  }
+}

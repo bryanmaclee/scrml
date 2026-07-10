@@ -2654,9 +2654,14 @@ function contextLabel(ctx) {
  *   bind: props against the propsDecl and emits E-COMPONENT-013 if prop is not bindable).
  * @returns {AttrNode[]}
  */
-function parseAttributes(tokens, filePath, errors, isComponent = false) {
+function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null) {
   const attrs = [];
   let i = 0;
+  // §23.5.2 — the `capabilities=` attribute is a `<program>` attribute (§4.12.2:
+  // valid top-level AND nested). Its value is special-parsed as a capability-
+  // token list only on `<program>`; on any other element it falls through to the
+  // generic value handling (there is no capability declaration off `<program>`).
+  const isProgramEl = typeof tagName === "string" && tagName.toLowerCase() === "program";
 
   while (i < tokens.length) {
     const tok = tokens[i];
@@ -2676,7 +2681,15 @@ function parseAttributes(tokens, filePath, errors, isComponent = false) {
 
           let value;
           const valSpan = tokenSpan(valTok, filePath);
-          if (valTok.kind === "ATTR_STRING") {
+          if (name === "capabilities" && isProgramEl) {
+            // §23.5.2 — special-parse the capability-token LIST (NOT a general
+            // expression). This is the CORE fix: without it the bracket value is
+            // parsed as a scrml array-expr and its token names resolve as
+            // undefined scope refs → a misleading fatal E-SCOPE-001. The value
+            // carries NO exprNode, so the TS scope walker never sees the tokens.
+            // Validates against the closed v1 vocab; unknown → E-FOREIGN-CAPABILITY-UNKNOWN.
+            value = parseCapabilitiesAttrValue(valTok.text, valSpan, filePath, errors);
+          } else if (valTok.kind === "ATTR_STRING") {
             value = { kind: "string-literal", value: valTok.text, span: valSpan };
             // E-ATTR-002: boolean attribute with a quoted string value
             if (BOOLEAN_ATTRS.has(name)) {
@@ -3201,6 +3214,77 @@ function splitArgs(raw) {
   }
   if (cur.trim().length > 0) parts.push(cur.trim());
   return parts;
+}
+
+// ---------------------------------------------------------------------------
+// §23.5 Capability Declaration — `capabilities=[…]` token-list parse + validate
+//
+// The `capabilities=` value is a bracketed list of capability tokens (§23.5.2),
+// NOT a general expression. Parsing it as an expression made its identifiers
+// (`network`, `db`, …) resolve as undefined scope refs → a misleading fatal
+// E-SCOPE-001 (the pre-impl-wave bug). This special-parse turns them into
+// declaration TOKENS: the token names are validated against the closed v1
+// vocabulary and the value node carries NO exprNode, so the TS scope walker
+// never sees them. `fs-read`/`fs-write` are hyphenated (not JS identifiers) —
+// they are capability KEYWORDS, so the token regex admits `-`.
+// ---------------------------------------------------------------------------
+
+// §23.5.3 — the CLOSED v1 capability vocabulary (the six-token table). An
+// unrecognized token is E-FOREIGN-CAPABILITY-UNKNOWN (§23.5.7). Future SPEC
+// revisions MAY extend additively; v1 is exactly these six.
+const CAPABILITY_VOCAB = new Set(["network", "fs-read", "fs-write", "spawn", "env", "db"]);
+
+/**
+ * §23.5.2 — parse a `capabilities=[…]` attribute value into a capability-token
+ * list. `raw` is the ATTR_EXPR bracket text (e.g. `[network("api.example.com"),
+ * fs-read("/etc/x"), spawn, db]` or `[]`). Validates each token's NAME against
+ * the closed v1 vocabulary (§23.5.3); an unrecognized token fires
+ * E-FOREIGN-CAPABILITY-UNKNOWN (§23.5.7). Args are captured verbatim (opaque
+ * host/path/cmd/env allow-list strings — v1.0 records intent; the allow-list
+ * gains teeth at the DEFERRED enforcement layer §23.5.6).
+ *
+ * Returns a `{ kind: "capabilities", tokens: [{ name, args }] }` value node with
+ * NO exprNode — so no incidental E-SCOPE-001 on the token names.
+ *
+ * @param {string} raw
+ * @param {object} span
+ * @param {string} filePath
+ * @param {TABError[]} errors
+ * @returns {{ kind: "capabilities", tokens: Array<{name: string, args: string[]}>, span: object }}
+ */
+function parseCapabilitiesAttrValue(raw, span, filePath, errors) {
+  const tokens = [];
+  let inner = (raw ?? "").trim();
+  // Strip the outer brackets (the tokenizer's bracket handler preserves them).
+  if (inner.startsWith("[")) inner = inner.slice(1);
+  if (inner.endsWith("]")) inner = inner.slice(0, -1);
+  inner = inner.trim();
+  // `capabilities=[]` — explicit empty (declare-nothing). No tokens; no error.
+  if (inner.length === 0) return { kind: "capabilities", tokens, span };
+
+  for (const part of splitArgs(inner)) {
+    const p = part.trim();
+    if (p.length === 0) continue;
+    // capability-token ::= arg-cap '(' string-lit (',' string-lit)* ')' | arg-cap | 'db'
+    const m = p.match(/^([A-Za-z][A-Za-z0-9-]*)\s*(?:\(([\s\S]*)\))?\s*$/);
+    const capName = m ? m[1] : p;
+    if (!CAPABILITY_VOCAB.has(capName)) {
+      errors.push(new TABError(
+        "E-FOREIGN-CAPABILITY-UNKNOWN",
+        `E-FOREIGN-CAPABILITY-UNKNOWN: \`${capName}\` is not a recognized capability token. ` +
+        `The v1 capability vocabulary is { network, fs-read, fs-write, spawn, env, db } (§23.5.3). ` +
+        `Remove the unrecognized token or correct it to one of the six — arg-bearing caps take ` +
+        `string-literal args (\`network("api.example.com")\`, \`fs-read("/etc/x")\`); \`db\` is ` +
+        `presence-only.`,
+        span,
+      ));
+      continue;
+    }
+    const argsRaw = m && m[2] !== undefined ? m[2].trim() : "";
+    const args = argsRaw.length === 0 ? [] : splitArgs(argsRaw).map((a) => a.trim()).filter(Boolean);
+    tokens.push({ name: capName, args });
+  }
+  return { kind: "capabilities", tokens, span };
 }
 
 /**
@@ -15651,7 +15735,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         block.span.col,
         "markup"
       );
-      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true);
+      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name);
 
       // ----------------------------------------------------------------
       // A1b B18 fire-site #1 — multi-statement event-handler validation

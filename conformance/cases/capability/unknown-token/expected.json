@@ -1,0 +1,13 @@
+{
+  "id": "capability-unknown-token",
+  "description": "§23.5.3 / §23.5.7 — a `capabilities=[…]` list containing a token outside the closed v1 vocabulary (`teleport`) fires E-FOREIGN-CAPABILITY-UNKNOWN (Error). Because the value is special-parsed as a capability-token LIST (not a general expression), the unknown token gets the HONEST capability-vocabulary error — NOT the pre-impl-wave misleading fatal E-SCOPE-001 (which treated `teleport` as an undeclared scope ref).",
+  "language-version": "1.0",
+  "spec": "§23.5.3, §23.5.7",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.3: the v1 capability vocabulary is CLOSED; an unrecognized capability token SHALL be a compile error (E-FOREIGN-CAPABILITY-UNKNOWN, §23.5.7). The honest code names the vocabulary; E-SCOPE-001 (the token-as-scope-ref misparse) MUST NOT fire.",
+  "expect": {
+    "codes": ["E-FOREIGN-CAPABILITY-UNKNOWN"],
+    "notCodes": ["E-SCOPE-001", "W-ATTR-001"],
+    "severity": { "E-FOREIGN-CAPABILITY-UNKNOWN": "error" }
+  }
+}

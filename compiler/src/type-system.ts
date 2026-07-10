@@ -20468,6 +20468,110 @@ function checkForeignBlocks(
   for (const node of nodes) visit(node);
 }
 
+// ---------------------------------------------------------------------------
+// §23.5.4 + §23.5.5 — capability determination (inheritance) + the
+// W-FOREIGN-UNDECLARED-CAPABILITY presence-nudge lint.
+//
+// A foreign-code construct (`_{}` block §23.2, WASM sigil/`extern` §23.3, or
+// `use foreign:` sidecar §23.4) governed by an EMPTY capability set fires the
+// Info lint (§23.5.5). The governing set is determined by inheritance (§23.5.4):
+// the CLOSEST ancestor `<program>` with a `capabilities=` attribute WINS — NO
+// union (mirrors §23.2.1 `lang=` determination). If no ancestor declares
+// `capabilities=`, the governing set is empty (declare-nothing) and the lint
+// fires. The lint is PRESENCE-only (opacity bound §23.2.3 — it does NOT inspect
+// the `_{}` interior; it checks declaration-presence, never access-accuracy).
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a `<program>` node's declared `capabilities=` token count.
+ *   - `null`   — no `capabilities=` attribute (this program does not declare;
+ *                inheritance continues to the next ancestor).
+ *   - `number` — the count of declared tokens (0 = explicit `[]` = declare-nothing).
+ * The ast-builder special-parses the value into `{ kind: "capabilities", tokens }`.
+ */
+function programCapabilityTokenCount(prog: ASTNodeLike): number | null {
+  const attrs = prog.attrs as Array<{ name: string; value: unknown }> | undefined;
+  if (!attrs) return null;
+  const cap = attrs.find((a) => a.name === "capabilities");
+  if (!cap) return null;
+  const v = cap.value as { kind?: string; tokens?: unknown[] } | undefined;
+  if (v && v.kind === "capabilities" && Array.isArray(v.tokens)) return v.tokens.length;
+  // Present but not the special-parsed shape (e.g. `capabilities=` on a
+  // non-program path, or a malformed value) — treat as declared-empty so a
+  // present-but-empty declaration still suppresses the inheritance walk.
+  return 0;
+}
+
+/**
+ * A foreign-code construct for the §23.5.5 presence-nudge (opacity-bound —
+ * PRESENCE detection only, never interior inspection):
+ *   - `_{}` block           → `kind:"foreign"` AST node (§23.2).
+ *   - `use foreign:` sidecar → `kind:"use-decl"` with `_foreignSidecarNominal` (§23.4).
+ *   - WASM sigil / `extern`  → a logic `init`/`expr`/`raw` string matching the
+ *                              anchored §23.3 call-char / extern forms.
+ */
+function isForeignConstructNode(n: Record<string, unknown>): boolean {
+  if (n.kind === "foreign") return true;
+  if (n.kind === "use-decl" && n._foreignSidecarNominal === true) return true;
+  for (const field of ["init", "expr", "raw"] as const) {
+    const raw = n[field];
+    if (typeof raw === "string" && raw.length > 0 &&
+        (WASM_EXTERN_DECL_RE.test(raw) || WASM_CALL_CHAR_SIGIL_RE.test(raw))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * §23.5.4 + §23.5.5 — walk the program-nesting tree threading the governing
+ * capability set; fire W-FOREIGN-UNDECLARED-CAPABILITY (Info) on each foreign
+ * construct governed by an empty set. No-op when the file has no foreign
+ * constructs. Suppression (`lint.foreign-undeclared-capability = off`, §28) is
+ * applied at the api.js diagnostic-partition layer (the lint always computes;
+ * api.js drops it when the knob is off).
+ */
+function checkUndeclaredCapabilities(nodes: ASTNodeLike[], errors: TSError[], fileSpan: Span): void {
+  const fired = new Set<unknown>();
+  const seen = new Set<unknown>();
+  const walk = (node: unknown, governingCount: number): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    const n = node as Record<string, unknown>;
+    // A `<program>` with its own `capabilities=` REPLACES the governing set for
+    // its subtree (closest-wins, no union §23.5.4). A program without the attr
+    // leaves the inherited set unchanged.
+    let gc = governingCount;
+    if (n.kind === "markup" && n.tag === "program") {
+      const cnt = programCapabilityTokenCount(n as ASTNodeLike);
+      if (cnt !== null) gc = cnt;
+    }
+    if (gc === 0 && !fired.has(n) && isForeignConstructNode(n)) {
+      fired.add(n);
+      const span = (n.span as Span | undefined) ?? fileSpan;
+      errors.push(new TSError(
+        "W-FOREIGN-UNDECLARED-CAPABILITY",
+        "W-FOREIGN-UNDECLARED-CAPABILITY: this foreign-code scope reaches the host but no " +
+        "ancestor `<program>` declares a `capabilities=` set (§23.5.4), so its governing " +
+        "capability surface is empty. Declare the intended host capabilities on the enclosing " +
+        "`<program>` — e.g. `capabilities=[network(\"api.example.com\"), fs-read(\"/etc/x\")]` " +
+        "(§23.5.2). This is an advisory presence-nudge (the declaration is not yet enforced; " +
+        "§23.5.6) — it checks declaration-presence, not access-accuracy (the `_{}` interior is " +
+        "opaque, §23.2.3). Suppress with `lint.foreign-undeclared-capability = off` (§28).",
+        span,
+        "info",
+      ));
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (Array.isArray(v)) for (const c of v) walk(c, gc);
+      else if (v && typeof v === "object") walk(v, gc);
+    }
+  };
+  for (const node of nodes) walk(node, 0);
+}
+
 function checkApiDeclarations(
   topNodes: ASTNodeLike[],
   typeRegistry: Map<string, ResolvedType>,
@@ -21717,6 +21821,9 @@ function processFile(
     // E-FOREIGN-004). Scoped to tool programs; empty otherwise.
     const _toolAdmittedForeign = collectToolAdmittedForeign(fileAST);
     checkForeignBlocks(allNodes, _foreignProgramLang, errors, fileSpan, _toolAdmittedForeign);
+    // §23.5.4/.5 — capability-inheritance walk + W-FOREIGN-UNDECLARED-CAPABILITY
+    // (Info) presence-nudge. No-op when the file has no foreign construct.
+    checkUndeclaredCapabilities(allNodes, errors, fileSpan);
   }
 
   // Assemble TypedFileAST.
