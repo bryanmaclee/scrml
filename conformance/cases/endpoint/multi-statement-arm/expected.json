@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-multi-statement-arm",
+  "description": "§61.2/§61.10 — an `<endpoint>` arm with a BARE body containing TWO OR MORE statements (a bare `seq` then the result object) fires E-ENDPOINT-MULTI-STATEMENT-ARM. An arm body is lowered as a single value-expression the compiler envelopes (§61.5), so a 2+-statement body has no single-expression lowering. The clean named diagnostic REPLACES the generic E-CODEGEN-INVALID-LOGIC gate.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.10, §61.9",
+  "source-test": "compiler/tests/integration/endpoint-multi-statement-arm.test.js",
+  "rationale": "§61.10: a multi-statement bare-body arm is a future-wave gap (the arm body is one value-expression). Codegen detects the 2+-statement body and fires E-ENDPOINT-MULTI-STATEMENT-ARM at the arm (W4), NOT the cryptic E-CODEGEN-INVALID-LOGIC.",
+  "expect": {
+    "codes": ["E-ENDPOINT-MULTI-STATEMENT-ARM"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-ENDPOINT-NOT-EXHAUSTIVE"],
+    "severity": { "E-ENDPOINT-MULTI-STATEMENT-ARM": "error" }
+  }
+}

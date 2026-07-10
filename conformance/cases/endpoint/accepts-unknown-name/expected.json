@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-accepts-unknown-name",
+  "description": "§61.3 — an `<endpoint>` whose `accepts=` names an UNDECLARED type (`NopeEnum`) fires E-TYPE-UNKNOWN-NAME, reusing the §14.1.2 unknown-name machinery (no dedicated E-ENDPOINT-* code). An undeclared ref does NOT also fire E-ENDPOINT-ACCEPTS-NOT-ENUM (no double-report — the type never resolved to a concrete non-enum).",
+  "language-version": "1.0",
+  "spec": "§61.3, §61.9, §14.1.2",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.9: an undeclared `accepts=` ref reuses E-TYPE-UNKNOWN-NAME (the §14.1.2 machinery, exactly as `<api>`'s reqShape/responseType). E-ENDPOINT-ACCEPTS-NOT-ENUM fires only when the type RESOLVES to a concrete non-enum, so it stays silent here.",
+  "expect": {
+    "codes": ["E-TYPE-UNKNOWN-NAME"],
+    "notCodes": ["E-ENDPOINT-ACCEPTS-NOT-ENUM", "E-ENDPOINT-NOT-EXHAUSTIVE"],
+    "severity": { "E-TYPE-UNKNOWN-NAME": "error" }
+  }
+}

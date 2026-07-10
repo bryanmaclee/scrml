@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-duplicate-arm",
+  "description": "§61.4/§61.9 — an `<endpoint>` with a DUPLICATE arm for the same variant (two `FleetStatus` arms) follows the §18.0.1 arm-validity rules: it fires E-TYPE-023, NOT a dedicated E-ENDPOINT-* code. `<endpoint>` reuses the existing arm-validity surface rather than minting a parallel code.",
+  "language-version": "1.0",
+  "spec": "§61.4, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.9: a duplicate arm is the §18.0.1 arm-validity diagnostic (E-TYPE-023), NOT an E-ENDPOINT-* code — `<endpoint>` reuses that surface. So E-TYPE-023 fires and the whole E-ENDPOINT-* family stays silent.",
+  "expect": {
+    "codes": ["E-TYPE-023"],
+    "notCodePrefixes": ["E-ENDPOINT-"],
+    "severity": { "E-TYPE-023": "error" }
+  }
+}

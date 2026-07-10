@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-method-missing",
+  "description": "§61.7 — an `<endpoint>` that omits `method=` entirely fires E-ENDPOINT-METHOD-INVALID (a missing method literal is reported by the same code, not a distinct one). The handler needs a method to mount for.",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-parser.test.js",
+  "rationale": "§61.7: `method=` SHALL be a recognized HTTP method literal; a missing method= has no recognized literal, so it fires E-ENDPOINT-METHOD-INVALID (parse-time, W2 — the same code as an unrecognized value).",
+  "expect": {
+    "codes": ["E-ENDPOINT-METHOD-INVALID"],
+    "notCodes": ["E-ENDPOINT-PATH-MISSING", "E-ENDPOINT-ACCEPTS-MISSING"],
+    "severity": { "E-ENDPOINT-METHOD-INVALID": "error" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-self-closing-arm-exhaustive",
+  "description": "§61.2/§61.5 — a self-closing `<Ping/>` arm is a no-op handler (it returns the default-success 204 envelope with no result), and it counts toward exhaustiveness. An `<endpoint>` covering `Ping` via a self-closing arm + `Lookup` via a `:`-shorthand arm is exhaustive over the enum — no E-ENDPOINT-NOT-EXHAUSTIVE, no E-ENDPOINT-MULTI-STATEMENT-ARM.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.5",
+  "source-test": "compiler/tests/integration/endpoint-multi-statement-arm.test.js",
+  "rationale": "§61.2: the self-closing `<Variant/>` arm is one of the three supported body forms (a no-op → 204, §61.5); it satisfies exhaustiveness like any other arm. So the family stays silent on a self-closing + shorthand exhaustive pair.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME", "E-TYPE-023"],
+    "notCodePrefixes": ["E-ENDPOINT-"]
+  }
+}

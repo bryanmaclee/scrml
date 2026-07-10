@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-not-exhaustive",
+  "description": "§61.4 — an `<endpoint>` whose arms are NOT exhaustive against the `accepts=` enum (the `DeltaSince` variant has no arm) fires E-ENDPOINT-NOT-EXHAUSTIVE. This is the inbound-honesty guarantee: because scrml owns the decode, the unhandled-variant hole is visible, so it is a compile error, not a silent runtime 404/500.",
+  "language-version": "1.0",
+  "spec": "§61.4, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.4: the arms SHALL be exhaustive against the `accepts=` enum (reusing the §18.0.1/§51 exhaustiveness machinery). A variant with no arm (and no wildcard) is E-ENDPOINT-NOT-EXHAUSTIVE (W3 typer).",
+  "expect": {
+    "codes": ["E-ENDPOINT-NOT-EXHAUSTIVE"],
+    "notCodes": ["E-ENDPOINT-ACCEPTS-NOT-ENUM", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-ENDPOINT-NOT-EXHAUSTIVE": "error" }
+  }
+}

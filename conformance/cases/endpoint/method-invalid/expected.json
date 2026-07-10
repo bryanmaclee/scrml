@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-method-invalid",
+  "description": "§61.7 — an `<endpoint>` naming a `method=` that is not a recognized HTTP method (here `HEAD`) fires E-ENDPOINT-METHOD-INVALID. The recognized set is GET/POST/PUT/PATCH/DELETE (the §60.2 http-method set, reused).",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-parser.test.js",
+  "rationale": "§61.7: `method=` SHALL be one of GET/POST/PUT/PATCH/DELETE. A value outside that set (HEAD) is E-ENDPOINT-METHOD-INVALID (parse-time, W2).",
+  "expect": {
+    "codes": ["E-ENDPOINT-METHOD-INVALID"],
+    "notCodes": ["E-ENDPOINT-PATH-MISSING", "E-ENDPOINT-ACCEPTS-MISSING"],
+    "severity": { "E-ENDPOINT-METHOD-INVALID": "error" }
+  }
+}

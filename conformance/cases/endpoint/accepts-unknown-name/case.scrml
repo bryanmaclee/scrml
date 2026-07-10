@@ -1,0 +1,7 @@
+<program>
+
+<endpoint path="/x" method="POST" accepts=NopeEnum>
+  <Whatever : { ok: true }>
+</endpoint>
+
+</program>

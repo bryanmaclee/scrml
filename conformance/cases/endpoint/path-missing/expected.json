@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-path-missing",
+  "description": "§61.7 — an `<endpoint>` declaration with no `path=` fires E-ENDPOINT-PATH-MISSING. The `path=` is the author-stable contract URL a foreign client connects to; without it the typed-inbound handler has no mount address.",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-parser.test.js",
+  "rationale": "§61.7: an `<endpoint>` SHALL declare a `path=` (the contract URL, the §12.3/§37.3 foreign-facing-endpoint rule reused). A missing `path=` is E-ENDPOINT-PATH-MISSING (parse-time, W2).",
+  "expect": {
+    "codes": ["E-ENDPOINT-PATH-MISSING"],
+    "notCodes": ["E-ENDPOINT-METHOD-INVALID", "E-ENDPOINT-ACCEPTS-MISSING"],
+    "severity": { "E-ENDPOINT-PATH-MISSING": "error" }
+  }
+}

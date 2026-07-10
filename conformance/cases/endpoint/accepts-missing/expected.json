@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-accepts-missing",
+  "description": "§61.3 — an `<endpoint>` with no `accepts=` enum type fires E-ENDPOINT-ACCEPTS-MISSING. The request body decodes into `accepts=` via parseVariant (§41.13); without it there is nothing to decode or dispatch.",
+  "language-version": "1.0",
+  "spec": "§61.3, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-parser.test.js",
+  "rationale": "§61.3: an `<endpoint>` SHALL declare an `accepts=` :enum type — the typed inbound surface is required. A missing accepts= is E-ENDPOINT-ACCEPTS-MISSING (parse-time, W2 — the catch-all mirroring §60.9's E-API-ENDPOINT-MALFORMED).",
+  "expect": {
+    "codes": ["E-ENDPOINT-ACCEPTS-MISSING"],
+    "notCodes": ["E-ENDPOINT-PATH-MISSING", "E-ENDPOINT-METHOD-INVALID"],
+    "severity": { "E-ENDPOINT-ACCEPTS-MISSING": "error" }
+  }
+}

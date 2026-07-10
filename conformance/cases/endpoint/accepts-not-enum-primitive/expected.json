@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-accepts-not-enum-primitive",
+  "description": "§61.3 — an `<endpoint>` whose `accepts=` resolves to a PRIMITIVE type (`number`) fires E-ENDPOINT-ACCEPTS-NOT-ENUM. A primitive is not a tagged-variant type, so there is nothing for parseVariant to dispatch on.",
+  "language-version": "1.0",
+  "spec": "§61.3, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.3: `accepts=` SHALL resolve to a :enum type. A concrete primitive (number) is E-ENDPOINT-ACCEPTS-NOT-ENUM (W3 typer, an Error) — the same variant-only constraint §60.5 records for the response half.",
+  "expect": {
+    "codes": ["E-ENDPOINT-ACCEPTS-NOT-ENUM"],
+    "notCodes": ["E-ENDPOINT-NOT-EXHAUSTIVE", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-ENDPOINT-ACCEPTS-NOT-ENUM": "error" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-wildcard-exhaustive",
+  "description": "§61.4 — a wildcard `<_>` arm satisfies exhaustiveness over the `accepts=` enum: an `<endpoint>` with only `FleetStatus` + a `<_>` arm covers the un-armed `Dispatch`/`DeltaSince` variants, so E-ENDPOINT-NOT-EXHAUSTIVE does NOT fire (reusing the §18.8.1 wildcard rule).",
+  "language-version": "1.0",
+  "spec": "§61.4",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.4: the arms reuse the §18.0.1/§51 exhaustiveness machinery, where a wildcard `<_>` arm covers every un-armed variant. So a `FleetStatus` + `<_>` pair is exhaustive and the family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME", "E-TYPE-023"],
+    "notCodePrefixes": ["E-ENDPOINT-"]
+  }
+}

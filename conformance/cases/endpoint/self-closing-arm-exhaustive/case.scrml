@@ -1,0 +1,13 @@
+<program>
+
+type Query:enum = {
+  Ping
+  Lookup(id: int)
+}
+
+<endpoint path="/q" method="POST" accepts=Query>
+  <Ping/>
+  <Lookup(id) : { jsonrpc: "2.0", result: { id: id } }>
+</endpoint>
+
+</program>

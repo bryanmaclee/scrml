@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-method-bareword-get-clean",
+  "description": "§61.7 — the `method=` value may be a bareword (unquoted) HTTP method literal, and GET (a non-POST method) is in the recognized set. A `method=GET` bareword endpoint, exhaustive over its enum, gates clean — no E-ENDPOINT-METHOD-INVALID.",
+  "language-version": "1.0",
+  "spec": "§61.7",
+  "source-test": "compiler/tests/unit/endpoint-decl-parser.test.js",
+  "rationale": "§61.7: `method=` SHALL be one of GET/POST/PUT/PATCH/DELETE, accepted as a quoted string-literal OR a bareword. A bareword GET is recognized, so E-ENDPOINT-METHOD-INVALID stays silent and the family is clean.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME"],
+    "notCodePrefixes": ["E-ENDPOINT-"]
+  }
+}

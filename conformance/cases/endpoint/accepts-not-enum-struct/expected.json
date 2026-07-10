@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-accepts-not-enum-struct",
+  "description": "§61.3 — an `<endpoint>` whose `accepts=` resolves to a CONCRETE non-enum type (a struct) fires E-ENDPOINT-ACCEPTS-NOT-ENUM. Unlike §60.5's response-half Info-lint, a non-enum INBOUND accepts= is a HARD Error: parseVariant is a tagged-variant decoder with no recoverable raw path. A non-enum does NOT also fire E-ENDPOINT-NOT-EXHAUSTIVE (no double-report).",
+  "language-version": "1.0",
+  "spec": "§61.3, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.3: `accepts=` SHALL resolve to a :enum type (parseVariant §41.13 cannot decode against a non-enum). A struct is E-ENDPOINT-ACCEPTS-NOT-ENUM (W3 typer) — an Error, NOT the §60.5 Info-lint; and it suppresses the exhaustiveness check (no double-report).",
+  "expect": {
+    "codes": ["E-ENDPOINT-ACCEPTS-NOT-ENUM"],
+    "notCodes": ["E-ENDPOINT-NOT-EXHAUSTIVE", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-ENDPOINT-ACCEPTS-NOT-ENUM": "error" }
+  }
+}

@@ -1,0 +1,9 @@
+<program>
+
+type FspReq:struct = { id: number }
+
+<endpoint path="/x" method="POST" accepts=FspReq>
+  <Whatever : { ok: true }>
+</endpoint>
+
+</program>

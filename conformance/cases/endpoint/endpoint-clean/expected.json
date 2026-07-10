@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-clean",
+  "description": "§61.2/§61.4 — a canonical valid `<endpoint>`: a required path=/method=/accepts=:enum, exhaustive per-variant arms (unit + two positional-payload variants), each returning an inline JSON-RPC value. The compile-shape proof that the declaration parses, accepts= resolves to the enum, the arms type-check + are exhaustive, and no E-ENDPOINT-* / E-TYPE-UNKNOWN-NAME fires.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.3, §61.4, §61.5",
+  "source-test": "compiler/tests/integration/endpoint-conformance-integration.test.js",
+  "rationale": "§61.2/§61.4: a well-formed `<endpoint>` with a `:enum` accepts= and exhaustive arms is valid — none of the six E-ENDPOINT-* codes, E-TYPE-UNKNOWN-NAME, or E-TYPE-023 fire. JSON-RPC is a CONVENTION expressed by what each arm returns (§61.5), not a baked-in mode.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME", "E-TYPE-023", "E-CODEGEN-INVALID-LOGIC"],
+    "notCodePrefixes": ["E-ENDPOINT-"]
+  }
+}
