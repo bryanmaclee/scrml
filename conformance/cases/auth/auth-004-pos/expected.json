@@ -1,0 +1,12 @@
+{
+  "id": "auth-004-pos",
+  "description": "Two declarations of the same state type name with conflicting authority= values (server vs local) fire E-AUTH-004 (§52.3.4 — authority is a property of the type; a type cannot be both server-authoritative and local).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-004.test.js",
+  "spec": "§52.3.4 / §52.11",
+  "expect": {
+    "codes": ["E-AUTH-004"],
+    "notCodes": [],
+    "severity": { "E-AUTH-004": "error" }
+  }
+}

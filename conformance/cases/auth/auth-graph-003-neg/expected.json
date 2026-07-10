@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-003-neg",
+  "description": "An `<auth role=\"Admin\">` gate whose variant tag IS in the resolved role enum's variant set does NOT fire E-AUTH-GRAPH-003 (the whole E-AUTH-GRAPH-* family stays silent; §40.1.1 / §40.9.2).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-classifier.test.ts",
+  "spec": "§40.1.1 / §40.9.2 / §34",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-AUTH-GRAPH-"]
+  }
+}

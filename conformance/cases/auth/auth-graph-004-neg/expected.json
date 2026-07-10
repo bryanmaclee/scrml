@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-004-neg",
+  "description": "An `<auth check=\"checkAdmin\">` block carries a gate predicate (the server-fn check= form, a well-formed runtime-fallback gate per §40.9.5) so it does NOT fire E-AUTH-GRAPH-004 (the whole E-AUTH-GRAPH-* family stays silent). The W-AUTH-RUNTIME-FALLBACK info-lint on the check= form is out of the E-AUTH-GRAPH scope.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-classifier.test.ts",
+  "spec": "§40.1.1 / §40.9.5 / §34",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-AUTH-GRAPH-"]
+  }
+}

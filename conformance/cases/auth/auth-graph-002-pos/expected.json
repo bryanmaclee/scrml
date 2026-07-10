@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-002-pos",
+  "description": "An `<auth role=\"Admin\">` gate references a role variant but NO app-scope role enum is declared anywhere in the compilation unit, so the A-3.2 role-enum resolver cannot resolve it — fires E-AUTH-GRAPH-002 (§40.1.1 / §40.9.5).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-role-enum-resolution.test.ts",
+  "spec": "§40.1.1 / §40.9.5 / §34",
+  "expect": {
+    "codes": ["E-AUTH-GRAPH-002"],
+    "notCodes": [],
+    "severity": { "E-AUTH-GRAPH-002": "error" }
+  }
+}

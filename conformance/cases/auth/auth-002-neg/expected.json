@@ -1,0 +1,11 @@
+{
+  "id": "auth-002-neg",
+  "description": "A `<var server>` with a literal initial value (not derived from any client-local `@var`) does NOT fire E-AUTH-002, even when a client-local cell is present in the same program (§52.4.4).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/state-authority-codegen.test.js",
+  "spec": "§52.4.4 / §52.11",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-002"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "auth-004-neg",
+  "description": "Two declarations of the same state type name with MATCHING authority= values do NOT fire E-AUTH-004 (the authority contract is consistent; §52.3.4). Any duplicate-declaration diagnostic is out of the E-AUTH-004 scope.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-004.test.js",
+  "spec": "§52.3.4 / §52.11",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-004"]
+  }
+}

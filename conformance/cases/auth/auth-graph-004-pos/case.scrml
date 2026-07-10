@@ -1,0 +1,11 @@
+<program title="Dispatch" auth="required">
+
+type UserRole:enum = { Anonymous, Driver, Admin }
+
+<auth>
+  <section class="p-4">
+    <h2>Ungated controls</h2>
+  </section>
+</auth>
+
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-003-pos",
+  "description": "An `<auth role=\"Ghost\">` gate references a variant tag NOT in the resolved role enum's variant set ({Anonymous, Driver, Admin}) — fires E-AUTH-GRAPH-003 (§40.1.1 / §40.9.2; the gate itself classifies runtime-fallback, but the variant mismatch is the diagnostic).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-classifier.test.ts",
+  "spec": "§40.1.1 / §40.9.2 / §34",
+  "expect": {
+    "codes": ["E-AUTH-GRAPH-003"],
+    "notCodes": [],
+    "severity": { "E-AUTH-GRAPH-003": "error" }
+  }
+}

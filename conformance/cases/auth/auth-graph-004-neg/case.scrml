@@ -1,0 +1,13 @@
+<program title="Dispatch" auth="required">
+
+type UserRole:enum = { Anonymous, Driver, Admin }
+
+server function checkAdmin() { lift true }
+
+<auth check="checkAdmin">
+  <section class="p-4">
+    <h2>Runtime-checked controls</h2>
+  </section>
+</auth>
+
+</program>

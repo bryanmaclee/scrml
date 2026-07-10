@@ -1,0 +1,6 @@
+<program db="sqlite:./kanban.db">
+
+<localCount>                = 0
+<doubleCount server>        = 0
+
+</program>

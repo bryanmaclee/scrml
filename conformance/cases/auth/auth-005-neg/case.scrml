@@ -1,0 +1,4 @@
+<program db="postgres">
+<count server> = 0
+<p>${@count}</>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-002-neg",
+  "description": "An `<auth role=\"Driver\">` gate with a single app-scope `type UserRole:enum` declared resolves cleanly (the resolver finds the enum) — the whole E-AUTH-GRAPH-* family stays silent (§40.1.1). The incidental W-AUTH-* content/login lints are out of the E-AUTH-GRAPH scope.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-role-enum-resolution.test.ts",
+  "spec": "§40.1.1 / §40.9.5 / §34",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-AUTH-GRAPH-"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "auth-005-neg",
+  "description": "The same `<var server>` declaration in a program WITH `db=` (a server context is present) does NOT fire E-AUTH-005 (§52.11).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-005.test.js",
+  "spec": "§52.4.4 / §52.11",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-005"]
+  }
+}

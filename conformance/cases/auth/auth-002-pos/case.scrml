@@ -1,0 +1,6 @@
+<program db="sqlite:./kanban.db">
+
+<localCount>                = 0                    // client-local
+<doubleCount server>        = @localCount * 2      // ERROR: server cell derives from local cell
+
+</program>

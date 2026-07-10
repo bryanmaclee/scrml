@@ -1,0 +1,4 @@
+<program title="Dashboard">
+<count server> = 0
+<p>${@count}</>
+</program>

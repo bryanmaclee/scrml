@@ -1,0 +1,12 @@
+{
+  "id": "auth-graph-004-pos",
+  "description": "A bare `<auth>` block lacking BOTH `role=` AND `check=` has no gate predicate and cannot be classified — fires E-AUTH-GRAPH-004 (§40.1.1; the A-3.3 classifier's malformed-gate exit).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/auth-graph-classifier.test.ts",
+  "spec": "§40.1.1 / §34",
+  "expect": {
+    "codes": ["E-AUTH-GRAPH-004"],
+    "notCodes": [],
+    "severity": { "E-AUTH-GRAPH-004": "error" }
+  }
+}

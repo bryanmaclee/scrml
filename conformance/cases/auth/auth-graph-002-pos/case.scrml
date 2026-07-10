@@ -1,0 +1,9 @@
+<program title="Dispatch" auth="required">
+
+<auth role="Admin">
+  <section class="p-4">
+    <h2>Admin-only controls</h2>
+  </section>
+</auth>
+
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "auth-005-pos",
+  "description": "A `<var server>` declared in a client-only context (a `<program>` with no `db=` attribute — no server context) fires E-AUTH-005 (§52.11 — server-authoritative cells require a server context).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-005.test.js",
+  "spec": "§52.4.4 / §52.11",
+  "expect": {
+    "codes": ["E-AUTH-005"],
+    "notCodes": [],
+    "severity": { "E-AUTH-005": "error" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "auth-002-pos",
+  "description": "A `<var server>` whose initial value derives directly from a client-local `@var` fires E-AUTH-002 (§52.4.4 / §52.4.7 — the server-authoritative cell must cross the server boundary, not read client-local state). Verbatim SPEC §52.4.7 worked example.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/state-authority-codegen.test.js",
+  "spec": "§52.4.4 / §52.4.7 / §52.11",
+  "expect": {
+    "codes": ["E-AUTH-002"],
+    "notCodes": [],
+    "severity": { "E-AUTH-002": "error" }
+  }
+}
