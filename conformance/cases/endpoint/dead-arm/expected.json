@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-dead-arm",
+  "description": "§61.4/§61.9 — an `<endpoint>` with a fully-exhaustive `accepts=` PLUS a DEAD/UNKNOWN arm (`Bogus`, a variant not declared in the `FspMethod` enum) follows the §18.0.1 arm-validity rules: it fires E-MATCH-SUBSET-DEAD-ARM (the §18.0.1 dead-arm diagnostic the §34 E-ENDPOINT-NOT-EXHAUSTIVE row names as the endpoint's reused dead-arm surface), NOT a dedicated E-ENDPOINT-* code. All real variants are covered, so E-ENDPOINT-NOT-EXHAUSTIVE stays silent.",
+  "language-version": "1.0",
+  "spec": "§61.4, §61.9",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "rationale": "§61.9: an arm naming a variant not in `accepts=` is the §18.0.1 arm-validity diagnostic (E-MATCH-SUBSET-DEAD-ARM), NOT an E-ENDPOINT-* code — `<endpoint>` reuses that surface. So E-MATCH-SUBSET-DEAD-ARM fires and the whole E-ENDPOINT-* family stays silent. This is the sibling of the duplicate-arm case (E-TYPE-023); both reuse the §18.0.1 arm-validity surface.",
+  "expect": {
+    "codes": ["E-MATCH-SUBSET-DEAD-ARM"],
+    "notCodePrefixes": ["E-ENDPOINT-"],
+    "severity": { "E-MATCH-SUBSET-DEAD-ARM": "error" }
+  }
+}

@@ -260,6 +260,35 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
   // before this scope correction).
 };
 
+// §51.0.M / §51.0.R — the engine-child-only, SELF-CLOSING structural elements.
+// These are grammatical ONLY inside an `<engine>` body (where the block-splitter
+// routes the whole body through the raw-text engine-decl recurse, whose buildBlock
+// errors are DISCARDED — see the `_bodyErrors` comment at the engine-decl build).
+// Parsed as a GENERAL markup element node ANYWHERE else — plain `<program>` /
+// `<page>` markup, or a `<match>` block-form arm — they are OUTSIDE their owning
+// engine locus, so they SHALL fire E-STRUCTURAL-ELEMENT-MISPLACED (§4.15) rather
+// than degrade to the incidental E-ATTR-001 / E-SCOPE-001 pair (from treating
+// `after=` / `to=` as HTML attributes). This is the markup-locus dual of the
+// `${}`-logic-body fire site (parseLogicBody). Restricted to `onTimeout` /
+// `onIdle`: both are self-closing (no body to lose when we short-circuit) and
+// carry NO `<match>`-forbidden-code interaction. `<onTransition>` is EXCLUDED —
+// it may carry a handler body AND has a distinct §18.0.2 match-locus code
+// (E-MATCH-ONTRANSITION-FORBIDDEN), so its markup-locus enforcement is a
+// separate, non-trivial follow-up.
+const ENGINE_CHILD_MARKUP_ONLY_ELEMENTS = new Set(["onTimeout", "onIdle"]);
+
+// Synchronous re-entrant depth counter: >0 while `buildBlock` is recursively
+// building an `<engine>` body's children (the VALID locus for the engine-child
+// structural elements above). Set ONLY around the engine-decl bodyChildren
+// build loop, so a valid in-engine `<onTimeout>` / `<onIdle>` node is built by
+// the normal markup path (attributes + children + full node shape PRESERVED —
+// this is load-bearing for the native-vs-JS within-node parity gate, which
+// compares node fields). The misplacement gate below fires + strips ONLY when
+// this depth is 0 (a genuinely-misplaced element in plain markup / a non-engine
+// container). buildBlock is fully synchronous, so a module-level counter with
+// try/finally balance is safe (no interleaving).
+let _engineBodyBuildDepth = 0;
+
 /**
  * Extract the leading tag-opener name from a collected expression string, e.g.
  * `"<schema>\n  <users>..."` → `"schema"`. Returns null if the expression
@@ -15544,6 +15573,46 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         };
       }
 
+      // §51.0.M / §51.0.R (markup-locus placement) — an engine-child-only
+      // structural element (`<onTimeout>` / `<onIdle>`) parsed HERE as a general
+      // markup element node is OUTSIDE its owning engine locus: plain
+      // `<program>` / `<page>` markup, or a `<match>` block-form arm. It SHALL
+      // fire E-STRUCTURAL-ELEMENT-MISPLACED (§4.15) — the markup-locus dual of
+      // the `${}`-logic-body fire site above. Skip attribute parsing + children
+      // so the misleading E-ATTR-001 / E-SCOPE-001 cascade (from treating
+      // `after=` / `to=` as HTML attributes) is suppressed and the misplacement
+      // is THE diagnostic — parity with the clean `${}`-locus fire.
+      //
+      // The VALID in-engine occurrence is EXCLUDED by the `_engineBodyBuildDepth`
+      // guard (set around the engine-decl body recurse): inside an engine body it
+      // is built by the normal markup path with its node shape PRESERVED (the
+      // within-node parser-parity gate compares node fields). Only a depth-0
+      // occurrence — plain `<program>` / `<page>` markup, or a non-engine
+      // container — is misplaced, fires, and is stripped.
+      if (_engineBodyBuildDepth === 0 && ENGINE_CHILD_MARKUP_ONLY_ELEMENTS.has(block.name)) {
+        errors.push(new TABError(
+          "E-STRUCTURAL-ELEMENT-MISPLACED",
+          `E-STRUCTURAL-ELEMENT-MISPLACED: \`<${block.name}>\` ${STRUCTURAL_ELEMENT_PLACEMENT[block.name]}. ` +
+          `(§4.15 — scrml-defined structural elements are grammatical only in their owning loci; ` +
+          `use outside the owning locus is E-STRUCTURAL-ELEMENT-MISPLACED.)`,
+          span,
+        ));
+        return {
+          id: ++counter.next,
+          kind: "markup",
+          tag: block.name,
+          attrs: [],
+          children: [],
+          selfClosing: block.closerForm === "self-closing",
+          closerForm: block.closerForm,
+          // The component-marker field is intentionally OMITTED (undefined ≡
+          // falsy): a scrml-defined structural element is never a PascalCase
+          // component, so the field's absence reads identically to `false` at
+          // every routing site.
+          span,
+        };
+      }
+
       // R25-Bug-40 — SPEC §4.14 `:`-shorthand body handling. When BS
       // recognized the opener as `:`-shorthand (closerForm:"shorthand"),
       // block.raw includes the shorthand body expression (everything
@@ -16349,14 +16418,23 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // Collect into a local errors buffer that we discard, so this
           // recurse cannot pollute the file-level errors stream.
           const _bodyErrors = [];
-          for (const child of block.children) {
-            if (child.raw) rulesRaw += child.raw;
-            // Build the child node. Use parentContextKind="markup" so any
-            // nested state-children inside the engine body are walked with
-            // markup-tree semantics (consistent with the block-splitter's
-            // recursive descent treating engine bodies as markup).
-            const childNode = buildBlock(child, filePath, "markup", counter, _bodyErrors);
-            if (childNode) bodyChildren.push(childNode);
+          // Mark the engine-body build so the §51.0.M / §51.0.R markup-locus
+          // misplacement gate does NOT fire (or strip) a VALID in-engine
+          // `<onTimeout>` / `<onIdle>`: it is grammatical here, and its node
+          // shape must be preserved for the within-node parser-parity gate.
+          _engineBodyBuildDepth++;
+          try {
+            for (const child of block.children) {
+              if (child.raw) rulesRaw += child.raw;
+              // Build the child node. Use parentContextKind="markup" so any
+              // nested state-children inside the engine body are walked with
+              // markup-tree semantics (consistent with the block-splitter's
+              // recursive descent treating engine bodies as markup).
+              const childNode = buildBlock(child, filePath, "markup", counter, _bodyErrors);
+              if (childNode) bodyChildren.push(childNode);
+            }
+          } finally {
+            _engineBodyBuildDepth--;
           }
           // _bodyErrors intentionally discarded — see comment block above.
         }

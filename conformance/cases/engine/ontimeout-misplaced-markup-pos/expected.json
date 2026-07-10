@@ -1,0 +1,12 @@
+{
+  "id": "engine-ontimeout-misplaced-markup-pos",
+  "description": "<onTimeout> misplaced in PLAIN <program> markup (§51.0.M / §4.15). §51.0.M: outside an engine state-child -> E-STRUCTURAL-ELEMENT-MISPLACED for ANY outside locus. This is the markup-locus sibling of the ${}-logic-body case (engine-ontimeout-misplaced-pos): the SAME SPEC code fires, cleanly (no incidental E-ATTR-001/E-SCOPE-001 cascade from treating after=/to= as HTML attributes). Restricted to the self-closing engine-child-only elements (onTimeout, onIdle).",
+  "language-version": "1.0",
+  "spec": "§51.0.M",
+  "rationale": "§51.0.M <onTimeout> is legal only inside an <engine> state-child body; used outside its owning locus (here plain <program> markup) -> E-STRUCTURAL-ELEMENT-MISPLACED (§4.15 structural-element placement gate). The markup-locus enforcement is the general-markup dual of the ${}-logic-body fire site.",
+  "expect": {
+    "codes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodes": ["E-ATTR-001", "E-SCOPE-001"],
+    "severity": { "E-STRUCTURAL-ELEMENT-MISPLACED": "error" }
+  }
+}

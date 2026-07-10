@@ -20970,10 +20970,36 @@ function checkEndpointDeclarations(
     //    machinery — `checkEnumExhaustiveness`). Build the `ArmPattern[]` from
     //    the parsed arms: a wildcard `<_>` arm satisfies exhaustiveness.
     const arms = (decl.arms as ASTNodeLike[] | undefined) ?? [];
-    const armPatterns: ArmPattern[] = arms.map(a => ({
-      kind: (a as { isWildcard?: boolean }).isWildcard ? "wildcard" : "variant",
-      variantName: (a as { variantName?: string }).variantName,
-    }));
+
+    // §61.4 / §61.9 — a DEAD/UNKNOWN arm (one naming a variant that is NOT a
+    // member of the `accepts=` enum) follows the §18.0.1 arm-validity rules: it
+    // is the §18.0.1 "dead arm" diagnostic — `E-MATCH-SUBSET-DEAD-ARM`, the code
+    // the §34 `E-ENDPOINT-NOT-EXHAUSTIVE` row names as the endpoint's reused
+    // dead-arm surface — NOT a parallel `E-ENDPOINT-*` code. It must be
+    // classified HERE, before the exhaustiveness call: `checkEnumExhaustiveness`
+    // silently folds an unknown-variant arm into its covered set (a phantom
+    // cover), so the dead/unknown arm fires nothing without this pass. Exclude
+    // the unknown-variant arms from the `ArmPattern[]` handed to the checker so
+    // they neither mask a genuine missing variant (E-ENDPOINT-NOT-EXHAUSTIVE)
+    // nor forge a spurious duplicate (E-TYPE-023).
+    const enumVariantNames = new Set(enumType.variants.map(v => v.name));
+    const unknownArmVariants: string[] = [];
+    const seenUnknownArm = new Set<string>();
+    const armPatterns: ArmPattern[] = [];
+    for (const a of arms) {
+      const aa = a as { isWildcard?: boolean; variantName?: string };
+      if (aa.isWildcard) { armPatterns.push({ kind: "wildcard" }); continue; }
+      const vName = aa.variantName;
+      if (typeof vName === "string" && vName.length > 0 && !enumVariantNames.has(vName)) {
+        // A concrete arm naming a variant not declared in the `accepts=` enum.
+        // (A subset-refined `accepts=`'s excluded-BASE-variant case is handled
+        // separately by `deadArms` below, keyed on `subsetVariants`.)
+        if (!seenUnknownArm.has(vName)) { seenUnknownArm.add(vName); unknownArmVariants.push(vName); }
+        continue;
+      }
+      armPatterns.push({ kind: "variant", variantName: vName });
+    }
+
     const { missing, duplicateArms, deadArms } =
       checkEnumExhaustiveness(enumType, armPatterns, subsetVariants);
 
@@ -21003,6 +21029,22 @@ function checkEndpointDeclarations(
         `E-MATCH-SUBSET-DEAD-ARM: \`<endpoint>\` arm \`.${variantName}\` is dead — the ` +
         `\`accepts=\` enum-subset refinement excludes \`.${variantName}\`, so that variant ` +
         `can never inhabit the decoded request (§18.8.1 / §53.15). Remove the \`.${variantName}\` arm.`,
+        span,
+      ));
+    }
+    // §61.4 / §61.9 — dead/UNKNOWN arm (variant not declared in the `accepts=`
+    // enum). The §18.0.1 dead-arm diagnostic (E-MATCH-SUBSET-DEAD-ARM, per the
+    // §34 E-ENDPOINT-NOT-EXHAUSTIVE row), NOT an E-ENDPOINT-* code. The message
+    // names the not-in-enum condition rather than the subset-exclusion wording
+    // above (a variant absent from the enum entirely, not excluded by a subset).
+    for (const variantName of unknownArmVariants) {
+      errors.push(new TSError(
+        "E-MATCH-SUBSET-DEAD-ARM",
+        `E-MATCH-SUBSET-DEAD-ARM: \`<endpoint>\` arm \`.${variantName}\` is a dead arm — ` +
+        `\`.${variantName}\` is not a variant of the \`accepts=${enumType.name}\` enum, so it ` +
+        `can never inhabit the decoded request (§61.4 — the arm follows the §18.0.1 ` +
+        `arm-validity rules). Remove the \`.${variantName}\` arm, or add \`${variantName}\` to ` +
+        `the \`${enumType.name}\` enum.`,
         span,
       ));
     }

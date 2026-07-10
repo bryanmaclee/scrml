@@ -186,3 +186,54 @@ describe("<endpoint> typer — a wildcard <_> arm satisfies exhaustiveness (§18
     expect(errCodes(r, "E-ENDPOINT-NOT-EXHAUSTIVE").length).toBe(0);
   });
 });
+
+// ===========================================================================
+// §61.4 / §61.9 — a DEAD/UNKNOWN arm (one naming a variant that is NOT a member
+// of the `accepts=` enum, with all real variants also covered) follows the
+// §18.0.1 arm-validity rules: it fires the §18.0.1 dead-arm diagnostic
+// (E-MATCH-SUBSET-DEAD-ARM, the code the §34 E-ENDPOINT-NOT-EXHAUSTIVE row names
+// as the endpoint's reused dead-arm surface), NOT a parallel E-ENDPOINT-* code.
+describe("<endpoint> typer — a dead/unknown arm fires E-MATCH-SUBSET-DEAD-ARM (§61.4/§18.0.1)", () => {
+  const DEAD_ARM =
+    FSP_ENUM +
+    `<endpoint path="/fsp" method="POST" accepts=FspMethod>\n` +
+    `    <FleetStatus : fleetStatus()>\n` +
+    `    <Dispatch(prompt, proj) : dispatch(prompt, proj)>\n` +
+    `    <DeltaSince(seq) : deltasSince(seq)>\n` +
+    `    <Bogus : nope()>\n` +
+    `</endpoint>\n` +
+    `<p>hi</p>\n`;
+
+  test("an arm naming a variant not in accepts= fires E-MATCH-SUBSET-DEAD-ARM (Error)", () => {
+    const r = compile(DEAD_ARM);
+    expect(errCodes(r, "E-MATCH-SUBSET-DEAD-ARM").length).toBe(1);
+    expect(warnCodes(r, "E-MATCH-SUBSET-DEAD-ARM").length).toBe(0);
+  });
+
+  test("the dead-arm diagnostic NAMES the offending variant (Bogus)", () => {
+    const r = compile(DEAD_ARM);
+    const e = errCodes(r, "E-MATCH-SUBSET-DEAD-ARM")[0];
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("Bogus");
+  });
+
+  test("the dead/unknown arm does NOT mint a parallel E-ENDPOINT-* code (§61.9)", () => {
+    const r = compile(DEAD_ARM);
+    const epErrs = (r.errors ?? []).filter(e => (e.code ?? "").startsWith("E-ENDPOINT-"));
+    expect(epErrs).toEqual([]);
+  });
+
+  test("a dead/unknown arm does NOT hide a genuine missing variant (both fire)", () => {
+    const r = compile(
+      FSP_ENUM +
+      `<endpoint path="/fsp" method="POST" accepts=FspMethod>\n` +
+      `    <FleetStatus : fleetStatus()>\n` +
+      `    <Dispatch(prompt, proj) : dispatch(prompt, proj)>\n` +
+      `    <Bogus : nope()>\n` +
+      `</endpoint>\n` +
+      `<p>hi</p>\n`
+    );
+    expect(errCodes(r, "E-MATCH-SUBSET-DEAD-ARM").length).toBe(1);
+    expect(errCodes(r, "E-ENDPOINT-NOT-EXHAUSTIVE").length).toBe(1);
+  });
+});
