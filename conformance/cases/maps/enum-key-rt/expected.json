@@ -1,0 +1,18 @@
+{
+  "id": "maps-enum-key-rt",
+  "description": "Enum-KEY value-native map (§59.4). A [City:int] map keyed by an ENUM. §59.4 declares enum keys supported (structural tag+payload identity); §14.10 bare-variant inference resolves a bare .Variant in a map-KEY position against the map's declared key enum. A .insert(.Dallas, 4500) key and the .getOr(.Dallas, 0) / .getOr(.Houston, 0) / .has(.Dallas) key reads all resolve their bare .Variant against City — NO spurious E-VARIANT-AMBIGUOUS. Codegen lowers a bare .Variant to its string tag, so insert and read hash the same key: after the insert, DAL=4500, HOU=0 (default — .Houston absent), HasDAL=true. Observed via impl-neutral derived scalars + DOM (the raw map cell is an impl-internal HAMT, not asserted).",
+  "language-version": "1.0",
+  "spec": "§59.4",
+  "rationale": "§59.4 a map key may be any §45-comparable value incl. enums; §14.10 flows the map's declared key-type into a bare .Variant in key position. insert(.Dallas,4500) then getOr(.Dallas,0)==4500, getOr(.Houston,0)==0, has(.Dallas)==true; no E-VARIANT-AMBIGUOUS.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VARIANT-AMBIGUOUS"],
+    "input": [{ "click": "#add" }],
+    "state": { "dal": 4500, "hou": 0, "hasDal": true },
+    "domAnchored": [
+      { "selector": "#dal", "text": "DAL: 4500" },
+      { "selector": "#hou", "text": "HOU: 0" },
+      { "selector": "#hasdal", "text": "HasDAL: true" }
+    ]
+  }
+}

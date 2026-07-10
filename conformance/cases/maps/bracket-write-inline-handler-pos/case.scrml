@@ -1,0 +1,7 @@
+${
+    <m>: [string:int] = [:]
+}
+<program>
+<button id="b" onclick=${@m["DAL"] = 4500}>Bad</>
+<p id="p">${@m.size}</>
+</program>

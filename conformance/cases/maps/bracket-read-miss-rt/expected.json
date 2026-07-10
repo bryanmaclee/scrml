@@ -1,0 +1,15 @@
+{
+  "id": "maps-bracket-read-miss-rt",
+  "description": "Bracket-read miss yields not (§59.6 — GAP-1). Reading a map is bracket-native: @m[k] evaluates to ValT | not — a present key yields its value, a key-MISS yields not (§42). @fares is seeded [ \"DAL\": 4500 ]; @fares[\"DAL\"] hits (4500) and @fares[\"XXX\"] misses. The miss yields not, which renders EMPTY in the DOM (the not-renders-nothing convention). Observed via DOM: #hit shows 'HIT:4500', #miss shows 'MISS:' (the interpolation of the missing key contributes no text).",
+  "language-version": "1.0",
+  "spec": "§59.6",
+  "rationale": "§59.6 @m[k] -> ValT | not; a key-miss yields not (composes with given / is some / match). A missing-key bracket-read interpolated into markup renders empty; a present-key read renders its value.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "domAnchored": [
+      { "selector": "#hit", "text": "HIT:4500" },
+      { "selector": "#miss", "text": "MISS:" }
+    ]
+  }
+}

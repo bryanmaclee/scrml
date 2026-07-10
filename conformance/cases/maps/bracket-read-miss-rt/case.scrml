@@ -1,0 +1,7 @@
+${
+    <fares>: [string:int] = [ "DAL": 4500 ]
+}
+<program>
+<p id="hit">HIT:${@fares["DAL"]}</>
+<p id="miss">MISS:${@fares["XXX"]}</>
+</program>

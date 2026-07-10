@@ -8587,6 +8587,12 @@ function annotateNodes(
               ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }
             ) as Span;
             inferReactiveSiteBareVariants(handlerExpr, scopeChain, hSpan, errors, cellMessageEnums);
+            // §59.7 — E-MAP-BRACKET-WRITE at the inline-handler locus. A
+            // `onclick=${@m[k]=v}` bracket-WRITE is an ExprNode assignment that
+            // never becomes a `reactive-nested-assign` logic node (the fn-body
+            // gate at ~11253), so it escaped the gate and silently miscompiled.
+            // Scan the handler ExprNode so the forbidden write is caught here too.
+            checkMapBracketWriteInExpr(handlerExpr, scopeChain, hSpan, errors);
           }
         }
 
@@ -9476,6 +9482,12 @@ function annotateNodes(
             // at typed-function call-arg positions before the LHS-driven
             // walk runs, so the no-context branch doesn't fire on them.
             inferBareVariantsAtCallArgs(initExprForScope, fnSignatures, letSpan, errors);
+            // §59.4 / §14.10 — map-KEY-arg pre-pass. `const x = @m.getOr(.City, 0)`
+            // / `@m[.City]` — the bare KEY variant resolves against the map's
+            // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
+            // runs, so the map (non-enum) LHS context doesn't false-fire
+            // E-VARIANT-AMBIGUOUS. Stamps resolved key idents (skip-flag).
+            inferBareVariantsAtMapKeyArgs(initExprForScope, scopeChain, letSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `let m: Mode = .OnePlayer(.Easy)` (or the qualified
             // `Mode.OnePlayer(.Easy)` form with no annotation). The ctor ARG
@@ -9939,6 +9951,11 @@ function annotateNodes(
             // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
             // resolved too late.
             inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
+            // §59.4 / §14.10 — map-KEY-arg pre-pass. `@m = @m.insert(.City, v)` —
+            // the bare KEY variant resolves against the map's declared key enum
+            // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
+            // LHS — the §59.4 gap), suppressing the spurious E-VARIANT-AMBIGUOUS.
+            inferBareVariantsAtMapKeyArgs(reactInitExprNode, scopeChain, reactSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG
             // `.Easy` must resolve against the OnePlayer payload type
@@ -10263,6 +10280,10 @@ function annotateNodes(
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
             inferBareVariantsAtCallArgs(beExprNode, fnSignatures, beSpan, errors);
+            // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
+            // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
+            // against the map's declared key enum + stamps.
+            inferBareVariantsAtMapKeyArgs(beExprNode, scopeChain, beSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg at bare-expr (`Mode.OnePlayer(.Easy)` as a statement).
             // No LHS contextType here, so only the QUALIFIED ctor form (enum
@@ -10833,6 +10854,10 @@ function annotateNodes(
             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
             // downstream walkers can deduplicate.
             inferBareVariantsAtCallArgs(ifCondExpr, fnSignatures, ifCondSpan, errors);
+            // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
+            // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
+            // map's declared key enum + stamps.
+            inferBareVariantsAtMapKeyArgs(ifCondExpr, scopeChain, ifCondSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg inside an if/while condition (`if (@p == Mode.OnePlayer(.Easy))`).
             // No LHS contextType; qualified ctor resolves via the type registry.
@@ -11133,6 +11158,11 @@ function annotateNodes(
           // the fn's return type (`return wrap(.Paren)` where
           // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
           inferBareVariantsAtCallArgs(retExprNode, fnSignatures, retSpan, errors);
+          // §59.4 / §14.10 — map-KEY-arg pre-pass in a return value
+          // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
+          // the map's declared key enum + stamps, so the return-type-context
+          // walker doesn't false-fire on the key.
+          inferBareVariantsAtMapKeyArgs(retExprNode, scopeChain, retSpan, errors);
           // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
           // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
           // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
@@ -14324,6 +14354,278 @@ function inferBareVariantsAtVariantCtorArgs(
       walk((n as Record<string, unknown>).right);
       walk((n as Record<string, unknown>).target);
       walk((n as Record<string, unknown>).value);
+      return;
+    }
+    if (n.kind === "ternary") {
+      walk((n as Record<string, unknown>).condition);
+      walk((n as Record<string, unknown>).consequent);
+      walk((n as Record<string, unknown>).alternate);
+      return;
+    }
+    if (n.kind === "unary") {
+      walk((n as Record<string, unknown>).argument);
+      return;
+    }
+    if (n.kind === "member") {
+      walk((n as Record<string, unknown>).object);
+      return;
+    }
+    if (n.kind === "index") {
+      walk((n as Record<string, unknown>).object);
+      walk((n as Record<string, unknown>).index);
+      return;
+    }
+    if (n.kind === "call") {
+      walk((n as Record<string, unknown>).callee);
+      const callArgs = (n as Record<string, unknown>).args;
+      if (Array.isArray(callArgs)) for (const a of callArgs) walk(a);
+      return;
+    }
+    if (n.kind === "array") {
+      const elements = (n as Record<string, unknown>).elements;
+      if (Array.isArray(elements)) for (const e of elements) walk(e);
+      return;
+    }
+    if (n.kind === "object") {
+      const props = (n as Record<string, unknown>).props;
+      if (Array.isArray(props)) {
+        for (const p of props) {
+          if (p && typeof p === "object") {
+            walk((p as Record<string, unknown>).value);
+            walk((p as Record<string, unknown>).argument);
+          }
+        }
+      }
+      return;
+    }
+    if (n.kind === "paren") {
+      walk((n as Record<string, unknown>).expr);
+      return;
+    }
+  };
+
+  walk(exprNode);
+}
+
+/**
+ * §59.4 / §14.10 — bare-variant inference at MAP-KEY positions.
+ *
+ * A bare `.Variant` in a map/set KEY position resolves against the map's
+ * DECLARED KEY type (§59.2 `[KeyT: ValT]`), exactly as a fn-param position
+ * resolves against the param type (`inferBareVariantsAtCallArgs`). §59.4
+ * declares enum keys supported; §14.10 supplies the key-type context. Two
+ * key-position shapes are recognized:
+ *
+ *   - a key-taking map/set method arg — `@m.insert(.City, v)` / `.getOr` /
+ *     `.remove` / `.has` / `.update` / set `.add` — where arg[0] is the key
+ *     (`insertAll` is EXCLUDED: its arg is a MAP, §59.7, not a bare key).
+ *   - a bracket-READ key — `@m[.City]` (§59.6).
+ *
+ * Without this pass the key `.Variant` reaches the LHS-driven flat walker with a
+ * null / map (non-enum) context and false-fires E-VARIANT-AMBIGUOUS (the map
+ * type is not itself an enum, so `bvCtxType` is null — the §59.4 gap). This pass
+ * resolves each key-position bare variant against `mapType.key` and STAMPS the
+ * resolved ident (`_bareVariantInferredAtBinaryExpr`, the shared skip-flag) so
+ * the downstream flat walker skips it — the same stamp convention the call-arg /
+ * ctor-arg pre-passes use. A key typo (`.Dalas`) still fires E-TYPE-063 against
+ * the key enum (the flat walker's existing behavior with a real enum context).
+ *
+ * Gated on an ENUM-ish key type (enum / union-of-enums / enum-subset). A
+ * non-enum key type (struct / primitive) is left untouched — a bare variant
+ * there is genuinely context-less and the existing E-VARIANT-AMBIGUOUS path
+ * owns it.
+ */
+function inferBareVariantsAtMapKeyArgs(
+  exprNode: unknown,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+
+  // Key-taking map/set methods whose FIRST arg is the key (§59.6/§59.7/§59.12).
+  const KEY_ARG_METHODS = new Set(["insert", "getOr", "remove", "has", "update", "add"]);
+
+  /** Resolve an object node → its MAP ResolvedType via scopeChain, or null. */
+  const resolveReceiverMapType = (objNode: unknown): MapType | null => {
+    if (!objNode || typeof objNode !== "object") return null;
+    const o = objNode as { kind?: string; name?: string };
+    if (o.kind === "ident" && typeof o.name === "string") {
+      const entry = scopeChain.lookup(o.name) as { resolvedType?: ResolvedType } | undefined;
+      const rt = entry?.resolvedType;
+      if (rt && rt.kind === "map") return rt as MapType;
+    }
+    return null;
+  };
+
+  /** enum / union-of-enums / enum-subset → a resolvable bare-variant context. */
+  const isEnumishKeyType = (t: ResolvedType | undefined | null): boolean =>
+    !!t && (t.kind === "enum" || t.kind === "union"
+      || (t.kind === "predicated" && (t as PredicatedType).baseType === "enum"));
+
+  /** Resolve every bare variant in `keyExpr` against the key type + stamp. */
+  const resolveKey = (keyExpr: unknown, keyType: ResolvedType): void => {
+    if (!keyExpr || typeof keyExpr !== "object") return;
+    inferBareVariantsInExpr(keyExpr, keyType, span, errors);
+    // Stamp every bare-variant ident in the key subtree so the downstream
+    // LHS-driven flat walker (null / map context) skips it (no double-fire).
+    forEachIdentInExprNode(keyExpr as any, (ident: { name?: unknown }) => {
+      if (typeof ident.name === "string" && ident.name.startsWith(".")) {
+        Object.defineProperty(ident, "_bareVariantInferredAtBinaryExpr", {
+          value: true, enumerable: false, configurable: true, writable: true,
+        });
+      }
+    });
+  };
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { kind?: string } & Record<string, unknown>;
+
+    // Map/set KEY-arg method call: `@m.insert(.V, ...)` / `.getOr(.V, d)` / …
+    if (n.kind === "call") {
+      const callee = n.callee as { kind?: string; object?: unknown; property?: string } | undefined;
+      const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
+      if (callee && callee.kind === "member" && typeof callee.property === "string"
+          && KEY_ARG_METHODS.has(callee.property) && args.length > 0) {
+        const mapType = resolveReceiverMapType(callee.object);
+        if (mapType && isEnumishKeyType(mapType.key)) {
+          resolveKey(args[0], mapType.key);
+        }
+      }
+    }
+
+    // Bracket-READ key: `@m[.V]` (§59.6). (A bracket-WRITE `@m[k]=v` is an
+    // error handled by the E-MAP-BRACKET-WRITE gate; the key of a READ still
+    // resolves its variant here.)
+    if (n.kind === "index") {
+      const mapType = resolveReceiverMapType((n as Record<string, unknown>).object);
+      if (mapType && isEnumishKeyType(mapType.key)) {
+        resolveKey((n as Record<string, unknown>).index, mapType.key);
+      }
+    }
+
+    // Recurse into every child branch — a key-position call/index may be nested
+    // inside a larger expression (`log(@m.getOr(.V, 0))`, a ternary, etc.).
+    if (n.kind === "binary" || n.kind === "assign") {
+      walk((n as Record<string, unknown>).left);
+      walk((n as Record<string, unknown>).right);
+      walk((n as Record<string, unknown>).target);
+      walk((n as Record<string, unknown>).value);
+      return;
+    }
+    if (n.kind === "ternary") {
+      walk((n as Record<string, unknown>).condition);
+      walk((n as Record<string, unknown>).consequent);
+      walk((n as Record<string, unknown>).alternate);
+      return;
+    }
+    if (n.kind === "unary") {
+      walk((n as Record<string, unknown>).argument);
+      return;
+    }
+    if (n.kind === "member") {
+      walk((n as Record<string, unknown>).object);
+      return;
+    }
+    if (n.kind === "index") {
+      walk((n as Record<string, unknown>).object);
+      walk((n as Record<string, unknown>).index);
+      return;
+    }
+    if (n.kind === "call") {
+      walk((n as Record<string, unknown>).callee);
+      const callArgs = (n as Record<string, unknown>).args;
+      if (Array.isArray(callArgs)) for (const a of callArgs) walk(a);
+      return;
+    }
+    if (n.kind === "array") {
+      const elements = (n as Record<string, unknown>).elements;
+      if (Array.isArray(elements)) for (const e of elements) walk(e);
+      return;
+    }
+    if (n.kind === "object") {
+      const props = (n as Record<string, unknown>).props;
+      if (Array.isArray(props)) {
+        for (const p of props) {
+          if (p && typeof p === "object") {
+            walk((p as Record<string, unknown>).value);
+            walk((p as Record<string, unknown>).argument);
+          }
+        }
+      }
+      return;
+    }
+    if (n.kind === "paren") {
+      walk((n as Record<string, unknown>).expr);
+      return;
+    }
+  };
+
+  walk(exprNode);
+}
+
+/**
+ * §59.7 — E-MAP-BRACKET-WRITE at an ExprNode locus (inline event handlers +
+ * `${...}` handler interpolations). The fn-body / logic-statement form is caught
+ * by the `reactive-nested-assign` case (which reads the node's target/path), but
+ * an inline handler `onclick=${@m[k]=v}` is an ExprNode assignment
+ * (`{kind:"assign", target:{kind:"index", object:{ident @m}}}`) that never
+ * becomes a `reactive-nested-assign` node — so the gate must ALSO scan the
+ * handler ExprNode, else the forbidden bracket-write escapes uncaught and the
+ * COW lowering corrupts the map. Read is bracket (§59.6); write is method
+ * (`.insert(k,v)`; set `.add(k)`).
+ */
+function checkMapBracketWriteInExpr(
+  exprNode: unknown,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+
+  const fireIfMapIndexTarget = (target: unknown): void => {
+    if (!target || typeof target !== "object") return;
+    const t = target as { kind?: string; object?: { kind?: string; name?: string } };
+    if (t.kind !== "index" || !t.object || t.object.kind !== "ident") return;
+    const name = t.object.name;
+    if (typeof name !== "string") return;
+    const entry = scopeChain.lookup(name) as { resolvedType?: ResolvedType } | undefined;
+    const rt = entry?.resolvedType;
+    if (!rt || rt.kind !== "map") return;
+    const bare = name.startsWith("@") ? name.slice(1) : name;
+    const isSet = (rt as MapType).set === true;
+    errors.push(new TSError(
+      "E-MAP-BRACKET-WRITE",
+      isSet
+        ? `E-MAP-BRACKET-WRITE: cannot write to set cell \`@${bare}\` by index — ` +
+          `\`@${bare}[k] = v\` is not valid (§59.12/§59.7). Set writes are method-native and ` +
+          `reassignment-canonical: use \`@${bare} = @${bare}.add(k)\` instead. ` +
+          `(Membership reads \`@${bare}.has(k)\` are fine — read is method, write is method.)`
+        : `E-MAP-BRACKET-WRITE: cannot write to map cell \`@${bare}\` by index — ` +
+          `\`@${bare}[k] = v\` is not valid (§59.7). Map writes are method-native and ` +
+          `reassignment-canonical: use \`@${bare} = @${bare}.insert(k, v)\` instead. ` +
+          `(Bracket READS \`@${bare}[k]\` are fine — read is bracket, write is method.)`,
+      span,
+    ));
+  };
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { kind?: string } & Record<string, unknown>;
+
+    if (n.kind === "assign") {
+      fireIfMapIndexTarget((n as Record<string, unknown>).target);
+      walk((n as Record<string, unknown>).value);
+      // The target subtree may itself hold a nested bracket-write receiver
+      // (rare); recurse the object side but not re-fire on this same target.
+      const tgt = (n as Record<string, unknown>).target as { object?: unknown } | undefined;
+      if (tgt) walk(tgt.object);
+      return;
+    }
+    if (n.kind === "binary") {
+      walk((n as Record<string, unknown>).left);
+      walk((n as Record<string, unknown>).right);
       return;
     }
     if (n.kind === "ternary") {

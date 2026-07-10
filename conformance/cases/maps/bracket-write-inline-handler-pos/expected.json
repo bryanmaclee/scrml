@@ -1,0 +1,12 @@
+{
+  "id": "maps-bracket-write-inline-handler-pos",
+  "description": "Bracket-WRITE on a map is forbidden EVERYWHERE it can occur (§59.7) — including an inline event-handler ${...}. onclick=${@m[\"DAL\"] = 4500} is an ExprNode assignment whose target is a map-typed index; it never becomes a reactive-nested-assign logic node, so it previously escaped the fn-body gate and silently miscompiled (the COW lowering corrupts the map). The inline-handler locus now fires E-MAP-BRACKET-WRITE (error), with the same fix-it naming .insert(k,v). Sibling of bracket-write-pos (the function-body form).",
+  "language-version": "1.0",
+  "spec": "§59.7",
+  "rationale": "§59.7 @m[k] = v bracket-write on a map-typed cell is E-MAP-BRACKET-WRITE at any locus it can occur; the inline-handler ExprNode is scanned so read is bracket, write is method.",
+  "expect": {
+    "codes": ["E-MAP-BRACKET-WRITE"],
+    "notCodes": [],
+    "severity": { "E-MAP-BRACKET-WRITE": "error" }
+  }
+}

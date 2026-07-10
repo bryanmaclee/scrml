@@ -1,0 +1,13 @@
+${
+    type City:enum = { Dallas, Houston }
+    <fares>: [City:int] = [:]
+    const <dal> = @fares.getOr(.Dallas, 0)
+    const <hou> = @fares.getOr(.Houston, 0)
+    const <hasDal> = @fares.has(.Dallas)
+}
+<program>
+<button id="add" onclick=${@fares = @fares.insert(.Dallas, 4500)}>add</>
+<p id="dal">DAL: ${@dal}</>
+<p id="hou">HOU: ${@hou}</>
+<p id="hasdal">HasDAL: ${@hasDal}</>
+</program>

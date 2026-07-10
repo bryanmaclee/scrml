@@ -1,11 +1,12 @@
 {
   "id": "maps-struct-key-literal-pos",
-  "description": "Struct-key map literal — v1 codegen-deferred (§59.3 M-cut). The literal [ {a:1}: 5 ] uses a STRUCT key. A primitive-key literal ships in v1, but a struct/enum-key literal is parse-accepted, codegen-deferred to the .insert form, and surfaces W-MAP-STRUCT-KEY-LITERAL naming .insert (a documented-on-purpose v1 scope-cut, not a silent gap). Asserts CODE PRESENCE only: §59.11 states Info severity but impl#1 emits 'warning' (severity-label divergence flagged to the PA).",
+  "description": "Struct-key map literal — v1 codegen-deferred (§59.3 M-cut). The literal [ {a:1}: 5 ] uses a STRUCT key. A primitive-key literal ships in v1, but a struct/enum-key literal is parse-accepted, codegen-deferred to the .insert form, and surfaces W-MAP-STRUCT-KEY-LITERAL naming .insert (a documented-on-purpose v1 scope-cut, not a silent gap). Asserts the code fires AS Info: §59.11/§34 declare W-MAP-STRUCT-KEY-LITERAL Info-level. The prior spec-vs-impl 'warning' severity-label divergence is now fixed and enshrined here.",
   "language-version": "1.0",
   "spec": "§59.3",
-  "rationale": "§59.3/§59.12 a struct/enum-key map literal is parse-accepted but codegen-deferred to .insert in v1; the compiler surfaces W-MAP-STRUCT-KEY-LITERAL naming the .insert form.",
+  "rationale": "§59.3/§59.12 a struct/enum-key map literal is parse-accepted but codegen-deferred to .insert in v1; the compiler surfaces W-MAP-STRUCT-KEY-LITERAL (Info, §59.11) naming the .insert form.",
   "expect": {
     "codes": ["W-MAP-STRUCT-KEY-LITERAL"],
-    "notCodes": []
+    "notCodes": [],
+    "severity": { "W-MAP-STRUCT-KEY-LITERAL": "info" }
   }
 }

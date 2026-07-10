@@ -347,7 +347,19 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
       // W-/I- prefix partition at api.js). Same surfacing pattern as reset-expr.
       forEachMapLitExprInExprNode(node, (mapNode) => {
         for (const d of mapNode.diagnostics ?? []) {
-          errors.push(new TABError(d.code, d.message, mapNode.span));
+          const tab = new TABError(d.code, d.message, mapNode.span);
+          // §34 / §59.11 — the W-MAP-* map-literal notices
+          // (`W-MAP-STRUCT-KEY-LITERAL`, `W-MAP-DUPLICATE-LITERAL-KEY`) are
+          // Info-level, NOT warning. Set the severity explicitly so the
+          // diagnostic carries `severity:"info"` rather than falling back to
+          // the stream ("warning") — otherwise the W-/I- partition still routes
+          // it to result.warnings (correct stream) but the SEVERITY LABEL is
+          // wrong (§34 declares Info; W-MAP-ITERATION-ORDER already emits Info).
+          // E-MAP-LITERAL-MALFORMED stays fatal (no severity → error stream).
+          if (typeof d.code === "string" && d.code.startsWith("W-MAP-")) {
+            tab.severity = "info";
+          }
+          errors.push(tab);
         }
       });
     }
@@ -3427,7 +3439,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (E-MAP-LITERAL-MALFORMED fatal; W-MAP-* info → result.warnings).
         forEachMapLitExprInExprNode(node, (mapNode) => {
           for (const d of mapNode.diagnostics ?? []) {
-            errors.push(new TABError(d.code, d.message, mapNode.span));
+            const tab = new TABError(d.code, d.message, mapNode.span);
+            // §34 / §59.11 — the W-MAP-* map-literal notices are Info-level;
+            // set severity so the diagnostic carries `severity:"info"` (not the
+            // stream-fallback "warning"). E-MAP-LITERAL-MALFORMED stays fatal.
+            if (typeof d.code === "string" && d.code.startsWith("W-MAP-")) {
+              tab.severity = "info";
+            }
+            errors.push(tab);
           }
         });
       }
