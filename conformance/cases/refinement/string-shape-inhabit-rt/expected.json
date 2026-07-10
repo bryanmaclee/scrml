@@ -1,0 +1,14 @@
+{
+  "id": "refinement-string-shape-inhabit-rt",
+  "description": "A conforming value inhabits a named-shape refinement type across a function boundary (§53.9). setEmail(addr) declares a refined parameter string(email). Calling setEmail(@email) passes @email = \"user@example.com\", a value that SATISFIES the email shape, so the compiler-generated boundary check succeeds and the assignment applies (@display -> \"user@example.com\"). The string-shape sibling of refinement-inhabit-rt (numeric) and the conforming counterpart of string-shape-literal-violation-pos.",
+  "language-version": "1.0",
+  "spec": "§53.9",
+  "rationale": "§53.9.1 a refined function parameter carries a boundary check; a conforming argument (\"user@example.com\", satisfying the email shape) passes the check and the body runs, applying @display = \"user@example.com\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-003"],
+    "input": [{ "click": "#ok" }],
+    "state": { "display": "user@example.com" },
+    "domAnchored": [{ "selector": "#disp", "text": "Email: user@example.com" }]
+  }
+}

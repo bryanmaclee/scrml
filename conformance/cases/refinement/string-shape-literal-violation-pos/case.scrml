@@ -1,0 +1,4 @@
+${
+    <email>: string(email) = "not-an-email"
+}
+<program><p id="p">${@email}</></program>

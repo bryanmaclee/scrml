@@ -1129,6 +1129,30 @@ const NAMED_SHAPES: Map<string, NamedShape> = new Map([
   ["color", { baseType: "string", htmlType: "color" }],
 ]);
 
+// §53.4.2 rule 2 / §53.11 — STATIC evaluation of a built-in named shape against
+// a string LITERAL. A named shape is a decidable, pure structural predicate; when
+// the incoming value is a compile-time string literal, the shape is provable at
+// compile time (T-PRED-1) exactly as a numeric literal is provable against a
+// comparison predicate. The compiler SHALL fire E-CONTRACT-001 when the literal
+// demonstrably fails the shape (§53.4.2 rule 2 cites `string(email) = "..."` as
+// "proven"; §53.12.6 is the numeric sibling of this case).
+//
+// INVARIANT: each evaluator MUST stay behaviorally identical to its RUNTIME twin
+// in codegen/emit-predicates.ts (NAMED_SHAPE_RUNTIME). The static check and the
+// boundary check are the same predicate at two enforcement sites — a literal the
+// compiler proves valid must also pass the runtime boundary, and one it proves
+// invalid must also fail it. If a shape's regex changes in one place, change it
+// in the other.
+const SHAPE_STATIC_PREDICATES: Map<string, (v: string) => boolean> = new Map([
+  ["email", (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)],
+  ["url",   (v) => { try { new URL(v); return true; } catch { return false; } }],
+  ["uuid",  (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)],
+  ["phone", (v) => /^[+]?[0-9\s\-().]{7,15}$/.test(v)],
+  ["date",  (v) => /^\d{4}-\d{2}-\d{2}$/.test(v)],
+  ["time",  (v) => /^\d{2}:\d{2}(:\d{2})?$/.test(v)],
+  ["color", (v) => /^#[0-9A-Fa-f]{6}$|^[a-z]+$/.test(v)],
+]);
+
 // ---------------------------------------------------------------------------
 // §14.8.3 SQLite type mapping
 //
@@ -1505,7 +1529,21 @@ function evaluatePredicateOnLiteral(pred: PredicateExpr, value: number | string)
       default:   return null;
     }
   }
-  if (pred.kind === "named-shape") return null; // not statically evaluated
+  if (pred.kind === "named-shape") {
+    // §53.4.2 rule 2 — a built-in named shape against a string LITERAL is a
+    // decidable structural check, proven statically (T-PRED-1). This mirrors the
+    // numeric/`.length` literal paths above so the three refinement literal forms
+    // are enforced consistently at compile time. Deferred (return null) only when
+    // it is genuinely undeterminable:
+    //   - non-string value: a base-type mismatch owned by the assignment
+    //     type-check, not the predicate (don't double-fire);
+    //   - `@`-prefixed / unregistered shape name: an external-ref or
+    //     E-CONTRACT-002 concern resolved elsewhere.
+    if (typeof value !== "string") return null;
+    const shapeCheck = pred.name ? SHAPE_STATIC_PREDICATES.get(pred.name) : undefined;
+    if (!shapeCheck) return null;
+    return shapeCheck(value);
+  }
   if (pred.kind === "and") {
     const l = evaluatePredicateOnLiteral(pred.left!, value);
     const r = evaluatePredicateOnLiteral(pred.right!, value);
@@ -24445,9 +24483,13 @@ function buildCellValueLifecycleMap(
  *     auto-defaulted; require an explicit initializer).
  *   - SATISFIES (`number(>=0)` → `0` passes `>=0`) → no error; the synthesized
  *     canonical-empty stands.
- *   - UNDETERMINABLE (predicate references named shape / external — returns null
- *     from evaluatePredicateOnLiteral) → no static error; the value rides forward
- *     and is checked at the existing §53 assignment/contract sites.
+ *   - VIOLATES (`string(email)` → `""` fails the email shape) → fire
+ *     E-REFINEMENT-NO-DEFAULT. §53.4.2 rule 2: a built-in named shape against a
+ *     string literal is statically decidable, so `""` is a proven violation of a
+ *     `string(email)`/`string(url)`/… no-RHS cell exactly as `0` is of `number(>0)`.
+ *   - UNDETERMINABLE (predicate references an external `@ref`, or an unregistered
+ *     shape — returns null from evaluatePredicateOnLiteral) → no static error; the
+ *     value rides forward and is checked at the existing §53 assignment sites.
  *
  * Reuses the §53 predicate infra (parsePredicateExpr + evaluatePredicateOnLiteral),
  * mirroring checkPredicateLiteral's static-evaluation shape so the diagnostic is
@@ -24487,8 +24529,11 @@ function runRefinementNoRhsDefaultCheck(
           if (baseValue !== null && open >= 0 && tAnno.endsWith(")")) {
             const predicateRaw = tAnno.slice(open + 1, -1).trim();
             const pred = parsePredicateExpr(predicateRaw);
-            // External-ref / named-shape predicates evaluate to null (undeterminable)
-            // — let the existing §53 sites handle them; no static no-default error.
+            // External-`@ref` predicates evaluate to null (undeterminable) — let
+            // the existing §53 sites handle them; no static no-default error.
+            // Built-in named shapes ARE now statically decidable against the
+            // string canonical-empty `""` (§53.4.2 rule 2), so they flow through
+            // evaluatePredicateOnLiteral like the numeric comparison predicates.
             const result = pred.hasExternalRef
               ? null
               : evaluatePredicateOnLiteral(pred, baseValue);

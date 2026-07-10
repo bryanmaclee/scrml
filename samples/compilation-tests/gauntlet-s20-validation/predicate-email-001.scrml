@@ -1,8 +1,11 @@
 // Phase 9: inline type predicate — email shape (§53)
 // Should compile clean with validation wiring.
+// The initializer must SATISFY the shape: §53.4.2 rule 2 statically evaluates a
+// named-shape against a string literal, so a non-conforming init (e.g. "") would
+// fire E-CONTRACT-001 at compile — parallel to the number sample's `= 25`.
 
 ${
-  <email>: string(email) = ""
+  <email>: string(email) = "user@example.com"
 }
 
 <div>

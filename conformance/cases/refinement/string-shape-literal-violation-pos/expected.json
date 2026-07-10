@@ -1,0 +1,12 @@
+{
+  "id": "refinement-string-shape-literal-violation-pos",
+  "description": "Compile-time refinement violation on a statically-known STRING literal against a named shape (§53.4.2 rule 2 / §53.11 E-CONTRACT-001). The cell type string(email) is initialized with the literal \"not-an-email\", which demonstrably fails the email structural predicate. Per §53.4.2 rule 2 a built-in named shape against a string literal is statically decidable (T-PRED-1), so the compiler proves the violation at COMPILE time and fires E-CONTRACT-001 — the string-shape sibling of refinement-literal-violation-pos (numeric) and the GAP-2 coverage the ss62 verify-pass flagged (existing cases only used numeric).",
+  "language-version": "1.0",
+  "spec": "§53.4.2",
+  "rationale": "§53.4.2 rule 2 cites `let e: string(email) = \"user@example.com\"` as statically provable; §53.11 E-CONTRACT-001 fires when the compiler can prove a literal violates the predicate. \"not-an-email\" fails the email shape (no @/domain), so the violation is proven statically.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

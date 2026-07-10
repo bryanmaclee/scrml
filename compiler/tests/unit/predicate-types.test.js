@@ -23,14 +23,14 @@
  *   §15 checkPredicateLiteral — E-CONTRACT-001: number literal fails predicate
  *   §16 checkPredicateLiteral — E-CONTRACT-001: negative number vs >0
  *   §17 checkPredicateLiteral — valid number literal passes predicate (returns true)
- *   §18 checkPredicateLiteral — E-CONTRACT-001 not fired for boundary (undetermined)
+ *   §18 checkPredicateLiteral — named shapes statically evaluated (§53.4.2 rule 2): conforming→ok, violating→E-CONTRACT-001
  *   §19 checkPredicateLiteral — E-CONTRACT-002: unknown named shape
  *   §20 checkPredicateLiteral — E-CONTRACT-003: predicate with external @ref
  *   §21 checkPredicateLiteral — string .length predicate vs literal
  *   §22 checkPredicateLiteral — and/or composition (both branches)
  *   §23 Type compatibility: PredicatedType is a subtype of PrimitiveType (T-PRED-3)
  *   §24 evaluatePredicateOnLiteral — range composition (>0 && <10000)
- *   §25 evaluatePredicateOnLiteral — returns null for named-shape (runtime-only)
+ *   §25 evaluatePredicateOnLiteral — named-shape statically evaluated for string literals; null only for non-string / error
  */
 
 import { describe, test, expect } from "bun:test";
@@ -544,16 +544,66 @@ describe("§17 checkPredicateLiteral — valid literal passes predicate (returns
   });
 });
 
-describe("§18 checkPredicateLiteral — named shapes return null (runtime check needed)", () => {
-  test("string(email) with string literal returns null (not statically evaluated)", () => {
+describe("§18 checkPredicateLiteral — named shapes are statically evaluated (§53.4.2 rule 2)", () => {
+  // §53.4.2 rule 2: a built-in named shape against a string LITERAL is decidable
+  // (T-PRED-1). A conforming literal is proven valid (returns true, no error); a
+  // violating literal fires E-CONTRACT-001 — the string-shape sibling of the
+  // numeric §53.12.6 case, and consistent with the property-predicate path (§21).
+  test("string(email) with a CONFORMING literal returns true (statically proven)", () => {
     const predType = resolveTypeExpr("string(email)", emptyRegistry());
     expect(predType.kind).toBe("predicated");
     if (predType.kind !== "predicated") return;
 
     const errors = [];
     const result = checkPredicateLiteral(predType, "user@example.com", span(), errors);
-    expect(result).toBeNull();
+    expect(result).toBe(true);
     expect(errors).toHaveLength(0);
+  });
+
+  test("string(email) with a VIOLATING literal returns false and fires E-CONTRACT-001", () => {
+    const predType = resolveTypeExpr("string(email)", emptyRegistry());
+    expect(predType.kind).toBe("predicated");
+    if (predType.kind !== "predicated") return;
+
+    const errors = [];
+    const result = checkPredicateLiteral(predType, "not-an-email", span(), errors);
+    expect(result).toBe(false);
+    expect(errors.some(e => e.code === "E-CONTRACT-001")).toBe(true);
+  });
+
+  test("string(url) with a VIOLATING literal fires E-CONTRACT-001", () => {
+    const predType = resolveTypeExpr("string(url)", emptyRegistry());
+    expect(predType.kind).toBe("predicated");
+    if (predType.kind !== "predicated") return;
+
+    const errors = [];
+    const result = checkPredicateLiteral(predType, "not a url at all", span(), errors);
+    expect(result).toBe(false);
+    expect(errors.some(e => e.code === "E-CONTRACT-001")).toBe(true);
+  });
+
+  test("string(uuid) with a CONFORMING literal returns true", () => {
+    const predType = resolveTypeExpr("string(uuid)", emptyRegistry());
+    expect(predType.kind).toBe("predicated");
+    if (predType.kind !== "predicated") return;
+
+    const errors = [];
+    const result = checkPredicateLiteral(predType, "12345678-1234-1234-1234-123456789abc", span(), errors);
+    expect(result).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  test("named shape against a NON-string value stays deferred (returns null, no double-fire)", () => {
+    // A base-type mismatch (number vs string-shape) is owned by the assignment
+    // type-check, not the predicate — the shape evaluator must not double-fire.
+    const predType = resolveTypeExpr("string(email)", emptyRegistry());
+    expect(predType.kind).toBe("predicated");
+    if (predType.kind !== "predicated") return;
+
+    const errors = [];
+    const result = checkPredicateLiteral(predType, 42, span(), errors);
+    expect(result).toBeNull();
+    expect(errors.some(e => e.code === "E-CONTRACT-001")).toBe(false);
   });
 });
 
@@ -762,9 +812,21 @@ describe("§24 evaluatePredicateOnLiteral — direct evaluation", () => {
 // ---------------------------------------------------------------------------
 
 describe("§25 evaluatePredicateOnLiteral — returns null for undeterminable", () => {
-  test("named-shape 'email' against string literal returns null", () => {
+  test("named-shape 'email' against a CONFORMING string literal returns true (§53.4.2 rule 2)", () => {
     const pred = parsePredicateExpr("email");
-    expect(evaluatePredicateOnLiteral(pred, "user@example.com")).toBeNull();
+    expect(evaluatePredicateOnLiteral(pred, "user@example.com")).toBe(true);
+  });
+
+  test("named-shape 'email' against a VIOLATING string literal returns false", () => {
+    const pred = parsePredicateExpr("email");
+    expect(evaluatePredicateOnLiteral(pred, "not-an-email")).toBe(false);
+  });
+
+  test("named-shape 'email' against a NON-string value stays undeterminable (null)", () => {
+    // A number reaching a string-shape is a base-type mismatch, not a shape
+    // decision — the evaluator defers so the assignment type-check owns it.
+    const pred = parsePredicateExpr("email");
+    expect(evaluatePredicateOnLiteral(pred, 5)).toBeNull();
   });
 
   test("comparison against non-number type returns null", () => {

@@ -1,0 +1,9 @@
+${
+    <email>: string = "user@example.com"
+    <display>: string = ""
+    function setEmail(addr: string(email)) { @display = addr }
+}
+<program>
+<button id="ok" onclick=${setEmail(@email)}>Ok</>
+<p id="disp">Email: ${@display}</>
+</program>

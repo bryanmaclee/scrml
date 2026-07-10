@@ -1,8 +1,11 @@
 // Phase 9: inline type predicate — url shape (§53)
 // Should compile clean.
+// The initializer must SATISFY the shape: §53.4.2 rule 2 statically evaluates a
+// named-shape against a string literal, so a non-conforming init (e.g. "") would
+// fire E-CONTRACT-001 at compile — parallel to the number sample's `= 25`.
 
 ${
-  <website>: string(url) = ""
+  <website>: string(url) = "https://example.com"
 }
 
 <div>
