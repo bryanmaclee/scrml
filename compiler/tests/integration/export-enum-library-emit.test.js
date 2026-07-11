@@ -228,21 +228,23 @@ describe("export-enum-library-emit §8: R26 flogence delta-log.scrml", () => {
   const R26 = "/home/bryan-maclee/scrmlMaster/flogence/src/models/delta-log.scrml";
 
   test.skipIf(!existsSync(R26))(
-    "errors on Kind's lowercase variants (E-ENUM-VARIANT-CASE, §14.4) — pending flogence uppercase migration",
+    "compiles clean — flogence Kind uppercase migration complete (no E-ENUM-VARIANT-CASE)",
     () => {
       const src = readFileSync(R26, "utf8");
       const { errorCodes } = compileLib("delta-log-r26", src);
-      // delta-log's `Kind:enum = { rule, disp, land, ... }` uses lowercase
-      // variants (a §14.4 violation). The S245 enum-variant-uppercase-error fix
-      // now fires E-ENUM-VARIANT-CASE LOUDLY instead of silently dropping them.
-      // Its uppercase enums (Pointer/VpaDirective) are conformant and will export
-      // as runtime reps once `Kind` is uppercased (flogence migration follow-up).
-      expect(errorCodes).toContain("E-ENUM-VARIANT-CASE");
+      // The flogence `Kind:enum` uppercase migration is COMPLETE — its variants
+      // are now `{ Rule, Disp, Land, Find, State, Friction, Escalate, Drift }`,
+      // so §14.4 E-ENUM-VARIANT-CASE no longer fires and the model compiles clean
+      // (empirically verified: errorCodes === []). This restores the §8 header's
+      // "compiles clean" intent; the temporary pending-migration canary window
+      // (which asserted E-ENUM-VARIANT-CASE FIRES) is now closed.
+      expect(errorCodes).not.toContain("E-ENUM-VARIANT-CASE");
+      expect(errorCodes).toHaveLength(0);
     },
   );
 
   test.skipIf(!existsSync(R26))(
-    "the --emit-block-analysis path also surfaces E-ENUM-VARIANT-CASE (no silent pass)",
+    "the --emit-block-analysis path compiles clean too (migration complete)",
     () => {
       const src = readFileSync(R26, "utf8");
       const filePath = join(TMP, "delta-log-ba.scrml");
@@ -258,12 +260,11 @@ describe("export-enum-library-emit §8: R26 flogence delta-log.scrml", () => {
       const errorCodes = (result.errors || [])
         .filter((e) => e.severity == null || e.severity === "error")
         .map((e) => e.code);
-      // delta-log errors on its lowercase `Kind` variants in this mode too — the
-      // E-ENUM-VARIANT-CASE diagnostic fires at the enum parse stage, upstream of
-      // both codegen and the --emit-block-analysis sidecar. (Once flogence
-      // uppercases `Kind`, the sidecar path runs clean; the original
-      // g-block-analysis-emit-foreign-underscore codegen defect stays fixed.)
-      expect(errorCodes).toContain("E-ENUM-VARIANT-CASE");
+      // Post-migration the --emit-block-analysis sidecar path also runs clean —
+      // E-ENUM-VARIANT-CASE no longer fires (Kind is uppercase), and the original
+      // g-block-analysis-emit-foreign-underscore codegen defect stays fixed
+      // (`blockAnalyses` is still a callable sidecar).
+      expect(errorCodes).not.toContain("E-ENUM-VARIANT-CASE");
       expect(typeof result.blockAnalyses).toBe("function");
     },
   );

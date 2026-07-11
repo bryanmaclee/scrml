@@ -1132,14 +1132,29 @@ export function generateHtml(
         // `data-scrml-error-boundary` anchor convention). A `<div>` (not the raw
         // `<outlet>` custom element) is the block-level region a page-content
         // slot needs, and `[data-scrml-outlet]` is the impl-stable selector the
-        // Wave-1b runtime swap + focus (§20.8.5 item 3) will address. Any
-        // authored children (a `<outlet/>` void slot normally has none) are
-        // preserved as the initial region content.
-        parts.push(`<div data-scrml-outlet>`);
-        for (const child of children) {
-          emitNode(child);
-        }
-        parts.push(`</div>`);
+        // Wave-1b runtime swap + focus (§20.8.5 item 3) will address.
+        //
+        // Rather than reimplement `if=` guarding, class/id (interpolation-aware)
+        // emission, and markup-parent child handling, we REWRITE the outlet to a
+        // `div` carrying a synthetic `data-scrml-outlet` marker + the outlet's
+        // own attrs, and DELEGATE to the generic markup path. That path already
+        // honors the universal `if=` directive (mount/unmount OR display-toggle),
+        // emits the registered `class` / `id` (static or `${}`-interpolated), and
+        // pushes the markup-parent context so a `<outlet>${x}</outlet>` logic
+        // child keeps its render slot. `selfClosing` is forced false so a
+        // `<outlet/>` void slot still emits the container form `<div…></div>`
+        // (never a `<div/>`, which HTML does not self-close). Re-entry is safe:
+        // the rewritten tag is `div`, so the outlet branch does not re-trigger.
+        const outletMarkerAttr = { name: "data-scrml-outlet", value: null };
+        const outletDivNode = {
+          ...node,
+          tag: "div",
+          tagName: "div",
+          selfClosing: false,
+          attributes: [outletMarkerAttr, ...attrs],
+          attrs: [outletMarkerAttr, ...attrs],
+        };
+        emitNode(outletDivNode);
         return;
       }
 

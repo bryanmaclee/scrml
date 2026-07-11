@@ -10072,6 +10072,15 @@ function fireChannelSharedModifier(
 //     the 2nd..nth outlet in the SAME shell fires E-OUTLET-DUPLICATE. Nested
 //     layouts (multiple / nested outlets) are v1.next.
 //
+// **V1 count semantics (coordinator ruling, navigate-soft-nav review):** V1 =
+// exactly ONE `<outlet>` per shell, counted STATICALLY across ALL edges. Two
+// outlets in mutually-exclusive conditional/match arms are STILL a duplicate
+// (branch-exclusive / per-branch outlets are a v1.next nicety, not "one flat
+// outlet" §20.8.1). So collectOutlets descends BOTH arms of every conditional/
+// match and files each outlet under its shell — the twin of the ast-builder.js
+// W-OUTLET-ABSENT scan (which for the SAME reason must count an outlet inside a
+// branch as PRESENT). Both walkers descend the identical full edge set.
+//
 // The walk carries the nearest enclosing `<program>` node so outlets partition
 // per-shell (a nested worker/sidecar `<program name=>` owns its own outlets).
 // Traversal shape mirrors walkChannelPlacement — children / body / defChildren
@@ -10178,6 +10187,23 @@ function collectOutlets(
         collectOutlets(arm.body, childProgram, byShell, orphans, visited);
       }
     }
+  }
+  // Markup if-chain (ast-builder.js:17624 — a `<el if=…>` … `<el else-if=…>` …
+  // `<el else>` chain) stores its branch elements in `branches[].element` +
+  // `elseBranch` (single markup nodes, NOT arrays), distinct from a logic-body
+  // `if` statement's `consequent`/`alternate`. Descending these is what makes an
+  // outlet in an if/else BRANCH count statically (V1 ruling: branch-exclusive
+  // outlets are still a duplicate). A single `<outlet if=…/>` with no else stays
+  // a plain markup node (reached via `children`) and needs no special edge.
+  if (Array.isArray(node.branches)) {
+    for (const br of node.branches) {
+      if (br && br.element) {
+        collectOutlets(br.element, childProgram, byShell, orphans, visited);
+      }
+    }
+  }
+  if (node.elseBranch) {
+    collectOutlets(node.elseBranch, childProgram, byShell, orphans, visited);
   }
 }
 
