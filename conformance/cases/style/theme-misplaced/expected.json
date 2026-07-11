@@ -1,0 +1,14 @@
+{
+  "id": "style-theme-misplaced",
+  "description": "§65.9 / §65.10 / §4.15 — a `<theme>` at file top-level (a sibling of `<program>`, OUTSIDE it) is MISPLACED. `<theme>` and `<defaults>` are PROGRAM-SCOPE for v1 (an immediate child of `<program>`, a sibling of `<page>` / `<channel>`); page-scope override is deferred to v1.next. Use outside that owning locus is E-STRUCTURAL-ELEMENT-MISPLACED (§65.10 reuse of §4.15). Divergence-fix proof: the recognized `<theme>` structural element was previously silently ACCEPTED at top-level (no diagnostic).",
+  "language-version": "1.0",
+  "spec": "§65.9, §65.10, §4.15",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§65.9: `<theme>` is a scrml-defined structural element valid ONLY at program scope (an immediate child of `<program>`). §65.10: `<theme>`/`<defaults>` misplacement reuses E-STRUCTURAL-ELEMENT-MISPLACED (§4.15/§24.4). A `<theme>` that parses to a theme-decl node but sits anywhere other than a direct child of a `<program>` node (file top-level here, or inside `<page>`) fires the structural-placement error. It is a clean, single-cause diagnosis — NOT a parse-confusion cascade (no E-CTX-003 / E-SYNTAX-002) and NOT the incidental E-COMPONENT-* family.",
+  "expect": {
+    "codes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodes": ["E-CTX-003", "E-SYNTAX-002"],
+    "notCodePrefixes": ["E-COMPONENT-"],
+    "severity": { "E-STRUCTURAL-ELEMENT-MISPLACED": "error" }
+  }
+}

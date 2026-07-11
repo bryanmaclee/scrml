@@ -1,0 +1,13 @@
+{
+  "id": "style-theme-name-collision",
+  "description": "§65.10 / §4.15 / §24.4 — a markup-bound const named `theme` (`const theme = <markup>` — the poor-man's-component shape, §4.15's lowercase `const engine = <article>` example) collides with the reserved scrml structural-element identifier `<theme>`. `theme` and `defaults` are reserved for the scrml-native CSS structural elements (§65.9) and MAY NOT be reused as a component / type name → E-NAME-COLLIDES-RESERVED. Divergence-fix proof: this previously compiled clean (the code had no fire-site in the compiler).",
+  "language-version": "1.0",
+  "spec": "§65.10, §4.15, §24.4",
+  "source-test": "compiler/tests/unit/theme-tokens.test.js",
+  "rationale": "§4.15: component names and the scrml-defined element names are disjoint — a user component named `theme` / `defaults` is E-NAME-COLLIDES-RESERVED (the names are reserved structural-element identifiers). §16645: defining `const engine = <article>` (lowercase) or `const Engine = <div>` (uppercase) is the collision; the same applies to `theme` / `Theme` and `defaults` / `Defaults`. The collision is case-insensitive and scoped to MARKUP-bound decls / components / user-types — a plain non-markup const (`const theme = 5`) is NOT a collision (migration backlog per §65.9). E-NAME-COLLIDES-RESERVED partitions into the fatal errors stream (§34 Error row).",
+  "expect": {
+    "codes": ["E-NAME-COLLIDES-RESERVED"],
+    "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "severity": { "E-NAME-COLLIDES-RESERVED": "error" }
+  }
+}

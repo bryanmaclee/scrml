@@ -250,6 +250,13 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
   onTimeout:    "an `<onTimeout>` element belongs inside an engine state-child (§51.0.M)",
   onIdle:       "an `<onIdle>` element belongs at engine root, sibling of state-children (§51.0.R)",
   onchange:     "an `<onchange>` element belongs inside a `<channel watches=<table>>` body (§38.13.3)",
+  // §65.9 — the scrml-native CSS structural elements. Both are PROGRAM-SCOPE:
+  // an immediate child of `<program>` (a sibling of `<page>` / `<channel>`) for
+  // v1; page-scope override is deferred to v1.next. Use outside that locus (file
+  // top-level, inside `<page>`, a component/markup subtree, an engine, or a
+  // `${ }` logic body) is E-STRUCTURAL-ELEMENT-MISPLACED (§65.10 reuse of §4.15).
+  theme:        "a `<theme>` element belongs as an immediate child of `<program>` (a sibling of `<page>` / `<channel>`) — program-scope only for v1 (§65.9)",
+  defaults:     "a `<defaults>` element belongs as an immediate child of `<program>` (a sibling of `<page>` / `<channel>`) — program-scope only for v1 (§65.9)",
   // NOTE: <match> is intentionally NOT in this table. Block-form <match> is
   // markup-as-value (§18.0.1 + §1.4 L1 pillar) — it is grammatical wherever a
   // value-yielding expression sits, including `${...}` markup-emit contexts
@@ -259,6 +266,23 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
   // (3 tests in compiler/tests/unit/promote-safety-harness.test.js failed
   // before this scope correction).
 };
+
+// §4.15 / §24.4 / §65.10 — reserved scrml structural-element IDENTIFIERS that a
+// user MAY NOT reuse as a component name or a state-type name. A component
+// (`const Theme = <markup>`), a markup-bound const (`const theme = <markup>` —
+// the poor-man's-component shape, §4.15 lowercase `const engine = <article>`
+// example), or a user-declared type (`type theme = …`) whose name matches one
+// of these (case-INSENSITIVE — both `theme` and `Theme` collide) is
+// E-NAME-COLLIDES-RESERVED. Scoped to the §65 CSS-model identifiers here; the
+// full §4.15 reserved list (engine/match/each/errors/onTransition/onTimeout/
+// onIdle/render/page/endpoint/onchange) is not yet wired to this code — the
+// broader wiring is a separate follow-on (E-NAME-COLLIDES-RESERVED had NO
+// fire-site in the compiler before this landing).
+//
+// A NON-markup plain const/state-cell named `theme` (`const theme = 5`,
+// `<theme> = "dark"`) is NOT a collision — it is migration backlog per §65.9
+// (the corpus proto-theme cells migrate, §65.14), not a component/type.
+const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
 
 // §51.0.M / §51.0.R — the engine-child-only, SELF-CLOSING structural elements.
 // These are grammatical ONLY inside an `<engine>` body (where the block-splitter
@@ -18018,6 +18042,119 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     for (const topNode of nodes) {
       visitForRedundantLogic(topNode);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // §65.9 / §65.10 — `<theme>` / `<defaults>` structural-element placement gate.
+  //
+  // SPEC §65.9 + §4.15: `<theme>` and `<defaults>` are PROGRAM-SCOPE — an
+  // immediate child of `<program>` (a sibling of `<page>` / `<channel>`) for v1
+  // (page-scope override deferred to v1.next). EVERY OTHER locus — file top-level
+  // (a sibling of `<program>`), inside `<page>`, a component/markup subtree, an
+  // engine, or a `${ }` logic body — is E-STRUCTURAL-ELEMENT-MISPLACED (§65.10
+  // reuse of §4.15). This post-build walker is the MARKUP-locus enforcement; the
+  // `${ }`-logic-body locus is caught earlier by parseLogicBody via the
+  // STRUCTURAL_ELEMENT_PLACEMENT `theme`/`defaults` entries.
+  //
+  // A `<theme>` is recognized as a `theme-decl` node; `<defaults>` (Phase-A
+  // recognition not yet landed) surfaces as a `markup` node with tag "defaults".
+  // The VALID set is the direct children of every `<program>` markup node
+  // (matched by node identity); anything else fires. NOTE: a `<theme>` /
+  // `<defaults>` swallowed inside a component-def *value* (kept as raw
+  // html-fragment text — never built into a node) is a SEPARATE, GENERAL
+  // component-body structural-recognition gap (it affects `<schema>` /
+  // `<onTimeout>` equally) and is out of scope for this placement gate.
+  {
+    const isThemeOrDefaults = (n) =>
+      !!n && typeof n === "object" && (
+        n.kind === "theme-decl" ||
+        (n.kind === "markup" && n.tag === "defaults")
+      );
+
+    // Collect the valid-placement set: theme/defaults nodes that are a DIRECT
+    // child of any `<program>` markup node.
+    const validlyPlaced = new Set();
+    function collectValidTheme(node) {
+      if (!node || typeof node !== "object") return;
+      if (node.kind === "markup" && node.tag === "program" && Array.isArray(node.children)) {
+        for (const kid of node.children) {
+          if (isThemeOrDefaults(kid)) validlyPlaced.add(kid);
+        }
+      }
+      if (Array.isArray(node.children)) {
+        for (const kid of node.children) collectValidTheme(kid);
+      }
+    }
+    for (const topNode of nodes) collectValidTheme(topNode);
+
+    // Fire E-STRUCTURAL-ELEMENT-MISPLACED on every theme/defaults node that is
+    // NOT in the valid set.
+    function checkThemePlacement(node) {
+      if (!node || typeof node !== "object") return;
+      if (isThemeOrDefaults(node) && !validlyPlaced.has(node)) {
+        const tag = node.kind === "theme-decl" ? "theme" : "defaults";
+        errors.push(new TABError(
+          "E-STRUCTURAL-ELEMENT-MISPLACED",
+          `E-STRUCTURAL-ELEMENT-MISPLACED: \`<${tag}>\` ${STRUCTURAL_ELEMENT_PLACEMENT[tag]}. ` +
+          `(§4.15 / §65.9 — scrml-defined structural elements are grammatical only in their ` +
+          `owning loci; use outside the owning locus is E-STRUCTURAL-ELEMENT-MISPLACED.)`,
+          node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
+      }
+      if (Array.isArray(node.children)) {
+        for (const kid of node.children) checkThemePlacement(kid);
+      }
+    }
+    for (const topNode of nodes) checkThemePlacement(topNode);
+  }
+
+  // ---------------------------------------------------------------------------
+  // §4.15 / §24.4 / §65.10 — E-NAME-COLLIDES-RESERVED for the §65 CSS-model
+  // structural-element identifiers reused as a component / markup-const / type.
+  //
+  // A component (`const Theme = <markup>` → component-def), a markup-bound const
+  // (`const theme = <markup>` → const-decl with a markup init — the §4.15
+  // lowercase `const engine = <article>` poor-man's-component shape), or a
+  // user-declared type (`type theme = …` → type-decl) named `theme` / `defaults`
+  // (case-INSENSITIVE — both `theme` and `Theme` collide) collides with the
+  // reserved structural-element identifier. A plain NON-markup const
+  // (`const theme = 5`) is NOT a collision — it is migration backlog (§65.9),
+  // not a component/type.
+  {
+    const seen = new Set();
+    const isMarkupInit = (node) => {
+      if (node.initExpr && typeof node.initExpr === "object" && exprNodeHasMarkupValue(node.initExpr)) return true;
+      return typeof node.init === "string" && node.init.trimStart().startsWith("<");
+    };
+    const reservedKindOf = (node) => {
+      if (!node || typeof node !== "object" || typeof node.name !== "string") return null;
+      if (!RESERVED_CSS_ELEMENT_IDENTIFIERS.has(node.name.toLowerCase())) return null;
+      if (node.kind === "component-def") return "component";
+      if (node.kind === "type-decl") return "type";
+      if (node.kind === "const-decl" && isMarkupInit(node)) return "component";
+      return null;
+    };
+    function checkReservedName(node) {
+      if (!node || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      const kindLabel = reservedKindOf(node);
+      if (kindLabel) {
+        const lower = node.name.toLowerCase();
+        errors.push(new TABError(
+          "E-NAME-COLLIDES-RESERVED",
+          `E-NAME-COLLIDES-RESERVED: the ${kindLabel} name \`${node.name}\` collides with the reserved ` +
+          `scrml structural-element identifier \`<${lower}>\`. \`theme\` and \`defaults\` are reserved for ` +
+          `the scrml-native CSS structural elements (§65.9) and MAY NOT be reused as a component or type ` +
+          `name (case-insensitive — both \`${lower}\` and \`${lower[0].toUpperCase() + lower.slice(1)}\` ` +
+          `collide). Rename the ${kindLabel}. See SPEC §4.15 / §24.4 / §65.10.`,
+          node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
+      }
+      for (const k of ["body", "children", "bodyChildren", "branches", "nodes", "statements"]) {
+        if (Array.isArray(node[k])) for (const kid of node[k]) checkReservedName(kid);
+      }
+    }
+    for (const topNode of nodes) checkReservedName(topNode);
   }
 
   // ---------------------------------------------------------------------------

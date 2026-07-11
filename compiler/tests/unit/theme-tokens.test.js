@@ -264,3 +264,158 @@ describe("§65.6 TYPER — variant inference from `<theme for=@cell>`", () => {
     expect(has(errors, "E-VARIANT-AMBIGUOUS")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §65.9 / §65.10 — <theme> / <defaults> PLACEMENT (E-STRUCTURAL-ELEMENT-MISPLACED)
+//
+// SPEC §65.9 + §4.15: `<theme>` and `<defaults>` are PROGRAM-SCOPE — an
+// immediate child of `<program>` (a sibling of `<page>` / `<channel>`) for v1
+// (page-scope override deferred to v1.next). Any other locus is
+// E-STRUCTURAL-ELEMENT-MISPLACED (§65.10 reuse of §4.15).
+// ---------------------------------------------------------------------------
+describe("§65.9/§65.10 PLACEMENT — <theme>/<defaults> program-scope gate", () => {
+  test("valid: `<theme>` as a direct child of `<program>` fires NO placement error", () => {
+    const src = `<program>
+  <theme>
+    brand = #2563eb;
+  </theme>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-STRUCTURAL-ELEMENT-MISPLACED")).toBe(false);
+  });
+
+  test("misplaced: `<theme>` at file top-level (outside `<program>`) fires E-STRUCTURAL-ELEMENT-MISPLACED", () => {
+    const src = `<theme>
+  brand = #2563eb;
+</theme>
+<program>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-STRUCTURAL-ELEMENT-MISPLACED")).toBe(true);
+  });
+
+  test("misplaced: `<theme>` inside `<page>` fires E-STRUCTURAL-ELEMENT-MISPLACED (page-scope deferred to v1.next)", () => {
+    const src = `<program>
+  <page>
+    <theme>
+      brand = #2563eb;
+    </theme>
+    <div>hi</div>
+  </page>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-STRUCTURAL-ELEMENT-MISPLACED")).toBe(true);
+  });
+
+  test("misplaced: `<theme>` inside a `${}` logic body fires E-STRUCTURAL-ELEMENT-MISPLACED (single, no double-fire)", () => {
+    const src = `<program>
+\${
+  <theme>
+    brand = #2563eb;
+  </theme>
+}
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    const n = codes(errors).filter((c) => c === "E-STRUCTURAL-ELEMENT-MISPLACED").length;
+    expect(n).toBe(1);
+  });
+
+  test("valid: `<defaults>` as a direct child of `<program>` fires NO placement error", () => {
+    const src = `<program>
+  <defaults>
+    a { color: blue; }
+  </defaults>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-STRUCTURAL-ELEMENT-MISPLACED")).toBe(false);
+  });
+
+  test("misplaced: `<defaults>` at file top-level fires E-STRUCTURAL-ELEMENT-MISPLACED", () => {
+    const src = `<defaults>
+  a { color: blue; }
+</defaults>
+<program>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-STRUCTURAL-ELEMENT-MISPLACED")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §65.10 / §4.15 / §24.4 — reserved-identifier collision (E-NAME-COLLIDES-RESERVED)
+//
+// A component / markup-bound const / user-type named `theme`/`defaults`
+// (case-insensitive) collides with the reserved structural-element identifier.
+// A plain NON-markup const (`const theme = 5`) is NOT a collision (§65.9
+// migration backlog).
+// ---------------------------------------------------------------------------
+describe("§65.10 RESERVED-NAME — theme/defaults identifier collision", () => {
+  test("`const theme = <markup>` (lowercase markup const) fires E-NAME-COLLIDES-RESERVED", () => {
+    const src = `<program>
+\${
+  const theme = <div>x</div>
+}
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(true);
+  });
+
+  test("`const Theme = <markup>` (uppercase component) fires E-NAME-COLLIDES-RESERVED", () => {
+    const src = `<program>
+  const Theme = <div>x</div>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(true);
+  });
+
+  test("`const defaults = <markup>` fires E-NAME-COLLIDES-RESERVED", () => {
+    const src = `<program>
+\${
+  const defaults = <div>x</div>
+}
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(true);
+  });
+
+  test("`type theme = {...}` (user-type named theme) fires E-NAME-COLLIDES-RESERVED", () => {
+    const src = `<program>
+\${
+  type theme = { a: int }
+}
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(true);
+  });
+
+  test("`const theme = 5` (plain NON-markup const) is NOT a collision (migration backlog, §65.9)", () => {
+    const src = `<program>
+\${
+  const theme = 5
+}
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(false);
+  });
+
+  test("a valid program-scope `<theme>` block is NOT flagged as a reserved-name collision", () => {
+    const src = `<program>
+  <theme>
+    brand = #2563eb;
+  </theme>
+  <div>hi</div>
+</program>`;
+    const { errors } = compileSource(src);
+    expect(has(errors, "E-NAME-COLLIDES-RESERVED")).toBe(false);
+  });
+});

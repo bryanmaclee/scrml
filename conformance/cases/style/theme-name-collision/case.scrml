@@ -1,0 +1,11 @@
+<program>
+
+  ${
+    const theme = <div class="swatch">
+      <span>brand token</span>
+    </div>
+  }
+
+  <div>hi</div>
+
+</program>
