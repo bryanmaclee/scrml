@@ -1,0 +1,12 @@
+{
+  "id": "forms-compound-validator-circular-dep-self",
+  "description": "§55.11 — a COMPOUND-CHILD cell whose cross-field validator references itself via member-access (`<a eq(@signup.a)>`) is the degenerate 1-cycle self-reference. This fires E-VALIDATOR-CIRCULAR-DEP as a fatal error. Regression guard for D-FORM-3: the compound member-access self-form previously compiled clean because compound children have no standalone reactive DG node and `@signup.a` resolves to the qualified key `signup.a` the global edge builder could not reach.",
+  "language-version": "1.0",
+  "spec": "§55.11, §31.4",
+  "rationale": "§55.11: validator predicate args form a DAG; a self-reference is a forbidden degenerate 1-cycle. Keying the compound child by its qualified path (`signup.a`) makes the ref `@signup.a` resolve to the cell's own key, so the self-reference is detected. E-VALIDATOR-CIRCULAR-DEP is fatal (§34).",
+  "expect": {
+    "codes": ["E-VALIDATOR-CIRCULAR-DEP"],
+    "notCodes": [],
+    "severity": { "E-VALIDATOR-CIRCULAR-DEP": "error" }
+  }
+}

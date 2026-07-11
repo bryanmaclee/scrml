@@ -49,7 +49,7 @@ import type {
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
-import { forEachIdentInValidators } from "./validator-arg-parser.ts";
+import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from "./validator-arg-parser.ts";
 
 // ---------------------------------------------------------------------------
 // DG-internal types (not in the shared AST, specific to Stage 7 output)
@@ -647,13 +647,20 @@ function collectAllFunctions(fileAST: FileAST): FunctionDeclNode[] {
  *
  * Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl. To
  * avoid duplicate DG nodes when the dedicated derived collector also picks
- * up the same state-decl, this function EXCLUDES nodes that are the legacy
- * folded-derived form (shape:"derived" + structuralForm:false). Those flow
- * through `collectAllReactiveDerivedDecls` exclusively and get
- * `_pendingDerivedReads` populated for read-edge resolution.
+ * up the same state-decl, this function EXCLUDES ALL derived-shape state-decl
+ * nodes (shape:"derived"). Those flow through `collectAllReactiveDerivedDecls`
+ * exclusively and get `_pendingDerivedReads` populated for read-edge
+ * resolution (required for E-DERIVED-CIRCULAR-DEP cycle detection).
  *
- * Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is INCLUDED
- * here — its codegen path (latent gap) treats it as a plain state-decl.
+ * Rx-1 (§6.6.10) — this predicate previously keyed on `structuralForm ===
+ * false`, which routed the V5-strict form (`const <x> = expr`,
+ * structuralForm:true) through THIS plain collector. That left its
+ * `_pendingDerivedReads` unpopulated, so the derived-reads cycle detector
+ * never saw its edges and E-DERIVED-CIRCULAR-DEP silently failed to fire in
+ * the real pipeline (the 22/22 unit test only exercised the legacy @-form,
+ * structuralForm:false). Both forms are derived cells and both emit
+ * `_scrml_derived_subscribe` in codegen, so both must participate in the
+ * derived subgraph. The predicate now keys on `shape === "derived"` alone.
  */
 function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
@@ -662,7 +669,7 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   function isFoldedDerived(n: ASTNode): boolean {
     if (n.kind !== "state-decl") return false;
     const sd = n as Record<string, unknown>;
-    return sd.shape === "derived" && sd.structuralForm === false;
+    return sd.shape === "derived";
   }
 
   function visit(list: ASTNode[]): void {
@@ -689,13 +696,20 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
  *
  * Phase A1a Step 11.5 — `reactive-derived-decl` retired and folded into
  * state-decl. Post-fold this collects `kind: "state-decl"` with
- * `shape === "derived"` AND `structuralForm === false` (the legacy
- * `@`-form). The function name is preserved for blame-traceability across
- * the rename.
+ * `shape === "derived"`. The function name is preserved for
+ * blame-traceability across the rename.
  *
- * Note: Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is
- * NOT collected — its codegen path (latent gap) is left untouched per
- * BRIEF §2.2. The plain state-decl loop in `nodes.set` covers it.
+ * Rx-1 (§6.6.10) — this now collects BOTH derived forms: the legacy `@`-form
+ * (structuralForm:false) AND Shape 3 V5-strict (`const <x> = expr`,
+ * structuralForm:true). Both are derived cells that emit
+ * `_scrml_derived_subscribe` in codegen, so both must feed
+ * `_pendingDerivedReads` for E-DERIVED-CIRCULAR-DEP cycle detection. The
+ * V5-strict form was previously excluded (routed to the plain collector),
+ * which is why circular V5-strict derived cells compiled clean and shipped an
+ * infinite-recompute loop to the client. Derived cells with no `@`-refs
+ * (e.g. `const <PI> = 3.14`) are still collected here but produce no
+ * `_pendingDerivedReads` (empty ref set) and therefore no edges — identical
+ * DG shape to their prior plain-node registration.
  */
 function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
@@ -704,7 +718,7 @@ function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
   function isLegacyDerivedFold(n: ASTNode): boolean {
     if (n.kind !== "state-decl") return false;
     const sd = n as Record<string, unknown>;
-    return sd.shape === "derived" && sd.structuralForm === false;
+    return sd.shape === "derived";
   }
 
   function visit(list: ASTNode[]): void {
@@ -3119,6 +3133,29 @@ export function runDG(input: DGInput): DGOutput {
   // case but the self-case is a clear degenerate cycle.
   const selfReferencingValidatorNodes = new Set<NodeId>();
 
+  // D-FORM-3 (§55.11) — compound-child validator cycle detection.
+  //
+  // Compound CHILD cells (`<signup><a eq(@signup.b)>...`) are NOT registered
+  // as standalone reactive DG nodes — only the compound PARENT (`signup`) is
+  // (see the Q1 collectors; `reactiveVarNodeIds` holds only `"signup"`). So
+  // the global node-id path below builds NO edge for a cross-field ref that
+  // member-accesses a sibling: `@signup.b` resolves to the qualified child
+  // key `"signup.b"`, which has no node, AND the child decl's bare name
+  // (`"a"`) has no `reactiveVarNodeIds` entry either — so `<a eq(@signup.b)>`
+  // + `<b eq(@signup.a)>` (and the self form `<a eq(@signup.a)>`) compiled
+  // clean, missing the §55.11 cycle.
+  //
+  // This self-contained qualified-name subgraph closes that gap: it keys
+  // compound-child cells by their fully-qualified path (`signup.a`,
+  // `signup.b`), resolves compound member-access refs via
+  // `forEachQualifiedCellRefInValidators` (which yields `"signup.b"` for the
+  // MemberExpr `@signup.b`), and runs the SAME generic `detectCycle` DFS. It
+  // is deliberately kept separate from the global node-id path so top-level
+  // (Shape-1) validator-cycle detection is byte-for-byte unchanged.
+  const compoundValidatorAdj = new Map<string, Set<string>>();
+  const compoundValidatorSelfRefs = new Set<string>();
+  const compoundValidatorSpans = new Map<string, Span>();
+
   function emitValidatorArgEdgesForFile(fileAST: FileAST): void {
     // Walk the full AST collecting state-decls with validators. Compound
     // CHILDREN are visited too — validators commonly sit on Shape-2
@@ -3170,6 +3207,60 @@ export function runDG(input: DGInput): DGOutput {
         pushEdge(fromNodeId, toNodeId, "validator-reads");
       });
     }
+
+    // D-FORM-3 — compound-child qualified-name subgraph. A dedicated walk
+    // that tracks the compound-parent prefix so each validator-bearing child
+    // gets its fully-qualified key. Separate from the flattened `decls` walk
+    // above (which loses parent context) so the global path is untouched.
+    function visitCompound(list: ASTNode[], prefix: string): void {
+      for (const node of list) {
+        if (node.kind === "logic" && Array.isArray((node as any).body)) {
+          visitCompound((node as any).body, prefix);
+          continue;
+        }
+        if (node.kind === "state-decl") {
+          const name = (node as any).name;
+          if (typeof name !== "string" || name.length === 0) continue;
+          const qname = prefix ? `${prefix}.${name}` : name;
+          const validators = (node as any).validators;
+
+          // A compound CHILD is a validator-bearing state-decl reached under a
+          // non-empty prefix. Only these participate in this subgraph; the
+          // top-level (prefix-less) cells flow through the global path above.
+          if (prefix && Array.isArray(validators) && validators.length > 0) {
+            compoundValidatorSpans.set(qname, (node as any).span);
+            forEachQualifiedCellRefInValidators(validators, (target) => {
+              if (target === qname) {
+                compoundValidatorSelfRefs.add(qname);
+                return;
+              }
+              let set = compoundValidatorAdj.get(qname);
+              if (!set) { set = new Set<string>(); compoundValidatorAdj.set(qname, set); }
+              set.add(target);
+            });
+          }
+
+          // Recurse into child STATE-DECLs (compound members) with this node's
+          // qname as the new prefix. Non-state-decl children (the `= <input/>`
+          // markup binding) carry no qualified cells, so they are skipped —
+          // qualification only deepens through the compound-cell tree.
+          const children = (node as any).children;
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              if (child && (child as ASTNode).kind === "state-decl") {
+                visitCompound([child as ASTNode], qname);
+              }
+            }
+          }
+          continue;
+        }
+        if ("children" in node && Array.isArray((node as MarkupNode).children)) {
+          // Markup container — descend without deepening the qualified prefix.
+          visitCompound((node as MarkupNode).children as ASTNode[], prefix);
+        }
+      }
+    }
+    visitCompound(fileAST.nodes, "");
   }
 
   // P1.3 — pause cross-file timing for per-file loop #5 (validator-arg edge emission).
@@ -3255,11 +3346,56 @@ export function runDG(input: DGInput): DGOutput {
     );
   }
 
+  // D-FORM-3 — compound-child validator cycle detection (§55.11). Same
+  // diagnostics as the top-level path above, but over the qualified-name
+  // subgraph (`signup.a`, `signup.b`) that the global node-id path cannot
+  // reach (compound children have no standalone reactive DG nodes).
+  for (const selfQName of compoundValidatorSelfRefs) {
+    errors.push(
+      new DGError(
+        "E-VALIDATOR-CIRCULAR-DEP",
+        `E-VALIDATOR-CIRCULAR-DEP: Validator on \`@${selfQName}\` ` +
+          `references the cell itself via cross-field predicate args ` +
+          `(e.g., \`<${selfQName.split(".").pop()} eq(@${selfQName})>\`). ` +
+          `Validator predicate args form a DAG; self-references are ` +
+          `forbidden (SPEC §55.11). Break the self-reference.`,
+        compoundValidatorSpans.get(selfQName) ??
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
+  const compoundValidatorNodeIds = new Set<string>();
+  for (const q of compoundValidatorAdj.keys()) compoundValidatorNodeIds.add(q);
+  for (const targets of compoundValidatorAdj.values()) {
+    for (const t of targets) compoundValidatorNodeIds.add(t);
+  }
+  const compoundValidatorCycle = detectCycle(compoundValidatorAdj, compoundValidatorNodeIds);
+  if (compoundValidatorCycle) {
+    const chain = compoundValidatorCycle.map((q) => `@${q}`).join(" -> ");
+    errors.push(
+      new DGError(
+        "E-VALIDATOR-CIRCULAR-DEP",
+        `E-VALIDATOR-CIRCULAR-DEP: Circular dependency detected among ` +
+          `validator predicate args: ${chain}. ` +
+          `Each cell's validator references a cell whose validator eventually ` +
+          `references back to the first — break the cycle (SPEC §55.11).`,
+        compoundValidatorSpans.get(compoundValidatorCycle[0]) ??
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
   // E-VALIDATOR-CIRCULAR-DEP: per §55.11 line 24631, "the validator-dep
   // graph is a DAG; cycles are forbidden". Like E-DERIVED-CIRCULAR-DEP,
   // this is a hard error that should fail-fast before the derived-cycle
   // scan to give clean diagnostics.
-  if (selfReferencingValidatorNodes.size > 0 || validatorCycle) {
+  if (
+    selfReferencingValidatorNodes.size > 0 ||
+    validatorCycle ||
+    compoundValidatorSelfRefs.size > 0 ||
+    compoundValidatorCycle
+  ) {
     return _finalizeDG();
   }
 
