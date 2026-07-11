@@ -8014,6 +8014,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //   OR JS-style: `for (const x of iterable) { body }`
     if (tok.kind === "KEYWORD" && tok.text === "for") {
       const startTok = consume();
+      // §19.9.8 — `for await ... of` is RETRACTED. scrml has no async/await
+      // (parallel-by-default, no colored functions). We record the retraction
+      // on the node (`isAwait`) and recover by parsing the form as a plain
+      // `for`; the async/await reject validator fires E-FOR-AWAIT-NOT-IN-SCRML
+      // on `for-stmt.isAwait` (with the stdlib + `^{}` meta carve-outs).
+      // Mirrors ast-builder's unconditional `isAsync` recording on function
+      // decls — the parser records the shape, the validator decides.
+      let isForAwait = false;
+      if (peek().kind === "KEYWORD" && peek().text === "await") {
+        isForAwait = true;
+        consume(); // consume `await`
+      }
       let variable = "item";
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -8112,6 +8124,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       return {
         id: ++counter.next,
         kind: "for-stmt",
+        ...(isForAwait ? { isAwait: true } : {}),
         variable,
         iterable,
         body,
@@ -11675,11 +11688,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // consume `server`
         }
       } else if (tok.kind === "KEYWORD" && tok.text === "async") {
-        // S89 §13.2 Sub-Phase B — `async function` (stdlib carve-out per §13.1).
-        // The flag is recorded unconditionally here; the user-source rejection
-        // (I-ASYNC-USER-SOURCE per §13.1) is a separate post-parse lint, not
-        // a TAB-time error (the lint needs filePath context to decide whether
-        // the file is inside the stdlib).
+        // `async function` — the flag is recorded UNCONDITIONALLY here. Two
+        // downstream consumers read it: (1) the §13.1 stdlib carve-out, where a
+        // `scrml:*` stdlib `async function` signals `Promise<T>` to the
+        // auto-await classifier (§13.2.1) and MUST still compile; (2) the
+        // async/await reject validator, which fires the hard §19.9.8
+        // E-ASYNC-NOT-IN-SCRML on user-source `function-decl.isAsync`. The
+        // stdlib-vs-user decision needs filePath context, so it lives in the
+        // validator (post-parse), not here at TAB time.
         isAsync = true;
         startTok = consume(); // consume `async`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
@@ -12205,6 +12221,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //   OR JS-style: `for (const x of iterable) { body }`
     if (tok.kind === "KEYWORD" && tok.text === "for") {
       const startTok = consume();
+      // §19.9.8 — `for await ... of` is RETRACTED. scrml has no async/await
+      // (parallel-by-default, no colored functions). We record the retraction
+      // on the node (`isAwait`) and recover by parsing the form as a plain
+      // `for`; the async/await reject validator fires E-FOR-AWAIT-NOT-IN-SCRML
+      // on `for-stmt.isAwait` (with the stdlib + `^{}` meta carve-outs).
+      // Mirrors ast-builder's unconditional `isAsync` recording on function
+      // decls — the parser records the shape, the validator decides.
+      let isForAwait = false;
+      if (peek().kind === "KEYWORD" && peek().text === "await") {
+        isForAwait = true;
+        consume(); // consume `await`
+      }
       let variable = "item";
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -12302,6 +12330,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       nodes.push({
         id: ++counter.next,
         kind: "for-stmt",
+        ...(isForAwait ? { isAwait: true } : {}),
         variable,
         iterable,
         body,
