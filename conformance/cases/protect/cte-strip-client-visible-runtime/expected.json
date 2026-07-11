@@ -1,0 +1,22 @@
+{
+  "id": "protect-cte-strip-client-visible-runtime",
+  "description": "§14.8.9 egress redaction — the RUNTIME proof that a CTE over a protect= table ships NO data to the client. A client button calls the server fn getUser (a `WITH t AS (SELECT * FROM users ...) SELECT * FROM t` CTE); the E-ADAPTER server-eval path runs the REAL emitted route handler, so `_scrml_protect_redact` executes at the egress sink. Because the CTE row has no statically-resolvable origin it is tagged `\"*\"` (strip-all) and redact returns `{}` per row — the client-bound cell @user observes an EMPTY object: neither passwordHash NOR any other column crosses. REGRESSION GUARD for the S249 fail-open where the whole (protected) row shipped verbatim. Compile half pinned: I-PROTECT-STRIP-001 (info) names the wholesale strip.",
+  "language-version": "1.0",
+  "spec": "§14.8.9 / §14.8.7",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 (SPEC.md I-PROTECT-STRIP-001 row) + §14.8.7 CTE degradation: an unresolvable-origin row is stripped WHOLESALE at egress, never accept-unknown. The runtime proof is that the client cell holds `{}` — passwordHash never crosses (and neither does id/name, the fail-closed posture). auth=\"none\" declassifies the AUTH scope (dodging the auth-path CSRF gate) while the §14.8.9 column-redaction floor stays engaged (column-redaction ⟂ auth-scope, SPEC.md §52).",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" },
+        { "id": 2, "name": "Bob", "passwordHash": "SECRET_HASH_BOB" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": {} }
+  }
+}
