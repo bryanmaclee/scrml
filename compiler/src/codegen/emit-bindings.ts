@@ -583,13 +583,32 @@ export function emitBindDirectiveBody(
       (a: any) => a && a.name === "type" && a.value?.value
     )?.value?.value ?? "";
     const isNumericInput = inputType === "number" || inputType === "range";
-    const writeValue = enumTypeName
-      ? `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`
-      : isNumericInput ? "Number(event.target.value)" : "event.target.value";
 
-    // §53.7.2: predicated-type write-gating.
+    // §53.7.2: predicated-type write-gating (also drives the <select> cell-type
+    // coercion below — a numeric refinement's base type is read off _bvPredInfo).
     const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
     const _bvPredInfo = _bvTypeAnnotation ? parsePredicateAnnotation(_bvTypeAnnotation) : null;
+
+    // §5.4 (D-FORM-5): a <select> carries no `type=` attr, so `isNumericInput`
+    // never fires for it. When the bound cell is number/boolean-typed — and NOT
+    // an enum (enum coercion is handled above via <Enum>_toEnum) — coerce the
+    // string `event.target.value` to the cell's declared type per §5.4:
+    //   number / integer / numeric-refinement → Number(event.target.value)
+    //   boolean                               → event.target.value === "true"
+    //   string / unannotated                  → no coercion (raw string)
+    const _selectBaseType = elementTag === "select" && !enumTypeName && _bvTypeAnnotation
+      ? (_bvPredInfo ? _bvPredInfo.baseType : _bvTypeAnnotation.trim())
+      : "";
+    const isNumericSelectCell = _selectBaseType === "number" || _selectBaseType === "integer";
+    const isBooleanSelectCell = _selectBaseType === "boolean";
+
+    const writeValue = enumTypeName
+      ? `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`
+      : isNumericInput || isNumericSelectCell
+        ? "Number(event.target.value)"
+        : isBooleanSelectCell
+          ? `event.target.value === "true"`
+          : "event.target.value";
 
     lines.push(`// bind:value=@${bVarRaw}`);
     lines.push(`{`);
