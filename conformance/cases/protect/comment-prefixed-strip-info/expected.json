@@ -1,0 +1,13 @@
+{
+  "id": "protect-comment-prefixed-strip-info",
+  "description": "§14.8.9 egress redaction — a server fn whose SELECT is prefixed by a leading SQL block comment (`/* fetch user */ SELECT * FROM users ...`) over a protect= table still resolves its origin (the comment is stripped before the leader test) and strips the protected column, firing I-PROTECT-STRIP-001 naming `passwordHash`. REGRESSION GUARD for the S249 fail-open: the leader test previously required the query text to START with `SELECT`, so a comment-prefixed row returned no protected-column tag and `passwordHash` SHIPPED unredacted. The comment-strip half of the fix (the CTE half is cte-strip-info).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9 keys redaction on a column's resolved (table,column) origin. A leading SQL comment is not part of the query's semantics — after it is stripped the query is a plain single-table SELECT *, whose protected-origin column `passwordHash` is tagged and stripped at egress; I-PROTECT-STRIP-001 names the column. A leading comment must never let a protected-origin row slip past the egress gate untagged.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}

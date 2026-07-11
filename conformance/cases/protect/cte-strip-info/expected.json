@@ -1,0 +1,13 @@
+{
+  "id": "protect-cte-strip-info",
+  "description": "§14.8.9 egress redaction — a server fn returning a CTE (`WITH t AS (SELECT * FROM users ...) SELECT * FROM t`) over a protect= table has NO statically-resolvable column origin, so the whole row is stripped WHOLESALE (fail-closed) and fires I-PROTECT-STRIP-001 (info, 'ALL columns'). REGRESSION GUARD for the S249 fail-open: the leader test previously gated on the query starting with `SELECT`, so a WITH/CTE-prefixed row returned no protected-column tag and the protected column SHIPPED unredacted. §14.8.7: 'SELECT * over a JOIN, a CTE, a UNION, or a subquery-in-FROM degrades the whole row to asIs' — §14.8.9: 'such a row is stripped wholesale at egress (every column dropped) ... it is never accept-unknown'. Compile half; the runtime client-visible absence is asserted in cte-strip-client-visible-runtime.",
+  "language-version": "1.0",
+  "spec": "§14.8.9 / §14.8.7",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: an unresolvable-origin row (CTE/UNION/subquery-in-FROM/dynamic SQL) is stripped WHOLESALE at egress — every column dropped, never accept-unknown. A WITH/CTE degrades to the {all:true} strip-all path (WITH is an untypeable leader in §14.8.7 extraction); the egress serializer emits `_scrml_protect_tag(<row>, \"*\")` and I-PROTECT-STRIP-001 names the wholesale strip. Exercises the strip-all branch AND the CTE leader boundary — both previously unconformanced.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "severity": { "I-PROTECT-STRIP-001": "info" }
+  }
+}
