@@ -1,0 +1,12 @@
+{
+  "id": "forms-validator-vocab-unknown-reject",
+  "description": "§55.1 (D-FORM-1) — an unknown bare-attribute validator predicate (`lenght`, a typo for `length`) is REJECTED at compile with E-TYPE-031. The universal-core vocabulary is closed at fourteen (§55.1 line 32517); the only escape hatch is `custom(fn)`. Regression guard: this was formerly a SILENT pass-through — codegen emitted `_scrml_validator_fire(\"lenght\",…)`, the runtime pushed `undefined` into the field's errors list, and the field went PERMANENTLY invalid with no diagnostic at all.",
+  "language-version": "1.0",
+  "spec": "§55.1, §34",
+  "rationale": "§55.1 closes the validator vocabulary at fourteen universal-core predicates plus `custom(fn)`. Any other predicate name is a typo or a non-first-class predicate and must be rejected — silently passing it through produces a field that can never validate. No dedicated §34 code exists for an unknown predicate name; the E-TYPE-031 family (already used for every validator arity / arg-shape rejection in this checker) carries it.",
+  "expect": {
+    "codes": ["E-TYPE-031"],
+    "notCodes": [],
+    "severity": { "E-TYPE-031": "error" }
+  }
+}

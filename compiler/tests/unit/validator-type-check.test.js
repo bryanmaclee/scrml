@@ -210,14 +210,34 @@ describe("B10 Phase 2 — inline-override (Level-1, §55.10) trailing-arg checks
   });
 });
 
-describe("B10 Phase 2 — unknown predicate names (silent pass-through)", () => {
-  test("library-surface `email` predicate — no error (deferred to stdlib registration)", () => {
-    // `email` is a stdlib `scrml:data` predicate-builder; not in the
-    // universal-core catalog. Per audit §1.2, B10 silently passes through
-    // unknown predicate names. A future tightening can convert this to a
-    // strict reject once stdlib predicates register.
+describe("B10 Phase 2 — unknown predicate names (D-FORM-1, closed vocabulary)", () => {
+  test("would-be library-surface `email` predicate — REJECTED (§55.1 closed at 14)", () => {
+    // §55.1 line 32517 — the universal-core vocabulary is CLOSED at fourteen.
+    // `email` is NOT a first-class predicate; adopters spell it `pattern(/…/)`
+    // or `custom(fn)`. An unknown bare-attribute predicate name is REJECTED with
+    // E-TYPE-031 (was a silent pass-through → permanently-invalid field, no diag).
     const sym = runUpToSYM(
       `<program>\${ <email email> = <input type="email"/> }</program>`,
+    );
+    const errs = getTypeErrors(sym);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("unknown validator predicate");
+    expect(errs[0].message).toContain("email");
+  });
+
+  test("typo'd predicate `lenght` — REJECTED (the footgun D-FORM-1 closes)", () => {
+    const sym = runUpToSYM(
+      `<program>\${ <name lenght(3)> = <input type="text"/> }</program>`,
+    );
+    const errs = getTypeErrors(sym);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("unknown validator predicate");
+    expect(errs[0].message).toContain("lenght");
+  });
+
+  test("`custom(fn)` escape hatch — no error (the single non-core name allowed)", () => {
+    const sym = runUpToSYM(
+      `<program>\${ <name custom(isValidName)> = <input type="text"/> }</program>`,
     );
     expect(getTypeErrors(sym)).toEqual([]);
   });

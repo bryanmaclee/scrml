@@ -1,0 +1,6 @@
+<program>
+${
+    <label min(3)> = "hi"
+}
+${ @label }
+</program>

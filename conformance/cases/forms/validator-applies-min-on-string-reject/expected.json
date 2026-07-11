@@ -1,0 +1,12 @@
+{
+  "id": "forms-validator-applies-min-on-string-reject",
+  "description": "§55.1 (D-FORM-6) — the inverse of the pattern-on-number case. `min(n)` requires a number cell; applying it to `<label … > = \"hi\"` (a string-literal-init cell) is a compile-time type error → E-TYPE-031. Length/bound predicates and value/range predicates are not interchangeable across the string/number divide.",
+  "language-version": "1.0",
+  "spec": "§55.1, §34",
+  "rationale": "§55.1 predicate-applicability enforcement. `label`'s type is inferred as `string` from its literal initializer `\"hi\"`; `min` (number-only, catalog `cellTypeRequirement: number`) does not apply → E-TYPE-031. The author most likely wanted `length(>=3)` (the string-appropriate predicate).",
+  "expect": {
+    "codes": ["E-TYPE-031"],
+    "notCodes": [],
+    "severity": { "E-TYPE-031": "error" }
+  }
+}

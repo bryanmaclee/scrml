@@ -94,8 +94,8 @@ function hasCode(res, code) {
 describe("Bug 60 §1: nested compound-field render-by-tag (text + email)", () => {
   const SRC =
     `<signupForm>\n` +
-    `    <userName req length(>=2)> = <input type="text"/>\n` +
-    `    <email req email>          = <input type="email"/>\n` +
+    `    <userName req length(>=2)>          = <input type="text"/>\n` +
+    `    <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>\n` +
     `</>\n\n` +
     `<div>\n` +
     `  <signupForm>\n` +

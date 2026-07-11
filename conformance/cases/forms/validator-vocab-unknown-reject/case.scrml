@@ -1,0 +1,6 @@
+<program>
+${
+    <userName lenght(3)> = <input type="text"/>
+}
+<userName/>
+</program>
