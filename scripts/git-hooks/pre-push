@@ -28,6 +28,14 @@ done
 
 echo "=== scrml pre-push: full validation ==="
 
+# 0. Refresh browser-test fixtures — the browser suite (part of the full run below)
+#    readFileSync's PRE-COMPILED samples from samples/compilation-tests/dist/. A stale or
+#    absent dist grades the current runtime against old codegen → phantom browser failures
+#    (S250 2026-07-11: stale Jul-8 fixtures faked ~9 fails vs the current runtime). Compile-all
+#    returns non-zero on the intentional error-fixtures, so `|| true` (the real gate is the run).
+echo "--- Refreshing browser-test fixtures (samples/compilation-tests/) ---"
+bun run compiler/src/cli.js compile samples/compilation-tests/ >/dev/null 2>&1 || true
+
 # 1. Full test suite (every push)
 echo "--- Running full test suite ---"
 TEST_OUTPUT=$(bun test compiler/tests/ 2>&1)
