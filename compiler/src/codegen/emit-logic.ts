@@ -2188,6 +2188,28 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
         if (!hasReactiveDeps) {
           const derivedRhs = emitExprField(node.initExpr, derivedInit, _makeExprCtx(opts));
+          // §6.6.11 — the compiler SHALL emit W-DERIVED-001 as a real
+          // diagnostic, not merely an inline provenance comment. Push a
+          // severity-"warning" CGError into `opts.errors`; api.js partitions
+          // W-* codes into `result.warnings` (non-fatal). The const-lowering
+          // (reactive-overhead elision) is the correct compile behavior — this
+          // only closes the SHALL-emit gap so `scrml compile` surfaces the
+          // warning to the adopter. The inline comment is retained as output
+          // provenance for anyone reading the compiled JS.
+          if (opts.errors) {
+            const wDerivedSpan = (node.initExpr && (node.initExpr as any).span)
+              ? (node.initExpr as any).span
+              : (node.span ?? { start: 0, end: 0 });
+            opts.errors.push(new CGError(
+              "W-DERIVED-001",
+              `W-DERIVED-001: Derived reactive value \`@${node.name}\` has no reactive ` +
+              `dependencies. It will never re-evaluate after initial computation. If this ` +
+              `is intentional, use \`const ${node.name}\` instead. If \`@${node.name}\` was ` +
+              `intended to depend on a reactive variable, check the expression. See SPEC §6.6.11.`,
+              wDerivedSpan,
+              "warning",
+            ));
+          }
           return _appendSidecar(`/* W-DERIVED-001: const @${node.name} has no reactive dependencies — treating as const */ const ${node.name} = ${derivedRhs};`);
         }
 

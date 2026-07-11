@@ -1,0 +1,12 @@
+{
+  "id": "reactive-derived-no-dep-warn",
+  "description": "A `const <name> = expr` whose RHS references no `@variable` SHALL emit W-DERIVED-001 as a REAL diagnostic (§6.6.11), not merely an inline provenance comment. `const <x> = 5 + 3` has no reactive dependencies, so the value never re-evaluates. Pre-fix emit-logic.ts injected the code ONLY as a `/* W-DERIVED-001: ... */` code comment, so `scrml compile` surfaced no warning (the SHALL-emit was unmet). The const-lowering (reactive-overhead elision) is correct; this case asserts the warning reaches result.warnings via the warnings stream. E-DG-002 (@x declared-but-never-consumed) co-fires incidentally and is not asserted (superset semantics).",
+  "language-version": "1.0",
+  "spec": "§6.6.11",
+  "rationale": "§6.6.11: 'The compiler SHALL emit W-DERIVED-001 when a `const <name> = expr` declaration contains no `@variable` references in `expr`.' The diagnostic must land in the warnings stream (non-fatal, severity: warning per the §34 / §6.6.12 catalog row), NOT only as a comment in the compiled JS.",
+  "expect": {
+    "codes": ["W-DERIVED-001"],
+    "notCodes": [],
+    "severity": { "W-DERIVED-001": "warning" }
+  }
+}
