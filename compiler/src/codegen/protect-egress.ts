@@ -100,10 +100,42 @@ export function buildProtectContext(protectAnalysis: unknown): ProtectContext {
  */
 export type ProtectedColumns = { cols: string[] } | { all: true } | null;
 
-/** Strip `${...}` bound-param interpolations + leading whitespace for the leader test. */
-function isSelectQuery(sqlContent: string): boolean {
-  const normalized = sqlContent.replace(/\$\{[^}]*\}/g, " ").trimStart();
-  return /^select\b/i.test(normalized);
+/**
+ * Strip leading SQL comments (block `slash-star ... star-slash` and `-- ...`
+ * line comments) plus whitespace so the leader test sees the first real keyword.
+ * Applied repeatedly because a query may carry several stacked leading comments
+ * (e.g. a line comment then a block comment then the SELECT). An unterminated
+ * block comment consumes the rest (a malformed / no-op query).
+ */
+function stripLeadingSqlNoise(sql: string): string {
+  let prev: string;
+  let s = sql;
+  do {
+    prev = s;
+    s = s.trimStart();
+    if (s.startsWith("/*")) {
+      const end = s.indexOf("*/");
+      s = end === -1 ? "" : s.slice(end + 2);
+    } else if (s.startsWith("--")) {
+      const nl = s.indexOf("\n");
+      s = nl === -1 ? "" : s.slice(nl + 1);
+    }
+  } while (s !== prev);
+  return s;
+}
+
+/**
+ * Is this query ROW-PRODUCING (so it can carry a client-facing protected column)?
+ * True for a leading `SELECT` OR a leading `WITH` (a CTE — `WITH [RECURSIVE] ...`).
+ * The leader test runs AFTER stripping `${...}` bound params and leading SQL
+ * comments, so a comment- or CTE-prefixed row still reaches the egress floor
+ * (§14.8.9: an unresolvable-origin row is stripped WHOLESALE, never accept-unknown).
+ * A CTE degrades to the `{ all: true }` strip-all path in `extractSelectProjection`
+ * (WITH is an UNTYPEABLE_LEADER); a comment-prefixed plain SELECT resolves normally.
+ */
+function isRowProducingQuery(sqlContent: string): boolean {
+  const normalized = stripLeadingSqlNoise(sqlContent.replace(/\$\{[^}]*\}/g, " "));
+  return /^(?:select|with)\b/i.test(normalized);
 }
 
 /**
@@ -118,10 +150,13 @@ export function resolveProtectedOutputColumns(
   sqlContent: string,
   ctx: ProtectContext,
 ): ProtectedColumns {
-  // Only a row-producing SELECT can carry a client-facing protected column.
-  // A non-SELECT (INSERT/UPDATE/DELETE/DDL) produces no typed row in the v1 SQL
-  // surface; `RETURNING` is part of the deferred long tail (documented).
-  if (!isSelectQuery(sqlContent)) return null;
+  // Only a row-producing query (a leading SELECT or a WITH/CTE, after stripping
+  // leading SQL comments) can carry a client-facing protected column. A non-row
+  // producer (INSERT/UPDATE/DELETE/DDL) produces no typed row in the v1 SQL
+  // surface; `RETURNING` is part of the deferred long tail (documented). A
+  // comment- or CTE-prefixed row must NOT slip past this gate untagged (§14.8.9
+  // fail-closed): a WITH degrades to strip-all below, never accept-unknown.
+  if (!isRowProducingQuery(sqlContent)) return null;
 
   const proj = extractSelectProjection(sqlContent);
   // Unresolvable SELECT (dynamic / CTE / UNION / subquery-in-FROM) — fail-closed:
