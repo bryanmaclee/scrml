@@ -10055,6 +10055,186 @@ function fireChannelSharedModifier(
   });
 }
 
+// ---------------------------------------------------------------------------
+// PASS 15.5 (navigate-soft-nav Wave-1a) — `<outlet>` placement + duplication
+// (SPEC §20.8.1 / §20.8.6 / §34)
+// ---------------------------------------------------------------------------
+//
+// `<outlet>` is the Client-Router swap region: the slot inside the persistent
+// `<program>` shell into which the current route's content renders (§20.8.2).
+// Two structural invariants land in Wave-1a (the runtime swap engine is 1b):
+//
+//   - `<outlet>` SHALL appear only inside a `<program>` shell; elsewhere fires
+//     E-OUTLET-OUTSIDE-SHELL. Unlike E-CHANNEL-OUTSIDE-PROGRAM there is NO
+//     module-file dispensation — an outlet has no meaning without a shell, so
+//     the fire is unconditional at programDepth === 0.
+//   - A shell SHALL contain at most one `<outlet>` in V1 (one flat outlet);
+//     the 2nd..nth outlet in the SAME shell fires E-OUTLET-DUPLICATE. Nested
+//     layouts (multiple / nested outlets) are v1.next.
+//
+// The walk carries the nearest enclosing `<program>` node so outlets partition
+// per-shell (a nested worker/sidecar `<program name=>` owns its own outlets).
+// Traversal shape mirrors walkChannelPlacement — children / body / defChildren
+// / consequent / alternate / arms[].body, with a WeakSet cycle guard.
+
+/**
+ * PASS 15.5 — validate `<outlet>` placement + count per SPEC §20.8.1.
+ * Mutates `errors[]`. Collects every `<outlet>` markup node keyed by its
+ * nearest enclosing `<program>` shell (or the orphan bucket when none), then
+ * fires E-OUTLET-OUTSIDE-SHELL on orphans and E-OUTLET-DUPLICATE on per-shell
+ * extras.
+ */
+function walkValidateOutlets(
+  ast: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const nodes = ast?.nodes;
+  if (!nodes) return;
+
+  // outlets grouped by their nearest enclosing `<program>` node; orphans (no
+  // program ancestor) collected separately.
+  const byShell = new Map<object, any[]>();
+  const orphans: any[] = [];
+  const visited = new WeakSet<object>();
+
+  collectOutlets(nodes, /*enclosingProgram*/ null, byShell, orphans, visited);
+
+  // E-OUTLET-OUTSIDE-SHELL — every outlet with no `<program>` ancestor.
+  for (const outletNode of orphans) {
+    fireOutletOutsideShell(outletNode, errors, filePath);
+  }
+
+  // E-OUTLET-DUPLICATE — the 2nd..nth outlet within a single shell. The first
+  // outlet in a shell is canonical (silent); each subsequent one fires.
+  for (const outlets of byShell.values()) {
+    for (let i = 1; i < outlets.length; i++) {
+      fireOutletDuplicate(outlets[i], errors, filePath);
+    }
+  }
+}
+
+/**
+ * Walk the markup tree collecting `<outlet>` markup nodes. `enclosingProgram`
+ * is the nearest `<program>` ancestor node (or null at file top / outside any
+ * shell). An outlet is filed under its enclosing shell (for the duplicate
+ * check) or into `orphans` (for the outside-shell check). Descending through a
+ * `<program>` re-parents subsequent outlets to that shell so a nested
+ * worker/sidecar `<program>` owns its own outlet budget.
+ */
+function collectOutlets(
+  nodes: any,
+  enclosingProgram: object | null,
+  byShell: Map<object, any[]>,
+  orphans: any[],
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      collectOutlets(n, enclosingProgram, byShell, orphans, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+
+  if (node.kind === "markup" && (node.tag ?? "") === "outlet") {
+    if (enclosingProgram) {
+      const list = byShell.get(enclosingProgram);
+      if (list) list.push(node);
+      else byShell.set(enclosingProgram, [node]);
+    } else {
+      orphans.push(node);
+    }
+  }
+
+  // Descend. A `<program>` node becomes the enclosing shell for its subtree.
+  const isProgramMarkup =
+    node.kind === "markup" && (node.tag ?? "") === "program";
+  const childProgram = isProgramMarkup ? node : enclosingProgram;
+
+  if (Array.isArray(node.children)) {
+    collectOutlets(node.children, childProgram, byShell, orphans, visited);
+  }
+  if (Array.isArray(node.body)) {
+    collectOutlets(node.body, childProgram, byShell, orphans, visited);
+  }
+  if (Array.isArray(node.defChildren)) {
+    collectOutlets(node.defChildren, childProgram, byShell, orphans, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    collectOutlets(node.consequent, childProgram, byShell, orphans, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    collectOutlets(node.alternate, childProgram, byShell, orphans, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        collectOutlets(arm.body, childProgram, byShell, orphans, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Fire `E-OUTLET-OUTSIDE-SHELL` per SPEC §20.8.1 / §20.8.6 + §34. Triggered
+ * when an `<outlet>` markup node has no `<program>` ancestor. An outlet is the
+ * shell's route-content region; outside a shell there is nothing to swap into.
+ */
+function fireOutletOutsideShell(
+  outletNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = outletNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-OUTLET-OUTSIDE-SHELL",
+    message:
+      `E-OUTLET-OUTSIDE-SHELL: an \`<outlet>\` appears outside a \`<program>\` shell. ` +
+      `\`<outlet>\` is the Client-Router swap region — the slot inside the persistent ` +
+      `\`<program>\` shell into which the current route's content renders (§20.8.1). ` +
+      `Outside a shell there is no route content to swap in. Move the \`<outlet>\` to be ` +
+      `a descendant of the \`<program>\` shell. ` +
+      `(SPEC §20.8.1 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-OUTLET-DUPLICATE` per SPEC §20.8.1 / §20.8.6 + §34. Triggered on the
+ * 2nd..nth `<outlet>` inside a single `<program>` shell. V1 supports one flat
+ * outlet per shell; nested / multiple outlets (Remix-style layouts) are v1.next.
+ */
+function fireOutletDuplicate(
+  outletNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = outletNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-OUTLET-DUPLICATE",
+    message:
+      `E-OUTLET-DUPLICATE: more than one \`<outlet>\` in a \`<program>\` shell. ` +
+      `V1 supports exactly one flat \`<outlet>\` per shell — the single region into which ` +
+      `the current route's content renders (§20.8.1). Nested layouts (multiple / nested ` +
+      `outlets, Remix-style) are v1.next. Remove the extra \`<outlet>\` so the shell ` +
+      `declares one swap region. ` +
+      `(SPEC §20.8.1 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
 
 
 // ---------------------------------------------------------------------------
@@ -12035,6 +12215,18 @@ export function runSYM(input: SYMInput): SYMResult {
   // Renumbered from B19's PASS 14 → PASS 15 during S69 file-delta merge
   // (B22 took PASS 14 in the parallel small-bundle dispatch).
   walkValidateChannels(ast, errors, filePath);
+
+  // PASS 15.5 (navigate-soft-nav Wave-1a): `<outlet>` placement + duplication
+  // per SPEC §20.8.1 / §20.8.6 / §34. `<outlet>` is the Client-Router swap
+  // region and is valid ONLY inside a `<program>` shell, at most one per shell
+  // (V1 flat-outlet). Two fire-sites:
+  //   - E-OUTLET-OUTSIDE-SHELL: an `<outlet>` with no `<program>` ancestor
+  //     (unconditional — unlike E-CHANNEL-OUTSIDE-PROGRAM there is no
+  //     module-file dispensation; an outlet ALWAYS needs a shell).
+  //   - E-OUTLET-DUPLICATE: the 2nd..nth `<outlet>` inside the same shell.
+  // The runtime swap/keep-alive/link-boost pipeline is Wave-1b; this pass is
+  // recognition-time structural validation only.
+  walkValidateOutlets(ast, errors, filePath);
 
   // PASS 16 (A5-3): A7 hierarchy + temporal extensions per §51.0.M-Q.
   // For every engine-decl carrying a `_record` (set by PASS 10.A) AND

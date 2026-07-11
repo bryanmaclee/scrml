@@ -1,0 +1,12 @@
+{
+  "id": "outlet-duplicate",
+  "description": "§20.8.1 — V1 supports exactly one flat `<outlet>` per shell. Two `<outlet>` elements in the same `<program>` shell fire E-OUTLET-DUPLICATE (on the second, redundant outlet). Nested / multiple outlets (Remix-style layouts) are v1.next.",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §20.8.6",
+  "rationale": "§20.8.1: 'More than one `<outlet>` in a shell SHALL be E-OUTLET-DUPLICATE.' The shell owns exactly one swap region in V1.",
+  "expect": {
+    "codes": ["E-OUTLET-DUPLICATE"],
+    "notCodes": ["E-OUTLET-OUTSIDE-SHELL"],
+    "severity": { "E-OUTLET-DUPLICATE": "error" }
+  }
+}

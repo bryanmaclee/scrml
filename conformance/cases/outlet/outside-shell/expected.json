@@ -1,0 +1,12 @@
+{
+  "id": "outlet-outside-shell",
+  "description": "§20.8.1 — `<outlet>` is the `<program>` shell's route-content swap region; an `<outlet>` with no `<program>` ancestor (here nested in a plain `<div>` at file top level) fires E-OUTLET-OUTSIDE-SHELL. Unlike E-CHANNEL-OUTSIDE-PROGRAM there is no module-file dispensation — an outlet has no meaning without a shell.",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §20.8.6",
+  "rationale": "§20.8.1: 'an `<outlet>` outside a `<program>` shell SHALL be E-OUTLET-OUTSIDE-SHELL.' Outside a shell there is no route content to swap in.",
+  "expect": {
+    "codes": ["E-OUTLET-OUTSIDE-SHELL"],
+    "notCodes": ["E-OUTLET-DUPLICATE"],
+    "severity": { "E-OUTLET-OUTSIDE-SHELL": "error" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "outlet-recognized-clean",
+  "description": "§20.8.1 — a single flat `<outlet>` inside a `<program>` shell is the canonical Client-Router swap region. It is recognized as a structural element (no E-STRUCTURAL-ELEMENT-MISPLACED), fires none of the E-OUTLET-* family, and emits a stable addressable region marker `<div data-scrml-outlet>` into the document body (the Wave-1b soft-nav swap target). The domAnchored half asserts exactly one `[data-scrml-outlet]` region exists in the live DOM.",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §20.8.2, §20.8.6",
+  "rationale": "§20.8.1: the shell MAY contain exactly one `<outlet>` — the region into which the current route's content renders. One flat outlet in a `<program>` is well-formed: no placement/duplicate error fires, and codegen emits the addressable `[data-scrml-outlet]` region.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-OUTLET-DUPLICATE", "E-OUTLET-OUTSIDE-SHELL", "E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-OUTLET-"],
+    "domAnchored": [{ "selector": "[data-scrml-outlet]", "count": 1 }]
+  }
+}

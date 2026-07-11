@@ -1121,6 +1121,28 @@ export function generateHtml(
         }
       }
 
+      if (tag === "outlet") {
+        // SPEC §20.8.1 (Client Router — navigate-soft-nav Wave-1a). `<outlet>`
+        // is the persistent-shell swap region: the current route's content
+        // renders here, and a soft navigation (§20.8.2) swaps this subtree with
+        // the target route's `<outlet>` content over the live shell.
+        //
+        // Wave-1a emits a stable, addressable region marker — a `<div
+        // data-scrml-outlet>` (mirroring the `data-scrml-each-mount` /
+        // `data-scrml-error-boundary` anchor convention). A `<div>` (not the raw
+        // `<outlet>` custom element) is the block-level region a page-content
+        // slot needs, and `[data-scrml-outlet]` is the impl-stable selector the
+        // Wave-1b runtime swap + focus (§20.8.5 item 3) will address. Any
+        // authored children (a `<outlet/>` void slot normally has none) are
+        // preserved as the initial region content.
+        parts.push(`<div data-scrml-outlet>`);
+        for (const child of children) {
+          emitNode(child);
+        }
+        parts.push(`</div>`);
+        return;
+      }
+
       if (tag === "errorBoundary" || tag === "errorboundary") {
         // SPEC §19.6 — markup-context error catch. The boundary wraps a subtree
         // in which `!`-function calls may produce error variants; those are

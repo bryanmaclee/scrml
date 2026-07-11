@@ -18331,6 +18331,71 @@ export function buildAST(bsOutput, tokenizerOverrides) {
           errors[errors.length - 1].severity = "info";
         }
       }
+
+      // ---------------------------------------------------------------------
+      // §20.8.1 / §20.8.7 — W-OUTLET-ABSENT-SOFT-NAV-DISABLED (info-level lint)
+      // (Client Router — navigate-soft-nav Wave-1a)
+      //
+      // A multi-page project whose `<program>` shell declares no `<outlet>`.
+      // Soft navigation + `<a>` link-boost (§20.8.2 / §20.8.3) have no region
+      // to swap into, so they fall back to hard (full-document) navigation. The
+      // lint surfaces the missed enhancement; it is informational only.
+      //
+      // Multi-page signal: a `pages/` directory at the project root — the SAME
+      // filesystem convention W-PROGRAM-SPA-INFERRED keys on (§40.8.1). This is
+      // the complementary branch: SPA-inferred fires when `pages/` is ABSENT
+      // (and no `<page>` siblings); this fires when `pages/` is PRESENT but the
+      // shell has no outlet. The two are mutually exclusive by the `pages/`
+      // condition. Gated on a real on-disk file (the fs probe is meaningless for
+      // synthetic test paths) — mirrors the SPA-inferred guard.
+      // ---------------------------------------------------------------------
+      if (filePathIsRealFile) {
+        let pagesDirPresent = false;
+        try {
+          const projectRoot = _pathDirname(filePath);
+          const pagesPath = _pathJoin(projectRoot, "pages");
+          if (existsSync(pagesPath)) {
+            pagesDirPresent = statSync(pagesPath).isDirectory();
+          }
+        } catch {
+          pagesDirPresent = false;
+        }
+
+        if (pagesDirPresent) {
+          // Does the shell declare an `<outlet>` anywhere in its subtree? The
+          // outlet may be nested inside the shell's layout markup (§20.8.1), so
+          // scan the `<program>` markup tree (children + logic-body markup),
+          // not just its direct children.
+          const shellHasOutlet = (function scanForOutlet(n) {
+            if (!n || typeof n !== "object") return false;
+            if (Array.isArray(n)) {
+              for (const c of n) if (scanForOutlet(c)) return true;
+              return false;
+            }
+            if (n.kind === "markup" && n.tag === "outlet") return true;
+            if (Array.isArray(n.children) && scanForOutlet(n.children)) return true;
+            if (Array.isArray(n.body) && scanForOutlet(n.body)) return true;
+            return false;
+          })(entryProgramNode.children);
+
+          if (!shellHasOutlet) {
+            const span =
+              entryProgramNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            errors.push(new TABError(
+              "W-OUTLET-ABSENT-SOFT-NAV-DISABLED",
+              `W-OUTLET-ABSENT-SOFT-NAV-DISABLED: this multi-page project (a \`pages/\` directory exists at the project root) ` +
+              `declares a \`<program>\` shell with no \`<outlet>\`. The Client Router (§20.8) swaps the current route's content ` +
+              `into the shell's \`<outlet>\` region on a soft navigation; with no \`<outlet>\`, soft navigation and \`<a>\` ` +
+              `link-boost have no region to swap into and fall back to hard (full-document) navigation. ` +
+              `If SSR-first hard navigation is your intent, this lint is informational only — no action required. ` +
+              `To enable soft navigation, add a single \`<outlet/>\` to the shell where route content should render. ` +
+              `Per SPEC §20.8.1 the shell holds exactly one flat \`<outlet>\` in V1.`,
+              span,
+            ));
+            errors[errors.length - 1].severity = "info";
+          }
+        }
+      }
     }
   }
 
