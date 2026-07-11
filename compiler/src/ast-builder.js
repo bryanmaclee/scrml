@@ -8446,15 +8446,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       };
     }
 
-    // THROW: scrml §19 Appendix B replaces `throw` with `fail`. Reject at parse time.
+    // THROW: scrml has no `throw` (§19.9.8 / §19.3 — failures are signalled with
+    // `fail`). Reject at parse time. E-THROW-NOT-IN-SCRML mirrors the native
+    // parser's parse-layer rejection (parse-stmt.js:parseThrow) — Fork-D
+    // drain-path-1 backport so the DEFAULT path enforces the same language
+    // contract the `--parser=scrml-native` path already fires. (This FREES the
+    // former squatting code E-ERROR-006 for its §19.2.3 cataloged meaning —
+    // renders-clause undefined-variable.)
     if (tok.kind === "KEYWORD" && tok.text === "throw") {
       const startTok = consume();
       const { expr } = collectExpr();
       errors.push(new TABError(
-        "E-ERROR-006",
-        "E-ERROR-006: `throw` is not a scrml keyword — §19 replaces it with `fail`. " +
-        "Declare the enclosing function as failable (`function name(...)! -> ErrorType`) " +
-        "and use `fail ErrorType::Variant(...)` to surface the error.",
+        "E-THROW-NOT-IN-SCRML",
+        "scrml has no `throw`. To signal a failure use `fail Type::Variant(...)` " +
+        "(§19.3) inside an `!` failable function — no source-level throw is needed.",
         tokenSpan(startTok, filePath),
       ));
       return {
@@ -8568,13 +8573,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && (tok.text === "switch" || tok.text === "try" || tok.text === "match")) {
       const startTok = consume();
       const keyword = startTok.text;
-      // §19 explicitly: "There is NO try/catch." Use `!{}` instead.
+      // §19.9.8 / §19: scrml has NO try/catch/finally — the error model is `fail`
+      // / `?` / `!{}` / `<errorBoundary>`. E-TRY-NOT-IN-SCRML mirrors the native
+      // parser's parse-layer rejection (Fork-D drain-path-1 backport). FREES the
+      // former squatting code E-ERROR-007 for its §19.10.4 nested-transaction meaning.
       if (keyword === "try") {
         errors.push(new TABError(
-          "E-ERROR-007",
-          "E-ERROR-007: `try` is not a scrml keyword — §19 has no try/catch/finally. " +
-          "Handle failable calls with `!{ ::Variant(e) -> ... }`, the `?` propagation " +
-          "operator, or by matching the result enum.",
+          "E-TRY-NOT-IN-SCRML",
+          "scrml has no `try`/`catch`/`finally`. The error model is `fail` (§19.3), " +
+          "the `?` propagate operator, the `!{}` guarded-expression handler, and " +
+          "`<errorBoundary>` — no source-level try/catch is needed.",
           tokenSpan(startTok, filePath),
         ));
       }
@@ -12521,15 +12529,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // THROW STATEMENT: §19 Appendix B replaces `throw` with `fail`.
+    // THROW STATEMENT: scrml has no `throw` (§19.9.8 / §19.3 — failures are
+    // signalled with `fail`). E-THROW-NOT-IN-SCRML mirrors the native parser's
+    // parse-layer rejection (Fork-D drain-path-1 backport; see the sibling
+    // throw site above). FREES the former squatting code E-ERROR-006 for its
+    // §19.2.3 cataloged meaning.
     if (tok.kind === "KEYWORD" && tok.text === "throw") {
       const startTok = consume();
       const { expr } = collectExpr();
       errors.push(new TABError(
-        "E-ERROR-006",
-        "E-ERROR-006: `throw` is not a scrml keyword — §19 replaces it with `fail`. " +
-        "Declare the enclosing function as failable (`function name(...)! -> ErrorType`) " +
-        "and use `fail ErrorType::Variant(...)` to surface the error.",
+        "E-THROW-NOT-IN-SCRML",
+        "scrml has no `throw`. To signal a failure use `fail Type::Variant(...)` " +
+        "(§19.3) inside an `!` failable function — no source-level throw is needed.",
         tokenSpan(startTok, filePath),
       ));
       nodes.push({
@@ -12564,12 +12575,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && (tok.text === "switch" || tok.text === "try" || tok.text === "match")) {
       const startTok = consume();
       const keyword = startTok.text;
+      // §19.9.8 / §19: scrml has NO try/catch/finally (Fork-D drain-path-1
+      // backport; see the sibling try site above). FREES E-ERROR-007 for its
+      // §19.10.4 nested-transaction meaning.
       if (keyword === "try") {
         errors.push(new TABError(
-          "E-ERROR-007",
-          "E-ERROR-007: `try` is not a scrml keyword — §19 has no try/catch/finally. " +
-          "Handle failable calls with `!{ ::Variant(e) -> ... }`, the `?` propagation " +
-          "operator, or by matching the result enum.",
+          "E-TRY-NOT-IN-SCRML",
+          "scrml has no `try`/`catch`/`finally`. The error model is `fail` (§19.3), " +
+          "the `?` propagate operator, the `!{}` guarded-expression handler, and " +
+          "`<errorBoundary>` — no source-level try/catch is needed.",
           tokenSpan(startTok, filePath),
         ));
       }

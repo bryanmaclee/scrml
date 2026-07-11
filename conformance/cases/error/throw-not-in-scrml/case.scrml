@@ -1,0 +1,6 @@
+${
+    function boom() {
+        throw someError
+    }
+}
+<p>z</>

@@ -1,0 +1,12 @@
+${
+    function retry() {
+        return 1
+    }
+    type PaymentError:enum = {
+        InvalidAmount(reason: string)
+            renders <div class="error">${reason}</>
+        NetworkError(detail: string)
+            renders <div class="error">${detail} <button onclick=retry()>Retry</button></>
+    }
+}
+<p>z</>

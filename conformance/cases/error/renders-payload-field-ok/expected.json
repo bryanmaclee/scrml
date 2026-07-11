@@ -1,0 +1,12 @@
+{
+  "id": "error-renders-payload-field-ok",
+  "description": "§19.2.3 / §19.2.1 — a `renders` clause that references only in-scope names is clean. `InvalidAmount`'s `${reason}` and `NetworkError`'s `${detail}` are payload fields; `NetworkError`'s `onclick=retry()` calls a module-scope function (the §19.2.1 canonical example shape) — a CALL, not a value reference, so it is reachable and does NOT fire E-ERROR-006. `notCodes` asserts the D-ERR-5 check does not false-positive on a valid renders clause or on a module-function call.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.2.3 / §19.2.1",
+  "spec": "§19.2.3",
+  "rationale": "§19.2.2: The `renders` clause body has access to the variant's payload fields. §19.2.1's canonical example calls `retry()` inside a `renders` clause — a module-scope function CALL is reachable; only VALUE references are constrained to payload fields (§19.2.3).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-006"]
+  }
+}

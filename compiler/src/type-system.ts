@@ -73,7 +73,7 @@
  */
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import { queryInterpolationsAreServerAmbientOnly } from "./codegen/collect.ts";
@@ -1741,6 +1741,50 @@ function recoverEnumBaseFromValidatedClause(
  * @param fileSpan   — span for error reporting
  * @param typeName   — enum type name for error messages
  */
+/**
+ * Extract the interior of each brace-balanced `${ ... }` interpolation from a
+ * `renders`-clause markup string. String literals (`"..."` / `'...'` /
+ * `` `...` ``) inside an interpolation are respected so a `}` inside a string
+ * does not prematurely terminate the span. Used by the §19.2.3 E-ERROR-006
+ * undefined-variable check. A `renders` markup interpolation is the only
+ * value-reference surface in the clause (event-handler attributes like
+ * `onclick=retry()` are NOT `${...}` spans, so a module-function call there is
+ * naturally out of scope for this value-reference check).
+ */
+function extractInterpolationExprs(markup: string): string[] {
+  const out: string[] = [];
+  const n = markup.length;
+  let i = 0;
+  while (i < n) {
+    if (markup[i] === "$" && markup[i + 1] === "{") {
+      let j = i + 2;
+      let depth = 1;
+      let quote: string | null = null;
+      while (j < n && depth > 0) {
+        const c = markup[j];
+        if (quote) {
+          if (c === "\\") { j += 2; continue; }
+          if (c === quote) quote = null;
+        } else if (c === '"' || c === "'" || c === "`") {
+          quote = c;
+        } else if (c === "{") {
+          depth++;
+        } else if (c === "}") {
+          depth--;
+          if (depth === 0) break;
+        }
+        j++;
+      }
+      const inner = markup.slice(i + 2, j).trim();
+      if (inner) out.push(inner);
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
 function parseEnumBody(
   raw: string,
   typeRegistry: Map<string, ResolvedType>,
@@ -1982,6 +2026,56 @@ function parseEnumBody(
       }
 
       variants.push({ name, payload, renders });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // §19.2.3 — `renders`-clause undefined-variable check (E-ERROR-006).
+  //
+  // "Variables referenced inside a `renders` clause body SHALL resolve to the
+  // variant's payload fields. A reference to an undefined variable inside a
+  // `renders` clause SHALL be a compile error: E-ERROR-006." A VALUE-position
+  // reference in a `${...}` interpolation that names no payload field — and is
+  // not a JS/DOM global (LOGIC_SCOPE_GLOBAL_ALLOWLIST) or a declared type — is
+  // undefined. Function CALLS are exempt: a module-scope function is reachable
+  // (the §19.2.1 canonical example calls `retry()` inside a `renders` clause),
+  // and `extractValueIdentifiersFromAST` drops callee positions.
+  //
+  // Fork-D drain-path-1 (2026-07): E-ERROR-006 was freed from its former `throw`
+  // squat (ast-builder.js), so it now carries this §19.2.3 cataloged meaning.
+  // Fires in the DEFAULT parse path; previously fired in NEITHER parser.
+  // `pushCaseError` dedups by code+message across the two-pass re-parse.
+  // -----------------------------------------------------------------------
+  if (errors && fileSpan) {
+    for (const v of variants) {
+      if (!v.renders || !v.renders.markup) continue;
+      const fieldNames = v.payload ? new Set(v.payload.keys()) : new Set<string>();
+      const seen = new Set<string>();
+      for (const expr of extractInterpolationExprs(v.renders.markup)) {
+        let idents: string[];
+        try {
+          idents = extractValueIdentifiersFromAST(expr);
+        } catch {
+          continue; // unparseable interpolation — leave to the markup re-parse path
+        }
+        for (const name of idents) {
+          if (!name || seen.has(name)) continue;
+          // Reactive `@cell` reads + `_scrml_*` runtime helpers have their own
+          // validation paths (DG sweep / codegen) — skip here.
+          if (name.startsWith("@") || name.startsWith("_")) continue;
+          if (fieldNames.has(name)) continue;                   // payload field — in scope
+          if (LOGIC_SCOPE_GLOBAL_ALLOWLIST.has(name)) continue; // JS/DOM global
+          if (typeRegistry.has(name)) continue;                 // declared type reference
+          seen.add(name);
+          const fieldList = fieldNames.size > 0 ? [...fieldNames].join(", ") : "(none)";
+          pushCaseError(
+            "E-ERROR-006",
+            "E-ERROR-006: renders clause on variant '" + v.name + "' references " +
+            "undefined variable '" + name + "'. Only the variant's payload fields " +
+            "are in scope: " + fieldList + ".",
+          );
+        }
+      }
     }
   }
 

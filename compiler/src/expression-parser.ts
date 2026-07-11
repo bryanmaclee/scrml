@@ -702,6 +702,67 @@ function extractIdentifiersFromNode(node: ESNode): string[] {
 }
 
 /**
+ * Extract only VALUE-position identifier names from an expression — like
+ * `extractIdentifiersFromAST`, but ALSO excluding:
+ *   - call callees  (`retry()` → `retry` excluded)
+ *   - `new` callees (`new Foo()` → `Foo` excluded)
+ *   - tagged-template tags
+ *
+ * Used by the §19.2.3 `renders`-clause undefined-variable check (E-ERROR-006),
+ * where a bare value reference MUST resolve to the variant's payload fields but
+ * a function CALL legitimately reaches a module-scope function (the §19.2.1
+ * canonical example calls `retry()` inside a `renders` clause). Excluding
+ * callees keeps module-function calls from false-positiving as undefined
+ * variables while still catching a value reference like `${reason}` that names
+ * no payload field.
+ */
+export function extractValueIdentifiersFromAST(expr: string): string[] {
+  const { ast } = parseExpression(expr);
+  const target = ast || parseStatements(expr)?.ast;
+  if (!target) return [];
+
+  const ids = new Set<string>();
+  const declared = new Set<string>();
+
+  walk(target, (n, parent) => {
+    if (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression") {
+      for (const param of (n.params as ESNode[] | undefined) ?? []) {
+        collectBindingIdentifiers(param, declared);
+      }
+    }
+    if (n.type === "ForInStatement" || n.type === "ForOfStatement") {
+      const left = n.left as ESNode | undefined;
+      if (left?.type === "VariableDeclaration") {
+        for (const decl of (left.declarations as ESNode[] | undefined) ?? []) {
+          const id = (decl as { id?: ESNode }).id;
+          if (id) collectBindingIdentifiers(id, declared);
+        }
+      }
+    }
+    if (n.type === "VariableDeclaration") {
+      for (const decl of (n.declarations as ESNode[] | undefined) ?? []) {
+        const id = (decl as { id?: ESNode }).id;
+        if (id) collectBindingIdentifiers(id, declared);
+      }
+    }
+    if (n.type === "Identifier") {
+      // Property access tail (`x.prop` → skip `prop`).
+      if (parent?.type === "MemberExpression" && (parent as { property?: ESNode; computed?: boolean }).property === n && !(parent as { computed?: boolean }).computed) return;
+      // Object literal key.
+      if (parent?.type === "Property" && (parent as { key?: ESNode; computed?: boolean }).key === n && !(parent as { computed?: boolean }).computed) return;
+      // Call / new callee (`retry()` → skip `retry`).
+      if ((parent?.type === "CallExpression" || parent?.type === "NewExpression") && (parent as { callee?: ESNode }).callee === n) return;
+      // Tagged-template tag.
+      if (parent?.type === "TaggedTemplateExpression" && (parent as { tag?: ESNode }).tag === n) return;
+      ids.add(n.name as string);
+    }
+  });
+
+  for (const d of declared) ids.delete(d);
+  return [...ids];
+}
+
+/**
  * Extract reactive variable dependencies from an expression.
  * Finds all Identifier nodes whose name starts with `@`.
  */

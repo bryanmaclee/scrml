@@ -248,8 +248,12 @@ const JS_PARADIGM_FIXTURES = [
   },
   {
     name: "throw new Error()",
+    // Fork-D drain-path-1 (2026-07): the DEFAULT parse path now fires the same
+    // parse-layer rejection the native parser fires — E-THROW-NOT-IN-SCRML —
+    // instead of squatting on E-ERROR-006 (which §19.2.3 reserves for the
+    // renders-clause undefined-variable check).
     src: `<program>\${ function bad() { throw new Error("nope") } }<div>x</div></program>`,
-    expect: { category: "compile-error", codePrefix: "E-ERROR-006" },
+    expect: { category: "compile-error", codePrefix: "E-THROW-NOT-IN-SCRML" },
   },
   {
     name: "=== strict equality (scrml is == only per §45)",

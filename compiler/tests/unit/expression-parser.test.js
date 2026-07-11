@@ -29,6 +29,7 @@ import {
   parseStatements,
   walk,
   extractIdentifiersFromAST,
+  extractValueIdentifiersFromAST,
   extractReactiveDepsFromAST,
   rewriteServerReactiveRefsAST,
 } from "../../src/expression-parser.ts";
@@ -225,5 +226,47 @@ describe("rewriteServerReactiveRefsAST trailing-content guard (ss49)", () => {
     const r = rewriteServerReactiveRefsAST(raw);
     expect(r.ok).toBe(true);
     expect(r.result).toBe(raw);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractValueIdentifiersFromAST — VALUE-position idents (callees excluded)
+// ---------------------------------------------------------------------------
+//
+// Backs the §19.2.3 renders-clause undefined-variable check (E-ERROR-006):
+// a value reference must be a payload field, but a function CALL reaches a
+// module-scope function, so callee positions are dropped.
+describe("extractValueIdentifiersFromAST", () => {
+  test("bare value reference is included", () => {
+    expect(extractValueIdentifiersFromAST("reason")).toEqual(["reason"]);
+  });
+
+  test("call callee is excluded, args are included", () => {
+    const ids = extractValueIdentifiersFromAST("retry(reason)");
+    expect(ids).toContain("reason");
+    expect(ids).not.toContain("retry");
+  });
+
+  test("new callee is excluded", () => {
+    const ids = extractValueIdentifiersFromAST("new Widget(x)");
+    expect(ids).toContain("x");
+    expect(ids).not.toContain("Widget");
+  });
+
+  test("member access keeps the base, drops the property tail", () => {
+    const ids = extractValueIdentifiersFromAST("detail.length");
+    expect(ids).toEqual(["detail"]);
+  });
+
+  test("method call keeps the receiver, drops the method + is not a callee", () => {
+    const ids = extractValueIdentifiersFromAST("info.toUpperCase()");
+    expect(ids).toEqual(["info"]);
+  });
+
+  test("nested call: outer + inner callees excluded, value args kept", () => {
+    const ids = extractValueIdentifiersFromAST("fmt(money(amount))");
+    expect(ids).toContain("amount");
+    expect(ids).not.toContain("fmt");
+    expect(ids).not.toContain("money");
   });
 });
