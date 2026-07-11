@@ -49,7 +49,7 @@ import type {
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
-import { forEachIdentInValidators } from "./validator-arg-parser.ts";
+import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from "./validator-arg-parser.ts";
 
 // ---------------------------------------------------------------------------
 // DG-internal types (not in the shared AST, specific to Stage 7 output)
@@ -3133,6 +3133,29 @@ export function runDG(input: DGInput): DGOutput {
   // case but the self-case is a clear degenerate cycle.
   const selfReferencingValidatorNodes = new Set<NodeId>();
 
+  // D-FORM-3 (§55.11) — compound-child validator cycle detection.
+  //
+  // Compound CHILD cells (`<signup><a eq(@signup.b)>...`) are NOT registered
+  // as standalone reactive DG nodes — only the compound PARENT (`signup`) is
+  // (see the Q1 collectors; `reactiveVarNodeIds` holds only `"signup"`). So
+  // the global node-id path below builds NO edge for a cross-field ref that
+  // member-accesses a sibling: `@signup.b` resolves to the qualified child
+  // key `"signup.b"`, which has no node, AND the child decl's bare name
+  // (`"a"`) has no `reactiveVarNodeIds` entry either — so `<a eq(@signup.b)>`
+  // + `<b eq(@signup.a)>` (and the self form `<a eq(@signup.a)>`) compiled
+  // clean, missing the §55.11 cycle.
+  //
+  // This self-contained qualified-name subgraph closes that gap: it keys
+  // compound-child cells by their fully-qualified path (`signup.a`,
+  // `signup.b`), resolves compound member-access refs via
+  // `forEachQualifiedCellRefInValidators` (which yields `"signup.b"` for the
+  // MemberExpr `@signup.b`), and runs the SAME generic `detectCycle` DFS. It
+  // is deliberately kept separate from the global node-id path so top-level
+  // (Shape-1) validator-cycle detection is byte-for-byte unchanged.
+  const compoundValidatorAdj = new Map<string, Set<string>>();
+  const compoundValidatorSelfRefs = new Set<string>();
+  const compoundValidatorSpans = new Map<string, Span>();
+
   function emitValidatorArgEdgesForFile(fileAST: FileAST): void {
     // Walk the full AST collecting state-decls with validators. Compound
     // CHILDREN are visited too — validators commonly sit on Shape-2
@@ -3184,6 +3207,60 @@ export function runDG(input: DGInput): DGOutput {
         pushEdge(fromNodeId, toNodeId, "validator-reads");
       });
     }
+
+    // D-FORM-3 — compound-child qualified-name subgraph. A dedicated walk
+    // that tracks the compound-parent prefix so each validator-bearing child
+    // gets its fully-qualified key. Separate from the flattened `decls` walk
+    // above (which loses parent context) so the global path is untouched.
+    function visitCompound(list: ASTNode[], prefix: string): void {
+      for (const node of list) {
+        if (node.kind === "logic" && Array.isArray((node as any).body)) {
+          visitCompound((node as any).body, prefix);
+          continue;
+        }
+        if (node.kind === "state-decl") {
+          const name = (node as any).name;
+          if (typeof name !== "string" || name.length === 0) continue;
+          const qname = prefix ? `${prefix}.${name}` : name;
+          const validators = (node as any).validators;
+
+          // A compound CHILD is a validator-bearing state-decl reached under a
+          // non-empty prefix. Only these participate in this subgraph; the
+          // top-level (prefix-less) cells flow through the global path above.
+          if (prefix && Array.isArray(validators) && validators.length > 0) {
+            compoundValidatorSpans.set(qname, (node as any).span);
+            forEachQualifiedCellRefInValidators(validators, (target) => {
+              if (target === qname) {
+                compoundValidatorSelfRefs.add(qname);
+                return;
+              }
+              let set = compoundValidatorAdj.get(qname);
+              if (!set) { set = new Set<string>(); compoundValidatorAdj.set(qname, set); }
+              set.add(target);
+            });
+          }
+
+          // Recurse into child STATE-DECLs (compound members) with this node's
+          // qname as the new prefix. Non-state-decl children (the `= <input/>`
+          // markup binding) carry no qualified cells, so they are skipped —
+          // qualification only deepens through the compound-cell tree.
+          const children = (node as any).children;
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              if (child && (child as ASTNode).kind === "state-decl") {
+                visitCompound([child as ASTNode], qname);
+              }
+            }
+          }
+          continue;
+        }
+        if ("children" in node && Array.isArray((node as MarkupNode).children)) {
+          // Markup container — descend without deepening the qualified prefix.
+          visitCompound((node as MarkupNode).children as ASTNode[], prefix);
+        }
+      }
+    }
+    visitCompound(fileAST.nodes, "");
   }
 
   // P1.3 — pause cross-file timing for per-file loop #5 (validator-arg edge emission).
@@ -3269,11 +3346,56 @@ export function runDG(input: DGInput): DGOutput {
     );
   }
 
+  // D-FORM-3 — compound-child validator cycle detection (§55.11). Same
+  // diagnostics as the top-level path above, but over the qualified-name
+  // subgraph (`signup.a`, `signup.b`) that the global node-id path cannot
+  // reach (compound children have no standalone reactive DG nodes).
+  for (const selfQName of compoundValidatorSelfRefs) {
+    errors.push(
+      new DGError(
+        "E-VALIDATOR-CIRCULAR-DEP",
+        `E-VALIDATOR-CIRCULAR-DEP: Validator on \`@${selfQName}\` ` +
+          `references the cell itself via cross-field predicate args ` +
+          `(e.g., \`<${selfQName.split(".").pop()} eq(@${selfQName})>\`). ` +
+          `Validator predicate args form a DAG; self-references are ` +
+          `forbidden (SPEC §55.11). Break the self-reference.`,
+        compoundValidatorSpans.get(selfQName) ??
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
+  const compoundValidatorNodeIds = new Set<string>();
+  for (const q of compoundValidatorAdj.keys()) compoundValidatorNodeIds.add(q);
+  for (const targets of compoundValidatorAdj.values()) {
+    for (const t of targets) compoundValidatorNodeIds.add(t);
+  }
+  const compoundValidatorCycle = detectCycle(compoundValidatorAdj, compoundValidatorNodeIds);
+  if (compoundValidatorCycle) {
+    const chain = compoundValidatorCycle.map((q) => `@${q}`).join(" -> ");
+    errors.push(
+      new DGError(
+        "E-VALIDATOR-CIRCULAR-DEP",
+        `E-VALIDATOR-CIRCULAR-DEP: Circular dependency detected among ` +
+          `validator predicate args: ${chain}. ` +
+          `Each cell's validator references a cell whose validator eventually ` +
+          `references back to the first — break the cycle (SPEC §55.11).`,
+        compoundValidatorSpans.get(compoundValidatorCycle[0]) ??
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
   // E-VALIDATOR-CIRCULAR-DEP: per §55.11 line 24631, "the validator-dep
   // graph is a DAG; cycles are forbidden". Like E-DERIVED-CIRCULAR-DEP,
   // this is a hard error that should fail-fast before the derived-cycle
   // scan to give clean diagnostics.
-  if (selfReferencingValidatorNodes.size > 0 || validatorCycle) {
+  if (
+    selfReferencingValidatorNodes.size > 0 ||
+    validatorCycle ||
+    compoundValidatorSelfRefs.size > 0 ||
+    compoundValidatorCycle
+  ) {
     return _finalizeDG();
   }
 

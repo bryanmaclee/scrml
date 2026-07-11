@@ -1,0 +1,12 @@
+{
+  "id": "forms-compound-validator-circular-dep",
+  "description": "§55.11 — two COMPOUND-CHILD cells whose cross-field validators reference each other via member-access (`<a eq(@signup.b)>` / `<b eq(@signup.a)>`) form a circular validator-dep. This fires E-VALIDATOR-CIRCULAR-DEP as a fatal error. Regression guard for D-FORM-3: the top-level bare-ref form (`<a eq(@b)>`+`<b eq(@a)>`) already fired, but the COMPOUND member-access form compiled clean — compound children have no standalone reactive DG nodes (only the parent `signup` is registered), and the ref `@signup.b` resolves to the qualified child key `signup.b`, which the global node-id edge builder could not reach.",
+  "language-version": "1.0",
+  "spec": "§55.11, §31.4",
+  "rationale": "§55.11 line 24631: the validator-dep graph is a DAG; cycles are forbidden. The compound cross-field form `eq(@signup.b)` is the canonical §55.11 cross-field predicate — it must be scanned for cycles exactly like the bare-ref form. The fix keys compound-child cells by their fully-qualified path (`signup.a`, `signup.b`) and resolves member-access refs to the same key, so the 2-cell cycle is detected. E-VALIDATOR-CIRCULAR-DEP is fatal (§34) — the cyclic validator wiring never reaches codegen.",
+  "expect": {
+    "codes": ["E-VALIDATOR-CIRCULAR-DEP"],
+    "notCodes": [],
+    "severity": { "E-VALIDATOR-CIRCULAR-DEP": "error" }
+  }
+}

@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <a req eq(@signup.b)> = <input id="a" type="password"/>
+        <b req eq(@signup.a)> = <input id="b" type="password"/>
+    </>
+}
+<signup><a/><b/></>
+</program>
