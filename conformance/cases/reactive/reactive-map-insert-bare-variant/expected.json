@@ -1,6 +1,6 @@
 {
   "id": "reactive-map-insert-bare-variant",
-  "description": "§59 / §14.10 (Rx-6) — a bare `.Variant` in the VALUE position of a map method on a REACTIVE map cell resolves against the map's declared value type. `<m>: [string:Color]` then `@m = @m.insert(\"a\", .Red)` and `@m.getOr(\"a\", .Blue)` must compile CLEAN — before the fix the reactive-cell-map path lost the map's value-type context for bare-variant inference and false-fired E-VARIANT-AMBIGUOUS on `.Red` / `.Blue`. (The non-reactive LOCAL map read path was already clean; the real repro is the reactive-map value arg.) A qualified `Color.Red` and a typo (`.Rd` → E-TYPE-063) both behave correctly.",
+  "description": "§59 / §14.10 (Rx-6) — a bare `.Variant` in the VALUE position of a map method on a REACTIVE map cell resolves against the map's declared value type. `<m>: [string:Color]` then `@m = @m.insert(\"a\", .Red)` and `@m.getOr(\"a\", .Blue)` must compile CLEAN — before the fix the reactive-cell-map path lost the map's value-type context (the `mapType.value` threading) for bare-variant inference and false-fired E-VARIANT-AMBIGUOUS on `.Red` / `.Blue`. (The non-reactive LOCAL map read path was already clean; the real repro is the reactive-map value arg.) SCOPE: this case exercises ONLY the valid bare-variant path; a value typo (e.g. `.Rd`) is NOT tested here — at the markup event-handler locus that path is fail-open today, so no E-TYPE-063 claim is made.",
   "language-version": "1.0",
   "source-test": "compiler/SPEC.md §59.2 / §59.4 / §14.10",
   "spec": "§59.4",

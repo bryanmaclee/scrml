@@ -1,9 +1,9 @@
 {
   "id": "reactive-derived-circular-dep-self",
-  "description": "§6.6.10 — a V5-strict derived cell whose initializer reads its own value (`const <counter> = @counter + @seed`) is the degenerate 1-cycle self-reference. This fires E-DERIVED-CIRCULAR-DEP as a fatal error and blocks codegen. Regression guard for Rx-1: the V5-strict `const <x> = expr` form (structuralForm:true) was previously routed through the plain-state collector, so its self-referencing dep was never detected and the self-cycle compiled clean in the real pipeline.",
+  "description": "§6.6.10 — a V5-strict derived cell whose initializer reads its own value (`const <counter> = @counter + @seed`) is the degenerate 1-cycle self-reference. This fires E-DERIVED-CIRCULAR-DEP as a fatal error → the CLI exits non-zero (exit 1), failing the build at the deploy gate (codegen still runs and writes the self-cyclic JS to `dist/*.client.js` per the uniform CLI write-on-error contract; the non-zero exit is the protection). Regression guard for Rx-1: the V5-strict `const <x> = expr` form (structuralForm:true) was previously routed through the plain-state collector, so its self-referencing dep was never detected and the self-cycle compiled clean in the real pipeline.",
   "language-version": "1.0",
   "spec": "§6.6.10, §31.5",
-  "rationale": "§6.6.10 line 2712: a derived cell cannot depend on its own value — the degenerate 1-cycle self-reference is forbidden because it forms an infinite recompute loop. The V5-strict `const <x> = expr` form is a derived cell and must be scanned for self-reference exactly like the legacy `@`-form. E-DERIVED-CIRCULAR-DEP is fatal (§34), so the self-cyclic derived cell never reaches codegen output.",
+  "rationale": "§6.6.10 line 2712: a derived cell cannot depend on its own value — the degenerate 1-cycle self-reference is forbidden because it forms an infinite recompute loop. The V5-strict `const <x> = expr` form is a derived cell and must be scanned for self-reference exactly like the legacy `@`-form. E-DERIVED-CIRCULAR-DEP is fatal (§34) → the build exits non-zero (exit 1) and fails at the deploy gate. (The self-cyclic JS is still written to `dist/*.client.js` per the uniform CLI write-on-error contract; the non-zero exit — not artifact-withholding — is the protection.)",
   "expect": {
     "codes": ["E-DERIVED-CIRCULAR-DEP"],
     "notCodes": [],
