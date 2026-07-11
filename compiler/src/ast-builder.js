@@ -9099,6 +9099,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const startTok = consume(); // consume IDENT (the name)
         const name = startTok.text;
         consume(); // consume `=`
+        // D-SFN-2 (wave-2 verify-harden) — bare-identifier SQL init:
+        // `result = ?{...}` / `rows = ?{...}.all()` in a function body. Every
+        // OTHER decl form (let at ~7550, const at ~7656, the legacy @-forms at
+        // ~7712/7738/7820/7883, top-level at ~11347/11519) routes an inline
+        // `?{}` RHS through tryConsumeSqlInit → a structured `sqlNode`
+        // (init: ""). The bare-assignment (tilde-decl) form was the lone gap:
+        // collectExpr captured the raw `?{...}` text, safeParseExprToNode
+        // produced an unresolved sql-ref ExprNode (nodeId: -1), and emit-logic's
+        // tilde-decl arm rendered the self-flagged
+        //   `const result = null /* sql-ref unresolved: nodeId=-1 —
+        //    upstream parser/AST bug, please report */`
+        // sentinel with NO diagnostic (fail-silent). Emit the SAME
+        // `const-decl`+`sqlNode` shape the `const <name> = ?{}` path produces
+        // (line ~7656) so the two forms are AST-identical and flow through
+        // emit-logic's already-tested const-decl sqlNode arm
+        // (emit-logic.ts:1907 → `const result = await _scrml_sql\`…\``). This
+        // matches the const behavior (RESOLVE, not reject) and preserves the
+        // emit-logic invariant that `?{}` reaches codegen only on let/const-kind
+        // decl nodes, never on a bare tilde-decl (emit-logic.ts:1902-1906).
+        const _sqlInitTilde = tryConsumeSqlInit();
+        if (_sqlInitTilde) {
+          return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitTilde, span: spanOf(startTok, peek()) };
+        }
         const { expr, span } = collectExpr();
         return { id: ++counter.next, kind: "tilde-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) };
       }
