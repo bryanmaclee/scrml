@@ -1,0 +1,12 @@
+{
+  "id": "match-block-member-access-subset-dead-arm",
+  "description": "§18.8.1 / §53.15 — a match over a MEMBER-ACCESS subject whose declared field type is an enum-subset refinement (role: Role oneOf([.Admin, .Editor])). A .Viewer arm names a variant the subset excludes, so it is a dead arm — E-MATCH-SUBSET-DEAD-ARM. Regression guard: because resolveMatchSubjectType did not resolve member expressions, the subset refinement carried on the struct field was never consulted and the dead arm compiled clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.1",
+  "rationale": "§18.8.1 SF-1: a concrete dead variant arm (a .Viewer arm over a oneOf([.Admin,.Editor])-typed value) names an IMPOSSIBLE case and SHALL be E-MATCH-SUBSET-DEAD-ARM. A member-access subject resolves to the field's declared subset-refined type, so the subset variant set drives the dead-arm check exactly as for a bound-local subject.",
+  "expect": {
+    "codes": ["E-MATCH-SUBSET-DEAD-ARM"],
+    "notCodes": []
+  }
+}

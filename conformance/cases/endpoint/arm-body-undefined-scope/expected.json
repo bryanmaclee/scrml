@@ -1,0 +1,12 @@
+{
+  "id": "endpoint-arm-body-undefined-scope",
+  "description": "§61.1 — an <endpoint> arm body that references an undefined identifier (<Ping : { ok: true, val: nonexistentVar }>) SHALL fire E-SCOPE-001, exactly as the same undefined var does in a normal logic expression. Regression guard: the arm body was lowered from a raw string by emit-server and never scope-checked, so nonexistentVar compiled clean and emitted a FREE variable into the server route-handler (runtime ReferenceError) — a fail-open that contradicts §61.1's inbound-honesty guarantee. The valid <Dispatch(prompt)> arm (payload binding) stays clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "spec": "§61.1",
+  "rationale": "§61.1: because scrml owns the inbound decode + dispatch, an <endpoint> arm body is compiler-owned honest code — an undeclared identifier is a hole the compiler can see, so it SHALL be loud at compile time (E-SCOPE-001), not a silent runtime ReferenceError. The arm's own positional payload bindings (prompt) and module fns / globals remain in scope.",
+  "expect": {
+    "codes": ["E-SCOPE-001"],
+    "notCodes": []
+  }
+}

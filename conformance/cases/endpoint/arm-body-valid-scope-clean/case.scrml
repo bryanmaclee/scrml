@@ -1,0 +1,15 @@
+<program>
+
+type M:enum = {
+  Ping
+  Dispatch(prompt: string, project: string)
+}
+
+fn handleDispatch(p: string, q: string) -> string { p }
+
+<endpoint path="/x" method="POST" accepts=M>
+  <Ping : { ok: true }>
+  <Dispatch(prompt, project) : { echo: handleDispatch(prompt, project) }>
+</endpoint>
+
+</program>

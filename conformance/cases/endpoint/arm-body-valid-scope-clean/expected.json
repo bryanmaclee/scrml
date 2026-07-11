@@ -1,0 +1,12 @@
+{
+  "id": "endpoint-arm-body-valid-scope-clean",
+  "description": "§61.1 — an <endpoint> whose arm bodies reference ONLY in-scope names (the arm's positional payload bindings prompt/project + a module fn handleDispatch + literals) SHALL compile clean: no E-SCOPE-001. The acceptance sibling of endpoint-arm-body-undefined-scope — proves the arm-body scope check binds payload bindings + module declarations correctly rather than over-firing.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/endpoint-decl-typer.test.js",
+  "spec": "§61.1",
+  "rationale": "§61.1 / §61.2: an arm body may reference its own destructured payload bindings (§51.0.B.1) plus any module-level declaration (fns, imports) and globals. handleDispatch(prompt, project) resolves the module fn + both payload bindings, so no undeclared-identifier diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"]
+  }
+}

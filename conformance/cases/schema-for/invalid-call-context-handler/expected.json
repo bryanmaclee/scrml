@@ -1,0 +1,12 @@
+{
+  "id": "schema-for-invalid-call-context-handler",
+  "description": "§41.15.8 — schemaFor(User) called in an EVENT-HANDLER interpolation position (a <button onclick=${ schemaFor(User) }>). This is 'any other markup context' outside a <schema> block, so it SHALL fire E-SCHEMAFOR-INVALID-CALL-CONTEXT. Regression guard: the invalid-context walker (Pass B) previously never reached event-handler expression nodes, so the call compiled clean and leaked a runtime schemaFor() call (compile-only; throws at runtime) into client.js.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-for.test.js",
+  "spec": "§41.15",
+  "rationale": "§41.15.8 normative statement: schemaFor(...) calls outside a <schema> block — including inside any other markup context — SHALL emit E-SCHEMAFOR-INVALID-CALL-CONTEXT. The function-call form is canonical INSIDE <schema> blocks only (its output is a table-declaration fragment that requires the <schema> parser context). An event-handler interpolation is one such invalid markup context. Resolution: wrap the call inside a <schema>${ schemaFor(...) }</> block.",
+  "expect": {
+    "codes": ["E-SCHEMAFOR-INVALID-CALL-CONTEXT"],
+    "notCodes": []
+  }
+}

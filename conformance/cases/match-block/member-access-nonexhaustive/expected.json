@@ -1,0 +1,12 @@
+{
+  "id": "match-block-member-access-nonexhaustive",
+  "description": "§18.8.1 — a match over a MEMBER-ACCESS subject (`match p.role` where role: Role over Role = { Admin, Editor, Viewer }) with only a .Admin arm is non-exhaustive and SHALL fire E-TYPE-020 naming the missing variants. Regression guard: resolveMatchSubjectType previously resolved only bare-identifier headers, never member expressions, so `match p.role` skipped exhaustiveness entirely and compiled clean — silently defeating the §18.8 guarantee and contradicting SPEC's own `match p.role` flagship example at §18.8.1.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.1",
+  "rationale": "§18.8.1: a match over an enum type SHALL be exhaustive; a non-exhaustive match SHALL be a compile error (E-TYPE-020) listing the missing variant names. A member-access subject resolves to the member's declared field type (Role), so the same exhaustiveness check runs as for a bound-local or ident subject. Missing: Editor, Viewer.",
+  "expect": {
+    "codes": ["E-TYPE-020"],
+    "notCodes": []
+  }
+}
