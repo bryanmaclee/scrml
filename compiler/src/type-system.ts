@@ -10959,7 +10959,7 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "match-stmt":
       case "match-expr": {
-        checkMatchDiagnostics(n, scopeChain, errors, filePath);
+        checkMatchDiagnostics(n, scopeChain, errors, filePath, fnCanFail, fnErrorTypes, typeRegistry);
         // §2a — E-SCOPE-001 on an undeclared subject ident (e.g.
         // `match undeclaredSubj { ... }`). checkMatchDiagnostics already
         // resolves the subject for type lookup but doesn't emit a scope
@@ -15309,11 +15309,64 @@ function givenArrowLegacyMessage(vars: string): string {
   );
 }
 
+/**
+ * §19.7.1/.3 — resolve a `match`-over-failable-call scrutinee to its implicit
+ * result union `::Ok | <declared-error-variants>`. In logic context, matching
+ * the result of a `!` function call MUST exhaustively cover the success case
+ * (`::Ok`) AND every declared error variant (§19.7.1); a missing variant fires
+ * E-TYPE-020. The scrutinee is a bare CALL expr (never a bound ident), so
+ * `resolveMatchSubjectType` returns null for it — this lifts the call to a
+ * synthetic enum whose variant set drives the SAME §18.8 exhaustiveness checker
+ * the plain-enum path uses. Returns null when the scrutinee is not a call to a
+ * known failable fn with a declared, enum-resolved error type (leaving the
+ * pre-existing null-subject early return untouched).
+ */
+function resolveFailableCallResultType(
+  header: string | undefined,
+  headerExpr: unknown,
+  fnCanFail: Set<string>,
+  fnErrorTypes: Map<string, string>,
+  typeRegistry: Map<string, ResolvedType>,
+): EnumType | null {
+  // Extract the callee name — ExprNode CallExpr first, header-string fallback
+  // (mirrors the `!{}`-handler callee extraction, ~line 10572).
+  let calleeName: string | null = null;
+  if (headerExpr && typeof headerExpr === "object") {
+    const e = headerExpr as { kind?: string; callee?: { kind?: string; name?: string } };
+    if (e.kind === "call" && e.callee && e.callee.kind === "ident" && typeof e.callee.name === "string") {
+      calleeName = e.callee.name;
+    }
+  }
+  if (!calleeName && typeof header === "string") {
+    const m = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(header);
+    if (m) calleeName = m[1];
+  }
+  if (!calleeName || !fnCanFail.has(calleeName)) return null;
+  const errorTypeName = fnErrorTypes.get(calleeName);
+  if (!errorTypeName) return null;
+  const errEnum = typeRegistry.get(errorTypeName);
+  if (!errEnum || errEnum.kind !== "enum") return null;
+  const errVariants = (errEnum as EnumType).variants ?? [];
+  // Synthetic result union: the implicit `::Ok` success variant + the declared
+  // error variants. The checker reads only variant NAMES for exhaustiveness, so
+  // the `::Ok` payload shape is immaterial here.
+  const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
+  return {
+    kind: "enum",
+    name: errorTypeName,
+    variants: [okVariant, ...errVariants],
+    transitionRules: null,
+  };
+}
+
 function checkMatchDiagnostics(
   node: ASTNodeLike,
   scopeChain: ScopeChain,
   errors: TSError[],
   filePath: string,
+  fnCanFail: Set<string>,
+  fnErrorTypes: Map<string, string>,
+  typeRegistry: Map<string, ResolvedType>,
 ): void {
   const span = (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   const extracted = extractArmsFromMatchNode(node);
@@ -15482,9 +15535,34 @@ function checkMatchDiagnostics(
     scopeChain,
   );
 
-  if (!subjectType) return;
-
   const isPartial = (node as { partial?: boolean }).partial === true;
+
+  if (!subjectType) {
+    // §19.7.1/.3 — a `match` over a failable-call result. The scrutinee is a
+    // bare CALL (never a bound ident), so `resolveMatchSubjectType` yields null;
+    // lift it to the implicit `::Ok | <error-variants>` union and run the SAME
+    // §18.8 exhaustiveness checker the plain-enum path uses (a missing `::Ok` or
+    // error variant → E-TYPE-020). A `_`/`else` wildcard still satisfies
+    // coverage (§19.7.3). Non-failable / untyped-error scrutinees resolve to
+    // null and fall through to the pre-existing no-op early return.
+    const failableResult = resolveFailableCallResultType(
+      (node as { header?: string }).header,
+      (node as { headerExpr?: unknown }).headerExpr,
+      fnCanFail,
+      fnErrorTypes,
+      typeRegistry,
+    );
+    if (failableResult) {
+      checkExhaustiveness(
+        { arms: extracted.armPatterns } as unknown as ASTNodeLike,
+        failableResult,
+        span,
+        errors,
+        isPartial,
+      );
+    }
+    return;
+  }
 
   if (subjectType.kind === "struct") {
     errors.push(new TSError(

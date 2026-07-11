@@ -1,0 +1,13 @@
+{
+  "id": "error-failable-match-nonexhaustive-err",
+  "description": "§19.7.1/.3 — a logic-context `match` over a failable-call result (`loadThing(id)! LoadError`) MUST exhaustively cover the implicit `::Ok` success variant AND every declared error variant. This match covers `::Ok` and `::NotFound` but OMITS `::Timeout`, so exhaustiveness (§18.8) fires E-TYPE-020. Before the D-ERR-1 fix the failable-call scrutinee was never lifted to the `::Ok | <errors>` union, so the missing error variant fell through silently.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.7.1 / §19.7.3 / §18.8",
+  "spec": "§19.7.1",
+  "rationale": "§19.7.1: matching the result of a `!` function call follows the existing exhaustive matching rules (§18.8); all variants — both success and error — MUST be covered. Missing an error variant SHALL trigger E-TYPE-020.",
+  "expect": {
+    "codes": ["E-TYPE-020"],
+    "notCodes": [],
+    "severity": { "E-TYPE-020": "error" }
+  }
+}

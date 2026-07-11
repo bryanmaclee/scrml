@@ -299,12 +299,19 @@ describe("errarm-refail §8: emitted JS parses (node --check equivalent)", () =>
     {
       name: "match value-arm",
       base: "parse-match",
+      // §19.7.1 — a logic-context `match` over a failable-call result MUST cover
+      // the implicit `::Ok` success variant AND every declared error variant
+      // (the D-ERR-1 exhaustiveness lift). The `::Ok(res) :> res` arm is the
+      // §19.5.2 desugaring's success arm; the value-arm codegen intent (a `:> fail …`
+      // arm value lowering to a fail-expr, not literal `fail`) is exercised by the
+      // ::X / ::Y arms.
       src: [
         "type BErr:enum = { X(reason: string), Y }",
         "type AErr:enum = { Wrapped(reason: string) }",
         "function inner()! -> BErr { fail BErr::X(\"boom\") }",
         "function outer()! -> AErr {",
         "    const v = match inner() {",
+        "        ::Ok(res)    :> res",
         "        ::X(reason)  :> fail AErr::Wrapped(reason)",
         "        ::Y          :> fail AErr::Wrapped(\"y\")",
         "    }",
