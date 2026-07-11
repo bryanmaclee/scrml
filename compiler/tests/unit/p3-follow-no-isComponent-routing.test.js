@@ -131,6 +131,15 @@ const ALLOWED = {
   // `isComponent` field appears in the TYPE ANNOTATION only; routing reads
   // here are on `kind === "function"|"fn"` and `isAsync === true`.
   "codegen/emit-logic.ts": 1,      // type-signature mention only (asyncExportRegistry)
+  // Issue #26 (P0 auth-bypass) — SERVER-mode stdlib auto-await classifier. The
+  // exportRegistry value shape `{kind, category, isComponent, isAsync?}` appears
+  // in TYPE ANNOTATIONS ONLY (EmitExprContext.asyncExportRegistry field + the
+  // file-scoped `_serverAsyncClassifier` type + `setServerAsyncClassifier` param;
+  // emit-server's new `exportRegistryLegacy` param). Routing reads are on
+  // `kind ∈ {function, fn}` and `isAsync === true` (isPromiseReturningStdlibFn),
+  // NEVER on `.isComponent`.
+  "codegen/emit-expr.ts": 3,       // type-signature mentions only (async classifier)
+  "codegen/emit-server.ts": 1,     // type-signature mention only (exportRegistryLegacy param)
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 
