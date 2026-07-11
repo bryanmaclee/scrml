@@ -1,0 +1,20 @@
+${
+    type InnerError:enum = {
+        Alpha
+        Beta
+    }
+    type OuterError:enum = {
+        Gamma
+    }
+
+    function inner(x: int)! InnerError {
+        given x < 0 :> fail InnerError.Alpha
+        return 1
+    }
+
+    function outer(x: int)! OuterError {
+        const v = inner(x)?
+        return v
+    }
+}
+<p>z</>

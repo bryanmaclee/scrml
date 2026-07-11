@@ -54,6 +54,7 @@
  *   E-ERROR-003  ? propagation used in non-! function
  *   E-ERROR-004  ? applied to non-! function call (callee is known non-failable)
  *   E-ERROR-008  User-defined error type declares reserved field 'message' or 'type'
+ *   E-ERROR-010  ? propagates callee error variant(s) absent from the enclosing fn's error type (§19.5.3/.4)
  *   E-CONTRACT-001  §53 Inline predicate constraint violated at compile time
  *   E-CONTRACT-002  §53 Named shape not found in registry
  *   E-CONTRACT-003  §53 Predicate references external reactive variable
@@ -9146,6 +9147,11 @@ function annotateNodes(
               ));
             }
             // E-ERROR-004: ? applied to non-failable callee (§19.5.4)
+            // E-ERROR-010: ? propagates a failable callee's error variants into
+            //   the enclosing fn's error envelope, but one or more of those
+            //   variants is absent from the enclosing fn's declared error type
+            //   (§19.5.3/.4). A callee is EITHER non-failable (E-ERROR-004) OR
+            //   failable-but-incompatible (E-ERROR-010) — never both.
             if (k === "propagate-expr" && canFail) {
               const calleeName = extractCalleeNameFromNode(stmt) ?? extractCalleeNameFromString(
                 stmt.exprNode ? emitStringFromTree(stmt.exprNode as import("./types/ast.ts").ExprNode) : (stmt.expr as string | undefined)
@@ -9157,6 +9163,56 @@ function annotateNodes(
                   `Only '!' functions can be propagated with '?'.`,
                   (stmt.span ?? n.span) as Span,
                 ));
+              } else if (calleeName && fnCanFail.has(calleeName)) {
+                // D-ERR-2 (§19.5.3/.4) — `?` error-type compatibility. `?`
+                // re-raises the callee's error variants into the ENCLOSING fn's
+                // error envelope (the §19.5.2 `fail EnclosingErrorType::Variant`
+                // desugaring), so every variant the callee can produce MUST
+                // exist in the enclosing fn's declared error type, else `?`
+                // would silently drop error information (§19.5.3). Compatibility
+                // is by variant NAME (payload-arity compat is a distinct, deeper
+                // check, out of scope here). NOTE: the SPEC's original naming
+                // reuses E-TYPE-001; that code is already load-bearing for the
+                // §14.3/§18.4 lifecycle double-assignment guard, so per the PA
+                // ruling this mints a dedicated code.
+                const calleeErrTypeName = fnErrorTypes.get(calleeName);
+                const enclosingErrTypeName = ((n as Record<string, unknown>).errorType as string) || "Error";
+                if (calleeErrTypeName && calleeErrTypeName !== enclosingErrTypeName) {
+                  // Resolve the callee's error-variant set.
+                  const calleeEnum = typeRegistry.get(calleeErrTypeName);
+                  // Resolve the enclosing fn's declared error-variant set (the
+                  // built-in `Error` default → its sole `Generic` variant, §19.4.2).
+                  let enclosingVariants: Set<string> | null = null;
+                  if (enclosingErrTypeName === "Error") {
+                    enclosingVariants = new Set(["Generic"]);
+                  } else {
+                    const enclosingEnum = typeRegistry.get(enclosingErrTypeName);
+                    if (enclosingEnum && enclosingEnum.kind === "enum") {
+                      enclosingVariants = new Set((enclosingEnum as EnumType).variants.map((v) => v.name));
+                    }
+                  }
+                  // Only enforce when BOTH types resolved to a variant set —
+                  // an unresolved type name is a different diagnostic's concern.
+                  if (calleeEnum && calleeEnum.kind === "enum" && enclosingVariants !== null) {
+                    const incompatible = (calleeEnum as EnumType).variants
+                      .map((v) => v.name)
+                      .filter((name) => !enclosingVariants!.has(name));
+                    if (incompatible.length > 0) {
+                      const variantList = incompatible.map((v) => `'${calleeErrTypeName}.${v}'`).join(", ");
+                      errors.push(new TSError(
+                        "E-ERROR-010",
+                        `E-ERROR-010: '?' in function '${fnName}' propagates error variant(s) ${variantList} ` +
+                        `from '${calleeName}', but the enclosing function's declared error type ` +
+                        `'${enclosingErrTypeName}' does not declare ${incompatible.length === 1 ? "it" : "them"}. ` +
+                        `'?' propagation requires every error variant the called function can produce to exist ` +
+                        `in the enclosing function's error type (§19.5.3), so error information is never silently ` +
+                        `dropped. Add the missing variant(s) to '${enclosingErrTypeName}', or handle '${calleeName}' ` +
+                        `explicitly with 'match' or '!{}'.`,
+                        (stmt.span ?? n.span) as Span,
+                      ));
+                    }
+                  }
+                }
               }
             }
             // E-ERROR-002: bare call to failable function with no error handling (§19.4.3)
