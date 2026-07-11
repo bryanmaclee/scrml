@@ -1,0 +1,17 @@
+<page auth="optional">
+  <db src="./app.db" protect="password_hash" tables="users">
+    ${
+      import { verifyPassword } from 'scrml:auth'
+
+      function loginServer(emailArg, passwordArg) {
+        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all()
+        const any = rows.some(h => verifyPassword(passwordArg, h.password_hash))
+        if (!any) { return { error: "bad" } }
+        return { ok: true }
+      }
+
+      function noop() { return }
+    }
+    <form onsubmit=noop()><button type="submit">x</button></form>
+  </>
+</page>

@@ -1382,38 +1382,98 @@ export function compileScrml(options = {}) {
       }
     }
     if (stdlibPaths.size === 0) return null;
+
+    // TAB-only parse cache — a stdlib file (and any re-export source it points
+    // at) is parsed at most once per compile. Returns the file's export-decl
+    // array, or null on missing-file / parse-failure (errors swallowed — this
+    // is a best-effort registry-seed pass, not a diagnostic surface).
+    const _seedParseCache = new Map();
+    function _parseStdlibExports(absPath) {
+      if (_seedParseCache.has(absPath)) return _seedParseCache.get(absPath);
+      let out = null;
+      if (existsSync(absPath)) {
+        try {
+          const src = readFileSync(absPath, "utf8");
+          const bsOut = splitBlocks(absPath, src);
+          const tabResult = buildAST(bsOut);
+          if (tabResult && tabResult.ast) out = tabResult.ast.exports || [];
+        } catch {
+          out = null;
+        }
+      }
+      _seedParseCache.set(absPath, out);
+      return out;
+    }
+
+    // Issue #26 (P0 auth-bypass) — resolve a re-export chain to its TERMINAL
+    // {kind, isAsync}. `scrml:auth` (index.scrml) re-exports the password/JWT
+    // surfaces via `export { verifyPassword, hashPassword } from './password.scrml'`.
+    // Pre-fix, the seed recorded such a name as an opaque `kind: "re-export"`
+    // entry with NO `isAsync`, so `isPromiseReturningStdlibFn` (which demands
+    // `kind` ∈ {function, fn} AND `isAsync === true`) mis-classified it as sync.
+    // The compiler then left the `async` call UNAWAITED in server-fn bodies —
+    // a truthy `Promise` accepted every password (auth bypass) and a
+    // `${hashPassword(...)}` INSERT stored a stringified Promise. Chasing the
+    // `reExportSource` (honoring `renames` for `export { x as y }`) recovers the
+    // real function kind + async modifier declared at the source. Depth-capped
+    // so a pathological / cyclic re-export chain cannot loop.
+    function _resolveStdlibExport(absPath, localName, depth) {
+      if (depth > 8) return null;
+      const exports = _parseStdlibExports(absPath);
+      if (!exports) return null;
+      for (const exp of exports) {
+        if (!exp.exportedName) continue;
+        if (exp.exportKind === "re-export" && exp.reExportSource) {
+          // Match the requested name against this re-export's exported names,
+          // resolving `as`-renames to the SOURCE local name.
+          let sourceLocal = null;
+          if (Array.isArray(exp.renames)) {
+            const hit = exp.renames.find(r => r && r.exported === localName);
+            if (hit) sourceLocal = hit.local ?? hit.exported;
+          } else {
+            const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
+            if (namesList.includes(localName)) sourceLocal = localName;
+          }
+          if (sourceLocal == null) continue;
+          const srcAbs = resolve(dirname(absPath), exp.reExportSource);
+          return _resolveStdlibExport(srcAbs, sourceLocal, depth + 1);
+        }
+        const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
+        if (namesList.includes(localName)) {
+          return { kind: exp.exportKind || "unknown", isAsync: !!exp.isAsync };
+        }
+      }
+      return null;
+    }
+
     for (const absPath of stdlibPaths) {
       if (moduleResult.exportRegistry.has(absPath)) continue; // already seeded (re-export inheritance)
-      if (!existsSync(absPath)) continue;
-      let src;
-      try {
-        src = readFileSync(absPath, "utf8");
-      } catch {
-        continue;
-      }
-      // TAB pass: BS + buildAST. Errors swallowed — this is a registry-seed pass.
-      let bsOut;
-      try {
-        bsOut = splitBlocks(absPath, src);
-      } catch {
-        continue;
-      }
-      let tabResult;
-      try {
-        tabResult = buildAST(bsOut);
-      } catch {
-        continue;
-      }
-      if (!tabResult || !tabResult.ast) continue;
+      const astExports = _parseStdlibExports(absPath);
+      if (!astExports) continue;
       // Build the per-name value map from the stdlib file's exports.
       const names = new Map();
-      const astExports = tabResult.ast.exports || [];
       for (const exp of astExports) {
         if (!exp.exportedName) continue;
         // Handle comma-separated names per the buildImportGraph convention.
         const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
         for (const name of namesList) {
-          const kind = exp.exportKind || "unknown";
+          let kind = exp.exportKind || "unknown";
+          let isAsync = !!exp.isAsync;
+          // Re-export: chase the source module for the terminal kind + async
+          // modifier so the auto-await classifier sees through it (Issue #26).
+          if (exp.exportKind === "re-export" && exp.reExportSource) {
+            let sourceLocal = name;
+            if (Array.isArray(exp.renames)) {
+              const hit = exp.renames.find(r => r && r.exported === name);
+              if (hit) sourceLocal = hit.local ?? hit.exported;
+            }
+            const srcAbs = resolve(dirname(absPath), exp.reExportSource);
+            const resolved = _resolveStdlibExport(srcAbs, sourceLocal, 1);
+            if (resolved) {
+              kind = resolved.kind;
+              isAsync = resolved.isAsync;
+            }
+          }
           let category;
           if (kind === "channel") category = "channel";
           else if (kind === "type") category = "type";
@@ -1426,7 +1486,7 @@ export function compileScrml(options = {}) {
             kind,
             category,
             isComponent,
-            ...(exp.isAsync ? { isAsync: true } : {}),
+            ...(isAsync ? { isAsync: true } : {}),
           });
         }
       }

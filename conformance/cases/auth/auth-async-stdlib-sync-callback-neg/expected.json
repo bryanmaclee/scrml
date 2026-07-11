@@ -1,0 +1,12 @@
+{
+  "id": "auth-async-stdlib-sync-callback-neg",
+  "description": "Issue #26 Finding-2 (S239 adversarial review) FAIL-CLOSED. A Promise-returning stdlib call (scrml:auth verifyPassword) inside a SYNC `.some` callback of a server function cannot be auto-awaited (`await` is illegal in a sync callback). scrml has no source `await` (§13.1), so a BARE emission returns an unawaited Promise — always truthy → `rows.some(h => verifyPassword(pw, h.password_hash))` accepts EVERY password (an accept-all auth bypass). The compiler fails closed with E-ASYNC-STDLIB-IN-SYNC-CALLBACK instead of silently shipping the leak. Pre-fix this compiled with ZERO diagnostics (the #26 fix routed stdlib-async through the awaitable-position machinery but gated the await off in non-awaitable positions without a diagnostic).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/issue-26-finding2-async-stdlib-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2 Compiler-Managed Asynchrony: the compiler SHALL insert `await` at every server call site where a Promise-returning call is made. Where `await` cannot be inserted (a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default), a Promise-returning stdlib call cannot be auto-awaited and a bare emission is an accept-all security leak. §49 no-silent-bad-output requires a fail-closed hard error (E-ASYNC-STDLIB-IN-SYNC-CALLBACK, §34) — the async-stdlib sibling of the peer-server-fn E-SERVER-FN-IN-SYNC-CALLBACK. Resolution: restructure so the call runs in the server function's async body (e.g. a `for` loop).",
+  "expect": {
+    "codes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "notCodes": []
+  }
+}

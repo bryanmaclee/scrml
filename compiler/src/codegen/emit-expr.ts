@@ -46,6 +46,10 @@ import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { resolveLogLoc } from "./log-loc.ts";
+// Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
+// expression-level auto-await in emitCall. module-resolver.js imports only node
+// builtins (no codegen), so this is cycle-free.
+import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -422,6 +426,27 @@ export interface EmitExprContext {
    * Threaded from `EmitLogicOpts.syncPeerCalls` via `_makeExprCtx`.
    */
   syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
+  /**
+   * Issue #26 (P0 auth-bypass) — per-file `callee → sourceModuleAbsPath` map
+   * (built once via `buildCalleeImportMap`) used to auto-await a statically-
+   * known Promise-returning stdlib import call in SERVER-mode emission. scrml
+   * has no `async`/`await` source surface (compiler-managed CPS), so an
+   * unawaited `verifyPassword(...)` / `hashPassword(...)` leaks a truthy
+   * `Promise` — a `const ok = verifyPassword(...)` predicate accepts every
+   * password (auth bypass), and a `${hashPassword(...)}` INSERT stores a
+   * stringified Promise. When BOTH this and `asyncExportRegistry` are present
+   * and the callee resolves to a stdlib `isAsync` export (Q5 carve-out,
+   * §13.2.1), `emitCall` wraps the call in `await` — the same treatment `?{}`
+   * SQL gets — in every awaitable position. NULL → no classifier threaded
+   * (client-mode contexts and test harnesses): the branch short-circuits.
+   */
+  asyncCalleeMap?: Map<string, string> | null;
+  /**
+   * Issue #26 — MOD `exportRegistry` (per-module `isAsync` flags) consulted by
+   * `isPromiseReturningStdlibFn` for the SERVER-mode auto-await above. Paired
+   * with `asyncCalleeMap`; either absent → no expression-level stdlib await.
+   */
+  asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1222,13 +1247,115 @@ function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   );
 }
 
+/**
+ * Issue #26 (P0 auth-bypass) — FILE-SCOPED stdlib async classifier. Set by
+ * emit-server at the top of each `generateServerJs` (per-file, from that file's
+ * import graph + the MOD exportRegistry). It is the robustness backbone of the
+ * SERVER-mode auto-await: the ctx-threaded `asyncCalleeMap`/`asyncExportRegistry`
+ * cover the DIRECT decl / bare-expr opts paths, but scrml has MANY expression
+ * emit boundaries (if/while/for/match conditions, the SQL `?{}` interpolation
+ * text path, nested lambdas) that reconstruct a FRESH `EmitExprContext` and drop
+ * threaded fields. A security fix must not depend on threading being complete
+ * across every one of those boundaries — a single missed site re-opens the
+ * bypass. This module-level classifier survives every reconstruction, so ANY
+ * server-mode structured-emit call site consults the same source of truth.
+ * OVERWRITTEN at the top of every `generateServerJs` (per file — so it never
+ * carries a prior file's map into the next), and only ever consulted under
+ * `mode === "server"` (client emission is gated out at the call site regardless).
+ */
+let _serverAsyncClassifier:
+  | {
+      calleeMap: Map<string, string>;
+      exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>>;
+      // Issue #26 Finding-2 (S239 adversarial review) — FAIL-CLOSED sink for
+      // async-stdlib calls emitted in a NON-awaitable position (`peerAwaitable
+      // === false` — a sync `.some`/`.find`/`.filter`/`.map` callback body, a
+      // nested lambda, or a parameter default). `await` is illegal there, so the
+      // call cannot be auto-awaited; emitting it BARE ships a truthy Promise (an
+      // accept-all auth bypass — `hashes.some(h => verifyPassword(pw, h))` makes
+      // `if (!any)` never fire). emitCall records each such site here instead of
+      // leaking silently; emit-server drains the sink after body emission and
+      // raises `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` (mirrors the peer-server-fn
+      // `E-SERVER-FN-IN-SYNC-CALLBACK` fail-closed path via `syncPeerCalls`). The
+      // sink lives ON the classifier so its lifetime is exactly the classifier's
+      // per-file scope: emit-server sets the classifier (with a fresh sink array
+      // it retains a reference to) at the top of every `generateServerJs`, so the
+      // sink is present in EVERY server-mode position where detection can fire —
+      // the same robustness backbone the classifier itself provides for the await.
+      syncCallSink?: Array<{ name: string; span: unknown }>;
+    }
+  | null = null;
+
+/**
+ * Issue #26 — install (or clear) the file-scoped stdlib async classifier.
+ * emit-server calls this once per `generateServerJs`. Returns the PREVIOUS
+ * value so the caller can restore it (defensive re-entrancy hygiene).
+ */
+export function setServerAsyncClassifier(
+  c:
+    | {
+        calleeMap: Map<string, string>;
+        exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>>;
+        syncCallSink?: Array<{ name: string; span: unknown }>;
+      }
+    | null,
+): typeof _serverAsyncClassifier {
+  const prev = _serverAsyncClassifier;
+  _serverAsyncClassifier = c;
+  return prev;
+}
+
+/**
+ * Issue #26 (P0 auth-bypass) — does the bare callee `name` resolve to a stdlib
+ * `Promise<T>`-returning export? True iff the classifier (ctx-threaded first,
+ * else the file-scoped module-level one) maps `name` to a source module AND
+ * `isPromiseReturningStdlibFn` confirms that module is under `<repo>/stdlib/`
+ * (Q5 carve-out) and the export carries `isAsync: true`. No classifier present
+ * (client-mode / test harness) → false (short-circuit). Exported so emit-logic's
+ * SQL `?{}` interpolation path can route an async param through the structured
+ * `emitExpr` await instead of the textual rewriter.
+ */
+export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean {
+  const calleeMap = ctx.asyncCalleeMap ?? _serverAsyncClassifier?.calleeMap ?? null;
+  const registry = ctx.asyncExportRegistry ?? _serverAsyncClassifier?.exportRegistry ?? null;
+  if (!calleeMap || !registry) return false;
+  const sourceModule = calleeMap.get(name);
+  if (!sourceModule) return false;
+  return isPromiseReturningStdlibFn(name, sourceModule, registry);
+}
+
+/**
+ * Issue #26 — does this call node lower to an `await <stdlibAsync>(...)` form?
+ * Mirror of `isAwaitedPeerCall` for the stdlib-import surface: SERVER-mode +
+ * an awaitable position (`peerAwaitable !== false`) + an unshadowed ident whose
+ * callee resolves to a stdlib Promise export. Used by `emitReceiver` so an
+ * awaited stdlib call used as a receiver (`(await crypto.hmac(...)).x`) is
+ * paren-wrapped — `await` is an await-expression (unary precedence), looser than
+ * member/index/call, so an unwrapped `await f().field` awaits the wrong thing.
+ */
+function isAwaitedStdlibAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  return (
+    ctx.mode === "server" &&
+    !call.optional &&
+    call.callee.kind === "ident" &&
+    typeof (call.callee as { name?: unknown }).name === "string" &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has((call.callee as { name: string }).name)) &&
+    ctx.peerAwaitable !== false &&
+    isStdlibAsyncCallee((call.callee as { name: string }).name, ctx)
+  );
+}
+
 function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   const s = emitExpr(node, ctx);
   // An awaited peer call (`await peer(...)`) is an await-expression (unary
   // precedence) — looser than member/index/call/new — so as a receiver it MUST
   // be wrapped: `(await peer(...)).field`. receiverNeedsParens treats a plain
   // call as a primary (correct pre-await), so this case needs its own guard.
-  if (isAwaitedPeerCall(node, ctx)) return `(${s})`;
+  // Issue #26 — the awaited stdlib-async call (`await verifyPassword(...)`)
+  // needs the identical wrap for the same precedence reason.
+  if (isAwaitedPeerCall(node, ctx) || isAwaitedStdlibAsyncCall(node, ctx)) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
 
@@ -2334,6 +2461,61 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // false` so emitReceiver can wrap an await form used as a receiver.)
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+
+  // Issue #26 (P0 auth-bypass) — auto-await a statically-known Promise-returning
+  // stdlib import call in SERVER-mode emission. scrml has no `async`/`await`
+  // source surface (compiler-managed CPS), so source cannot force the await; an
+  // unawaited `verifyPassword(...)` / `hashPassword(...)` leaks a truthy Promise.
+  // Symptoms: a `const ok = verifyPassword(...)` predicate makes `if (!ok)` never
+  // fire (every password accepted — auth bypass), and a `${hashPassword(...)}`
+  // INSERT stores a stringified Promise (`[object Promise]`) instead of the
+  // Argon2 digest. Awaiting here — the SAME treatment `?{}` SQL already gets —
+  // covers EVERY shape uniformly: decl init, `if (!verifyPassword(...))`
+  // predicate, `${hashPassword(...)}` SQL interpolation, nested call arg, and a
+  // bare statement. Placed AFTER the sibling-server-fn peer branch (a name is an
+  // import OR a same-file peer, never both) and BEFORE the navigate/render/log
+  // builtin lowerings. Gated on:
+  //   - `mode === "server"` — the surface the security bug lives on; the enclosing
+  //     server-fn body is always emitted inside `await (async () => {...})()`.
+  //   - `isStdlibAsyncCallee` — resolves the callee to a stdlib `isAsync` export
+  //     under `<repo>/stdlib/` (Q5 carve-out). Sync stdlib calls and user-source
+  //     `async function` do NOT match, so `await` is never over-applied.
+  // An `await` on a non-Promise would be a JS no-op anyway, but the classifier
+  // targets exactly the async surfaces so sync emission is byte-identical.
+  //
+  // FAIL-CLOSED (Finding 2, S239 adversarial review) — mirrors the peer branch's
+  // `peerAwaitable === false` handling. Where `await` is NOT syntactically valid
+  // (a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested
+  // lambda, or ANY parameter default — `await` is illegal in a default even in
+  // an async fn), an async-stdlib call CANNOT be auto-awaited. Emitting it BARE
+  // ships a truthy Promise: `hashes.some(h => verifyPassword(pw, h))` returns
+  // `true` for a wrong password (every Promise is truthy) → `if (!any)` never
+  // fires → accept-all auth bypass, with ZERO diagnostics. Pre-Finding-2 the
+  // `peerAwaitable !== false` gate lived in this `if` head, so a non-awaitable
+  // async-stdlib call fell through to the generic (bare) call path silently. Now
+  // the gate is INSIDE: a non-awaitable position RECORDS the site into the
+  // classifier's `syncCallSink` (drained by emit-server → hard error
+  // `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) instead of leaking. The bare emission is
+  // still returned so the artifact is well-formed for the diagnostic pass; the
+  // recorded ERROR is fatal, so that output never ships.
+  if (
+    ctx.mode === "server" &&
+    !node.optional &&
+    node.callee.kind === "ident" &&
+    typeof node.callee.name === "string" &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)) &&
+    isStdlibAsyncCallee(node.callee.name, ctx)
+  ) {
+    if (ctx.peerAwaitable === false) {
+      // The sink is always present when detection can fire: emit-server installs
+      // the classifier (carrying a fresh sink) whenever an export registry exists,
+      // and `isStdlibAsyncCallee` returns false without a registry. The optional
+      // chain is belt-and-suspenders (never null in production server emission).
+      _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;

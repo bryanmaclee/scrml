@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult } from "./rewrite.js";
-import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
@@ -855,6 +855,18 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     declaredNames: opts.declaredNames ?? null,
     // §20.6 — forward the current statement span for log() file:line.
     stmtSpan: opts.currentStmtSpan ?? null,
+    // Issue #26 (P0 auth-bypass) — forward the stdlib async classifier inputs so
+    // emit-expr's `emitCall` auto-awaits a Promise-returning stdlib import call
+    // in SERVER-mode bodies (the same treatment `?{}` SQL gets). The `emitCall`
+    // branch is gated on `mode === "server"`, so forwarding these on the CLIENT
+    // path (where scheduling.ts already threads them for its statement-level
+    // classifier) is inert — no double-await. Server-fn opts objects in
+    // emit-server.ts populate `asyncCalleeMap`/`asyncExportRegistry`; the four-
+    // field guarded-expr statement-level path (which also needs asyncRouteMap +
+    // asyncFilePath) stays OFF on the server, so expression-level await is the
+    // single source of truth there.
+    asyncCalleeMap: opts.asyncCalleeMap ?? null,
+    asyncExportRegistry: opts.asyncExportRegistry ?? null,
   };
 }
 
@@ -3015,23 +3027,43 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // Params with no peer call keep the text path verbatim (byte-identical),
           // so this is a no-op for every existing SQL-param shape (@cell rewriting
           // already runs in the text path's server reactive-ref pass).
+          let _refsPeer = false;
           if (_sqlExprCtx.serverFnNames && _sqlExprCtx.serverFnNames.size > 0) {
-            let _refsPeer = false;
             for (const _fn of _sqlExprCtx.serverFnNames) {
               if (new RegExp("\\b" + _fn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\(").test(p)) {
                 _refsPeer = true;
                 break;
               }
             }
-            if (_refsPeer) {
-              try {
-                const _node = parseExprToNode(p, "<sql-param-peer>", 0);
-                return emitExpr(_node, _sqlExprCtx);
-              } catch {
-                // Defensive: an unparseable param falls back to the text path
-                // (the pre-fix emission) rather than crashing codegen.
-                return emitExprField(null, p, _sqlExprCtx);
+          }
+          // Issue #26 (P0 auth-bypass) — a SQL `?{}` param `${...}` that calls a
+          // Promise-returning stdlib fn (e.g. `${hashPassword(pw)}` in an INSERT)
+          // must lower to `await hashPassword(pw)` — the textual `rewriteServerExpr`
+          // path (`emitExprField(null, …)`) has no notion of the auto-await, so it
+          // interpolated a STRINGIFIED Promise (`[object Promise]`) as the stored
+          // value (seed corruption). Route through the STRUCTURED `emitExpr` path
+          // (same machinery as the peer branch above) so `emitCall` awaits it.
+          // Detection mirrors the peer scan: any `name(` token that classifies as
+          // a stdlib async callee (ctx-threaded OR the file-scoped classifier).
+          let _refsAsyncStdlib = false;
+          if (!_refsPeer) {
+            const _callRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+            let _cm: RegExpExecArray | null;
+            while ((_cm = _callRe.exec(p)) !== null) {
+              if (isStdlibAsyncCallee(_cm[1], _sqlExprCtx)) {
+                _refsAsyncStdlib = true;
+                break;
               }
+            }
+          }
+          if (_refsPeer || _refsAsyncStdlib) {
+            try {
+              const _node = parseExprToNode(p, "<sql-param-async>", 0);
+              return emitExpr(_node, _sqlExprCtx);
+            } catch {
+              // Defensive: an unparseable param falls back to the text path
+              // (the pre-fix emission) rather than crashing codegen.
+              return emitExprField(null, p, _sqlExprCtx);
             }
           }
           return emitExprField(null, p, _sqlExprCtx);

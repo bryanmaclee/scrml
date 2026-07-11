@@ -5902,6 +5902,195 @@ export function rejectWritesToDerivedVars(
 }
 
 /**
+ * §52.11 — is this `?{}` query a persisted WRITE (INSERT / UPDATE / DELETE)?
+ *
+ * Classified by the leading SQL keyword after stripping `${...}` interpolations,
+ * SQL line/block comments, and leading whitespace. A `WITH`-prefixed CTE that
+ * carries a data-modifying INSERT/UPDATE/DELETE is also a write (favor detection
+ * — a false-negative on a data-modifying CTE would LEAK). SELECT (read) / PRAGMA
+ * / DDL are not §52 persist-writes: a SELECT bound-param is a read (the §52.6
+ * W-AUTH-004 lane), not a persisted client-controlled value.
+ */
+function sqlIsPersistWrite(query: string): boolean {
+  const q = query
+    .replace(/\$\{[^}]*\}/g, " ")      // strip interpolations (leader is a bare keyword)
+    .replace(/--[^\n]*/g, " ")         // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, " ") // block comments
+    .replace(/\s+/g, " ")
+    .trim();
+  const leader = (/^([A-Za-z]+)/.exec(q)?.[1] ?? "").toUpperCase();
+  if (leader === "INSERT" || leader === "UPDATE" || leader === "DELETE") return true;
+  if (leader === "WITH") return /\b(?:INSERT|UPDATE|DELETE)\b/i.test(q);
+  return false;
+}
+
+/**
+ * Extract the base names of `@`-sigil reactive reads appearing inside the
+ * `${...}` interpolations of a `?{}` SQL query. String literals inside an
+ * interpolation are stripped first so an `@` inside a quoted value (e.g. an
+ * email address) is not mistaken for a reactive read. `@obj.field` / `@arr[i]`
+ * yield the base name `obj` / `arr`. A balanced-brace scan handles nested
+ * braces inside an interpolation body (`${ f({a: @x}) }`).
+ */
+function sqlInterpolationSigilReads(query: string): string[] {
+  const out: string[] = [];
+  const n = query.length;
+  let i = 0;
+  while (i < n) {
+    if (query.charCodeAt(i) === 36 /* $ */ && i + 1 < n && query.charCodeAt(i + 1) === 123 /* { */) {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        const ch = query.charCodeAt(j);
+        if (ch === 123 /* { */) depth++;
+        else if (ch === 125 /* } */) { depth--; if (depth === 0) break; }
+        j++;
+      }
+      const body = query.slice(i + 2, j)
+        .replace(/"(?:[^"\\]|\\.)*"/g, " ")
+        .replace(/'(?:[^'\\]|\\.)*'/g, " ")
+        .replace(/`(?:[^`\\]|\\.)*`/g, " ");
+      const m = body.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+      if (m) for (const r of m) out.push(r.slice(1));
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * §52.4.4 / §52.11 — E-AUTH-001: a client-local `@var` used as a bound
+ * parameter in a server-side `?{}` INSERT / UPDATE / DELETE write.
+ *
+ * SECURITY guard — a false-negative LEAKS: a client-controlled value reaches a
+ * DB write with no server-authority mediation. The SPEC steer (§52.4.6) is to
+ * pass the value to a server function first; INSIDE that fn the bound param is
+ * a plain parameter identifier (`${id}`), NOT the client-local cell (`${@id}`),
+ * so the `@`-sigil cleanly disambiguates the direct leak from the laundered
+ * form. The rule's "outside a server function" clause IS exactly this: a direct
+ * `${@clientLocal}` in a write `?{}` has NOT crossed a server-fn parameter
+ * boundary — whether it sits in a top-level `${...}` logic block (the §52.4.6
+ * worked example) OR lexically inside a function body that closes over the
+ * client-local cell (still an unmediated leak; the value never became a param).
+ * The safe form does not fire because its query reads `${id}` (a param, no
+ * `@`-sigil), and the client-local cell only appears at the CALL SITE argument.
+ *
+ * Authority classification mirrors the §52 state-decl authority the E-AUTH-002
+ * / E-AUTH-005 checks read:
+ *   - `isServer` (Tier-2 `<x server>`) or `serverAuthorityTable` present
+ *     (Tier-1 `<Type authority="server">` instance) → server-authoritative → EXEMPT.
+ *   - `@currentUser` when the ambient is active (no user `<currentUser>` cell
+ *     shadows it) → server-context request identity (§52.15) → EXEMPT.
+ *   - otherwise a declared reactive cell → client-local → E-AUTH-001.
+ *   - an undeclared `@name` → not this rule's concern (E-STATE-UNDECLARED owns it).
+ *
+ * Direct-reference scope matches the E-AUTH-002 sibling (which likewise checks
+ * only direct `@`-idents in an init expr): a value laundered through an
+ * intermediate `let x = @cell` before the write is NOT caught — at the
+ * bound-param site it is no longer a `@`-sigil read. A data-flow taint pass is
+ * out of scope, consistent with the family's direct-reference precedent.
+ */
+export function checkClientLocalWriteParams(
+  fileAST: FileAST,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const topNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+    ?? [];
+
+  // Pass 1 — collect reactive-cell authority, file-wide + order-independent so
+  // a `?{}` write that precedes the cell's decl in source is still classified.
+  const clientLocalCells = new Set<string>();
+  const serverCells = new Set<string>();
+  const collectAuthority = (ns: ASTNodeLike[]): void => {
+    for (const n of ns) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "state-decl" && typeof n.name === "string" && n.name.length > 0) {
+        const isServer = !!(n as ASTNodeLike).isServer
+          || (typeof (n as ASTNodeLike).serverAuthorityTable === "string"
+              && ((n as ASTNodeLike).serverAuthorityTable as string).length > 0);
+        if (isServer) serverCells.add(n.name);
+        else clientLocalCells.add(n.name);
+      }
+      const body = n.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectAuthority(body);
+      const children = n.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectAuthority(children);
+    }
+  };
+  collectAuthority(topNodes);
+  if (clientLocalCells.size === 0) return; // no client-local cell can leak
+
+  // `@currentUser` is the server-context ambient identity cell (§52.15) UNLESS a
+  // user reactive cell named `currentUser` shadows it (its authority is then
+  // whatever its decl says — already captured in the sets above).
+  const currentUserIsAmbient =
+    !clientLocalCells.has("currentUser") && !serverCells.has("currentUser");
+
+  // Pass 2 — visit `?{}` SQL nodes, tracking whether the write sits INSIDE a
+  // server-call boundary. "Outside a server function" (§52.4.4) is load-bearing:
+  // a `?{}` write nested inside a function body OR an event-handler attribute is
+  // a CPS-split server-call boundary (§12.2) — the compiler marshals the
+  // client-local `@var` to the server as `_scrml_body[...]`, so it is NOT an
+  // unmediated leak (the §4/§2 inline-sql-in-branch-cps locked tests). The
+  // genuine leak is a TOP-LEVEL `?{}` write in a program-scope `${...}` logic
+  // block (the §52.4.6 shape, which W-CG-001 flags as "won't execute"): no
+  // server-call boundary marshals its params.
+  //
+  // A function-decl body (any function kind) and a markup ATTRIBUTE value (the
+  // `on:click=${...}` event-handler position) are the guarded boundaries;
+  // markup CHILDREN are NOT guarded (a top-level `?{}` under `<program>` /
+  // `<db>` markup children is still the §52.4.6 leak shape).
+  const FN_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown, guarded: boolean): void => {
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value as object)) return;
+    seen.add(value as object);
+    if (Array.isArray(value)) { for (const item of value) visit(item, guarded); return; }
+    const v = value as ASTNodeLike;
+    if (!guarded && v.kind === "sql" && typeof (v as { query?: unknown }).query === "string") {
+      const query = (v as { query: string }).query;
+      if (sqlIsPersistWrite(query)) {
+        const span = (v.span as Span | undefined) ?? fileSpan;
+        const flagged = new Set<string>();
+        for (const varName of sqlInterpolationSigilReads(query)) {
+          if (flagged.has(varName)) continue;
+          if (varName === "currentUser" && currentUserIsAmbient) continue; // server ambient
+          if (serverCells.has(varName)) continue;                          // server-authoritative
+          if (!clientLocalCells.has(varName)) continue;                    // not a known client cell
+          flagged.add(varName);
+          errors.push(new TSError(
+            "E-AUTH-001",
+            `E-AUTH-001: '@${varName}' is client-local and cannot be used as a bound parameter ` +
+            `in a ?{} persistence block outside a server function. ` +
+            `Only server-authoritative variables and values derived from server function arguments ` +
+            `may appear as bound parameters in INSERT/UPDATE/DELETE statements. ` +
+            `To persist a client-local value, pass it to a server-side function first, then call ` +
+            `that function with '@${varName}' (the value crosses the boundary as a parameter).`,
+            span,
+          ));
+        }
+      }
+    }
+    // A function body is a server-call boundary; descend guarded.
+    const nodeGuarded = guarded || (typeof v.kind === "string" && FN_KINDS.has(v.kind));
+    for (const key of Object.keys(v)) {
+      if (key === "span") continue;
+      // A markup element's attribute value (`on:click=${...}`) is the
+      // event-handler server-call boundary; descend guarded. Markup children
+      // are NOT guarded (top-level `?{}` under markup is the §52.4.6 leak).
+      const keyGuarded = nodeGuarded || (key === "attrs" && v.kind === "markup");
+      visit((v as Record<string, unknown>)[key], keyGuarded);
+    }
+  };
+  visit(topNodes, false);
+}
+
+/**
  * §51.9 — Validate derived machines once state-decl annotations are known.
  *
  * This runs after the main TS walk has annotated state-decl nodes. It:
@@ -21809,6 +21998,14 @@ function processFile(
     );
     checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan);
   }
+
+  // §52.4.4 / §52.11 — E-AUTH-001: a client-local `@var` used as a bound
+  // parameter in a server-side `?{}` INSERT / UPDATE / DELETE write (a
+  // client-controlled value reaching a DB write with no server-authority
+  // mediation). The sibling of the E-AUTH-002/005 authority checks; runs after
+  // annotation (the state-decl `isServer` / `serverAuthorityTable` authority
+  // flags are AST-build-time, so the classification is available here).
+  checkClientLocalWriteParams(fileAST, errors, fileSpan);
 
   // §51.9 — After annotation, collect the reactive → machine bindings that
   // `annotateNodes` attached to state-decl nodes and validate every

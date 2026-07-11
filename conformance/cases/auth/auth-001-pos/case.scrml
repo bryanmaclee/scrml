@@ -1,0 +1,11 @@
+<program db="sqlite:./kanban.db">
+
+<editingId> = not    // client-local
+
+${
+    // ERROR: @editingId is client-local. It cannot appear as a bound
+    // parameter in a ?{} block outside of a server function.
+    ?{`INSERT INTO audit_log (object_id) VALUES (${@editingId})`}.run()
+}
+
+</program>

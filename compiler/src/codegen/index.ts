@@ -1107,7 +1107,7 @@ export function runCG(input: CgInput): CgOutput {
     let serverJs: string | null = codegenStage("emit-server", () =>
       // §14.8.9 — thread the PA stage's ProtectAnalysis so emit-server can apply
       // protected-column egress redaction (server-fn response + SSR /__serverLoad).
-      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode, protectAnalysis)
+      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode, protectAnalysis, exportRegistryInput)
     ) || null;
 
     // ---------------------------------------------------------------------------

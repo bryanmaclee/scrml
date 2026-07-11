@@ -9,7 +9,7 @@ import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, setServerAsyncClassifier, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -17,7 +17,8 @@ import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-form
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename } from "node:path";
 import { parseExprToNode } from "../expression-parser.ts";
-import { extractCalleeNames } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
+import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
@@ -1015,6 +1016,13 @@ export function generateServerJs(
   batchPlannerErrors?: Array<{ code: string; message: string; span?: any }>,
   modeLegacy?: "browser" | "library",
   protectAnalysisLegacy?: unknown,
+  // Issue #26 (P0 auth-bypass) — MOD exportRegistry (per-module `isAsync`
+  // flags). Threaded positionally because the production caller
+  // (codegen/index.ts) invokes this on the LEGACY signature, BEFORE it builds
+  // the per-file CompileContext. Consulted (with the ctx path) to auto-await
+  // Promise-returning stdlib import calls in server-fn bodies. NULL → no stdlib
+  // await (test harnesses / files with no stdlib imports).
+  exportRegistryLegacy?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null,
 ): string {
   // Support both new (ctx) and legacy (fileAST, routeMap, errors, authMW, mwConfig) signatures
   let fileAST: any;
@@ -1040,6 +1048,47 @@ export function generateServerJs(
   }
   const filePath: string = fileAST.filePath;
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
+
+  // Issue #26 (P0 auth-bypass) — per-file stdlib async classifier inputs,
+  // computed ONCE for the file and threaded into every server-fn body opts
+  // object below. scrml has no `async`/`await` source surface, so a
+  // Promise-returning stdlib import call (`verifyPassword` / `hashPassword` /
+  // crypto / redis / http …) inside a server fn must be auto-awaited by the
+  // compiler — the same treatment `?{}` SQL gets. Without the await, a
+  // `const ok = verifyPassword(...)` predicate accepts every password (auth
+  // bypass) and a `${hashPassword(...)}` INSERT stores a stringified Promise.
+  // `emit-expr.ts:emitCall` consumes these via `_makeExprCtx` and wraps the
+  // call in `await` in every awaitable server-mode position. `buildCalleeImportMap`
+  // reads `.imports` off the FileAST; the TABResult wrapper hoists imports to
+  // `.ast.imports`, so fall back to `.ast` when present (mirrors emit-functions.ts).
+  const _asyncFileAstForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
+  const _asyncCalleeMap = buildCalleeImportMap(_asyncFileAstForImports);
+  const _asyncExportRegistry = ctxForCache?.exportRegistry ?? exportRegistryLegacy ?? null;
+  // Issue #26 Finding-2 (S239 adversarial review) — FAIL-CLOSED sink for
+  // async-stdlib calls emit-expr lowers in a NON-awaitable position (a sync
+  // `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a
+  // parameter default). `await` is illegal there, so the call cannot be
+  // auto-awaited; a bare emission leaks a truthy Promise (an accept-all auth
+  // bypass — see the drain below). emit-expr records each such site into this
+  // array (via the classifier it carries); we drain it after all bodies are
+  // emitted and raise E-ASYNC-STDLIB-IN-SYNC-CALLBACK (mirrors the peer-server-fn
+  // `_syncPeerCalls` → E-SERVER-FN-IN-SYNC-CALLBACK fail-closed path).
+  const _syncStdlibAsyncCalls: Array<{ name: string; span: unknown }> = [];
+  // Install the file-scoped stdlib async classifier so emit-expr's SERVER-mode
+  // auto-await reaches EVERY structured-emit boundary (if/while/for/match
+  // conditions, SQL `?{}` interpolation, nested lambdas) — not just the direct
+  // decl/bare-expr opts paths the ctx-threading below covers. Set unconditionally
+  // (empty map when the file has no stdlib imports → classifier is inert). Only
+  // read in `mode === "server"`, so it cannot affect client emission. The sink
+  // rides on the classifier so its lifetime is exactly the classifier's per-file
+  // scope — present in EVERY server-mode position where async-stdlib detection
+  // can fire (the classifier is non-null iff the export registry exists, and
+  // detection needs the registry).
+  setServerAsyncClassifier(
+    _asyncExportRegistry
+      ? { calleeMap: _asyncCalleeMap, exportRegistry: _asyncExportRegistry, syncCallSink: _syncStdlibAsyncCalls }
+      : null,
+  );
 
   // §14.8.9 — protected-column egress redaction context. Built from the PA
   // stage's ProtectAnalysis (threaded via the new ctx field or the trailing
@@ -1838,6 +1887,42 @@ export function generateServerJs(
       "error",
     ));
   };
+  // Issue #26 Finding-2 (S239 adversarial review) — the async-stdlib sibling of
+  // `_diagSyncCb`. Shared E-ASYNC-STDLIB-IN-SYNC-CALLBACK emitter, used by BOTH
+  // the escape-hatch walk below (block-body callbacks — raw text emit-expr never
+  // structurally sees) AND the post-emission `_syncStdlibAsyncCalls` drain
+  // (structured lambdas / param defaults, recorded by emit-expr's position-
+  // accurate lowering). A Promise-returning stdlib call (`verifyPassword` /
+  // `hashPassword` / crypto / redis / http …) in a synchronous callback cannot be
+  // auto-awaited; a bare emission ships a truthy Promise (an accept-all auth
+  // bypass). FAIL CLOSED with a hard error rather than leak silently.
+  const _diagAsyncStdlibSyncCb = (calleeName: string, span: any): void => {
+    const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+    errors.push(new CGError(
+      "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
+      `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async stdlib call \`${calleeName}(…)\` cannot be ` +
+      `awaited inside a synchronous callback or a parameter default. scrml has no source ` +
+      `\`await\`, so the compiler auto-awaits Promise-returning stdlib calls — but only where ` +
+      `\`await\` is valid. Inside a \`.some\`/\`.find\`/\`.filter\`/\`.map\` callback (or a ` +
+      `parameter default) it is not, so a bare \`${calleeName}(…)\` would return an unawaited ` +
+      `Promise (always truthy → an accept-all bug). Restructure so the call runs in the ` +
+      `server function's async body — e.g. hoist it into a \`for\` loop: ` +
+      `\`for (const x of xs) { const r = ${calleeName}(…); … }\`.`,
+      { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
+      "error",
+    ));
+  };
+  // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
+  // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's
+  // per-file async classifier inputs (computed above). Used by the escape-hatch
+  // walk to diagnose async-stdlib calls in block-body callbacks (which emit as raw
+  // text, so emit-expr's structured `syncCallSink` never records them).
+  const _isAsyncStdlibName = (name: string): boolean => {
+    if (!_asyncExportRegistry) return false;
+    const _src = _asyncCalleeMap.get(name);
+    if (!_src) return false;
+    return isPromiseReturningStdlibFn(name, _src, _asyncExportRegistry);
+  };
   const _calledPeerNames = new Set<string>();
   {
     const _seen = new WeakSet<object>();
@@ -1893,8 +1978,17 @@ export function generateServerJs(
       if (n.kind === "escape-hatch" && typeof n.raw === "string"
           && (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression")
           && !/^\s*async\b/.test(n.raw)) {
-        const _hit = extractCalleeNames(n.raw).find((c) => _serverFnPeerNames.has(c));
+        const _callees = extractCalleeNames(n.raw);
+        const _hit = _callees.find((c) => _serverFnPeerNames.has(c));
         if (_hit) _diagSyncCb(_hit, n.span);
+        // Issue #26 Finding-2 — the async-stdlib sibling of the peer diagnostic
+        // above. A BLOCK-body callback's async-stdlib call (`verifyPassword` /
+        // `hashPassword` / crypto / redis / http …) emits as raw text VERBATIM
+        // (bare, unawaited) — emit-expr's structured `syncCallSink` never sees it.
+        // A bare async-stdlib call in a sync callback ships a truthy Promise (an
+        // accept-all auth bypass), so FAIL CLOSED here too.
+        const _asyncHit = _callees.find((c) => _isAsyncStdlibName(c));
+        if (_asyncHit) _diagAsyncStdlibSyncCb(_asyncHit, n.span);
       }
 
       // ss19 #12 (g-sql-in-arrow-body-invalid-js) — DIAGNOSTIC. A `?{}` SQL
@@ -2005,6 +2099,9 @@ export function generateServerJs(
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
+        // Issue #26: auto-await Promise-returning stdlib import calls.
+        asyncCalleeMap: _asyncCalleeMap,
+        asyncExportRegistry: _asyncExportRegistry,
       };
 
       for (const stmt of body) {
@@ -2378,6 +2475,9 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrors,
+        // Issue #26: auto-await Promise-returning stdlib import calls.
+        asyncCalleeMap: _asyncCalleeMap,
+        asyncExportRegistry: _asyncExportRegistry,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -2553,6 +2653,9 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrorsNonCsrf,
+        // Issue #26: auto-await Promise-returning stdlib import calls.
+        asyncCalleeMap: _asyncCalleeMap,
+        asyncExportRegistry: _asyncExportRegistry,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -3003,6 +3106,9 @@ export function generateServerJs(
         insideFunctionBody: true,
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
+        // Issue #26: auto-await Promise-returning stdlib import calls.
+        asyncCalleeMap: _asyncCalleeMap,
+        asyncExportRegistry: _asyncExportRegistry,
       };
       const _peerBodyLines: string[] = [];
       for (const stmt of (_peerInfo.fnNode.body ?? [])) {
@@ -3050,6 +3156,28 @@ export function generateServerJs(
       if (_seenSync.has(_key)) continue;
       _seenSync.add(_key);
       _diagSyncCb(_spc.name, _spc.span);
+    }
+  }
+
+  // Issue #26 Finding-2 (S239 adversarial review) — drain the async-stdlib
+  // sync-callback record. emit-expr recorded every Promise-returning stdlib
+  // import call (`scrml:auth` verifyPassword/hashPassword, crypto, redis, http …)
+  // it lowered to a BARE call because the position was NOT awaitable (a
+  // synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda,
+  // or a parameter default — `await` is illegal in all three). Each is a SILENT
+  // auth-bypass surface: a bare `verifyPassword(...)` returns a truthy Promise,
+  // so `hashes.some(h => verifyPassword(pw, h))` accepts every password. The #26
+  // fix auto-awaits this call in an awaitable position but could not extend the
+  // await here — so we FAIL CLOSED with a hard error (parallel to the peer-fn
+  // E-SERVER-FN-IN-SYNC-CALLBACK drain above) instead of shipping the leak.
+  {
+    const _seenAsyncStdlib = new Set<string>();
+    for (const _sac of _syncStdlibAsyncCalls) {
+      const _sp = (_sac.span ?? {}) as { start?: number };
+      const _key = `${_sac.name}@${_sp.start ?? -1}`;
+      if (_seenAsyncStdlib.has(_key)) continue;
+      _seenAsyncStdlib.add(_key);
+      _diagAsyncStdlibSyncCb(_sac.name, _sac.span);
     }
   }
 
@@ -3396,6 +3524,9 @@ export function generateServerJs(
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
         syncPeerCalls: _syncPeerCalls,
+        // Issue #26: auto-await Promise-returning stdlib import calls.
+        asyncCalleeMap: _asyncCalleeMap,
+        asyncExportRegistry: _asyncExportRegistry,
       };
       const wsBody: any[] = fnNode.body ?? [];
       const _wsBodyLines: string[] = [];

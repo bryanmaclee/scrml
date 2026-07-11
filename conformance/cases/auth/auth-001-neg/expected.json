@@ -1,0 +1,11 @@
+{
+  "id": "auth-001-neg",
+  "description": "The SPEC §52.4.6 remedy: the same INSERT wrapped in a server function whose bound param is the parameter `${id}` (not the client-local cell `${@editingId}`), called with `logEdit(@editingId)`. The client-local value crosses the boundary as a parameter, so E-AUTH-001 does NOT fire (§52.4.4 / §52.4.6 / §52.11).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-001.test.js",
+  "spec": "§52.4.4 / §52.4.6 / §52.11",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-001"]
+  }
+}
