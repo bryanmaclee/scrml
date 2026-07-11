@@ -15627,33 +15627,82 @@ function extractArmsFromMatchNode(node: ASTNodeLike): ExtractedArms {
   return { armPatterns, elseIndex, total: armPatterns.length, guardArms, hasNotArm };
 }
 
+/** Look up a bare/`@`-reactive identifier's declared type from the scope. */
+function lookupIdentDeclaredType(name: string, scopeChain: ScopeChain): ResolvedType | null {
+  const entry = scopeChain.lookup(name);
+  if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
+  const alt = name.startsWith("@")
+    ? scopeChain.lookup(name.slice(1))
+    : scopeChain.lookup("@" + name);
+  if (alt && alt.resolvedType) return alt.resolvedType as ResolvedType;
+  return null;
+}
+
+/** Resolve a struct field's declared type (`objType.field`); null if not a struct field. */
+function structFieldDeclaredType(objType: ResolvedType | null, field: string): ResolvedType | null {
+  if (objType && objType.kind === "struct") {
+    const ft = (objType as StructType).fields.get(field) ?? null;
+    // R28-8 (§14.10) — a field carrying a trailing validator (`role: Role req`)
+    // is lowered to `asIs` with its TRUE base type stashed in `bareVariantBase`
+    // (the enum / enum-subset / named type). Unwrap it so a member-access match
+    // subject resolves to the real enum / subset type and runs exhaustiveness.
+    if (ft && ft.kind === "asIs" && (ft as AsIsType).bareVariantBase) {
+      return (ft as AsIsType).bareVariantBase as ResolvedType;
+    }
+    return ft;
+  }
+  return null;
+}
+
+/**
+ * §18.8.1 — resolve a match subject ExprNode to its declared type. Handles a
+ * bare identifier (`match r`) AND a member-access chain (`match p.role`,
+ * `match a.b.c`). A member subject resolves the object's type and walks the
+ * struct-field chain to the member's DECLARED field type — so a member-access
+ * enum subject runs the SAME §18.8 exhaustiveness / §53.15 subset / dead-arm
+ * checks as a bound-local subject (matching the SPEC's `match p.role` flagship).
+ */
+function resolveSubjectExprDeclaredType(
+  headerExpr: unknown,
+  scopeChain: ScopeChain,
+): ResolvedType | null {
+  if (!headerExpr || typeof headerExpr !== "object") return null;
+  const e = headerExpr as { kind?: string; name?: string; object?: unknown; property?: unknown };
+  if (e.kind === "ident" && typeof e.name === "string") {
+    return lookupIdentDeclaredType(e.name, scopeChain);
+  }
+  if (e.kind === "member" && typeof e.property === "string") {
+    const objType = resolveSubjectExprDeclaredType(e.object, scopeChain);
+    return structFieldDeclaredType(objType, e.property);
+  }
+  return null;
+}
+
 function resolveMatchSubjectType(
   header: string | undefined,
   headerExpr: unknown,
   scopeChain: ScopeChain,
 ): ResolvedType | null {
-  if (headerExpr && typeof headerExpr === "object") {
-    const e = headerExpr as { kind?: string; name?: string };
-    if (e.kind === "ident" && typeof e.name === "string") {
-      const entry = scopeChain.lookup(e.name);
-      if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
-      const rEntry = scopeChain.lookup("@" + e.name.replace(/^@/, ""));
-      if (rEntry && rEntry.resolvedType) return rEntry.resolvedType as ResolvedType;
-    }
-  }
+  const fromExpr = resolveSubjectExprDeclaredType(headerExpr, scopeChain);
+  if (fromExpr) return fromExpr;
+
   if (typeof header === "string") {
     const trimmed = header.trim();
     if (/^[@A-Za-z_][\w]*$/.test(trimmed)) {
-      const entry = scopeChain.lookup(trimmed);
-      if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
-      if (trimmed.startsWith("@")) {
-        const bare = trimmed.slice(1);
-        const e2 = scopeChain.lookup(bare);
-        if (e2 && e2.resolvedType) return e2.resolvedType as ResolvedType;
-      } else {
-        const e2 = scopeChain.lookup("@" + trimmed);
-        if (e2 && e2.resolvedType) return e2.resolvedType as ResolvedType;
+      return lookupIdentDeclaredType(trimmed, scopeChain);
+    }
+    // §18.8.1 — dotted member path captured only as a header string (no
+    // structured `headerExpr`, e.g. `p . role`). Resolve the head identifier's
+    // type then walk the struct-field chain so member-access subjects still run
+    // exhaustiveness. Whitespace between segments is tolerated (the header
+    // string preserves the source spacing).
+    if (/^@?[A-Za-z_][\w]*(\s*\.\s*[A-Za-z_][\w]*)+$/.test(trimmed)) {
+      const parts = trimmed.split(".").map((p) => p.trim());
+      let cur = lookupIdentDeclaredType(parts[0], scopeChain);
+      for (let i = 1; i < parts.length && cur; i++) {
+        cur = structFieldDeclaredType(cur, parts[i]);
       }
+      if (cur) return cur;
     }
   }
   return null;
