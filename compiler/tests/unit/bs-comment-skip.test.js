@@ -372,3 +372,54 @@ describe("BS /* */ block-comment skip inside brace contexts — jwt-auth-bypass"
     expect(ee[0].tagNesting ?? 0).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// jwt-auth-bypass followup (2026-07-11, HIGH — adversarial S239 catch) — a `/*`
+// inside a REGEX literal or a BACKTICK template must NOT be eaten as a block
+// comment. The block-splitter has no regex-awareness and its string guard only
+// tracked `"`/`'`, so `/*` in a regex/template opened a phantom comment that
+// scanned to EOF → whole-file E-CTX-003 "Unclosed 'program'" + all output
+// dropped. Fixed by (a) backtick tracking in openStringQuoteAt and (b) a
+// containment pre-scan (the closing `*/` must precede the context's own `}`).
+// ---------------------------------------------------------------------------
+describe("BS /* */ containment — regex/template /* is NOT a phantom comment", () => {
+  const cases = [
+    ["regex trailing-slash strip", "p.replace(/\\/*$/, \"\")"],
+    ["regex char-class",           "s.match(/[/*]/g)"],
+    ["backtick glob template",     "`${dir}/*.js`"],
+    ["backtick /* template",       "`open /* ${name}`"],
+  ];
+
+  for (const [label, body] of cases) {
+    test(`${label}: ${'$'}{} closes cleanly, no unclosed-context error`, () => {
+      const src = `\${\n  function f(x) {\n    return ${body}\n  }\n}`;
+      const result = splitWithErrors(src);
+      // The logic block must close — pre-fix this fired E-CTX-003.
+      expect(result.errors.map((e) => e.code)).not.toContain("E-CTX-003");
+      const logic = result.blocks.find((b) => b.type === "logic");
+      expect(logic).toBeDefined();
+      // The regex/template bytes survive verbatim in the logic body (no phantom
+      // comment child ate them).
+      expect(logic.raw).toContain(body);
+      // No spurious comment child was extracted from the regex/template.
+      const comments = (logic.children || []).filter((c) => c.type === "comment");
+      expect(comments).toHaveLength(0);
+    });
+  }
+
+  test("a REAL block comment BEFORE a regex still extracts, regex survives", () => {
+    const src = [
+      "${",
+      "  /* strip trailing slash */",
+      "  function f(p) { return p.replace(/\\/*$/, \"\") }",
+      "}",
+    ].join("\n");
+    const result = splitWithErrors(src);
+    expect(result.errors.map((e) => e.code)).not.toContain("E-CTX-003");
+    const logic = result.blocks.find((b) => b.type === "logic");
+    const comments = (logic.children || []).filter((c) => c.type === "comment");
+    // Exactly the ONE real leading comment — the regex `/*` did not add another.
+    expect(comments).toHaveLength(1);
+    expect(comments[0].raw).toContain("strip trailing slash");
+  });
+});
