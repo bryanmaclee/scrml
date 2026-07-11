@@ -11658,6 +11658,20 @@ function annotateNodes(
             }
           }
         }
+        // §51.0.J / §18 (En-D3) — a derived-engine inline `match` must be
+        // exhaustive over the SOURCE enum. The parser captures the body as raw
+        // text (`inlineMatchBody`), so §18 never ran; parse it into structured
+        // arms and run the SAME exhaustiveness checker the derived-CELL match
+        // uses (Bug 71 — E-TYPE-020). A `_`/`else` arm satisfies coverage.
+        {
+          const inlineMatchBody = (n as { inlineMatchBody?: unknown }).inlineMatchBody;
+          const srcVar = String((n as { sourceVar?: unknown }).sourceVar ?? "");
+          if (typeof inlineMatchBody === "string" && inlineMatchBody.length > 0 && srcVar.length > 0) {
+            const engSpan = (n.span as Span | undefined)
+              ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkDerivedEngineMatchExhaustiveness(inlineMatchBody, srcVar, scopeChain, engSpan, errors);
+          }
+        }
         const bodyChildren = (n as { bodyChildren?: ASTNodeLike[] }).bodyChildren;
         if (Array.isArray(bodyChildren)) {
           for (const child of bodyChildren) {
@@ -15413,6 +15427,110 @@ function resolveFailableCallResultType(
     variants: [okVariant, ...errVariants],
     transitionRules: null,
   };
+}
+
+/**
+ * §51.0.J / §18 (En-D3) — exhaustiveness for a derived-engine inline `match`
+ * (`<engine for=Dst derived=match @src { .A :> .X … }>`). The parser captures
+ * the match body as RAW TEXT (`inlineMatchBody`) with NO structured arm AST, so
+ * §18.8 never ran and a non-exhaustive derived-match fell through silently. SPEC
+ * §51.0.J is explicit: "a `match` must cover every case (its `_` / `else` arm,
+ * §18)". This parses the raw body into structured arm patterns (reusing the
+ * §18.2 arm splitter + pattern parser) and runs the SAME exhaustiveness checker
+ * the derived-CELL match uses (Bug 71, S157 — E-TYPE-020). The scrutinee is the
+ * SOURCE cell `@sourceVar`, so exhaustiveness is over the source enum's variant
+ * set (the arms' RHS destination variants are immaterial). A `_` / `else` arm
+ * satisfies coverage (§18.6). No-op when the source resolves to a non-enum (a
+ * different diagnostic's concern).
+ */
+function checkDerivedEngineMatchExhaustiveness(
+  inlineMatchBody: string,
+  sourceVar: string,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  const sourceType = resolveMatchSubjectType(sourceVar, undefined, scopeChain);
+  if (!sourceType || sourceType.kind !== "enum") return;
+  const armPatterns = extractDerivedMatchArmPatterns(inlineMatchBody);
+  checkExhaustiveness(
+    { arms: armPatterns } as unknown as ASTNodeLike,
+    sourceType,
+    span,
+    errors,
+    false,
+  );
+}
+
+/**
+ * §51.0.J — extract the LHS SOURCE-variant pattern chain that immediately
+ * precedes an arm arrow. A derived-match arm is `<LHS> => <RHS-destination-variant>`;
+ * unlike a value-match (string RHS), the RHS here is itself a `.Variant`, so the
+ * generic `splitMatchArms` (which treats any leading-`.Variant` as a new arm
+ * header) mis-splits — the RHS destination variant would be counted as a source
+ * pattern. This dedicated splitter scans for the arm-separator arrows at depth 0
+ * (paren/brace/string aware) and, for each pre-arrow chunk, keeps ONLY the
+ * trailing `V (| V)*` chain (the LHS); the leading, whitespace-separated part of
+ * the chunk is the PRIOR arm's RHS and is discarded.
+ */
+function extractDerivedMatchArmPatterns(body: string): ArmPattern[] {
+  const armPatterns: ArmPattern[] = [];
+  const pushArm = (chunk: string): void => {
+    const lhs = derivedMatchArmLHS(chunk);
+    if (!lhs) return;
+    const parsed = parseArmPattern(lhs);
+    if (parsed.kind === "variant") {
+      // Variant-pattern alternation (`.A | .B => .X`) pushes each alternate so
+      // exhaustiveness coverage sees every source variant.
+      if (parsed.altVariants && parsed.altVariants.length > 0) {
+        for (const v of parsed.altVariants) armPatterns.push({ kind: "variant", variantName: v });
+      } else {
+        armPatterns.push({ kind: "variant", variantName: parsed.variantName });
+      }
+    } else if (parsed.kind === "wildcard") {
+      armPatterns.push(parsed.isNot ? { kind: "variant", variantName: "not" } : { kind: "wildcard" });
+    }
+  };
+
+  let depth = 0;
+  let inString: string | null = null;
+  let chunkStart = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    const next = body[i + 1];
+    if (inString) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inString = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth = Math.max(0, depth - 1); continue; }
+    // Arm-separator arrow (`=>` / `:>` / `->`) at depth 0. `::` (double-colon
+    // variant prefix) never matches — its second `:` is followed by an identifier
+    // char, not `>`.
+    if (depth === 0 && (ch === "=" || ch === ":" || ch === "-") && next === ">") {
+      pushArm(body.slice(chunkStart, i));
+      i++; // consume ">"
+      chunkStart = i + 1;
+    }
+  }
+  return armPatterns;
+}
+
+/**
+ * §51.0.J — from the pre-arrow chunk `[<prior-RHS>] <LHS>`, keep only the LHS:
+ * the trailing whitespace-delimited variant-pattern chain, whose alternates are
+ * joined by `|` (`.A | .B`). The prior arm's RHS (a whitespace-separated
+ * destination variant) is dropped.
+ */
+function derivedMatchArmLHS(chunk: string): string {
+  const toks = chunk.trim().split(/\s+/).filter(Boolean);
+  if (toks.length === 0) return "";
+  let start = toks.length - 1;
+  // Absorb a leading `V | V | …` alternation chain (alternates joined by `|`).
+  while (start - 2 >= 0 && toks[start - 1] === "|") start -= 2;
+  return toks.slice(start).join(" ");
 }
 
 function checkMatchDiagnostics(

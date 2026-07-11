@@ -1,0 +1,13 @@
+{
+  "id": "engine-derived-engine-match-nonexhaustive",
+  "description": "§51.0.J / §18 — a derived-engine inline `match` must cover every case of the SOURCE enum (SPEC §51.0.J: 'a `match` must cover every case (its `_` / `else` arm, §18)'). The source cell `@src: Src` has variants {A, B, C}; the `derived=match @src` arms cover `.A` and `.B` but OMIT `.C` and have no `_`/`else` arm, so §18 exhaustiveness fires E-TYPE-020. Before the En-D3 fix the inline-match body was captured as raw text (no structured arm AST), so §18 never ran and the missing source variant fell through silently — mirrors the derived-CELL match precedent (Bug 71, S157).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §51.0.J / §18.8",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J: The expression's exhaustiveness is its OWN — a `match` must cover every case (its `_` / `else` arm, §18). A derived-engine `derived=match` over a source enum must exhaustively cover that enum; a missing source variant with no wildcard is a non-exhaustive match → E-TYPE-020.",
+  "expect": {
+    "codes": ["E-TYPE-020"],
+    "notCodes": [],
+    "severity": { "E-TYPE-020": "error" }
+  }
+}
