@@ -1,0 +1,19 @@
+${
+    type Src:enum = { A, B }
+    type Dst:enum = { X, Y }
+}
+<engine for=Src initial=.A>
+    <A rule=.B/>
+    <B rule=.A/>
+</>
+<engine for=Dst derived=match @src {
+    Src.A :> .X
+    Src.B :> .Y
+}>
+    <X/>
+    <Y/>
+</>
+<program>
+<button id="toB" onclick=@src.advance(.B)>To B</>
+<p id="d">${@dst}</>
+</program>
