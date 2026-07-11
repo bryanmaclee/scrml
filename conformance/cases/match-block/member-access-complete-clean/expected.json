@@ -1,0 +1,12 @@
+{
+  "id": "match-block-member-access-complete-clean",
+  "description": "§18.8.1 — a COMPLETE match over a member-access subject (`match p.role` with an arm for every Role variant) is exhaustive and SHALL compile clean: neither E-TYPE-020 (non-exhaustive) nor E-MATCH-SUBSET-DEAD-ARM fires. The acceptance sibling of member-access-nonexhaustive — proves the member-access resolution narrows the exhaustiveness SET correctly rather than over-firing.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.1",
+  "rationale": "§18.8.1: a match is exhaustive iff every declared variant has an arm. A member-access subject resolves to the field's declared enum type; covering all three Role variants satisfies exhaustiveness, so no E-TYPE-020 / E-MATCH-SUBSET-DEAD-ARM is emitted.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-020", "E-MATCH-SUBSET-DEAD-ARM", "E-TYPE-024", "E-TYPE-025"]
+  }
+}

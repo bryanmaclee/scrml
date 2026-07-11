@@ -1,0 +1,13 @@
+<program>
+
+type M:enum = {
+  Ping
+  Dispatch(prompt: string)
+}
+
+<endpoint path="/x" method="POST" accepts=M>
+  <Ping : { ok: true, val: nonexistentVar }>
+  <Dispatch(prompt) : { echo: prompt }>
+</endpoint>
+
+</program>

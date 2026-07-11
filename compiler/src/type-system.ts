@@ -15627,33 +15627,82 @@ function extractArmsFromMatchNode(node: ASTNodeLike): ExtractedArms {
   return { armPatterns, elseIndex, total: armPatterns.length, guardArms, hasNotArm };
 }
 
+/** Look up a bare/`@`-reactive identifier's declared type from the scope. */
+function lookupIdentDeclaredType(name: string, scopeChain: ScopeChain): ResolvedType | null {
+  const entry = scopeChain.lookup(name);
+  if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
+  const alt = name.startsWith("@")
+    ? scopeChain.lookup(name.slice(1))
+    : scopeChain.lookup("@" + name);
+  if (alt && alt.resolvedType) return alt.resolvedType as ResolvedType;
+  return null;
+}
+
+/** Resolve a struct field's declared type (`objType.field`); null if not a struct field. */
+function structFieldDeclaredType(objType: ResolvedType | null, field: string): ResolvedType | null {
+  if (objType && objType.kind === "struct") {
+    const ft = (objType as StructType).fields.get(field) ?? null;
+    // R28-8 (§14.10) — a field carrying a trailing validator (`role: Role req`)
+    // is lowered to `asIs` with its TRUE base type stashed in `bareVariantBase`
+    // (the enum / enum-subset / named type). Unwrap it so a member-access match
+    // subject resolves to the real enum / subset type and runs exhaustiveness.
+    if (ft && ft.kind === "asIs" && (ft as AsIsType).bareVariantBase) {
+      return (ft as AsIsType).bareVariantBase as ResolvedType;
+    }
+    return ft;
+  }
+  return null;
+}
+
+/**
+ * §18.8.1 — resolve a match subject ExprNode to its declared type. Handles a
+ * bare identifier (`match r`) AND a member-access chain (`match p.role`,
+ * `match a.b.c`). A member subject resolves the object's type and walks the
+ * struct-field chain to the member's DECLARED field type — so a member-access
+ * enum subject runs the SAME §18.8 exhaustiveness / §53.15 subset / dead-arm
+ * checks as a bound-local subject (matching the SPEC's `match p.role` flagship).
+ */
+function resolveSubjectExprDeclaredType(
+  headerExpr: unknown,
+  scopeChain: ScopeChain,
+): ResolvedType | null {
+  if (!headerExpr || typeof headerExpr !== "object") return null;
+  const e = headerExpr as { kind?: string; name?: string; object?: unknown; property?: unknown };
+  if (e.kind === "ident" && typeof e.name === "string") {
+    return lookupIdentDeclaredType(e.name, scopeChain);
+  }
+  if (e.kind === "member" && typeof e.property === "string") {
+    const objType = resolveSubjectExprDeclaredType(e.object, scopeChain);
+    return structFieldDeclaredType(objType, e.property);
+  }
+  return null;
+}
+
 function resolveMatchSubjectType(
   header: string | undefined,
   headerExpr: unknown,
   scopeChain: ScopeChain,
 ): ResolvedType | null {
-  if (headerExpr && typeof headerExpr === "object") {
-    const e = headerExpr as { kind?: string; name?: string };
-    if (e.kind === "ident" && typeof e.name === "string") {
-      const entry = scopeChain.lookup(e.name);
-      if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
-      const rEntry = scopeChain.lookup("@" + e.name.replace(/^@/, ""));
-      if (rEntry && rEntry.resolvedType) return rEntry.resolvedType as ResolvedType;
-    }
-  }
+  const fromExpr = resolveSubjectExprDeclaredType(headerExpr, scopeChain);
+  if (fromExpr) return fromExpr;
+
   if (typeof header === "string") {
     const trimmed = header.trim();
     if (/^[@A-Za-z_][\w]*$/.test(trimmed)) {
-      const entry = scopeChain.lookup(trimmed);
-      if (entry && entry.resolvedType) return entry.resolvedType as ResolvedType;
-      if (trimmed.startsWith("@")) {
-        const bare = trimmed.slice(1);
-        const e2 = scopeChain.lookup(bare);
-        if (e2 && e2.resolvedType) return e2.resolvedType as ResolvedType;
-      } else {
-        const e2 = scopeChain.lookup("@" + trimmed);
-        if (e2 && e2.resolvedType) return e2.resolvedType as ResolvedType;
+      return lookupIdentDeclaredType(trimmed, scopeChain);
+    }
+    // §18.8.1 — dotted member path captured only as a header string (no
+    // structured `headerExpr`, e.g. `p . role`). Resolve the head identifier's
+    // type then walk the struct-field chain so member-access subjects still run
+    // exhaustiveness. Whitespace between segments is tolerated (the header
+    // string preserves the source spacing).
+    if (/^@?[A-Za-z_][\w]*(\s*\.\s*[A-Za-z_][\w]*)+$/.test(trimmed)) {
+      const parts = trimmed.split(".").map((p) => p.trim());
+      let cur = lookupIdentDeclaredType(parts[0], scopeChain);
+      for (let i = 1; i < parts.length && cur; i++) {
+        cur = structFieldDeclaredType(cur, parts[i]);
       }
+      if (cur) return cur;
     }
   }
   return null;
@@ -19934,6 +19983,35 @@ function walkAndExpandSchemaForCalls(
    */
   function walkPassB(arr: ASTNodeLike[] | undefined): void {
     if (!Array.isArray(arr)) return;
+
+    // Shared recognizer — a schemaFor call reached in an invalid (non-`<schema>`)
+    // context. Rides `forEachCallInExprNode`; respects `processedCalls` so a call
+    // already expanded by Pass A never double-fires.
+    const flagInvalidSchemaForCall = (call: unknown): void => {
+      if (processedCalls.has(call as unknown as object)) return;
+      const callee = (call as { callee?: { kind?: string; name?: string } }).callee;
+      if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
+      if (!schemaForLocals.has(callee.name)) return;
+      const span = ((call as { span?: Span }).span as Span | undefined) ?? defaultSpan;
+      errors.push(new TSError(
+        "E-SCHEMAFOR-INVALID-CALL-CONTEXT",
+        `E-SCHEMAFOR-INVALID-CALL-CONTEXT: \`schemaFor(...)\` was called outside a \`<schema>\` block. ` +
+        `The function-call form is canonical INSIDE \`<schema>\` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a table-declaration fragment that requires the \`<schema>\` parser context). ` +
+        `Resolution: wrap the call inside a \`<schema>\${ schemaFor(...) }</>\` block. ` +
+        `See SPEC §41.15.8.`,
+        span,
+      ));
+    };
+
+    const walkExprForSchemaFor = (v: unknown): void => {
+      if (!v || typeof v !== "object") return;
+      try {
+        forEachCallInExprNode(v as any, flagInvalidSchemaForCall);
+      } catch {
+        // Defensive — forEachCallInExprNode is exhaustive per ExprNode kinds.
+      }
+    };
+
     for (const n of arr) {
       if (!n || typeof n !== "object") continue;
 
@@ -19941,27 +20019,34 @@ function walkAndExpandSchemaForCalls(
       const EXPR_FIELDS = ["exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
                             "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr"];
       for (const f of EXPR_FIELDS) {
-        const v = (n as Record<string, unknown>)[f];
-        if (v && typeof v === "object") {
-          try {
-            forEachCallInExprNode(v as any, (call) => {
-              if (processedCalls.has(call as unknown as object)) return;
-              const callee = (call as { callee?: { kind?: string; name?: string } }).callee;
-              if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
-              if (!schemaForLocals.has(callee.name)) return;
-              const span = ((call as { span?: Span }).span as Span | undefined) ?? defaultSpan;
-              errors.push(new TSError(
-                "E-SCHEMAFOR-INVALID-CALL-CONTEXT",
-                `E-SCHEMAFOR-INVALID-CALL-CONTEXT: \`schemaFor(...)\` was called outside a \`<schema>\` block. ` +
-                `The function-call form is canonical INSIDE \`<schema>\` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a table-declaration fragment that requires the \`<schema>\` parser context). ` +
-                `Resolution: wrap the call inside a \`<schema>\${ schemaFor(...) }</>\` block. ` +
-                `See SPEC §41.15.8.`,
-                span,
-              ));
-            });
-          } catch {
-            // Defensive — forEachCallInExprNode is exhaustive per ExprNode kinds.
-          }
+        walkExprForSchemaFor((n as Record<string, unknown>)[f]);
+      }
+
+      // §41.15.8 — a schemaFor call in an ATTRIBUTE-VALUE or EVENT-HANDLER
+      // expression position (`<div title=${schemaFor(User)}>`, `<button
+      // onclick=${schemaFor(User)}>`) is "any other markup context" and SHALL
+      // fire E-SCHEMAFOR-INVALID-CALL-CONTEXT. The EXPR_FIELDS whitelist above
+      // does NOT reach attr/handler exprs, so walk them explicitly — otherwise
+      // the call leaks a runtime `schemaFor()` into client.js (schemaFor is
+      // compile-only; it throws at runtime). Both the interpolation form
+      // (`{kind:"expr", exprNode}`) and the bare-handler form (via
+      // handlerAttrToExprNode) are covered.
+      const attrList = ((n as ASTNodeLike).attrs
+        ?? (n as Record<string, unknown>).attributes) as ASTNodeLike[] | undefined;
+      if (Array.isArray(attrList)) {
+        for (const attr of attrList) {
+          if (!attr || typeof attr !== "object") continue;
+          const av = (attr as { value?: unknown }).value;
+          if (!av || typeof av !== "object") continue;
+          // Resolve the single ExprNode carried by the attribute value. The
+          // interpolation form (`attr=${...}`) carries it directly under
+          // `exprNode`; the bare-handler form (`onclick=@cell.method(...)`) is
+          // synthesized by handlerAttrToExprNode. Mutually exclusive so the
+          // call is walked exactly once (no double-fire).
+          const attrExpr = (av as { kind?: string }).kind === "expr"
+            ? (av as { exprNode?: unknown }).exprNode
+            : handlerAttrToExprNode(av);
+          walkExprForSchemaFor(attrExpr);
         }
       }
 
@@ -21568,6 +21653,36 @@ function checkEndpointDeclarations(
   collectEndpointDecls(topNodes);
   if (endpointDecls.length === 0) return; // nothing endpoint-shaped in this file
 
+  // §61.1 — the names an `<endpoint>` arm BODY may legitimately reference beyond
+  // its own per-arm payload bindings: every top-level fn / value declaration in
+  // the file, plus imported specifiers + machine names (the `exemptTypeNames`
+  // set the `<api>` typer reuses). Collected once via a deep walk and handed to
+  // `checkLogicExprIdents` as its `knownFnNames` fallback so the arm-body scope
+  // check (below) does NOT false-fire on a real module fn / value / import.
+  const endpointBodyKnownNames = new Set<string>(exemptTypeNames);
+  {
+    const seenNameWalk = new WeakSet<object>();
+    const DECL_NAME_KINDS = new Set([
+      "function-decl", "let-decl", "const-decl", "tilde-decl", "lin-decl", "state-decl",
+    ]);
+    const collectDeclNames = (node: unknown): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const c of node) collectDeclNames(c); return; }
+      if (seenNameWalk.has(node as object)) return;
+      seenNameWalk.add(node as object);
+      const n = node as Record<string, unknown>;
+      if (typeof n.kind === "string" && DECL_NAME_KINDS.has(n.kind) &&
+          typeof n.name === "string" && n.name) {
+        endpointBodyKnownNames.add(n.name);
+      }
+      for (const key in n) {
+        const v = n[key];
+        if (v && typeof v === "object") collectDeclNames(v);
+      }
+    };
+    collectDeclNames(topNodes);
+  }
+
   // ---- helper: resolve the `accepts=` type-ref + fire E-TYPE-UNKNOWN-NAME ---
   // An undeclared `accepts=` ref is an UNRECOGNIZED type name — the SAME class
   // `checkUnknownTypeNames` (§14.1.2) / `checkApiDeclarations` cover — so reuse
@@ -21766,6 +21881,50 @@ function checkEndpointDeclarations(
       if (vDef && vDef.payload && vDef.payload.size > 0) {
         a.payloadBindingTypes = Array.from(vDef.payload.values());
       }
+    }
+
+    // 5. §61.1 inbound-honesty — scope / name-resolution over each arm BODY. An
+    //    arm body is a code-default value-expression (§61.5 — the value the
+    //    compiler envelopes as the JSON response); an undefined identifier in it
+    //    previously emitted a FREE variable into the server route-handler → a
+    //    runtime ReferenceError, whereas the SAME undefined var in a normal logic
+    //    expr fires E-SCOPE-001. Walk each arm body against the file's declared
+    //    names (`endpointBodyKnownNames`) + the type registry + the arm's own
+    //    payload bindings so an undeclared ident is loud at compile time (REUSE
+    //    `checkLogicExprIdents` — no new scope machinery). The compiler-owned
+    //    decode-failure path (§61.3) never reaches an arm, so only author arms
+    //    are walked; a self-closing / empty (204 no-op) arm has no body to check.
+    const bodyScope = new ScopeChain();
+    for (const [tn, tt] of typeRegistry) {
+      if (!BUILTIN_TYPES.has(tn)) bodyScope.global.bind(tn, { kind: "type", resolvedType: tt });
+    }
+    for (const arm of arms) {
+      if (!arm || typeof arm !== "object") continue;
+      const a = arm as Record<string, unknown>;
+      if (a.isWildcard) continue;
+      const bodyRaw = typeof a.bodyRaw === "string" ? a.bodyRaw.trim() : "";
+      if (bodyRaw === "" || a.bodyForm === "self-closing") continue;
+      const armSpan = (a.span as Span | undefined) ?? span;
+      let bodyExpr: unknown = null;
+      try {
+        bodyExpr = parseExprToNode(bodyRaw, armSpan.file, armSpan.start);
+      } catch {
+        // Unparseable body — a separate parse diagnostic owns it; skip here.
+        bodyExpr = null;
+      }
+      if (!bodyExpr || typeof bodyExpr !== "object") continue;
+      bodyScope.push("endpoint-arm");
+      const bindingsRaw = typeof a.payloadBindingsRaw === "string" ? a.payloadBindingsRaw : "";
+      const bindingNames = bindingsRaw.split(",").map(s => s.trim()).filter(s => s.length > 0);
+      const bindingTypes = Array.isArray(a.payloadBindingTypes)
+        ? (a.payloadBindingTypes as ResolvedType[]) : [];
+      bindingNames.forEach((bn, i) => {
+        bodyScope.bind(bn, { kind: "let", resolvedType: bindingTypes[i] ?? tAsIs() });
+      });
+      checkLogicExprIdents(
+        bodyExpr, armSpan, bodyScope, typeRegistry, errors, undefined, endpointBodyKnownNames,
+      );
+      bodyScope.pop();
     }
   }
 }
