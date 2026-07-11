@@ -1,0 +1,15 @@
+{
+  "id": "engine-derived-engine-match-qualified-lhs",
+  "description": "§51.0.J / §14.4.1 — a derived-engine inline `derived=match @src { Src.A :> .X  Src.B :> .Y }` with QUALIFIED source-variant LHS patterns must lower BOTH arms IDENTICALLY to the bare `.A`/`.B` form. The derived-engine path routes the raw match body through the codegen STRING pipeline (rewriteMatchExpr), whose arm splitter + parser only recognized bare `.Variant` LHS — a qualified `Src.A` arm was mis-lowered: both-qualified produced invalid JS (literal `match {…}` survives), mixed silently DROPPED the qualified arm. This case drives the source engine A -> B and asserts the derived cell tracks BOTH arms: src=A yields dst=X at init (arm `Src.A :> .X`), and after advancing src to B the derived cell recomputes to Y (arm `Src.B :> .Y` — the arm silently dropped pre-fix). Pre-fix the both-qualified artifact throws a SyntaxError at eval; post-fix it runs identically to the bare form.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §51.0.J / §14.4.1",
+  "spec": "§51.0.J",
+  "rationale": "§14.4.1: a qualified variant pattern `Src.A` is equivalent to the canonical bare form `.A`; the general value-match path strips the `TypeName.` qualifier at the AST-builder before the emitter sees it. The §51.0.J derived-engine `derived=match` string-pipeline path must MIRROR that normalization so a qualified LHS lowers the same as a bare LHS. Both arms cover the source enum {A, B} exhaustively (En-D3), so no E-TYPE-020; both lower to valid JS, so no E-CODEGEN-INVALID-LOGIC.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-TYPE-020"],
+    "input": [{ "click": "#toB" }],
+    "state": { "src": "B", "dst": "Y" },
+    "domAnchored": [{ "selector": "#d", "text": "Y" }]
+  }
+}
