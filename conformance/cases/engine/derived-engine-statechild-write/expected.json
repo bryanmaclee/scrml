@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-statechild-write",
+  "description": "§51.0.J E-DERIVED-ENGINE-NO-WRITE for a direct write inside a derived engine's own state-child body. `<Healthy><button onclick=${ @health = .AtRisk }></>` inside a `derived=` engine is rejected with E-DERIVED-ENGINE-NO-WRITE. Previously fire-site #10 fired E-ENGINE-INVALID-TRANSITION with self-contradictory 'add rule=' advice (rule= on a derived engine is itself E-DERIVED-ENGINE-NO-RULES).",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J: the state-child-body direct-write fire-site must consult the derived-engine metadata and fire E-DERIVED-ENGINE-NO-WRITE (the variable is read-only) instead of E-ENGINE-INVALID-TRANSITION, whose remedy contradicts §51.0.J.",
+  "expect": {
+    "codes": ["E-DERIVED-ENGINE-NO-WRITE"],
+    "notCodes": ["E-ENGINE-INVALID-TRANSITION", "E-DERIVED-WRITE"],
+    "severity": { "E-DERIVED-ENGINE-NO-WRITE": "error" }
+  }
+}

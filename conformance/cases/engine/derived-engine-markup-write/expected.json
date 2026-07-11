@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-markup-write",
+  "description": "§51.0.J E-DERIVED-ENGINE-NO-WRITE via a markup event-handler. A derived engine (`<engine for=Health derived=match @marioState {...}>`) auto-declares a read-only `@health`; a direct write in `<button onclick=${ @health = .AtRisk }>` is rejected. The write-side rejection walker previously never descended into markup event-handler attribute expressions, so this compiled clean and emitted corrupting client JS.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J: direct writes to a derived engine's auto-declared variable are E-DERIVED-ENGINE-NO-WRITE, regardless of locus — including a markup event-handler attribute. Not E-DERIVED-WRITE (§6.6.8 governs `const <name>` cells, not engine variables).",
+  "expect": {
+    "codes": ["E-DERIVED-ENGINE-NO-WRITE"],
+    "notCodes": ["E-DERIVED-WRITE", "E-ENGINE-INVALID-TRANSITION"],
+    "severity": { "E-DERIVED-ENGINE-NO-WRITE": "error" }
+  }
+}

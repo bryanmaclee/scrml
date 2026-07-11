@@ -3431,7 +3431,9 @@ function checkStateDeclForDerivedWrite(
   // reassignment). A reassignment write is never `const`.
   if (decl.structuralForm === false && decl.isConst !== true) {
     const rec = lookupStateCell(scope, decl.name);
-    if (rec && rec.isConst) {
+    // Engine cells are `isConst` too but are governed by §51.0.J
+    // (E-DERIVED-ENGINE-NO-WRITE) / §51.0.F, NOT §6.6.8 — skip them here.
+    if (rec && rec.isConst && !rec.engineMeta) {
       fireDerivedWrite(
         errors, rec.name, rec.declNode, "reassign",
         spanFromMutationNode(decl, fileFromScope),
@@ -3752,7 +3754,9 @@ function checkExprNodeForMutations(
       const bareName = n.target.name.slice(1);
       if (bareName.length > 0) {
         const rec = lookupStateCell(scope, bareName);
-        if (rec && rec.isConst) {
+        // Engine cells are `isConst` too but are governed by §51.0.J
+        // (E-DERIVED-ENGINE-NO-WRITE) / §51.0.F, NOT §6.6.8 — skip them here.
+        if (rec && rec.isConst && !rec.engineMeta) {
           fireDerivedWrite(errors, rec.name, rec.declNode, "reassign", containerSpan);
         }
       }
@@ -8260,6 +8264,22 @@ export function walkDerivedEngineWriteRejections(
     // Continue descent — state-decl children may carry nested writes.
   }
 
+  // Markup event-handler attribute expressions (`<button onclick=${ @var = .X }>`,
+  // `<button onclick=${ @var.advance(.X) }>`). Attr values carry an ExprNode on
+  // `attr.value.exprNode`; a derived-engine write there is E-DERIVED-ENGINE-NO-WRITE
+  // (§51.0.J). The generic `children` recursion below does NOT reach `attrs`, so
+  // this descent is required for the event-handler locus. (This walker never
+  // descends into `engine-decl.bodyChildren` — state-child body writes are owned
+  // by fire-site #10 in `validateEngineA5Extensions` — so no double-fire.)
+  if (Array.isArray(node.attrs)) {
+    for (const attr of node.attrs) {
+      const av = attr && attr.value;
+      if (av && typeof av === "object" && av.exprNode && typeof av.exprNode === "object") {
+        checkExprNodeForDerivedEngineWrite(av.exprNode, node, fileScope, errors, filePath);
+      }
+    }
+  }
+
   // Recurse into common containers.
   if (Array.isArray(node.children)) {
     walkDerivedEngineWriteRejections(node.children, fileScope, errors, filePath, visited);
@@ -10417,6 +10437,14 @@ export function validateEngineA5Extensions(
     // current pipeline. Broader coverage waits on body-parser widening
     // tracked in `engine-a7-hierarchy.test.js §7`.
     const varName = typeof meta.varName === "string" ? meta.varName : "";
+    // A Move-14 derived engine (§51.0.J) — `derivedExpr` set and NOT the
+    // §51.9 legacy-source-var shape (which is E-ENGINE-017 territory).
+    // Mirrors `lookupDerivedEngineMeta`'s gate.
+    const dExpr = meta.derivedExpr;
+    const isDerivedEngineHere =
+      dExpr !== null && dExpr !== undefined &&
+      !(typeof dExpr === "object"
+        && (dExpr as Record<string, unknown>).kind === "legacy-source-var");
     if (
       varName.length > 0 &&
       variants.length > 0 &&
@@ -10428,6 +10456,21 @@ export function validateEngineA5Extensions(
         // Skip targets not in this engine's variants — different error
         // already fires (or will fire) for that case; mirrors fire-site #3.
         if (!variantSet.has(dw.target)) continue;
+
+        // ----- En-D4 (§51.0.J): on a DERIVED engine, ANY state-child-body
+        // direct write is E-DERIVED-ENGINE-NO-WRITE — the auto-declared
+        // variable is read-only. Fire that (not E-ENGINE-INVALID-TRANSITION,
+        // whose "add rule=" advice is self-contradictory since `rule=` on a
+        // derived engine is itself E-DERIVED-ENGINE-NO-RULES). This precedes
+        // the self-write no-op check below: v0.3 Option-d self-write no-ops
+        // are a NON-derived-engine semantic; a derived engine rejects even a
+        // self-write.
+        if (isDerivedEngineHere) {
+          fireDerivedEngineNoWrite(
+            engineDecl, varName, dw.shape === "advance", errors, filePath,
+          );
+          continue;
+        }
 
         // ----- Fire-site #10 (v0.3 Option-d synthesis) — self-write
         //       no-op detection: W-ENGINE-SELF-WRITE-DETECTED (info) -----

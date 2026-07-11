@@ -1,0 +1,13 @@
+${ type Mario:enum = { Small, Big } }
+${ type Health:enum = { Healthy, AtRisk } }
+<marioState>: Mario = .Small
+<engine for=Health derived=match @marioState {
+  .Small :> .Healthy
+  .Big :> .AtRisk
+}>
+  <Healthy>
+    <button id="w" onclick=${ @health = .AtRisk }>write</button>
+  </>
+  <AtRisk/>
+</>
+${ <p id="h">${@health}</p> }
