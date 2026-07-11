@@ -262,3 +262,113 @@ describe("BS R28-BUG-3 — // comment before :-shorthand engine in a compound bo
     expect(result.errors).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// jwt-auth-bypass (2026-07-11, HIGH) — `/* ... */` block-comment skip INSIDE a
+// brace context.
+//
+// The main scan loop skipped `//` line comments but NOT `/* */` block comments
+// inside brace-delimited contexts. A JSDoc `/** ... */` in a `${...}` logic
+// block had its interior scanned char-by-char:
+//   - a `Promise<string>` / `<string>` inside it was mis-read as a markup
+//     tag-opener → `frame.tagNesting++` that never decrements → the leaked
+//     tagNesting propagated onto every subsequent `!{...}` error-effect child
+//     BLOCK_REF → collectExpr's `tok.block?.tagNesting === 0` statement-boundary
+//     break was BYPASSED → the failable handler was ABSORBED into the preceding
+//     expression → "statement boundary not detected" drop that discarded the
+//     rest of the module's export set (an unawaited-Promise auth bypass, issue
+//     #26 class, on the JWT path).
+//   - a literal `!{}` in the comment prose spawned a SPURIOUS error-effect child.
+//
+// The fix skips `/* … */` as a `comment` block inside brace contexts (mirroring
+// the `//` handler), making the comment interior inert.
+// ---------------------------------------------------------------------------
+describe("BS /* */ block-comment skip inside brace contexts — jwt-auth-bypass", () => {
+  function firstLogic(source) {
+    const blocks = split(source);
+    const logic = blocks.find((b) => b.type === "logic");
+    expect(logic).toBeDefined();
+    return logic;
+  }
+
+  test("/* Promise<string> */ in a ${} does NOT leak tagNesting onto a later !{}", () => {
+    // The `<string>` inside the block comment must NOT be read as a tag-opener.
+    // Pre-fix the later `!{...}` error-effect carried tagNesting = 1.
+    const src = [
+      "${",
+      "  /** @returns Promise<string> — a doc comment */",
+      "  const x = risky() !{",
+      "    | ::Thrown(m, n) -> { return 0 }",
+      "  }",
+      "}",
+    ].join("\n");
+    const logic = firstLogic(src);
+    const ee = logic.children.filter((c) => c.type === "error-effect");
+    // Exactly ONE error-effect (the real handler) — no spurious one.
+    expect(ee).toHaveLength(1);
+    // The real handler carries NO leaked tag-nesting (undefined or 0).
+    expect(ee[0].tagNesting ?? 0).toBe(0);
+    // The block comment was extracted as a comment child (inert interior).
+    const comments = logic.children.filter((c) => c.type === "comment");
+    expect(comments.length).toBeGreaterThan(0);
+    expect(comments.some((c) => c.raw.includes("Promise<string>"))).toBe(true);
+  });
+
+  test("a literal !{} inside a block comment does NOT spawn a spurious error-effect", () => {
+    const src = [
+      "${",
+      "  /* normalized to {valid:false} by the !{} handler */",
+      "  const x = risky() !{",
+      "    | ::Thrown(m, n) -> { return 0 }",
+      "  }",
+      "}",
+    ].join("\n");
+    const logic = firstLogic(src);
+    const ee = logic.children.filter((c) => c.type === "error-effect");
+    // Only the REAL handler — the `!{}` in the comment prose is inert.
+    expect(ee).toHaveLength(1);
+    expect(ee[0].raw).toContain("::Thrown");
+  });
+
+  test("multi-line block comment with sigils/tags spans correctly and stays inert", () => {
+    const src = [
+      "${",
+      "  /**",
+      "   * Uses ${x} interpolation and <Foo> markup and a !{} handler",
+      "   * across multiple lines.",
+      "   */",
+      "  const y = call() !{ | ::Thrown(m, n) -> { return 1 } }",
+      "}",
+    ].join("\n");
+    const logic = firstLogic(src);
+    const ee = logic.children.filter((c) => c.type === "error-effect");
+    expect(ee).toHaveLength(1);
+    expect(ee[0].tagNesting ?? 0).toBe(0);
+    // No spurious logic child from the `${x}` inside the comment.
+    const nestedLogic = logic.children.filter((c) => c.type === "logic");
+    expect(nestedLogic).toHaveLength(0);
+  });
+
+  test("/* */ INSIDE a string literal is NOT treated as a comment", () => {
+    // openStringQuoteAt guard: a `/*` inside `"..."` on the current line is
+    // string content, mirroring the `//` handler's string guard.
+    const src = '${ const s = "a /* not a comment */ b" }';
+    const logic = firstLogic(src);
+    const comments = logic.children.filter((c) => c.type === "comment");
+    expect(comments).toHaveLength(0);
+  });
+
+  test("regression: // line-comment skip inside ${} still works (additive)", () => {
+    // The new /* */ arm must not disturb the pre-existing `//` handling.
+    const src = [
+      "${",
+      "  // returns Promise<string>",
+      "  const z = risky() !{ | ::Thrown(m, n) -> { return 2 } }",
+      "}",
+    ].join("\n");
+    const logic = firstLogic(src);
+    const ee = logic.children.filter((c) => c.type === "error-effect");
+    expect(ee).toHaveLength(1);
+    expect(ee[0].tagNesting ?? 0).toBe(0);
+  });
+});

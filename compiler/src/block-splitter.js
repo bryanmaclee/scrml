@@ -2376,6 +2376,81 @@ export function splitBlocks(filePath, source) {
     }
 
     // -----------------------------------------------------------------------
+    // Section 27.1: '/* ... */' block-comment suppression INSIDE brace contexts.
+    //
+    // jwt-auth-bypass (2026-07-11, HIGH) — inside a brace-delimited context
+    // (`${...}` logic, `?{}` SQL, `#{}` CSS, `!{}`, `^{}`, `~{}` test), a
+    // `/* ... */` block comment (e.g. a JSDoc `/** @returns Promise<string> */`)
+    // is a CODE comment (SPEC §27.1 — `//` + `/* */` are universal). Pre-fix the
+    // main loop skipped `//` line comments (above) but NOT `/* */`, so the
+    // comment BODY was scanned char-by-char: a `<string>` / `Promise<T>` inside
+    // it was mis-read as a markup tag-opener → `frame.tagNesting++` that never
+    // decrements → the leaked tagNesting propagated onto every subsequent
+    // error-effect (`!{...}`) child BLOCK_REF (line ~2245). collectExpr's
+    // statement-boundary break (ast-builder.js, `tok.block?.tagNesting === 0`
+    // guard) was then BYPASSED, so a failable handler `call() !{ … }` was
+    // ABSORBED into the preceding expression — the "statement boundary not
+    // detected" drop that silently discarded the rest of jwt.scrml's exports
+    // (`signJwt`/`verifyJwt`/…), classifying the async fns as SYNC downstream →
+    // an unawaited-Promise auth bypass (same class as issue #26). A `!{}` /
+    // `${}` literally written inside the comment prose likewise spawned a
+    // spurious child block. Skipping the whole `/* … */` as a `comment` block
+    // (parallel to the `//` handler above) makes the comment interior inert, so
+    // the block STRUCTURE (children + tagNesting) is correct; tokenizeLogic's
+    // own `readBlockComment` still re-handles the comment text in `bodyRaw`
+    // (benign duplication, same as the `//` case).
+    //
+    // Scope: brace contexts ONLY (`topIsBraceContext()`) — the confirmed locus.
+    // markup-text `/* */` is NOT a comment (that is `<!-- -->`) and is left
+    // untouched. The `openStringQuoteAt` guard mirrors the `//` handler: a `/*`
+    // inside a `"..."` / `'...'` string literal on the current line is string
+    // content, not a comment opener.
+    // -----------------------------------------------------------------------
+    if (c === "/" && ch(1) === "*" && topIsBraceContext()) {
+      const openQ = openStringQuoteAt(source, curPos);
+      if (openQ) {
+        // `/*` sits inside a string literal on this line — consume as string
+        // content up to the closing quote (mirrors the `//` string branch).
+        beginText();
+        step(); step(); // consume the `/*` as string content
+        while (pos < len) {
+          const sc = source[pos];
+          if (sc === "\\" && pos + 1 < len) { step(); step(); continue; }
+          if (sc === openQ) { step(); break; } // consume the closing quote
+          if (sc === "\n") break; // unterminated on this line — stop, recover
+          step();
+        }
+        continue;
+      }
+      flushText();
+      const commentStart = curPos;
+      const commentStartLine = curLine;
+      const commentStartCol = curCol;
+      advance(2); // consume '/*'
+      // Scan to the closing '*/' (step() maintains line/col across newlines).
+      // If EOF is hit first the comment runs to EOF — best-effort recovery,
+      // matching the unclosed-`//`/`<!--` behavior.
+      while (pos < len) {
+        if (source[pos] === "*" && ch(1) === "/") {
+          advance(2); // consume '*/'
+          break;
+        }
+        step();
+      }
+      targetChildren().push({
+        type: "comment",
+        raw: source.slice(commentStart, pos),
+        span: { start: commentStart, end: pos, line: commentStartLine, col: commentStartCol },
+        depth: depth(),
+        children: [],
+        name: null,
+        closerForm: null,
+        isComponent: false,
+      });
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
     // Section 27.2: '<!-- ... -->' HTML markup-comment suppression.
     //
     // SPEC §27.2 lists `<!-- -->` as the markup-context native comment.
