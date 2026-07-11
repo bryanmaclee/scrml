@@ -9199,15 +9199,30 @@ function annotateNodes(
                       .filter((name) => !enclosingVariants!.has(name));
                     if (incompatible.length > 0) {
                       const variantList = incompatible.map((v) => `'${calleeErrTypeName}.${v}'`).join(", ");
+                      const it = incompatible.length === 1 ? "it" : "them";
+                      // D-ERR-2 remedy: for a BARE-`!` enclosing function the error
+                      // type is the built-in `Error` enum (§19.4.2 — sole variant
+                      // `Error::Generic`), which CANNOT be extended. "Add the
+                      // missing variant(s) to 'Error'" is nonsensical there; steer
+                      // the author to declare an explicit error type on the
+                      // enclosing function (§19.4 `! ErrorType`) instead.
+                      const isBuiltinError = enclosingErrTypeName === "Error";
+                      const envelopeDesc = isBuiltinError
+                        ? `the built-in bare-'!' error type 'Error' (§19.4.2, sole variant 'Error::Generic')`
+                        : `the enclosing function's declared error type '${enclosingErrTypeName}'`;
+                      const remedy = isBuiltinError
+                        ? `The built-in 'Error' envelope cannot be extended. Declare an explicit error type on ` +
+                          `'${fnName}' that includes ${it} (§19.4, e.g. '${fnName}(…) ! ${calleeErrTypeName}'), ` +
+                          `or handle '${calleeName}' explicitly with 'match' or '!{}'.`
+                        : `Add the missing variant(s) to '${enclosingErrTypeName}', or handle '${calleeName}' ` +
+                          `explicitly with 'match' or '!{}'.`;
                       errors.push(new TSError(
                         "E-ERROR-010",
                         `E-ERROR-010: '?' in function '${fnName}' propagates error variant(s) ${variantList} ` +
-                        `from '${calleeName}', but the enclosing function's declared error type ` +
-                        `'${enclosingErrTypeName}' does not declare ${incompatible.length === 1 ? "it" : "them"}. ` +
+                        `from '${calleeName}', but ${envelopeDesc} does not declare ${it}. ` +
                         `'?' propagation requires every error variant the called function can produce to exist ` +
                         `in the enclosing function's error type (§19.5.3), so error information is never silently ` +
-                        `dropped. Add the missing variant(s) to '${enclosingErrTypeName}', or handle '${calleeName}' ` +
-                        `explicitly with 'match' or '!{}'.`,
+                        `dropped. ${remedy}`,
                         (stmt.span ?? n.span) as Span,
                       ));
                     }
