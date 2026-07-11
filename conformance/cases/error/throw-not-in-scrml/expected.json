@@ -1,0 +1,13 @@
+{
+  "id": "error-throw-not-in-scrml",
+  "description": "§19.9.8 / §19.3 — scrml has no `throw`; failures are signalled with `fail Type::Variant(...)` inside an `!` failable function. The DEFAULT parse path (block-splitter + ast-builder) fires the parse-layer rejection E-THROW-NOT-IN-SCRML, matching the opt-in `--parser=scrml-native` path (parse-stmt.js:parseThrow). Fork-D drain-path-1 backport: previously the default path SQUATTED on E-ERROR-006 (which §19.2.3 reserves for the renders-clause undefined-variable check); `notCodes` asserts the squat is gone.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.9.8 / §19.3",
+  "spec": "§19.9.8",
+  "rationale": "§19.9.8: scrml has no `throw` — the error model is `fail` (§19.3), the `?` propagate operator, the `!{}` guarded-expression handler, and `<errorBoundary>`. A source-level `throw` is a hard parse-layer rejection: E-THROW-NOT-IN-SCRML.",
+  "expect": {
+    "codes": ["E-THROW-NOT-IN-SCRML"],
+    "notCodes": ["E-ERROR-006"],
+    "severity": { "E-THROW-NOT-IN-SCRML": "error" }
+  }
+}

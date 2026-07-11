@@ -1,0 +1,13 @@
+{
+  "id": "error-renders-undefined-var",
+  "description": "§19.2.3 — variables referenced inside a `renders` clause body SHALL resolve to the variant's payload fields; a reference to an undefined variable is a compile error E-ERROR-006. Here `InvalidAmount(reason: string)` declares payload field `reason`, but the `renders` clause interpolates `${badVar}` — a value reference that names no payload field, no JS/DOM global, and no declared type. Fork-D drain-path-1 (D-ERR-5): E-ERROR-006 was freed from its `throw` squat and now carries this §19.2.3 cataloged meaning in the DEFAULT parse path.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.2.3",
+  "spec": "§19.2.3",
+  "rationale": "§19.2.3: Variables referenced inside a `renders` clause body SHALL resolve to the variant's payload fields. A reference to an undefined variable inside a `renders` clause SHALL be a compile error: E-ERROR-006 -- `renders clause on variant '{VariantName}' references undefined variable '{name}'. Only the variant's payload fields are in scope: {list of fields}.`",
+  "expect": {
+    "codes": ["E-ERROR-006"],
+    "notCodes": [],
+    "severity": { "E-ERROR-006": "error" }
+  }
+}

@@ -1,0 +1,7 @@
+${
+    type PaymentError:enum = {
+        InvalidAmount(reason: string)
+            renders <div class="error">${badVar}</>
+    }
+}
+<p>z</>

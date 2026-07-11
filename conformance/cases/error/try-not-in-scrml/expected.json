@@ -1,0 +1,13 @@
+{
+  "id": "error-try-not-in-scrml",
+  "description": "§19.9.8 / §19 — scrml has no `try`/`catch`/`finally`; the error model is `fail` / `?` / `!{}` / `<errorBoundary>`. The DEFAULT parse path (block-splitter + ast-builder) fires the parse-layer rejection E-TRY-NOT-IN-SCRML, matching the opt-in `--parser=scrml-native` path (parse-stmt.js:parseTry). Fork-D drain-path-1 backport: previously the default path SQUATTED on E-ERROR-007 (which §19.10.4 reserves for nested-`transaction` blocks); `notCodes` asserts the squat is gone. (The separate W-TRY-CATCH-IN-SCRML-SOURCE warning still fires as an advisory sibling.)",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.9.8 / §19",
+  "spec": "§19.9.8",
+  "rationale": "§19.9.8: scrml has no `try`/`catch`/`finally`. A source-level `try` is a hard parse-layer rejection: E-TRY-NOT-IN-SCRML.",
+  "expect": {
+    "codes": ["E-TRY-NOT-IN-SCRML"],
+    "notCodes": ["E-ERROR-007"],
+    "severity": { "E-TRY-NOT-IN-SCRML": "error" }
+  }
+}

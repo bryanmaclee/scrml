@@ -1389,6 +1389,94 @@ describe("§30.1 parseEnumBody renders clause", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §19.2.3 — `renders` clause undefined-variable check (E-ERROR-006, D-ERR-5)
+// ---------------------------------------------------------------------------
+//
+// Fork-D drain-path-1: E-ERROR-006 was freed from its `throw` squat and now
+// carries its §19.2.3 cataloged meaning — a `renders` clause `${...}` value
+// reference that names no payload field (nor a JS/DOM global, nor a declared
+// type) is an undefined variable. The check is gated on the errors + fileSpan
+// args, so the parse-only tests above are unaffected.
+describe("§19.2.3 renders undefined-variable (E-ERROR-006)", () => {
+  const codes = (errors) => errors.map(e => e.code);
+
+  test("value reference to an undefined variable fires E-ERROR-006", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      '{ InvalidAmount(reason:string) renders <div class="error">${badVar}</> }',
+      registry, errors, span(), "PaymentError",
+    );
+    expect(codes(errors)).toContain("E-ERROR-006");
+    const msg = errors.find(e => e.code === "E-ERROR-006").message;
+    expect(msg).toContain("badVar");
+    expect(msg).toContain("reason"); // the in-scope payload field is listed
+  });
+
+  test("value reference to the variant's own payload field is clean", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      '{ InvalidAmount(reason:string) renders <div class="error">${reason}</> }',
+      registry, errors, span(), "PaymentError",
+    );
+    expect(codes(errors)).not.toContain("E-ERROR-006");
+  });
+
+  test("a module-function CALL inside an interpolation does not false-positive", () => {
+    // §19.2.1's canonical renders example calls a module function; a CALL is
+    // reachable — only VALUE references are constrained to payload fields.
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      '{ InvalidAmount(reason:string) renders <div>${fmt(reason)}</> }',
+      registry, errors, span(), "PaymentError",
+    );
+    expect(codes(errors)).not.toContain("E-ERROR-006");
+  });
+
+  test("a JS/DOM global value reference is clean", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      '{ Overflow(n:number) renders <div>${Math.min(n, 9)}</> }',
+      registry, errors, span(), "NumError",
+    );
+    expect(codes(errors)).not.toContain("E-ERROR-006");
+  });
+
+  test("a unit variant whose renders references any variable fires E-ERROR-006", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      "{ Bare renders <div>${oops}</> }",
+      registry, errors, span(), "E",
+    );
+    expect(codes(errors)).toContain("E-ERROR-006");
+  });
+
+  test("member access resolves against the base payload field", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    const errors = [];
+    parseEnumBody(
+      '{ Detail(info:string) renders <div>${info.length}</> }',
+      registry, errors, span(), "E",
+    );
+    expect(codes(errors)).not.toContain("E-ERROR-006");
+  });
+
+  test("parse-only calls (no errors arg) never run the check", () => {
+    const registry = new Map(BUILTIN_TYPES);
+    // 2-arg call — errors/fileSpan undefined; check is gated off, no throw.
+    const { variants } = parseEnumBody(
+      "{ Bare renders <div>${undefinedThing}</> }",
+      registry,
+    );
+    expect(variants).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §31  Forward reference resolution (TS-AB-RE-002 regression test)
 // ---------------------------------------------------------------------------
 
