@@ -1,0 +1,12 @@
+{
+  "id": "forms-compound-render-not-bindable",
+  "description": "§5.4.1 / §6.2 E-CELL-RENDER-SPEC-NOT-BINDABLE via the compound wrapping form. A compound child with a non-bindable render-spec (`<name req> = <div/>`) used as `<signup><name/></>` (SPEC §6.4 wrapping form) is rejected — the same as a top-level `<name/>` use. Previously the compound-qualified child slipped the file-scope-only render-by-tag check and emitted garbage `<name/>` HTML.",
+  "language-version": "1.0",
+  "spec": "§5.4.1",
+  "rationale": "§6.2 Shape 2 requires a bindable form element as the render-spec root; `<div>` is not bindable. The render-by-tag bindability check must resolve the compound child `signup.name` through the enclosing compound wrapper's sub-scope, not just file scope.",
+  "expect": {
+    "codes": ["E-CELL-RENDER-SPEC-NOT-BINDABLE"],
+    "notCodes": [],
+    "severity": { "E-CELL-RENDER-SPEC-NOT-BINDABLE": "error" }
+  }
+}

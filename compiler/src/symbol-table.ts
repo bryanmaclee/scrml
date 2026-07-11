@@ -2875,10 +2875,17 @@ function describeShape(cellKind: CellKind, decl: ReactiveDeclNode): string {
  * use-site (lowercase self-closed tag matching a registered cell), apply the
  * cell-kind switch and push the appropriate diagnostic. Returns silently for
  * non-use-site nodes.
+ *
+ * `lookupScope` is the resolution scope for the tag. At top level it is the
+ * file scope; inside a compound wrapping form (`<parent><childName/></>`,
+ * SPEC §6.4 wrapping form) it is the enclosing compound's SUB-scope, so the
+ * compound child `<childName/>` resolves (its render-spec bindability is then
+ * validated the same as a top-level `<childName/>`). `lookupStateCell` chains
+ * to the file scope, so file-scope cells remain reachable from either scope.
  */
 function checkRenderByTag(
   node: MinimalMarkupNode,
-  fileScope: Scope,
+  lookupScope: Scope,
   errors: SYMDiagnostic[],
 ): void {
   if (!node.selfClosing) return;
@@ -2888,8 +2895,8 @@ function checkRenderByTag(
   // Lowercase letter range: 'a'-'z' = 97-122. Anything outside (uppercase,
   // digits, special) is not a state-cell render-by-tag use.
   if (first < 97 || first > 122) return;
-  const decl = lookupStateCell(fileScope, node.tag);
-  if (!decl) return; // HTML built-in, unresolved tag, or compound child — out of scope.
+  const decl = lookupStateCell(lookupScope, node.tag);
+  if (!decl) return; // HTML built-in, unresolved tag, or unaddressable compound child — out of scope.
   const declNode = decl.declNode;
   const cellKind = getCellKind(declNode);
   if (cellKind === undefined) return; // not classified — defensive (shouldn't happen post-PASS-4).
@@ -2948,8 +2955,16 @@ function walkRenderByTagUses(
   fileScope: Scope,
   visited: WeakSet<object>,
   errors: SYMDiagnostic[],
+  // Enclosing compound wrapper's SUB-scope, or null at top level. When a
+  // markup wrapper's tag resolves to a compound-parent cell, its children are
+  // walked with that compound's sub-scope so the wrapping form
+  // `<parent><childName/></>` (SPEC §6.4) resolves the child. Inherited through
+  // intermediate (non-compound) markup so `<parent><div><childName/></div></>`
+  // resolves too.
+  wrapperScope: Scope | null = null,
 ): void {
   if (!nodes) return;
+  const lookupScope = wrapperScope ?? fileScope;
   for (const n of nodes) {
     if (!n || typeof n !== "object") continue;
     if (visited.has(n)) continue;
@@ -2963,9 +2978,13 @@ function walkRenderByTagUses(
       // that fires, descendants (none, by selfClosing definition) are still
       // walked for consistency. For non-self-closed markup, children are
       // walked normally.
-      checkRenderByTag(n as MinimalMarkupNode, fileScope, errors);
+      checkRenderByTag(n as MinimalMarkupNode, lookupScope, errors);
       if (Array.isArray(anyN.children)) {
-        walkRenderByTagUses(anyN.children, fileScope, visited, errors);
+        // If THIS wrapper's tag resolves to a compound-parent cell, its
+        // children address the compound's fields — descend with that
+        // compound's sub-scope. Otherwise inherit the current wrapper scope.
+        const childScope = compoundSubScopeForTag(anyN.tag, lookupScope) ?? wrapperScope;
+        walkRenderByTagUses(anyN.children, fileScope, visited, errors, childScope);
       }
       continue;
     }
@@ -2976,36 +2995,51 @@ function walkRenderByTagUses(
       // compound's nested context is rare and uses the file-scope lookup
       // (matching Phase 0 §2.4 limitation note).
       if (Array.isArray(anyN.children)) {
-        walkRenderByTagUses(anyN.children, fileScope, visited, errors);
+        walkRenderByTagUses(anyN.children, fileScope, visited, errors, wrapperScope);
       }
       continue;
     }
 
     if (kind === "function-decl") {
-      walkRenderByTagUses(anyN.body, fileScope, visited, errors);
+      walkRenderByTagUses(anyN.body, fileScope, visited, errors, wrapperScope);
       continue;
     }
 
     // Generic recursion (mirrors PASS-1 shape).
-    if (Array.isArray(anyN.children)) walkRenderByTagUses(anyN.children, fileScope, visited, errors);
-    if (Array.isArray(anyN.body)) walkRenderByTagUses(anyN.body, fileScope, visited, errors);
-    if (Array.isArray(anyN.consequent)) walkRenderByTagUses(anyN.consequent, fileScope, visited, errors);
-    if (Array.isArray(anyN.alternate)) walkRenderByTagUses(anyN.alternate, fileScope, visited, errors);
+    if (Array.isArray(anyN.children)) walkRenderByTagUses(anyN.children, fileScope, visited, errors, wrapperScope);
+    if (Array.isArray(anyN.body)) walkRenderByTagUses(anyN.body, fileScope, visited, errors, wrapperScope);
+    if (Array.isArray(anyN.consequent)) walkRenderByTagUses(anyN.consequent, fileScope, visited, errors, wrapperScope);
+    if (Array.isArray(anyN.alternate)) walkRenderByTagUses(anyN.alternate, fileScope, visited, errors, wrapperScope);
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
-        if (arm && Array.isArray(arm.body)) walkRenderByTagUses(arm.body, fileScope, visited, errors);
+        if (arm && Array.isArray(arm.body)) walkRenderByTagUses(arm.body, fileScope, visited, errors, wrapperScope);
       }
     }
     // Phase A10 (S78) — descend into engine-decl.bodyChildren so render-by-tag
     // use-sites (e.g., `<derivedName/>` inside an engine state-child body)
     // are validated. Walks with file-scope (B6 lookups are file-scoped).
     if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
-      walkRenderByTagUses(anyN.bodyChildren, fileScope, visited, errors);
+      walkRenderByTagUses(anyN.bodyChildren, fileScope, visited, errors, wrapperScope);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
-      walkRenderByTagUses([anyN.expr.node], fileScope, visited, errors);
+      walkRenderByTagUses([anyN.expr.node], fileScope, visited, errors, wrapperScope);
     }
   }
+}
+
+/**
+ * If `tag` resolves (in `scope`) to a compound-PARENT cell, return that
+ * compound's registered SUB-scope (the scope holding its child cells), else
+ * null. The sub-scope is stamped on the parent's decl node as `_scope` by
+ * `registerStateDecl` (PASS 1). Used to resolve the wrapping form
+ * `<parent><childName/></>` render-by-tag child.
+ */
+function compoundSubScopeForTag(tag: unknown, scope: Scope): Scope | null {
+  if (typeof tag !== "string" || tag.length === 0) return null;
+  const rec = lookupStateCell(scope, tag);
+  if (!rec || rec.isCompoundParent !== true) return null;
+  const sub = (rec.declNode as ScopeAnnotated)._scope;
+  return sub ?? null;
 }
 
 // ---------------------------------------------------------------------------
