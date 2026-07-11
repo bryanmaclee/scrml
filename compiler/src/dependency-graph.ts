@@ -808,6 +808,44 @@ function collectAllSqlBlocks(fileAST: FileAST): SQLNode[] {
 }
 
 /**
+ * §52.4.4 (E-AUTH-001 companion) — the base names of `@`-sigil reactive reads
+ * appearing inside the `${...}` interpolations of a `?{}` SQL query. String
+ * literals inside an interpolation are stripped first so an `@` inside a quoted
+ * value (e.g. an email address) is not mistaken for a reactive read.
+ * `@obj.field` / `@arr[i]` yield the base name `obj` / `arr`. A balanced-brace
+ * scan handles nested braces inside an interpolation body. Mirrors the
+ * type-system.ts `sqlInterpolationSigilReads` used by the E-AUTH-001 check so
+ * the DG "consumed" credit and the guard agree on what a bound-param read is.
+ */
+function sqlQueryInterpolationSigilReads(query: string): string[] {
+  const out: string[] = [];
+  const n = query.length;
+  let i = 0;
+  while (i < n) {
+    if (query.charCodeAt(i) === 36 /* $ */ && i + 1 < n && query.charCodeAt(i + 1) === 123 /* { */) {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        const ch = query.charCodeAt(j);
+        if (ch === 123 /* { */) depth++;
+        else if (ch === 125 /* } */) { depth--; if (depth === 0) break; }
+        j++;
+      }
+      const body = query.slice(i + 2, j)
+        .replace(/"(?:[^"\\]|\\.)*"/g, " ")
+        .replace(/'(?:[^'\\]|\\.)*'/g, " ")
+        .replace(/`(?:[^`\\]|\\.)*`/g, " ");
+      const m = body.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+      if (m) for (const r of m) out.push(r.slice(1));
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
  * Collect all meta blocks from a file AST.
  */
 function collectAllMetaBlocks(fileAST: FileAST): MetaNode[] {
@@ -1376,6 +1414,12 @@ export function runDG(input: DGInput): DGOutput {
   // the sweep walks the same AST node references collected by
   // collectAllMarkupNodes (no copying / cloning between the two passes).
   const markupAstToRenderId = new Map<ASTNode, NodeId>();
+  // §52.4.4 (E-AUTH-001 companion) — sql AST node identity → its registered
+  // sql-query DGNode NodeId. Populated in loop #1 at the sql node creation site;
+  // consumed in loop #2 to credit `${@var}` bound-param reads as consumers for
+  // E-DG-002. Identity-keyed for the same reason as `markupAstToRenderId`
+  // (makeNodeId embeds a monotonic counter, non-recomputable from filePath/span).
+  const sqlAstToNodeId = new Map<ASTNode, NodeId>();
   // Cross-file aggregate — counts the number of times the stack-empty fallback
   // to findOwningRenderDGNode produced a non-null result, which would indicate
   // a missed boundary push in the walker. Reported via [DG-OWNER-STACK-FALLBACK]
@@ -1610,6 +1654,7 @@ export function runDG(input: DGInput): DGOutput {
         span: sqlNode.span,
       };
       nodes.set(nodeId, dgNode);
+      sqlAstToNodeId.set(sqlNode as ASTNode, nodeId);
     }
 
     // Collect meta blocks
@@ -1891,6 +1936,24 @@ export function runDG(input: DGInput): DGOutput {
             }
           }
 
+          // §52.4.4 (E-AUTH-001 companion) — a `?{}` SQL statement in a function
+          // body reads its `${@var}` bound params. `collectAllSqlBlocks` (the
+          // top-level credit) does NOT descend into function bodies, so credit
+          // those reads here so the function counts as a consumer for E-DG-002
+          // (a var interpolated into a `?{}` write IS consumed — E-AUTH-001,
+          // §52.11, is the sole diagnostic for the client-local write-param
+          // leak, not a misleading "unused variable").
+          if (bodyNode.kind === "sql" && typeof bodyNode.query === "string") {
+            for (const varName of sqlQueryInterpolationSigilReads(bodyNode.query)) {
+              const reactiveNodeId = reactiveVarNodeIds.get(varName);
+              if (reactiveNodeId) {
+                pushEdge(fnDGNodeId, reactiveNodeId, "reads");
+                const readers = reactiveVarReaders.get(varName);
+                if (readers) readers.add(fnDGNodeId);
+              }
+            }
+          }
+
           // Recurse into control flow bodies
           if (bodyNode.kind === "match-stmt") {
             // Match stmt header may contain @var refs — ExprNode-first, string fallback
@@ -1951,6 +2014,32 @@ export function runDG(input: DGInput): DGOutput {
         }
       }
       walkBodyForReactiveRefs(fnNode.body);
+    }
+
+    // §52.4.4 (E-AUTH-001 companion) — credit `${@var}` reads inside a `?{}` SQL
+    // query as consumers for E-DG-002 accounting. A cell interpolated as a bound
+    // parameter IS consumed by the query (a read for SELECT; a persisted write
+    // for INSERT/UPDATE/DELETE), so the "declared but never consumed" sweep must
+    // not false-fire on it. This is the E-DG-002-interaction resolution the
+    // §52.4.6 worked example fixes: a client-local write-param must surface as
+    // E-AUTH-001 (§52.11) ALONE — the value IS consumed, just illegally — not as
+    // a misleading "unused variable" warning. The prior fn-body walk never
+    // visited `sql` nodes, so a bound-param read went uncounted.
+    for (const sqlNode of collectAllSqlBlocks(fileAST)) {
+      const q = typeof sqlNode.query === "string" ? sqlNode.query : "";
+      if (!q) continue;
+      // Look up the sql node's ALREADY-REGISTERED DGNode id (loop #1); makeNodeId
+      // embeds a monotonic counter so it cannot be recomputed here.
+      const sqlNodeId = sqlAstToNodeId.get(sqlNode as ASTNode);
+      if (!sqlNodeId) continue;
+      for (const varName of sqlQueryInterpolationSigilReads(q)) {
+        const reactiveNodeId = reactiveVarNodeIds.get(varName);
+        if (reactiveNodeId) {
+          pushEdge(sqlNodeId, reactiveNodeId, "reads");
+          const readers = reactiveVarReaders.get(varName);
+          if (readers) readers.add(sqlNodeId);
+        }
+      }
     }
     _tPerFileEnd(_fileIdx2);
   }

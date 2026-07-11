@@ -1,0 +1,12 @@
+{
+  "id": "auth-001-pos",
+  "description": "A client-local `@var` used as a bound parameter in a server-side `?{}` INSERT outside a server function fires E-AUTH-001 — a client-controlled value reaching a DB write with no server-authority mediation (§52.4.4 / §52.11). Verbatim SPEC §52.4.6 worked example. E-AUTH-001 REPLACES the misleading E-DG-002: the value IS consumed by the write (just illegally), so the `notCodes` locks the 'never consumed' warning to silence per the §52.4.6 Expected-compiler-output.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-001.test.js",
+  "spec": "§52.4.4 / §52.4.6 / §52.11",
+  "expect": {
+    "codes": ["E-AUTH-001"],
+    "notCodes": ["E-DG-002"],
+    "severity": { "E-AUTH-001": "error" }
+  }
+}

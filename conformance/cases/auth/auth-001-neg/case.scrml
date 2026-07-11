@@ -1,0 +1,16 @@
+<program db="sqlite:./kanban.db">
+
+<editingId> = not    // client-local
+
+${
+    // SAFE: the client-local value crosses the server boundary as a function
+    // PARAMETER. Inside logEdit the bound param is `${id}` (a param), not the
+    // client-local cell `${@editingId}`, so no unmediated client-controlled
+    // value reaches the write. This is the SPEC §52.4.6 remedy.
+    function logEdit(id) {
+        ?{`INSERT INTO audit_log (object_id) VALUES (${id})`}.run()
+    }
+    logEdit(@editingId)
+}
+
+</program>
