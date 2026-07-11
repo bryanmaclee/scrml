@@ -1,0 +1,12 @@
+{
+  "id": "error-for-await-not-in-scrml",
+  "description": "§19.9.8 — scrml has no `for await ... of`. The DEFAULT parse path (block-splitter + ast-builder) records `for-stmt.isAwait` at the retracted head and recovers as a plain `for`; the async/await reject validator then fires the hard E-FOR-AWAIT-NOT-IN-SCRML, matching the opt-in `--parser=scrml-native` path (parse-stmt.js for-head). Migration 2026-07.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.9.8",
+  "spec": "§19.9.8",
+  "rationale": "§19.9.8: scrml has no `async`/`await` (parallel-by-default, no colored functions), so the `for await ... of` iteration form is not valid. It is a hard rejection: E-FOR-AWAIT-NOT-IN-SCRML.",
+  "expect": {
+    "codes": ["E-FOR-AWAIT-NOT-IN-SCRML"],
+    "severity": { "E-FOR-AWAIT-NOT-IN-SCRML": "error" }
+  }
+}

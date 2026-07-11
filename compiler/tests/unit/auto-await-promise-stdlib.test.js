@@ -17,13 +17,14 @@
  *       surfaces lives in the spec compliance matrix, not per-test).
  *   §3  Negative — stdlib non-Promise function (`safeCall` from
  *       `scrml:host`) does NOT auto-await.
- *   §4  Negative — user `async function` carries `isAsync` on the AST but
- *       does NOT classify as Promise-returning in the call-site walker
- *       (Q5 carve-out — user source's `async function` is gated by
- *       I-ASYNC-USER-SOURCE info lint at the validator layer, not the
- *       codegen classifier).
- *   §5  Positive — user `async function` triggers I-ASYNC-USER-SOURCE
- *       info lint.
+ *   §4  Negative — user `async function` is a HARD ERROR (E-ASYNC-NOT-IN-SCRML,
+ *       §19.9.8) on the default path; it does NOT compile and is never
+ *       auto-awaited at call sites (the auto-await classifier is stdlib-only).
+ *       (2026-07 migration — reverses the S89 Q5 `I-ASYNC-USER-SOURCE` info
+ *       nudge; user-source async/await is now rejected.)
+ *   §5  Positive — user `async function` fires the hard E-ASYNC-NOT-IN-SCRML;
+ *       a `scrml:*` stdlib `async function` does NOT (the §13.1 carve-out is
+ *       preserved — stdlib async still compiles + is still auto-awaited).
  *   §6  Edge — `!{}` failable guard works without explicit `await` on the
  *       guarded init (Q4).
  *   §7  Idempotency — explicit `await` permitted (Q2 Position C); compiler
@@ -34,7 +35,8 @@
  * SPEC anchors:
  *   §13.1 stdlib carve-out (S89 67a6a81)
  *   §13.2.1 auto-await classifier (S89 67a6a81)
- *   §34 I-ASYNC-USER-SOURCE catalog row (S89 §13.2 Sub-Phase B 1c)
+ *   §19.9.8 no `async`/`await` standing rule + E-ASYNC-NOT-IN-SCRML (S114;
+ *           default-path hard-error migration 2026-07)
  *   §41.4.1 stdlib API authoring rule (Promise-always invariant)
  */
 
@@ -180,12 +182,12 @@ describe("auto-await §3: stdlib non-Promise function (safeCall) does NOT auto-a
 // §4 — Negative: user `async function` does NOT classify in call-site walker
 // ---------------------------------------------------------------------------
 
-describe("auto-await §4: user `async function` does NOT classify (Q5 carve-out)", () => {
-  test("call site to a USER async function does NOT auto-await (no isPromiseReturningStdlibFn match)", () => {
-    // User-source async function declared inline. The lint fires (§5), and the
-    // CALLER does NOT auto-await because the callee's source module is the
-    // current file (not under stdlib/) — so isPromiseReturningStdlibFn returns
-    // false at the classifier layer.
+describe("auto-await §4: user `async function` is a HARD ERROR (§19.9.8)", () => {
+  test("a USER `async function` fires E-ASYNC-NOT-IN-SCRML and is never auto-awaited", () => {
+    // User-source async function declared inline. Post-migration (2026-07) this
+    // is a HARD error, not the retired I-ASYNC-USER-SOURCE info nudge — scrml
+    // has no `async` keyword (§19.9.8). The auto-await classifier remains
+    // stdlib-only, so no same-file user `async function` is ever awaited.
     const fxPath = fix("user-async-no-classify.scrml", `<program>
 \${
   async function userPromise() { return 42 }
@@ -198,23 +200,22 @@ describe("auto-await §4: user `async function` does NOT classify (Q5 carve-out)
 </program>
 `);
     const { clientJs, errors, warnings } = compileFile(fxPath);
-    const blockingErrors = errors.filter(e => e.severity !== "warning");
-    expect(blockingErrors).toEqual([]);
-    // I-ASYNC-USER-SOURCE info lint fires for the user async function.
+    // Hard error fires — the file does NOT compile clean.
+    expect(errors.some(e => e.code === "E-ASYNC-NOT-IN-SCRML")).toBe(true);
+    // The retired info nudge is gone.
     const allDiags = [...errors, ...warnings];
-    expect(allDiags.some(d => d.code === "I-ASYNC-USER-SOURCE")).toBe(true);
-    // Caller does NOT auto-await — the callee is a same-file user function,
-    // not a stdlib import.
+    expect(allDiags.some(d => d.code === "I-ASYNC-USER-SOURCE")).toBe(false);
+    // A user `async function` is never auto-awaited (classifier is stdlib-only).
     expect(clientJs).not.toMatch(/await\s+_scrml_userPromise_/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §5 — Positive: user async function fires I-ASYNC-USER-SOURCE info lint
+// §5 — user async is a hard error; stdlib async is exempt (carve-out preserved)
 // ---------------------------------------------------------------------------
 
-describe("auto-await §5: I-ASYNC-USER-SOURCE info lint on user source `async function`", () => {
-  test("`async function foo()` in user source fires the info lint", () => {
+describe("auto-await §5: E-ASYNC-NOT-IN-SCRML on user source `async function`", () => {
+  test("`async function foo()` in user source fires the hard E-ASYNC-NOT-IN-SCRML", () => {
     const fxPath = fix("user-async-lint.scrml", `<program>
 \${
   async function foo() { return 1 }
@@ -224,19 +225,22 @@ describe("auto-await §5: I-ASYNC-USER-SOURCE info lint on user source `async fu
 </program>
 `);
     const { errors, warnings } = compileFile(fxPath);
+    const asyncErrs = errors.filter(d => d.code === "E-ASYNC-NOT-IN-SCRML");
+    expect(asyncErrs.length).toBeGreaterThanOrEqual(1);
+    expect(asyncErrs[0].message).toContain("foo");
+    // A hard error — severity "error", partitions into result.errors.
+    expect(asyncErrs[0].severity).toBe("error");
+    // The retired info nudge no longer appears in either stream.
     const allDiags = [...errors, ...warnings];
-    const asyncDiags = allDiags.filter(d => d.code === "I-ASYNC-USER-SOURCE");
-    expect(asyncDiags.length).toBeGreaterThanOrEqual(1);
-    expect(asyncDiags[0].message).toContain("foo");
-    // Severity is "warning" (info lint plumbing) — per the §34 catalog row,
-    // listed as Info. The code prefix is the discriminator.
-    expect(asyncDiags[0].severity).toBe("warning");
+    expect(allDiags.some(d => d.code === "I-ASYNC-USER-SOURCE")).toBe(false);
   });
 
-  test("stdlib `async function` does NOT fire the info lint (carve-out)", () => {
-    // Smoke: importing safeCallAsync from scrml:host should not produce any
-    // I-ASYNC-USER-SOURCE diagnostics for the stdlib file itself, even though
-    // the stdlib file is now seeded into exportRegistry (Step 3).
+  test("stdlib `async function` does NOT fire E-ASYNC-NOT-IN-SCRML (carve-out)", () => {
+    // Importing safeCallAsync from scrml:host must not produce any async/await
+    // rejection for the stdlib file itself — the §13.1 carve-out is preserved.
+    // (The stdlib .scrml is seeded via STDLIB-EXPORT-SEED post-MOD, not pushed
+    // onto tabResults, so the reject walker never sees it; and even if it did,
+    // isStdlibFile() would exempt it.)
     const fxPath = fix("user-importing-stdlib.scrml", `<program>
 \${
   import { safeCallAsync } from "scrml:host"
@@ -248,13 +252,12 @@ describe("auto-await §5: I-ASYNC-USER-SOURCE info lint on user source `async fu
 <button onclick=caller()>Go</button>
 </program>
 `);
-    const { errors, warnings } = compileFile(fxPath);
+    const { clientJs, errors, warnings } = compileFile(fxPath);
     const allDiags = [...errors, ...warnings];
-    // No I-ASYNC-USER-SOURCE for `safeCallAsync` (the lint runs against TAB
-    // results — stdlib files are seeded via STDLIB-EXPORT-SEED post-MOD, NOT
-    // pushed onto the tabResults array, so the lint walker never sees them).
-    const asyncDiags = allDiags.filter(d => d.code === "I-ASYNC-USER-SOURCE");
-    expect(asyncDiags).toEqual([]);
+    // No async/await rejection for the stdlib `safeCallAsync`.
+    expect(allDiags.some(d => /-(ASYNC|AWAIT|FOR-AWAIT)-NOT-IN-SCRML$/.test(d.code))).toBe(false);
+    // And the stdlib async surface is STILL auto-awaited at the call site.
+    expect(clientJs).toMatch(/= await safeCallAsync\b/);
   });
 });
 

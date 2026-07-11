@@ -1,45 +1,66 @@
 /**
- * I-ASYNC-USER-SOURCE — Q5 stdlib carve-out info lint (S89 §13.2 Sub-Phase B).
+ * async/await reject validator — §19.9.8 language-wide standing rule.
  *
- * Fires an info-level diagnostic on every `function-decl` AST node carrying
- * `isAsync: true` when the file is NOT under the stdlib root (`<repo>/stdlib/`).
+ * Fires the three hard-error codes on user-source `async` / `await` /
+ * `for await`, matching the native parser (`compiler/native-parser/`):
  *
- * Per SPEC §13.1 (S89 stdlib carve-out, Q5 ratified), the developer SHALL NOT
- * write `async`, `await`, `Promise`, `Promise.all`, or any other explicit
- * asynchrony construct in scrml USER SOURCE. Stdlib `.scrml` files (under
- * `<repo>/stdlib/`, served via the `scrml:*` namespace per §41.4) MAY declare
- * `async function` as an informational signal that surfaces the `Promise<T>`
- * return shape to the auto-await classifier (§13.2.1).
+ *   - `E-ASYNC-NOT-IN-SCRML`     — `async function`, `async fn`, or `async () =>`
+ *   - `E-AWAIT-NOT-IN-SCRML`     — an `await` expression
+ *   - `E-FOR-AWAIT-NOT-IN-SCRML` — a `for await ... of` head
  *
- * **Why info, not error:** the user-source restriction is a STYLE constraint
- * tied to the values-not-exceptions error model and the §13.2 auto-await
- * regime. The compiler still records `isAsync: true` on the AST regardless of
- * file location so downstream stages have a single shape to consume; this lint
- * tells the adopter to remove the `async` keyword (the compiler will auto-await
- * for them once the callee classifier covers their site).
+ * Per SPEC §19.9.8 (S114, user-voice verbatim: *"I have intentionally left
+ * async/await out of the language, because I hate leaky abstractions and
+ * colored functions"*) scrml has NO `async`/`await`. The canonical async
+ * surface is the compiler body-split / CPS (§19.9.3) — developer code stays
+ * flat and synchronous-looking; the compiler emits the async infrastructure.
  *
- * **Pipeline placement:** runs post-TAB / post-Gauntlet, same shelf as
- * `lint-try-catch.ts`. No NR / SYM / TS dependency — the walker only needs
- * `FunctionDeclNode.isAsync` and the file path.
+ * **Migration note (2026-07 — reverses S89 Q5).** This validator previously
+ * fired the non-fatal `I-ASYNC-USER-SOURCE` INFO nudge and let user-source
+ * `async function` compile (the S89 §13.2 Sub-Phase B carve-out). That nudge is
+ * RETIRED: bryan-ratified §19.9.8 + the user-voice "no colored functions" line
+ * are normative stated intent, so user-source async/await is now a HARD ERROR
+ * on the default parse path — parity with the native parser, which already
+ * hard-errors.
  *
- * **SPEC anchors:** §13.1 stdlib carve-out (S89, Q5 ratified at commit
- * `67a6a81`); §34 catalog row (added S89 §13.2 Sub-Phase B).
+ * **Two LOAD-BEARING carve-outs are preserved:**
+ *
+ *   1. **stdlib carve-out (§13.1).** A `scrml:*` stdlib file (under
+ *      `<repo>/stdlib/`) MAY declare `async function` — its `async` signals the
+ *      `Promise<T>` return shape to the auto-await classifier (§13.2.1), and
+ *      stdlib bodies MAY use `await` at the JS-host boundary (e.g. `await
+ *      import(...)`, `await crypto.subtle.*`). The whole file is exempt
+ *      (`isStdlibFile`). Only USER source errors.
+ *
+ *   2. **`^{}` meta + `_{}` foreign JS-host boundary (§19.9.8).** A `^{}` meta
+ *      block is host-JS-adjacent — a JS Promise legitimately crosses there
+ *      (`await import(...)` in emitted/meta paths); its body is parsed as logic
+ *      statements, so we must NOT descend into it. A `_{}` foreign block is
+ *      OPAQUE (§23.2.3 — TAB never tokenizes its interior), so an `await` there
+ *      never becomes a parsed node; we skip its subtree too, belt-and-suspenders.
+ *
+ * **Pipeline placement:** runs post-TAB / post-Gauntlet (api.js Stage 3.008),
+ * same shelf as `lint-try-catch.ts`. No NR / SYM / TS dependency — the walker
+ * needs only the parsed AST (`function-decl.isAsync`, `lambda.isAsync`,
+ * `unary.op === "await"`, `for-stmt.isAwait`) and the file path.
+ *
+ * **SPEC anchors:** §19.9.8 (no `async`/`await` standing rule + the three
+ * codes); §13.1 stdlib carve-out; §13.2.1 auto-await classifier; §34 catalog
+ * (the three `E-*-NOT-IN-SCRML` rows).
  *
  * @module lint-async-user-source
  */
-import { walkFileAst } from "./ast-walk.ts";
+import { isMetaKind } from "../types/ast.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 /**
  * The stdlib root absolute path — files under this directory are exempt from
- * the I-ASYNC-USER-SOURCE lint per §13.1 stdlib carve-out (Q5 ratified S89).
+ * async/await rejection per the §13.1 stdlib carve-out (Q5 ratified S89).
  *
- * Resolution mirrors `compiler/src/module-resolver.js:558` STDLIB_ROOT so the
- * two definitions track each other:
+ * Resolution mirrors `compiler/src/module-resolver.js` STDLIB_ROOT so the two
+ * definitions track each other:
  *   `<repo>/compiler/src/validators/lint-async-user-source.ts`
- *   → `../..` = `<repo>/compiler`
  *   → `../../..` = `<repo>`
  *   → `../../../stdlib` = `<repo>/stdlib`
  */
@@ -48,18 +69,23 @@ const STDLIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../s
 /** Trailing slash sentinel so `foo/stdlibSidecar/` doesn't false-match `foo/stdlib`. */
 const STDLIB_ROOT_PREFIX = STDLIB_ROOT.endsWith("/") ? STDLIB_ROOT : STDLIB_ROOT + "/";
 
-export interface AsyncUserSourceLintDiagnostic {
-  code: "I-ASYNC-USER-SOURCE";
+export type AsyncAwaitRejectCode =
+  | "E-ASYNC-NOT-IN-SCRML"
+  | "E-AWAIT-NOT-IN-SCRML"
+  | "E-FOR-AWAIT-NOT-IN-SCRML";
+
+export interface AsyncAwaitRejectDiagnostic {
+  code: AsyncAwaitRejectCode;
   message: string;
   span: Span;
-  severity: "warning";
+  severity: "error";
 }
 
 /**
  * Test whether a file path is inside the stdlib carve-out region.
  * Exact `STDLIB_ROOT` match counts as inside; child paths also count.
  *
- * Exported for unit testing — callers should use `runAsyncUserSourceLint`.
+ * Exported for unit testing — callers should use `runAsyncAwaitReject`.
  */
 export function isStdlibFile(filePath: string | null | undefined): boolean {
   if (!filePath) return false;
@@ -69,63 +95,172 @@ export function isStdlibFile(filePath: string | null | undefined): boolean {
   return resolved.startsWith(STDLIB_ROOT_PREFIX);
 }
 
+// The canonical steer shared by all three messages — points to the body-split
+// / CPS surface (§19.9.3) that replaces source-level async/await. Mirrors the
+// native parser's phrasing (parse-stmt.js / parse-expr.js) for parity.
+const CANONICAL_STEER =
+  "The canonical async surface is the compiler body-split (server functions, " +
+  "reactive state) — no source-level async/await is needed (§19.9.3).";
+
+type MutableNode = Record<string, unknown> & { kind?: string; span?: Span };
+
 /**
- * Walk a FileAST collecting I-ASYNC-USER-SOURCE diagnostics — one per
- * `function-decl` with `isAsync: true` whose enclosing file path is NOT under
- * `<repo>/stdlib/`. The walker descends into logic, function bodies, etc., so
- * `async function` nested inside another function body is also caught.
+ * Walk EVERY node reachable from the FileAST — statements AND their expression
+ * subtrees (unlike `validators/ast-walk.ts`, which only descends statement
+ * bodies). `async`/`await` live in expression position (`unary`, `lambda`), so
+ * a statement-only walk would miss them. Skips the `^{}` meta and `_{}` foreign
+ * subtrees (the §19.9.8 JS-host boundary — see module docstring).
  *
- * **Severity note:** the diagnostic carries `severity: "warning"` to flow
- * through the same `result.warnings` channel as `W-TRY-CATCH-IN-SCRML-SOURCE`
- * and `W-PROGRAM-SPA-INFERRED`. The `I-` code prefix marks it as info per the
- * §34 catalog convention; `api.js` does not distinguish I- from W- in its
- * collection logic (both flow through warnings, not errors).
+ * `seen` is a cycle guard: the parsed AST is a tree, but a defensive WeakSet
+ * keeps the walk total even if a downstream stage backfills a parent pointer.
  */
-export function runAsyncUserSourceLint(
-  ast: FileAST | null | undefined,
-): AsyncUserSourceLintDiagnostic[] {
-  const diagnostics: AsyncUserSourceLintDiagnostic[] = [];
-  if (!ast) return diagnostics;
+function walkDeep(
+  node: unknown,
+  visit: (n: MutableNode) => void,
+  seen: WeakSet<object>,
+): void {
+  if (!node || typeof node !== "object") return;
+  if (seen.has(node)) return;
+  seen.add(node);
 
-  const filePath = ast.filePath ?? "";
+  if (Array.isArray(node)) {
+    for (const c of node) walkDeep(c, visit, seen);
+    return;
+  }
 
-  // Stdlib carve-out: a stdlib file's `async function` declarations are
-  // canonical and emit no diagnostic.
-  if (isStdlibFile(filePath)) return diagnostics;
+  const n = node as MutableNode;
 
-  walkFileAst(ast, (node) => {
-    if (!node || typeof node !== "object") return;
-    const n = node as { kind?: string; isAsync?: boolean; name?: string; span?: Span };
-    if (n.kind !== "function-decl") return;
-    if (n.isAsync !== true) return;
-    const span: Span = n.span ?? {
+  // §19.9.8 JS-host interop boundary — do NOT descend into a `^{}` meta block
+  // (`await import(...)` is legitimate host JS there) or a `_{}` foreign block
+  // (opaque interior). Neither the node nor its subtree is checked.
+  if (isMetaKind(n.kind) || n.kind === "foreign" || n.kind === "Foreign") return;
+
+  visit(n);
+
+  for (const key of Object.keys(n)) {
+    // `span` is a position record (no nodes); `parent` would cycle upward.
+    if (key === "span" || key === "parent") continue;
+    walkDeep(n[key], visit, seen);
+  }
+}
+
+function spanOf(n: MutableNode, filePath: string): Span {
+  return (
+    n.span ?? {
       file: filePath,
       start: 0,
       end: 0,
       line: 1,
       col: 1,
+    }
+  );
+}
+
+/**
+ * Walk a FileAST and collect the three §19.9.8 hard-error diagnostics on
+ * user-source `async` / `await` / `for await`. Returns `[]` for stdlib files
+ * (the §13.1 carve-out) and never enters `^{}` / `_{}` subtrees.
+ */
+export function runAsyncAwaitReject(
+  ast: FileAST | null | undefined,
+): AsyncAwaitRejectDiagnostic[] {
+  const diagnostics: AsyncAwaitRejectDiagnostic[] = [];
+  if (!ast) return diagnostics;
+
+  const filePath = ast.filePath ?? "";
+
+  // stdlib carve-out (§13.1): a stdlib file's `async function` is canonical
+  // (Promise<T> signal to the auto-await classifier) and its `await` is the
+  // JS-host boundary — the whole file is exempt.
+  if (isStdlibFile(filePath)) return diagnostics;
+
+  const seen = new WeakSet<object>();
+  const visit = (n: MutableNode) => {
+      const kind = n.kind;
+
+      // `async function` / `async fn` — E-ASYNC-NOT-IN-SCRML.
+      if (kind === "function-decl" && n.isAsync === true) {
+        const fnName =
+          typeof n.name === "string" && n.name.length > 0 ? n.name : "<anonymous>";
+        diagnostics.push({
+          code: "E-ASYNC-NOT-IN-SCRML",
+          severity: "error",
+          span: spanOf(n, filePath),
+          message:
+            `E-ASYNC-NOT-IN-SCRML: \`async function ${fnName}\` — scrml has no ` +
+            `\`async\` keyword (§19.9.8). ${CANONICAL_STEER} Remove \`async\` ` +
+            `(the compiler auto-awaits statically-known \`Promise<T>\` callees ` +
+            `per §13.2.1). \`async\` is reserved for \`scrml:*\` stdlib declarations.`,
+        });
+        return;
+      }
+
+      // `async () =>` arrow (or an async function-expression) — E-ASYNC-NOT-IN-SCRML.
+      if (kind === "lambda" && n.isAsync === true) {
+        diagnostics.push({
+          code: "E-ASYNC-NOT-IN-SCRML",
+          severity: "error",
+          span: spanOf(n, filePath),
+          message:
+            `E-ASYNC-NOT-IN-SCRML: an \`async\` arrow/function expression — scrml ` +
+            `has no \`async\` keyword (§19.9.8). ${CANONICAL_STEER}`,
+        });
+        return;
+      }
+
+      // Backstop — a BLOCK-body async arrow (`async () => { ... }`) is not
+      // structurally convertible by the default expression parser, so it falls
+      // back to an `escape-hatch` node carrying the raw source text (rather than
+      // a `lambda` with `isAsync`). A concise-body arrow (`async () => expr`) and
+      // an async `function` expression ARE structured (caught above / by the
+      // function-decl arm); only the block-body arrow reaches here. Match the
+      // leading `async` keyword in the raw text — `\b` excludes an identifier
+      // like `asyncHandler`. Parity with the native parser, which tokenizes
+      // `async` at the expression head.
+      if (kind === "escape-hatch" && typeof n.raw === "string" && /^\s*async\b/.test(n.raw)) {
+        diagnostics.push({
+          code: "E-ASYNC-NOT-IN-SCRML",
+          severity: "error",
+          span: spanOf(n, filePath),
+          message:
+            `E-ASYNC-NOT-IN-SCRML: an \`async\` arrow/function expression — scrml ` +
+            `has no \`async\` keyword (§19.9.8). ${CANONICAL_STEER}`,
+        });
+        return;
+      }
+
+      // `await <expr>` — E-AWAIT-NOT-IN-SCRML.
+      if (kind === "unary" && n.op === "await") {
+        diagnostics.push({
+          code: "E-AWAIT-NOT-IN-SCRML",
+          severity: "error",
+          span: spanOf(n, filePath),
+          message:
+            `E-AWAIT-NOT-IN-SCRML: an \`await\` expression — scrml has no ` +
+            `\`await\` keyword (§19.9.8). ${CANONICAL_STEER} A JS Promise ` +
+            `crossing the host boundary (\`^{}\` meta / \`_{}\` foreign / server-fn ` +
+            `return) is resolved by the compiler at the boundary — the scrml-side ` +
+            `read needs no \`await\`.`,
+        });
+        return;
+      }
+
+      // `for await ... of` — E-FOR-AWAIT-NOT-IN-SCRML (ast-builder records
+      // `for-stmt.isAwait` at the retracted head; see ast-builder.js for-parse).
+      if (kind === "for-stmt" && n.isAwait === true) {
+        diagnostics.push({
+          code: "E-FOR-AWAIT-NOT-IN-SCRML",
+          severity: "error",
+          span: spanOf(n, filePath),
+          message:
+            `E-FOR-AWAIT-NOT-IN-SCRML: a \`for await ... of\` loop — scrml has no ` +
+            `\`for await\` (§19.9.8). ${CANONICAL_STEER}`,
+        });
+        return;
+      }
     };
-    const fnName = typeof n.name === "string" && n.name.length > 0 ? n.name : "<anonymous>";
-    diagnostics.push({
-      code: "I-ASYNC-USER-SOURCE",
-      severity: "warning",
-      span,
-      message:
-        `I-ASYNC-USER-SOURCE: \`async function ${fnName}\` declared in user source. ` +
-        `Per §13.1, scrml user source SHALL NOT use the \`async\` keyword — ` +
-        `the compiler auto-awaits statically-known \`Promise<T>\` callees per §13.2.1 ` +
-        `so adopter code reads flat and synchronous. The \`async\` modifier is reserved ` +
-        `for stdlib (\`scrml:*\` namespace) declarations as an informational signal to ` +
-        `the auto-await classifier. ` +
-        `Suppression: remove the \`async\` keyword from \`function ${fnName}\` ` +
-        `(the compiler will continue to auto-await call sites where the callee's return ` +
-        `shape is statically known). For stdlib-style \`Promise<T>\` boundary wrapping, ` +
-        `use \`safeCallAsync\` from \`scrml:host\` and a failable \`!{ ... }\` arm. ` +
-        `(Catalog addition S89 §13.2 Sub-Phase B 2026-05-13; emitted at ` +
-        `\`compiler/src/validators/lint-async-user-source.ts\` invoked from ` +
-        `\`compiler/src/api.js\` Stage 3.008 post-LINT-TRY-CATCH.)`,
-    });
-  });
+
+  for (const n of ast.nodes ?? []) walkDeep(n, visit, seen);
 
   return diagnostics;
 }

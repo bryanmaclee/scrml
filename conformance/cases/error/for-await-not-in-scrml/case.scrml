@@ -1,0 +1,8 @@
+${
+    function iterate(items) {
+        for await (const it of items) {
+            lift it
+        }
+    }
+}
+<p>z</>

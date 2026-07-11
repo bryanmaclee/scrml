@@ -1,0 +1,13 @@
+{
+  "id": "error-async-not-in-scrml",
+  "description": "§19.9.8 — scrml has no `async` keyword. The DEFAULT parse path (block-splitter + ast-builder) fires the hard rejection E-ASYNC-NOT-IN-SCRML on a user-source `async function`, matching the opt-in `--parser=scrml-native` path (parse-stmt.js). Migration 2026-07: this REVERSES the retired S89 Q5 `I-ASYNC-USER-SOURCE` info nudge (which let user async compile); `notCodes` asserts the nudge is gone.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.9.8",
+  "spec": "§19.9.8",
+  "rationale": "§19.9.8 (user-voice S114: 'I hate leaky abstractions and colored functions'): scrml has no `async`/`await` — the canonical async surface is the compiler body-split / CPS (§19.9.3). A source-level `async function`/`async fn`/`async () =>` is a hard rejection: E-ASYNC-NOT-IN-SCRML. The `async` modifier is reserved for `scrml:*` stdlib declarations (§13.1 carve-out — Promise<T> signal to the auto-await classifier).",
+  "expect": {
+    "codes": ["E-ASYNC-NOT-IN-SCRML"],
+    "notCodes": ["I-ASYNC-USER-SOURCE"],
+    "severity": { "E-ASYNC-NOT-IN-SCRML": "error" }
+  }
+}

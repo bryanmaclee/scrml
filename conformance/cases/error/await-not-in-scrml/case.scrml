@@ -1,0 +1,10 @@
+${
+    function makeValue() {
+        return 1
+    }
+    function useIt() {
+        let v = await makeValue()
+        return v
+    }
+}
+<p>z</>

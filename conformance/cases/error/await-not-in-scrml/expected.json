@@ -1,0 +1,13 @@
+{
+  "id": "error-await-not-in-scrml",
+  "description": "§19.9.8 — scrml has no `await` keyword. The DEFAULT parse path (block-splitter + ast-builder) fires the hard rejection E-AWAIT-NOT-IN-SCRML on a user-source `await` expression, matching the opt-in `--parser=scrml-native` path (parse-expr.js:parseUnary). The callee is a defined same-file function so the reject is clean (no E-SCOPE-001); `notCodes` asserts the migration no longer leaks the generic E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.9.8",
+  "spec": "§19.9.8",
+  "rationale": "§19.9.8: scrml has no `await`. When a JS Promise crosses the host boundary (`^{}` meta / `_{}` foreign / server-fn return) the compiler resolves it at the boundary; the scrml-side read needs no `await` (the compiler auto-awaits statically-known Promise<T> callees per §13.2.1). A source-level `await` is a hard rejection: E-AWAIT-NOT-IN-SCRML.",
+  "expect": {
+    "codes": ["E-AWAIT-NOT-IN-SCRML"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-SCOPE-001"],
+    "severity": { "E-AWAIT-NOT-IN-SCRML": "error" }
+  }
+}

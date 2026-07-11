@@ -336,29 +336,28 @@ ${body}
     expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
-  // Defect C2 — async expr-body lambda: LEGITIMATE composition. The peer MUST be
-  // emitted (previously `await helper(...)` referenced a missing fn → crash).
-  test("C2: peer reached through an async lambda compiles and the peer is emitted", () => {
-    const { errors, serverJsPath } = compileToFiles(wrap(
+  // Defect C2 — async expr-body lambda. §19.9.8 (S114) RETRACTS user-source
+  // async/await: a source `async () =>` is a HARD rejection (E-ASYNC-NOT-IN-SCRML).
+  // The pre-S114 "peer reached through an async lambda" shape is no longer legal
+  // scrml; the direct-peer-call emission invariant is covered by the emit-shape
+  // tests above. (2026-07 async/await hard-error migration.)
+  test("C2: an async expr-body lambda is rejected (§19.9.8 E-ASYNC-NOT-IN-SCRML)", () => {
+    const { errors } = compileToFiles(wrap(
 `    server function helper(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
     server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); const run = async () => helper(ids[0]); return run() }`),
       "async-lambda", ITEMS);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const js = readFileSync(serverJsPath, "utf-8");
-    // Invariant: the awaited peer has a corresponding emitted callable.
-    expect(js).toMatch(/async function helper\(/);
-    expect(js).toContain("await helper(");
+    expect(errors.map((e) => e.code)).toContain("E-ASYNC-NOT-IN-SCRML");
   });
 
-  // Defect C3 — async BLOCK-body lambda: also legitimate; peer must be emitted.
-  test("C3: peer reached through an async block-body lambda compiles with the peer emitted", () => {
-    const { errors, serverJsPath } = compileToFiles(wrap(
+  // Defect C3 — async BLOCK-body lambda: likewise rejected under §19.9.8. The
+  // block-body arrow falls back to an escape-hatch in the default parser; the
+  // reject validator's leading-`async` backstop still fires E-ASYNC-NOT-IN-SCRML.
+  test("C3: an async block-body lambda is rejected (§19.9.8 E-ASYNC-NOT-IN-SCRML)", () => {
+    const { errors } = compileToFiles(wrap(
 `    server function helper(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
     server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); const run = async () => { return helper(ids[0]) }; return run() }`),
       "async-block", ITEMS);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const js = readFileSync(serverJsPath, "utf-8");
-    expect(js).toMatch(/async function helper\(/);
+    expect(errors.map((e) => e.code)).toContain("E-ASYNC-NOT-IN-SCRML");
   });
 });
 
@@ -420,14 +419,15 @@ ${body}
     expect(codesOf(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
-  // Legit: an async block-body lambda calling a peer compiles clean with the
-  // peer emitted (the bare call is a Promise the async body flattens).
-  test("async block-body lambda calling a peer compiles clean with peer emitted", () => {
-    const { errors, serverJsPath } = compileToFiles(
+  // §19.9.8 (S114): an async block-body lambda calling a peer is REJECTED —
+  // user-source async/await is retracted (E-ASYNC-NOT-IN-SCRML via the reject
+  // validator's leading-`async` escape-hatch backstop). Was a pre-S114 "legit"
+  // shape; the peer-emission invariant lives in the direct-call tests above.
+  test("async block-body lambda calling a peer is rejected (§19.9.8 E-ASYNC-NOT-IN-SCRML)", () => {
+    const { errors } = compileToFiles(
       prog("", `    ${L}\n    server function caller(ids) { const run = async () => { return lookup(ids[0]) }; return run() }`),
       "async-block-legit", ITEMS);
-    expect(codesOf(errors).filter((c) => !c?.startsWith("W-"))).toEqual([]);
-    expect(readFileSync(serverJsPath, "utf-8")).toMatch(/async function lookup\(/);
+    expect(codesOf(errors)).toContain("E-ASYNC-NOT-IN-SCRML");
   });
 });
 

@@ -60,7 +60,7 @@ import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwi
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
-import { runAsyncUserSourceLint } from "./validators/lint-async-user-source.ts";
+import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -1324,18 +1324,22 @@ export function compileScrml(options = {}) {
     collectErrors("LINT-TRY-CATCH", tryCatchDiags);
   }
 
-  // Stage 3.008 (LINT-ASYNC-USER-SOURCE): I-ASYNC-USER-SOURCE — Q5 stdlib
-  // carve-out info lint (S89 §13.2 Sub-Phase B). Per SPEC §13.1, scrml USER
-  // SOURCE SHALL NOT use the `async` keyword on function declarations; stdlib
-  // (`scrml:*` namespace, files under `<repo>/stdlib/`) MAY declare
-  // `async function` to surface the `Promise<T>` return shape to the auto-await
-  // classifier (§13.2.1). Walker fires one info diagnostic per
-  // `function-decl` with `isAsync: true` whose enclosing file path is NOT
-  // under the stdlib root. Runs post-LINT-TRY-CATCH so the two lint walkers
-  // share the same post-Gauntlet shelf.
+  // Stage 3.008 (REJECT-ASYNC-AWAIT): §19.9.8 language-wide standing rule —
+  // scrml has NO `async`/`await`. Fires the three HARD codes on user source,
+  // matching the native parser: E-ASYNC-NOT-IN-SCRML (`async function`/`fn`/
+  // `() =>`), E-AWAIT-NOT-IN-SCRML (an `await` expr), E-FOR-AWAIT-NOT-IN-SCRML
+  // (`for await ... of`). Two carve-outs are LOAD-BEARING: (1) §13.1 stdlib —
+  // a `scrml:*` file's `async function` still compiles (Promise<T> signal to
+  // the §13.2.1 auto-await classifier) and its boundary `await` is exempt;
+  // (2) §19.9.8 JS-host boundary — `^{}` meta + `_{}` foreign subtrees are not
+  // entered (`await import(...)` there is host JS). Runs post-LINT-TRY-CATCH,
+  // before MOD/SYM, so `await p` surfaces the named code rather than a generic
+  // E-SCOPE-001/E-CODEGEN-INVALID-LOGIC. (Migration 2026-07 — reverses the S89
+  // Q5 `I-ASYNC-USER-SOURCE` info nudge; bryan-ratified §19.9.8 + user-voice
+  // "no colored functions" are normative stated intent.)
   for (const tabResult of tabResults) {
-    const asyncDiags = stage("LINT-ASYNC-USER-SOURCE", () => runAsyncUserSourceLint(tabResult.ast));
-    collectErrors("LINT-ASYNC-USER-SOURCE", asyncDiags);
+    const asyncDiags = stage("REJECT-ASYNC-AWAIT", () => runAsyncAwaitReject(tabResult.ast));
+    collectErrors("REJECT-ASYNC-AWAIT", asyncDiags);
   }
 
   // Stage 3.1: Module Resolution
