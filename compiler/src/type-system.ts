@@ -15550,6 +15550,14 @@ function extractDerivedMatchArmPatterns(body: string): ArmPattern[] {
  * the trailing whitespace-delimited variant-pattern chain, whose alternates are
  * joined by `|` (`.A | .B`). The prior arm's RHS (a whitespace-separated
  * destination variant) is dropped.
+ *
+ * §14.4.1 — a QUALIFIED LHS (`Src.A`) is normalized to its canonical bare form
+ * (`.A`), MIRRORING the general value-match path (the AST builder strips the
+ * `TypeName.` qualifier off `match-arm-inline.test`, so a general `match Src.A`
+ * arrives as `.A`). Without this the derived-engine path parses raw source text
+ * where `Src.A` fails `parseArmPattern`'s leading-`.`/`::` variant regex,
+ * returns `unknown`, is dropped from coverage, and a fully-exhaustive qualified
+ * `derived=match` falsely fires E-TYPE-020.
  */
 function derivedMatchArmLHS(chunk: string): string {
   const toks = chunk.trim().split(/\s+/).filter(Boolean);
@@ -15557,7 +15565,10 @@ function derivedMatchArmLHS(chunk: string): string {
   let start = toks.length - 1;
   // Absorb a leading `V | V | …` alternation chain (alternates joined by `|`).
   while (start - 2 >= 0 && toks[start - 1] === "|") start -= 2;
-  return toks.slice(start).join(" ");
+  const lhs = toks.slice(start).join(" ");
+  // Strip a `TypeName.` enum qualifier from each variant token → bare `.Variant`
+  // (handles single `Src.A` and each alternate of `Src.A | Src.B`).
+  return lhs.replace(/(?:^|(?<=[\s|]))([A-Z][A-Za-z0-9_]*)\.(?=[A-Za-z_])/g, ".");
 }
 
 function checkMatchDiagnostics(
