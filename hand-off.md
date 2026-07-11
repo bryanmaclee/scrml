@@ -1,47 +1,49 @@
-# scrml — Session 245 (CLOSE)
+# scrml — Session 248 (WRAP — no push; branch-baton to S249)
 
-**Date:** 2026-07-07. **Profile:** A — FULL (`/boot`). A large build/fix session run CONCURRENTLY with **S244** (its CSS-native §65 arc) on the SHARED local checkout — I am S245, the pre-wrap successor (S244 wrapped mid-session at `f9d37153`; its hand-off names me correctly). **6 landings, all PA-adversarially-reviewed**, batched under a mid-session "hold commits" directive then landed on release. Mechanical stream → delta-log `[438]`–`[446]`.
+**Date:** 2026-07-09→11. **Profile:** A (full, `/boot`). The LEADING PA of a concurrent pair (S249 = concurrent, branch-isolated on `s249`). **Enormous session** — booted into the un-wrapped S244→S247 chain, took over S247's footprint, then drove the V1 conformance-freeze frontier hard. **Wrapped no-push per bryan** — 3 commits are LOCAL-only on main; the rest pushed. On this wrap I inbox-signal S249 to merge `s249`→main + take the baton.
 
 ## ⚠️ READ FIRST
-- **PUSHED** (this wrap authorized "wrap and push"). Coherence 0/0 at close. If a re-check shows ahead>0, push again.
-- **Boot mis-ID (resolved):** `/boot` first concluded "S244 continuing"; user corrected "244 is live." I am S245. The flobase `/boot` STILL lacks the concurrent-session step that would have prevented this (the S244-filed gap — routed to flogence). Watch for it on the next boot.
-- **Open follow-ups (see below):** flogence `Kind` migration (notice sent) · standalone-build `pg` bundling (MED) · markup-context-§52-recognition · realtime live-PG e2e verify.
-- **Live siblings at close:** S244's CSS worktree `a7888cfc` (locked) + S244's parked string-blind `a43632` — both RETAINED (not mine).
+- **PUSH STATE:** origin/main = `a37f11e0` (oracle 305). Local main = `304b00cc` (oracle 310). **3 unpushed local commits:** `701b7e00` theme-divergences · `e9a9473d` E-AUTH-001 · `304b00cc` #26 P0 auth-bypass. Push is HELD (bryan "no push"). Everything ≤ a37f11e0 is on origin.
+- **CONCURRENT S249 (branch-baton):** S249 is LIVE on branch `s249` (worktree `.claude/worktrees/s249`, cut off cfcde3d0), doing REPORT-ONLY verify-harden (engine/reactive/forms/error §19). It is 17 commits ahead on its branch, 3 behind main (my last 3). **On this wrap: signal sent to S249's inbox → S249 UTDs `s249` with main, merges → main, becomes leading, pre-cuts S250.** S249's verify-harden divergences will need bryan fix-vs-amend rulings (like the 6 I fixed).
+- **🔴 HIGH open — Finding 1 (JWT auth-bypass, from #26's S239 review):** `scrml:auth` verifyJwt/signJwt/verifyJwtJwks STILL emit UNAWAITED in server fns → same bypass class as #26 (accept-all / `[object Promise]` token). Root cause SEPARATE + PRE-EXISTING: the **block-splitter DROPS jwt.scrml's entire export set** (its multi-line `!{}` failable-handler blocks trip "statement boundary not detected") → the seed never sees isAsync. Main has it too. Needs a block-splitter fix (multi-line `!{}` in jwt.scrml). **File as an issue + fix early** — security.
+- **Open issues on origin (Peter/pjoliver11, Windows dogfood):** #26 P0 auth-bypass = FIXED (local `304b00cc`, unpushed). #25 Windows nested-page 404 (`pathFor` `\` vs `/` — clean fix: normalize separators). #27 `navigate()` soft-nav spec-only (§20.1-20.3 vs runtime full-reload — DESIGN call: implement soft-nav+router OR reconcile SPEC).
 
-## ✅ LANDED THIS SESSION (S245) — all pushed
-| Feature | commit | notes |
+## ✅ LANDED THIS SESSION (S248) — conformance 236 → 310 (+74 cases)
+| Arc | commits | push |
 |---|---|---|
-| Realtime **`<channel watches=>` Phase 2** (runtime) | `bfaf9ae5` | trigger install + bundled-`pg` LISTEN bridge + client `__change` dispatch + protect-egress. SPEC §38.13 Nominal→Implemented. 3 LOW residuals in the change-dir GAPS.md. |
-| **http client-inline** private-helper closure (MED) | `19282549` | `_inlineSiblingShimImports` transitive same-file closure; member-access-exclusion keeps §3-Math clean. |
-| **E-CG-001** protected-field regex-division evasion (**HIGH**) | `bb3a73b2` | S244's finding; acorn-exact FAIL-CLOSED egress scan; decouples security scan from the mangle scanner (root fix); closed computed+destructuring siblings free. |
-| **export-enum library emit** (MED, rediagnosed) | `43e72e0d` | `emit-library.ts` now EMITS exported enum runtime reps (was erasing them + dangling `export`); companion typed-fn-sig strip. |
-| **§52-composition** (watches← authority) | `325ceb36` | `collectSchemaTables` sources shape from a §52 `authority="server" table=` decl; SPEC §38.13 example→`${}` form. |
-| **E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE** | `9485a006` | error (not silent-drop) on lowercase enum names (§14.4); the "lets error" ruling; +coupled export-enum §8 test reconcile. |
+| **Editor arc** (S247 inherited): neovim+vscode grammar · LSP semantic-tokens (MED context-leak found+fixed in review) | `7dfc3df8` · `fbb4d9fd` | pushed |
+| **URL-`//` compiler fix**: bare URLs in CSS `url()` / markup prose / match+engine arm compile (was E-CTX-003; found via LSP dog-food; SPEC §27-preserving URL-exemption) | `89bc9361` | pushed |
+| **Conformance breadth**: realtime §38.13 (+14) · §61 endpoint (+14) · §23.5 **capability BUILT** (V1-floor: was SPEC-only+fail-open; +8) · auth §52/§40.1.1 (+12) · CSS §65 Wave-1 (+14) | `b1b3a7b2·29813aa7·cfcde3d0·467751bb·a37f11e0` | pushed |
+| **6 divergences fixed** (impl-vs-SPEC, conformance-surfaced): static-eval §53.4.2 · maps §59.11/§59.7/§59.4 · diag-precision §61.4-arm/§51.0.M-onTimeout | `d19c8a74·115f4e53·205a67b3` | pushed |
+| **E-AUTH-001** client-local-leak guard (was SPEC-only) — boundary: top-level `?{}` write leaks, in-fn is safe (CPS marshals) | `e9a9473d` | **LOCAL** |
+| **theme §65.9/§65.10 divergences**: misplacement→E-STRUCTURAL-ELEMENT-MISPLACED · name-collision→E-NAME-COLLIDES-RESERVED (wired from 0-fire-site) | `701b7e00` | **LOCAL** |
+| **#26 P0 auth-bypass**: auto-await imported async stdlib in server fns + FAIL-CLOSE the sync-callback silent leak (new E-ASYNC-STDLIB-IN-SYNC-CALLBACK) | `304b00cc` | **LOCAL** |
 
 ## 📋 NEXT-START / OPEN THREADS
-1. **flogence `delta-log` `Kind` uppercase migration** — its `Kind:enum = {rule,disp,land,…}` now errors `E-ENUM-VARIANT-CASE` (loud, intended). Notice sent to flogence inbox. Until migrated, `delta-log.scrml` won't compile. (Or the user relaxes the §14.4 rule later — the deliberation `[442]` is on record.)
-2. **standalone-build `pg` bundling** (MED) — `scrml build` deploy doesn't bundle `pg`; realtime dev-verifiable now, production-deployable after. GAPS.md in `docs/changes/realtime-channel-watches-phase2-2026-07-07/`.
-3. **markup-context §52 recognition** — a `<Order authority="server" table=…>` as a direct `<program>` child is silently NOT recognized as a §52 decl (default-logic §40.8 auto-lift doesn't cover it); the `${}` form works. A separate pre-existing default-logic gap surfaced by §52-composition.
-4. **Realtime live-PG e2e verify** — the one thing no test env covers (real commit→NOTIFY→client-patch); owed before realtime GA. Also: the compiler-bundled-`pg` decision means the emitted server needs `pg` present.
-5. **3 realtime LOW review residuals** (GAPS.md): LISTEN-retry client `.end()` · multi-instance trigger-install race · pre-existing arm-scanner backtick/regex/comment blindness (reuse S244's `literal-scan.ts` if it revives).
-6. **Pre-existing surfaced (not filed as formal gaps):** false `W-WHITESPACE-001` on every §52 authority type-decl (`tryParseServerAuthorityDecl` hardcodes `openerHadSpaceAfterLt`); `W-LINT-013` Vue-`@click` ghost on `@x=@x.map(...)`; `E-CHANNEL-WATCHES-UNKNOWN-TABLE` message could mention the §52 alternative.
+1. **PUSH** the 3 local commits (theme · E-AUTH-001 · #26) once bryan authorizes — or S249 folds them into its merge+push. Coherence target 0/0.
+2. **Finding 1 (JWT leak, HIGH)** — file + fix (block-splitter multi-line `!{}` in jwt.scrml). Security.
+3. **Issues #25 (Windows pathFor) + #27 (navigate soft-nav design)** — #25 clean, #27 needs a design ruling.
+4. **S249's verify-harden divergence backlog** — engine/reactive/forms/error §19 GAPS+DIVERGENCES → bryan fix-vs-amend rulings, then fix (the divergence-batch pattern worked clean).
+5. **Residual backlog** (surfaced, non-blocking): regex `string.pattern(/re/)` static-eval (asIs parse gap) · non-reactive local-map enum-key after `m=m.insert()` reassignment · `<onTransition>` markup-locus + onTimeout/onIdle in `<match>` arm · bare non-URL `//` in markup prose fails E-CTX-003 (§27-compliant — a §27 UX Q) · component-body `<theme>`/`<schema>`/`<onTimeout>` general structural-recognition gap · full §4.15 reserved-name list unwired (scoped to §65) · E-SERVER-FN-IN-SYNC-CALLBACK has no §34 row (codegen-internal-code gap).
+6. **Harness verbs owed** (conformance runtime coverage): the RATIFIED (b) synthetic server-push `__change`-frame contract-verb (build deferred — unblocks realtime/broadcast/SSE runtime) · endpoint foreign-inbound-request verb + response-envelope axis · per-case `compilerSettings` channel (capability §28 + the #26 runtime bypass-closed case need it).
+7. **Capability §23.5 enforcement (§23.5.6)** — deferred per N1 (manifest + sandbox); declaration half is done.
 
-## 🧭 METHODOLOGY / ANOMALIES (the irreducible reasoning)
-- **S239 adversarial review earned its keep again — on OUR OWN dispatches.** The auto-reviewer STALLED on realtime P2 (stream watchdog) → I completed it MANUALLY by reading the parser+emitter (structural proof) backed by the agent's tests. Lesson: reading the emitter proves byte-identical/structural properties MORE reliably than spot-compiles; the manual review is a valid S239 pass when the automated one dies + Bash is flaky.
-- **Triage can be wrong TWICE and the agent catches it.** (a) `g-block-analysis-emit-foreign-underscore` filed as foreign-`_{}` → actually export-enum-erasure (I reproduced + minimized). (b) §52-composition: my "markup-context §52 compiles clean" was FALSE — it compiled because the decl was IGNORED as a dead markup node; the agent verified + corrected + implemented the recognized `${}` form. **Reproduce + verify the agent's premise, and let the agent correct YOURS.**
-- **Landing-order test interaction.** The enum-error fix made flogence delta-log's `Kind` error → broke the already-landed export-enum §8 R26 test (which asserted delta-log compiles clean). Caught by the pre-commit gate on the enum-error commit. Fix = a coupled reconcile (update §8 to expect the error) in the same commit. **A fix that changes a shared adopter-fixture's compile result must reconcile the sibling test that used it.**
-- **Concurrent SPEC.md on a shared checkout.** S244's CSS §65 + my §52 (§38.13) + enum-error (§14.4/§34) all edited SPEC.md from divergent bases. Landing rule: **file-delta the code (disjoint), but apply the SPEC sections by `git apply` patch** (§38.13/§14.4 untouched by §65 → clean context) — NEVER wholesale file-delta SPEC.md (clobbers §65). Verified §65 intact after each apply.
-- **Design ruling `[442]` — uppercase enum variants.** The casing is load-bearing for the parser's `Type.Variant`/`.Variant` vs `receiver.member` disambiguation (not merely convention); user ruled keep-the-rule-but-error. The silent-drop was a real miscompile class. `E-ENUM-TYPE-CASE` is a hard error, distinct from the name-resolver `W-CASE-001` warning.
+## 🧭 METHODOLOGY / ANOMALIES (the irreducible)
+- **STALE-DOC no-op class (banked → memory `feedback_verify_work_not_done_before_dispatch`):** 3 conformance dispatches (ss58/ss62/E-ADAPTER) were NO-OPS — the spa-list `[status=pending]` markers + progress files run STALE; the corpus was already done. **Plan conformance from actual landed cases + `bun conformance/run.ts` + git, NEVER the markers.** The redirected ss62 verify-pass then found 2 real gaps + 4 divergences — verify-HARDEN > assume-unauthored (S249 now runs this model).
+- **E-AUTH-001 boundary (load-bearing):** "outside a server fn" = TOP-LEVEL `?{}` write; a client-local `@var` in a `?{}` write INSIDE a fn is SAFE (the §12.2 CPS-split marshals it server-side; locked by inline-sql-in-branch-cps §2/§4). The agent self-caught an over-broad v1.
+- **#26 adversarial S239 earned its keep:** the reviewer found 2 residual leaks the fix-agent's self-verification missed (Finding 1 JWT pre-existing; Finding 2 sync-callback silent leak — folded fail-closed). ADVERSARIAL review on security/codegen is mandatory, incl our own.
+- **Multi-fix same-file land discipline:** the 6 divergence fixes + E-AUTH-001 all touched type-system.ts/ast-builder.js in DISJOINT regions → landed via `git apply --3way` of the hunks (NOT clobber-file-delta) + combined-gate-verify per land (S226/feedback_file_delta_vs_cherry_pick).
+- **CSS-branch maps leak:** a dispatched worktree's `.claude/maps/*` diverged in its diff → file-delta pulled them in; restored to HEAD + committed via explicit pathspec (maps are wrap-owned). Grep-exclude `.claude/maps/` on file-delta.
+- **Commit-hook timeouts:** the full-suite pre-commit hook (~210s+ under concurrent load) times out the 300000ms foreground wrapper repeatedly but the commit LANDS (verify `git show --stat` non-empty + HEAD advanced).
 
-## 🚦 STATE @ CLOSE
-- **git:** scrml HEAD `9485a006`; PUSHED (coherence 0/0). Branch = main. Working tree clean post-wrap.
-- **Board:** live via `bun scripts/state.ts`. Resolved this session: g-block-analysis-emit-foreign-underscore · g-http-client-inline-private-helper-drop · g-ecg001-protected-field-regex-division-evasion (HIGH→0) · g-realtime-external-db-writes (Nominal→Implemented, Phase 2) · g-channel-watches-schema-vs-52-authority-composition. NEW: standalone-build-pg-bundling (MED) + the pre-existing surfaced items.
-- **Worktrees:** MINE cleaned (adb1d08f/aa8308cf/afff7ab7). RETAINED: `a43632` (S244 parked string-blind) + `a7888cfc` (S244 CSS, locked/live).
-- **Tests:** full pre-commit gate green at each landing (final 19598/0 at enum-error).
-- **Maps: REFRESH OWED (deferred again).** Watermark `66a3afb1` / 2026-07-04 — now ~40+ commits stale (deferred S243/S244/S245). A mid-wrap incremental on that staleness is marginal; needs a dedicated full `project-mapper` pass at a clean session (the S244 CSS worktree `a7888cfc` was also live at this wrap). Not silently skipped — explicitly carried.
+## 🚦 STATE @ CLOSE (branch-baton wrap)
+- **git:** local main `304b00cc` (oracle **310/310**, full gate **19826/0**); origin/main `a37f11e0`; **3 unpushed** (theme·E-AUTH-001·#26). Working tree: clean except 2 untracked `handOffs/incoming/read/` floStyle msgs (committed in this wrap).
+- **S249:** LIVE concurrent on `s249` (17 ahead / 3 behind); **wrap-signal sent** → it merges + takes over. Its verify-harden backlog + divergences carry to it/S250.
+- **DEFERRED to S249/S250 (concurrent-wrap — S249 owns main after merge, reconciles these):** worktree cleanup (26 worktrees incl S249's — do NOT blind-sweep; only S248's landed ~15 are cleanable; feedback_pa_bash_cleanup_dry_run) · maps refresh (stale, `04a483d0` watermark) · `state.ts --write/--check` (6d) · board archive of CLOSED S242/S244/S245/S246 · master-list §0 conformance-count + landings currency (OWED) · full changelog dated block (OWED). **DONE this wrap:** hand-off · delta-log [452]-[465] · S249 baton-signal · inbox (2 read/ msgs committed) · board close.
+- **delta-log:** S248 stream appended [452]+ (concise); S249 reconciles on merge.
 
-## pa.md directives in force (Profile A)
-R1–R5 · S239 adversarial review (incl. manual-when-auto-dies) · S138 R26 · S67 file-delta + `git apply` for concurrent SPEC.md · S147 coherence · S88/S90/S99/S126 · S136 BRIEF archival · S219 orchestrate + default-GO · concurrent-session board · commit-to-main only after authz (given; "hold commits" honored then lifted).
+## pa.md directives in force
+R1-R5 · S239 adversarial (incl our own; the #26 review found 2 leaks) · S138 R26 · S67 file-delta + `git apply --3way` for shared-file overlap · S147 coherence · S88/S90/S99/S126 path discipline · S136 BRIEF archival · S219 orchestrate + default-GO · concurrent-session branch-baton (leading owns main; concurrent own-branch; wrap→inbox-signal→take over) · commit-to-main after authz (given; "no push" honored) · feedback_verify_work_not_done_before_dispatch (NEW).
 
 ## Tags
-#session-245 #close #6-landings #realtime-p2-runtime #ecg001-high-security #export-enum-rep #52-composition #enum-case-error #lets-error-ruling #hold-commits-honored #concurrent-css-65 #pushed
+#session-248 #wrap-no-push #branch-baton-to-s249 #conformance-236-to-310 #capability-built #6-divergences-fixed #e-auth-001 #issue-26-p0-authbypass-fixed #finding-1-jwt-HIGH-open #issues-25-27-open #enormous-session
