@@ -1276,9 +1276,27 @@ function findEngineCloser(bodyRaw: string, from: number): number {
       // PascalCase state-child opener `<X ...>`.
       const next = bodyRaw[i + 1];
       if (next && next >= "A" && next <= "Z") {
+        // Scan past the tag name so `isColonShorthandOpener` inspects only the
+        // attribute region (mirrors the lowercase branch below).
+        let jj = i + 1;
+        while (jj < bodyRaw.length) {
+          const c = bodyRaw[jj]!;
+          if ((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+              (c >= "0" && c <= "9") || c === "-") jj++;
+          else break;
+        }
         const oe = findOpenerEnd(bodyRaw, i + 1);
         if (oe < 0) return -1;
-        if (bodyRaw[oe - 1] !== "/") {
+        const isSelfClose = bodyRaw[oe - 1] === "/";
+        // §4.14 `:`-shorthand openers are self-terminating (no closer) — an
+        // uppercase state-child written as `<P rule=.Q : "p">` must NOT bump
+        // scDepth, exactly like the lowercase branch below (and self-close).
+        // Without this guard, a `:`-shorthand inner-engine state-child pushed a
+        // depth that never popped, corrupting the inner-engine boundary so
+        // findEngineCloser overran the real closer and the inner children were
+        // flattened up into the OUTER engine (→ false E-ENGINE-STATE-CHILD-*).
+        const isColonShorthand = isColonShorthandOpener(bodyRaw, jj, oe);
+        if (!isSelfClose && !isColonShorthand) {
           scDepth++;
         }
         i = oe + 1;
@@ -1788,12 +1806,26 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
       const next = rulesRaw[i + 1];
       if (next && next >= "A" && next <= "Z") {
         depth++;
+        // Scan past the tag name so `isColonShorthandOpener` inspects only the
+        // attribute region (mirrors the lowercase branch below).
+        let jj = i + 1;
+        while (jj < rulesRaw.length) {
+          const c = rulesRaw[jj]!;
+          if ((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+              (c >= "0" && c <= "9") || c === "-") jj++;
+          else break;
+        }
         // Advance past the opener
         const openerEnd = findOpenerEnd(rulesRaw, i + 1);
         if (openerEnd < 0) return -1;
         // Self-closing? `<Tag/>`
         if (rulesRaw[openerEnd - 1] === "/") {
           depth--; // self-close cancels the increment
+        } else if (isColonShorthandOpener(rulesRaw, jj, openerEnd)) {
+          // §4.14 `:`-shorthand openers are self-terminating (no closer) — an
+          // uppercase state-child written as `<P rule=.Q : "p">` must NOT bump
+          // depth, exactly like the lowercase branch below (and self-close).
+          depth--; // colon-shorthand cancels the increment
         }
         i = openerEnd + 1;
         continue;
