@@ -485,7 +485,7 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
  * like hash(password) (from scrml:crypto) as server-side operations
  * even though they are not user-defined functions in the AST.
  */
-const SERVER_ONLY_SCRML_MODULES = new Set<string>([
+export const SERVER_ONLY_SCRML_MODULES = new Set<string>([
   "scrml:crypto",
   "scrml:auth",
   "scrml:data",
@@ -498,6 +498,24 @@ const SERVER_ONLY_SCRML_MODULES = new Set<string>([
   "scrml:cron",    // wraps Bun.cron (Bun ≥1.3.12); in-process scheduler
   "scrml:oauth",   // OAuth client; network calls + token storage
 ]);
+
+/**
+ * True when `source` is a server-only `scrml:*` module import — matching the
+ * bare module (`scrml:auth`) OR any of its submodules (`scrml:auth/jwt`). A
+ * submodule of a server-only module is itself server-only.
+ *
+ * Used by the STDLIB-EXPORT-SEED fail-closed backstop (api.js): an unresolvable
+ * re-export in a server-only stdlib module MUST default to async (so emit-server
+ * awaits it) rather than fail-open to sync — an un-awaited Promise from a
+ * server-only auth/crypto call is the JWT/password auth-bypass class (issue #26).
+ */
+export function isServerOnlyScrmlModuleSource(source: string): boolean {
+  if (SERVER_ONLY_SCRML_MODULES.has(source)) return true;
+  for (const m of SERVER_ONLY_SCRML_MODULES) {
+    if (source.startsWith(m + "/")) return true;
+  }
+  return false;
+}
 
 /**
  * Check a bare-expr string for server-only resource access patterns.

@@ -23,7 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
-import { runRI, buildFunctionIndex } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry } from "./type-system.ts";
@@ -1374,10 +1374,19 @@ export function compileScrml(options = {}) {
   stage("STDLIB-EXPORT-SEED", () => {
     // Collect unique stdlib import absolute paths from the import graph.
     const stdlibPaths = new Set();
+    // jwt-auth-bypass (2026-07-11, HIGH) — the subset of stdlibPaths reached via
+    // a SERVER-ONLY `scrml:*` import (`scrml:auth` / `scrml:crypto` / … and their
+    // submodules). A re-export in one of these modules that cannot be resolved to
+    // a terminal {kind, isAsync} MUST fail CLOSED (default async), never fail open
+    // to sync — see the `_resolveStdlibExport` backstop below.
+    const serverOnlyStdlibPaths = new Set();
     for (const [, entry] of moduleResult.importGraph) {
       for (const imp of entry.imports) {
         if (imp.source && imp.source.startsWith("scrml:") && imp.absSource && imp.absSource.endsWith(".scrml")) {
           stdlibPaths.add(imp.absSource);
+          if (isServerOnlyScrmlModuleSource(imp.source)) {
+            serverOnlyStdlibPaths.add(imp.absSource);
+          }
         }
       }
     }
@@ -1472,6 +1481,34 @@ export function compileScrml(options = {}) {
             if (resolved) {
               kind = resolved.kind;
               isAsync = resolved.isAsync;
+            } else if (serverOnlyStdlibPaths.has(absPath)) {
+              // jwt-auth-bypass (2026-07-11, HIGH) — FAIL CLOSED. The re-export
+              // could NOT be resolved to a terminal {kind, isAsync} (missing /
+              // unparseable source, a name-not-found, or a splitter regression
+              // that dropped the source export). This re-export lives in a
+              // SERVER-ONLY `scrml:*` module, so silently defaulting to sync
+              // (isAsync:false) is the FAIL-OPEN that leaks an un-awaited Promise
+              // from a server-only auth/crypto call → the accept-all auth bypass
+              // (issue #26 class). Default to async (`function` + isAsync:true) so
+              // emit-server AWAITS the call. Awaiting a non-Promise is a harmless
+              // no-op (`await x` ⟶ x); NOT awaiting a Promise is the vulnerability.
+              // A hard E-STDLIB-SEED diagnostic would also close it, but a robust
+              // silent fail-closed keeps a transient stdlib parse hiccup from
+              // breaking the build while never leaking the Promise.
+              kind = "function";
+              isAsync = true;
+              allErrors.push({
+                stage: "STDLIB-EXPORT-SEED",
+                code: "W-STDLIB-SEED-FAILCLOSED",
+                severity: "warning",
+                message:
+                  `W-STDLIB-SEED-FAILCLOSED: server-only re-export \`${name}\` ` +
+                  `(re-exported from \`${exp.reExportSource}\` in ${absPath}) could not ` +
+                  `be resolved to a terminal {kind, isAsync}. Defaulting to async ` +
+                  `(fail-closed) so the server auto-await classifier awaits it — an ` +
+                  `un-awaited Promise from a server-only call is the issue #26 auth-` +
+                  `bypass class. Check the re-export source module compiles cleanly.`,
+              });
             }
           }
           let category;

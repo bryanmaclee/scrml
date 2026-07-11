@@ -385,9 +385,20 @@ function skipLineComment(source, startPos) {
  * quote inside a regex like the double-quote class, or apostrophes in
  * block-comment prose).
  *
- * Returns the open quote char (`"`/`'`) if inside a string at `slashPos`, else
- * null. Caller is responsible for only invoking this in brace-delimited
+ * Returns the open quote char (`"`/`'`/`` ` ``) if inside a string at `slashPos`,
+ * else null. Caller is responsible for only invoking this in brace-delimited
  * contexts (where string literals are a real concept).
+ *
+ * jwt-auth-bypass followup (2026-07-11, HIGH) — also tracks BACKTICK template
+ * literals so a slash-slash / slash-star inside a backtick template (a glob such
+ * as dir + slash-star-dot-js, or "open" + slash-star + interpolation) is
+ * recognized as string content, not a comment. The scan stays LINE-SCOPED (a
+ * template opened on a previous line is NOT seen — that case is caught by the
+ * block-comment handler's containment safeguard). Backtick interpolation is
+ * treated naively (the backtick toggle ignores the interpolation braces): the
+ * probe templates carry their slash-star in template TEXT, not inside an
+ * interpolation, so naive parity is correct for them; an interpolation-embedded
+ * comment is the documented rare edge.
  */
 function openStringQuoteAt(source, slashPos) {
   // Find the start of the current physical line.
@@ -395,6 +406,7 @@ function openStringQuoteAt(source, slashPos) {
   while (lineStart > 0 && source[lineStart - 1] !== "\n") lineStart--;
   let inDouble = false;
   let inSingle = false;
+  let inBacktick = false;
   for (let i = lineStart; i < slashPos; i++) {
     const ch = source[i];
     if (inDouble) {
@@ -407,11 +419,18 @@ function openStringQuoteAt(source, slashPos) {
       if (ch === "'") inSingle = false;
       continue;
     }
+    if (inBacktick) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === "`") inBacktick = false;
+      continue;
+    }
     if (ch === '"') { inDouble = true; continue; }
     if (ch === "'") { inSingle = true; continue; }
+    if (ch === "`") { inBacktick = true; continue; }
   }
   if (inDouble) return '"';
   if (inSingle) return "'";
+  if (inBacktick) return "`";
   return null;
 }
 
@@ -2362,6 +2381,122 @@ export function splitBlocks(filePath, source) {
       // Scan to end of line
       while (pos < len && source[pos] !== "\n") step();
       if (pos < len) step(); // consume the newline
+      targetChildren().push({
+        type: "comment",
+        raw: source.slice(commentStart, pos),
+        span: { start: commentStart, end: pos, line: commentStartLine, col: commentStartCol },
+        depth: depth(),
+        children: [],
+        name: null,
+        closerForm: null,
+        isComponent: false,
+      });
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // Section 27.1: '/* ... */' block-comment suppression INSIDE brace contexts.
+    //
+    // jwt-auth-bypass (2026-07-11, HIGH) — inside a brace-delimited context
+    // (`${...}` logic, `?{}` SQL, `#{}` CSS, `!{}`, `^{}`, `~{}` test), a
+    // `/* ... */` block comment (e.g. a JSDoc `/** @returns Promise<string> */`)
+    // is a CODE comment (SPEC §27.1 — `//` + `/* */` are universal). Pre-fix the
+    // main loop skipped `//` line comments (above) but NOT `/* */`, so the
+    // comment BODY was scanned char-by-char: a `<string>` / `Promise<T>` inside
+    // it was mis-read as a markup tag-opener → `frame.tagNesting++` that never
+    // decrements → the leaked tagNesting propagated onto every subsequent
+    // error-effect (`!{...}`) child BLOCK_REF (line ~2245). collectExpr's
+    // statement-boundary break (ast-builder.js, `tok.block?.tagNesting === 0`
+    // guard) was then BYPASSED, so a failable handler `call() !{ … }` was
+    // ABSORBED into the preceding expression — the "statement boundary not
+    // detected" drop that silently discarded the rest of jwt.scrml's exports
+    // (`signJwt`/`verifyJwt`/…), classifying the async fns as SYNC downstream →
+    // an unawaited-Promise auth bypass (same class as issue #26). A `!{}` /
+    // `${}` literally written inside the comment prose likewise spawned a
+    // spurious child block. Skipping the whole `/* … */` as a `comment` block
+    // (parallel to the `//` handler above) makes the comment interior inert, so
+    // the block STRUCTURE (children + tagNesting) is correct; tokenizeLogic's
+    // own `readBlockComment` still re-handles the comment text in `bodyRaw`
+    // (benign duplication, same as the `//` case).
+    //
+    // Scope: brace contexts ONLY (`topIsBraceContext()`) — the confirmed locus.
+    // markup-text `/* */` is NOT a comment (that is `<!-- -->`) and is left
+    // untouched. The `openStringQuoteAt` guard mirrors the `//` handler: a `/*`
+    // inside a `"..."` / `'...'` / `` `…` `` string literal on the current line
+    // is string content, not a comment opener.
+    //
+    // jwt-auth-bypass followup (2026-07-11, HIGH — adversarial S239 catch) — the
+    // block-splitter has NO regex-awareness, so a `/*` INSIDE a regex literal
+    // (`/\/*$/`, `/[/*]/g`) or a MULTI-LINE / interpolated backtick template is
+    // not a comment. Two safeguards below prevent the "phantom comment eats to
+    // EOF → whole-file E-CTX-003" regression:
+    //   (a) the `openStringQuoteAt` backtick tracking (single-line templates), and
+    //   (b) a CONTAINMENT pre-scan: a real comment's `*/` closer SHALL appear
+    //       before the enclosing brace context's own closing `}`. We pre-scan
+    //       (non-destructively) for `*/`, tracking relative brace depth; if a `}`
+    //       that closes THIS context (relDepth 0) — or EOF — is reached before
+    //       `*/`, the `/*` was NOT a comment (it is regex / template content), so
+    //       we BAIL: emit the `/` as ordinary text and let normal brace-context
+    //       scanning consume the rest. This turns a whole-file failure into, at
+    //       worst, a local no-op (a real comment carrying an unbalanced `}` in
+    //       prose reverts to pre-fix, tokenizeLogic-handled behavior).
+    // -----------------------------------------------------------------------
+    if (c === "/" && ch(1) === "*" && topIsBraceContext()) {
+      const openQ = openStringQuoteAt(source, curPos);
+      if (openQ) {
+        // `/*` sits inside a string literal on this line — consume as string
+        // content up to the closing quote (mirrors the `//` string branch).
+        beginText();
+        step(); step(); // consume the `/*` as string content
+        while (pos < len) {
+          const sc = source[pos];
+          if (sc === "\\" && pos + 1 < len) { step(); step(); continue; }
+          if (sc === openQ) { step(); break; } // consume the closing quote
+          if (sc === "\n") break; // unterminated on this line — stop, recover
+          step();
+        }
+        continue;
+      }
+      // Containment pre-scan (non-destructive): is there a `*/` before this
+      // brace context's closing `}` (or EOF)? Pure brace-depth — a `}` at
+      // relDepth 0 is the context closer.
+      let commentContained = false;
+      {
+        let j = curPos + 2; // past `/*`
+        let relDepth = 0;
+        while (j < len) {
+          const cj = source[j];
+          if (cj === "*" && source[j + 1] === "/") { commentContained = true; break; }
+          if (cj === "{") { relDepth++; j++; continue; }
+          if (cj === "}") {
+            if (relDepth === 0) break; // context closer reached before `*/` — NOT a comment
+            relDepth--; j++; continue;
+          }
+          j++;
+        }
+      }
+      if (!commentContained) {
+        // Not a real comment (regex `/*` / multi-line-or-interpolated template
+        // `/*`). Emit the `/` as ordinary text and resume normal scanning; the
+        // brace-context branch consumes the rest with correct depth tracking.
+        beginText();
+        step();
+        continue;
+      }
+      flushText();
+      const commentStart = curPos;
+      const commentStartLine = curLine;
+      const commentStartCol = curCol;
+      advance(2); // consume '/*'
+      // Scan to the closing '*/' (step() maintains line/col across newlines).
+      // The pre-scan above guarantees a `*/` exists before the context boundary.
+      while (pos < len) {
+        if (source[pos] === "*" && ch(1) === "/") {
+          advance(2); // consume '*/'
+          break;
+        }
+        step();
+      }
       targetChildren().push({
         type: "comment",
         raw: source.slice(commentStart, pos),

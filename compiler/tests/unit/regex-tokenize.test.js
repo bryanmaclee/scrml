@@ -250,4 +250,58 @@ describe("regex tokenization", () => {
     const punctSlashes = toks.filter(t => t.kind === "PUNCT" && t.text === "/");
     expect(punctSlashes.length).toBe(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // §18 jwt-auth-bypass (2026-07-11, HIGH) — a regex literal MAY begin with `=`.
+  //
+  // `/=/g` (the base64url padding strip in stdlib/auth/jwt.scrml:42) is a REGEX
+  // in regex context, NOT the `/=` divide-assign operator. Pre-fix the tokenizer
+  // excluded `ch(1) === '='` from regex detection, forcing `s.replace(/=/g, "")`
+  // to lex `/=` as the operator → corrupted the expression → dropped every
+  // subsequent `export function` from the module (STDLIB-EXPORT-SEED never saw
+  // signJwt/verifyJwt async → SYNC → unawaited Promise → auth bypass, issue #26
+  // class). isRegexContext() disambiguates: `/=` is a regex after `(`/`,`/`=`/
+  // return/etc., and the `/=` OPERATOR only after a value (IDENT/`)`/`]`/NUMBER).
+  // ---------------------------------------------------------------------------
+
+  test("§18a regex starting with = after ( : .replace(/=/g, \"\") → REGEX", () => {
+    const toks = lex('s.replace(/=/g, "")');
+    const regex = toks.find(t => t.kind === "REGEX");
+    expect(regex).toBeDefined();
+    expect(regex.text).toBe("/=/g");
+    // No stray `/=` operator token was produced.
+    expect(toks.find(t => t.text === "/=")).toBeUndefined();
+  });
+
+  test("§18b regex starting with = after assignment: let r = /=x/", () => {
+    const toks = lex("let r = /=x/");
+    const regex = toks.find(t => t.kind === "REGEX");
+    expect(regex).toBeDefined();
+    expect(regex.text).toBe("/=x/");
+  });
+
+  test("§18c regex starting with = after return: return /=/.test(s)", () => {
+    const toks = lex("return /=/.test(s)");
+    const regex = toks.find(t => t.kind === "REGEX");
+    expect(regex).toBeDefined();
+    expect(regex.text).toBe("/=/");
+  });
+
+  test("§18d regression: x /= 2 STILL lexes /= as the compound-assign operator", () => {
+    // The fix must not regress the operator case — isRegexContext() returns
+    // false after an IDENT, so `/=` after a value stays the operator.
+    const toks = lex("x /= 2");
+    expect(toks.find(t => t.kind === "REGEX")).toBeUndefined();
+    const op = toks.find(t => t.text === "/=");
+    expect(op).toBeDefined();
+    expect(op.kind).toBe("OPERATOR");
+  });
+
+  test("§18e regression: arr[0] /= 2 → operator, not regex", () => {
+    const toks = lex("arr[0] /= 2");
+    expect(toks.find(t => t.kind === "REGEX")).toBeUndefined();
+    const op = toks.find(t => t.text === "/=");
+    expect(op).toBeDefined();
+    expect(op.kind).toBe("OPERATOR");
+  });
 });
