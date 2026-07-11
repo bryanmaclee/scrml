@@ -1,0 +1,13 @@
+${ type AppMode:enum  = { Title, Playing } }
+${ type PlayMode:enum = { Exploring, Battle } }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing>
+    "Welcome."
+  </>
+  <Playing rule=.Title>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle : "Exploring the map">
+      <Battle rule=.Exploring : "In battle">
+    </>
+  </>
+</>

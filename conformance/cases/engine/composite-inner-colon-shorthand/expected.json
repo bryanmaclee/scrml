@@ -1,0 +1,15 @@
+{
+  "id": "engine-composite-inner-colon-shorthand",
+  "description": "En-D2 — a composite state-child (§51.0.Q.1) whose inner nested <engine> uses inside-opener `:`-shorthand state-children (`<Exploring rule=.Battle : \"...\">`) compiles clean. Pre-fix, each uppercase `:`-shorthand child bumped the state-child depth counter in the nested-engine closer scan (findEngineCloser / findStateChildCloser PascalCase branch) — but a `:`-shorthand opener is self-terminating (no closer), so the phantom depth never popped, overran the inner <engine> boundary, and flattened the inner children UP into the OUTER engine. The outer then saw Exploring/Battle as its own state-children (invalid AppMode variants) and lost Playing's real content, firing false E-ENGINE-STATE-CHILD-MISSING (outer) + E-ENGINE-STATE-CHILD-INVALID-VARIANT / E-ENGINE-RULE-INVALID-VARIANT (inner). Inner bare-body and inner self-closing children were unaffected; the trigger was a single inner `:`-shorthand child.",
+  "language-version": "1.0",
+  "spec": "§51.0.Q.1",
+  "rationale": "§51.0.Q.1: the nested <engine> in a composite state-child has FULL engine semantics, including §51.0.I `:`-shorthand state-children. The nested-engine boundary scan must treat an uppercase `:`-shorthand opener as self-terminating (no closer), exactly as the §4.14 lowercase-HTML branch already does, so the inner children stay attributed to the inner engine.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-STATE-CHILD-MISSING",
+      "E-ENGINE-STATE-CHILD-INVALID-VARIANT",
+      "E-ENGINE-RULE-INVALID-VARIANT"
+    ]
+  }
+}
