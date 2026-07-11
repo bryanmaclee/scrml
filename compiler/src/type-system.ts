@@ -9543,7 +9543,7 @@ function annotateNodes(
             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
             // runs, so the map (non-enum) LHS context doesn't false-fire
             // E-VARIANT-AMBIGUOUS. Stamps resolved key idents (skip-flag).
-            inferBareVariantsAtMapKeyArgs(initExprForScope, scopeChain, letSpan, errors);
+            inferBareVariantsAtMapMethodArgs(initExprForScope, scopeChain, letSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `let m: Mode = .OnePlayer(.Easy)` (or the qualified
             // `Mode.OnePlayer(.Easy)` form with no annotation). The ctor ARG
@@ -10011,7 +10011,7 @@ function annotateNodes(
             // the bare KEY variant resolves against the map's declared key enum
             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
             // LHS — the §59.4 gap), suppressing the spurious E-VARIANT-AMBIGUOUS.
-            inferBareVariantsAtMapKeyArgs(reactInitExprNode, scopeChain, reactSpan, errors);
+            inferBareVariantsAtMapMethodArgs(reactInitExprNode, scopeChain, reactSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG
             // `.Easy` must resolve against the OnePlayer payload type
@@ -10339,7 +10339,7 @@ function annotateNodes(
             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
             // against the map's declared key enum + stamps.
-            inferBareVariantsAtMapKeyArgs(beExprNode, scopeChain, beSpan, errors);
+            inferBareVariantsAtMapMethodArgs(beExprNode, scopeChain, beSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg at bare-expr (`Mode.OnePlayer(.Easy)` as a statement).
             // No LHS contextType here, so only the QUALIFIED ctor form (enum
@@ -10913,7 +10913,7 @@ function annotateNodes(
             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
             // map's declared key enum + stamps.
-            inferBareVariantsAtMapKeyArgs(ifCondExpr, scopeChain, ifCondSpan, errors);
+            inferBareVariantsAtMapMethodArgs(ifCondExpr, scopeChain, ifCondSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg inside an if/while condition (`if (@p == Mode.OnePlayer(.Easy))`).
             // No LHS contextType; qualified ctor resolves via the type registry.
@@ -11218,7 +11218,7 @@ function annotateNodes(
           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
           // the map's declared key enum + stamps, so the return-type-context
           // walker doesn't false-fire on the key.
-          inferBareVariantsAtMapKeyArgs(retExprNode, scopeChain, retSpan, errors);
+          inferBareVariantsAtMapMethodArgs(retExprNode, scopeChain, retSpan, errors);
           // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
           // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
           // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
@@ -14478,34 +14478,37 @@ function inferBareVariantsAtVariantCtorArgs(
 }
 
 /**
- * §59.4 / §14.10 — bare-variant inference at MAP-KEY positions.
+ * §59.4 / §59 (Rx-6) / §14.10 — bare-variant inference at MAP-METHOD KEY + VALUE
+ * positions.
  *
- * A bare `.Variant` in a map/set KEY position resolves against the map's
- * DECLARED KEY type (§59.2 `[KeyT: ValT]`), exactly as a fn-param position
- * resolves against the param type (`inferBareVariantsAtCallArgs`). §59.4
- * declares enum keys supported; §14.10 supplies the key-type context. Two
- * key-position shapes are recognized:
+ * A bare `.Variant` in a map/set KEY or VALUE position resolves against the map's
+ * DECLARED KEY / VALUE type (§59.2 `[KeyT: ValT]`), exactly as a fn-param position
+ * resolves against the param type (`inferBareVariantsAtCallArgs`). §59.4 declares
+ * enum keys supported; §14.10 supplies the type context. Recognized shapes:
  *
  *   - a key-taking map/set method arg — `@m.insert(.City, v)` / `.getOr` /
  *     `.remove` / `.has` / `.update` / set `.add` — where arg[0] is the key
  *     (`insertAll` is EXCLUDED: its arg is a MAP, §59.7, not a bare key).
+ *   - a value-taking map method arg — `@m.insert(k, .V)` / `.getOr(k, .V)` — where
+ *     arg[1] is a VALUE of the map's value type (`update`'s arg[1] is a FUNCTION,
+ *     EXCLUDED; `insertAll` EXCLUDED).
  *   - a bracket-READ key — `@m[.City]` (§59.6).
  *
- * Without this pass the key `.Variant` reaches the LHS-driven flat walker with a
+ * Without this pass the `.Variant` reaches the LHS-driven flat walker with a
  * null / map (non-enum) context and false-fires E-VARIANT-AMBIGUOUS (the map
- * type is not itself an enum, so `bvCtxType` is null — the §59.4 gap). This pass
- * resolves each key-position bare variant against `mapType.key` and STAMPS the
- * resolved ident (`_bareVariantInferredAtBinaryExpr`, the shared skip-flag) so
- * the downstream flat walker skips it — the same stamp convention the call-arg /
- * ctor-arg pre-passes use. A key typo (`.Dalas`) still fires E-TYPE-063 against
- * the key enum (the flat walker's existing behavior with a real enum context).
+ * type is not itself an enum, so `bvCtxType` is null — the §59.4 key gap / Rx-6
+ * value gap on a REACTIVE map cell). This pass resolves each key/value-position
+ * bare variant against `mapType.key` / `mapType.value` and STAMPS the resolved
+ * ident (`_bareVariantInferredAtBinaryExpr`, the shared skip-flag) so the
+ * downstream flat walker skips it — the same stamp convention the call-arg /
+ * ctor-arg pre-passes use. A typo (`.Dalas`) still fires E-TYPE-063 against the
+ * resolved enum (the flat walker's existing behavior with a real enum context).
  *
- * Gated on an ENUM-ish key type (enum / union-of-enums / enum-subset). A
- * non-enum key type (struct / primitive) is left untouched — a bare variant
- * there is genuinely context-less and the existing E-VARIANT-AMBIGUOUS path
- * owns it.
+ * Gated on an ENUM-ish key / value type (enum / union-of-enums / enum-subset). A
+ * non-enum type (struct / primitive) is left untouched — a bare variant there is
+ * genuinely context-less and the existing E-VARIANT-AMBIGUOUS path owns it.
  */
-function inferBareVariantsAtMapKeyArgs(
+function inferBareVariantsAtMapMethodArgs(
   exprNode: unknown,
   scopeChain: ScopeChain,
   span: Span,
@@ -14515,6 +14518,11 @@ function inferBareVariantsAtMapKeyArgs(
 
   // Key-taking map/set methods whose FIRST arg is the key (§59.6/§59.7/§59.12).
   const KEY_ARG_METHODS = new Set(["insert", "getOr", "remove", "has", "update", "add"]);
+  // §59 (Rx-6) — value-taking map methods whose SECOND arg is a VALUE of the
+  // map's declared value type: `insert(k, v)` and `getOr(k, default)`. Excluded:
+  // `update(k, fn)` — arg[1] is a FUNCTION, not a value; `insertAll(m)` — arg is
+  // a MAP (§59.7), not a bare value.
+  const VALUE_ARG_METHODS = new Set(["insert", "getOr"]);
 
   /** Resolve an object node → its MAP ResolvedType via scopeChain, or null. */
   const resolveReceiverMapType = (objNode: unknown): MapType | null => {
@@ -14529,17 +14537,19 @@ function inferBareVariantsAtMapKeyArgs(
   };
 
   /** enum / union-of-enums / enum-subset → a resolvable bare-variant context. */
-  const isEnumishKeyType = (t: ResolvedType | undefined | null): boolean =>
+  const isEnumishType = (t: ResolvedType | undefined | null): boolean =>
     !!t && (t.kind === "enum" || t.kind === "union"
       || (t.kind === "predicated" && (t as PredicatedType).baseType === "enum"));
 
-  /** Resolve every bare variant in `keyExpr` against the key type + stamp. */
-  const resolveKey = (keyExpr: unknown, keyType: ResolvedType): void => {
-    if (!keyExpr || typeof keyExpr !== "object") return;
-    inferBareVariantsInExpr(keyExpr, keyType, span, errors);
-    // Stamp every bare-variant ident in the key subtree so the downstream
+  /** Resolve every bare variant in `argExpr` against `ctxType` + stamp. Shared by
+   *  the KEY-arg (arg[0] vs `mapType.key`) and VALUE-arg (arg[1] vs `mapType.value`)
+   *  positions — both are map-method-arg bare-variant contexts. */
+  const resolveBareVariantsAgainst = (argExpr: unknown, ctxType: ResolvedType): void => {
+    if (!argExpr || typeof argExpr !== "object") return;
+    inferBareVariantsInExpr(argExpr, ctxType, span, errors);
+    // Stamp every bare-variant ident in the arg subtree so the downstream
     // LHS-driven flat walker (null / map context) skips it (no double-fire).
-    forEachIdentInExprNode(keyExpr as any, (ident: { name?: unknown }) => {
+    forEachIdentInExprNode(argExpr as any, (ident: { name?: unknown }) => {
       if (typeof ident.name === "string" && ident.name.startsWith(".")) {
         Object.defineProperty(ident, "_bareVariantInferredAtBinaryExpr", {
           value: true, enumerable: false, configurable: true, writable: true,
@@ -14552,15 +14562,32 @@ function inferBareVariantsAtMapKeyArgs(
     if (!node || typeof node !== "object") return;
     const n = node as { kind?: string } & Record<string, unknown>;
 
-    // Map/set KEY-arg method call: `@m.insert(.V, ...)` / `.getOr(.V, d)` / …
+    // Map/set method call — resolve bare variants at the KEY position
+    // (`@m.insert(.V, …)` / `.getOr(.V, d)`) against the map's key type AND, for
+    // value-taking methods, at the VALUE position (`@m.insert(k, .V)` /
+    // `.getOr(k, .V)`) against the map's value type.
     if (n.kind === "call") {
       const callee = n.callee as { kind?: string; object?: unknown; property?: string } | undefined;
       const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
-      if (callee && callee.kind === "member" && typeof callee.property === "string"
-          && KEY_ARG_METHODS.has(callee.property) && args.length > 0) {
-        const mapType = resolveReceiverMapType(callee.object);
-        if (mapType && isEnumishKeyType(mapType.key)) {
-          resolveKey(args[0], mapType.key);
+      if (callee && callee.kind === "member" && typeof callee.property === "string" && args.length > 0) {
+        const method = callee.property;
+        if (KEY_ARG_METHODS.has(method)) {
+          const mapType = resolveReceiverMapType(callee.object);
+          if (mapType && isEnumishType(mapType.key)) {
+            resolveBareVariantsAgainst(args[0], mapType.key);
+          }
+        }
+        // §59 (Rx-6) — VALUE-position arg. Without this, a bare `.Variant` value
+        // on a REACTIVE map cell (`@m = @m.insert("a", .Red)`) reaches the
+        // LHS-driven flat walker with a null / map (non-enum) context and
+        // false-fires E-VARIANT-AMBIGUOUS — the value-position analog of the
+        // §59.4 key gap. A bare value on a non-reactive LOCAL map already
+        // compiles clean (its reassignment isn't re-walked for bare variants).
+        if (VALUE_ARG_METHODS.has(method) && args.length > 1) {
+          const mapType = resolveReceiverMapType(callee.object);
+          if (mapType && isEnumishType(mapType.value)) {
+            resolveBareVariantsAgainst(args[1], mapType.value);
+          }
         }
       }
     }
@@ -14570,8 +14597,8 @@ function inferBareVariantsAtMapKeyArgs(
     // resolves its variant here.)
     if (n.kind === "index") {
       const mapType = resolveReceiverMapType((n as Record<string, unknown>).object);
-      if (mapType && isEnumishKeyType(mapType.key)) {
-        resolveKey((n as Record<string, unknown>).index, mapType.key);
+      if (mapType && isEnumishType(mapType.key)) {
+        resolveBareVariantsAgainst((n as Record<string, unknown>).index, mapType.key);
       }
     }
 
