@@ -1787,6 +1787,30 @@ export function generateHtml(
                 span,
               ));
             }
+
+            // D-FORM-8 (§5.4.1, L1651): `bind:checked` is dispatched ONLY for
+            // `<input type="checkbox">`. An input carrying an EXPLICIT
+            // non-checkbox type (e.g. `type="text"`) with `bind:checked` is
+            // `E-ATTR-011` — otherwise the compiler silently wires `.checked` +
+            // a change listener onto a text-shaped input. A bare `<input
+            // bind:checked=@x>` (no `type` attr) is tolerated — the author
+            // intends a checkbox and the tag check above passes (§11 unit-test
+            // precedent); only an explicit conflicting type is rejected. A
+            // dynamic `type=@expr` (non-string value) can't be statically
+            // resolved, so it is not rejected here.
+            if (bindName === "bind:checked" && tag === "input") {
+              const typeAttr = attrs.find((a: any) => a && a.name === "type");
+              const typeVal = typeAttr?.value?.value;
+              if (typeof typeVal === "string" && typeVal !== "checkbox") {
+                errors.push(new CGError(
+                  "E-ATTR-011",
+                  `E-ATTR-011: \`bind:checked\` requires \`<input type="checkbox">\`, ` +
+                  `but this element is \`<input type="${typeVal}">\`. ` +
+                  `Use \`bind:value\` for text-shaped inputs, or change the type to \`checkbox\`.`,
+                  span,
+                ));
+              }
+            }
           }
         }
       }
