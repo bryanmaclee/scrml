@@ -19934,6 +19934,35 @@ function walkAndExpandSchemaForCalls(
    */
   function walkPassB(arr: ASTNodeLike[] | undefined): void {
     if (!Array.isArray(arr)) return;
+
+    // Shared recognizer — a schemaFor call reached in an invalid (non-`<schema>`)
+    // context. Rides `forEachCallInExprNode`; respects `processedCalls` so a call
+    // already expanded by Pass A never double-fires.
+    const flagInvalidSchemaForCall = (call: unknown): void => {
+      if (processedCalls.has(call as unknown as object)) return;
+      const callee = (call as { callee?: { kind?: string; name?: string } }).callee;
+      if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
+      if (!schemaForLocals.has(callee.name)) return;
+      const span = ((call as { span?: Span }).span as Span | undefined) ?? defaultSpan;
+      errors.push(new TSError(
+        "E-SCHEMAFOR-INVALID-CALL-CONTEXT",
+        `E-SCHEMAFOR-INVALID-CALL-CONTEXT: \`schemaFor(...)\` was called outside a \`<schema>\` block. ` +
+        `The function-call form is canonical INSIDE \`<schema>\` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a table-declaration fragment that requires the \`<schema>\` parser context). ` +
+        `Resolution: wrap the call inside a \`<schema>\${ schemaFor(...) }</>\` block. ` +
+        `See SPEC §41.15.8.`,
+        span,
+      ));
+    };
+
+    const walkExprForSchemaFor = (v: unknown): void => {
+      if (!v || typeof v !== "object") return;
+      try {
+        forEachCallInExprNode(v as any, flagInvalidSchemaForCall);
+      } catch {
+        // Defensive — forEachCallInExprNode is exhaustive per ExprNode kinds.
+      }
+    };
+
     for (const n of arr) {
       if (!n || typeof n !== "object") continue;
 
@@ -19941,27 +19970,34 @@ function walkAndExpandSchemaForCalls(
       const EXPR_FIELDS = ["exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
                             "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr"];
       for (const f of EXPR_FIELDS) {
-        const v = (n as Record<string, unknown>)[f];
-        if (v && typeof v === "object") {
-          try {
-            forEachCallInExprNode(v as any, (call) => {
-              if (processedCalls.has(call as unknown as object)) return;
-              const callee = (call as { callee?: { kind?: string; name?: string } }).callee;
-              if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
-              if (!schemaForLocals.has(callee.name)) return;
-              const span = ((call as { span?: Span }).span as Span | undefined) ?? defaultSpan;
-              errors.push(new TSError(
-                "E-SCHEMAFOR-INVALID-CALL-CONTEXT",
-                `E-SCHEMAFOR-INVALID-CALL-CONTEXT: \`schemaFor(...)\` was called outside a \`<schema>\` block. ` +
-                `The function-call form is canonical INSIDE \`<schema>\` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a table-declaration fragment that requires the \`<schema>\` parser context). ` +
-                `Resolution: wrap the call inside a \`<schema>\${ schemaFor(...) }</>\` block. ` +
-                `See SPEC §41.15.8.`,
-                span,
-              ));
-            });
-          } catch {
-            // Defensive — forEachCallInExprNode is exhaustive per ExprNode kinds.
-          }
+        walkExprForSchemaFor((n as Record<string, unknown>)[f]);
+      }
+
+      // §41.15.8 — a schemaFor call in an ATTRIBUTE-VALUE or EVENT-HANDLER
+      // expression position (`<div title=${schemaFor(User)}>`, `<button
+      // onclick=${schemaFor(User)}>`) is "any other markup context" and SHALL
+      // fire E-SCHEMAFOR-INVALID-CALL-CONTEXT. The EXPR_FIELDS whitelist above
+      // does NOT reach attr/handler exprs, so walk them explicitly — otherwise
+      // the call leaks a runtime `schemaFor()` into client.js (schemaFor is
+      // compile-only; it throws at runtime). Both the interpolation form
+      // (`{kind:"expr", exprNode}`) and the bare-handler form (via
+      // handlerAttrToExprNode) are covered.
+      const attrList = ((n as ASTNodeLike).attrs
+        ?? (n as Record<string, unknown>).attributes) as ASTNodeLike[] | undefined;
+      if (Array.isArray(attrList)) {
+        for (const attr of attrList) {
+          if (!attr || typeof attr !== "object") continue;
+          const av = (attr as { value?: unknown }).value;
+          if (!av || typeof av !== "object") continue;
+          // Resolve the single ExprNode carried by the attribute value. The
+          // interpolation form (`attr=${...}`) carries it directly under
+          // `exprNode`; the bare-handler form (`onclick=@cell.method(...)`) is
+          // synthesized by handlerAttrToExprNode. Mutually exclusive so the
+          // call is walked exactly once (no double-fire).
+          const attrExpr = (av as { kind?: string }).kind === "expr"
+            ? (av as { exprNode?: unknown }).exprNode
+            : handlerAttrToExprNode(av);
+          walkExprForSchemaFor(attrExpr);
         }
       }
 
