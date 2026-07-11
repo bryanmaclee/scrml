@@ -1845,7 +1845,23 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
     // Regex literal — check after line/block comments but before single-char PUNCT.
     // isRegexContext() inspects the token stream to distinguish /pattern/flags
     // from division operators (x / y) and compound operators (/=).
-    if (c0 === '/' && ch(1) !== '/' && ch(1) !== '*' && ch(1) !== '=' && isRegexContext()) {
+    //
+    // jwt-auth-bypass (2026-07-11, HIGH) — do NOT exclude `ch(1) === '='` here.
+    // A regex literal MAY begin with `=` (e.g. `/=/g` — the base64url padding
+    // strip in stdlib/auth/jwt.scrml:42). The `ch(1) !== '='` exclusion was
+    // redundant with isRegexContext() AND actively harmful: it forced `/=/g` to
+    // lex as the `/=` divide-assign OPERATOR, corrupting the enclosing
+    // expression (`s.replace(/=/g, "")` → `s . replace ( /= …`) and cascading to
+    // DROP every subsequent `export function` from the module's export set → the
+    // STDLIB-EXPORT-SEED never saw `signJwt`/`verifyJwt` (async) → they were
+    // classified SYNC → a server fn emitted `verifyJwt(...)` UNAWAITED → the
+    // truthy Promise passed the guard (auth bypass, issue #26 class).
+    // isRegexContext() already disambiguates the operator case: the `/=` operator
+    // only appears in VALUE context (after IDENT / `)` / `]` / NUMBER / …), where
+    // isRegexContext() returns false — so `x /= 2` still lexes `/=` as the
+    // compound-assign operator via MULTI_OPS below. The `/` and `*` exclusions
+    // stay (a `//` line comment / `/* */` block comment is never a regex).
+    if (c0 === '/' && ch(1) !== '/' && ch(1) !== '*' && isRegexContext()) {
       readRegex();
       continue;
     }
