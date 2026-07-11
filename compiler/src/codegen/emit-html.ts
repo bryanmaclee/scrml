@@ -1801,7 +1801,9 @@ export function generateHtml(
             if (bindName === "bind:checked" && tag === "input") {
               const typeAttr = attrs.find((a: any) => a && a.name === "type");
               const typeVal = typeAttr?.value?.value;
-              if (typeof typeVal === "string" && typeVal !== "checkbox") {
+              // HTML `type` is ASCII-case-insensitive per WHATWG — `CHECKBOX`
+              // renders a real checkbox, so gate case-insensitively.
+              if (typeof typeVal === "string" && typeVal.toLowerCase() !== "checkbox") {
                 errors.push(new CGError(
                   "E-ATTR-011",
                   `E-ATTR-011: \`bind:checked\` requires \`<input type="checkbox">\`, ` +

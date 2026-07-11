@@ -286,9 +286,12 @@ function _emitTouchedListenerLines(
  * (auto-coerce via `<EnumName>_toEnum[...]`) when `tag === "select"`.
  */
 function dispatchByRenderSpec(tag: string, attrs: any[]): BindDispatch {
-  const typeAttr = ((attrs ?? []).find(
+  const rawTypeAttr = ((attrs ?? []).find(
     (a: any) => a && a.name === "type",
   )?.value?.value ?? "") as string;
+  // HTML `type` is ASCII-case-insensitive per WHATWG — `type="CHECKBOX"`
+  // renders a real checkbox, so dispatch on the normalized value.
+  const typeAttr = rawTypeAttr.toLowerCase();
   if (tag === "input") {
     if (typeAttr === "checkbox") return { flavour: "checked", inputEvent: "change", isNumeric: false };
     if (typeAttr === "file")     return { flavour: "files",   inputEvent: "change", isNumeric: false };
