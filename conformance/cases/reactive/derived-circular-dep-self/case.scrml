@@ -1,0 +1,5 @@
+${
+    <seed> = 0
+    const <counter> = @counter + @seed
+}
+<p id="counter">${@counter}</>

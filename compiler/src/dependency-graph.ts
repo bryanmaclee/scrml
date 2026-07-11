@@ -647,13 +647,20 @@ function collectAllFunctions(fileAST: FileAST): FunctionDeclNode[] {
  *
  * Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl. To
  * avoid duplicate DG nodes when the dedicated derived collector also picks
- * up the same state-decl, this function EXCLUDES nodes that are the legacy
- * folded-derived form (shape:"derived" + structuralForm:false). Those flow
- * through `collectAllReactiveDerivedDecls` exclusively and get
- * `_pendingDerivedReads` populated for read-edge resolution.
+ * up the same state-decl, this function EXCLUDES ALL derived-shape state-decl
+ * nodes (shape:"derived"). Those flow through `collectAllReactiveDerivedDecls`
+ * exclusively and get `_pendingDerivedReads` populated for read-edge
+ * resolution (required for E-DERIVED-CIRCULAR-DEP cycle detection).
  *
- * Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is INCLUDED
- * here — its codegen path (latent gap) treats it as a plain state-decl.
+ * Rx-1 (§6.6.10) — this predicate previously keyed on `structuralForm ===
+ * false`, which routed the V5-strict form (`const <x> = expr`,
+ * structuralForm:true) through THIS plain collector. That left its
+ * `_pendingDerivedReads` unpopulated, so the derived-reads cycle detector
+ * never saw its edges and E-DERIVED-CIRCULAR-DEP silently failed to fire in
+ * the real pipeline (the 22/22 unit test only exercised the legacy @-form,
+ * structuralForm:false). Both forms are derived cells and both emit
+ * `_scrml_derived_subscribe` in codegen, so both must participate in the
+ * derived subgraph. The predicate now keys on `shape === "derived"` alone.
  */
 function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
@@ -662,7 +669,7 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   function isFoldedDerived(n: ASTNode): boolean {
     if (n.kind !== "state-decl") return false;
     const sd = n as Record<string, unknown>;
-    return sd.shape === "derived" && sd.structuralForm === false;
+    return sd.shape === "derived";
   }
 
   function visit(list: ASTNode[]): void {
@@ -689,13 +696,20 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
  *
  * Phase A1a Step 11.5 — `reactive-derived-decl` retired and folded into
  * state-decl. Post-fold this collects `kind: "state-decl"` with
- * `shape === "derived"` AND `structuralForm === false` (the legacy
- * `@`-form). The function name is preserved for blame-traceability across
- * the rename.
+ * `shape === "derived"`. The function name is preserved for
+ * blame-traceability across the rename.
  *
- * Note: Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is
- * NOT collected — its codegen path (latent gap) is left untouched per
- * BRIEF §2.2. The plain state-decl loop in `nodes.set` covers it.
+ * Rx-1 (§6.6.10) — this now collects BOTH derived forms: the legacy `@`-form
+ * (structuralForm:false) AND Shape 3 V5-strict (`const <x> = expr`,
+ * structuralForm:true). Both are derived cells that emit
+ * `_scrml_derived_subscribe` in codegen, so both must feed
+ * `_pendingDerivedReads` for E-DERIVED-CIRCULAR-DEP cycle detection. The
+ * V5-strict form was previously excluded (routed to the plain collector),
+ * which is why circular V5-strict derived cells compiled clean and shipped an
+ * infinite-recompute loop to the client. Derived cells with no `@`-refs
+ * (e.g. `const <PI> = 3.14`) are still collected here but produce no
+ * `_pendingDerivedReads` (empty ref set) and therefore no edges — identical
+ * DG shape to their prior plain-node registration.
  */
 function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
@@ -704,7 +718,7 @@ function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
   function isLegacyDerivedFold(n: ASTNode): boolean {
     if (n.kind !== "state-decl") return false;
     const sd = n as Record<string, unknown>;
-    return sd.shape === "derived" && sd.structuralForm === false;
+    return sd.shape === "derived";
   }
 
   function visit(list: ASTNode[]): void {
