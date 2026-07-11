@@ -1,0 +1,9 @@
+${
+    type Color:enum = { Red, Green, Blue }
+    <m>: [string:Color] = [:]
+    const <first> = @m.getOr("a", .Blue)
+}
+<program>
+<button id="add" onclick=${@m = @m.insert("a", .Red)}>add</>
+<p id="first">${@first}</>
+</program>

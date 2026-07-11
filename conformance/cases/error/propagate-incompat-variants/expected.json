@@ -1,0 +1,13 @@
+{
+  "id": "error-propagate-incompat-variants",
+  "description": "§19.5.3/.4 — `?` propagation requires every error variant the called function can produce to exist in the enclosing function's declared error type. `inner()! InnerError` produces {Alpha, Beta}; `outer()! OuterError` declares only {Gamma}. Propagating `inner(x)?` inside `outer` would silently drop Alpha/Beta, so E-ERROR-010 fires naming the incompatible variants. NOTE: the SPEC text originally named E-TYPE-001 here, but that code is load-bearing for the §14.3/§18.4 lifecycle double-assignment guard; the PA ruling mints the dedicated E-ERROR-010 (§34 row NOTED in the dispatch report, SPEC amendment PA-owned).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.5.3 / §19.5.4",
+  "spec": "§19.5.3",
+  "rationale": "§19.5.3: Every error variant that the called function can produce MUST exist as a variant in the enclosing function's error type. If the called function produces error variants not present in the enclosing function's error type, the compiler SHALL emit a compile error identifying the incompatible variants. This ensures `?` never silently drops error information.",
+  "expect": {
+    "codes": ["E-ERROR-010"],
+    "notCodes": [],
+    "severity": { "E-ERROR-010": "error" }
+  }
+}

@@ -54,6 +54,7 @@
  *   E-ERROR-003  ? propagation used in non-! function
  *   E-ERROR-004  ? applied to non-! function call (callee is known non-failable)
  *   E-ERROR-008  User-defined error type declares reserved field 'message' or 'type'
+ *   E-ERROR-010  ? propagates callee error variant(s) absent from the enclosing fn's error type (§19.5.3/.4)
  *   E-CONTRACT-001  §53 Inline predicate constraint violated at compile time
  *   E-CONTRACT-002  §53 Named shape not found in registry
  *   E-CONTRACT-003  §53 Predicate references external reactive variable
@@ -9146,6 +9147,11 @@ function annotateNodes(
               ));
             }
             // E-ERROR-004: ? applied to non-failable callee (§19.5.4)
+            // E-ERROR-010: ? propagates a failable callee's error variants into
+            //   the enclosing fn's error envelope, but one or more of those
+            //   variants is absent from the enclosing fn's declared error type
+            //   (§19.5.3/.4). A callee is EITHER non-failable (E-ERROR-004) OR
+            //   failable-but-incompatible (E-ERROR-010) — never both.
             if (k === "propagate-expr" && canFail) {
               const calleeName = extractCalleeNameFromNode(stmt) ?? extractCalleeNameFromString(
                 stmt.exprNode ? emitStringFromTree(stmt.exprNode as import("./types/ast.ts").ExprNode) : (stmt.expr as string | undefined)
@@ -9157,6 +9163,56 @@ function annotateNodes(
                   `Only '!' functions can be propagated with '?'.`,
                   (stmt.span ?? n.span) as Span,
                 ));
+              } else if (calleeName && fnCanFail.has(calleeName)) {
+                // D-ERR-2 (§19.5.3/.4) — `?` error-type compatibility. `?`
+                // re-raises the callee's error variants into the ENCLOSING fn's
+                // error envelope (the §19.5.2 `fail EnclosingErrorType::Variant`
+                // desugaring), so every variant the callee can produce MUST
+                // exist in the enclosing fn's declared error type, else `?`
+                // would silently drop error information (§19.5.3). Compatibility
+                // is by variant NAME (payload-arity compat is a distinct, deeper
+                // check, out of scope here). NOTE: the SPEC's original naming
+                // reuses E-TYPE-001; that code is already load-bearing for the
+                // §14.3/§18.4 lifecycle double-assignment guard, so per the PA
+                // ruling this mints a dedicated code.
+                const calleeErrTypeName = fnErrorTypes.get(calleeName);
+                const enclosingErrTypeName = ((n as Record<string, unknown>).errorType as string) || "Error";
+                if (calleeErrTypeName && calleeErrTypeName !== enclosingErrTypeName) {
+                  // Resolve the callee's error-variant set.
+                  const calleeEnum = typeRegistry.get(calleeErrTypeName);
+                  // Resolve the enclosing fn's declared error-variant set (the
+                  // built-in `Error` default → its sole `Generic` variant, §19.4.2).
+                  let enclosingVariants: Set<string> | null = null;
+                  if (enclosingErrTypeName === "Error") {
+                    enclosingVariants = new Set(["Generic"]);
+                  } else {
+                    const enclosingEnum = typeRegistry.get(enclosingErrTypeName);
+                    if (enclosingEnum && enclosingEnum.kind === "enum") {
+                      enclosingVariants = new Set((enclosingEnum as EnumType).variants.map((v) => v.name));
+                    }
+                  }
+                  // Only enforce when BOTH types resolved to a variant set —
+                  // an unresolved type name is a different diagnostic's concern.
+                  if (calleeEnum && calleeEnum.kind === "enum" && enclosingVariants !== null) {
+                    const incompatible = (calleeEnum as EnumType).variants
+                      .map((v) => v.name)
+                      .filter((name) => !enclosingVariants!.has(name));
+                    if (incompatible.length > 0) {
+                      const variantList = incompatible.map((v) => `'${calleeErrTypeName}.${v}'`).join(", ");
+                      errors.push(new TSError(
+                        "E-ERROR-010",
+                        `E-ERROR-010: '?' in function '${fnName}' propagates error variant(s) ${variantList} ` +
+                        `from '${calleeName}', but the enclosing function's declared error type ` +
+                        `'${enclosingErrTypeName}' does not declare ${incompatible.length === 1 ? "it" : "them"}. ` +
+                        `'?' propagation requires every error variant the called function can produce to exist ` +
+                        `in the enclosing function's error type (§19.5.3), so error information is never silently ` +
+                        `dropped. Add the missing variant(s) to '${enclosingErrTypeName}', or handle '${calleeName}' ` +
+                        `explicitly with 'match' or '!{}'.`,
+                        (stmt.span ?? n.span) as Span,
+                      ));
+                    }
+                  }
+                }
               }
             }
             // E-ERROR-002: bare call to failable function with no error handling (§19.4.3)
@@ -9487,7 +9543,7 @@ function annotateNodes(
             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
             // runs, so the map (non-enum) LHS context doesn't false-fire
             // E-VARIANT-AMBIGUOUS. Stamps resolved key idents (skip-flag).
-            inferBareVariantsAtMapKeyArgs(initExprForScope, scopeChain, letSpan, errors);
+            inferBareVariantsAtMapMethodArgs(initExprForScope, scopeChain, letSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `let m: Mode = .OnePlayer(.Easy)` (or the qualified
             // `Mode.OnePlayer(.Easy)` form with no annotation). The ctor ARG
@@ -9955,7 +10011,7 @@ function annotateNodes(
             // the bare KEY variant resolves against the map's declared key enum
             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
             // LHS — the §59.4 gap), suppressing the spurious E-VARIANT-AMBIGUOUS.
-            inferBareVariantsAtMapKeyArgs(reactInitExprNode, scopeChain, reactSpan, errors);
+            inferBareVariantsAtMapMethodArgs(reactInitExprNode, scopeChain, reactSpan, errors);
             // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
             // pre-pass. `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG
             // `.Easy` must resolve against the OnePlayer payload type
@@ -10283,7 +10339,7 @@ function annotateNodes(
             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
             // against the map's declared key enum + stamps.
-            inferBareVariantsAtMapKeyArgs(beExprNode, scopeChain, beSpan, errors);
+            inferBareVariantsAtMapMethodArgs(beExprNode, scopeChain, beSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg at bare-expr (`Mode.OnePlayer(.Easy)` as a statement).
             // No LHS contextType here, so only the QUALIFIED ctor form (enum
@@ -10857,7 +10913,7 @@ function annotateNodes(
             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
             // map's declared key enum + stamps.
-            inferBareVariantsAtMapKeyArgs(ifCondExpr, scopeChain, ifCondSpan, errors);
+            inferBareVariantsAtMapMethodArgs(ifCondExpr, scopeChain, ifCondSpan, errors);
             // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
             // CTOR arg inside an if/while condition (`if (@p == Mode.OnePlayer(.Easy))`).
             // No LHS contextType; qualified ctor resolves via the type registry.
@@ -10959,7 +11015,7 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "match-stmt":
       case "match-expr": {
-        checkMatchDiagnostics(n, scopeChain, errors, filePath);
+        checkMatchDiagnostics(n, scopeChain, errors, filePath, fnCanFail, fnErrorTypes, typeRegistry);
         // §2a — E-SCOPE-001 on an undeclared subject ident (e.g.
         // `match undeclaredSubj { ... }`). checkMatchDiagnostics already
         // resolves the subject for type lookup but doesn't emit a scope
@@ -11162,7 +11218,7 @@ function annotateNodes(
           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
           // the map's declared key enum + stamps, so the return-type-context
           // walker doesn't false-fire on the key.
-          inferBareVariantsAtMapKeyArgs(retExprNode, scopeChain, retSpan, errors);
+          inferBareVariantsAtMapMethodArgs(retExprNode, scopeChain, retSpan, errors);
           // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
           // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
           // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
@@ -11600,6 +11656,20 @@ function annotateNodes(
                 "info",
               ));
             }
+          }
+        }
+        // §51.0.J / §18 (En-D3) — a derived-engine inline `match` must be
+        // exhaustive over the SOURCE enum. The parser captures the body as raw
+        // text (`inlineMatchBody`), so §18 never ran; parse it into structured
+        // arms and run the SAME exhaustiveness checker the derived-CELL match
+        // uses (Bug 71 — E-TYPE-020). A `_`/`else` arm satisfies coverage.
+        {
+          const inlineMatchBody = (n as { inlineMatchBody?: unknown }).inlineMatchBody;
+          const srcVar = String((n as { sourceVar?: unknown }).sourceVar ?? "");
+          if (typeof inlineMatchBody === "string" && inlineMatchBody.length > 0 && srcVar.length > 0) {
+            const engSpan = (n.span as Span | undefined)
+              ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkDerivedEngineMatchExhaustiveness(inlineMatchBody, srcVar, scopeChain, engSpan, errors);
           }
         }
         const bodyChildren = (n as { bodyChildren?: ASTNodeLike[] }).bodyChildren;
@@ -14408,34 +14478,37 @@ function inferBareVariantsAtVariantCtorArgs(
 }
 
 /**
- * §59.4 / §14.10 — bare-variant inference at MAP-KEY positions.
+ * §59.4 / §59 (Rx-6) / §14.10 — bare-variant inference at MAP-METHOD KEY + VALUE
+ * positions.
  *
- * A bare `.Variant` in a map/set KEY position resolves against the map's
- * DECLARED KEY type (§59.2 `[KeyT: ValT]`), exactly as a fn-param position
- * resolves against the param type (`inferBareVariantsAtCallArgs`). §59.4
- * declares enum keys supported; §14.10 supplies the key-type context. Two
- * key-position shapes are recognized:
+ * A bare `.Variant` in a map/set KEY or VALUE position resolves against the map's
+ * DECLARED KEY / VALUE type (§59.2 `[KeyT: ValT]`), exactly as a fn-param position
+ * resolves against the param type (`inferBareVariantsAtCallArgs`). §59.4 declares
+ * enum keys supported; §14.10 supplies the type context. Recognized shapes:
  *
  *   - a key-taking map/set method arg — `@m.insert(.City, v)` / `.getOr` /
  *     `.remove` / `.has` / `.update` / set `.add` — where arg[0] is the key
  *     (`insertAll` is EXCLUDED: its arg is a MAP, §59.7, not a bare key).
+ *   - a value-taking map method arg — `@m.insert(k, .V)` / `.getOr(k, .V)` — where
+ *     arg[1] is a VALUE of the map's value type (`update`'s arg[1] is a FUNCTION,
+ *     EXCLUDED; `insertAll` EXCLUDED).
  *   - a bracket-READ key — `@m[.City]` (§59.6).
  *
- * Without this pass the key `.Variant` reaches the LHS-driven flat walker with a
+ * Without this pass the `.Variant` reaches the LHS-driven flat walker with a
  * null / map (non-enum) context and false-fires E-VARIANT-AMBIGUOUS (the map
- * type is not itself an enum, so `bvCtxType` is null — the §59.4 gap). This pass
- * resolves each key-position bare variant against `mapType.key` and STAMPS the
- * resolved ident (`_bareVariantInferredAtBinaryExpr`, the shared skip-flag) so
- * the downstream flat walker skips it — the same stamp convention the call-arg /
- * ctor-arg pre-passes use. A key typo (`.Dalas`) still fires E-TYPE-063 against
- * the key enum (the flat walker's existing behavior with a real enum context).
+ * type is not itself an enum, so `bvCtxType` is null — the §59.4 key gap / Rx-6
+ * value gap on a REACTIVE map cell). This pass resolves each key/value-position
+ * bare variant against `mapType.key` / `mapType.value` and STAMPS the resolved
+ * ident (`_bareVariantInferredAtBinaryExpr`, the shared skip-flag) so the
+ * downstream flat walker skips it — the same stamp convention the call-arg /
+ * ctor-arg pre-passes use. A typo (`.Dalas`) still fires E-TYPE-063 against the
+ * resolved enum (the flat walker's existing behavior with a real enum context).
  *
- * Gated on an ENUM-ish key type (enum / union-of-enums / enum-subset). A
- * non-enum key type (struct / primitive) is left untouched — a bare variant
- * there is genuinely context-less and the existing E-VARIANT-AMBIGUOUS path
- * owns it.
+ * Gated on an ENUM-ish key / value type (enum / union-of-enums / enum-subset). A
+ * non-enum type (struct / primitive) is left untouched — a bare variant there is
+ * genuinely context-less and the existing E-VARIANT-AMBIGUOUS path owns it.
  */
-function inferBareVariantsAtMapKeyArgs(
+function inferBareVariantsAtMapMethodArgs(
   exprNode: unknown,
   scopeChain: ScopeChain,
   span: Span,
@@ -14445,6 +14518,11 @@ function inferBareVariantsAtMapKeyArgs(
 
   // Key-taking map/set methods whose FIRST arg is the key (§59.6/§59.7/§59.12).
   const KEY_ARG_METHODS = new Set(["insert", "getOr", "remove", "has", "update", "add"]);
+  // §59 (Rx-6) — value-taking map methods whose SECOND arg is a VALUE of the
+  // map's declared value type: `insert(k, v)` and `getOr(k, default)`. Excluded:
+  // `update(k, fn)` — arg[1] is a FUNCTION, not a value; `insertAll(m)` — arg is
+  // a MAP (§59.7), not a bare value.
+  const VALUE_ARG_METHODS = new Set(["insert", "getOr"]);
 
   /** Resolve an object node → its MAP ResolvedType via scopeChain, or null. */
   const resolveReceiverMapType = (objNode: unknown): MapType | null => {
@@ -14459,17 +14537,19 @@ function inferBareVariantsAtMapKeyArgs(
   };
 
   /** enum / union-of-enums / enum-subset → a resolvable bare-variant context. */
-  const isEnumishKeyType = (t: ResolvedType | undefined | null): boolean =>
+  const isEnumishType = (t: ResolvedType | undefined | null): boolean =>
     !!t && (t.kind === "enum" || t.kind === "union"
       || (t.kind === "predicated" && (t as PredicatedType).baseType === "enum"));
 
-  /** Resolve every bare variant in `keyExpr` against the key type + stamp. */
-  const resolveKey = (keyExpr: unknown, keyType: ResolvedType): void => {
-    if (!keyExpr || typeof keyExpr !== "object") return;
-    inferBareVariantsInExpr(keyExpr, keyType, span, errors);
-    // Stamp every bare-variant ident in the key subtree so the downstream
+  /** Resolve every bare variant in `argExpr` against `ctxType` + stamp. Shared by
+   *  the KEY-arg (arg[0] vs `mapType.key`) and VALUE-arg (arg[1] vs `mapType.value`)
+   *  positions — both are map-method-arg bare-variant contexts. */
+  const resolveBareVariantsAgainst = (argExpr: unknown, ctxType: ResolvedType): void => {
+    if (!argExpr || typeof argExpr !== "object") return;
+    inferBareVariantsInExpr(argExpr, ctxType, span, errors);
+    // Stamp every bare-variant ident in the arg subtree so the downstream
     // LHS-driven flat walker (null / map context) skips it (no double-fire).
-    forEachIdentInExprNode(keyExpr as any, (ident: { name?: unknown }) => {
+    forEachIdentInExprNode(argExpr as any, (ident: { name?: unknown }) => {
       if (typeof ident.name === "string" && ident.name.startsWith(".")) {
         Object.defineProperty(ident, "_bareVariantInferredAtBinaryExpr", {
           value: true, enumerable: false, configurable: true, writable: true,
@@ -14482,15 +14562,32 @@ function inferBareVariantsAtMapKeyArgs(
     if (!node || typeof node !== "object") return;
     const n = node as { kind?: string } & Record<string, unknown>;
 
-    // Map/set KEY-arg method call: `@m.insert(.V, ...)` / `.getOr(.V, d)` / …
+    // Map/set method call — resolve bare variants at the KEY position
+    // (`@m.insert(.V, …)` / `.getOr(.V, d)`) against the map's key type AND, for
+    // value-taking methods, at the VALUE position (`@m.insert(k, .V)` /
+    // `.getOr(k, .V)`) against the map's value type.
     if (n.kind === "call") {
       const callee = n.callee as { kind?: string; object?: unknown; property?: string } | undefined;
       const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
-      if (callee && callee.kind === "member" && typeof callee.property === "string"
-          && KEY_ARG_METHODS.has(callee.property) && args.length > 0) {
-        const mapType = resolveReceiverMapType(callee.object);
-        if (mapType && isEnumishKeyType(mapType.key)) {
-          resolveKey(args[0], mapType.key);
+      if (callee && callee.kind === "member" && typeof callee.property === "string" && args.length > 0) {
+        const method = callee.property;
+        if (KEY_ARG_METHODS.has(method)) {
+          const mapType = resolveReceiverMapType(callee.object);
+          if (mapType && isEnumishType(mapType.key)) {
+            resolveBareVariantsAgainst(args[0], mapType.key);
+          }
+        }
+        // §59 (Rx-6) — VALUE-position arg. Without this, a bare `.Variant` value
+        // on a REACTIVE map cell (`@m = @m.insert("a", .Red)`) reaches the
+        // LHS-driven flat walker with a null / map (non-enum) context and
+        // false-fires E-VARIANT-AMBIGUOUS — the value-position analog of the
+        // §59.4 key gap. A bare value on a non-reactive LOCAL map already
+        // compiles clean (its reassignment isn't re-walked for bare variants).
+        if (VALUE_ARG_METHODS.has(method) && args.length > 1) {
+          const mapType = resolveReceiverMapType(callee.object);
+          if (mapType && isEnumishType(mapType.value)) {
+            resolveBareVariantsAgainst(args[1], mapType.value);
+          }
         }
       }
     }
@@ -14500,8 +14597,8 @@ function inferBareVariantsAtMapKeyArgs(
     // resolves its variant here.)
     if (n.kind === "index") {
       const mapType = resolveReceiverMapType((n as Record<string, unknown>).object);
-      if (mapType && isEnumishKeyType(mapType.key)) {
-        resolveKey((n as Record<string, unknown>).index, mapType.key);
+      if (mapType && isEnumishType(mapType.key)) {
+        resolveBareVariantsAgainst((n as Record<string, unknown>).index, mapType.key);
       }
     }
 
@@ -15309,11 +15406,168 @@ function givenArrowLegacyMessage(vars: string): string {
   );
 }
 
+/**
+ * §19.7.1/.3 — resolve a `match`-over-failable-call scrutinee to its implicit
+ * result union `::Ok | <declared-error-variants>`. In logic context, matching
+ * the result of a `!` function call MUST exhaustively cover the success case
+ * (`::Ok`) AND every declared error variant (§19.7.1); a missing variant fires
+ * E-TYPE-020. The scrutinee is a bare CALL expr (never a bound ident), so
+ * `resolveMatchSubjectType` returns null for it — this lifts the call to a
+ * synthetic enum whose variant set drives the SAME §18.8 exhaustiveness checker
+ * the plain-enum path uses. Returns null when the scrutinee is not a call to a
+ * known failable fn with a declared, enum-resolved error type (leaving the
+ * pre-existing null-subject early return untouched).
+ */
+function resolveFailableCallResultType(
+  header: string | undefined,
+  headerExpr: unknown,
+  fnCanFail: Set<string>,
+  fnErrorTypes: Map<string, string>,
+  typeRegistry: Map<string, ResolvedType>,
+): EnumType | null {
+  // Extract the callee name — ExprNode CallExpr first, header-string fallback
+  // (mirrors the `!{}`-handler callee extraction, ~line 10572).
+  let calleeName: string | null = null;
+  if (headerExpr && typeof headerExpr === "object") {
+    const e = headerExpr as { kind?: string; callee?: { kind?: string; name?: string } };
+    if (e.kind === "call" && e.callee && e.callee.kind === "ident" && typeof e.callee.name === "string") {
+      calleeName = e.callee.name;
+    }
+  }
+  if (!calleeName && typeof header === "string") {
+    const m = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(header);
+    if (m) calleeName = m[1];
+  }
+  if (!calleeName || !fnCanFail.has(calleeName)) return null;
+  const errorTypeName = fnErrorTypes.get(calleeName);
+  if (!errorTypeName) return null;
+  const errEnum = typeRegistry.get(errorTypeName);
+  if (!errEnum || errEnum.kind !== "enum") return null;
+  const errVariants = (errEnum as EnumType).variants ?? [];
+  // Synthetic result union: the implicit `::Ok` success variant + the declared
+  // error variants. The checker reads only variant NAMES for exhaustiveness, so
+  // the `::Ok` payload shape is immaterial here.
+  const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
+  return {
+    kind: "enum",
+    name: errorTypeName,
+    variants: [okVariant, ...errVariants],
+    transitionRules: null,
+  };
+}
+
+/**
+ * §51.0.J / §18 (En-D3) — exhaustiveness for a derived-engine inline `match`
+ * (`<engine for=Dst derived=match @src { .A :> .X … }>`). The parser captures
+ * the match body as RAW TEXT (`inlineMatchBody`) with NO structured arm AST, so
+ * §18.8 never ran and a non-exhaustive derived-match fell through silently. SPEC
+ * §51.0.J is explicit: "a `match` must cover every case (its `_` / `else` arm,
+ * §18)". This parses the raw body into structured arm patterns (reusing the
+ * §18.2 arm splitter + pattern parser) and runs the SAME exhaustiveness checker
+ * the derived-CELL match uses (Bug 71, S157 — E-TYPE-020). The scrutinee is the
+ * SOURCE cell `@sourceVar`, so exhaustiveness is over the source enum's variant
+ * set (the arms' RHS destination variants are immaterial). A `_` / `else` arm
+ * satisfies coverage (§18.6). No-op when the source resolves to a non-enum (a
+ * different diagnostic's concern).
+ */
+function checkDerivedEngineMatchExhaustiveness(
+  inlineMatchBody: string,
+  sourceVar: string,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  const sourceType = resolveMatchSubjectType(sourceVar, undefined, scopeChain);
+  if (!sourceType || sourceType.kind !== "enum") return;
+  const armPatterns = extractDerivedMatchArmPatterns(inlineMatchBody);
+  checkExhaustiveness(
+    { arms: armPatterns } as unknown as ASTNodeLike,
+    sourceType,
+    span,
+    errors,
+    false,
+  );
+}
+
+/**
+ * §51.0.J — extract the LHS SOURCE-variant pattern chain that immediately
+ * precedes an arm arrow. A derived-match arm is `<LHS> => <RHS-destination-variant>`;
+ * unlike a value-match (string RHS), the RHS here is itself a `.Variant`, so the
+ * generic `splitMatchArms` (which treats any leading-`.Variant` as a new arm
+ * header) mis-splits — the RHS destination variant would be counted as a source
+ * pattern. This dedicated splitter scans for the arm-separator arrows at depth 0
+ * (paren/brace/string aware) and, for each pre-arrow chunk, keeps ONLY the
+ * trailing `V (| V)*` chain (the LHS); the leading, whitespace-separated part of
+ * the chunk is the PRIOR arm's RHS and is discarded.
+ */
+function extractDerivedMatchArmPatterns(body: string): ArmPattern[] {
+  const armPatterns: ArmPattern[] = [];
+  const pushArm = (chunk: string): void => {
+    const lhs = derivedMatchArmLHS(chunk);
+    if (!lhs) return;
+    const parsed = parseArmPattern(lhs);
+    if (parsed.kind === "variant") {
+      // Variant-pattern alternation (`.A | .B => .X`) pushes each alternate so
+      // exhaustiveness coverage sees every source variant.
+      if (parsed.altVariants && parsed.altVariants.length > 0) {
+        for (const v of parsed.altVariants) armPatterns.push({ kind: "variant", variantName: v });
+      } else {
+        armPatterns.push({ kind: "variant", variantName: parsed.variantName });
+      }
+    } else if (parsed.kind === "wildcard") {
+      armPatterns.push(parsed.isNot ? { kind: "variant", variantName: "not" } : { kind: "wildcard" });
+    }
+  };
+
+  let depth = 0;
+  let inString: string | null = null;
+  let chunkStart = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    const next = body[i + 1];
+    if (inString) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inString = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth = Math.max(0, depth - 1); continue; }
+    // Arm-separator arrow (`=>` / `:>` / `->`) at depth 0. `::` (double-colon
+    // variant prefix) never matches — its second `:` is followed by an identifier
+    // char, not `>`.
+    if (depth === 0 && (ch === "=" || ch === ":" || ch === "-") && next === ">") {
+      pushArm(body.slice(chunkStart, i));
+      i++; // consume ">"
+      chunkStart = i + 1;
+    }
+  }
+  return armPatterns;
+}
+
+/**
+ * §51.0.J — from the pre-arrow chunk `[<prior-RHS>] <LHS>`, keep only the LHS:
+ * the trailing whitespace-delimited variant-pattern chain, whose alternates are
+ * joined by `|` (`.A | .B`). The prior arm's RHS (a whitespace-separated
+ * destination variant) is dropped.
+ */
+function derivedMatchArmLHS(chunk: string): string {
+  const toks = chunk.trim().split(/\s+/).filter(Boolean);
+  if (toks.length === 0) return "";
+  let start = toks.length - 1;
+  // Absorb a leading `V | V | …` alternation chain (alternates joined by `|`).
+  while (start - 2 >= 0 && toks[start - 1] === "|") start -= 2;
+  return toks.slice(start).join(" ");
+}
+
 function checkMatchDiagnostics(
   node: ASTNodeLike,
   scopeChain: ScopeChain,
   errors: TSError[],
   filePath: string,
+  fnCanFail: Set<string>,
+  fnErrorTypes: Map<string, string>,
+  typeRegistry: Map<string, ResolvedType>,
 ): void {
   const span = (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   const extracted = extractArmsFromMatchNode(node);
@@ -15482,9 +15736,34 @@ function checkMatchDiagnostics(
     scopeChain,
   );
 
-  if (!subjectType) return;
-
   const isPartial = (node as { partial?: boolean }).partial === true;
+
+  if (!subjectType) {
+    // §19.7.1/.3 — a `match` over a failable-call result. The scrutinee is a
+    // bare CALL (never a bound ident), so `resolveMatchSubjectType` yields null;
+    // lift it to the implicit `::Ok | <error-variants>` union and run the SAME
+    // §18.8 exhaustiveness checker the plain-enum path uses (a missing `::Ok` or
+    // error variant → E-TYPE-020). A `_`/`else` wildcard still satisfies
+    // coverage (§19.7.3). Non-failable / untyped-error scrutinees resolve to
+    // null and fall through to the pre-existing no-op early return.
+    const failableResult = resolveFailableCallResultType(
+      (node as { header?: string }).header,
+      (node as { headerExpr?: unknown }).headerExpr,
+      fnCanFail,
+      fnErrorTypes,
+      typeRegistry,
+    );
+    if (failableResult) {
+      checkExhaustiveness(
+        { arms: extracted.armPatterns } as unknown as ASTNodeLike,
+        failableResult,
+        span,
+        errors,
+        isPartial,
+      );
+    }
+    return;
+  }
 
   if (subjectType.kind === "struct") {
     errors.push(new TSError(

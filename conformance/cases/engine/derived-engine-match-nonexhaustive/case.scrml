@@ -1,0 +1,13 @@
+${
+    type Src:enum = { A, B, C }
+    type Dst:enum = { X, Y }
+    <src>: Src = Src.A
+}
+<engine for=Dst derived=match @src {
+    .A :> .X
+    .B :> .Y
+}>
+    <X/>
+    <Y/>
+</>
+<program><p>${@src}</p></program>

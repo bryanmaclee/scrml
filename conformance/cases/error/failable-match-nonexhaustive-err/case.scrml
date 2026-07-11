@@ -1,0 +1,19 @@
+${
+    type LoadError:enum = {
+        NotFound
+        Timeout
+    }
+
+    function loadThing(id: int)! LoadError {
+        given id < 0 :> fail LoadError.NotFound
+        return "ok"
+    }
+
+    function useIt(id: int) {
+        return match loadThing(id) {
+            ::Ok(v) :> v
+            ::NotFound :> "nf"
+        }
+    }
+}
+<p>${useIt(1)}</>
