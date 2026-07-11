@@ -1,0 +1,13 @@
+{
+  "id": "reactive-derived-write-reassign",
+  "description": "§6.6.8 E-DERIVED-WRITE — reassignment to a `const <name>` derived cell after declaration. `const <doubled> = @count * 2` then a `@doubled = 5` write in an event handler is rejected: derived cells are reference-immutable. Incidental W-PROGRAM-* ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.8",
+  "rationale": "§6.6.8: the compiler SHALL reject any assignment to a `const <name>` identifier after its declaration, regardless of enclosing context (here an event handler). The fix-advice lists the upstream dependency `@count`.",
+  "expect": {
+    "codes": ["E-DERIVED-WRITE"],
+    "notCodes": ["E-DERIVED-VALUE-MUTATE"],
+    "severity": { "E-DERIVED-WRITE": "error" },
+    "notCodePrefixes": ["E-STATE-UNDECLARED"]
+  }
+}

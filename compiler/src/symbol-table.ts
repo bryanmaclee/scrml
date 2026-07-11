@@ -3245,6 +3245,181 @@ function fireDelete(
   });
 }
 
+// ---------------------------------------------------------------------------
+// E-DERIVED-WRITE (§6.6.8 reassignment + §6.8.1 default=) — the sibling rule
+// the B8 NEXT-STEP HOOK (above) reserves. Shares PASS 6 with the value-mutate
+// walker per §6.6.18. Distinct from E-DERIVED-VALUE-MUTATE (in-place mutation
+// of the VALUE) — this rule governs REASSIGNMENT of the derived cell itself
+// (`@derived = x` / `@derived += x`) and `default=` on a `const` derived decl.
+// ---------------------------------------------------------------------------
+
+// Per-file registry of `const`-derived cells, populated in source/visit order
+// by the PASS 6 walker. Consulted ONLY as an overwrite-masking fallback: a
+// top-level `${ @name = expr }` write to a derived cell surfaces as a
+// non-`_isReactiveAssign` `state-decl`, which PASS 1 registers — overwriting
+// the file-scope `const`-derived record with a phantom plain cell (a documented
+// ast-builder V-kill deferral, see ast-builder.js ~L11171). `lookupStateCell`
+// then returns the phantom (non-const) and the write would slip through. The
+// registry preserves the derived record (captured at decl-visit time, before
+// the reference site is reached) so E-DERIVED-WRITE still rejects the write,
+// per SPEC §6.6.8 ("regardless of enclosing context — top-level, function body,
+// logic block, or event handler"). Keyed by the file (root) scope.
+const DERIVED_CELL_REGISTRY = new WeakMap<Scope, Map<string, StateCellRecord>>();
+
+function rootScopeOf(scope: Scope): Scope {
+  let s = scope;
+  while (s.parent) s = s.parent;
+  return s;
+}
+
+function registerDerivedCellForWriteCheck(scope: Scope, record: StateCellRecord): void {
+  const root = rootScopeOf(scope);
+  let m = DERIVED_CELL_REGISTRY.get(root);
+  if (!m) { m = new Map(); DERIVED_CELL_REGISTRY.set(root, m); }
+  if (!m.has(record.name)) m.set(record.name, record);
+}
+
+/**
+ * Overwrite-masking fallback lookup (see `DERIVED_CELL_REGISTRY`). Returns the
+ * `const`-derived record for `name` ONLY when its declaring scope is reachable
+ * from `scope` (ancestor-or-equal) — a write can only target a cell visible at
+ * its reference site, so the reachability guard prevents a false positive from
+ * a same-named derived cell in an unrelated sibling scope.
+ */
+function lookupDerivedCellForWriteCheck(scope: Scope, name: string): StateCellRecord | null {
+  const root = rootScopeOf(scope);
+  const rec = DERIVED_CELL_REGISTRY.get(root)?.get(name);
+  if (!rec) return null;
+  let s: Scope | null = scope;
+  while (s) {
+    if (s === rec.scope) return rec;
+    s = s.parent;
+  }
+  return null;
+}
+
+/**
+ * Collect the upstream reactive dependencies (`@`-prefixed idents) referenced
+ * in a derived cell's init expression. Per SPEC §6.6.8: "The error message
+ * SHALL list the upstream dependencies of the target derived value, to guide
+ * the developer toward the correct fix." Order-preserving + de-duplicated.
+ */
+function collectDerivedUpstreamDeps(declNode: any): string[] {
+  const deps: string[] = [];
+  const seen = new Set<string>();
+  const initExpr = declNode?.initExpr;
+  if (initExpr && typeof initExpr === "object") {
+    forEachIdentInExprNode(initExpr, (ident: IdentExpr) => {
+      const nm = ident.name;
+      if (typeof nm === "string" && nm.startsWith("@") && !seen.has(nm)) {
+        seen.add(nm);
+        deps.push(nm);
+      }
+    });
+  }
+  return deps;
+}
+
+/**
+ * Fire E-DERIVED-WRITE for a write to a `const`-derived reactive cell.
+ *
+ *   - `form === "reassign"` — `@derived = x` / `@derived += x` after the
+ *     declaration (SPEC §6.6.8). Fires regardless of enclosing context
+ *     (top-level, function body, logic block, event handler).
+ *   - `form === "default"`  — a `default=` attribute on a `const <name>`
+ *     derived declaration (SPEC §6.8.1 — `default=`/`reset()` on a derived
+ *     cell is a write and is forbidden for the same reason).
+ *
+ * `declNode` is the DERIVED cell's declaration node (source of the upstream
+ * dependency list for the fix-advice).
+ */
+function fireDerivedWrite(
+  errors: SYMDiagnostic[],
+  cellName: string,
+  declNode: any,
+  form: "reassign" | "default",
+  span: Span,
+): void {
+  const ref = "@" + cellName;
+  const deps = collectDerivedUpstreamDeps(declNode);
+  const depHint = deps.length > 0
+    ? `modify one of its upstream dependencies (${deps.join(", ")})`
+    : `modify one of its upstream dependencies`;
+  const lead = form === "default"
+    ? `E-DERIVED-WRITE: \`default=\` on derived reactive value \`${ref}\`. `
+      + `A \`const <name>\` derived cell is immutable; \`default=\` (and `
+      + `\`reset(${ref})\`) is a write to the derived value and is forbidden `
+      + `for the same reason as direct assignment (SPEC §6.8.1 + §6.6.8 + §34). `
+    : `E-DERIVED-WRITE: Assignment to derived reactive value \`${ref}\`. `
+      + `\`const <name>\` bindings are immutable (SPEC §6.6.8 + §34). `;
+  errors.push({
+    code: "E-DERIVED-WRITE",
+    message: `${lead}To reset the value, ${depHint}.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Detect the two `state-decl`-shaped E-DERIVED-WRITE forms:
+ *
+ *   1. **default= on const derived** — a derived declaration
+ *      (`structuralForm: true`, `isConst: true`) carrying a `defaultExpr`
+ *      (§6.8.1). The original derived declaration WITHOUT a default is legal;
+ *      only the `default=` form fires.
+ *   2. **bare reassignment** — a `@name = expr` write surfaces as a
+ *      `state-decl` with `structuralForm: false` (the parser has no separate
+ *      assignment-statement kind for the plain-`=` form; compound `+=` forms
+ *      stay as `bare-expr` → `assign` and are handled in
+ *      `checkExprNodeForMutations`). When the target name resolves to a
+ *      `const`-derived cell, the write is rejected.
+ */
+function checkStateDeclForDerivedWrite(
+  decl: any,
+  scope: Scope,
+  errors: SYMDiagnostic[],
+  fileFromScope: string,
+): void {
+  if (typeof decl.name !== "string" || decl.name.length === 0) return;
+  // Form 1 — `default=` on a `const` derived declaration (§6.8.1).
+  if (decl.isConst === true
+      && decl.structuralForm === true
+      && decl.defaultExpr != null) {
+    fireDerivedWrite(
+      errors, decl.name, decl, "default",
+      spanFromMutationNode(decl, fileFromScope),
+    );
+    return; // a derived declaration is never itself a reassignment write.
+  }
+  // Form 2 — bare `@name = expr` reassignment (a write, not a declaration).
+  // `decl.isConst !== true` excludes `const @name = expr` LOCAL declarations
+  // (also `structuralForm: false`, but const-tagged — a fresh binding, never a
+  // reassignment). A reassignment write is never `const`.
+  if (decl.structuralForm === false && decl.isConst !== true) {
+    const rec = lookupStateCell(scope, decl.name);
+    if (rec && rec.isConst) {
+      fireDerivedWrite(
+        errors, rec.name, rec.declNode, "reassign",
+        spanFromMutationNode(decl, fileFromScope),
+      );
+      return;
+    }
+    // Overwrite-masking fallback: a prior top-level `${ @name = expr }` write
+    // may have made PASS 1 register a phantom plain cell over the derived one
+    // (see `DERIVED_CELL_REGISTRY`). Consult the registry so the write still
+    // rejects when the resolved record is non-const but the name IS derived.
+    if (!rec || rec.isConst !== true) {
+      const derivedRec = lookupDerivedCellForWriteCheck(scope, decl.name);
+      if (derivedRec) {
+        fireDerivedWrite(
+          errors, derivedRec.name, derivedRec.declNode, "reassign",
+          spanFromMutationNode(decl, fileFromScope),
+        );
+      }
+    }
+  }
+}
+
 /**
  * A4 (S134) — Alias-aware variant of `buildReceiverPath`. When the chain's
  * leaf ident is NOT `@`-prefixed, consult `Scope.localAliases`. If the leaf
@@ -3530,6 +3705,24 @@ function checkExprNodeForMutations(
         }
       }
     }
+    // E-DERIVED-WRITE (§6.6.8) — REASSIGNMENT of a derived cell: a bare-ident
+    // assign target `@derived = x` / `@derived += x` (any assign op is a
+    // write). Distinct target-kind from the member/index value-mutate branch
+    // above (a given assign node has exactly one target kind — no double-fire).
+    // Covers the compound-assign form (`bare-expr` → `assign`) and every
+    // event-handler-attribute assign (`<button onclick=${ @derived = x }>`),
+    // where the plain-`=` form is NOT lowered to a state-decl.
+    if (k === "assign" && n.target && n.target.kind === "ident"
+        && typeof n.op === "string"
+        && typeof n.target.name === "string" && n.target.name.startsWith("@")) {
+      const bareName = n.target.name.slice(1);
+      if (bareName.length > 0) {
+        const rec = lookupStateCell(scope, bareName);
+        if (rec && rec.isConst) {
+          fireDerivedWrite(errors, rec.name, rec.declNode, "reassign", containerSpan);
+        }
+      }
+    }
     if (k === "call" && n.callee && n.callee.kind === "member"
         && typeof n.callee.property === "string"
         && ARRAY_MUTATING_METHODS.has(n.callee.property)) {
@@ -3756,6 +3949,33 @@ function walkDerivedValueMutate(
           checkExprNodeForMutations(v, currentScope, errors, containerSpan);
         }
       }
+    }
+    // Markup event-handler attribute expressions (`<button onclick=${ ... }>`).
+    // Attr values carry an ExprNode on `attr.value.exprNode`; a bare-ident
+    // assign there is an E-DERIVED-WRITE (event-handler locus, §6.6.8) and a
+    // member-chain mutation is E-DERIVED-VALUE-MUTATE (§6.6.18) — both fire
+    // through `checkExprNodeForMutations`. Generic `children` recursion below
+    // does NOT reach `attrs`, so this descent is required for the handler locus.
+    if (Array.isArray(anyN.attrs)) {
+      for (const attr of anyN.attrs) {
+        const av = attr && attr.value;
+        if (av && typeof av === "object" && av.exprNode
+            && typeof av.exprNode === "object") {
+          checkExprNodeForMutations(av.exprNode, currentScope, errors, containerSpan);
+        }
+      }
+    }
+    // E-DERIVED-WRITE (§6.6.8 reassignment / §6.8.1 default=) — the `state-decl`
+    // shapes (bare `@name = expr` reassignment; `default=` on a `const`
+    // derived declaration). See `checkStateDeclForDerivedWrite`. Register each
+    // `const`-derived declaration (in source/visit order, before any later
+    // reference site) into the overwrite-masking registry first.
+    if (kind === "state-decl") {
+      if (anyN.isConst === true && anyN.structuralForm === true
+          && anyN.shape === "derived" && anyN._record) {
+        registerDerivedCellForWriteCheck(currentScope, anyN._record);
+      }
+      checkStateDeclForDerivedWrite(anyN, currentScope, errors, fileFromScope);
     }
 
     // Scope-aware recursion.

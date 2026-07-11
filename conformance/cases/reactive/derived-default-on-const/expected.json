@@ -1,0 +1,13 @@
+{
+  "id": "reactive-derived-default-on-const",
+  "description": "§6.8.1 E-DERIVED-WRITE — `default=` on a `const <name>` derived declaration. `const <doubled default=0> = @count * 2` is rejected: `default=`/`reset()` on a derived cell is a write, forbidden for the same reason as direct assignment. Incidental W-PROGRAM-* ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.8.1",
+  "rationale": "§6.8.1: `default=` on a `const` derived declaration is E-DERIVED-WRITE — assigning/resetting a derived cell is always a write error. The plain (no-default) derived declaration is legal; only the `default=` form fires.",
+  "expect": {
+    "codes": ["E-DERIVED-WRITE"],
+    "notCodes": ["E-DERIVED-VALUE-MUTATE"],
+    "severity": { "E-DERIVED-WRITE": "error" },
+    "notCodePrefixes": ["E-REFINEMENT-"]
+  }
+}

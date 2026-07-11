@@ -1,0 +1,5 @@
+<program>
+<count> = 1
+const <doubled default=0> = @count * 2
+<p id="d">${@doubled}</p>
+</program>

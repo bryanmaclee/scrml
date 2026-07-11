@@ -1,0 +1,6 @@
+<program>
+<count> = 1
+const <doubled> = @count * 2
+<button id="b" onclick=${ @doubled = 5 }>set</button>
+<p id="d">${@doubled}</p>
+</program>
