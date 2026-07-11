@@ -1,0 +1,11 @@
+{
+  "id": "forms-validator-vocab-custom-accepted",
+  "description": "§55.1 (D-FORM-1) — the single `custom(fn)` escape hatch is the ONE non-universal-core validator name that is accepted. `<userName req custom(checkName)>` compiles clean: `req` is universal-core, and `custom(fn)` is the sanctioned bridge for arbitrary predicates (and for external schema libraries per §55.1). No E-TYPE-031 fires.",
+  "language-version": "1.0",
+  "spec": "§55.1",
+  "rationale": "§55.1 line 32517: adopters bridge non-core validation at runtime via `stdlib/data/validate.scrml`'s `custom(fn)` slot. `custom` is therefore the only name outside the fourteen universal-core predicates that the vocabulary check must let through — the D-FORM-1 reject explicitly exempts it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-031"]
+  }
+}

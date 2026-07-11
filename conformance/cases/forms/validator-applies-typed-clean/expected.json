@@ -1,0 +1,11 @@
+{
+  "id": "forms-validator-applies-typed-clean",
+  "description": "§55.1 (D-FORM-6) — the passing side of predicate-applicability. `<age min(18)>: number` (number predicate on a number cell) and `<label length(>=2)>: string` (length on a string cell) are both correctly-typed applications → NO E-TYPE-031. Guards against a false type-mismatch fire on valid predicate/cell pairings.",
+  "language-version": "1.0",
+  "spec": "§55.1",
+  "rationale": "§55.1 predicate-applicability: `min` applies to `number` cells and `length` applies to `string`-or-`array` cells. With explicit annotations pinning the types, both applications are well-typed and must compile clean. The applicability check only fires on a CONFIDENT mismatch, never on a correct pairing.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-031"]
+  }
+}

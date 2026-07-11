@@ -1,0 +1,6 @@
+<program>
+${
+    <userName req custom(checkName)> = <input type="text"/>
+}
+<userName/>
+</program>

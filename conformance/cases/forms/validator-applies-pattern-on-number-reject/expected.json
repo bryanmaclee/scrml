@@ -1,0 +1,12 @@
+{
+  "id": "forms-validator-applies-pattern-on-number-reject",
+  "description": "§55.1 (D-FORM-6) — predicate applicability to the cell's inferred TYPE. `pattern(re)` requires a string cell; applying it to `<age … > = 25` (a numeric-literal-init cell) is a compile-time type error → E-TYPE-031. This is the §55.1 line 32510-32511 worked example verbatim: \"applying `pattern(re)` to a `number` cell is a compile-time type error (E-TYPE-031 family)\".",
+  "language-version": "1.0",
+  "spec": "§55.1, §34",
+  "rationale": "§55.1 requires the compiler to enforce predicate-applicability to the cell type. `age`'s type is inferred as `number` from its literal initializer `25`; `pattern` (string-only) does not apply, so E-TYPE-031 fires before codegen. The regex arg is well-formed — the error is purely the predicate/cell-type mismatch, orthogonal to arg shape.",
+  "expect": {
+    "codes": ["E-TYPE-031"],
+    "notCodes": [],
+    "severity": { "E-TYPE-031": "error" }
+  }
+}
