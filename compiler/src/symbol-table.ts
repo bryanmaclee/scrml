@@ -4061,11 +4061,15 @@ function walkDerivedValueMutate(
 // validators, B10 looks up each validator against the
 // `validator-catalog.ts` module's predicate signature catalog and verifies:
 //
-//   1. Predicate name is in the universal-core (14 predicates per §55.1).
-//      Library-surface predicates (`email`/`url`/`numeric`/`integer` from
-//      `scrml:data`) are NOT in the universal-core catalog; B10 silently
-//      passes through unknown names — a future tightening will register
-//      stdlib predicates and convert this to a strict reject.
+//   1. Predicate name is in the universal-core (14 predicates per §55.1) OR is
+//      the single `custom(fn)` escape hatch. Per §55.1 line 32517 the vocabulary
+//      is CLOSED at fourteen — `email`/`url`/`numeric`/`integer` are NOT
+//      first-class predicates; adopters spell them `pattern(/…/)` or `custom(fn)`.
+//      Any OTHER bare-attribute predicate name (a typo like `lenght`, or a
+//      would-be stdlib predicate) is REJECTED with E-TYPE-031 (D-FORM-1). This
+//      closes the former "silent pass-through" footgun where an unknown name
+//      reached codegen and produced a permanently-invalid field with no
+//      diagnostic.
 //
 //   2. Arity matches:
 //      - bareword (args: null) → must be `arity: 0` or `"0+inline"` predicate
@@ -4089,13 +4093,26 @@ function walkDerivedValueMutate(
 //                          diagnostic — though B13 ultimately owns the formal
 //                          extraction + inline-override-record.
 //
+//   4. Predicate applies to the cell's declared/inferred value TYPE (D-FORM-6,
+//      §55.1 line 32510-32511: "applying `pattern(re)` to a `number` cell is a
+//      compile-time type error (E-TYPE-031 family)"). Each catalog signature
+//      carries a `cellTypeRequirement`; `inferCellCategory` reads the decl's
+//      explicit type annotation OR its initializer/default LITERAL to derive a
+//      coarse category. When the category is CONFIDENTLY known and incompatible
+//      with the predicate's requirement, B10 fires E-TYPE-031. When the type
+//      cannot be pinned (untyped form cell, non-literal init), the check stays
+//      SILENT — a false type-mismatch fire is worse than a missed one.
+//
 // Failures fire `E-TYPE-031` (the existing umbrella per §55.1 line 24295)
 // with a per-violation descriptive message.
 //
 // **DEFERRED to follow-up steps:**
-//   - Cell-type compatibility check (`pattern(re)` on a `number` cell): needs
-//     type-system.ts type inference. Audit §1.3 budgets this for a later
-//     tightening.
+//   - Deeper cell-type inference (union bases, render-spec `<input type=>` for
+//     coerced Shape-2 cells). The value type of an UNtyped form cell is the raw
+//     input string (§5.4 — no coercion without an annotation), so `type="number"`
+//     alone does NOT make the cell numeric; inferring from the widget would
+//     false-fire. This walker infers only from an explicit annotation or a
+//     literal init/default, which is both minimal and correct.
 //   - B13 owns formal Level-1 inline-override extraction onto the validator
 //     record + explicit dynamic-override rejection error code.
 //   - Cycle detection (E-VALIDATOR-CIRCULAR-DEP) is Phase 3 of B10 and lives
@@ -4109,8 +4126,10 @@ function walkDerivedValueMutate(
 
 import {
   lookupPredicate,
+  UNIVERSAL_CORE_PREDICATES,
   type PredicateSignature,
   type PredicateArgKind,
+  type CellTypeRequirement,
 } from "./validator-catalog.js";
 import type { ValidatorEntry, ValidatorArg } from "./types/ast.js";
 
@@ -4188,19 +4207,58 @@ function checkValidator(
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
-  const signature = lookupPredicate(validator.name);
-  if (!signature) {
-    // Unknown predicate name. May be a library-surface predicate
-    // (`email`, `url`, `numeric`, `integer` from scrml:data) which has a
-    // separate registration path. Silent pass-through; a future tightening
-    // can convert this to a strict reject once stdlib predicates register.
-    return;
-  }
-
   const cellName = cellRecord.qualifiedPath || cellRecord.name;
   const span = (validator as any).span ?? cellRecord.declNode.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
+
+  const signature = lookupPredicate(validator.name);
+  if (!signature) {
+    // D-FORM-1 — the universal-core vocabulary is CLOSED at fourteen (§55.1 line
+    // 32517). The ONLY escape hatch is `custom(fn)` (stdlib/data/validate.scrml).
+    // `email`/`url`/`numeric`/`integer` are NOT first-class predicates — adopters
+    // spell them `pattern(/…/)` or `custom(fn)`. Any other bare-attribute name is
+    // a typo (e.g. `lenght`) or a would-be stdlib predicate; REJECT it. (Was a
+    // silent pass-through → codegen emitted `_scrml_validator_fire("<name>",…)` →
+    // runtime `errors.push(undefined)` → the field went permanently-invalid with
+    // NO diagnostic.)
+    if (validator.name === "custom") return; // the single escape hatch — clean.
+    errors.push({
+      code: "E-TYPE-031",
+      message:
+        `E-TYPE-031: unknown validator predicate \`${validator.name}\` on \`${cellName}\`. `
+        + `The universal-core validator vocabulary is closed at fourteen `
+        + `(${UNIVERSAL_CORE_PREDICATES.map((p) => p.name).join(", ")}), plus the `
+        + `\`custom(fn)\` escape hatch (SPEC §55.1). \`email\`/\`url\`/\`numeric\`/`
+        + `\`integer\` are NOT first-class predicates — use \`pattern(/…/)\` or `
+        + `\`custom(fn)\`. Check for a typo.`,
+      span,
+      severity: "error",
+    });
+    return;
+  }
+
+  // D-FORM-6 — predicate applicability to the cell's declared/inferred TYPE
+  // (§55.1 line 32510-32511). Orthogonal to arity/arg-shape: `pattern(re)` on a
+  // `number` cell is a type error regardless of the regex being well-formed. Fire
+  // FIRST + short-circuit — if the predicate does not belong on this cell type at
+  // all, the arg-shape diagnostics below are redundant noise. Conservative: only
+  // fires when the cell category is CONFIDENTLY known (see `inferCellCategory`).
+  const cellCategory = inferCellCategory(cellRecord.declNode);
+  if (cellCategory !== "unknown"
+      && !predicateAppliesToCategory(signature.cellTypeRequirement, cellCategory)) {
+    errors.push({
+      code: "E-TYPE-031",
+      message:
+        `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` does not apply to a `
+        + `\`${cellCategory}\` cell — it requires ${describeCellTypeRequirement(signature.cellTypeRequirement)} `
+        + `(SPEC §55.1). Applying \`${validator.name}\` to a \`${cellCategory}\` value is a `
+        + `compile-time type error.`,
+      span,
+      severity: "error",
+    });
+    return;
+  }
 
   const args = validator.args;
 
@@ -4371,11 +4429,113 @@ function checkValidator(
 }
 
 /**
+ * D-FORM-6 — a coarse value-type category for a state cell, used to enforce
+ * predicate-applicability (§55.1). `"unknown"` means the type could NOT be
+ * confidently pinned from the decl; callers stay SILENT on `"unknown"` (a false
+ * type-mismatch fire is worse than a missed one).
+ */
+type CellCategory = "string" | "number" | "boolean" | "array" | "date" | "unknown";
+
+/**
+ * Map an explicit type-annotation string to a coarse category. Refinement forms
+ * (`number(>=0)`) are stripped to their base (`number`); array-suffix forms
+ * (`T[]`) map to `array`. Only a CLEAN single-token base name is classified —
+ * union / generic / named-type annotations stay `unknown` (conservative: a
+ * `string | number` cell has no single applicable-type answer).
+ */
+function categoryFromTypeAnnotation(ann: string): CellCategory {
+  let base = ann.trim();
+  const parenIdx = base.indexOf("(");
+  if (parenIdx >= 0) base = base.slice(0, parenIdx).trim(); // strip refinement predicate
+  if (/\[\s*\]$/.test(base)) return "array";
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(base)) return "unknown"; // union/generic/etc.
+  switch (base.toLowerCase()) {
+    case "number": case "int": case "integer": case "float": case "bigint": return "number";
+    case "string": case "text": return "string";
+    case "bool": case "boolean": return "boolean";
+    case "date": case "datetime": case "timestamp": return "date";
+    case "array": case "list": return "array";
+    default: return "unknown"; // named type / enum / struct — not pinnable here
+  }
+}
+
+/**
+ * Map an initializer/default ExprNode to a coarse category, but ONLY for
+ * unambiguous LITERAL shapes (string / number / boolean / array literal, and a
+ * negated numeric literal). Everything else (idents, calls, member access,
+ * arithmetic, the `not` absence literal) is `unknown`.
+ */
+function categoryFromLiteralExpr(expr: unknown): CellCategory {
+  if (!expr || typeof expr !== "object") return "unknown";
+  const n = expr as { kind?: string; litType?: string; op?: string; prefix?: boolean;
+    argument?: { kind?: string; litType?: string } };
+  if (n.kind === "lit") {
+    switch (n.litType) {
+      case "number": return "number";
+      case "string": case "template": return "string";
+      case "bool": return "boolean";
+      default: return "unknown"; // "not" absence literal, etc.
+    }
+  }
+  if (n.kind === "unary" && n.op === "-" && n.prefix && n.argument
+      && n.argument.kind === "lit" && n.argument.litType === "number") return "number";
+  if (n.kind === "array") return "array";
+  return "unknown";
+}
+
+/**
+ * Infer the coarse value-type category of a state cell from its decl node.
+ * Priority: explicit type annotation (most authoritative) > initializer literal
+ * > `default=` literal. Returns `"unknown"` when none pins the type.
+ */
+function inferCellCategory(declNode: any): CellCategory {
+  if (typeof declNode?.typeAnnotation === "string" && declNode.typeAnnotation.length > 0) {
+    const fromAnn = categoryFromTypeAnnotation(declNode.typeAnnotation);
+    if (fromAnn !== "unknown") return fromAnn;
+  }
+  const fromInit = categoryFromLiteralExpr(declNode?.initExpr);
+  if (fromInit !== "unknown") return fromInit;
+  const fromDefault = categoryFromLiteralExpr(declNode?.defaultExpr);
+  if (fromDefault !== "unknown") return fromDefault;
+  return "unknown";
+}
+
+/**
+ * Does a predicate whose catalog `cellTypeRequirement` is `req` apply to a cell
+ * of coarse category `cat`? `cat` is never `"unknown"` here (caller guards). Any
+ * scrml value is `req`-able and `equatable`, so those requirements always pass.
+ */
+function predicateAppliesToCategory(req: CellTypeRequirement, cat: CellCategory): boolean {
+  switch (req) {
+    case "any": return true;
+    case "equatable": return true; // every scrml value type supports ==
+    case "string": return cat === "string";
+    case "string-or-array": return cat === "string" || cat === "array";
+    case "number": return cat === "number";
+    case "orderable": return cat === "number" || cat === "string" || cat === "date";
+    default: return true;
+  }
+}
+
+/** Human-readable phrase for a `cellTypeRequirement`, for the D-FORM-6 message. */
+function describeCellTypeRequirement(req: CellTypeRequirement): string {
+  switch (req) {
+    case "string": return "a `string` cell";
+    case "string-or-array": return "a `string` or `array` cell";
+    case "number": return "a `number` cell";
+    case "orderable": return "an orderable (`number`/`string`/`date`) cell";
+    case "equatable": return "an equatable cell";
+    case "any": return "any cell";
+    default: return "a compatible cell";
+  }
+}
+
+/**
  * Check a single arg's shape against the expected slot kind.
  *
- * NOTE: cell-type compatibility (e.g., `pattern(re)` on a `number` cell)
- * is DEFERRED per audit §1.3 — needs type-system inference. This check
- * verifies AST shape only.
+ * NOTE: cell-type applicability (e.g., `pattern(re)` on a `number` cell) is
+ * checked in `checkValidator` (D-FORM-6) BEFORE this per-arg walk runs; this
+ * function verifies arg AST shape only.
  */
 function checkArgShape(
   arg: ValidatorArg,
