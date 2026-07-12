@@ -2587,7 +2587,16 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // Finding #7 — an explicit `.Soft` in a SERVER-escalated context is a no-op
     // (soft nav needs a browser). Do the server behavior (hard redirect path)
     // rather than emit `_scrml_navigate_soft` (which would ReferenceError on
-    // `window` server-side). The type-system fires W-NAV-SOFT-SERVER.
+    // `window` server-side).
+    //
+    // W-NAV-SOFT-SERVER (§20.8.7, RESERVED): the lint SHOULD fire here — `ctx.mode`
+    // is the compiler-certain side. It is NOT emitted yet: codegen's
+    // `EmitExprContext.errors` is not reliably drained into the result diagnostic
+    // stream (the same reason the §20.6.7 log-shadowing lint lives in the type
+    // system, not here), and the type-system's `checkNavigateCall` walk has no
+    // per-function server/client placement. Wiring it needs one of those two
+    // channels — a bounded follow-on. The BEHAVIOR (server hard redirect) is
+    // correct regardless.
     const isServer = ctx.mode === "server";
     if (explicit === "Soft" && isServer) {
       return `_scrml_navigate(${pathExpr})`;

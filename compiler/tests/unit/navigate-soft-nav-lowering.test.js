@@ -160,8 +160,8 @@ describe("§5 — navigate() variant parsing (findings #5/#7)", () => {
   });
 });
 
-describe("§6 — navigate() as a match-arm tail stays statement-shape (finding #6)", () => {
-  test("a client navigate() as a match-arm body compiles to VALID JS (no value-wrap breakage)", () => {
+describe("§6 — navigate() as a match-arm tail: statement-shape + soft (findings #6 + #4)", () => {
+  test("a client navigate() in a match value-arm lowers to _scrml_navigate_soft (divergence #4) and stays valid JS", () => {
     const src =
       `type Dest:enum = .Home | .Away\n` +
       `<x>: Dest = .Home\n` +
@@ -173,11 +173,13 @@ describe("§6 — navigate() as a match-arm tail stays statement-shape (finding 
       `} }\n` +
       `<button onclick=nav()>go</button>`;
     const { result, clientJs } = compileToClient(src, "nav-matcharm");
-    // The isStatementShapeStmt whitelist recognizes both `_scrml_navigate(` and
-    // `_scrml_navigate_soft(` so a navigate arm tail is treated as a statement,
-    // never value-wrapped into malformed JS.
+    // #6 — the isStatementShapeStmt whitelist recognizes `_scrml_navigate_soft(`
+    // so the arm tail is not value-wrapped into malformed JS.
     expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    expect(clientJs).toMatch(/_scrml_navigate(?:_soft)?\(/);
+    // #4 — the client string-rewrite path (match value-arm) now SOFT-navs
+    // (matches the structured emit-expr lowering), not a hard full reload.
+    expect(clientJs).toContain("_scrml_navigate_soft(");
+    expect(clientJs).not.toMatch(/[^_]_scrml_navigate\(\s*"\/home"/);
     // The emitted client body must be syntactically valid.
     expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
