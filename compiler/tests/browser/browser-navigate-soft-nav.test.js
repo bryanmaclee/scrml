@@ -101,6 +101,23 @@ function outletLogicId() {
   return el ? el.getAttribute("data-scrml-logic") : null;
 }
 
+// Reconstruct the if= scaffold (its `<template>` + `scrml-if-marker` comment)
+// from the live outlet, so a same-chunk soft-nav target reuses the exact ids —
+// modelling the target route's SSR (server renders template + marker; the client
+// controller mounts). Returns the outlet-inner HTML for the target.
+function outletIfScaffold() {
+  const outlet = document.querySelector("[data-scrml-outlet]");
+  const tpl = outlet.querySelector("template");
+  let markerHtml = "";
+  const walker = document.createTreeWalker(outlet, 128 /* SHOW_COMMENT */);
+  let n;
+  while ((n = walker.nextNode())) {
+    const m = /scrml-if-marker:(.+)/.exec((n.nodeValue || "").trim());
+    if (m) { markerHtml = "<!--scrml-if-marker:" + m[1] + "-->"; break; }
+  }
+  return (tpl ? tpl.outerHTML : "") + markerHtml;
+}
+
 let restoreFetch = null;
 beforeEach(() => { restoreFetch = null; });
 afterEach(() => {
@@ -336,6 +353,87 @@ describe("extended #1 — a show= display-toggle in a swapped region RE-EVALUATE
     expect(swapped.style.display).toBe("none");
     window._scrml_reactive_set("shown", true);
     expect(swapped.style.display).toBe("");
+  });
+});
+
+describe("M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES", () => {
+  const IF_SHELL = [
+    "<program>",
+    "  <shown> = true",
+    "  <outlet><p if=@shown id=\"tgt\">visible</p></outlet>",
+    "  ${ function go() { navigate(\"/page2\") } }",
+    "  <button onclick=go()>Go</button>",
+    "</program>",
+  ].join("\n");
+
+  test("a swapped-in if= mounts on true and unmounts on false (not frozen)", async () => {
+    const { html, clientJs } = compileInline(IF_SHELL);
+    mount(html, clientJs);
+    // Boot-mounted: the if= content is present (shown === true).
+    expect(document.querySelector("[data-scrml-outlet] #tgt")).not.toBeNull();
+    const scaffold = outletIfScaffold(); // template + marker, same ids (same chunk)
+
+    mockFetch({ "/page2": ssrDoc(scaffold) });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // Re-invoked controller mounts the if= content into the swapped region.
+    expect(document.querySelector("[data-scrml-outlet] #tgt")).not.toBeNull();
+    // It RE-EVALUATES: flip the cell → the swapped-in if= unmounts / remounts.
+    window._scrml_reactive_set("shown", false);
+    expect(document.querySelector("[data-scrml-outlet] #tgt")).toBeNull();
+    window._scrml_reactive_set("shown", true);
+    expect(document.querySelector("[data-scrml-outlet] #tgt")).not.toBeNull();
+  });
+
+  test("if= re-entry idempotency — nav away+back mounts EXACTLY ONE copy (no double-mount, no leaked scope)", async () => {
+    const { html, clientJs } = compileInline(IF_SHELL);
+    mount(html, clientJs);
+    const scaffold = outletIfScaffold();
+
+    // Nav away (teardown disposes the boot controller + unmounts) then back.
+    mockFetch({ "/page2": ssrDoc(scaffold), "/back": ssrDoc(scaffold) });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+    window._scrml_navigate_soft("/back");
+    await flush();
+
+    // Exactly one mounted copy — the prior controller's effect was disposed
+    // (region-tracked teardown), so no second controller double-mounts.
+    expect(document.querySelectorAll("[data-scrml-outlet] #tgt").length).toBe(1);
+    // Still reactive after the round-trip.
+    window._scrml_reactive_set("shown", false);
+    expect(document.querySelectorAll("[data-scrml-outlet] #tgt").length).toBe(0);
+    window._scrml_reactive_set("shown", true);
+    expect(document.querySelectorAll("[data-scrml-outlet] #tgt").length).toBe(1);
+  });
+});
+
+describe("M1 — an <each> list in a swapped region RE-RENDERS", () => {
+  test("a swapped-in each re-renders after a list change", async () => {
+    const shell = [
+      "<program>",
+      "  <items> = [\"a\", \"b\"]",
+      "  <outlet><ul><each in=@items as item><li>${item}</li></each></ul></outlet>",
+      "  ${ function go() { navigate(\"/page2\") } }",
+      "  <button onclick=go()>Go</button>",
+      "</program>",
+    ].join("\n");
+    const { html, clientJs } = compileInline(shell);
+    mount(html, clientJs);
+    // Reconstruct the each mount scaffold from the live outlet (same chunk ids).
+    const outlet = document.querySelector("[data-scrml-outlet]");
+    const eachInner = outlet.innerHTML;
+
+    mockFetch({ "/page2": ssrDoc(eachInner) });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // After the swap + _scrml_remount_each, the list is re-rendered + reactive.
+    window._scrml_reactive_set("items", ["x", "y", "z"]);
+    await flush();
+    const lis = document.querySelectorAll("[data-scrml-outlet] li");
+    expect(lis.length).toBe(3);
   });
 });
 
