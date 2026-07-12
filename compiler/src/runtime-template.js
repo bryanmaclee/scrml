@@ -1378,9 +1378,14 @@ function _scrml_create_scope() {
  * the marker count is small. For larger documents the markers can be looked
  * up via a compile-time-emitted Map; deferred to a later sub-phase.
  */
-function _scrml_find_if_marker(markerId) {
+function _scrml_find_if_marker(markerId, scope) {
+  // M1 Phase 2/3 — search within scope (default document.body). A soft-nav
+  // rehydrate passes the swapped outlet root so a re-invoked if= controller finds
+  // the NEW region's marker, never a same-id marker elsewhere.
+  const rootNode = (scope && (scope.nodeType === 1 || scope.nodeType === 11)) ? scope : document.body;
+  if (!rootNode) return null;
   const needle = "scrml-if-marker:" + markerId;
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+  const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_COMMENT);
   let node;
   while ((node = walker.nextNode())) {
     if (node.nodeValue && node.nodeValue.trim() === needle) return node;
@@ -1401,8 +1406,8 @@ function _scrml_find_if_marker(markerId) {
  * @param {string} templateId — id of the template element holding the source
  * @returns {HTMLElement|null} — the mounted root element, or null on failure
  */
-function _scrml_mount_template(markerId, templateId) {
-  const marker = _scrml_find_if_marker(markerId);
+function _scrml_mount_template(markerId, templateId, scope) {
+  const marker = _scrml_find_if_marker(markerId, scope);
   if (!marker || !marker.parentNode) return null;
   const tpl = document.getElementById(templateId);
   if (!tpl || !(tpl.content instanceof DocumentFragment)) return null;
@@ -2484,6 +2489,11 @@ function _scrml_rehydrate_region(root) {
     try { _scrml_rehydrators[i](scope); }
     catch (e) { if (typeof console !== "undefined") console.error("scrml rehydrate error:", e); }
   }
+  // M1 Phase 1 — re-render any <each> lists in the swapped region. The renderer
+  // does its own [data-scrml-each-mount] querySelector + container-keyed reconcile
+  // (adopting the server-rendered rows), so this is a clean scoped rebuild; the
+  // old container's reconcile state dies with the detached node.
+  if (typeof _scrml_remount_each === "function" && scope) _scrml_remount_each(scope);
 }
 
 // Tear down the OUTGOING region's reactive display effects / subscriptions /
