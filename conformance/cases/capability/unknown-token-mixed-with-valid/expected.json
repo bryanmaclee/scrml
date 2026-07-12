@@ -1,0 +1,13 @@
+{
+  "id": "capability-unknown-token-mixed-with-valid",
+  "description": "§23.5.3 — the vocabulary check scans the WHOLE token list, not just a lone token. `capabilities=[network(\"a.com\"), teleport]` pairs a VALID token (`network`) with an out-of-vocabulary one (`teleport`); E-FOREIGN-CAPABILITY-UNKNOWN still fires for `teleport`. Sharpens the single-token `unknown-token` case: a valid leading token does NOT short-circuit or mask the closed-vocabulary check on later tokens, and the honest capability error fires (never the pre-impl-wave E-SCOPE-001 token-as-scope-ref misparse).",
+  "language-version": "1.0",
+  "spec": "§23.5.3, §23.5.7",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.3: the v1 capability vocabulary is CLOSED (`{ network, fs-read, fs-write, spawn, env, db }`); ANY unrecognized token in the list SHALL be E-FOREIGN-CAPABILITY-UNKNOWN (§23.5.7). The valid `network` token is accepted and does not suppress the check on `teleport`. E-SCOPE-001 (token-as-scope-ref) and W-ATTR-001 MUST NOT fire — the value is special-parsed as a capability-token list.",
+  "expect": {
+    "codes": ["E-FOREIGN-CAPABILITY-UNKNOWN"],
+    "notCodes": ["E-SCOPE-001", "W-ATTR-001"],
+    "severity": { "E-FOREIGN-CAPABILITY-UNKNOWN": "error" }
+  }
+}

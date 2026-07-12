@@ -1,0 +1,12 @@
+{
+  "id": "capability-inline-block-covered",
+  "description": "§23.5.5 — a `_{}` INLINE foreign-code block governed by a NON-empty `capabilities=` set silences the presence-nudge lint. Same `_={ … }=` block as `inline-block-undeclared`, but the enclosing `<program lang=\"ts\">` now declares `capabilities=[network(\"api.example.com\")]`. Because the governing set is non-empty, W-FOREIGN-UNDECLARED-CAPABILITY stays silent — the ONLY structural difference from the twin fire case is the presence of the declaration. Proves the lint is presence-gated, not always-on for foreign code.",
+  "language-version": "1.0",
+  "spec": "§23.5.5, §23.2",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.5: the lint fires only when the governing capability set is EMPTY. Here the closest ancestor `<program>` declares a non-empty `capabilities=[network(...)]`, so the `_{}` block is governed by a non-empty set and the presence-nudge does NOT fire. The declaration is advisory (§23.5.1) — non-blocking — so no error accompanies it. No E-SCOPE-001, no E-FOREIGN-CAPABILITY-UNKNOWN.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-FOREIGN-UNDECLARED-CAPABILITY", "E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN", "W-ATTR-001"]
+  }
+}

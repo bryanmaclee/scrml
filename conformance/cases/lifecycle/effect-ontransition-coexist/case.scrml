@@ -1,0 +1,16 @@
+${
+    type Game:enum = { Title, Playing, Paused }
+    <log> = 0
+}
+<engine for=Game initial=.Title>
+    <Title rule=.Playing effect=${ @log = @log + 1 }>
+        <onTransition to=.Playing>${ @log = @log + 10 }</>
+    </>
+    <Playing rule=(.Paused | .Title)>
+        <onTransition to=.Paused>${ @log = @log + 100 }</>
+    </>
+    <Paused rule=.Playing></>
+</>
+<program>
+<p id="log">Log: ${@log}</>
+</program>

@@ -1,0 +1,8 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Item:struct = { sku: string, name: string }
+    <items>: Item[] = []
+    <picked>: string[] = []
+}
+<tableFor for=Item rows=@items selectable=@picked>
+</tableFor>

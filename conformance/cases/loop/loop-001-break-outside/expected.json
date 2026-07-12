@@ -1,0 +1,13 @@
+{
+  "id": "loop-001-break-outside",
+  "description": "§49.9 — a bare `break` in a position not enclosed by any `while`, `do...while`, or `for...of` loop fires E-LOOP-001. This is the SPEC's own worked example (§49.9 E-LOOP-001 block). Complements the existing loop-005 (break crossing a function boundary) and loop-006 (duplicate labels): here the break is simply outside ALL loops. W-PROGRAM-001 co-fires incidentally (no `<program>` shell around the bare markup).",
+  "language-version": "1.0",
+  "spec": "§49.9, §49.4",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§49.9 E-LOOP-001: the compiler SHALL reject `break` that appears outside any enclosing loop. `break` may only appear inside a `while`, `do...while`, or `for...of` loop body.",
+  "expect": {
+    "codes": ["E-LOOP-001"],
+    "notCodes": ["E-LOOP-002"],
+    "severity": { "E-LOOP-001": "error" }
+  }
+}

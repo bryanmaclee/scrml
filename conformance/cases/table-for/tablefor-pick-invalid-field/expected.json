@@ -1,0 +1,11 @@
+{
+  "id": "tablefor-pick-invalid-field",
+  "description": "§41.16 — `pick=[\"X\", ...]` on `<tableFor for=T>` naming a field not present on struct `T` fires E-TABLEFOR-PICK-INVALID-FIELD. `User` has `{ id, name }`; `pick=[\"nope\"]` names a non-field. Mirror of E-FORMFOR-PICK-INVALID-FIELD (§41.14) + E-SCHEMAFOR-PICK-INVALID-FIELD (§41.15). Complements the `tablefor-column-field-unknown` case (an unknown `<column field>`) by exercising the `pick=` attribute path specifically. (Incidental W-PROGRAM-001 + W-STDLIB-SEED-FAILCLOSED co-fire, as in the sibling table-for cases; superset match.)",
+  "language-version": "1.0",
+  "spec": "§41.16",
+  "rationale": "§41.16 E-TABLEFOR-PICK-INVALID-FIELD: the `pick=[...]` attribute SHALL name only declared struct fields; an unknown name is rejected. Fix: correct or remove the invalid field name from the pick array.",
+  "expect": {
+    "codes": ["E-TABLEFOR-PICK-INVALID-FIELD"],
+    "notCodes": ["E-TABLEFOR-OMIT-INVALID-FIELD", "E-TABLEFOR-PICK-OMIT-CONFLICT"]
+  }
+}

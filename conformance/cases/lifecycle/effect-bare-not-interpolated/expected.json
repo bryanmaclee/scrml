@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-effect-bare-not-interpolated",
+  "description": "§51.0.H (S182) — `effect=` is a §7 logic-context BLOCK; the `${...}` delimiter is MANDATORY. A bare `effect=log(\"go\")` (the plain event-handler sugar `onclick=load()` of §5.2.3) does NOT extend to `effect=` and is NOT a silent no-op → E-ENGINE-EFFECT-NOT-INTERPOLATED. The fix is to wrap the body: `effect=${ log(\"go\") }` (the form every existing lifecycle runtime case uses). Complements `effect-ambiguous-multi-target`: this one is a well-placed single-target effect that is only mis-DELIMITED.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "source-test": "compiler/tests/unit/engine-effect-not-interpolated.test.js",
+  "rationale": "§51.0.H: `effect=` is a §7 logic-context block (a full, possibly multi-statement body — codegen re-parses it as `${...}`), so the delimiter is mandatory. A bare `effect=playSound(...)` or unbalanced/empty braces is E-ENGINE-EFFECT-NOT-INTERPOLATED, NOT a silent no-op. The bare single-expression sugar that a plain event handler permits does NOT extend to `effect=`.",
+  "expect": {
+    "codes": ["E-ENGINE-EFFECT-NOT-INTERPOLATED"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-EFFECT-NOT-INTERPOLATED": "error" }
+  }
+}

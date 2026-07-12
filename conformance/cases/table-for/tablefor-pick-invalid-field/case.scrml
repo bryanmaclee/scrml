@@ -1,0 +1,7 @@
+${
+    import { tableFor } from 'scrml:data'
+    type User:struct = { id: integer, name: string }
+    <users>: User[] = []
+}
+<tableFor for=User rows=@users pick=["nope"]>
+</tableFor>

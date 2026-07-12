@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-effect-on-derived-engine",
+  "description": "§51.0.H edge-case (iii) / §51.0.J — a boot `effect=` on a DERIVED-engine opener is E-ENGINE-EFFECT-ON-DERIVED. A `derived=` engine has no init->initial= edge (its value is COMPUTED, not entered) and forbids writes to its variable, so a boot effect has nothing coherent to do. This is the derived-engine counterpart to the plain-engine boot effect that `boot-effect` exercises positively. (W-PROGRAM-SPA-INFERRED co-fires incidentally from the sibling `<program>`; @count is read+written so no dead-cell E-DG-002.)",
+  "language-version": "1.0",
+  "spec": "§51.0.H, §51.0.J",
+  "source-test": "compiler/tests/unit/derived-engine-expression-form.test.js",
+  "rationale": "§51.0.H (iii): `effect=` on a `derived=` engine opener is E-ENGINE-EFFECT-ON-DERIVED. A derived engine has no init->initial= edge and forbids writes to its variable (E-DERIVED-ENGINE-NO-WRITE), so a boot effect is incoherent. Use a plain mount-time `${}` effect at the enclosing scope, or a non-derived engine, instead.",
+  "expect": {
+    "codes": ["E-ENGINE-EFFECT-ON-DERIVED"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-EFFECT-ON-DERIVED": "error" }
+  }
+}

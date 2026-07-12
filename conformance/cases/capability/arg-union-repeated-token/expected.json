@@ -1,0 +1,12 @@
+{
+  "id": "capability-arg-union-repeated-token",
+  "description": "§23.5.2 — a capability token MAY repeat with additional args; the args UNION. `capabilities=[network(\"a.com\"), network(\"b.com\")]` is the SPEC's own worked equivalence (≡ `network` allowing `{a.com, b.com}`). It COMPILES CLEAN: the repeated `network` is NOT a duplicate-attribute error, NOT an unknown token, and the two hosts merge into one allow-list rather than the second shadowing the first. Complements `all-tokens-valid` (each token once) by exercising the repeat-and-union path specifically.",
+  "language-version": "1.0",
+  "spec": "§23.5.2",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.2: a capability token MAY repeat with additional args; the args UNION (`network(\"a.com\"), network(\"b.com\")` ≡ `network` allowing `{a.com, b.com}`). The special-parsed capability-token list accepts the repeat with no diagnostic. Only the incidental W-PROGRAM-SPA-INFERRED remains; E-FOREIGN-CAPABILITY-UNKNOWN, E-SCOPE-001, and W-ATTR-001 all stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOREIGN-CAPABILITY-UNKNOWN", "E-SCOPE-001", "W-ATTR-001"]
+  }
+}

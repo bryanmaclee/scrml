@@ -1,0 +1,13 @@
+{
+  "id": "error-boundary-e005-partial-coverage",
+  "description": "§19.6.6 — E-ERROR-005 fires on PARTIAL coverage. The enum has two reachable error variants: NotFound (HAS a `renders` clause) and Timeout (has NONE). The `<errorBoundary>` declares NO `fallback`. NotFound is displayable via its own `renders`, but Timeout has neither a `renders` clause nor a boundary `fallback`, so the boundary cannot display it → E-ERROR-005. This proves the exhaustiveness check is PER-VARIANT (every reachable variant must be covered), not satisfied by any single covered variant. Sharpens the `variant-renders` clean case, which pairs `renders` WITH a `fallback` so the second variant is covered.",
+  "language-version": "1.0",
+  "spec": "§19.6.5, §19.6.6",
+  "source-test": "compiler/tests/conformance/conf-error-boundary.test.js",
+  "rationale": "§19.6.6: EVERY error variant reachable inside a boundary SHALL be covered by a `renders` clause OR the boundary's `fallback`. NotFound is covered by its `renders`; Timeout is covered by neither, so the per-variant check fails on Timeout → E-ERROR-005. E-ERROR-002 stays silent (the call is inside a boundary, §19.6.6).",
+  "expect": {
+    "codes": ["E-ERROR-005"],
+    "notCodes": ["E-ERROR-002"],
+    "severity": { "E-ERROR-005": "error" }
+  }
+}

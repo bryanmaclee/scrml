@@ -1,0 +1,13 @@
+type LoadError:enum = {
+    NotFound(id: string)
+    Timeout
+}
+
+function loadItem(id: string)! LoadError {
+    if (id == "missing") fail LoadError::NotFound(id)
+    return id
+}
+
+<page>
+    <p>${loadItem("missing")}</>
+</page>

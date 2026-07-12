@@ -1,0 +1,11 @@
+${
+    type Phase:enum = { Low, High }
+    <count> = 0
+}
+<engine for=Phase derived=${ @count > 5 ? .High : .Low } effect=${ log("boot") }>
+    <Low></>
+    <High></>
+</>
+<program>
+<button id="inc" onclick=${ @count = @count + 1 }>+</>
+</program>

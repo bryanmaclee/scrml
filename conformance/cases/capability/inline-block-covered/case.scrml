@@ -1,0 +1,8 @@
+<program lang="ts" capabilities=[network("api.example.com")]>
+  export function fetchIt(url: string) {
+    const out = _={ in: { url }
+      await fetch(url).then(r => r.text())
+    }=
+    return out
+  }
+</program>

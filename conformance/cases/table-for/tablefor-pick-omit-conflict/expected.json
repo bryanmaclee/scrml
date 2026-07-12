@@ -1,0 +1,11 @@
+{
+  "id": "tablefor-pick-omit-conflict",
+  "description": "§41.16 — supplying BOTH `pick=[...]` AND `omit=[...]` on the same `<tableFor>` fires E-TABLEFOR-PICK-OMIT-CONFLICT. Both name VALID fields (`pick=[\"name\"]`, `omit=[\"id\"]`), so this pins the mutual-exclusivity rule specifically, NOT a field-validity error — the two transforms are inverses (pick names the only fields to render; omit names fields to exclude) and cannot be combined. Mirror of E-FORMFOR-PICK-OMIT-CONFLICT (§41.14) + E-SCHEMAFOR-PICK-OMIT-CONFLICT (§41.15). Because the fields are valid, E-TABLEFOR-PICK-INVALID-FIELD / E-TABLEFOR-OMIT-INVALID-FIELD MUST NOT fire. (Incidental W-PROGRAM-001 + W-STDLIB-SEED-FAILCLOSED co-fire; superset match.)",
+  "language-version": "1.0",
+  "spec": "§41.16",
+  "rationale": "§41.16 E-TABLEFOR-PICK-OMIT-CONFLICT: `pick:` and `omit:` are mutually exclusive; supplying both on one call is rejected. Fix: use exactly one per call, or layer Pick over Omit at the type level and pass the derived type.",
+  "expect": {
+    "codes": ["E-TABLEFOR-PICK-OMIT-CONFLICT"],
+    "notCodes": ["E-TABLEFOR-PICK-INVALID-FIELD", "E-TABLEFOR-OMIT-INVALID-FIELD"]
+  }
+}
