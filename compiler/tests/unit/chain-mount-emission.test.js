@@ -365,7 +365,9 @@ describe("§6: client JS controller for all-dirty chains (N23-N25)", () => {
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
     </>`);
-    expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-chain-branch="[^"]+"\]'\)/);
+    // navigate-wave1b M1: the chain controller lives in `_scrml_nav_rewire(root)`
+    // (re-invocable on soft nav), so the wrapper query is `(root || document)`-scoped.
+    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-chain-branch="[^"]+"\]'\)/);
   });
 
   test("N24: all-dirty chain controller does NOT call _scrml_mount_template / _scrml_unmount_scope", () => {
@@ -438,18 +440,16 @@ describe("§7: client JS controller for mixed-cleanliness chains (N26-N28)", () 
 
 describe("§8: round-trip through full pipeline (N29-N31)", () => {
   test("N29: clean chain emission yields valid JS (no syntax errors)", () => {
-    // Smoke check: the controller must be a syntactically valid module.
-    // The post-commit hook also runs this; here we ensure the chain block
-    // closes properly with matching braces.
+    // Smoke check: the emitted client module must be syntactically valid.
+    // (navigate-wave1b M1 moved the chain controller into `_scrml_nav_rewire`, so
+    // the old 2-space brace-parity extraction no longer bounds it — assert the
+    // whole emitted body parses, which is the real invariant.)
     const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
     </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    // Brace count parity (open braces == close braces inside the block).
-    const opens = (chainBlock.match(/\{/g) ?? []).length;
-    const closes = (chainBlock.match(/\}/g) ?? []).length;
-    expect(opens).toBe(closes);
+    expect(clientJs).toContain("_update_chain_");
+    expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
 
   test("N30: condition cascade respects source order in chain controller", () => {

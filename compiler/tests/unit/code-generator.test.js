@@ -1946,7 +1946,7 @@ describe("navigate() rewriting", () => {
     expect(out.clientJs).not.toMatch(/(?<!_scrml_)navigate\s*\(/);
   });
 
-  test("navigate with template literal is rewritten", () => {
+  test("navigate with template literal is rewritten (client → soft, navigate-wave1b #4)", () => {
     const ast = makeFileAST("/test/app.scrml", [
       makeLogicBlock([
         makeFunctionDecl("viewUser", [
@@ -1964,7 +1964,8 @@ describe("navigate() rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_navigate(`/users/");
+    // A client-context navigate lowers to the §20.8 soft-navigation engine.
+    expect(out.clientJs).toContain("_scrml_navigate_soft(`/users/");
   });
 });
 

@@ -710,6 +710,31 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   if (serverVarDecls.length > 0 || serverAuthorityTypesForSeed.length > 0) {
     lines.push("");
     lines.push("// --- §52.8 SSR pre-render seed application (ssr-b-substrate) ---");
+    // navigate-wave1b #5 — when this page is a <program> shell (has an <outlet>),
+    // emit the compile-time set of program-top-level (shell) cell names so the
+    // soft-nav REHYDRATE seed-apply (_scrml_ssr_seed_apply(true)) can skip them: a
+    // mutated shell cell (nav counter, sidebar toggle) MUST survive a soft nav, not
+    // reset to the fetched route's SSR-initial value. The INITIAL page load seeds
+    // everything (the bare _scrml_ssr_seed_apply() below). Only a shell that has ≥1
+    // shell cell overlapping the seed needs the set — gate on that intersection so
+    // a route-only-seed page emits nothing (byte-identical to before).
+    if (fileHasOutlet(fileAST)) {
+      const shellCells = collectShellCellNames(fileAST);
+      const seedShellCells: string[] = [];
+      for (const decl of serverVarDecls) {
+        const n = decl.name as string;
+        if (shellCells.has(n)) seedShellCells.push(n);
+      }
+      for (const decl of serverAuthorityTypesForSeed) {
+        const n = decl.name as string;
+        if (shellCells.has(n)) seedShellCells.push(n);
+      }
+      if (seedShellCells.length > 0) {
+        const entries = seedShellCells.map((n) => `${JSON.stringify(n)}: true`).join(", ");
+        lines.push(`// navigate-wave1b #5 — shell cells skipped by the soft-nav rehydrate seed-apply.`);
+        lines.push(`var _scrml_shell_cells = { ${entries} };`);
+      }
+    }
     lines.push("_scrml_ssr_seed_apply();");
   }
   if (serverVarDecls.length > 0) {
@@ -897,6 +922,78 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// navigate-wave1b #5 — persistent-shell cell membership
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect the names of PROGRAM-TOP-LEVEL (shell) cells — `state-decl`s declared
+ * OUTSIDE any `<outlet>`/`<page>` region — so the soft-nav rehydrate seed-apply
+ * can SKIP re-seeding them (finding #5). A shell cell (a nav counter, a sidebar
+ * toggle) belongs to the persistent `<program>` shell that survives a soft nav;
+ * re-applying the fetched route's SSR-initial value would RESET a value the user
+ * mutated. A cell declared INSIDE the outlet/page IS route-scoped and re-seeds
+ * with the new route's values on every swap.
+ *
+ * The walk mirrors `classifyMarkupNodes`'s `insideOutlet` region tracking, but
+ * (a) descends into `logic` bodies (where `state-decl`s live — the classifier
+ * SKIPS them) and (b) treats `<outlet>` AND `<page>` as region boundaries.
+ * Membership is COMPILE-TIME only — no runtime shortcut (per the finding).
+ */
+function collectShellCellNames(fileAST: any): Set<string> {
+  const shell = new Set<string>();
+  function visit(nodeList: any[], insideRegion: boolean): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      // A cell declared OUTSIDE any outlet/page region is a shell cell.
+      if (node.kind === "state-decl" && node.name && !insideRegion) {
+        shell.add(node.name as string);
+      }
+      // An <outlet>/<page> subtree is route-scoped: descend with the region bit set.
+      let childRegion = insideRegion;
+      if (node.kind === "markup") {
+        const tag: string = node.tag ?? "";
+        if (tag === "outlet" || tag === "page") childRegion = true;
+      }
+      if (node.kind === "logic" && Array.isArray(node.body)) visit(node.body, insideRegion);
+      if (Array.isArray(node.children)) visit(node.children, childRegion);
+      if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) {
+        visit((node as any).bodyChildren, insideRegion);
+      }
+      // Control-flow bodies carry the region bit unchanged.
+      if (node.kind === "match-stmt" && Array.isArray((node as any).body)) visit((node as any).body, insideRegion);
+      if (node.kind === "if-stmt") {
+        if (Array.isArray((node as any).consequent)) visit((node as any).consequent, insideRegion);
+        if (Array.isArray((node as any).alternate)) visit((node as any).alternate, insideRegion);
+      }
+    }
+  }
+  visit(getNodes(fileAST), false);
+  return shell;
+}
+
+/**
+ * Does the file contain an `<outlet>` anywhere in its markup? Soft-nav (and thus
+ * the `_scrml_shell_cells` skip) is only applicable to a `<program>` shell with a
+ * swap region, so `_scrml_shell_cells` is emitted only when an outlet is present.
+ */
+function fileHasOutlet(fileAST: any): boolean {
+  let found = false;
+  function visit(nodeList: any[]): void {
+    if (found || !Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (found) return;
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "markup" && node.tag === "outlet") { found = true; return; }
+      if (Array.isArray(node.children)) visit(node.children);
+      if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) visit((node as any).bodyChildren);
+    }
+  }
+  visit(getNodes(fileAST));
+  return found;
+}
+
+// ---------------------------------------------------------------------------
 // Single-pass markup classification (replaces 5 independent AST walks)
 // ---------------------------------------------------------------------------
 
@@ -929,16 +1026,30 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
     bindPropsWirings: [],
   };
 
-  function visit(nodeList: any[]): void {
+  function visit(nodeList: any[], insideOutlet = false): void {
     for (const node of nodeList) {
       if (!node || typeof node !== "object") continue;
 
       if (node.kind === "markup") {
         const tag: string = node.tag ?? "";
+        // navigate-wave1b M1 Phase 4 — an <outlet> descendant is region-resident:
+        // a <timer>/<poll> lexically inside the outlet belongs to the swappable
+        // region, so its cleanup routes into _scrml_region_cleanups (torn down on
+        // soft nav), not the boot-once beforeunload path. A shell-level timer
+        // (outside the outlet) keeps the module-init path untouched.
+        const childInsideOutlet = insideOutlet || tag === "outlet";
 
         if (tag === "timer" || tag === "poll") {
+          if (insideOutlet) node._outletResident = true;
           result.lifecycleNodes.push(node);
         } else if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
+          // navigate-wave1b #7 — an <keyboard>/<mouse>/<gamepad> lexically inside the
+          // outlet is region-resident: its GLOBAL document/window listeners must be
+          // torn down on a soft-nav swap (else they leak, double-firing against the
+          // old route's cells). Route its destroy into _scrml_region_cleanups, the
+          // same treatment <timer>/<poll> get. A SHELL-level input handler keeps the
+          // boot-once cleanup path so it survives navigation.
+          if (insideOutlet) node._outletResident = true;
           result.inputStateNodes.push(node);
         } else if (tag === "request") {
           result.requestNodes.push(node);
@@ -954,9 +1065,9 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
           }
         }
 
-        // Recurse into markup children
+        // Recurse into markup children (carry the outlet-residence flag).
         if (Array.isArray(node.children)) {
-          visit(node.children);
+          visit(node.children, childInsideOutlet);
         }
         continue;
       }
@@ -989,13 +1100,13 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
       // emit-engine.ts; this branch is only for OTHER reactive surfaces
       // that may incidentally appear inside arm bodies.
       if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) {
-        visit((node as any).bodyChildren);
+        visit((node as any).bodyChildren, insideOutlet);
         continue;
       }
 
       // Recurse into all other node kinds
       if (Array.isArray(node.children)) {
-        visit(node.children);
+        visit(node.children, insideOutlet);
       }
     }
   }
@@ -1090,7 +1201,18 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
     lines.push(`});`);
   }
 
-  lines.push(`_scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar}));`);
+  // navigate-wave1b M1 Phase 4 — an OUTLET-RESIDENT <timer>/<poll> belongs to the
+  // swappable region: route its stop into `_scrml_region_cleanups` so a soft nav
+  // AWAY tears it down (`_scrml_teardown_region` drains it), closing the leak
+  // where the old route's timer keeps ticking against detached cells. A
+  // SHELL-level timer keeps the boot-once `_scrml_register_cleanup` (beforeunload)
+  // path so it survives navigation. (Restart-on-return for the region timer rides
+  // §20.8.4 fresh-per-visit re-hydrate — a bounded follow-on; the leak is closed.)
+  if (node && node._outletResident) {
+    lines.push(`if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); } else { _scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); }`);
+  } else {
+    lines.push(`_scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar}));`);
+  }
 
   return lines;
 }
@@ -1118,10 +1240,19 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
   const inputIdJs = inputId ? JSON.stringify(inputId) : JSON.stringify(genVar("input"));
   const scopeVar = JSON.stringify(genVar("scope"));
 
+  // navigate-wave1b #7 — an OUTLET-RESIDENT input handler routes its destroy into
+  // `_scrml_region_cleanups` (drained by _scrml_teardown_region on a soft-nav swap)
+  // so its global document/window listeners are removed, not leaked; a SHELL-level
+  // handler keeps the boot-once `_scrml_register_cleanup` (beforeunload) path.
+  const registerDestroy = (destroyCall: string): string =>
+    (node && node._outletResident)
+      ? `if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => ${destroyCall}); } else { _scrml_register_cleanup(() => ${destroyCall}); }`
+      : `_scrml_register_cleanup(() => ${destroyCall});`;
+
   if (tag === "keyboard") {
     lines.push(`// <keyboard${inputId ? ` id="${inputId}"` : ""}>`);
     lines.push(`_scrml_input_keyboard_create(${inputIdJs}, ${scopeVar});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_keyboard_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_keyboard_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "mouse") {
     const targetAttr = attrMap.get("target");
     let targetExpr = "null";
@@ -1134,7 +1265,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
     }
     lines.push(`// <mouse${inputId ? ` id="${inputId}"` : ""}${targetAttr ? " target=..." : ""}>`);
     lines.push(`_scrml_input_mouse_create(${inputIdJs}, ${scopeVar}, ${targetExpr});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_mouse_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_mouse_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "gamepad") {
     const indexAttr = attrMap.get("index");
     let gamepadIndex = 0;
@@ -1150,7 +1281,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
     }
     lines.push(`// <gamepad${inputId ? ` id="${inputId}"` : ""} index=${gamepadIndex}>`);
     lines.push(`_scrml_input_gamepad_create(${inputIdJs}, ${scopeVar}, ${gamepadIndex});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_gamepad_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_gamepad_destroy(${inputIdJs}, ${scopeVar})`));
   }
 
   return lines;

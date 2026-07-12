@@ -4316,6 +4316,65 @@ function checkLogShadowing(
 }
 
 // ---------------------------------------------------------------------------
+// §20.1 / E-NAV-NO-PATH — navigate() requires a path argument
+// ---------------------------------------------------------------------------
+
+/**
+ * §20.1 (navigate-wave1b finding #5) — `navigate(path)` requires a developer
+ * path string; the FIRST argument is the path and an OPTIONAL second is the
+ * `.Hard` / `.Soft` navigation-type modifier. A `navigate(.Soft)` (the modifier
+ * with NO path) or a bare `navigate()` has no destination — fire E-NAV-NO-PATH
+ * rather than silently lower the bare variant into the path slot.
+ */
+function checkNavigateCall(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const seen = new WeakSet<object>();
+  const isBareVariant = (a: unknown): boolean => {
+    if (!a || typeof a !== "object") return false;
+    const n = a as Record<string, unknown>;
+    if (n.kind === "ident" && typeof n.name === "string" && n.name.startsWith(".")) return true;
+    if (n.kind === "member" && typeof n.property === "string") {
+      const p = (n.object as Record<string, unknown> | undefined);
+      // `Nav.Soft` — a qualified navigation-type variant (heuristic: PascalCase).
+      return /^(Hard|Soft)$/.test(n.property as string) && !!p;
+    }
+    return false;
+  };
+  function walk(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    const callee = n.callee as Record<string, unknown> | undefined;
+    if (n.kind === "call" && callee && callee.kind === "ident" && callee.name === "navigate") {
+      const args = Array.isArray(n.args) ? n.args : [];
+      const hasPath = args.length > 0 && !isBareVariant(args[0]);
+      if (!hasPath) {
+        const span = ((n.span as Span | undefined) ?? fileSpan);
+        errors.push(new TSError(
+          "E-NAV-NO-PATH",
+          "E-NAV-NO-PATH: `navigate(...)` requires a path argument (§20.1). The " +
+          "first argument is the destination URL; `.Hard` / `.Soft` is an OPTIONAL " +
+          "second-position navigation-type modifier, not a path. Write " +
+          "`navigate(\"/path\")` or `navigate(\"/path\", .Hard)`.",
+          span,
+          "error",
+        ));
+      }
+    }
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  for (const node of topNodes) walk(node);
+}
+
+// ---------------------------------------------------------------------------
 // ss16 C3 / W-RENDER-SHADOWED — render() builtin shadowing nudge
 // ---------------------------------------------------------------------------
 
@@ -7041,6 +7100,14 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // SURVEY for follow-up).
   "broadcast",
   "disconnect",
+  // §20.1 — navigate() navigation builtin. A tokenizer/ast-builder keyword,
+  // lowered at codegen (emit-expr.ts) to `_scrml_navigate_soft(path)` (client /
+  // `.Soft`) or `_scrml_navigate(path)` (server / `.Hard`). Allowlisted here so
+  // a bare `navigate("/x")` call does NOT fire a spurious E-SCOPE-001 — the same
+  // omission class the render/log/print/animationFrame entries were added for
+  // (navigate-wave1b; the builtin had been shipping with a fatal scope-check
+  // false-positive that killed every navigate call site).
+  "navigate",
   // §20.6 — log() location-transparent logging builtin. Lowered at codegen
   // (emit-expr.ts) to _scrml_log(side, loc, ...args). Allowlisted here so a
   // bare `log(...)` call (no user-declared `function log`) does NOT fire
@@ -21966,6 +22033,9 @@ function processFile(
     // §20.6.7 / W-LOG-SHADOWED — a user-declared `function log` / `fn log`
     // shadows the location-transparent log() builtin; info-level nudge.
     checkLogShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §20.1 / E-NAV-NO-PATH — navigate() called with no path (a bare `.Soft` /
+    // `.Hard` modifier is not a destination). navigate-wave1b finding #5.
+    checkNavigateCall(fnFieldTopNodes, errors, fileSpan);
     // ss16 C3 / W-RENDER-SHADOWED — a user-declared `function render` / `fn
     // render` shadows the render() client component-render builtin; info-level
     // nudge (mirrors W-LOG-SHADOWED).

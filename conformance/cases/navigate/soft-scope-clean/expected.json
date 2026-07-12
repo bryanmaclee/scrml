@@ -1,0 +1,13 @@
+{
+  "id": "navigate-soft-scope-clean",
+  "description": "§20.1/§20.8.2 (Client Router — navigate-soft-nav Wave-1b). A CLIENT `navigate(\"/reports\")` inside a `<program>` shell compiles clean: it does NOT fire the spurious E-SCOPE-001 the builtin used to trip (it is a first-class navigation builtin, allowlisted in the logic-scope pass alongside render/log/print), no E-OUTLET-* placement error fires, and the shell renders the single addressable `[data-scrml-outlet]` swap region the soft-nav runtime targets.",
+  "language-version": "1.0",
+  "spec": "§20.1, §20.3, §20.8.1, §20.8.2",
+  "rationale": "§20.1: a client-side `navigate(path)` compiles to the soft-navigation pipeline (`_scrml_navigate_soft`), NOT a document reload; the call site must resolve as a builtin (no E-SCOPE-001), and the shell's `<outlet>` emits the `[data-scrml-outlet]` region the swap addresses (§20.8.2).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "notCodePrefixes": ["E-OUTLET-", "E-SCOPE-"],
+    "domAnchored": [{ "selector": "[data-scrml-outlet]", "count": 1 }]
+  }
+}

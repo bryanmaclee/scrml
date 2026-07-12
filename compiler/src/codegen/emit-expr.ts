@@ -514,6 +514,24 @@ function extractAdvanceBareVariantName(arg: any): string | null {
 }
 
 /**
+ * §20.2 — extract an EXPLICIT `navigate(path, .Hard)` / `navigate(path, .Soft)`
+ * variant from the call's SECOND argument node. Accepts the bare-dot ident form
+ * (`.Hard` → `{kind:"ident", name:".Hard"}`, the parsed shape) and a qualified
+ * `Nav.Hard` member form. Returns `"Hard"` / `"Soft"`, or `null` when the arg is
+ * absent / any other shape (the inferred-from-context case, §20.3).
+ */
+function navigateExplicitVariant(arg: any): "Hard" | "Soft" | null {
+  if (!arg || typeof arg !== "object") return null;
+  let name: string | null = null;
+  if (arg.kind === "ident" && typeof arg.name === "string" && arg.name.startsWith(".")) {
+    name = arg.name.slice(1).trim();
+  } else if (arg.kind === "member" && typeof arg.property === "string") {
+    name = arg.property.trim();
+  }
+  return name === "Hard" || name === "Soft" ? name : null;
+}
+
+/**
  * Emit a JavaScript expression string from an ExprNode tree.
  */
 export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
@@ -2521,9 +2539,70 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     return `await ${callee}(${args})`;
   }
 
-  // navigate() → client-side routing
+  // navigate() → §20.1–20.3 / §20.8 navigation lowering.
+  //
+  // The FIRST argument is the developer path; an OPTIONAL second argument is a
+  // built-in variant `.Soft` / `.Hard` (§20.2) — a bare-dot ident node
+  // (`{kind:"ident", name:".Soft"}`) or a qualified `Nav.Soft` member. The
+  // variant, when present, is NOT forwarded to the runtime call — only the path
+  // is — so re-emit the path arg alone rather than reusing the joined `args`.
+  //
+  //   - CLIENT caller (or explicit `.Soft`) → `_scrml_navigate_soft(path)`, the
+  //     §20.8.2 in-place `<outlet>` swap pipeline (fetch SSR HTML → swap →
+  //     rehydrate → View-Transition). NOT a document reload (§20.3).
+  //   - SERVER-escalated caller (or explicit `.Hard`) → `_scrml_navigate(path)`,
+  //     the existing full-document hard navigation (§20.1 hard leg).
+  //
+  // §20.3 note (SURFACED, deferred): a `.Hard` from a client caller "SHALL cause
+  // the compiler to emit a server redirect … escalate the calling function to a
+  // server route if necessary, or emit W-NAV-001 if impossible." True
+  // server-route escalation + the W-NAV-001 escalation-impossible warning is a
+  // §12 route-inference concern outside the Wave-1b RUNTIME pipeline; a client
+  // `.Hard` here lowers to the existing full-document navigation
+  // (`window.location.href`), which IS a hard navigation behaviorally. The
+  // escalation/W-NAV-001 leg lands with the server-emission sub-wave.
   if (node.callee.kind === "ident" && node.callee.name === "navigate") {
-    return `_scrml_navigate(${args})`;
+    // Finding #5 — the modifier `.Hard`/`.Soft` may be the ONLY argument
+    // (`navigate(.Soft)`, no path) or the SECOND (`navigate(path, .Soft)`). Parse
+    // the variant from whichever position holds it; the PATH is the first
+    // NON-variant argument. NEVER emit a bare `.Soft`/`.Hard` as the path.
+    const arg0Variant = navigateExplicitVariant(node.args[0]);
+    let explicit: "Hard" | "Soft" | null;
+    let pathNode: ExprNode | null;
+    if (arg0Variant !== null) {
+      // `navigate(.Soft)` — variant-only, NO path. (The type-system fires
+      // E-NAV-NO-PATH; here we must not emit the variant as a path.)
+      explicit = arg0Variant;
+      pathNode = null;
+    } else {
+      pathNode = (node.args.length > 0 ? (node.args[0] as ExprNode) : null);
+      explicit = navigateExplicitVariant(node.args[1]);
+    }
+    if (pathNode === null) {
+      // No path — malformed call. Emit a harmless no-op (statement + expression
+      // safe) rather than a bogus `_scrml_navigate_soft(".Soft")`.
+      return "(void 0)";
+    }
+    const pathExpr = emitExpr(pathNode, ctx);
+    // Finding #7 — an explicit `.Soft` in a SERVER-escalated context is a no-op
+    // (soft nav needs a browser). Do the server behavior (hard redirect path)
+    // rather than emit `_scrml_navigate_soft` (which would ReferenceError on
+    // `window` server-side).
+    //
+    // W-NAV-SOFT-SERVER (§20.8.7, RESERVED): the lint SHOULD fire here — `ctx.mode`
+    // is the compiler-certain side. It is NOT emitted yet: codegen's
+    // `EmitExprContext.errors` is not reliably drained into the result diagnostic
+    // stream (the same reason the §20.6.7 log-shadowing lint lives in the type
+    // system, not here), and the type-system's `checkNavigateCall` walk has no
+    // per-function server/client placement. Wiring it needs one of those two
+    // channels — a bounded follow-on. The BEHAVIOR (server hard redirect) is
+    // correct regardless.
+    const isServer = ctx.mode === "server";
+    if (explicit === "Soft" && isServer) {
+      return `_scrml_navigate(${pathExpr})`;
+    }
+    const isSoft = explicit === "Soft" || (explicit === null && !isServer);
+    return isSoft ? `_scrml_navigate_soft(${pathExpr})` : `_scrml_navigate(${pathExpr})`;
   }
 
   // render() → client-side component render.

@@ -845,6 +845,66 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
   // Emit wiring — delegable events use document.addEventListener with ancestor
   // walk; non-delegable events use Approach A querySelectorAll + forEach.
+  //
+  // §20.8.2 step 3 (navigate-wave1b) — the non-delegable (element-scoped)
+  // wiring is ALSO collected into a re-runnable `_scrml_nav_rewire(root)`
+  // registered as a soft-nav rehydrator. Delegable click/submit listeners live
+  // on `document` and survive an <outlet> subtree swap on their own; the
+  // element-scoped listeners do NOT (the swapped-in nodes are fresh), so they
+  // are re-attached scoped to the swapped region on each soft navigation
+  // (WITHOUT re-booting the shell). The initial boot still runs the ORIGINAL
+  // inline `document.querySelectorAll` below unchanged (zero behavior change);
+  // the rehydrator only fires from _scrml_rehydrate_region on a swap.
+  const nonDelegatedRewire: string[] = [];
+
+  // §20.8.2 step 3 (navigate-wave1b, finding #1) — the reactive-DISPLAY wiring
+  // (`${@cell}` / inline match/if render effects) is ALSO collected here, scoped
+  // to `root`, so a soft nav RE-BINDS the display to the swapped-in nodes (else
+  // the swap renders frozen — the effects still point at the detached old nodes).
+  // Every display effect (boot AND rehydrate) is created via
+  // `_scrml_region_track(el, _scrml_effect(...))` so, when the element is in the shell
+  // outlet, its disposer is tracked for teardown before the next swap (finding
+  // #2 — no leak / no double-update). Shell display effects (outside the outlet)
+  // fail the closest() check and persist.
+  const reactiveRewire: string[] = [];
+  // Emit a reactive-display block. A REACTIVE block (`rebind`) is emitted ONCE,
+  // into the `_scrml_nav_rewire(root)` rehydrator (`root`-scoped): it runs at
+  // boot via `_scrml_nav_rewire(document)` AND re-runs scoped to the swapped
+  // region on a soft nav (finding #1) — a single emission, so occurrence counts
+  // are unchanged from the pre-Wave-1b inline form. A STATIC one-shot render (no
+  // effect, `rebind=false`) is emitted inline at boot ONLY: a soft nav's
+  // swapped-in SSR HTML already carries the server-rendered value. `body` are the
+  // inner statements — they reference `el` and use `_scrml_region_track(el, …)`
+  // for the effect (so a nav away disposes it, finding #2).
+  // Generalized: emit a `{ const el = <scope>.querySelector('<selector>'); if (el)
+  // { <body> } }` block into the rehydrator (rebind, root-scoped) or inline at
+  // boot (rebind=false, document-scoped). Used for EVERY element-scoped reactive
+  // construct (display, display/visibility toggle, boolean-attr toggle, errors /
+  // render anchors) so a soft nav re-binds it (finding #1) and its region-tracked
+  // effect tears down (finding #2).
+  const pushRebindableSel = (selector: string, body: string[], rebind = true): void => {
+    const wrap = (scope: string, sink: string[], ind: string): void => {
+      sink.push(`${ind}{`);
+      sink.push(`${ind}  const el = ${scope}.querySelector('${selector}');`);
+      sink.push(`${ind}  if (el) {`);
+      for (const b of body) sink.push(`${ind}    ${b}`);
+      sink.push(`${ind}  }`);
+      sink.push(`${ind}}`);
+    };
+    if (rebind) wrap("(root || document)", reactiveRewire, "    ");
+    else wrap("document", lines, "  ");
+  };
+  const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void =>
+    pushRebindableSel(`[data-scrml-logic="${placeholderId}"]`, body, rebind);
+  // Emit a region-tracked reactive-display effect as TWO statements — the bare
+  // `_scrml_effect(function() { <inner> });` (its exact shape preserved for the
+  // codegen-shape tests) followed by `_scrml_region_track(el, <dispose>);` so a
+  // soft nav away disposes it (finding #2). `inner` is the effect body.
+  const regionEffectLines = (inner: string): string[] => [
+    `const _scrml_disp = _scrml_effect(function() { ${inner} });`,
+    `_scrml_region_track(el, _scrml_disp);`,
+  ];
+
   for (const [eventName, entries] of byEventType) {
     const domEvent = eventName.replace(/^on/, ""); // onclick → click
     // gate-found-invalid-js-fix-wave (S141): the handler-registry / dispatch-map
@@ -891,13 +951,21 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
       lines.push(`  };`);
 
-      // Emit one querySelectorAll to wire all handlers for this event type
-      lines.push(`  document.querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
-      lines.push(`    const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
-      lines.push(`    if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
-      lines.push(`  });`);
+      // Wire all handlers for this event type into `_scrml_nav_rewire(root)`
+      // (§20.8.2 step 3) — a SINGLE emission that runs at boot via
+      // `_scrml_nav_rewire(document)` AND re-attaches scoped to the swapped
+      // `root` on a soft nav (the swapped-in nodes are fresh; delegable
+      // click/submit live on `document` and survive on their own).
+      nonDelegatedRewire.push(`    (root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
+      nonDelegatedRewire.push(`      const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
+      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
+      nonDelegatedRewire.push(`    });`);
     }
   }
+
+  // (The `_scrml_nav_rewire` rehydrator — non-delegable handlers + reactive
+  // display — is emitted at the END of the boot body, after Step 9 has collected
+  // the reactive-display rebind lines into `reactiveRewire`.)
 
   // -------------------------------------------------------------------------
   // Step 9: Wire reactive display for logic placeholders
@@ -974,21 +1042,22 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             }
           }
           const cfRenderFn = `_scrml_cf_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-          lines.push(`  {`);
-          lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-          lines.push(`    if (el) {`);
+          // Rebindable (finding #1): the block is emitted inline (boot) AND into
+          // the soft-nav rehydrator (scoped to the swapped region).
+          const cfBody: string[] = [];
           if (refSet.size > 0) {
             // Reactive: define the value computation once, render it now, and
-            // re-render under an effect (the effect re-runs the reads → tracks).
-            lines.push(`      const ${cfRenderFn} = function() { return ${valueExpr}; };`);
-            lines.push(`      _scrml_render_value(el, ${cfRenderFn}());`);
-            lines.push(`      _scrml_effect(function() { _scrml_render_value(el, ${cfRenderFn}()); });`);
+            // re-render under a region-tracked effect (re-runs the reads → tracks).
+            cfBody.push(`const ${cfRenderFn} = function() { return ${valueExpr}; };`);
+            cfBody.push(`_scrml_render_value(el, ${cfRenderFn}());`);
+            cfBody.push(...regionEffectLines(`_scrml_render_value(el, ${cfRenderFn}());`));
           } else {
             // Static scrutinee/condition: one-shot render.
-            lines.push(`      _scrml_render_value(el, ${valueExpr});`);
+            cfBody.push(`_scrml_render_value(el, ${valueExpr});`);
           }
-          lines.push(`    }`);
-          lines.push(`  }`);
+          // Only the reactive variant needs a rehydrator rebind; the static
+          // one-shot is server-rendered in a swapped region.
+          pushRebindableDisplay(placeholderId, cfBody, refSet.size > 0);
         }
         continue;
       }
@@ -1267,32 +1336,45 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
 
         if (conditionCode) {
-          lines.push(`  {`);
-          lines.push(`    // if= mount/unmount controller — marker ${mid}, template ${tid}`);
-          lines.push(`    let _scrml_mr_${suffix} = null;`);
-          lines.push(`    let _scrml_ms_${suffix} = null;`);
-          lines.push(`    function _scrml_if_mount_${suffix}() {`);
-          lines.push(`      _scrml_ms_${suffix} = _scrml_create_scope();`);
-          lines.push(`      _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)});`);
-          lines.push(`    }`);
-          lines.push(`    function _scrml_if_unmount_${suffix}() {`);
-          lines.push(`      if (_scrml_mr_${suffix} !== null) {`);
-          lines.push(`        _scrml_unmount_scope(_scrml_mr_${suffix}, _scrml_ms_${suffix});`);
-          lines.push(`        _scrml_mr_${suffix} = null;`);
-          lines.push(`        _scrml_ms_${suffix} = null;`);
-          lines.push(`      }`);
-          lines.push(`    }`);
-          // Initial mount on first render if condition is true.
-          lines.push(`    if (${conditionCode}) _scrml_if_mount_${suffix}();`);
-          // Reactive update — _scrml_effect subscribes to all reactives in the body.
-          lines.push(`    _scrml_effect(function() {`);
-          lines.push(`      if (${conditionCode}) {`);
-          lines.push(`        if (_scrml_mr_${suffix} === null) _scrml_if_mount_${suffix}();`);
-          lines.push(`      } else {`);
-          lines.push(`        if (_scrml_mr_${suffix} !== null) _scrml_if_unmount_${suffix}();`);
-          lines.push(`      }`);
-          lines.push(`    });`);
-          lines.push(`  }`);
+          // M1 Phase 3 (navigate-wave1b) — the if= mount/unmount controller is a
+          // STATEFUL MACHINE, so it is emitted into `_scrml_nav_rewire(root)`
+          // (runs at boot with `document`, RE-INVOKED scoped to the swapped region
+          // on a soft nav). Idempotent re-entry: the OLD controller's teardown
+          // (unmount current + dispose effect) is region-tracked and drained by
+          // `_scrml_teardown_region` BEFORE the swap, then this block re-runs with
+          // FRESH closure state against the NEW region's marker — no double-mount,
+          // no leaked scope. The marker lookup is narrowed to `(root||document)`;
+          // when the marker is NOT in this region (a shell if= during a region
+          // rehydrate), the whole controller is skipped so no dead effect stacks.
+          reactiveRewire.push(`    {`);
+          reactiveRewire.push(`      // if= mount/unmount controller — marker ${mid}, template ${tid}`);
+          reactiveRewire.push(`      var _scrml_ifm_${suffix} = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(mid)}, (root || document)) : null;`);
+          reactiveRewire.push(`      if (_scrml_ifm_${suffix}) {`);
+          reactiveRewire.push(`        var _scrml_ifa_${suffix} = _scrml_ifm_${suffix}.parentElement || null;`);
+          reactiveRewire.push(`        let _scrml_mr_${suffix} = null;`);
+          reactiveRewire.push(`        let _scrml_ms_${suffix} = null;`);
+          reactiveRewire.push(`        function _scrml_if_mount_${suffix}() {`);
+          reactiveRewire.push(`          _scrml_ms_${suffix} = _scrml_create_scope();`);
+          reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (root || document));`);
+          reactiveRewire.push(`        }`);
+          reactiveRewire.push(`        function _scrml_if_unmount_${suffix}() {`);
+          reactiveRewire.push(`          if (_scrml_mr_${suffix} !== null) {`);
+          reactiveRewire.push(`            _scrml_unmount_scope(_scrml_mr_${suffix}, _scrml_ms_${suffix});`);
+          reactiveRewire.push(`            _scrml_mr_${suffix} = null;`);
+          reactiveRewire.push(`            _scrml_ms_${suffix} = null;`);
+          reactiveRewire.push(`          }`);
+          reactiveRewire.push(`        }`);
+          reactiveRewire.push(`        if (${conditionCode}) _scrml_if_mount_${suffix}();`);
+          reactiveRewire.push(`        var _scrml_ifd_${suffix} = _scrml_effect(function() {`);
+          reactiveRewire.push(`          if (${conditionCode}) {`);
+          reactiveRewire.push(`            if (_scrml_mr_${suffix} === null) _scrml_if_mount_${suffix}();`);
+          reactiveRewire.push(`          } else {`);
+          reactiveRewire.push(`            if (_scrml_mr_${suffix} !== null) _scrml_if_unmount_${suffix}();`);
+          reactiveRewire.push(`          }`);
+          reactiveRewire.push(`        });`);
+          reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_ifa_${suffix}, function() { _scrml_if_unmount_${suffix}(); _scrml_ifd_${suffix}(); });`);
+          reactiveRewire.push(`      }`);
+          reactiveRewire.push(`    }`);
         }
         continue;
       }
@@ -1305,9 +1387,6 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (binding.isReactiveBoolAttr && binding.boolAttrName) {
         const attrName = binding.boolAttrName;
         const dataAttr = `data-scrml-bind-bool-${attrName}`;
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[${dataAttr}="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
         if (binding.condExpr) {
           // Bug 61 — thread synthCellKeys so `disabled=!@form.isValid` (the
           // §41.14 default submit-button gate) routes `@form.isValid` to the
@@ -1317,11 +1396,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // the same condition resolves via _scrml_derived_get).
           const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
           const conditionCode = `(${compiled})`;
-          lines.push(`      if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`);
-          lines.push(`      _scrml_effect(function() { if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); } });`);
+          const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
+          // Rebindable (findings #1/#2): re-binds the boolean-attr toggle scoped to
+          // a swapped region; the effect is region-tracked for teardown.
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
+            toggle,
+            ...regionEffectLines(toggle),
+          ]);
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
         continue;
       }
 
@@ -1333,10 +1415,6 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (binding.isConditionalDisplay || binding.isVisibilityToggle) {
         const hasTransition = binding.transitionEnter || binding.transitionExit;
         const dataAttr = binding.isVisibilityToggle ? "data-scrml-bind-show" : "data-scrml-bind-if";
-
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[${dataAttr}="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
 
         // Build the condition expression string used for evaluation
         let conditionCode: string | undefined;
@@ -1352,46 +1430,47 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           subscribeVars = _ddCond.subscribeVars;
         }
 
+        // Rebindable (findings #1/#2): the if=/show= display toggle re-binds
+        // scoped to a swapped region so it RE-EVALUATES against the new node, and
+        // its region-tracked effect tears down on the next nav.
         if (conditionCode && subscribeVars !== undefined) {
+          const dtBody: string[] = [];
           if (!hasTransition) {
             // No transition — simple display toggle (original behavior)
-            lines.push(`      el.style.display = ${conditionCode} ? "" : "none";`);
-            lines.push(`      _scrml_effect(function() { el.style.display = ${conditionCode} ? "" : "none"; });`);
+            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(...regionEffectLines(`el.style.display = ${conditionCode} ? "" : "none";`));
           } else {
             // Transition-aware display toggle
             const enterClass = binding.transitionEnter ? `"scrml-enter-${binding.transitionEnter}"` : null;
             const exitClass = binding.transitionExit ? `"scrml-exit-${binding.transitionExit}"` : null;
+            const fnName = `_scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
             // Initial state — no animation on first render
-            lines.push(`      el.style.display = ${conditionCode} ? "" : "none";`);
-
-            // Build the transition toggle function
-            lines.push(`      function _scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}() {`);
-            lines.push(`        const _scrml_show = ${conditionCode};`);
-            lines.push(`        if (_scrml_show) {`);
+            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(`function ${fnName}() {`);
+            dtBody.push(`  const _scrml_show = ${conditionCode};`);
+            dtBody.push(`  if (_scrml_show) {`);
             if (enterClass) {
-              lines.push(`          el.style.display = "";`);
-              lines.push(`          el.classList.add(${enterClass});`);
-              lines.push(`          el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${enterClass}); el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    el.style.display = "";`);
+              dtBody.push(`    el.classList.add(${enterClass});`);
+              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${enterClass}); el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              lines.push(`          el.style.display = "";`);
+              dtBody.push(`    el.style.display = "";`);
             }
-            lines.push(`        } else {`);
+            dtBody.push(`  } else {`);
             if (exitClass) {
-              lines.push(`          el.classList.add(${exitClass});`);
-              lines.push(`          el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${exitClass}); el.style.display = "none"; el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    el.classList.add(${exitClass});`);
+              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${exitClass}); el.style.display = "none"; el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              lines.push(`          el.style.display = "none";`);
+              dtBody.push(`    el.style.display = "none";`);
             }
-            lines.push(`        }`);
-            lines.push(`      }`);
-
-            lines.push(`      _scrml_effect(_scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")});`);
+            dtBody.push(`  }`);
+            dtBody.push(`}`);
+            dtBody.push(`const _scrml_disp = _scrml_effect(${fnName});`);
+            dtBody.push(`_scrml_region_track(el, _scrml_disp);`);
           }
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, dtBody);
         }
-
-        lines.push(`    }`);
-        lines.push(`  }`);
         continue;
       }
 
@@ -1570,16 +1649,19 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           const _ifgCond = computeDisplayToggleCondition(binding.ifGuard);
           _guardCond = _ifgCond ? _ifgCond.conditionCode : null;
         }
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
+        // Rebindable (finding #1): emitted inline (boot) AND into the soft-nav
+        // rehydrator (scoped to the swapped region) via pushRebindableDisplay.
+        // The display effect is region-tracked (_scrml_region_track) so a nav
+        // away tears it down (finding #2).
+        const dispBody: string[] = [];
         if (needsAsync) {
+          const asyncRun = `(async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
           if (_guardCond) {
-            lines.push(`      if (${_guardCond}) { (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); }`);
-            lines.push(`      _scrml_effect(function() { if (!(${_guardCond})) return; (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); });`);
+            dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
           } else {
-            lines.push(`      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`);
-            lines.push(`      _scrml_effect(function() { (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); });`);
+            dispBody.push(asyncRun);
+            dispBody.push(...regionEffectLines(`${asyncRun}`));
           }
         } else {
           // markup-as-value (§1.4/§7.4 Pillar 1): node-aware display. A markup-
@@ -1587,15 +1669,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // keeps the byte-identical textContent path. _scrml_render_value
           // (core chunk) dispatches on `instanceof Node` at runtime.
           if (_guardCond) {
-            lines.push(`      if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
-            lines.push(`      _scrml_effect(function() { if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr}); });`);
+            dispBody.push(`if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr});`));
           } else {
-            lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
-            lines.push(`      _scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); });`);
+            dispBody.push(`_scrml_render_value(el, ${rewrittenExpr});`);
+            dispBody.push(...regionEffectLines(`_scrml_render_value(el, ${rewrittenExpr});`));
           }
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
+        pushRebindableDisplay(placeholderId, dispBody);
       } else if (binding.kind == null && typeof expr === "string" && expr.trim() !== "") {
         // Bug 5 Phase 1 (S107, 2026-05-19) — non-reactive non-server-fn
         // default-kind interpolation gets a one-shot textContent write at
@@ -1635,15 +1716,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (standaloneTildeRegex.test(expr)) continue;
 
         const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
         // markup-as-value (§1.4/§7.4 Pillar 1): node-aware one-shot display.
         // A markup-typed value renders into el; a string/primitive keeps the
         // byte-identical textContent path via _scrml_render_value (core chunk).
-        lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
-        lines.push(`    }`);
-        lines.push(`  }`);
+        // Static one-shot (no effect) — inline only; a swapped region gets this
+        // value server-rendered in its SSR HTML (rebind=false).
+        pushRebindableDisplay(placeholderId, [`_scrml_render_value(el, ${rewrittenExpr});`], false);
       }
     }
   }
@@ -1680,27 +1758,40 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       const allBranches: LogicBinding[] = [...condBranches];
       if (elseBranch) allBranches.push(elseBranch);
 
-      lines.push("");
-      lines.push(`  // if-chain: ${chainId}`);
-      lines.push(`  {`);
-      lines.push(`    let _scrml_chain_${chainSlug}_active = null;`);
+      // M1 Phase 3 (navigate-wave1b) — the if-chain is a STATEFUL controller;
+      // emit it into `_scrml_nav_rewire(root)` (boot with `document`, RE-INVOKED
+      // scoped to the swapped region on a soft nav). A PRESENCE gate skips the
+      // whole controller when the chain is not in `root` (a shell chain during a
+      // region rehydrate). Idempotent re-entry: the old controller's teardown
+      // (unmount active mount branches + dispose the effect) is region-tracked +
+      // drained before the swap, then this re-runs with fresh state against the
+      // new region. Marker lookup + wrapper query are narrowed to `(root||document)`.
+      reactiveRewire.push("");
+      reactiveRewire.push(`    // if-chain: ${chainId}`);
+      reactiveRewire.push(`    {`);
+      reactiveRewire.push(`      var _scrml_chain_${chainSlug}_anchor = null;`);
+      reactiveRewire.push(`      var _scrml_chain_${chainSlug}_present = false;`);
 
-      // Per-branch state declarations.
+      // Per-branch state declarations + presence/anchor resolution (scoped).
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
         if (branch.branchMode === "mount") {
-          lines.push(`    let _scrml_chain_${branchSlug}_root = null;`);
-          lines.push(`    let _scrml_chain_${branchSlug}_scope = null;`);
+          reactiveRewire.push(`      var _scrml_chain_${branchSlug}_marker = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(branch.markerId)}, (root || document)) : null;`);
+          reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_marker) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_marker.parentElement || null; }`);
+          reactiveRewire.push(`      let _scrml_chain_${branchSlug}_root = null;`);
+          reactiveRewire.push(`      let _scrml_chain_${branchSlug}_scope = null;`);
         } else {
-          // display-mode: resolve wrapper at startup. The wrapper is the
-          // emit-html-emitted `<div data-scrml-chain-branch="<branchId>">`
-          // (Step 1 dirty-branch path).
-          lines.push(`    const _scrml_chain_${branchSlug}_wrapper = document.querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
+          // display-mode: resolve wrapper at startup (the emit-html-emitted
+          // `<div data-scrml-chain-branch="<branchId>">`), scoped to root.
+          reactiveRewire.push(`      const _scrml_chain_${branchSlug}_wrapper = (root || document).querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
+          reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_wrapper) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_wrapper; }`);
         }
       }
 
-      lines.push(`    function _update_chain_${chainSlug}() {`);
-      lines.push(`      let _next = null;`);
+      reactiveRewire.push(`      if (_scrml_chain_${chainSlug}_present) {`);
+      reactiveRewire.push(`        let _scrml_chain_${chainSlug}_active = null;`);
+      reactiveRewire.push(`        function _update_chain_${chainSlug}() {`);
+      reactiveRewire.push(`          let _next = null;`);
 
       // Condition cascade — same as pre-Phase-2g shape.
       //
@@ -1718,58 +1809,92 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // as before; sharing the helper keeps this `_next` cascade byte-
         // identical to the descendant-effect visibility gate (lockstep).
         const condCode = computeChainBranchCondition(branch.condition) ?? "true";
-        lines.push(`      if (_next === null && (${condCode})) _next = "${branch.branchId}";`);
+        reactiveRewire.push(`          if (_next === null && (${condCode})) _next = "${branch.branchId}";`);
       }
       if (elseBranch) {
-        lines.push(`      if (_next === null) _next = "${elseBranch.branchId}";`);
+        reactiveRewire.push(`          if (_next === null) _next = "${elseBranch.branchId}";`);
       }
 
       // Idempotency guard.
-      lines.push(`      if (_next === _scrml_chain_${chainSlug}_active) return;`);
+      reactiveRewire.push(`          if (_next === _scrml_chain_${chainSlug}_active) return;`);
 
       // Deactivate previous active branch (if any).
-      lines.push(`      if (_scrml_chain_${chainSlug}_active !== null) {`);
-      lines.push(`        switch (_scrml_chain_${chainSlug}_active) {`);
+      reactiveRewire.push(`          if (_scrml_chain_${chainSlug}_active !== null) {`);
+      reactiveRewire.push(`            switch (_scrml_chain_${chainSlug}_active) {`);
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
-        lines.push(`          case ${JSON.stringify(branch.branchId)}:`);
+        reactiveRewire.push(`              case ${JSON.stringify(branch.branchId)}:`);
         if (branch.branchMode === "mount") {
-          lines.push(`            if (_scrml_chain_${branchSlug}_root !== null) {`);
-          lines.push(`              _scrml_unmount_scope(_scrml_chain_${branchSlug}_root, _scrml_chain_${branchSlug}_scope);`);
-          lines.push(`              _scrml_chain_${branchSlug}_root = null;`);
-          lines.push(`              _scrml_chain_${branchSlug}_scope = null;`);
-          lines.push(`            }`);
+          reactiveRewire.push(`                if (_scrml_chain_${branchSlug}_root !== null) {`);
+          reactiveRewire.push(`                  _scrml_unmount_scope(_scrml_chain_${branchSlug}_root, _scrml_chain_${branchSlug}_scope);`);
+          reactiveRewire.push(`                  _scrml_chain_${branchSlug}_root = null;`);
+          reactiveRewire.push(`                  _scrml_chain_${branchSlug}_scope = null;`);
+          reactiveRewire.push(`                }`);
         } else {
-          lines.push(`            if (_scrml_chain_${branchSlug}_wrapper) _scrml_chain_${branchSlug}_wrapper.style.display = "none";`);
+          reactiveRewire.push(`                if (_scrml_chain_${branchSlug}_wrapper) _scrml_chain_${branchSlug}_wrapper.style.display = "none";`);
         }
-        lines.push(`            break;`);
+        reactiveRewire.push(`                break;`);
       }
-      lines.push(`        }`);
-      lines.push(`      }`);
+      reactiveRewire.push(`            }`);
+      reactiveRewire.push(`          }`);
 
       // Activate next branch.
-      lines.push(`      switch (_next) {`);
+      reactiveRewire.push(`          switch (_next) {`);
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
-        lines.push(`        case ${JSON.stringify(branch.branchId)}:`);
+        reactiveRewire.push(`            case ${JSON.stringify(branch.branchId)}:`);
         if (branch.branchMode === "mount") {
-          lines.push(`          _scrml_chain_${branchSlug}_scope = _scrml_create_scope();`);
-          lines.push(`          _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)});`);
+          reactiveRewire.push(`              _scrml_chain_${branchSlug}_scope = _scrml_create_scope();`);
+          reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (root || document));`);
         } else {
-          lines.push(`          if (_scrml_chain_${branchSlug}_wrapper) _scrml_chain_${branchSlug}_wrapper.style.display = "";`);
+          reactiveRewire.push(`              if (_scrml_chain_${branchSlug}_wrapper) _scrml_chain_${branchSlug}_wrapper.style.display = "";`);
         }
-        lines.push(`          break;`);
+        reactiveRewire.push(`              break;`);
       }
-      lines.push(`      }`);
+      reactiveRewire.push(`          }`);
 
-      lines.push(`      _scrml_chain_${chainSlug}_active = _next;`);
-      lines.push(`    }`);
+      reactiveRewire.push(`          _scrml_chain_${chainSlug}_active = _next;`);
+      reactiveRewire.push(`        }`);
 
-      // Initial render + reactive effect.
-      lines.push(`    _update_chain_${chainSlug}();`);
-      lines.push(`    _scrml_effect(_update_chain_${chainSlug});`);
-      lines.push(`  }`);
+      // Initial render + region-tracked reactive effect.
+      reactiveRewire.push(`        _update_chain_${chainSlug}();`);
+      reactiveRewire.push(`        var _scrml_chain_${chainSlug}_disp = _scrml_effect(_update_chain_${chainSlug});`);
+      // Region teardown — unmount active mount branches + dispose the effect.
+      reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_chain_${chainSlug}_anchor, function() {`);
+      for (const branch of allBranches) {
+        const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
+        if (branch.branchMode === "mount") {
+          reactiveRewire.push(`          if (_scrml_chain_${branchSlug}_root !== null) { _scrml_unmount_scope(_scrml_chain_${branchSlug}_root, _scrml_chain_${branchSlug}_scope); _scrml_chain_${branchSlug}_root = null; _scrml_chain_${branchSlug}_scope = null; }`);
+        }
+      }
+      reactiveRewire.push(`          _scrml_chain_${chainSlug}_disp();`);
+      reactiveRewire.push(`        });`);
+      reactiveRewire.push(`      }`);
+      reactiveRewire.push(`    }`);
     }
+  }
+
+  // §20.8.2 step 3 — the element-scoped wiring function. `_scrml_nav_rewire(root)`
+  // attaches this file's non-delegable handlers AND binds the reactive display
+  // scoped to `root`. It is invoked ONCE at boot with `document` (wiring the whole
+  // page), and REGISTERED as a soft-nav rehydrator so it re-runs scoped to the
+  // swapped <outlet> subtree on each navigation (WITHOUT re-booting the shell) —
+  // re-attaching handlers (finding #1) + re-binding display effects that
+  // `_scrml_region_track` disposes on the next nav (finding #2). Delegable
+  // click/submit listeners are wired inline above (boot-only, document-level) and
+  // survive a swap on their own. Registration is guarded on
+  // `_scrml_register_rehydrator` (the 'utilities' runtime chunk) so a page with no
+  // navigate() call — chunk tree-shaken — simply never registers (boot wiring is
+  // unaffected).
+  if (nonDelegatedRewire.length > 0 || reactiveRewire.length > 0) {
+    lines.push("");
+    lines.push("  // --- element-scoped wiring (non-delegable handlers + reactive display); re-run on soft-nav ---");
+    lines.push("  function _scrml_nav_rewire(root) {");
+    for (const l of nonDelegatedRewire) lines.push(l);
+    for (const l of reactiveRewire) lines.push(l);
+    lines.push("  }");
+    lines.push("  _scrml_nav_rewire(document);");
+    lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 
   lines.push("});");
