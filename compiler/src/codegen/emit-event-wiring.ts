@@ -845,6 +845,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
   // Emit wiring — delegable events use document.addEventListener with ancestor
   // walk; non-delegable events use Approach A querySelectorAll + forEach.
+  //
+  // §20.8.2 step 3 (navigate-wave1b) — the non-delegable (element-scoped)
+  // wiring is ALSO collected into a re-runnable `_scrml_nav_rewire(root)`
+  // registered as a soft-nav rehydrator. Delegable click/submit listeners live
+  // on `document` and survive an <outlet> subtree swap on their own; the
+  // element-scoped listeners do NOT (the swapped-in nodes are fresh), so they
+  // are re-attached scoped to the swapped region on each soft navigation
+  // (WITHOUT re-booting the shell). The initial boot still runs the ORIGINAL
+  // inline `document.querySelectorAll` below unchanged (zero behavior change);
+  // the rehydrator only fires from _scrml_rehydrate_region on a swap.
+  const nonDelegatedRewire: string[] = [];
   for (const [eventName, entries] of byEventType) {
     const domEvent = eventName.replace(/^on/, ""); // onclick → click
     // gate-found-invalid-js-fix-wave (S141): the handler-registry / dispatch-map
@@ -896,7 +907,28 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       lines.push(`    const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
       lines.push(`    if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
       lines.push(`  });`);
+
+      // Re-runnable, region-scoped twin (soft-nav rehydration, §20.8.2 step 3).
+      // Closes over the same dispatch map; scopes to the swapped `root`.
+      nonDelegatedRewire.push(`    (root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
+      nonDelegatedRewire.push(`      const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
+      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
+      nonDelegatedRewire.push(`    });`);
     }
+  }
+
+  // §20.8.2 step 3 — register the region-scoped rehydrator so a soft navigation
+  // re-attaches this file's non-delegable handlers to the swapped-in <outlet>
+  // subtree. Guarded on `_scrml_register_rehydrator` (the 'utilities' runtime
+  // chunk) so a page with no navigate() call — where the chunk is tree-shaken —
+  // stays a clean no-op.
+  if (nonDelegatedRewire.length > 0) {
+    lines.push("");
+    lines.push("  // --- soft-nav rehydration: re-attach non-delegable handlers scoped to a swapped region ---");
+    lines.push("  function _scrml_nav_rewire(root) {");
+    for (const l of nonDelegatedRewire) lines.push(l);
+    lines.push("  }");
+    lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 
   // -------------------------------------------------------------------------

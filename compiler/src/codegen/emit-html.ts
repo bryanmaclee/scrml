@@ -1146,13 +1146,24 @@ export function generateHtml(
         // (never a `<div/>`, which HTML does not self-close). Re-entry is safe:
         // the rewritten tag is `div`, so the outlet branch does not re-trigger.
         const outletMarkerAttr = { name: "data-scrml-outlet", value: null };
+        // §20.8.5(3) focus-after-swap (navigate-wave1b) — the region is the
+        // focus target the soft-nav runtime moves keyboard/AT focus to after a
+        // swap. A `tabindex="-1"` makes the container programmatically focusable
+        // (not in the tab order) so `outlet.focus()` works. Skip when the author
+        // already set a tabindex on the `<outlet>` (respect an explicit value).
+        const outletHasTabindex = attrs.some(
+          (a: any) => a && typeof a.name === "string" && a.name.toLowerCase() === "tabindex",
+        );
+        const outletFocusAttrs = outletHasTabindex
+          ? [outletMarkerAttr]
+          : [outletMarkerAttr, { name: "tabindex", value: { kind: "string-literal", value: "-1" } }];
         const outletDivNode = {
           ...node,
           tag: "div",
           tagName: "div",
           selfClosing: false,
-          attributes: [outletMarkerAttr, ...attrs],
-          attrs: [outletMarkerAttr, ...attrs],
+          attributes: [...outletFocusAttrs, ...attrs],
+          attrs: [...outletFocusAttrs, ...attrs],
         };
         emitNode(outletDivNode);
         return;
