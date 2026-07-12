@@ -16,6 +16,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { rewriteNavigateCalls } from "../../src/codegen/rewrite.ts";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { writeFileSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
@@ -157,6 +158,23 @@ describe("§5 — navigate() variant parsing (findings #5/#7)", () => {
     const { serverJs } = compileToClient(src, "nav-srvsoft");
     expect(serverJs).toContain('_scrml_navigate("/x")');
     expect(serverJs).not.toContain("_scrml_navigate_soft");
+  });
+});
+
+describe("§5b — client navigate string-lowering bounds each call (S239 re-review #1)", () => {
+  test("TWO navigate calls in one expression each lower to the correct mode (no cross-contamination)", () => {
+    // The SEVERE mode-inversion bug: a `.Hard` modifier regex spanning an
+    // intervening plain navigate() flipped BOTH modes. Each call must be bounded.
+    const out = rewriteNavigateCalls('navigate("/home") + navigate("/logout", .Hard)', true);
+    expect(out).toBe('_scrml_navigate_soft("/home") + _scrml_navigate("/logout")');
+    // Reversed order — same independence.
+    const out2 = rewriteNavigateCalls('navigate("/logout", .Hard) + navigate("/home")', true);
+    expect(out2).toBe('_scrml_navigate("/logout") + _scrml_navigate_soft("/home")');
+  });
+
+  test("a comma inside a string arg / nested call is not mistaken for the modifier delimiter", () => {
+    expect(rewriteNavigateCalls('navigate(getUrl("a,b"), .Hard)', true)).toBe('_scrml_navigate(getUrl("a,b"))');
+    expect(rewriteNavigateCalls('navigate(cond ? "/a" : "/b")', true)).toBe('_scrml_navigate_soft(cond ? "/a" : "/b")');
   });
 });
 
