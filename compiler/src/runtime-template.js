@@ -2218,12 +2218,25 @@ function _scrml_register_rehydrator(fn) {
 
 // AbortController for the currently in-flight soft-nav fetch (last-nav-wins).
 var _scrml_nav_controller = null;
+// Monotonic nav token — the last-nav-wins backstop when AbortController is
+// unavailable (finding #10: a null controller made the identity check useless,
+// so a slow first fetch could overwrite a fast second nav). Every fetch captures
+// its token; a resolve/reject whose token is stale bails.
+var _scrml_nav_token = 0;
 var _scrml_nav_popstate_wired = false;
+// The pathname currently rendered into the outlet — used to distinguish an
+// in-page #hash popstate (same pathname) from a real route change (finding #8).
+var _scrml_nav_pathname = (typeof window !== "undefined" && window.location) ? window.location.pathname : "";
 
 function _scrml_nav_outlet() {
   return (typeof document !== "undefined")
     ? document.querySelector("[data-scrml-outlet]")
     : null;
+}
+
+// The pathname portion of a nav target (strip query + hash).
+function _scrml_nav_pathname_of(path) {
+  return String(path == null ? "" : path).replace(/[?#][\\s\\S]*$/, "");
 }
 
 // Persist the OUTGOING history entry's scroll position so a later back/forward
@@ -2244,6 +2257,14 @@ function _scrml_nav_ensure_popstate() {
   _scrml_nav_popstate_wired = true;
   window.addEventListener("popstate", function (ev) {
     if (!_scrml_nav_outlet()) return; // no shell outlet → let the browser handle it
+    var newPathname = window.location.pathname;
+    // Finding #8 — an in-page #hash change to the SAME pathname is NOT a route
+    // change: skip the fetch+swap and let native hash scrolling run.
+    if (newPathname === _scrml_nav_pathname && window.location.hash) {
+      _scrml_nav_scroll(null);
+      return;
+    }
+    _scrml_nav_pathname = newPathname;
     var restore = (ev.state && ev.state.__scrml_scroll) ? ev.state.__scrml_scroll : null;
     _scrml_nav_fetch_and_swap(window.location.pathname + window.location.search, restore);
   });
@@ -2265,6 +2286,7 @@ function _scrml_navigate_soft(path) {
   try {
     history.pushState({ __scrml_soft: true }, "", path);
   } catch (e) { _scrml_navigate(path); return; }
+  _scrml_nav_pathname = _scrml_nav_pathname_of(path);
 
   // A fresh navigation scrolls to top / #hash (restore === null).
   _scrml_nav_fetch_and_swap(path, null);
@@ -2277,19 +2299,29 @@ function _scrml_nav_fetch_and_swap(path, restore) {
   if (_scrml_nav_controller) { try { _scrml_nav_controller.abort(); } catch (e) { /* already settled */ } }
   var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
   _scrml_nav_controller = controller;
+  // Finding #10 — the monotonic token is the last-nav-wins backstop that works
+  // even when AbortController is unavailable (controller === null).
+  var myToken = ++_scrml_nav_token;
 
   var opts = { headers: { "X-Scrml-Soft-Nav": "1" }, credentials: "same-origin" };
   if (controller) opts.signal = controller.signal;
 
   fetch(path, opts)
-    .then(function (res) { return res.text(); })
+    .then(function (res) {
+      if (myToken !== _scrml_nav_token) return null; // a newer nav superseded us
+      // Finding #3 — a non-OK (404/500/302→login) or a redirected-to-another-URL
+      // response must NOT be swapped UNDER the pushed URL: hard-navigate to the
+      // FINAL url so the address bar matches and auth/error flows run natively.
+      if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }
+      return res.text();
+    })
     .then(function (html) {
-      if (_scrml_nav_controller !== controller) return; // a newer nav superseded us
+      if (html == null || myToken !== _scrml_nav_token) return;
       _scrml_nav_apply_html(html, path, restore);
     })
     .catch(function (err) {
       if (err && err.name === "AbortError") return;      // superseded — expected
-      if (_scrml_nav_controller !== controller) return;
+      if (myToken !== _scrml_nav_token) return;
       _scrml_navigate(path);                             // transport failure → hard nav
     });
 }
@@ -2314,6 +2346,62 @@ function _scrml_nav_extract_seed(doc) {
   window.__scrml_ssr_state = null; // target has no seed → clear (seed_apply no-ops)
 }
 
+// The set of route client-chunk filenames (name.client.js) a document loads.
+// Two routes served by the SAME <program> chunk share this set; a separate
+// pages/ file references a DIFFERENT client chunk.
+function _scrml_nav_client_chunks(d) {
+  var out = {};
+  if (!d || typeof d.querySelectorAll !== "function") return out;
+  var s = d.querySelectorAll("script[src]");
+  for (var i = 0; i < s.length; i++) {
+    var src = s[i].getAttribute("src") || "";
+    if (/\\.client\\.js(\\?|$)/.test(src)) out[src.split("/").pop()] = true;
+  }
+  return out;
+}
+
+// Finding #4 — same-chunk iff every client chunk the target references is ALREADY
+// loaded in the current document. A target needing a chunk we don't have is a
+// CROSS-ROUTE navigation (a separate pages/ file): the current runtime has no
+// wiring for it, so a soft swap would render frozen, dead markup. Cross-route
+// chunk-loading is Wave-1c; until then, cross-route hard-navigates.
+function _scrml_nav_same_chunk(doc) {
+  var have = _scrml_nav_client_chunks(document);
+  var need = _scrml_nav_client_chunks(doc);
+  for (var k in need) { if (Object.prototype.hasOwnProperty.call(need, k) && !have[k]) return false; }
+  return true;
+}
+
+// Finding #9 — sync a pragmatic head subset across a soft nav: <title>,
+// <meta name="description">, <link rel="canonical">. Fuller head-diffing
+// (arbitrary meta/link/preload) is a noted follow-on.
+function _scrml_nav_sync_head(doc) {
+  try {
+    var t = doc.querySelector("title");
+    if (t) document.title = t.textContent || document.title;
+  } catch (e) { /* non-fatal */ }
+  _scrml_nav_sync_meta(doc, 'meta[name="description"]');
+  _scrml_nav_sync_link(doc, 'link[rel="canonical"]');
+}
+function _scrml_nav_sync_meta(doc, selector) {
+  try {
+    var src = doc.querySelector(selector);
+    if (!src) return;
+    var live = document.head && document.head.querySelector(selector);
+    if (!live && document.head) { live = document.createElement("meta"); live.setAttribute("name", src.getAttribute("name") || ""); document.head.appendChild(live); }
+    if (live) live.setAttribute("content", src.getAttribute("content") || "");
+  } catch (e) { /* non-fatal */ }
+}
+function _scrml_nav_sync_link(doc, selector) {
+  try {
+    var src = doc.querySelector(selector);
+    if (!src) return;
+    var live = document.head && document.head.querySelector(selector);
+    if (!live && document.head) { live = document.createElement("link"); live.setAttribute("rel", src.getAttribute("rel") || ""); document.head.appendChild(live); }
+    if (live) live.setAttribute("href", src.getAttribute("href") || "");
+  } catch (e) { /* non-fatal */ }
+}
+
 // Parse the fetched HTML, extract the target outlet subtree + seed, and swap the
 // live outlet's children (View-Transition-wrapped where available).
 function _scrml_nav_apply_html(html, path, restore) {
@@ -2325,21 +2413,25 @@ function _scrml_nav_apply_html(html, path, restore) {
   var fetchedOutlet = doc.querySelector("[data-scrml-outlet]");
   if (!fetchedOutlet) { _scrml_navigate(path); return; } // target isn't a shell page → hard nav
 
+  // Finding #4 — a cross-route target (needs a client chunk we don't have) would
+  // frozen-swap; hard-navigate so the browser loads the route's own chunk.
+  if (!_scrml_nav_same_chunk(doc)) { _scrml_navigate(path); return; }
+
   // Install the target route's seed BEFORE rehydration so server-authority cells
   // apply the new route's values (§52.8).
   _scrml_nav_extract_seed(doc);
 
-  // Sync the document title (a soft nav should update it).
-  var newTitle = doc.querySelector("title");
-  if (newTitle) { try { document.title = newTitle.textContent || document.title; } catch (e) { /* non-fatal */ } }
+  // Sync <title> + description + canonical (§20.8 head sync, finding #9).
+  _scrml_nav_sync_head(doc);
 
   var newHtml = fetchedOutlet.innerHTML;
   var swap = function () {
-    // Tear down the OUTGOING region's reactive scopes before replacing it.
+    // Tear down the OUTGOING region's reactive effects/subscriptions/timers
+    // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
     liveOutlet.innerHTML = newHtml;
-    // Re-hydrate the swapped-in region (seed + scoped re-wiring) without
-    // re-booting the shell.
+    // Re-hydrate the swapped-in region (seed + scoped re-wiring incl. reactive
+    // display) without re-booting the shell (finding #1).
     _scrml_rehydrate_region(liveOutlet);
     _scrml_nav_focus(liveOutlet);   // §20.8.5(3)
     _scrml_nav_scroll(restore);     // §20.8.5(2)
@@ -2379,8 +2471,12 @@ function _scrml_nav_scroll(restore) {
 
 // Re-hydrate a swapped-in region WITHOUT re-booting the shell (§20.8.2 step 3):
 // apply the region's SSR seed, then run each registered element-scoped
-// rehydrator against the swapped root. Reuses the ordinary boot helpers
-// (_scrml_ssr_seed_apply + the per-file wiring the rehydrators close over).
+// rehydrator against the swapped root. The rehydrators re-attach non-delegable
+// handlers AND re-bind the reactive display (interpolations, inline match/if) to
+// the swapped nodes — the display effects they create for elements in the outlet
+// register their disposers into _scrml_region_cleanups (via _scrml_region_track)
+// so the NEXT nav can tear them down (finding #1 + #2). Reuses the ordinary boot
+// helpers (_scrml_ssr_seed_apply + the per-file wiring the rehydrators close over).
 function _scrml_rehydrate_region(root) {
   if (typeof _scrml_ssr_seed_apply === "function") _scrml_ssr_seed_apply();
   var scope = root || (typeof document !== "undefined" ? document : null);
@@ -2390,18 +2486,21 @@ function _scrml_rehydrate_region(root) {
   }
 }
 
-// Tear down the OUTGOING region's reactive scopes before its subtree is
-// replaced. A control-flow mount that stamps its root with data-scrml-scope has
-// its scope (timers / rAF / cleanups, §6.7.5) destroyed here; shell-level cells
-// and delegated listeners live OUTSIDE the outlet and are untouched. (Full
-// region scope-GC needs the mount sites to stamp data-scrml-scope — a bounded
-// follow-on; this is a safe no-op until they do.)
+// Tear down the OUTGOING region's reactive display effects / subscriptions /
+// timers before its subtree is replaced (finding #2 — TRACK, not query). Every
+// display effect created for an element INSIDE the outlet registered its
+// disposer into _scrml_region_cleanups (at boot AND on each rehydrate, via
+// _scrml_region_track.s closest("[data-scrml-outlet]") check); draining that
+// list stops the old region's reactivity so it neither leaks subscriptions nor
+// double-updates. Shell-level cells + delegated listeners live OUTSIDE the outlet
+// and never registered, so they stay live.
 function _scrml_teardown_region(root) {
-  if (!root || typeof root.querySelectorAll !== "function") return;
-  var stamped = root.querySelectorAll("[data-scrml-scope]");
-  for (var i = 0; i < stamped.length; i++) {
-    var sid = stamped[i].getAttribute("data-scrml-scope");
-    if (sid && typeof _scrml_destroy_scope === "function") _scrml_destroy_scope(sid);
+  if (typeof _scrml_region_cleanups === "undefined") return;
+  var list = _scrml_region_cleanups;
+  _scrml_region_cleanups = [];
+  for (var i = 0; i < list.length; i++) {
+    try { if (typeof list[i] === "function") list[i](); }
+    catch (e) { if (typeof console !== "undefined") console.error("scrml region teardown error:", e); }
   }
 }
 
@@ -3452,6 +3551,31 @@ function _scrml_deep_reactive(value) {
   _scrml_proxy_cache.set(value, proxy);
   _scrml_proxy_targets.set(proxy, value);
   return proxy;
+}
+
+// §20.8.2 Client-Router region reactivity (navigate-wave1b, findings #1/#2).
+//
+// Disposers for reactive-display effects bound to elements INSIDE the persistent
+// shell's outlet. The soft-nav rehydrator wires the outlet's display effects
+// through _scrml_region_track(el, _scrml_effect(fn)) instead of the bare form, so each
+// outlet-region effect's disposer lands here; _scrml_teardown_region drains + runs
+// the list before the next swap (no leak, no double-update). Shell effects
+// (outside the outlet) go through the bare _scrml_effect and persist. A page with
+// no outlet never registers anything (the closest() check fails).
+var _scrml_region_cleanups = [];
+
+// Track a reactive-display effect's disposer for region teardown WHEN its target
+// element is inside the shell outlet. Wraps the disposer returned by a bare
+// _scrml_effect(fn) (the codegen emits _scrml_region_track(el, _scrml_effect(fn)),
+// preserving the _scrml_effect(fn) shape) so the next soft-nav swap can dispose it
+// (no leak / no double-update). Shell effects (element outside the outlet) fail
+// the closest() check and are left untracked so they persist. Returns the
+// disposer unchanged.
+function _scrml_region_track(el, dispose) {
+  if (el && typeof el.closest === "function" && el.closest("[data-scrml-outlet]")) {
+    _scrml_region_cleanups.push(dispose);
+  }
+  return dispose;
 }
 
 /**

@@ -856,6 +856,37 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // inline `document.querySelectorAll` below unchanged (zero behavior change);
   // the rehydrator only fires from _scrml_rehydrate_region on a swap.
   const nonDelegatedRewire: string[] = [];
+
+  // §20.8.2 step 3 (navigate-wave1b, finding #1) — the reactive-DISPLAY wiring
+  // (`${@cell}` / inline match/if render effects) is ALSO collected here, scoped
+  // to `root`, so a soft nav RE-BINDS the display to the swapped-in nodes (else
+  // the swap renders frozen — the effects still point at the detached old nodes).
+  // Every display effect (boot AND rehydrate) is created via
+  // `_scrml_region_track(el, _scrml_effect(...))` so, when the element is in the shell
+  // outlet, its disposer is tracked for teardown before the next swap (finding
+  // #2 — no leak / no double-update). Shell display effects (outside the outlet)
+  // fail the closest() check and persist.
+  const reactiveRewire: string[] = [];
+  // Emit a reactive-display block to the inline boot (`document`-scoped) and,
+  // when `rebind` (the block wires a REACTIVE effect that must re-bind to swapped
+  // nodes), ALSO to the rehydrator buffer (`root`-scoped). A STATIC one-shot
+  // render (no effect) is NOT re-emitted: a soft nav's swapped-in SSR HTML
+  // already carries the server-rendered value, so re-running it client-side is
+  // redundant. `body` are the inner statements — they reference `el` and use
+  // `_scrml_region_track(el, _scrml_effect(...))` for the effect.
+  const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void => {
+    const wrap = (scope: string, sink: string[], ind: string): void => {
+      sink.push(`${ind}{`);
+      sink.push(`${ind}  const el = ${scope}.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+      sink.push(`${ind}  if (el) {`);
+      for (const b of body) sink.push(`${ind}    ${b}`);
+      sink.push(`${ind}  }`);
+      sink.push(`${ind}}`);
+    };
+    wrap("document", lines, "  ");
+    if (rebind) wrap("(root || document)", reactiveRewire, "    ");
+  };
+
   for (const [eventName, entries] of byEventType) {
     const domEvent = eventName.replace(/^on/, ""); // onclick → click
     // gate-found-invalid-js-fix-wave (S141): the handler-registry / dispatch-map
@@ -917,19 +948,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     }
   }
 
-  // §20.8.2 step 3 — register the region-scoped rehydrator so a soft navigation
-  // re-attaches this file's non-delegable handlers to the swapped-in <outlet>
-  // subtree. Guarded on `_scrml_register_rehydrator` (the 'utilities' runtime
-  // chunk) so a page with no navigate() call — where the chunk is tree-shaken —
-  // stays a clean no-op.
-  if (nonDelegatedRewire.length > 0) {
-    lines.push("");
-    lines.push("  // --- soft-nav rehydration: re-attach non-delegable handlers scoped to a swapped region ---");
-    lines.push("  function _scrml_nav_rewire(root) {");
-    for (const l of nonDelegatedRewire) lines.push(l);
-    lines.push("  }");
-    lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
-  }
+  // (The `_scrml_nav_rewire` rehydrator — non-delegable handlers + reactive
+  // display — is emitted at the END of the boot body, after Step 9 has collected
+  // the reactive-display rebind lines into `reactiveRewire`.)
 
   // -------------------------------------------------------------------------
   // Step 9: Wire reactive display for logic placeholders
@@ -1006,21 +1027,22 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             }
           }
           const cfRenderFn = `_scrml_cf_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-          lines.push(`  {`);
-          lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-          lines.push(`    if (el) {`);
+          // Rebindable (finding #1): the block is emitted inline (boot) AND into
+          // the soft-nav rehydrator (scoped to the swapped region).
+          const cfBody: string[] = [];
           if (refSet.size > 0) {
             // Reactive: define the value computation once, render it now, and
-            // re-render under an effect (the effect re-runs the reads → tracks).
-            lines.push(`      const ${cfRenderFn} = function() { return ${valueExpr}; };`);
-            lines.push(`      _scrml_render_value(el, ${cfRenderFn}());`);
-            lines.push(`      _scrml_effect(function() { _scrml_render_value(el, ${cfRenderFn}()); });`);
+            // re-render under a region-tracked effect (re-runs the reads → tracks).
+            cfBody.push(`const ${cfRenderFn} = function() { return ${valueExpr}; };`);
+            cfBody.push(`_scrml_render_value(el, ${cfRenderFn}());`);
+            cfBody.push(`_scrml_region_track(el, _scrml_effect(function() { _scrml_render_value(el, ${cfRenderFn}()); }));`);
           } else {
             // Static scrutinee/condition: one-shot render.
-            lines.push(`      _scrml_render_value(el, ${valueExpr});`);
+            cfBody.push(`_scrml_render_value(el, ${valueExpr});`);
           }
-          lines.push(`    }`);
-          lines.push(`  }`);
+          // Only the reactive variant needs a rehydrator rebind; the static
+          // one-shot is server-rendered in a swapped region.
+          pushRebindableDisplay(placeholderId, cfBody, refSet.size > 0);
         }
         continue;
       }
@@ -1602,16 +1624,19 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           const _ifgCond = computeDisplayToggleCondition(binding.ifGuard);
           _guardCond = _ifgCond ? _ifgCond.conditionCode : null;
         }
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
+        // Rebindable (finding #1): emitted inline (boot) AND into the soft-nav
+        // rehydrator (scoped to the swapped region) via pushRebindableDisplay.
+        // The display effect is region-tracked (_scrml_region_track) so a nav
+        // away tears it down (finding #2).
+        const dispBody: string[] = [];
         if (needsAsync) {
+          const asyncRun = `(async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
           if (_guardCond) {
-            lines.push(`      if (${_guardCond}) { (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); }`);
-            lines.push(`      _scrml_effect(function() { if (!(${_guardCond})) return; (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); });`);
+            dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
+            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { if (!(${_guardCond})) return; ${asyncRun} }));`);
           } else {
-            lines.push(`      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`);
-            lines.push(`      _scrml_effect(function() { (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })(); });`);
+            dispBody.push(asyncRun);
+            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { ${asyncRun} }));`);
           }
         } else {
           // markup-as-value (§1.4/§7.4 Pillar 1): node-aware display. A markup-
@@ -1619,15 +1644,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // keeps the byte-identical textContent path. _scrml_render_value
           // (core chunk) dispatches on `instanceof Node` at runtime.
           if (_guardCond) {
-            lines.push(`      if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
-            lines.push(`      _scrml_effect(function() { if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr}); });`);
+            dispBody.push(`if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
+            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr}); }));`);
           } else {
-            lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
-            lines.push(`      _scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); });`);
+            dispBody.push(`_scrml_render_value(el, ${rewrittenExpr});`);
+            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); }));`);
           }
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
+        pushRebindableDisplay(placeholderId, dispBody);
       } else if (binding.kind == null && typeof expr === "string" && expr.trim() !== "") {
         // Bug 5 Phase 1 (S107, 2026-05-19) — non-reactive non-server-fn
         // default-kind interpolation gets a one-shot textContent write at
@@ -1667,15 +1691,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (standaloneTildeRegex.test(expr)) continue;
 
         const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
         // markup-as-value (§1.4/§7.4 Pillar 1): node-aware one-shot display.
         // A markup-typed value renders into el; a string/primitive keeps the
         // byte-identical textContent path via _scrml_render_value (core chunk).
-        lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
-        lines.push(`    }`);
-        lines.push(`  }`);
+        // Static one-shot (no effect) — inline only; a swapped region gets this
+        // value server-rendered in its SSR HTML (rebind=false).
+        pushRebindableDisplay(placeholderId, [`_scrml_render_value(el, ${rewrittenExpr});`], false);
       }
     }
   }
@@ -1802,6 +1823,23 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       lines.push(`    _scrml_effect(_update_chain_${chainSlug});`);
       lines.push(`  }`);
     }
+  }
+
+  // §20.8.2 step 3 — register the region-scoped rehydrator (soft nav). It
+  // re-attaches this file's non-delegable handlers AND re-binds the reactive
+  // display to the swapped-in <outlet> subtree (WITHOUT re-booting the shell).
+  // Emitted at the END of the boot body so it closes over the handler dispatch
+  // maps + carries every reactive-display rebind line collected during Step 9.
+  // Guarded on `_scrml_register_rehydrator` (the 'utilities' runtime chunk) so a
+  // page with no navigate() call — chunk tree-shaken — stays a clean no-op.
+  if (nonDelegatedRewire.length > 0 || reactiveRewire.length > 0) {
+    lines.push("");
+    lines.push("  // --- soft-nav rehydration: re-wire non-delegable handlers + reactive display scoped to a swapped region ---");
+    lines.push("  function _scrml_nav_rewire(root) {");
+    for (const l of nonDelegatedRewire) lines.push(l);
+    for (const l of reactiveRewire) lines.push(l);
+    lines.push("  }");
+    lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 
   lines.push("});");

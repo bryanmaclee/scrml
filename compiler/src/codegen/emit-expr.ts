@@ -2562,9 +2562,37 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // (`window.location.href`), which IS a hard navigation behaviorally. The
   // escalation/W-NAV-001 leg lands with the server-emission sub-wave.
   if (node.callee.kind === "ident" && node.callee.name === "navigate") {
-    const pathExpr = node.args.length > 0 ? emitExpr(node.args[0] as ExprNode, ctx) : "undefined";
-    const explicit = navigateExplicitVariant(node.args[1]);
-    const isSoft = explicit === "Soft" || (explicit === null && ctx.mode !== "server");
+    // Finding #5 — the modifier `.Hard`/`.Soft` may be the ONLY argument
+    // (`navigate(.Soft)`, no path) or the SECOND (`navigate(path, .Soft)`). Parse
+    // the variant from whichever position holds it; the PATH is the first
+    // NON-variant argument. NEVER emit a bare `.Soft`/`.Hard` as the path.
+    const arg0Variant = navigateExplicitVariant(node.args[0]);
+    let explicit: "Hard" | "Soft" | null;
+    let pathNode: ExprNode | null;
+    if (arg0Variant !== null) {
+      // `navigate(.Soft)` — variant-only, NO path. (The type-system fires
+      // E-NAV-NO-PATH; here we must not emit the variant as a path.)
+      explicit = arg0Variant;
+      pathNode = null;
+    } else {
+      pathNode = (node.args.length > 0 ? (node.args[0] as ExprNode) : null);
+      explicit = navigateExplicitVariant(node.args[1]);
+    }
+    if (pathNode === null) {
+      // No path — malformed call. Emit a harmless no-op (statement + expression
+      // safe) rather than a bogus `_scrml_navigate_soft(".Soft")`.
+      return "(void 0)";
+    }
+    const pathExpr = emitExpr(pathNode, ctx);
+    // Finding #7 — an explicit `.Soft` in a SERVER-escalated context is a no-op
+    // (soft nav needs a browser). Do the server behavior (hard redirect path)
+    // rather than emit `_scrml_navigate_soft` (which would ReferenceError on
+    // `window` server-side). The type-system fires W-NAV-SOFT-SERVER.
+    const isServer = ctx.mode === "server";
+    if (explicit === "Soft" && isServer) {
+      return `_scrml_navigate(${pathExpr})`;
+    }
+    const isSoft = explicit === "Soft" || (explicit === null && !isServer);
     return isSoft ? `_scrml_navigate_soft(${pathExpr})` : `_scrml_navigate(${pathExpr})`;
   }
 

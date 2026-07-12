@@ -3358,7 +3358,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // route through the value-shape wrap (per existing negative-control
       // tests in error-handler-terminator-arms.test.js §8).
       const isStatementShapeStmt = (stmt: string): boolean =>
-        /^(?:_scrml_reactive_set\s*\(|_scrml_engine_[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(|_scrml_navigate\s*\(|_scrml_register_cleanup\s*\(|_scrml_effect\s*\(|_scrml_init_set\s*\()/.test(stmt);
+        /^(?:_scrml_reactive_set\s*\(|_scrml_engine_[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(|_scrml_navigate(?:_soft)?\s*\(|_scrml_register_cleanup\s*\(|_scrml_effect\s*\(|_scrml_init_set\s*\()/.test(stmt);
 
       // S142 gate-tail (surface 8): at TOP-LEVEL `${...}` there is no enclosing
       // function, so a terminal `return X` written in an arm body is invalid JS
