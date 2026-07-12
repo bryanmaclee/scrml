@@ -202,3 +202,45 @@ describe("§6 — navigate() as a match-arm tail: statement-shape + soft (findin
     expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
 });
+
+describe("§6b — a .Hard navigate in a match value-arm is NOT downgraded to soft (S239 verify-#1)", () => {
+  test("the match-arm re-serialized '. Hard' modifier is recognized (whitespace-tolerant)", () => {
+    // The match value-arm path re-serializes the `.Hard` bare-dot modifier with an
+    // interior SPACE (". Hard") by the time rewriteNavigateCalls runs, so a bare
+    // `=== ".Hard"` never matched → a forced-hard navigate silently soft-navved.
+    const out = rewriteNavigateCalls('navigate ( "/logout" , . Hard )', true);
+    expect(out).toContain("_scrml_navigate(");
+    expect(out).not.toContain("_scrml_navigate_soft(");
+    // .Soft form is symmetric (stays soft, modifier stripped).
+    const outSoft = rewriteNavigateCalls('navigate ( "/x" , . Soft )', true);
+    expect(outSoft).toContain("_scrml_navigate_soft(");
+    expect(outSoft).not.toContain(".Soft");
+    expect(outSoft).not.toContain("Soft\"");
+    // False-positive guard: a path literally "Hard" is NEVER treated as the modifier.
+    expect(rewriteNavigateCalls('navigate("Hard")', true)).toBe('_scrml_navigate_soft("Hard")');
+  });
+
+  test("end-to-end: an enum match value-arm lowers .Hard to a HARD nav, soft to soft", () => {
+    const src =
+      `type Dest:enum = .Home | .Away\n` +
+      `<program>\n` +
+      `<x>: Dest = .Home\n` +
+      `<outlet/>\n` +
+      `\${ function nav() {\n` +
+      `  match @x {\n` +
+      `    .Home :> navigate("/home")\n` +
+      `    .Away :> navigate("/logout", .Hard)\n` +
+      `  }\n` +
+      `} }\n` +
+      `<button onclick=nav()>go</button>\n` +
+      `</program>`;
+    const { result, clientJs } = compileToClient(src, "nav-matcharm-hard");
+    expect(errorCodes(result)).toEqual([]);
+    // The soft arm stays soft; the .Hard arm hard-navs with the modifier STRIPPED
+    // (no bogus "Hard" runtime arg, no soft downgrade — the security-adjacent bug).
+    expect(clientJs).toMatch(/_scrml_navigate_soft\(\s*"\/home"\s*\)/);
+    expect(clientJs).toMatch(/_scrml_navigate\(\s*"\/logout"\s*\)/);
+    expect(clientJs).not.toMatch(/_scrml_navigate_soft\(\s*"\/logout"/);
+    expect(clientJs).not.toContain('"Hard"');
+  });
+});
