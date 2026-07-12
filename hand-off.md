@@ -1,89 +1,55 @@
-# scrml — Session 249 (CLOSE) — the verify-harden mega-session
+# scrml — Session 250 (WRAP) — concurrent→leading; commit-lock built; navigate #27 arc (1a landed, 1b banked)
 
-**Date:** 2026-07-11. **Profile:** A (`/boot concurrent`). **Branch-baton successor to S248** (took over
-main after S248's baton merge). A very large session: **verify-harden as a systematic pass** (adversarially
-probe impl-vs-SPEC across covered domains) → 2 waves, ~43 divergences surfaced, **20 fixes landed** incl. **two
-critical security fail-opens**, an async/await language migration, and the whole thing landed in disciplined
-S239-reviewed batches on the shared-checkout concurrent-session infrastructure.
+**Date:** 2026-07-11→12. **Profile:** A (`/boot concurrent` → took the baton → LEADING). Enormous session.
+Booted concurrent to S249, took the branch-baton (S249 wrapped+released), became the single writer to main.
+**Commit-lock released at this wrap** — next boot: `commit-lock.sh status <uuid>` → FREE → acquire.
 
 ## ⚠️ READ FIRST
-- **PUSH HELD** (bryan's standing hold, all session). **main @ `c4332e0d`, 56 ahead of origin, 0 behind.**
-  Nothing pushed. When bryan authorizes push: `git push` (pre-push runs the full suite ~5min; coherence 0/0 after).
-- **COMMIT-LOCK: RELEASED at this wrap** (`commit-lock.sh release S249`) — main-authority is FREE for the next
-  boot. The lock (S250-built, `scrml-support/.../commit-lock.sh`) is the new single-writer signal: **boot runs
-  `commit-lock.sh status` FIRST** (Discipline step 0), never infer leading-vs-concurrent from ps/hand-off.
-- **Oracle 349/349 · full gate 19954/0** at close.
-- **S250 is a concurrent off-main PA** (built the commit-lock in scrml-support; touches no scrml main). Board:
-  `active-sessions/S250.md`. My ack: `active-sessions/2026-07-11-from-S249-to-S250-lock-adopted.md`.
+- **PUSH STATE:** origin/main = **`ac22895e`** (Wave-1a). Everything landed this session is PUSHED (main, scrml-support, flogence all coherence 0/0). No unpushed main work.
+- **COMMIT-LOCK RELEASED** (S250). The lock (`scrml-support/handOffs/active-sessions/commit-lock.sh`) is the who-owns-main signal — boot runs `status <your-session-uuid>` FIRST (Discipline step 0), never infer from ps. See [[feedback_commit_lock_main_authority]] + [[feedback_browser_test_regression_triage]].
+- **S251 is a LIVE concurrent PA** on its own worktree/branch `s251` (bryan's concurrent workflow). It stays off main. Coordinate via the board + the lock.
+- **🔴 Navigate Wave-1b is BANKED, NOT landed** — see the dedicated section. Branch `worktree-agent-ad18282b8c9c2cc10` @ `9c8150fb`.
 
-## ✅ LANDED THIS SESSION (all local, push held)
-**Wave-1 verify-harden (13 fixes, batch `4128610a`)** — engine/reactive/forms/error §19 divergences:
-Rx-1 E-DERIVED-CIRCULAR-DEP (was infinite-loop-to-client) · Rx-2 E-DERIVED-WRITE · Rx-3 W-DERIVED-001 ·
-Rx-6 reactive-map bare-variant · En-D1/En-D4 derived-engine-write · En-D3 derived-engine-match-exhaustiveness ·
-D-ERR-1 failable-match-exhaustiveness · D-ERR-2 E-ERROR-010 (?-propagation) · D-FORM-2/3 compound-path ·
-D-FORM-5 select-coerce · D-FORM-8 bind:checked. (4-reviewer S239 pass; D-FORM-4 flipped to SPEC-amend.)
-**Two SECURITY fail-opens (batch `9113d5ea`):**
-- **JWT auth-bypass** — verifyJwt/signJwt un-awaited in server fns (accept-all). 3 roots: block-splitter `/* */`
-  in brace-ctx + tokenizer `/=/g` regex-mis-lex (export-drop) + `~{}` test-block drop; + fail-closed seed.
-  (S239 caught a block-splitter regression on regex/backtick `/*` — fixed: backtick-track + containment.)
-- **protect-CTE leak** — CTE/comment-prefixed SELECT shipped protected cols unredacted. Fixed CTE+comment scope.
-**Wave-2 clear-FIX fail-opens (batch `c4332e0d`):** D-SF-1 schemaFor-attr-leak · D-MB-2 member-access-match-
-exhaustiveness · D-EP-1 endpoint-arm-body-scope · D-SFN-2 bare-assign `?{}` broken-SQL.
-**async/await MIGRATION (batch `c4332e0d`):** user async/await → hard E-ASYNC/AWAIT/FOR-AWAIT-NOT-IN-SCRML
-(§19.9.8 stated intent; retired the S89 I-ASYNC-USER-SOURCE nudge; stdlib carve-out + `^{}`/`_{}` host-await exempt).
+## ✅ LANDED + PUSHED this session
+- **Commit-lock mechanism** (NEW, scrml-support) — explicit single-writer mutex on main's HEAD (mkdir FS-mutex + claims.md CAS row + heartbeat-lease). Hardened twice live: `heartbeat` auto-heals a dead pid (the S251-false-crash class); `session_uuid` in the holder for deterministic identity; README §COMMIT-LOCK + Discipline step 0. Routed to flogence for the flobase continuity module.
+- **S249's 58-commit verify-harden wave** — merged s249→main + PUSHED (`a37f11e0..ac22895e`), incl. **2 security fail-opens** (JWT auth-bypass, protect-CTE leak) now on origin.
+- **Navigate #27 SPEC §20.8** — the Client Router, Nominal/spec-ahead (`3f4d3917`, pushed). Full axis-by-axis design ruled + banked (scrml-support/docs/deep-dives/navigate-soft-nav-*).
+- **Navigate Wave-1a** — `<outlet>` + `<program>`-shell foundation (`ac22895e`, pushed) — recognition + emit + E-OUTLET-DUPLICATE/OUTSIDE-SHELL + W-OUTLET-ABSENT + 7 conformance cases. S239-reviewed (5 bugs caught+fixed pre-land).
+- **Pre-push hook fix** — recompiles `samples/compilation-tests/` fixtures before the browser check (stale fixtures faked "16 browser fails" — NOT a regression; [[feedback_browser_test_regression_triage]]). `82b61bb2`.
+- **Wrap-debt cleared** — worktrees 51→22, 29 merged branches deleted, board archived (S242-248 → read/).
 
-## 🧭 FORK RULINGS (bryan, banked → design-insights + user-voice)
-- **Fork D = (b)** backport *-NOT-IN-SCRML to path-1 (throw/try+D-ERR-5 done; async/await done as migration).
-- **Fork A = (C)** server-fn/client-reactive TRUST AXIOM: retire E-REACTIVE-003 (marshal is real), add a
-  trust-boundary diagnostic (C-MVP: warn on server-fn read of a derived). **SCOPED not built** — scope draft in
-  scratchpad `forkA-C-trust-boundary-SCOPE.md`. → next session builds it.
-- **Fork B = implement flush()** (§6.6.5) — **NOT DONE, deferred** (small: expose runtime flush + E-REACTIVE-004).
-- **Fork C = validators closed at 14 + custom** → D-FORM-1/6 landed (E-TYPE-031).
-- **D-FORM-4 = amend SPEC** (drop E-ATTR-012, composable-by-design).
-- **⭐ STRATEGIC: parser drain-path-1.** Keep the native-parser (path 2) as path-3's oracle, OFF the V1 path;
-  don't do M5/M6. Path 3 (self-host-v2, real scrml-scrml) = post-V1 prize. Meter: if verify-harden stops
-  finding a declining divergence count OR the freeze slips quarters → M5 earns its cost.
+## 🔴 NAVIGATE WAVE-1b — BANKED (finish next session)
+**Branch `worktree-agent-ad18282b8c9c2cc10` @ `9c8150fb`** (worktree retained under `.claude/worktrees/`). Gate-green
+(19984/0, conformance 359, browser 15/0) BUT the S239 re-review found 9 findings; 2 fixed, 7 remain.
+- **DONE (committed on branch):** M1 region-scope registry (if=/each/if-chains + effects rehydrate + tear down on swap) · `#1` SEVERE mode-inversion regex (rewrite.ts — `.Hard` logout was becoming a soft swap; **security-adjacent**) FIXED `2f374fc3` · `#2` forward-soft-nav hash short-circuit FIXED `9c8150fb`.
+- **REMAINING (fix plan):**
+  - **#5 SHOWSTOPPER (codegen)** — `_scrml_rehydrate_region`→`_scrml_ssr_seed_apply()` is UN-scoped; the fetched route's seed includes SHELL cells at SSR-initial values → a mutated shell cell (nav counter/sidebar) RESETS on every soft-nav (breaks persistent shell). FIX: emit a compile-time `_scrml_shell_cells` set (program-top-level cells, outside outlet/pages) + skip them in rehydrate seed-apply. No runtime-only shortcut (shell/route distinction is compile-time-only).
+  - **#7 leak (codegen)** — `<keyboard>`/`<mouse>`/`<gamepad>` handlers NOT region-routed (only `<timer>`/`<poll>` got `_outletResident`) → global listeners leak on swap. FIX: mirror the `_outletResident` region-cleanup treatment (emit-reactive-wiring.ts:~1108 has the timer pattern).
+  - **#3 follow-on (by design)** — outlet `<timer>`/`<poll>` STOPS on nav-away (leak closed) but does NOT restart on return; deferred deliberately. FIX: make the outlet-resident timer setup re-invocable from the rehydrator (agent was mid-way threading `insideOutlet` emit-html→emit-reactive-wiring).
+  - **#4** focus: `_scrml_nav_focus` targets an h1/h2 with no tabindex → `.focus()` no-op → apply `tabindex=-1` to the focused node (§20.8.5(3)). **#6** nav-race: recheck nav-token inside `startViewTransition(swap)` before swapping. **#8** `_scrml_find_if_marker` per-marker TreeWalker (perf). **#9** `_scrml_nav_sync_meta`/`_link` copy-paste dedupe.
+- **Verify #1 empirically** (rewrite.ts is a binary diff): compile a match value-arm with two navigate calls, confirm each lowers to the correct mode.
+- **Then:** S239 re-review the fix delta → merge branch→main (`git merge --no-ff`; the branch merged main in) → the complete same-chunk soft-nav lands.
 
-## 📋 DEFERRED BACKLOG (next-session; full detail in scratchpad `verify-harden-backlog.md`)
-**Wave-2 GENUINE FORKS (need bryan rulings):** protect-allowlist→DENYLIST redesign (fail-closed-vs-over-strip
-tension; the R2-HIGH — TABLE/paren/dynamic-leader STILL leak) · server-fn closure-capture trust (AUTH, like Fork A)
-· schema-for `;`-multi-call expand-vs-reject · endpoint §18.6/csrf · match-block SPEC tensions.
-**Broad/pre-existing FAIL-OPENS surfaced (clear-ish FIX):** ⚠️ **§18.0.1 arm-body scope-bypass is BROAD** —
-MATCH-expr arms + channel `<onchange>` arms ALSO leak free vars (endpoint fixed; siblings not) · mid-arm-alternation
-drop (non-surgical, ast-builder+type-system+codegen) · derived-engine INIT-ORDER (forced get before set) ·
-fatal-error-writes-dist (compiler emits artifacts on fatal; exit-code is the only gate) · is-some two-word
-bare-attr misparse · bare-ident foreign-init `_={}=`.
-**~66 authorable GAPS** (coverage-growth, no ruling) across all domains.
-**Harness verbs owed:** endpoint foreign-inbound-request verb · realtime __change (ratified, build deferred).
-**OWED SPEC amendments** (Rule 4, deferred this wrap — do next): E-ERROR-010 §19.5.3/.4 + §34 row · drop
-E-ATTR-012 §5.4 + §34 · async/await 3 E-rows (17843/44/45) annotate default-path emit site.
-**OWED wrap-debt (S248's + mine):** worktree cleanup (~30 worktrees — DRY-RUN first, [[feedback_pa_bash_cleanup_dry_run]];
-some locked/#26/mine-merged) · maps refresh (04a483d0 watermark, ~stale) · state.ts · board archive of CLOSED
-S242/244/245/246/247/248 · changelog dated block. Open origin issues: #25 Windows pathFor · #27 navigate soft-nav.
+## 📋 NAVIGATE ARC ROADMAP
+**1a** ✓ (outlet+shell) · **1b** banked (same-chunk runtime — finish #5/#7/#3) · **1c** cross-route chunk-loading (a different-chunk route hard-falls-back today) · **Wave 2** link-boost (`<a>` default-soft + `hard`) · **Wave 3** keep-alive (`<page keep-alive>` data-cache; invalidation deep-dive done). Authority: scrml-support/docs/deep-dives/navigate-* (client-router + SPEC-AMENDMENT + rehydration-mechanism [M1 chosen over M2 re-run-boot — double-init landmine] + keepalive-invalidation).
 
-## 🔬 METHODOLOGY (the irreducible lessons)
-- **Verify-harden works + adversarial S239 is non-negotiable.** The green oracle MASKS fail-opens (it tests what
-  it asserts, not the negative-space). S239 adversarial review caught 2 things a green gate couldn't: the JWT
-  block-splitter regression (regex/backtick `/*`) + the protect allowlist-gap. Green ≠ complete.
-- **Synth-AST misses upstream** (Rx-1: detector 22/22 on synthetic AST, dead in the real pipeline). Probe the real CLI.
-- **A recurring ROOT-CLASS**: member/attr/compound-path resolution blind spots (the checker resolves a plain
-  ident but skips member/attr/compound positions) — behind D-MB-2, D-SF-1, D-EP-1, wave-1 compound-path.
-- **Commit-lock nuance**: `status` ALWAYS prints "concurrent, do NOT commit" (written for a concurrent reader;
-  doesn't compare caller to holder). The holder confirms via `heartbeat` (script refuses non-holders).
-- **Agent transient death**: an agent can die on ConnectionRefused with its commits already ON the branch —
-  re-check the branch tip + SendMessage-resume (the JWT agent finished this way twice).
+## 📋 OTHER OPEN THREADS
+- **#26 P0 (Peter)** — CANNOT reproduce on Linux (all 3 SQL-bearing variants await correctly). Replied asking Peter for a clean `rm -rf dist/` rebuild (likely stale artifact) vs Windows-specific. Ball with Peter. **No Windows CI — Peter is the sole canary (4th OS-path issue).**
+- **#25** Windows nested-page `pathFor` `\`vs`/` 404 (clean fix; pathFor partly in api.js).
+- **Deferred wrap-debt:** maps refresh (Wave-1a landed; not regenerated), `state.ts` known-gaps regen, master-list §0 currency. ~20 unmerged worktree branches need per-branch triage.
 
 ## 🚦 STATE @ CLOSE
-- git: main `c4332e0d`, 56 ahead of origin (0 behind), PUSH HELD. Working tree clean post-wrap.
-- lock: RELEASED (S249). Next boot: `commit-lock.sh status` → 🟢 FREE → acquire on baton.
-- worktrees: ~30 present (this session's ~15 fix/review + S248's + locked) — cleanup owed (dry-run).
-- oracle 349/349 · gate 19954/0.
+- git: main `ac22895e`, origin coherent (0/0). scrml-support + flogence pushed. Wave-1b on its branch (retained). commit-lock RELEASED. conformance 356 at main.
+- S251 live concurrent (own branch). Board: active-sessions/S250.md.
+
+## Methodology (the irreducible)
+- **S239 review earned its keep repeatedly** — green gate + happy-path browser tests green'd broken soft-nav THREE times (frozen content, no-op teardown, security-adjacent mode-inversion); the adversarial workflow caught each. "It swaps" ≠ "it works." [[feedback_adversarial_verify_not_confirmatory]]
+- **Stale-fixture trap** — browser pre-push reads pre-compiled `samples/compilation-tests/dist/`; recompile before trusting; compare WHOLE-SUITE not isolated files. [[feedback_browser_test_regression_triage]]
+- **commit-lock false-crash** — wrong/dead pid ≠ crash; tool verdict is authoritative; surface, don't conclude. [[feedback_commit_lock_main_authority]]
+- **Repeated transient agent death** — huge-context agent hit stream instability; ~2 crashes → PA-direct; commit-after-each-fix salvages. [[feedback_repeated_dispatch_crash_pa_direct]]
 
 ## pa.md directives in force
-R1-R5 · S239 adversarial (incl PA-side + resumable-agent) · S138 R26 empirical · S67 file-delta + git-apply-3way
-for concurrent same-file regions · S147 coherence · commit-lock (S250) · branch-baton (concurrent) · commit-to-main
-only after authz (baton = authz; push separately held) · orchestrate-don't-grind + default-GO.
+R1-R5 · S239 adversarial (PA-side workflow review; caught a security-adjacent bug) · S138 R26 · commit-lock (S250, released) · branch-baton (S251 live) · commit-to-main after authz · orchestrate-don't-grind + default-GO.
 
 ## Tags
-#session-249 #close #verify-harden #20-fixes #jwt-auth-bypass #protect-cte #async-await-migration #4-fork-rulings
-#parser-drain-path-1 #s239-earned-its-keep #branch-baton #commit-lock #push-held #56-ahead
+#session-250 #concurrent-to-leading #commit-lock-built #navigate-27-arc #wave-1a-landed-pushed #wave-1b-banked #s239-earned-keep-3x #security-mode-inversion-caught #issue-26-ball-with-peter #enormous-session
