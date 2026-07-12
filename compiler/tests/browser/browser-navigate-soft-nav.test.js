@@ -670,3 +670,27 @@ describe("finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehy
     expect(window._scrml_reactive_get("accounts")).toEqual([{ id: 1, name: "ssr-initial" }]);
   });
 });
+
+describe("finding #9 — deduped head sync applies description + canonical on a soft nav", () => {
+  test("the description <meta> and canonical <link> are synced from the fetched route", async () => {
+    const { html, clientJs } = compileInline(SHELL);
+    mount(html, clientJs);
+    // Seed the live head with initial description + canonical.
+    document.head.innerHTML =
+      '<meta name="description" content="old desc"><link rel="canonical" href="/old">';
+    // The fetched route carries a NEW description + canonical in its <head>.
+    const routeDoc =
+      "<!DOCTYPE html><html><head><title>Route</title>" +
+      '<meta name="description" content="new desc"><link rel="canonical" href="/new">' +
+      '</head><body><div data-scrml-outlet tabindex="-1"><p>two</p></div></body></html>';
+    mockFetch({ "/page2": routeDoc });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // _scrml_nav_sync_head_el (the deduped meta/link helper) copied both across.
+    expect(document.head.querySelector('meta[name="description"]').getAttribute("content")).toBe("new desc");
+    expect(document.head.querySelector('link[rel="canonical"]').getAttribute("href")).toBe("/new");
+    // Cleanup so head residue does not leak into other tests.
+    document.head.innerHTML = "";
+  });
+});

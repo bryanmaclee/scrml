@@ -2404,25 +2404,24 @@ function _scrml_nav_sync_head(doc) {
     var t = doc.querySelector("title");
     if (t) document.title = t.textContent || document.title;
   } catch (e) { /* non-fatal */ }
-  _scrml_nav_sync_meta(doc, 'meta[name="description"]');
-  _scrml_nav_sync_link(doc, 'link[rel="canonical"]');
+  _scrml_nav_sync_head_el(doc, 'meta[name="description"]', "meta", "name", "content");
+  _scrml_nav_sync_head_el(doc, 'link[rel="canonical"]', "link", "rel", "href");
 }
-function _scrml_nav_sync_meta(doc, selector) {
+// #9 — sync one head element (a <meta> or a <link>) from the fetched document into
+// the live <head> across a soft nav: find (or create) it by selector, carry its
+// identity attribute (keyAttr: name/rel) on create, then copy its value attribute
+// (valueAttr: content/href). Dedupes the former _scrml_nav_sync_meta/_link twins.
+function _scrml_nav_sync_head_el(doc, selector, tag, keyAttr, valueAttr) {
   try {
     var src = doc.querySelector(selector);
     if (!src) return;
     var live = document.head && document.head.querySelector(selector);
-    if (!live && document.head) { live = document.createElement("meta"); live.setAttribute("name", src.getAttribute("name") || ""); document.head.appendChild(live); }
-    if (live) live.setAttribute("content", src.getAttribute("content") || "");
-  } catch (e) { /* non-fatal */ }
-}
-function _scrml_nav_sync_link(doc, selector) {
-  try {
-    var src = doc.querySelector(selector);
-    if (!src) return;
-    var live = document.head && document.head.querySelector(selector);
-    if (!live && document.head) { live = document.createElement("link"); live.setAttribute("rel", src.getAttribute("rel") || ""); document.head.appendChild(live); }
-    if (live) live.setAttribute("href", src.getAttribute("href") || "");
+    if (!live && document.head) {
+      live = document.createElement(tag);
+      live.setAttribute(keyAttr, src.getAttribute(keyAttr) || "");
+      document.head.appendChild(live);
+    }
+    if (live) live.setAttribute(valueAttr, src.getAttribute(valueAttr) || "");
   } catch (e) { /* non-fatal */ }
 }
 
