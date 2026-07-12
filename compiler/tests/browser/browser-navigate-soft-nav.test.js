@@ -562,6 +562,41 @@ const SHELL5 = [
   '</program>',
 ].join("\n");
 
+describe("finding #6 — a stale swap is dropped when a newer nav supersedes it mid-transition", () => {
+  test("under a DEFERRED startViewTransition, a superseded swap does NOT overwrite the newer nav", async () => {
+    const { html, clientJs } = compileInline(SHELL);
+    mount(html, clientJs);
+
+    // Shim startViewTransition to DEFER the swap callback (as a real browser does),
+    // capturing them so we can control run order. This is the window finding #6
+    // closes: the token can change between apply-html and the deferred swap.
+    const pending = [];
+    document.startViewTransition = (cb) => { pending.push(cb); return { finished: Promise.resolve(), ready: Promise.resolve(), updateCallbackDone: Promise.resolve() }; };
+
+    mockFetch({ "/first": ssrDoc('<p id="r">FIRST</p>'), "/second": ssrDoc('<p id="r">SECOND</p>') });
+
+    // Nav A resolves + queues swapA (nav token 1). Nav B resolves + queues swapB
+    // (nav token 2 — the current one).
+    window._scrml_navigate_soft("/first");
+    await flush();
+    window._scrml_navigate_soft("/second");
+    await flush();
+    expect(pending.length).toBe(2);
+
+    // Run the deferred swaps with the STALE one (swapA) LAST — modelling a
+    // real-browser transition where the older swap fires after the newer took over.
+    pending[1](); // swapB — token 2 === current 2 → applies SECOND
+    pending[0](); // swapA — token 1 !== current 2 → bails (the #6 guard)
+
+    const r = document.querySelector("[data-scrml-outlet] #r");
+    expect(r).not.toBeNull();
+    // Without the guard, swapA would clobber SECOND with stale FIRST content.
+    expect(r.textContent).toBe("SECOND");
+
+    delete document.startViewTransition;
+  });
+});
+
 describe("finding #7 — an outlet <keyboard> listener is removed on swap (no leak)", () => {
   test("the swapped-OUT region's keyboard handler is torn down; a shell handler survives", async () => {
     const shell = [

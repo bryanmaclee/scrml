@@ -2341,7 +2341,7 @@ function _scrml_nav_fetch_and_swap(path, restore) {
     })
     .then(function (html) {
       if (html == null || myToken !== _scrml_nav_token) return;
-      _scrml_nav_apply_html(html, path, restore);
+      _scrml_nav_apply_html(html, path, restore, myToken);
     })
     .catch(function (err) {
       if (err && err.name === "AbortError") return;      // superseded — expected
@@ -2428,7 +2428,7 @@ function _scrml_nav_sync_link(doc, selector) {
 
 // Parse the fetched HTML, extract the target outlet subtree + seed, and swap the
 // live outlet's children (View-Transition-wrapped where available).
-function _scrml_nav_apply_html(html, path, restore) {
+function _scrml_nav_apply_html(html, path, restore, token) {
   var liveOutlet = _scrml_nav_outlet();
   if (!liveOutlet) return;
   var doc;
@@ -2450,6 +2450,11 @@ function _scrml_nav_apply_html(html, path, restore) {
 
   var newHtml = fetchedOutlet.innerHTML;
   var swap = function () {
+    // #6 — re-check the nav token INSIDE the swap. Under startViewTransition the
+    // swap runs ASYNCHRONOUSLY (the browser defers it), so a fast second nav can
+    // bump _scrml_nav_token between apply-html and this callback; without this
+    // guard we would tear down + swap in STALE content over the newer nav.
+    if (typeof token === "number" && token !== _scrml_nav_token) return;
     // Tear down the OUTGOING region's reactive effects/subscriptions/timers
     // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
