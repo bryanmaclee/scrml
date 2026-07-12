@@ -218,6 +218,21 @@ describe("§20.8.2 — soft navigation swaps the <outlet> in place", () => {
     expect(active === live || (live.contains && live.contains(active))).toBe(true);
   });
 
+  test("finding #4 — the focus target heading is made focusable (tabindex=-1)", async () => {
+    // A heading is not focusable without a tabindex, so a bare .focus() is a no-op
+    // in a real browser. The runtime must stamp tabindex="-1" on the target so
+    // §20.8.5(3) focus actually lands. (happy-dom focuses anything, so we assert the
+    // browser-agnostic observable — the tabindex — not the activeElement.)
+    const { html, clientJs } = compileInline(SHELL);
+    mount(html, clientJs);
+    mockFetch({ "/page2": ssrDoc("<h2 id=\"hd\">Heading</h2><p>body</p>") });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+    const hd = document.querySelector("[data-scrml-outlet] #hd");
+    expect(hd).not.toBeNull();
+    expect(hd.getAttribute("tabindex")).toBe("-1");
+  });
+
   test("§52.8 — the target route's SSR seed is applied before hydration", async () => {
     // A server-authority cell so the shell carries a seed-apply path.
     const shell = [

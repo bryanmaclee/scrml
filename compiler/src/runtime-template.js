@@ -2475,7 +2475,14 @@ function _scrml_nav_focus(outlet) {
   if (!outlet) return;
   var target = outlet.querySelector("h1, h2, [autofocus]") || outlet;
   try {
-    if (target === outlet && !outlet.hasAttribute("tabindex")) outlet.setAttribute("tabindex", "-1");
+    // #4 — a heading (h1/h2) or the outlet <div> is NOT focusable without a
+    // tabindex, so a bare .focus() is a silent no-op (§20.8.5(3) unmet). Give the
+    // target a programmatic tabindex="-1" (script-focusable, kept OUT of the tab
+    // order) so focus actually lands. An [autofocus] control is already natively
+    // focusable — leave its tab order intact.
+    if (!target.hasAttribute("tabindex") && !target.hasAttribute("autofocus")) {
+      target.setAttribute("tabindex", "-1");
+    }
     target.focus();
   } catch (e) { /* focus can throw on a detached/hidden node — non-fatal */ }
 }
