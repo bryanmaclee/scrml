@@ -1,0 +1,3 @@
+<program capabilities=[network("a.com"), teleport]>
+<div>hi</div>
+</>

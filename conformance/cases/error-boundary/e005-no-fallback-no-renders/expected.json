@@ -1,0 +1,13 @@
+{
+  "id": "error-boundary-e005-no-fallback-no-renders",
+  "description": "§19.6.3 item 3 / §19.6.6 — the E-ERROR-005 static-exhaustiveness FIRE case. An `<errorBoundary>` with NO `fallback` attribute wraps a `!`-call whose reachable error variants (NotFound, Timeout) each have NO `renders` clause. Per the §19.6.5 priority order there is neither a variant `renders` (priority 1) nor a boundary `fallback` (priority 2), so the boundary has nothing to display for the caught variant → E-ERROR-005. This is the positive twin of the `fallback` / `variant-renders` clean cases: those provide coverage and stay silent; this one removes both coverage sources and pins the compile error. The boundary still suppresses E-ERROR-002 (the call is inside a boundary), so the unhandled-call error MUST NOT co-fire.",
+  "language-version": "1.0",
+  "spec": "§19.6.3, §19.6.5, §19.6.6",
+  "source-test": "compiler/tests/conformance/conf-error-boundary.test.js",
+  "rationale": "§19.6.6: the compiler SHALL verify at compile time that every error variant reachable inside a boundary is covered by a `renders` clause or the boundary's `fallback`; failure SHALL be E-ERROR-005. §19.6.3 item 3 names it explicitly for the no-renders + no-fallback shape. §19.6.6 also states a `!`-call inside a boundary SHALL NOT trigger E-ERROR-002 — the boundary satisfies the handling requirement even when it is under-specified for display — so E-ERROR-002 stays silent.",
+  "expect": {
+    "codes": ["E-ERROR-005"],
+    "notCodes": ["E-ERROR-002"],
+    "severity": { "E-ERROR-005": "error" }
+  }
+}

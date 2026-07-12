@@ -1,0 +1,7 @@
+${
+    type Game:enum = { Title, Playing }
+}
+<engine for=Game initial=.Title>
+    <Title rule=.Playing effect=log("go")></>
+    <Playing rule=.Title></>
+</>

@@ -1,0 +1,9 @@
+<program db="sqlite:./orders.db">
+<price server> = 10
+function bump() : number {
+    result = ?{`UPDATE prices SET n = ${@price} + 1 RETURNING n`}
+    return result
+}
+<button id="b" onclick=@price = bump()>Bump</>
+<p id="p">Price: ${@price}</>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-ontransition-once-if-attrs",
+  "description": "§51.0.H — the built-in `<onTransition>` attributes `once` (bare — runs at most ONCE for the engine's lifetime) and `if=expr` (conditional gating — fires only when expr is true at transition time) are recognized and COMPILE CLEAN. Two `<onTransition to=.Playing>` handlers on the same from-state, one `once`, one `if=`-gated, parse as valid built-in attributes (not W-ATTR-001 unknown-attribute warnings) and do not fire any E-ENGINE-EFFECT-* diagnostic. Pins the §51.0.H attribute table's `once` / `if=` rows.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "source-test": "compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js",
+  "rationale": "§51.0.H attribute table: `once` is a bare attribute (handler runs at most once then is dropped); `if=expr` gates the handler on a transition-time condition. Both are built-in `<onTransition>` attributes and compile clean — no W-ATTR-001, no E-ENGINE-EFFECT-* diagnostic.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-ATTR-001"],
+    "notCodePrefixes": ["E-ENGINE-EFFECT-"]
+  }
+}

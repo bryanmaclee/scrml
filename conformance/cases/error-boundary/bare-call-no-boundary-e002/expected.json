@@ -1,0 +1,13 @@
+{
+  "id": "error-boundary-bare-call-no-boundary-e002",
+  "description": "§19.4.3 / §19.6.6 — the boundary-ABSENT contrast. A `!`-call in markup with NO enclosing `<errorBoundary>` (and no match, `?`, or `!{}`) is unhandled → E-ERROR-002. This is the negative space that motivates `<errorBoundary>`: §19.6.6 states that inside a boundary the same call does NOT fire E-ERROR-002 because the boundary satisfies the handling requirement — so the ONLY structural difference between this fire case and the sibling clean `fallback` case is the presence of the boundary. E-ERROR-005 MUST NOT fire (there is no boundary whose coverage could be incomplete).",
+  "language-version": "1.0",
+  "spec": "§19.4.3, §19.6.6",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "rationale": "§19.4.3: the caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`; an unhandled `!`-call SHALL be E-ERROR-002. With no boundary present the markup interpolation `${loadItem(...)}` handles the result in none of the four ways → E-ERROR-002. E-ERROR-005 is boundary-scoped and cannot fire without a boundary.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "notCodes": ["E-ERROR-005"],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "reactive-server-fn-cps-marshal-derived-warn",
+  "description": "§6.6.9 / §19.9.9 (RULING: THE SPLIT) — a CPS-split fn (`@lastRows = ?{…}`) reading a `const <total>` DERIVED marshals it (client stub sends `{ \"total\": _scrml_derived_get(\"total\") }`, server reads `_scrml_body[\"total\"]`) AND fires W-SERVER-DERIVED-MARSHAL (severity warning): a client-computed derived aggregate is a client-supplied snapshot worth a trust nudge, even though it now works. NOT an error (the value crosses the wire). Asserts the warning fires and E-REACTIVE-003 stays absent.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9: a CPS fn marshals a derived read AND warns (W-SERVER-DERIVED-MARSHAL) — the round-trip works but the value is a client-computed snapshot, not server-recomputed.",
+  "expect": {
+    "codes": ["W-SERVER-DERIVED-MARSHAL"],
+    "notCodes": ["E-REACTIVE-003"],
+    "severity": { "W-SERVER-DERIVED-MARSHAL": "warning" }
+  }
+}

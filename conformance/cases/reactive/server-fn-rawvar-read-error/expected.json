@@ -1,0 +1,12 @@
+{
+  "id": "reactive-server-fn-rawvar-read-error",
+  "description": "§6.6.9 E-REACTIVE-003 (RULING A, broadening) — the SAME error fires for a raw mutable `@var` read, not just a derived. `saveOrder()` escalates via `?{}` SQL and reads the client-side mutable `@price`; the read lowers to `_scrml_body[\"price\"]`, which a non-CPS server-fn stub never sends, so `@price` resolves to `undefined` server-side. The pre-S250 draft scoped E-REACTIVE-003 to derived-only; it now covers ANY free client cell (the raw-@var read has the identical not-transported failure). Incidental W-PROGRAM-001 / W-SQL-ROW-UNTYPED ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9: 'E-REACTIVE-003 now covers ANY free client cell read in a wholly-server function; the derived case is the sharpest instance.' A mutable `@var` read in a server fn is not transported and resolves to undefined exactly as a derived read does.",
+  "expect": {
+    "codes": ["E-REACTIVE-003"],
+    "notCodes": [],
+    "severity": { "E-REACTIVE-003": "error" }
+  }
+}

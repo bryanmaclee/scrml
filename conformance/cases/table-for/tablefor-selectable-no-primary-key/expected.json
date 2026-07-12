@@ -1,0 +1,11 @@
+{
+  "id": "tablefor-selectable-no-primary-key",
+  "description": "§41.16.8 — `selectable=@cell` on `<tableFor for=T>` where struct `T` has NO `id` field AND no `selectedBy=\"field\"` override fires E-TABLEFOR-NO-PRIMARY-KEY. `Item` has `{ sku, name }` (no `id`); the selection surface needs a primary-key field to track selected rows. Exercises the `selectable=` selection surface, which no existing table-for case reaches. Fix: add an `id` field, OR add `selectedBy=\"sku\"` to name the PK explicitly. (Incidental W-PROGRAM-001 + W-STDLIB-SEED-FAILCLOSED co-fire; superset match.)",
+  "language-version": "1.0",
+  "spec": "§41.16, §41.16.8",
+  "rationale": "§41.16.8 E-TABLEFOR-NO-PRIMARY-KEY: `selectable=@cell` requires a primary key — a field named `id` or an explicit `selectedBy=` override — so the selection surface can track which rows are selected. Absent both, the compiler cannot key the selection and rejects.",
+  "expect": {
+    "codes": ["E-TABLEFOR-NO-PRIMARY-KEY"],
+    "notCodes": ["E-TABLEFOR-TYPE-NOT-STRUCT", "E-TABLEFOR-ROWS-MISSING"]
+  }
+}

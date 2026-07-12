@@ -1,0 +1,11 @@
+{
+  "id": "reactive-server-fn-param-passthrough-clean",
+  "description": "§6.6.9 escape hatch #1 (RULING A) — passing the client value as an EXPLICIT ARGUMENT is clean. `saveOrder(total)` reads the bare parameter `total` (never `@total`), and the call site `saveOrder(@total)` evaluates `@total` client-side and passes it as an argument — function arguments ARE marshalled into the request body, so the value is transported. No E-REACTIVE-003. This is the corrected form of the server-fn-derived-read-error case. Asserts the whole family stays absent.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9 fix (1): 'Pass the value as an explicit argument. Function arguments ARE marshalled into the request body. Give the function a parameter and read the parameter (a bare name, not @cell); the caller passes the client cell at the call site.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-REACTIVE-003"]
+  }
+}

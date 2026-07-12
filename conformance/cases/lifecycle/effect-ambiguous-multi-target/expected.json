@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-effect-ambiguous-multi-target",
+  "description": "§51.0.H Form 1 — the `effect=` attribute is legal ONLY on a SINGLE-target `rule=`. Here `.Title` has a multi-target `rule=(.Playing | .Paused)` AND an `effect=`, which is ambiguous (which target fires the effect?) → E-ENGINE-EFFECT-AMBIGUOUS. This is the negative-space of the `on-transition-to` runtime case (which uses the multi-target Form 2 `<onTransition to=.X>` instead precisely because effect= cannot disambiguate). The SPEC-sanctioned fix is to move the effect into a `<onTransition to=.Playing>` child.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "source-test": "compiler/tests/unit/b17-3-typer-diagnostics-ontransition-effect.test.js",
+  "rationale": "§51.0.H Form 1: `effect=` is legal ONLY when `rule=` is single-target; combining `effect=` with a multi-target `rule=` is ambiguous → E-ENGINE-EFFECT-AMBIGUOUS. The multi-target case must use Form 2 `<onTransition to=.Variant>` children, which name the specific edge per effect.",
+  "expect": {
+    "codes": ["E-ENGINE-EFFECT-AMBIGUOUS"],
+    "notCodes": [],
+    "severity": { "E-ENGINE-EFFECT-AMBIGUOUS": "error" }
+  }
+}

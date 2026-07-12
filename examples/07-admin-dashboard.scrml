@@ -30,13 +30,18 @@
       <roleFilter> = "all"
       <allUsers>: User[] = []   // S105: hoisted to a reactive cell so tableFor's rows= can reference it
 
-      function fetchUsers() {
+      // §6.6.9 — a server-escalated fn cannot read client cells (@search /
+      // @roleFilter live in the browser; the server would see `undefined`).
+      // Take the filter values as explicit parameters; the caller passes the
+      // client cells as arguments (`fetchUsers(@search, @roleFilter)`), which the
+      // compiler marshals into the request body.
+      function fetchUsers(search: string, roleFilter: string) {
         lift ?{`
           SELECT id, username, email, role, joined
           FROM users
           WHERE
-            (${@search} = "" OR username LIKE ${"%" + @search + "%"} OR email LIKE ${"%" + @search + "%"})
-            AND (${@roleFilter} = "all" OR role = ${@roleFilter})
+            (${search} = "" OR username LIKE ${"%" + search + "%"} OR email LIKE ${"%" + search + "%"})
+            AND (${roleFilter} = "all" OR role = ${roleFilter})
           ORDER BY joined DESC
           LIMIT 100
         `}.all()

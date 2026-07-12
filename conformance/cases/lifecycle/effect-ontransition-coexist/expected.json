@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-effect-ontransition-coexist",
+  "description": "§51.0.H Co-existence — a single state-child MAY carry BOTH an `effect=` attribute (for the common single-target case) AND additional `<onTransition>` children. `.Title` has `effect=` (single-target .Playing) plus a redundant-but-legal `<onTransition to=.Playing>` child; `.Playing` carries only an `<onTransition to=.Paused>`. This COMPILES CLEAN — the combination is explicitly NOT a conflict, and it does NOT fire E-ENGINE-EFFECT-AMBIGUOUS (the `effect=`'s `rule=.Playing` is single-target). Guards against a regression where the presence of an `<onTransition>` alongside `effect=` would be mis-flagged.",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "source-test": "compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js",
+  "rationale": "§51.0.H Co-existence: `effect=` fires for its own target; each `<onTransition>` fires for its declared `to=`; no conflict. E-ENGINE-EFFECT-AMBIGUOUS does not apply because the `effect=`'s `rule=` is single-target (.Playing). The whole E-ENGINE-EFFECT-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ENGINE-EFFECT-"]
+  }
+}

@@ -6,6 +6,15 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
 
+### 2026-07-11→12 (S250 — **concurrent→leading · commit-lock built · navigate #27 client-router arc (Wave-1a landed, 1b banked)**)
+
+Booted concurrent to S249, took the branch-baton (S249 wrapped+released), became the single writer to main. Built the explicit commit-lock (the who-owns-main mutex), designed + spec'd the navigate() client router, landed its first wave, and banked the second under adversarial review. The S239 review earned its keep three separate times on the soft-nav runtime — the green gate + happy-path browser tests each green'd broken code (frozen swapped content, a no-op teardown, a security-adjacent navigation mode-inversion) that the adversarial workflow caught before landing. "It swaps" ≠ "it works."
+
+- **commit-lock** (scrml-support) — a single-writer mutex on main's HEAD (FS `mkdir` mutex + `claims.md` CAS row + heartbeat-lease); a booting PA READS who owns main instead of inferring it from `ps`/hand-off prose. Hardened live (dead-pid auto-heal, `session_uuid` deterministic identity). Routed to flogence for the flobase continuity module.
+- **S249's verify-harden wave** — 58 commits (incl. 2 security fail-opens: JWT auth-bypass, protect-CTE leak) merged to main + pushed to origin.
+- **navigate #27** — SPEC §20.8 Client Router (Nominal/spec-ahead); **Wave-1a** (`<outlet>` + `<program>`-shell foundation) landed + pushed; **Wave-1b** (same-chunk reactive soft-nav) built + banked on its branch — a showstopper (shell-state reset on nav) + input-handler-leak codegen fix pending before it lands.
+- **pre-push hook** — now recompiles the browser-test fixtures before the browser check (a stale `samples/compilation-tests/dist/` was faking failures).
+
 ### 2026-07-07 (S245 — **realtime `<channel watches=>` Phase 2 runtime · a HIGH protected-field egress leak · 3 codegen/diagnostic fixes — all adversarially reviewed; concurrent with S244's CSS §65 arc**)
 
 Six landings, each PA-adversarially-reviewed (the S239 gate — one auto-reviewer stalled and the PA completed it manually by reading the emitter). Run concurrently with S244 (CSS-native §65) on the shared checkout; commits held mid-session while S244 landed §65, then batched — file-delta the disjoint code, `git apply` the SPEC.md sections by-patch to preserve §65.

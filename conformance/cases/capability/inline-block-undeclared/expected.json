@@ -1,0 +1,13 @@
+{
+  "id": "capability-inline-block-undeclared",
+  "description": "§23.5.5 — the presence-nudge lint fires for a `_{}` INLINE foreign-code block (§23.2), not just the `use foreign:` sidecar the existing cases exercise. An inline value-returning `_={ … }=` block sits inside a `<program lang=\"ts\">` with NO `capabilities=` on any ancestor → governed by the empty set → W-FOREIGN-UNDECLARED-CAPABILITY (Info). Unlike the sidecar cases, the inline `_{}` form does NOT co-fire E-FOREIGN-SIDECAR-NOMINAL (that Nominal error is sidecar-runtime-specific), so this is the cleanest single-construct proof of the lint. Twin of `inline-block-covered`.",
+  "language-version": "1.0",
+  "spec": "§23.5.5, §23.2",
+  "source-test": "compiler/tests/unit/capability-declaration.test.js",
+  "rationale": "§23.5.5: the compiler SHALL emit W-FOREIGN-UNDECLARED-CAPABILITY (Info) when a foreign-code construct — a `_{}` block (§23.2), WASM sigil (§23.3), or `use foreign:` sidecar (§23.4) — is governed by an empty capability set. Here the `_={ … }=` block has no ancestor `capabilities=`, so the empty-set nudge fires. §23.5.5 opacity bound: it checks declaration-PRESENCE only. No E-SCOPE-001, no E-FOREIGN-CAPABILITY-UNKNOWN.",
+  "expect": {
+    "codes": ["W-FOREIGN-UNDECLARED-CAPABILITY"],
+    "notCodes": ["E-SCOPE-001", "E-FOREIGN-CAPABILITY-UNKNOWN"],
+    "severity": { "W-FOREIGN-UNDECLARED-CAPABILITY": "info" }
+  }
+}

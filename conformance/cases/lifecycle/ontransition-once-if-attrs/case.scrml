@@ -1,0 +1,11 @@
+${
+    type Game:enum = { Title, Playing }
+    <over> = false
+}
+<engine for=Game initial=.Title>
+    <Title rule=.Playing>
+        <onTransition to=.Playing once>${ log("first") }</>
+        <onTransition to=.Playing if=(@over == false)>${ log("guarded") }</>
+    </>
+    <Playing rule=.Title></>
+</>

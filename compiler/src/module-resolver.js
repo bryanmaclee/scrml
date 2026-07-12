@@ -770,20 +770,50 @@ export function isStdlibImport(source) {
 }
 
 /**
+ * Normalize OS path separators to POSIX forward-slash form.
+ *
+ * `resolve`/`join` from `node:path` emit NATIVE separators — `\` on Windows,
+ * `/` on POSIX. Any path comparison that hardcodes `/` (e.g. the stdlib
+ * carve-out prefix below) silently fails on Windows: `C:\repo\stdlib\auth`
+ * does not `startsWith` `C:\repo\stdlib/`. Normalizing both operands before
+ * comparison makes the check separator-agnostic. Mirrors the
+ * `.replace(/\\/g, "/")` idiom already used in emit-server.ts (~L3908).
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function normalizeSep(p) {
+  return typeof p === "string" ? p.replace(/\\/g, "/") : p;
+}
+
+/**
  * Check if an absolute file path resolves under the stdlib root.
  *
  * Mirrors the §13.1 stdlib carve-out region used by
  * `lint-async-user-source.ts`. Files under `<repo>/stdlib/` are the only
  * authoring surface permitted to declare `async function` (Q5 ratified S89).
  *
+ * Issue #26 (P0 auth-bypass, 2026-07-11): the carve-out is the gate for the
+ * server-fn auto-await classifier (`isPromiseReturningStdlibFn` →
+ * `isStdlibAsyncCallee`). On Windows `STDLIB_ROOT` and the resolved module
+ * path both carry native `\` separators, but the prefix built here hardcoded
+ * `+ "/"`. `C:\repo\stdlib\auth\index.scrml`.startsWith(`C:\repo\stdlib/`) is
+ * FALSE → the classifier mis-classified `verifyPassword`/`hashPassword`/JWT as
+ * sync → the compiler shipped the `Promise`-returning call UN-AWAITED → a
+ * truthy Promise accepted every password (accept-all auth bypass). Invisible
+ * on POSIX (all `/`), only reproduced on Windows. Fix: normalize BOTH operands
+ * to forward-slash form before the `startsWith`/equality comparison.
+ *
  * @param {string} absPath — absolute file path
  * @returns {boolean}
  */
 export function isStdlibFilePath(absPath) {
   if (typeof absPath !== "string" || absPath.length === 0) return false;
-  if (absPath === STDLIB_ROOT) return true;
-  const prefix = STDLIB_ROOT.endsWith("/") ? STDLIB_ROOT : STDLIB_ROOT + "/";
-  return absPath.startsWith(prefix);
+  const normPath = normalizeSep(absPath);
+  const normRoot = normalizeSep(STDLIB_ROOT);
+  if (normPath === normRoot) return true;
+  const prefix = normRoot.endsWith("/") ? normRoot : normRoot + "/";
+  return normPath.startsWith(prefix);
 }
 
 /**

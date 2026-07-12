@@ -1,0 +1,11 @@
+{
+  "id": "reactive-server-fn-ambient-identity-clean",
+  "description": "§6.6.9 exclusion (RULING A) — reading the ambient identity singletons `@currentUser` / `@session` in a server fn is NOT E-REACTIVE-003. These are compiler-provided per-request singletons (§20.5 / §52), resolved server-side from the session middleware (`@currentUser` lowers to `_scrml_currentUser`, NOT `_scrml_body`) — they are not `state-decl` client cells, so the read-detector never sees them. The raw client value `@price` is passed as an explicit param `p` (escape hatch), keeping the whole fn clean. Incidental auth/SQL warnings ignored by superset. Asserts the E-REACTIVE-003 family stays absent.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9 exclusion (c): 'the ambient identity singletons @session / @currentUser (§20.5 / §52, resolved server-side from the session middleware)' are excluded — they are not client cells and never trigger E-REACTIVE-003.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-REACTIVE-003"]
+  }
+}

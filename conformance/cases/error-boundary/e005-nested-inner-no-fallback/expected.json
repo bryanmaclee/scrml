@@ -1,0 +1,13 @@
+{
+  "id": "error-boundary-e005-nested-inner-no-fallback",
+  "description": "§19.6.4 + §19.6.6 — the INNERMOST boundary governs E-ERROR-005. The `!`-call sits inside an inner `<errorBoundary>` with NO `fallback`, nested inside an outer boundary that DOES declare a `fallback`. Because §19.6.4 is inner-catches-first, the inner boundary is the one that must display the caught variant; the caught variant (NotFound) has no `renders` and the INNER boundary has no `fallback`, so E-ERROR-005 fires — the outer `fallback` does NOT rescue it (the error never reaches the outer boundary). This is the sharp innermost-governs proof: moving the `fallback` to the INNER boundary (or adding a `renders`) would silence it. Complements the `nested-inner-catches` runtime case (which proves inner-catches-first for a COVERED variant).",
+  "language-version": "1.0",
+  "spec": "§19.6.4, §19.6.6",
+  "source-test": "compiler/tests/conformance/conf-error-boundary.test.js",
+  "rationale": "§19.6.4: an inner boundary catches errors before an outer boundary (inner-catches-first). §19.6.6: coverage is checked against the boundary that catches the variant — here the inner boundary, which has no `fallback`, for a variant with no `renders` → E-ERROR-005. The outer `fallback` is irrelevant because the inner boundary intercepts first. E-ERROR-002 stays silent (the call is inside a boundary).",
+  "expect": {
+    "codes": ["E-ERROR-005"],
+    "notCodes": ["E-ERROR-002"],
+    "severity": { "E-ERROR-005": "error" }
+  }
+}

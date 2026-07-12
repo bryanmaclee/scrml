@@ -1894,6 +1894,107 @@ function detectServerContextChannelCellRead(
 }
 
 // ---------------------------------------------------------------------------
+// §6.6.9 / §12 (RULING A) — E-REACTIVE-003: free client-cell read in a
+// server-escalated function. The read-side sibling of E-RI-002 (server fn
+// *assigns* @reactive). A `@<cell>` read of a client-held reactive cell lowers,
+// server-side (emit-expr.ts), to `_scrml_body["<cell>"]`; the client fetch stub
+// sends only declared params, so the value is NOT transported and resolves to
+// `undefined` at request time. Force the author to pass it explicitly (arguments
+// ARE marshalled) or declare a §52 `<... server>` authority cell.
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect the file's CLIENT-HELD reactive cell names (every `state-decl`), each
+ * mapped to whether it is a `const <name>` derived (for message wording).
+ *
+ * INCLUDES §52 `<... server>` authority cells (`isServer === true`). Ruling THE
+ * SPLIT correction: a `<... server>` cell is CLIENT-HELD (compiler-hydrated on
+ * mount, §52.4.2; the persist is the developer's own `?{}` fn, §52.6.2) — there
+ * is NO server-side cell store, so a server-side read lowers to
+ * `_scrml_body["<cell>"]` and resolves to `undefined` exactly like any other
+ * client cell. It therefore errors in a wholly-server fn and marshals in a CPS
+ * fn, identically to a plain client cell. (The earlier "§52 is server-resolved"
+ * premise was empirically false.) Ambient identity (`@session`/`@currentUser`)
+ * is a compiler-provided singleton, not a `state-decl`, so it is absent here.
+ */
+function collectClientReactiveCells(nodes: any[]): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  const visit = (list: any[]): void => {
+    if (!Array.isArray(list)) return;
+    for (const node of list) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "state-decl" && typeof node.name === "string") {
+        out.set(node.name, node.shape === "derived");
+      }
+      if (node.kind === "logic" && Array.isArray(node.body)) visit(node.body);
+      if (Array.isArray(node.children)) visit(node.children);
+    }
+  };
+  visit(nodes);
+  return out;
+}
+
+/**
+ * Scan a SERVER-escalated function body for FREE CLIENT-CELL reads — a
+ * `@<name>` read whose bare name is in `clientCells` and NOT in `exclude`
+ * (channel cells own E-CHANNEL-SERVER-CELL-READ, fired separately). Returns an
+ * ORDERED, de-duplicated list of `{ cell, span, derived }`.
+ *
+ * Reads are gathered from TWO surfaces (SQL-aware, verified against real parser
+ * output): every ExprNode `{ kind:"ident", name:"@<name>" }` reachable by
+ * full-node recursion (covers `let x = @c + 1`, `if (@c > 3)`, `log(@c)`,
+ * `return @c`, nested `binary`/`call`/`args`), AND `sql` node `query` RAW text —
+ * a `?{...}` template stores its interpolations as query TEXT, not ExprNodes (the
+ * ident-walker leaf-stops at `sql-ref`), so the SQL body is scanned by an
+ * `@name` regex. Does NOT descend into nested `function-decl` bodies (own scope).
+ * The LHS write-target of a `state-decl` is `node.name` (no `@`), so it is never
+ * a read (that write is E-RI-002's concern).
+ */
+function detectServerFreeClientCellReads(
+  body: any[],
+  clientCells: Map<string, boolean>,
+  exclude: Set<string>,
+): Array<{ cell: string; span: Span | undefined; derived: boolean }> {
+  const out: Array<{ cell: string; span: Span | undefined; derived: boolean }> = [];
+  const seen = new Set<string>();
+  const visited = new WeakSet<object>();
+  if (!Array.isArray(body) || clientCells.size === 0) return out;
+
+  const record = (bare: string, span: Span | undefined): void => {
+    if (seen.has(bare) || !clientCells.has(bare) || exclude.has(bare)) return;
+    seen.add(bare);
+    out.push({ cell: bare, span, derived: clientCells.get(bare) === true });
+  };
+
+  const scanSql = (text: string, span: Span | undefined): void => {
+    const re = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) record(m[1], span);
+  };
+
+  const visit = (node: any, stmtSpan: Span | undefined): void => {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    if (node.kind === "function-decl") return;
+    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : stmtSpan;
+    if (node.kind === "ident" && typeof node.name === "string"
+        && node.name.length > 1 && node.name.charCodeAt(0) === 0x40 /* @ */) {
+      record(node.name.slice(1), sp);
+    }
+    if (node.kind === "sql" && typeof node.query === "string") scanSql(node.query, sp);
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = (node as any)[key];
+      if (Array.isArray(val)) { for (const c of val) visit(c, sp); }
+      else if (val && typeof val === "object") visit(val, sp);
+    }
+  };
+
+  for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // CPS transformation analysis
 // ---------------------------------------------------------------------------
 
@@ -3005,6 +3106,9 @@ export function runRI(input: RIInput): RIOutput {
   const perFileOnclientHandlerNames = new Map<string, Set<string>>();
   /** filePath → Set<onserver-handler-name> */
   const perFileOnserverHandlerNames = new Map<string, Set<string>>();
+  /** filePath → (client reactive cell name → isDerived) — §6.6.9 E-REACTIVE-003
+   *  read-detection input; excludes §52 `<... server>` cells (server-resolved). */
+  const perFileClientReactiveCells = new Map<string, Map<string, boolean>>();
   for (const fileAST of files) {
     const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
     if (!Array.isArray(nodes)) continue;
@@ -3013,6 +3117,7 @@ export function runRI(input: RIInput): RIOutput {
     const _attrHandlers = collectChannelAttrHandlerNames(nodes);
     perFileOnclientHandlerNames.set(fileAST.filePath, _attrHandlers.onclient);
     perFileOnserverHandlerNames.set(fileAST.filePath, _attrHandlers.onserver);
+    perFileClientReactiveCells.set(fileAST.filePath, collectClientReactiveCells(nodes));
   }
 
   // ------------------------------------------------------------------
@@ -4036,6 +4141,51 @@ export function runRI(input: RIInput): RIOutput {
                 (reactiveAssignment as any).span ?? record.fnNode.span,
               ));
             }
+          }
+        }
+      }
+
+      // §6.6.9 / §12 (RULING A) — E-REACTIVE-003: a WHOLLY server-escalated
+      // function reading a FREE CLIENT CELL (raw `@var` OR `const` derived)
+      // resolves to `undefined` server-side. The server-mode rewrite (emit-expr.ts)
+      // lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server fn's client
+      // fetch stub sends only declared params — the cell value is NOT transported.
+      // Read-side sibling of E-RI-002.
+      //
+      // GATED on `cpsSplit === null`: a CPS-split fn (it has a reactive
+      // assignment, so its `@cell` reads sit in the server BATCH) already marshals
+      // those reads via the CPS client wrapper (§19.9.9) — they are NOT undefined,
+      // so this error must NOT fire for it. Only the wholly-server fn (no split)
+      // leaves the reads unmarshalled.
+      //
+      // `collectClientReactiveCells` INCLUDES §52 `<... server>` cells (they are
+      // client-held, §52.4.2 — a wholly-server read of one is undefined too) and
+      // EXCLUDES ambient identity (`@session`/`@currentUser`, not `state-decl`s);
+      // channel cells are excluded so the §38.4 E-CHANNEL-SERVER-CELL-READ above
+      // owns them (no double-diagnostic). Declared params are read BARE (never
+      // `@`-prefixed), so passing the value as an argument is the clean escape hatch.
+      if (cpsSplit === null) {
+        const _clientCells = perFileClientReactiveCells.get(record.filePath);
+        if (_clientCells && _clientCells.size > 0) {
+          const _chanExclude = new Set<string>();
+          const _chMap = perFileChannelCellMap.get(record.filePath);
+          if (_chMap) for (const _cells of _chMap.values()) for (const _c of _cells) _chanExclude.add(_c);
+          const _freeReads = detectServerFreeClientCellReads(body, _clientCells, _chanExclude);
+          for (const _r of _freeReads) {
+            const _kind = _r.derived ? "derived value" : "reactive variable";
+            const _fn = record.fnNode.name ?? "<anonymous>";
+            errors.push(new RIError(
+              "E-REACTIVE-003",
+              `E-REACTIVE-003: Server-escalated function \`${_fn}\` reads the client-side ${_kind} ` +
+              `\`@${_r.cell}\`. A client cell lives in the browser; a wholly server-escalated function ` +
+              `(§12) runs in the Bun process and receives only its declared arguments — this read lowers ` +
+              `to \`_scrml_body["${_r.cell}"]\`, which the client stub never sends, so it resolves to ` +
+              `\`undefined\` at request time (the value is not transported). Fix: pass it explicitly — ` +
+              `\`${_fn === "<anonymous>" ? "fn" : _fn}(@${_r.cell})\` with a matching parameter (arguments ` +
+              `ARE marshalled into the request body), or restructure so the server computes the value ` +
+              `itself (e.g. read the source inside the \`?{}\` query). See SPEC §6.6.9.`,
+              _r.span ?? record.fnNode.span,
+            ));
           }
         }
       }

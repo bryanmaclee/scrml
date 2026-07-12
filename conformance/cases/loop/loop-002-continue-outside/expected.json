@@ -1,0 +1,13 @@
+{
+  "id": "loop-002-continue-outside",
+  "description": "§49.9 — a bare `continue` in a position not enclosed by any `while`, `do...while`, or `for...of` loop fires E-LOOP-002. The SPEC's own worked example (§49.9 E-LOOP-002 block); the `continue` twin of loop-001-break-outside. W-PROGRAM-001 co-fires incidentally (bare markup, no `<program>` shell).",
+  "language-version": "1.0",
+  "spec": "§49.9, §49.4",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§49.9 E-LOOP-002: the compiler SHALL reject `continue` that appears outside any enclosing loop. `continue` may only appear inside a `while`, `do...while`, or `for...of` loop body.",
+  "expect": {
+    "codes": ["E-LOOP-002"],
+    "notCodes": ["E-LOOP-001"],
+    "severity": { "E-LOOP-002": "error" }
+  }
+}
