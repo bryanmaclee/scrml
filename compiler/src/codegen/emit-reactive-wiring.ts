@@ -1043,6 +1043,13 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
           if (insideOutlet) node._outletResident = true;
           result.lifecycleNodes.push(node);
         } else if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
+          // navigate-wave1b #7 — an <keyboard>/<mouse>/<gamepad> lexically inside the
+          // outlet is region-resident: its GLOBAL document/window listeners must be
+          // torn down on a soft-nav swap (else they leak, double-firing against the
+          // old route's cells). Route its destroy into _scrml_region_cleanups, the
+          // same treatment <timer>/<poll> get. A SHELL-level input handler keeps the
+          // boot-once cleanup path so it survives navigation.
+          if (insideOutlet) node._outletResident = true;
           result.inputStateNodes.push(node);
         } else if (tag === "request") {
           result.requestNodes.push(node);
@@ -1233,10 +1240,19 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
   const inputIdJs = inputId ? JSON.stringify(inputId) : JSON.stringify(genVar("input"));
   const scopeVar = JSON.stringify(genVar("scope"));
 
+  // navigate-wave1b #7 — an OUTLET-RESIDENT input handler routes its destroy into
+  // `_scrml_region_cleanups` (drained by _scrml_teardown_region on a soft-nav swap)
+  // so its global document/window listeners are removed, not leaked; a SHELL-level
+  // handler keeps the boot-once `_scrml_register_cleanup` (beforeunload) path.
+  const registerDestroy = (destroyCall: string): string =>
+    (node && node._outletResident)
+      ? `if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => ${destroyCall}); } else { _scrml_register_cleanup(() => ${destroyCall}); }`
+      : `_scrml_register_cleanup(() => ${destroyCall});`;
+
   if (tag === "keyboard") {
     lines.push(`// <keyboard${inputId ? ` id="${inputId}"` : ""}>`);
     lines.push(`_scrml_input_keyboard_create(${inputIdJs}, ${scopeVar});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_keyboard_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_keyboard_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "mouse") {
     const targetAttr = attrMap.get("target");
     let targetExpr = "null";
@@ -1249,7 +1265,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
     }
     lines.push(`// <mouse${inputId ? ` id="${inputId}"` : ""}${targetAttr ? " target=..." : ""}>`);
     lines.push(`_scrml_input_mouse_create(${inputIdJs}, ${scopeVar}, ${targetExpr});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_mouse_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_mouse_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "gamepad") {
     const indexAttr = attrMap.get("index");
     let gamepadIndex = 0;
@@ -1265,7 +1281,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
     }
     lines.push(`// <gamepad${inputId ? ` id="${inputId}"` : ""} index=${gamepadIndex}>`);
     lines.push(`_scrml_input_gamepad_create(${inputIdJs}, ${scopeVar}, ${gamepadIndex});`);
-    lines.push(`_scrml_register_cleanup(() => _scrml_input_gamepad_destroy(${inputIdJs}, ${scopeVar}));`);
+    lines.push(registerDestroy(`_scrml_input_gamepad_destroy(${inputIdJs}, ${scopeVar})`));
   }
 
   return lines;

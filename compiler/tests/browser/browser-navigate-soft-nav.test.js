@@ -74,6 +74,17 @@ function countLiveTimers() {
   return n;
 }
 
+// Count registered <keyboard> input handlers across all scopes — proves an
+// outlet-region keyboard handler's global listeners are torn down (its registry
+// entry removed) on a soft-nav swap while a shell handler survives (finding #7).
+function countKeyboardHandlers() {
+  const reg = window._scrml_input_keyboard_registry;
+  if (!reg || typeof reg.forEach !== "function") return -1;
+  let n = 0;
+  reg.forEach((scopeMap) => { scopeMap.forEach(() => n++); });
+  return n;
+}
+
 // Drain the fetch().then().then() chain (mock setTimeout + 2 microtask hops).
 // Several macrotask+microtask cycles guarantee the swap has run.
 async function flush(cycles = 6) {
@@ -535,6 +546,34 @@ const SHELL5 = [
   '  <button onclick=go()>Go</button>',
   '</program>',
 ].join("\n");
+
+describe("finding #7 — an outlet <keyboard> listener is removed on swap (no leak)", () => {
+  test("the swapped-OUT region's keyboard handler is torn down; a shell handler survives", async () => {
+    const shell = [
+      "<program>",
+      "  <keyboard id=\"shellKb\"/>",
+      "  <outlet><p>region</p><keyboard id=\"regionKb\"/></outlet>",
+      "  ${ function go() { navigate(\"/page2\") } }",
+      "  <button onclick=go()>Go</button>",
+      "</program>",
+    ].join("\n");
+    const { html, clientJs } = compileInline(shell);
+    mount(html, clientJs);
+
+    // Boot: two keyboard handlers registered (shell + outlet-resident region).
+    expect(countKeyboardHandlers()).toBe(2);
+
+    // Nav away — the target region carries no <keyboard>.
+    mockFetch({ "/page2": ssrDoc("<p>two</p>") });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // The region keyboard was region-tracked → _scrml_teardown_region ran its
+    // destroy (removing the global keydown/keyup listeners). The shell keyboard's
+    // module-init cleanup path is untouched. Exactly one handler remains.
+    expect(countKeyboardHandlers()).toBe(1);
+  });
+});
 
 describe("finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehydrate", () => {
   test("the compiler emits _scrml_shell_cells listing the program-top-level cell", () => {
