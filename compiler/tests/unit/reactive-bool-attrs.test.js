@@ -75,7 +75,7 @@ describe("§B1.1 — disabled=${expr} emits bool-attr placeholder + runtime togg
     </program>`;
     const r = compile(src);
     const client = emittedClient(r);
-    expect(client).toMatch(/document\.querySelector\('\[data-scrml-bind-bool-disabled="[^"]+"\]'\)/);
+    expect(client).toMatch(/.querySelector\('\[data-scrml-bind-bool-disabled="[^"]+"\]'\)/);
     expect(client).toContain("setAttribute(\"disabled\", \"\")");
     expect(client).toContain("removeAttribute(\"disabled\")");
     expect(client).toContain("_scrml_effect");
@@ -195,7 +195,7 @@ describe("§B1.5 — formFor follow-on close: default submit button disabled=!@c
     </program>`;
     const r = compile(src);
     const client = emittedClient(r);
-    expect(client).toMatch(/document\.querySelector\('\[data-scrml-bind-bool-disabled="[^"]+"\]'\)/);
+    expect(client).toMatch(/.querySelector\('\[data-scrml-bind-bool-disabled="[^"]+"\]'\)/);
     expect(client).toContain("setAttribute(\"disabled\", \"\")");
     expect(client).toContain("removeAttribute(\"disabled\")");
   });

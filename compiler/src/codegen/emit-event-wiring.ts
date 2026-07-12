@@ -876,10 +876,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // swapped-in SSR HTML already carries the server-rendered value. `body` are the
   // inner statements — they reference `el` and use `_scrml_region_track(el, …)`
   // for the effect (so a nav away disposes it, finding #2).
-  const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void => {
+  // Generalized: emit a `{ const el = <scope>.querySelector('<selector>'); if (el)
+  // { <body> } }` block into the rehydrator (rebind, root-scoped) or inline at
+  // boot (rebind=false, document-scoped). Used for EVERY element-scoped reactive
+  // construct (display, display/visibility toggle, boolean-attr toggle, errors /
+  // render anchors) so a soft nav re-binds it (finding #1) and its region-tracked
+  // effect tears down (finding #2).
+  const pushRebindableSel = (selector: string, body: string[], rebind = true): void => {
     const wrap = (scope: string, sink: string[], ind: string): void => {
       sink.push(`${ind}{`);
-      sink.push(`${ind}  const el = ${scope}.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+      sink.push(`${ind}  const el = ${scope}.querySelector('${selector}');`);
       sink.push(`${ind}  if (el) {`);
       for (const b of body) sink.push(`${ind}    ${b}`);
       sink.push(`${ind}  }`);
@@ -888,6 +894,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     if (rebind) wrap("(root || document)", reactiveRewire, "    ");
     else wrap("document", lines, "  ");
   };
+  const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void =>
+    pushRebindableSel(`[data-scrml-logic="${placeholderId}"]`, body, rebind);
   // Emit a region-tracked reactive-display effect as TWO statements — the bare
   // `_scrml_effect(function() { <inner> });` (its exact shape preserved for the
   // codegen-shape tests) followed by `_scrml_region_track(el, <dispose>);` so a
@@ -1366,9 +1374,6 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (binding.isReactiveBoolAttr && binding.boolAttrName) {
         const attrName = binding.boolAttrName;
         const dataAttr = `data-scrml-bind-bool-${attrName}`;
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[${dataAttr}="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
         if (binding.condExpr) {
           // Bug 61 — thread synthCellKeys so `disabled=!@form.isValid` (the
           // §41.14 default submit-button gate) routes `@form.isValid` to the
@@ -1378,11 +1383,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // the same condition resolves via _scrml_derived_get).
           const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
           const conditionCode = `(${compiled})`;
-          lines.push(`      if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`);
-          lines.push(`      _scrml_effect(function() { if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); } });`);
+          const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
+          // Rebindable (findings #1/#2): re-binds the boolean-attr toggle scoped to
+          // a swapped region; the effect is region-tracked for teardown.
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
+            toggle,
+            ...regionEffectLines(toggle),
+          ]);
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
         continue;
       }
 
@@ -1394,10 +1402,6 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (binding.isConditionalDisplay || binding.isVisibilityToggle) {
         const hasTransition = binding.transitionEnter || binding.transitionExit;
         const dataAttr = binding.isVisibilityToggle ? "data-scrml-bind-show" : "data-scrml-bind-if";
-
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[${dataAttr}="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
 
         // Build the condition expression string used for evaluation
         let conditionCode: string | undefined;
@@ -1413,46 +1417,47 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           subscribeVars = _ddCond.subscribeVars;
         }
 
+        // Rebindable (findings #1/#2): the if=/show= display toggle re-binds
+        // scoped to a swapped region so it RE-EVALUATES against the new node, and
+        // its region-tracked effect tears down on the next nav.
         if (conditionCode && subscribeVars !== undefined) {
+          const dtBody: string[] = [];
           if (!hasTransition) {
             // No transition — simple display toggle (original behavior)
-            lines.push(`      el.style.display = ${conditionCode} ? "" : "none";`);
-            lines.push(`      _scrml_effect(function() { el.style.display = ${conditionCode} ? "" : "none"; });`);
+            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(...regionEffectLines(`el.style.display = ${conditionCode} ? "" : "none";`));
           } else {
             // Transition-aware display toggle
             const enterClass = binding.transitionEnter ? `"scrml-enter-${binding.transitionEnter}"` : null;
             const exitClass = binding.transitionExit ? `"scrml-exit-${binding.transitionExit}"` : null;
+            const fnName = `_scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
             // Initial state — no animation on first render
-            lines.push(`      el.style.display = ${conditionCode} ? "" : "none";`);
-
-            // Build the transition toggle function
-            lines.push(`      function _scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}() {`);
-            lines.push(`        const _scrml_show = ${conditionCode};`);
-            lines.push(`        if (_scrml_show) {`);
+            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(`function ${fnName}() {`);
+            dtBody.push(`  const _scrml_show = ${conditionCode};`);
+            dtBody.push(`  if (_scrml_show) {`);
             if (enterClass) {
-              lines.push(`          el.style.display = "";`);
-              lines.push(`          el.classList.add(${enterClass});`);
-              lines.push(`          el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${enterClass}); el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    el.style.display = "";`);
+              dtBody.push(`    el.classList.add(${enterClass});`);
+              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${enterClass}); el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              lines.push(`          el.style.display = "";`);
+              dtBody.push(`    el.style.display = "";`);
             }
-            lines.push(`        } else {`);
+            dtBody.push(`  } else {`);
             if (exitClass) {
-              lines.push(`          el.classList.add(${exitClass});`);
-              lines.push(`          el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${exitClass}); el.style.display = "none"; el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    el.classList.add(${exitClass});`);
+              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${exitClass}); el.style.display = "none"; el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              lines.push(`          el.style.display = "none";`);
+              dtBody.push(`    el.style.display = "none";`);
             }
-            lines.push(`        }`);
-            lines.push(`      }`);
-
-            lines.push(`      _scrml_effect(_scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")});`);
+            dtBody.push(`  }`);
+            dtBody.push(`}`);
+            dtBody.push(`const _scrml_disp = _scrml_effect(${fnName});`);
+            dtBody.push(`_scrml_region_track(el, _scrml_disp);`);
           }
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, dtBody);
         }
-
-        lines.push(`    }`);
-        lines.push(`  }`);
         continue;
       }
 

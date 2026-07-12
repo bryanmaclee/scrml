@@ -304,6 +304,41 @@ describe("finding #2 — the OLD region's reactivity is torn down (no leak)", ()
   });
 });
 
+describe("extended #1 — a show= display-toggle in a swapped region RE-EVALUATES", () => {
+  test("a swapped-in show= toggle updates on a cell change (not frozen)", async () => {
+    // NOTE: `show=` is the display-toggle path (data-scrml-bind-show + style.display),
+    // now wired in `_scrml_nav_rewire` (region-tracked). `if=` uses the
+    // mount/unmount template state-machine (`_scrml_mount_template`) — NOT yet
+    // rehydrated (surfaced remaining surface).
+    const shell = [
+      "<program>",
+      "  <shown> = true",
+      "  <outlet><p show=@shown id=\"tgt\">visible</p></outlet>",
+      "  ${ function go() { navigate(\"/page2\") } }",
+      "  <button onclick=go()>Go</button>",
+      "</program>",
+    ].join("\n");
+    const { html, clientJs } = compileInline(shell);
+    mount(html, clientJs);
+    const tEl = document.querySelector("[data-scrml-outlet] [data-scrml-bind-show]");
+    expect(tEl).not.toBeNull();
+    const pid = tEl.getAttribute("data-scrml-bind-show");
+
+    // Same-chunk target reuses the SAME show= placeholder id.
+    mockFetch({ "/page2": ssrDoc('<p data-scrml-bind-show="' + pid + '" id="tgt2">two</p>') });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    const swapped = document.querySelector("#tgt2");
+    expect(swapped).not.toBeNull();
+    // The rebound display-toggle effect re-evaluates against the new node.
+    window._scrml_reactive_set("shown", false);
+    expect(swapped.style.display).toBe("none");
+    window._scrml_reactive_set("shown", true);
+    expect(swapped.style.display).toBe("");
+  });
+});
+
 describe("finding #4 — a cross-route target hard-navigates (no frozen swap)", () => {
   test("a target that needs a client chunk we don't have is NOT soft-swapped", async () => {
     const { html, clientJs } = compileInline(SHELL);

@@ -403,7 +403,11 @@ describe("§10: reactive display wiring unchanged", () => {
     }), new Map());
     const out = result.join("\n");
 
-    expect(out).toContain('document.querySelector(\'[data-scrml-bind-if="_scrml_if_60"]\'');
+    // navigate-wave1b: the if=/show= display toggle re-binds on soft nav, so it
+    // is wired inside `_scrml_nav_rewire(root)` — `(root || document)`-scoped
+    // per-element querySelector (NOT batch querySelectorAll).
+    expect(out).toContain('.querySelector(\'[data-scrml-bind-if="_scrml_if_60"]\'');
+    expect(out).not.toContain('querySelectorAll(\'[data-scrml-bind-if="_scrml_if_60"]\'');
   });
 });
 
