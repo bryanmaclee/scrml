@@ -1,0 +1,12 @@
+{
+  "id": "outlet-if-guard-false",
+  "description": "§20.8.1 — `<outlet>` honors the universal `if=` structural directive. With `if=@show` and `@show=false`, the outlet region is NOT mounted, so the live DOM contains ZERO `[data-scrml-outlet]` regions. (Regression: the Wave-1a outlet emit branch used to `return` before the generic `if=` guard, so `if=` was silently ignored and the region always rendered.)",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §17.1",
+  "rationale": "§17.1 `if=` is a universal display/mount directive; the outlet region is a plain DOM region and must gate on `if=` like any element — a false guard means the region is absent from the live tree.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-OUTLET-DUPLICATE", "E-OUTLET-OUTSIDE-SHELL"],
+    "domAnchored": [{ "selector": "[data-scrml-outlet]", "count": 0 }]
+  }
+}

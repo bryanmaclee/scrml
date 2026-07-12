@@ -181,6 +181,14 @@ const STRUCTURAL_RAW_BODY_ELEMENTS = new Set([
 
 const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
   "program", "page", "channel", "schema", "seeds", "module",
+  // §20.8.1 (Client Router — navigate-soft-nav Wave-1a) — `<outlet>` is the
+  // persistent-shell swap region: the reserved-structural slot into which the
+  // current route's content renders. It is a void/empty slot (NOT a raw-body
+  // element — it does NOT go in STRUCTURAL_RAW_BODY_ELEMENTS), so it needs no
+  // body-mode detection; it is listed here purely as a §4.15 reserved-structural
+  // name so the compound-state-decl auto-lift never misclassifies an
+  // `<outlet>...</outlet>` block-form as a compound state-decl.
+  "outlet",
   // S107 Phase 1 (SPEC §18.0.1 match block-form impl arc).
   // `<match for=Type [on=expr]> <Variant>...</> ... </>` is a Tier 1
   // case-analysis container, not a compound state-decl. Its body looks

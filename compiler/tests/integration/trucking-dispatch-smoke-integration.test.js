@@ -417,6 +417,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // promoted from info 6nz B1 2026-06-24) — partitions into result.warnings, exit stays 0.
     // Aggregate 74 -> 77 (item 1).
     "W-INTERP-IN-RAW-CONTENT": 3,
+    // navigate-soft-nav Wave-1a (§20.8.1 / §20.8.7): W-OUTLET-ABSENT-SOFT-NAV-
+    // DISABLED (info) fires ONCE — the trucking-dispatch shell (app.scrml's
+    // top-level `<program>`) is a multi-page project (a `pages/` directory
+    // exists at the app root) whose shell declares no `<outlet>`. With no
+    // outlet, the Client Router (§20.8) has no swap region, so soft navigation
+    // and `<a>` link-boost fall back to hard (full-document) navigation. This is
+    // a legitimate new info lint on a real multi-page-without-outlet adopter
+    // shell (NOT a regression); adding a single `<outlet/>` to app.scrml's shell
+    // would enable soft-nav and silence it. Complementary to W-PROGRAM-SPA-
+    // INFERRED (which stays 0 here — `pages/` is present, suppressing it).
+    // Aggregate 42 -> 43.
+    "W-OUTLET-ABSENT-SOFT-NAV-DISABLED": 1,
     "W-PROGRAM-001": 4,
     // phase-b1-examples-rewrite (ss11 item 7, canonical-form pass): each trucking
     // page file carried a redundant top-level `${ import ... }` wrapper inside its

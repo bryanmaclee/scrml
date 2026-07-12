@@ -1,0 +1,3 @@
+<program>
+  <outlet class="main-region" id="app-outlet"/>
+</program>

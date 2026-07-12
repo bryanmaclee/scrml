@@ -498,6 +498,29 @@ ELEMENT_ATTR_REGISTRY.set("defaults", {
 });
 
 // ---------------------------------------------------------------------------
+// <outlet> — the Client Router swap region (SPEC §20.8.1, navigate-soft-nav
+// Wave-1a).
+//
+// A scrml-defined structural element valid ONLY inside a `<program>` shell — the
+// region into which the current route's content renders on a soft navigation
+// (§20.8.2). V1 supports one flat `<outlet>` per shell; more than one is
+// `E-OUTLET-DUPLICATE`, and an `<outlet>` outside a `<program>` shell is
+// `E-OUTLET-OUTSIDE-SHELL` (both fired at the SYM placement pass, §34). It takes
+// only the generic `class` / `id` presentation attributes for now (no feature
+// attributes — the swap/keep-alive/link-boost machinery is Wave-1b runtime).
+// Registered here so VP-1 recognizes the element and surfaces a typo'd attribute
+// rather than silently forwarding it as HTML. New scrml-special structural
+// elements MUST be added here per primer §12 amendment.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("outlet", {
+  allowedAttrs: new Map([
+    ["class", attrSpec({ supportsInterpolation: true })],
+    ["id",    attrSpec({ supportsInterpolation: true })],
+  ]),
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

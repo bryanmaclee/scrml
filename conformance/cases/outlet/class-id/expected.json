@@ -1,0 +1,15 @@
+{
+  "id": "outlet-class-id",
+  "description": "§20.8.1 — the `class` / `id` attributes registered for `<outlet>` (attribute-registry.js) survive to the emitted region `<div>`. The region carries both the author `class`/`id` AND the `data-scrml-outlet` marker. (Regression: the Wave-1a outlet emit hardcoded `<div data-scrml-outlet>` and dropped class/id.)",
+  "language-version": "1.0",
+  "spec": "§20.8.1",
+  "rationale": "§20.8.1: the outlet is a real addressable region; its presentation attrs (class/id) are author-owned and must be emitted onto the region element.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-OUTLET-DUPLICATE", "E-OUTLET-OUTSIDE-SHELL"],
+    "domAnchored": [
+      { "selector": "[data-scrml-outlet]", "count": 1 },
+      { "selector": "#app-outlet", "count": 1, "attr": { "class": "main-region" } }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+<program>
+  <ready> = true
+  <outlet if=@ready/>
+  <outlet else/>
+</program>

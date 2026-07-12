@@ -1,0 +1,12 @@
+{
+  "id": "outlet-logic-child",
+  "description": "§20.8.1 — a `${...}` logic child inside `<outlet>` renders into the region (it is a markup-interpolation, not a default-logic mount-effect body). The live `[data-scrml-outlet]` region reads `Count: 0`. (Regression: the Wave-1a outlet branch walked children WITHOUT pushing the markup-parent context, so a program-level logic child was treated as default-logic mode and dropped its render slot — contradicting the 'children preserved' contract.)",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §3.3",
+  "rationale": "§3.3: a `${expr}` inside a real markup element renders; the outlet region is such an element, so its logic child must get a render slot and show its value.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-OUTLET-DUPLICATE", "E-OUTLET-OUTSIDE-SHELL"],
+    "domAnchored": [{ "selector": "[data-scrml-outlet]", "text": "Count: 0" }]
+  }
+}
