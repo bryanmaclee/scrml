@@ -1,55 +1,89 @@
-# scrml — Session 250 (WRAP) — concurrent→leading; commit-lock built; navigate #27 arc (1a landed, 1b banked)
+# scrml — Session 251 (WRAP) — landed 4 arcs + a full pre-V1 strategic plan (5 DDs ratified)
 
-**Date:** 2026-07-11→12. **Profile:** A (`/boot concurrent` → took the baton → LEADING). Enormous session.
-Booted concurrent to S249, took the branch-baton (S249 wrapped+released), became the single writer to main.
-**Commit-lock released at this wrap** — next boot: `commit-lock.sh status <uuid>` → FREE → acquire.
+**Date:** 2026-07-12. **Profile:** A (`/boot`). **Successor to S250** (booted concurrent, took over main
+after S250 wrapped). Two-phase session: **(1) execution** — landed + PUSHED four arcs; **(2) strategy** —
+reframed the whole pre-V1 push around a flogence-tandem release + ratified five design DDs. Next session =
+EXECUTION against the ruled backlog.
 
 ## ⚠️ READ FIRST
-- **PUSH STATE:** origin/main = **`ac22895e`** (Wave-1a). Everything landed this session is PUSHED (main, scrml-support, flogence all coherence 0/0). No unpushed main work.
-- **COMMIT-LOCK RELEASED** (S250). The lock (`scrml-support/handOffs/active-sessions/commit-lock.sh`) is the who-owns-main signal — boot runs `status <your-session-uuid>` FIRST (Discipline step 0), never infer from ps. See [[feedback_commit_lock_main_authority]] + [[feedback_browser_test_regression_triage]].
-- **S251 is a LIVE concurrent PA** on its own worktree/branch `s251` (bryan's concurrent workflow). It stays off main. Coordinate via the board + the lock.
-- **🔴 Navigate Wave-1b is BANKED, NOT landed** — see the dedicated section. Branch `worktree-agent-ad18282b8c9c2cc10` @ `9c8150fb`.
+- **EVERYTHING IS PUSHED. origin/main == HEAD == `af6da1ee` (0/0 coherent).** No push-hold. The NUL-fix commit
+  `af6da1ee` sat 1-ahead → **this wrap pushes it** (verify 0/0 at boot).
+- **THE PLAN-OF-RECORD is `../scrml-support/docs/pre-v1-execution-board-2026-07-12.md`** — read it first next
+  session. It carries the reframe, the tandem-critical tracks, the freeze-blockers, the SPA tail, and the
+  execution classification. The five DD design docs are in `../scrml-support/docs/deep-dives/*-2026-07-12.md`.
+- **commit-lock: RELEASED at this wrap** (S251). Next boot: `commit-lock.sh status <your-S-num>` → FREE → acquire.
+- **ONE open input gates Track A:** **Fork 3** — is flogence's MCP stdio leg (`fsp-mcp`) a v1 tandem gate or
+  fast-follow? Answer unblocks the server-shape dispatch.
 
-## ✅ LANDED + PUSHED this session
-- **Commit-lock mechanism** (NEW, scrml-support) — explicit single-writer mutex on main's HEAD (mkdir FS-mutex + claims.md CAS row + heartbeat-lease). Hardened twice live: `heartbeat` auto-heals a dead pid (the S251-false-crash class); `session_uuid` in the holder for deterministic identity; README §COMMIT-LOCK + Discipline step 0. Routed to flogence for the flobase continuity module.
-- **S249's 58-commit verify-harden wave** — merged s249→main + PUSHED (`a37f11e0..ac22895e`), incl. **2 security fail-opens** (JWT auth-bypass, protect-CTE leak) now on origin.
-- **Navigate #27 SPEC §20.8** — the Client Router, Nominal/spec-ahead (`3f4d3917`, pushed). Full axis-by-axis design ruled + banked (scrml-support/docs/deep-dives/navigate-soft-nav-*).
-- **Navigate Wave-1a** — `<outlet>` + `<program>`-shell foundation (`ac22895e`, pushed) — recognition + emit + E-OUTLET-DUPLICATE/OUTSIDE-SHELL + W-OUTLET-ABSENT + 7 conformance cases. S239-reviewed (5 bugs caught+fixed pre-land).
-- **Pre-push hook fix** — recompiles `samples/compilation-tests/` fixtures before the browser check (stale fixtures faked "16 browser fails" — NOT a regression; [[feedback_browser_test_regression_triage]]). `82b61bb2`.
-- **Wrap-debt cleared** — worktrees 51→22, 29 merged branches deleted, board archived (S242-248 → read/).
+## ✅ LANDED + PUSHED THIS SESSION (all on origin @ af6da1ee)
+1. **Fork A — the server-fn/client-cell "SPLIT"** (`47ea59ac`): a huge design arc (C→A→split). E-REACTIVE-003
+   fires on a WHOLLY-server fn reading a free client cell (error, pass-as-arg); a CPS fn (form-submit idiom)
+   MARSHALS the reads. **Fixed a systemic bug: the canonical form/login idiom silently POSTed `undefined`**
+   (verified react-auth login hashed undefined). §52 `<x server>` is CLIENT-HELD (§52.4.2). @session/@currentUser
+   never client-marshalled (spoofing guard). +9 conformance. Adversarially reviewed (anti-drift verified).
+2. **#26 P0 Windows auth-bypass** (`66483cdf`): `isStdlibFilePath` hardcoded `/` vs native `\` → the async-stdlib
+   classifier failed on Windows → verifyPassword shipped un-awaited → accept-all. Fix = separator-normalize +
+   a Windows-simulating regression test. **Root-caused, fixed, and replied to Peter on the issue** (posted as
+   bryanmaclee, comment 4951048439). Issue still OPEN pending Peter's clean-build confirm.
+3. **Conformance +19** (`f8336f07`): capability/error-boundary/lifecycle/loop/table-for. Surfaced (board-logged)
+   §49 loop divergences: E-LOOP-003/004 disabled (braceless-if FP), **E-LOOP-007 inverted** (fires on the
+   SPEC-valid lift form, silent on the error form) — parser-entangled, backlog.
+4. **Navigate Wave-1b** (`0a41a327` merge): same-chunk soft-nav complete. #5 shell-reset showstopper + #7
+   input-handler leak + #4/#6/#9, and a **NEW security-adjacent mode-inversion** (a `match`-arm `navigate(.Hard)`
+   was still soft-navving a forced auth redirect) — S251-adversarially-verified robust. #8/#3 deferred (gzip-gate/invasive).
+5. **NUL-fix** (`af6da1ee`): `rewrite.ts:143` carried a raw 0x00 (a real cache-key separator stored as a byte,
+   not an escape) → the file classified as binary → grep silently dropped matches (bit two reviews). Escaped it,
+   behavior-identical. rewrite.ts is now grep-able text.
 
-## 🔴 NAVIGATE WAVE-1b — BANKED (finish next session)
-**Branch `worktree-agent-ad18282b8c9c2cc10` @ `9c8150fb`** (worktree retained under `.claude/worktrees/`). Gate-green
-(19984/0, conformance 359, browser 15/0) BUT the S239 re-review found 9 findings; 2 fixed, 7 remain.
-- **DONE (committed on branch):** M1 region-scope registry (if=/each/if-chains + effects rehydrate + tear down on swap) · `#1` SEVERE mode-inversion regex (rewrite.ts — `.Hard` logout was becoming a soft swap; **security-adjacent**) FIXED `2f374fc3` · `#2` forward-soft-nav hash short-circuit FIXED `9c8150fb`.
-- **REMAINING (fix plan):**
-  - **#5 SHOWSTOPPER (codegen)** — `_scrml_rehydrate_region`→`_scrml_ssr_seed_apply()` is UN-scoped; the fetched route's seed includes SHELL cells at SSR-initial values → a mutated shell cell (nav counter/sidebar) RESETS on every soft-nav (breaks persistent shell). FIX: emit a compile-time `_scrml_shell_cells` set (program-top-level cells, outside outlet/pages) + skip them in rehydrate seed-apply. No runtime-only shortcut (shell/route distinction is compile-time-only).
-  - **#7 leak (codegen)** — `<keyboard>`/`<mouse>`/`<gamepad>` handlers NOT region-routed (only `<timer>`/`<poll>` got `_outletResident`) → global listeners leak on swap. FIX: mirror the `_outletResident` region-cleanup treatment (emit-reactive-wiring.ts:~1108 has the timer pattern).
-  - **#3 follow-on (by design)** — outlet `<timer>`/`<poll>` STOPS on nav-away (leak closed) but does NOT restart on return; deferred deliberately. FIX: make the outlet-resident timer setup re-invocable from the rehydrator (agent was mid-way threading `insideOutlet` emit-html→emit-reactive-wiring).
-  - **#4** focus: `_scrml_nav_focus` targets an h1/h2 with no tabindex → `.focus()` no-op → apply `tabindex=-1` to the focused node (§20.8.5(3)). **#6** nav-race: recheck nav-token inside `startViewTransition(swap)` before swapping. **#8** `_scrml_find_if_marker` per-marker TreeWalker (perf). **#9** `_scrml_nav_sync_meta`/`_link` copy-paste dedupe.
-- **Verify #1 empirically** (rewrite.ts is a binary diff): compile a match value-arm with two navigate calls, confirm each lowers to the correct mode.
-- **Then:** S239 re-review the fix delta → merge branch→main (`git merge --no-ff`; the branch merged main in) → the complete same-chunk soft-nav lands.
+## 🧭 THE PRE-V1 REFRAME (bryan, S251) — read the board doc for the full plan
+More runway before freeze (flogence must **release in tandem** with scrml V1). Spirit: **"do it right, go all
+the way"** — pull v1.next into V1 *where flogence exercises it*. flogence sweep corrected two assumptions:
+**local-first** (§58 cloud-deploy NOT tandem-blocking) + **single-page** (navigate 2-3 NOT tandem-driven).
+**Tandem-critical = Track A (server-shape) · §65-W2→#7 (floStyle) · the lang-gap fixes + coupled-CI.**
 
-## 📋 NAVIGATE ARC ROADMAP
-**1a** ✓ (outlet+shell) · **1b** banked (same-chunk runtime — finish #5/#7/#3) · **1c** cross-route chunk-loading (a different-chunk route hard-falls-back today) · **Wave 2** link-boost (`<a>` default-soft + `hard`) · **Wave 3** keep-alive (`<page keep-alive>` data-cache; invalidation deep-dive done). Authority: scrml-support/docs/deep-dives/navigate-* (client-router + SPEC-AMENDMENT + rehydration-mechanism [M1 chosen over M2 re-run-boot — double-init landmine] + keepalive-invalidation).
+## 🔬 FIVE DDs RATIFIED (bryan: cruxes + defaults) — designs banked, BUILDABLE
+Anchors + cruxes ruled; DD-recommended defaults taken on the rest. Full ruling sets in the docs.
+- **#5 server-program-shape** = **1A** (`kind="tool" serve=`); ~80% exists; load-bearing = 2A decouple
+  emit-server. **OPEN Fork 3** (stdio v1-gate?). ⚠️ concentrates in `emit-server.ts`/`route-inference.ts` —
+  navigate's files → do NOT run navigate concurrently with Track A.
+- **#7 style-provenance** = **data-scrml-sid**; GATED on §65 Wave-2 `<theme>` parse (unbuilt).
+- **Cask-0** = freezes STRUCTURE-not-content → **CUT-NOW** (un-gated by coverage). Crux D2 (schema-vs-content
+  split). Net-new = surface→daughter ownership map. Freeze = cross-repo tag pair. flobase mechanics → flogence inbox.
+- **protect-denylist** = overloaded-null → total-classify-UNKNOWN-strips; crux R-4 (scoped-strip + named warning).
+  ⚠️ conformance `protect/` has ZERO guard for the 6 leak shapes → ship red-then-green.
+- **typer-soundness** = HALVED (anon-struct-poison is a MISDIAGNOSIS); real bug = hostmethod-return-asis;
+  fix = Option-D curated host-method table (+ a GCP3 mirror for the equality silent-accept).
 
-## 📋 OTHER OPEN THREADS
-- **#26 P0 (Peter)** — CANNOT reproduce on Linux (all 3 SQL-bearing variants await correctly). Replied asking Peter for a clean `rm -rf dist/` rebuild (likely stale artifact) vs Windows-specific. Ball with Peter. **No Windows CI — Peter is the sole canary (4th OS-path issue).**
-- **#25** Windows nested-page `pathFor` `\`vs`/` 404 (clean fix; pathFor partly in api.js).
-- **Deferred wrap-debt:** maps refresh (Wave-1a landed; not regenerated), `state.ts` known-gaps regen, master-list §0 currency. ~20 unmerged worktree branches need per-branch triage.
+## 📋 NEXT SESSION = EXECUTION (from the board doc)
+Buildable now: **Cask-0 cut** (un-gated, PA-direct — author the ownership map + D2 split + cross-repo tag) ·
+**protect-denylist** (lock-PA, red-then-green) · **typer Option-D** (concurrent/SPA) · **Track A** (pending
+Fork 3, off-navigate) · **§65 Wave-2 → #7** (concurrent). **SPA queue**: coverage-tail · ~66 negative-space +
+~40 engine cases · standing-gaps (19 MED/16 LOW) · string-blind fixes · fail-variant-arity E-TYPE-082 · flush ·
+#25 Windows pathFor · doc-debt (drop E-ATTR-012 · E-ERROR-010 rows). **Owed infra:** coupled-CI (flogence vs
+scrml HEAD). Also open: navigate Wave-1c/2/3 (lower urgency, scrml-completeness).
+
+## 🔬 METHODOLOGY (the irreducible)
+- **Commit-lock: trust the tool, never `ps`.** Booted, `status` said HELD-by-S250-leased; I over-rode it with a
+  dead-pid `ps` check and inferred a crash — S250 was live. The exact anti-pattern the lock exists to kill. The
+  acquire-time pid ROTATES; the lease is authoritative. [[feedback_commit_lock_main_authority]] hardened.
+- **Read the FULL adopter thread before posting.** Posted the #26 Peter reply off the tail; it held only because
+  I'd root-caused from code independently. Read the whole issue next time.
+- **Adversarial review keeps earning it.** Fork A's agent had carve-out holes TWICE (§52 exclusion, CPS marshal
+  premise) that green masked — caught by compiling + inspecting emitted artifacts. Wave-1b's mode-inversion +
+  the same. Green ≠ complete. [[feedback_adversarial_verify_not_confirmatory]]
+- **DD-ahead-of-execution paid off:** verify-before-claim SHRANK two freeze-blockers (typer halved via
+  misdiagnosis; Cask-0 cut-now). Deliberate hard arcs before building.
 
 ## 🚦 STATE @ CLOSE
-- git: main `ac22895e`, origin coherent (0/0). scrml-support + flogence pushed. Wave-1b on its branch (retained). commit-lock RELEASED. conformance 356 at main.
-- S251 live concurrent (own branch). Board: active-sessions/S250.md.
-
-## Methodology (the irreducible)
-- **S239 review earned its keep repeatedly** — green gate + happy-path browser tests green'd broken soft-nav THREE times (frozen content, no-op teardown, security-adjacent mode-inversion); the adversarial workflow caught each. "It swaps" ≠ "it works." [[feedback_adversarial_verify_not_confirmatory]]
-- **Stale-fixture trap** — browser pre-push reads pre-compiled `samples/compilation-tests/dist/`; recompile before trusting; compare WHOLE-SUITE not isolated files. [[feedback_browser_test_regression_triage]]
-- **commit-lock false-crash** — wrong/dead pid ≠ crash; tool verdict is authoritative; surface, don't conclude. [[feedback_commit_lock_main_authority]]
-- **Repeated transient agent death** — huge-context agent hit stream instability; ~2 crashes → PA-direct; commit-after-each-fix salvages. [[feedback_repeated_dispatch_crash_pa_direct]]
+- git: scrml main `af6da1ee`, pushed (0/0). scrml-support: this wrap commits the 6 DD docs + board doc +
+  user-voice S251 + design-insights + board files, then pushes. Conformance **386/386** · gate green at close.
+- lock: RELEASED (S251). worktrees: cleanup attempted this wrap (dry-run first; ~20 present).
+- No live sibling PA.
 
 ## pa.md directives in force
-R1-R5 · S239 adversarial (PA-side workflow review; caught a security-adjacent bug) · S138 R26 · commit-lock (S250, released) · branch-baton (S251 live) · commit-to-main after authz · orchestrate-don't-grind + default-GO.
+R1-R5 · S239 adversarial (incl PA-side) · S138 R26 empirical · commit-lock (trust-tool-not-ps) · commit-to-main
+after authz · orchestrate-don't-grind + default-GO · DD-ahead-of-execution for hard arcs.
 
 ## Tags
-#session-250 #concurrent-to-leading #commit-lock-built #navigate-27-arc #wave-1a-landed-pushed #wave-1b-banked #s239-earned-keep-3x #security-mode-inversion-caught #issue-26-ball-with-peter #enormous-session
+#session-251 #four-arcs-landed-pushed #fork-a-split #issue-26-p0-fixed #navigate-wave1b #pre-v1-strategy
+#five-dds-ratified #flogence-tandem #cask0-cut-now #typer-halved #do-it-right
