@@ -929,14 +929,21 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
     bindPropsWirings: [],
   };
 
-  function visit(nodeList: any[]): void {
+  function visit(nodeList: any[], insideOutlet = false): void {
     for (const node of nodeList) {
       if (!node || typeof node !== "object") continue;
 
       if (node.kind === "markup") {
         const tag: string = node.tag ?? "";
+        // navigate-wave1b M1 Phase 4 — an <outlet> descendant is region-resident:
+        // a <timer>/<poll> lexically inside the outlet belongs to the swappable
+        // region, so its cleanup routes into _scrml_region_cleanups (torn down on
+        // soft nav), not the boot-once beforeunload path. A shell-level timer
+        // (outside the outlet) keeps the module-init path untouched.
+        const childInsideOutlet = insideOutlet || tag === "outlet";
 
         if (tag === "timer" || tag === "poll") {
+          if (insideOutlet) node._outletResident = true;
           result.lifecycleNodes.push(node);
         } else if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
           result.inputStateNodes.push(node);
@@ -954,9 +961,9 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
           }
         }
 
-        // Recurse into markup children
+        // Recurse into markup children (carry the outlet-residence flag).
         if (Array.isArray(node.children)) {
-          visit(node.children);
+          visit(node.children, childInsideOutlet);
         }
         continue;
       }
@@ -989,13 +996,13 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
       // emit-engine.ts; this branch is only for OTHER reactive surfaces
       // that may incidentally appear inside arm bodies.
       if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) {
-        visit((node as any).bodyChildren);
+        visit((node as any).bodyChildren, insideOutlet);
         continue;
       }
 
       // Recurse into all other node kinds
       if (Array.isArray(node.children)) {
-        visit(node.children);
+        visit(node.children, insideOutlet);
       }
     }
   }
@@ -1090,7 +1097,18 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
     lines.push(`});`);
   }
 
-  lines.push(`_scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar}));`);
+  // navigate-wave1b M1 Phase 4 — an OUTLET-RESIDENT <timer>/<poll> belongs to the
+  // swappable region: route its stop into `_scrml_region_cleanups` so a soft nav
+  // AWAY tears it down (`_scrml_teardown_region` drains it), closing the leak
+  // where the old route's timer keeps ticking against detached cells. A
+  // SHELL-level timer keeps the boot-once `_scrml_register_cleanup` (beforeunload)
+  // path so it survives navigation. (Restart-on-return for the region timer rides
+  // §20.8.4 fresh-per-visit re-hydrate — a bounded follow-on; the leak is closed.)
+  if (node && node._outletResident) {
+    lines.push(`if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); } else { _scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); }`);
+  } else {
+    lines.push(`_scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar}));`);
+  }
 
   return lines;
 }

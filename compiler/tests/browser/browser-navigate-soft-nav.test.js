@@ -52,10 +52,23 @@ function mount(html, clientJs) {
     "window._scrml_register_rehydrator = typeof _scrml_register_rehydrator === 'function' ? _scrml_register_rehydrator : undefined;\n" +
     "window._scrml_reactive_get = _scrml_reactive_get;\n" +
     "window._scrml_reactive_set = _scrml_reactive_set;\n" +
+    "window._scrml_timer_registry = typeof _scrml_timer_registry !== 'undefined' ? _scrml_timer_registry : undefined;\n" +
     "})();";
   // eslint-disable-next-line no-eval
   eval(code);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+}
+
+// Count live (non-paused) interval timers across all scopes — proves an
+// outlet-region timer is torn down (its handle cleared) while a shell timer runs.
+function countLiveTimers() {
+  const reg = window._scrml_timer_registry;
+  if (!reg || typeof reg.forEach !== "function") return -1;
+  let n = 0;
+  reg.forEach((scopeTimers) => {
+    scopeTimers.forEach((t) => { if (t && t.handle != null) n++; });
+  });
+  return n;
 }
 
 // Drain the fetch().then().then() chain (mock setTimeout + 2 microtask hops).
@@ -434,6 +447,35 @@ describe("M1 — an <each> list in a swapped region RE-RENDERS", () => {
     await flush();
     const lis = document.querySelectorAll("[data-scrml-outlet] li");
     expect(lis.length).toBe(3);
+  });
+});
+
+describe("M1 Phase 4 — an outlet-resident <timer> STOPS on nav; a shell timer survives", () => {
+  test("the swapped-OUT region's timer is torn down; the shell timer keeps running", async () => {
+    const shell = [
+      "<program>",
+      "  <tick> = 0",
+      "  <shellTick> = 0",
+      "  <timer interval=1000>${ @shellTick = @shellTick + 1 }</timer>",
+      "  <outlet><p>region</p><timer interval=500>${ @tick = @tick + 1 }</timer></outlet>",
+      "  ${ function go() { navigate(\"/page2\") } }",
+      "  <button onclick=go()>Go</button>",
+      "</program>",
+    ].join("\n");
+    const { html, clientJs } = compileInline(shell);
+    mount(html, clientJs);
+
+    // Boot: two live timers (shell + region).
+    expect(countLiveTimers()).toBe(2);
+
+    // Nav away — the target region carries no timer.
+    mockFetch({ "/page2": ssrDoc("<p>two</p>") });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // The region timer was region-tracked → drained by _scrml_teardown_region.
+    // The shell timer (module-init path) keeps running. Exactly one live timer.
+    expect(countLiveTimers()).toBe(1);
   });
 });
 
