@@ -2186,6 +2186,226 @@ function _scrml_navigate(path) {
 }
 
 // ---------------------------------------------------------------------------
+// §20.8.2 — the Client Router soft-navigation engine (navigate-wave1b).
+//
+// A CLIENT navigate() lowers to _scrml_navigate_soft(path) (emit-expr.ts). It
+// performs the §20.8.2 in-place <outlet> swap over the persistent <program>
+// shell instead of a full document reload:
+//   1. pushState + history.scrollRestoration = "manual" (§20.8.5(1)/(2)).
+//   2. fetch(path) the target route's SSR HTML — a superseded in-flight fetch is
+//      aborted (last-nav-wins, §20.8.5(4)).
+//   3. DOMParser-extract the target [data-scrml-outlet] subtree + the
+//      window.__scrml_ssr_state seed the SSR document injects (§52.8).
+//   4. Swap the live outlet's subtree (wrapped in startViewTransition where
+//      available; instant otherwise — §20.8.5(7)), rehydrate the swapped region
+//      (_scrml_rehydrate_region), move focus to the outlet (§20.8.5(3)), and
+//      scroll to top / #hash / the restored position (§20.8.5(2)).
+// A transport failure falls back to a hard navigation (§20.8.5(5)). SSR-first is
+// preserved — the <a href> stays a real link, so no-JS degrades to a full
+// navigation, and this whole engine is a browser-only enhancement (guarded on
+// typeof window/document). It lives in the 'utilities' chunk beside
+// _scrml_navigate (tree-shaken out when a page has no navigate() call).
+
+// Registry of per-region rehydration callbacks. A file's boot registers its
+// element-scoped wiring (non-delegated handlers + reactive-display re-binding)
+// via _scrml_register_rehydrator so a swapped-in region can be re-wired WITHOUT
+// re-booting the shell. Delegated (document-level) click/submit listeners
+// survive a subtree swap on their own and are NOT re-registered.
+var _scrml_rehydrators = [];
+function _scrml_register_rehydrator(fn) {
+  if (typeof fn === "function") _scrml_rehydrators.push(fn);
+}
+
+// AbortController for the currently in-flight soft-nav fetch (last-nav-wins).
+var _scrml_nav_controller = null;
+var _scrml_nav_popstate_wired = false;
+
+function _scrml_nav_outlet() {
+  return (typeof document !== "undefined")
+    ? document.querySelector("[data-scrml-outlet]")
+    : null;
+}
+
+// Persist the OUTGOING history entry's scroll position so a later back/forward
+// to it can restore (§20.8.5(2)).
+function _scrml_nav_save_scroll() {
+  if (typeof history === "undefined" || typeof window === "undefined") return;
+  try {
+    var st = (history.state && typeof history.state === "object") ? history.state : {};
+    var merged = Object.assign({}, st, { __scrml_scroll: [window.scrollX, window.scrollY] });
+    history.replaceState(merged, "", window.location.href);
+  } catch (e) { /* replaceState can throw in a sandboxed frame — non-fatal */ }
+}
+
+// §20.8.5(1) — wire the popstate handler once. Back/forward soft-navigates to
+// the target, restoring the saved scroll position.
+function _scrml_nav_ensure_popstate() {
+  if (_scrml_nav_popstate_wired || typeof window === "undefined") return;
+  _scrml_nav_popstate_wired = true;
+  window.addEventListener("popstate", function (ev) {
+    if (!_scrml_nav_outlet()) return; // no shell outlet → let the browser handle it
+    var restore = (ev.state && ev.state.__scrml_scroll) ? ev.state.__scrml_scroll : null;
+    _scrml_nav_fetch_and_swap(window.location.pathname + window.location.search, restore);
+  });
+}
+
+function _scrml_navigate_soft(path) {
+  // Not a browser (SSR / a test host without a DOM) → nothing to swap.
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  // No <program> shell outlet on the page → soft-nav is inapplicable; degrade to
+  // a full-document hard navigation (SSR-first, §20.8.5(6)).
+  if (!_scrml_nav_outlet()) { _scrml_navigate(path); return; }
+
+  _scrml_nav_ensure_popstate();
+  if (typeof history !== "undefined" && "scrollRestoration" in history) {
+    history.scrollRestoration = "manual";
+  }
+  // Save the current entry's scroll before we leave it, then push the target.
+  _scrml_nav_save_scroll();
+  try {
+    history.pushState({ __scrml_soft: true }, "", path);
+  } catch (e) { _scrml_navigate(path); return; }
+
+  // A fresh navigation scrolls to top / #hash (restore === null).
+  _scrml_nav_fetch_and_swap(path, null);
+}
+
+// Fetch the target route's SSR HTML and swap it in. Shared by pushState navs
+// (restore === null) and popstate (restore === saved [x, y]).
+function _scrml_nav_fetch_and_swap(path, restore) {
+  // Abort a superseded in-flight fetch — last-nav-wins (§20.8.5(4)).
+  if (_scrml_nav_controller) { try { _scrml_nav_controller.abort(); } catch (e) { /* already settled */ } }
+  var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  _scrml_nav_controller = controller;
+
+  var opts = { headers: { "X-Scrml-Soft-Nav": "1" }, credentials: "same-origin" };
+  if (controller) opts.signal = controller.signal;
+
+  fetch(path, opts)
+    .then(function (res) { return res.text(); })
+    .then(function (html) {
+      if (_scrml_nav_controller !== controller) return; // a newer nav superseded us
+      _scrml_nav_apply_html(html, path, restore);
+    })
+    .catch(function (err) {
+      if (err && err.name === "AbortError") return;      // superseded — expected
+      if (_scrml_nav_controller !== controller) return;
+      _scrml_navigate(path);                             // transport failure → hard nav
+    });
+}
+
+// Extract the target document's SSR state seed (the SSR doc injects
+// <script>window.__scrml_ssr_state={…}</script>; DOMParser does NOT execute it,
+// so parse the JSON out of the script text). Replaces the live seed wholesale so
+// a stale prior-route seed does not leak into the new region.
+function _scrml_nav_extract_seed(doc) {
+  if (typeof window === "undefined") return;
+  var scripts = doc.querySelectorAll("script");
+  var prefix = "window.__scrml_ssr_state=";
+  for (var i = 0; i < scripts.length; i++) {
+    var text = scripts[i].textContent || "";
+    var at = text.indexOf(prefix);
+    if (at === -1) continue;
+    var json = text.slice(at + prefix.length).replace(/;\\s*$/, "");
+    try { window.__scrml_ssr_state = JSON.parse(json); }
+    catch (e) { /* malformed seed — keep the prior seed rather than crash */ }
+    return;
+  }
+  window.__scrml_ssr_state = null; // target has no seed → clear (seed_apply no-ops)
+}
+
+// Parse the fetched HTML, extract the target outlet subtree + seed, and swap the
+// live outlet's children (View-Transition-wrapped where available).
+function _scrml_nav_apply_html(html, path, restore) {
+  var liveOutlet = _scrml_nav_outlet();
+  if (!liveOutlet) return;
+  var doc;
+  try { doc = new DOMParser().parseFromString(html, "text/html"); }
+  catch (e) { _scrml_navigate(path); return; }
+  var fetchedOutlet = doc.querySelector("[data-scrml-outlet]");
+  if (!fetchedOutlet) { _scrml_navigate(path); return; } // target isn't a shell page → hard nav
+
+  // Install the target route's seed BEFORE rehydration so server-authority cells
+  // apply the new route's values (§52.8).
+  _scrml_nav_extract_seed(doc);
+
+  // Sync the document title (a soft nav should update it).
+  var newTitle = doc.querySelector("title");
+  if (newTitle) { try { document.title = newTitle.textContent || document.title; } catch (e) { /* non-fatal */ } }
+
+  var newHtml = fetchedOutlet.innerHTML;
+  var swap = function () {
+    // Tear down the OUTGOING region's reactive scopes before replacing it.
+    _scrml_teardown_region(liveOutlet);
+    liveOutlet.innerHTML = newHtml;
+    // Re-hydrate the swapped-in region (seed + scoped re-wiring) without
+    // re-booting the shell.
+    _scrml_rehydrate_region(liveOutlet);
+    _scrml_nav_focus(liveOutlet);   // §20.8.5(3)
+    _scrml_nav_scroll(restore);     // §20.8.5(2)
+  };
+
+  // View Transitions where available; instant swap otherwise (§20.8.5(7)).
+  if (typeof document.startViewTransition === "function") {
+    try { document.startViewTransition(swap); } catch (e) { swap(); }
+  } else {
+    swap();
+  }
+}
+
+// §20.8.5(3) — after a swap, move focus to the region (its first heading, else
+// the outlet itself) for keyboard / assistive-tech users.
+function _scrml_nav_focus(outlet) {
+  if (!outlet) return;
+  var target = outlet.querySelector("h1, h2, [autofocus]") || outlet;
+  try {
+    if (target === outlet && !outlet.hasAttribute("tabindex")) outlet.setAttribute("tabindex", "-1");
+    target.focus();
+  } catch (e) { /* focus can throw on a detached/hidden node — non-fatal */ }
+}
+
+// §20.8.5(2) — scroll: restore the saved position on back/forward, else scroll
+// to the #hash target, else to top.
+function _scrml_nav_scroll(restore) {
+  if (typeof window === "undefined") return;
+  if (restore && restore.length === 2) { window.scrollTo(restore[0], restore[1]); return; }
+  var hash = window.location.hash;
+  if (hash && hash.length > 1) {
+    var el = document.getElementById(hash.slice(1));
+    if (el) { try { el.scrollIntoView(); return; } catch (e) { /* fall through to top */ } }
+  }
+  window.scrollTo(0, 0);
+}
+
+// Re-hydrate a swapped-in region WITHOUT re-booting the shell (§20.8.2 step 3):
+// apply the region's SSR seed, then run each registered element-scoped
+// rehydrator against the swapped root. Reuses the ordinary boot helpers
+// (_scrml_ssr_seed_apply + the per-file wiring the rehydrators close over).
+function _scrml_rehydrate_region(root) {
+  if (typeof _scrml_ssr_seed_apply === "function") _scrml_ssr_seed_apply();
+  var scope = root || (typeof document !== "undefined" ? document : null);
+  for (var i = 0; i < _scrml_rehydrators.length; i++) {
+    try { _scrml_rehydrators[i](scope); }
+    catch (e) { if (typeof console !== "undefined") console.error("scrml rehydrate error:", e); }
+  }
+}
+
+// Tear down the OUTGOING region's reactive scopes before its subtree is
+// replaced. A control-flow mount that stamps its root with data-scrml-scope has
+// its scope (timers / rAF / cleanups, §6.7.5) destroyed here; shell-level cells
+// and delegated listeners live OUTSIDE the outlet and are untouched. (Full
+// region scope-GC needs the mount sites to stamp data-scrml-scope — a bounded
+// follow-on; this is a safe no-op until they do.)
+function _scrml_teardown_region(root) {
+  if (!root || typeof root.querySelectorAll !== "function") return;
+  var stamped = root.querySelectorAll("[data-scrml-scope]");
+  for (var i = 0; i < stamped.length; i++) {
+    var sid = stamped[i].getAttribute("data-scrml-scope");
+    if (sid && typeof _scrml_destroy_scope === "function") _scrml_destroy_scope(sid);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §40.9.7 tier-1 idle prefetch runtime (chunk: 'prefetch')
 // ---------------------------------------------------------------------------
 //

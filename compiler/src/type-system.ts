@@ -7041,6 +7041,14 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // SURVEY for follow-up).
   "broadcast",
   "disconnect",
+  // §20.1 — navigate() navigation builtin. A tokenizer/ast-builder keyword,
+  // lowered at codegen (emit-expr.ts) to `_scrml_navigate_soft(path)` (client /
+  // `.Soft`) or `_scrml_navigate(path)` (server / `.Hard`). Allowlisted here so
+  // a bare `navigate("/x")` call does NOT fire a spurious E-SCOPE-001 — the same
+  // omission class the render/log/print/animationFrame entries were added for
+  // (navigate-wave1b; the builtin had been shipping with a fatal scope-check
+  // false-positive that killed every navigate call site).
+  "navigate",
   // §20.6 — log() location-transparent logging builtin. Lowered at codegen
   // (emit-expr.ts) to _scrml_log(side, loc, ...args). Allowlisted here so a
   // bare `log(...)` call (no user-declared `function log`) does NOT fire
