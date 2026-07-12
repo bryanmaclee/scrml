@@ -2286,6 +2286,25 @@ function _scrml_navigate_soft(path) {
   if (typeof history !== "undefined" && "scrollRestoration" in history) {
     history.scrollRestoration = "manual";
   }
+
+  // Fix #2 (S239) — an in-page #hash change is NOT a route change: a bare
+  // navigate("#anchor") OR a target whose pathname equals the current one but
+  // carries a #hash. Push the entry + scroll to the anchor; do NOT fetch+swap
+  // (which would wipe the swapped region's form input / scroll / if= state) —
+  // the same short-circuit the popstate handler already applies.
+  var _hashAt = path.indexOf("#");
+  if (_hashAt >= 0) {
+    var _targetPath = _scrml_nav_pathname_of(path);
+    if (path.charAt(0) === "#" || _targetPath === _scrml_nav_pathname) {
+      _scrml_nav_save_scroll();
+      try { history.pushState({ __scrml_soft: true }, "", path); }
+      catch (e) { _scrml_navigate(path); return; }
+      if (path.charAt(0) !== "#") _scrml_nav_pathname = _targetPath;
+      _scrml_nav_scroll(null); // scroll to the #hash target (native anchor behavior)
+      return;
+    }
+  }
+
   // Save the current entry's scroll before we leave it, then push the target.
   _scrml_nav_save_scroll();
   try {

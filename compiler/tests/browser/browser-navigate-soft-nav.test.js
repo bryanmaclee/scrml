@@ -450,6 +450,26 @@ describe("M1 — an <each> list in a swapped region RE-RENDERS", () => {
   });
 });
 
+describe("S239 #2 — an in-page #hash navigate does NOT swap the outlet", () => {
+  test("navigate(\"#anchor\") pushes + scrolls but leaves the outlet subtree intact", async () => {
+    const { html, clientJs } = compileInline(SHELL);
+    mount(html, clientJs);
+    const outlet = document.querySelector("[data-scrml-outlet]");
+    const before = outlet.innerHTML;
+    let fetched = false;
+    restoreFetch = globalThis.fetch;
+    globalThis.fetch = () => { fetched = true; return Promise.resolve({ ok: true, status: 200, text: async () => ssrDoc("<p id=\"swapped\">x</p>") }); };
+
+    window._scrml_navigate_soft("#section");
+    await flush();
+
+    // No fetch, no swap — the outlet is untouched (its state survives).
+    expect(fetched).toBe(false);
+    expect(document.querySelector("[data-scrml-outlet]").innerHTML).toBe(before);
+    expect(document.querySelector("#swapped")).toBeNull();
+  });
+});
+
 describe("M1 Phase 4 — an outlet-resident <timer> STOPS on nav; a shell timer survives", () => {
   test("the swapped-OUT region's timer is torn down; the shell timer keeps running", async () => {
     const shell = [
