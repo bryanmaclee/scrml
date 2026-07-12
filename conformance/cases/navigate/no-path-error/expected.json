@@ -1,0 +1,12 @@
+{
+  "id": "navigate-no-path-error",
+  "description": "§20.1 (Client Router — navigate-soft-nav Wave-1b, S239 re-review finding #5). `navigate(.Soft)` passes ONLY the navigation-type modifier and NO path. The modifier is not a destination, so the compiler fires E-NAV-NO-PATH rather than silently lowering the bare `.Soft` variant into the path slot (which would produce a `_scrml_navigate_soft(\".Soft\")` bogus-path call).",
+  "language-version": "1.0",
+  "spec": "§20.1, §20.2",
+  "rationale": "§20.1: `navigate(path)` requires a developer path string; the first argument is the destination and `.Hard`/`.Soft` is an optional second-position modifier. A variant-only call has no destination — E-NAV-NO-PATH.",
+  "expect": {
+    "codes": ["E-NAV-NO-PATH"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-NAV-NO-PATH": "error" }
+  }
+}

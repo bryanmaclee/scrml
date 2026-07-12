@@ -69,14 +69,36 @@ async function flush(cycles = 6) {
 
 // Build a minimal SSR document for a target route: an outlet subtree + an
 // optional __scrml_ssr_state seed script (mirrors emit-server's injection).
-function ssrDoc(outletInner, seed) {
+// `clientScript` (optional) adds a `<script src>` so the same-chunk check can be
+// exercised (a DIFFERENT client chunk = cross-route → hard-nav, finding #4).
+function ssrDoc(outletInner, seed, clientScript) {
   const seedTag = seed
     ? "<script>window.__scrml_ssr_state=" + JSON.stringify(seed).replace(/</g, "\\u003c") + ";</script>"
     : "";
+  const scriptTag = clientScript ? '<script src="' + clientScript + '"></script>' : "";
   return (
     "<!DOCTYPE html><html><head><title>Route</title>" + seedTag + "</head>" +
-    "<body><div data-scrml-outlet tabindex=\"-1\">" + outletInner + "</div></body></html>"
+    "<body><div data-scrml-outlet tabindex=\"-1\">" + outletInner + "</div>" + scriptTag + "</body></html>"
   );
+}
+
+// A shell whose OUTLET holds a reactive `${@count}` interpolation — the flagship
+// re-bind case (finding #1). The initial outlet content + a soft-nav target that
+// reuses the SAME placeholder id (same chunk) exercise the rebind + teardown.
+const REACTIVE_SHELL = [
+  "<program>",
+  "  <count> = 0",
+  "  <outlet>Count ${@count}</outlet>",
+  "  ${ function go() { navigate(\"/page2\") } }",
+  "  <button onclick=go()>Go</button>",
+  "</program>",
+].join("\n");
+
+// The placeholder id of the outlet's reactive logic span (for crafting a
+// same-chunk target that re-uses it).
+function outletLogicId() {
+  const el = document.querySelector("[data-scrml-outlet] [data-scrml-logic]");
+  return el ? el.getAttribute("data-scrml-logic") : null;
 }
 
 let restoreFetch = null;
@@ -236,5 +258,64 @@ describe("§20.8.2 step 3 — rehydration re-wires the swapped region", () => {
     mount(html, clientJs);
     const outlet = document.querySelector("[data-scrml-outlet]");
     expect(() => window._scrml_rehydrate_region(outlet)).not.toThrow();
+  });
+});
+
+describe("finding #1 — the swapped region stays REACTIVE (not frozen)", () => {
+  test("a `${@cell}` in a swapped region UPDATES after a cell mutation", async () => {
+    const { html, clientJs } = compileInline(REACTIVE_SHELL);
+    mount(html, clientJs);
+    const pid = outletLogicId();
+    expect(pid).not.toBeNull();
+
+    // Same-chunk target: reuse the SAME placeholder id (no client script → same chunk).
+    mockFetch({ "/page2": ssrDoc('<span data-scrml-logic="' + pid + '">Count 0</span>') });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    const swapped = document.querySelector("[data-scrml-outlet] [data-scrml-logic]");
+    expect(swapped).not.toBeNull();
+    // Mutate the cell — the REBOUND effect must update the swapped-in node.
+    window._scrml_reactive_set("count", 5);
+    expect(swapped.textContent).toBe("5");
+  });
+});
+
+describe("finding #2 — the OLD region's reactivity is torn down (no leak)", () => {
+  test("the swapped-out region's effect STOPS updating after nav", async () => {
+    const { html, clientJs } = compileInline(REACTIVE_SHELL);
+    mount(html, clientJs);
+    const pid = outletLogicId();
+    // The boot-rendered region-A node (its display effect is region-tracked).
+    const oldNode = document.querySelector("[data-scrml-outlet] [data-scrml-logic]");
+    window._scrml_reactive_set("count", 1);
+    expect(oldNode.textContent).toBe("1"); // A is live before nav
+
+    mockFetch({ "/page2": ssrDoc('<span data-scrml-logic="' + pid + '">Count 1</span>') });
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // Mutate AFTER the swap: the NEW node updates (B live), the OLD detached node
+    // does NOT (A was disposed by teardown — proves it is not a leaking no-op).
+    window._scrml_reactive_set("count", 9);
+    const newNode = document.querySelector("[data-scrml-outlet] [data-scrml-logic]");
+    expect(newNode.textContent).toBe("9");   // rebound effect B fires
+    expect(oldNode.textContent).toBe("1");   // disposed effect A does NOT fire
+  });
+});
+
+describe("finding #4 — a cross-route target hard-navigates (no frozen swap)", () => {
+  test("a target that needs a client chunk we don't have is NOT soft-swapped", async () => {
+    const { html, clientJs } = compileInline(SHELL);
+    mount(html, clientJs);
+    const before = document.querySelector("[data-scrml-outlet]").innerHTML;
+    // The target references a DIFFERENT client chunk (a separate pages/ file).
+    mockFetch({ "/other": ssrDoc('<p id="cross">cross-route</p>', null, "other-route.client.js") });
+    window._scrml_navigate_soft("/other");
+    await flush();
+    // Hard-nav fallback: happy-dom's window.location assignment is inert, so the
+    // outlet is LEFT AS-IS (never frozen-swapped with the cross-route content).
+    expect(document.querySelector("#cross")).toBeNull();
+    expect(document.querySelector("[data-scrml-outlet]").innerHTML).toBe(before);
   });
 });

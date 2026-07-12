@@ -31,6 +31,8 @@ function compileToClient(src, base = "nav") {
   const clientPath = join(outDir, `${base}.client.js`);
   let clientJs = "";
   try { clientJs = readFileSync(clientPath, "utf8"); } catch { /* no client emitted */ }
+  let serverJs = "";
+  try { serverJs = readFileSync(join(outDir, `${base}.server.js`), "utf8"); } catch { /* no server emitted */ }
   // The external runtime file (scrml-runtime.<hash>.js) carries the tree-shaken
   // runtime; concatenate it so callers can assert the engine was INCLUDED.
   let runtimeJs = "";
@@ -39,7 +41,7 @@ function compileToClient(src, base = "nav") {
       if (/^scrml-runtime\..*\.js$/.test(f)) runtimeJs += readFileSync(join(outDir, f), "utf8");
     }
   } catch { /* no runtime file */ }
-  return { result, clientJs, runtimeJs };
+  return { result, clientJs, serverJs, runtimeJs };
 }
 
 function errorCodes(result) {
@@ -110,5 +112,73 @@ describe("§4 — runtime soft-nav engine present", () => {
     // call pulls in the 'utilities' chunk).
     expect(runtimeJs).toContain("function _scrml_navigate_soft(");
     expect(runtimeJs).toContain("function _scrml_rehydrate_region(");
+  });
+
+  test("SCRML_RUNTIME defines the region teardown + rebind + same-chunk surface (S239 re-review)", () => {
+    expect(SCRML_RUNTIME).toContain("function _scrml_region_track(");
+    expect(SCRML_RUNTIME).toContain("function _scrml_teardown_region(");
+    expect(SCRML_RUNTIME).toContain("function _scrml_nav_same_chunk(");
+    expect(SCRML_RUNTIME).toContain("_scrml_nav_token");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — S239 re-review findings #5/#7 (variant parsing) + #6 (statement-shape)
+// ---------------------------------------------------------------------------
+
+describe("§5 — navigate() variant parsing (findings #5/#7)", () => {
+  test("finding #5 — `navigate(.Soft)` (no path) fires E-NAV-NO-PATH and never lowers the variant as a path", () => {
+    const src = `\${ function d() { navigate(.Soft) } }\n<button onclick=d()>d</button>`;
+    const { result, clientJs } = compileToClient(src, "nav-nopath");
+    expect(errorCodes(result)).toContain("E-NAV-NO-PATH");
+    // The bare `.Soft` must NOT be emitted as the path.
+    expect(clientJs).not.toContain('_scrml_navigate_soft(".Soft")');
+    expect(clientJs).not.toContain("_scrml_navigate_soft(.Soft)");
+    expect(clientJs).not.toContain('_scrml_navigate(".Soft")');
+  });
+
+  test("finding #5 — `navigate(\"/x\", .Hard)` lowers path-only (variant not forwarded)", () => {
+    const src = `\${ function b() { navigate("/x", .Hard) } }\n<button onclick=b()>b</button>`;
+    const { clientJs } = compileToClient(src, "nav-hard2");
+    expect(clientJs).toContain('_scrml_navigate("/x")');
+    expect(clientJs).not.toContain('.Hard');
+  });
+
+  test("finding #7 — explicit `.Soft` in a SERVER function does the server (hard) behavior, not `_scrml_navigate_soft`", () => {
+    const src =
+      `<program db="./x.db">\n` +
+      `  <outlet/>\n` +
+      `  \${ server function go() {\n` +
+      `    let r = ?{\`SELECT 1 as n\`}.get()\n` +
+      `    navigate("/x", .Soft)\n` +
+      `  } }\n` +
+      `  \${ go() }\n` +
+      `</program>`;
+    const { serverJs } = compileToClient(src, "nav-srvsoft");
+    expect(serverJs).toContain('_scrml_navigate("/x")');
+    expect(serverJs).not.toContain("_scrml_navigate_soft");
+  });
+});
+
+describe("§6 — navigate() as a match-arm tail stays statement-shape (finding #6)", () => {
+  test("a client navigate() as a match-arm body compiles to VALID JS (no value-wrap breakage)", () => {
+    const src =
+      `type Dest:enum = .Home | .Away\n` +
+      `<x>: Dest = .Home\n` +
+      `\${ function nav() {\n` +
+      `  match @x {\n` +
+      `    .Home :> navigate("/home")\n` +
+      `    .Away :> navigate("/away")\n` +
+      `  }\n` +
+      `} }\n` +
+      `<button onclick=nav()>go</button>`;
+    const { result, clientJs } = compileToClient(src, "nav-matcharm");
+    // The isStatementShapeStmt whitelist recognizes both `_scrml_navigate(` and
+    // `_scrml_navigate_soft(` so a navigate arm tail is treated as a statement,
+    // never value-wrapped into malformed JS.
+    expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(clientJs).toMatch(/_scrml_navigate(?:_soft)?\(/);
+    // The emitted client body must be syntactically valid.
+    expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
 });
