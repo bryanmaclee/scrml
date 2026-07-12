@@ -18291,41 +18291,112 @@ export function buildAST(bsOutput, tokenizerOverrides) {
         }
       }
 
-      if (!hasPageSibling && filePathIsRealFile) {
-        // Condition (3): no `pages/` directory at the project root.
-        // Project root = dirname of the file containing <program>.
-        // Suppression: if `pages/` EXISTS as a directory (even empty),
-        // do not emit.
-        let pagesDirPresent = false;
+      // pages/ directory presence — the filesystem multi-page signal (§40.8.1),
+      // computed ONCE and shared by both filesystem-inference lints below:
+      //   - W-PROGRAM-SPA-INFERRED fires when `pages/` is ABSENT (SPA shape).
+      //   - W-OUTLET-ABSENT-SOFT-NAV-DISABLED fires when `pages/` is PRESENT but
+      //     the shell has no <outlet> (multi-page, soft-nav-disabled).
+      // Gated on a real on-disk file — the fs probe is meaningless for synthetic
+      // test paths. A stray `pages` FILE (not a directory) does not count (the
+      // SPEC mechanism is specifically a directory). On an fs error (permissions,
+      // broken symlink) we treat pages/ as ABSENT — conservative: the adopter
+      // sees the SPA-inference signal rather than having it silently suppressed.
+      let pagesDirPresent = false;
+      if (filePathIsRealFile) {
         try {
           const projectRoot = _pathDirname(filePath);
           const pagesPath = _pathJoin(projectRoot, "pages");
           if (existsSync(pagesPath)) {
-            // Confirm it is a directory (a stray `pages` FILE does not
-            // suppress the lint — the SPEC mechanism is specifically a
-            // directory).
             pagesDirPresent = statSync(pagesPath).isDirectory();
           }
         } catch {
-          // fs lookup failed (permissions, broken symlink, etc.) —
-          // treat as "no pages/ dir" (i.e. lint may fire). This is
-          // conservative: the adopter sees the inference signal rather
-          // than having it silently suppressed by a transient fs error.
           pagesDirPresent = false;
         }
+      }
 
-        if (!pagesDirPresent) {
+      // W-PROGRAM-SPA-INFERRED — Condition (3): no `pages/` directory at the
+      // project root (project root = dirname of the <program> file). Suppression:
+      // a `pages/` directory (even EMPTY) suppresses the lint.
+      if (!hasPageSibling && filePathIsRealFile && !pagesDirPresent) {
+        const span =
+          entryProgramNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        errors.push(new TABError(
+          "W-PROGRAM-SPA-INFERRED",
+          `W-PROGRAM-SPA-INFERRED: The compiler has inferred SPA (single-page application) shape from the filesystem: ` +
+          `the entry file declares a top-level \`<program>\` element, the \`<program>\` body contains zero \`<page>\` siblings, ` +
+          `and no \`pages/\` directory exists at the project root. ` +
+          `If SPA is your intent, this lint is informational only — no action required. ` +
+          `If you intended a multi-page app, add \`<page>\` declarations to the entry-file \`<program>\` body or create a \`pages/\` directory at the project root. ` +
+          `To suppress this lint, create an empty \`pages/\` directory at the project root (signals adopter awareness of the multi-page option). ` +
+          `Per SPEC §40.8.1 the SPA-vs-multi-page-app shape is filesystem-inferred exclusively; no \`<program spa>\` boolean attribute exists.`,
+          span,
+        ));
+        errors[errors.length - 1].severity = "info";
+      }
+
+      // ---------------------------------------------------------------------
+      // §20.8.1 / §20.8.7 — W-OUTLET-ABSENT-SOFT-NAV-DISABLED (info-level lint)
+      // (Client Router — navigate-soft-nav Wave-1a)
+      //
+      // A multi-page project whose `<program>` shell declares no `<outlet>`.
+      // Soft navigation + `<a>` link-boost (§20.8.2 / §20.8.3) have no region
+      // to swap into, so they fall back to hard (full-document) navigation. The
+      // lint surfaces the missed enhancement; it is informational only. This is
+      // the complementary branch to W-PROGRAM-SPA-INFERRED (mutually exclusive by
+      // the `pages/` condition — one fires on ABSENT, the other on PRESENT).
+      // ---------------------------------------------------------------------
+      if (filePathIsRealFile && pagesDirPresent) {
+        // Does the shell declare an `<outlet>` anywhere in its subtree? The
+        // outlet may be nested inside the shell's layout markup OR inside
+        // control-flow (§20.8.1), so scan the `<program>` markup tree over the
+        // FULL edge set — children / body / defChildren / consequent / alternate
+        // / arms[].body — matching `collectOutlets` in symbol-table.ts (SYM PASS
+        // 15.5). Descending both conditional/match arms is deliberate: an outlet
+        // nested inside a branch counts as PRESENT (no false "absent"), the twin
+        // of the E-OUTLET-DUPLICATE static count (one static outlet across all
+        // edges; branch-exclusive outlets are v1.next, not V1).
+        const shellHasOutlet = (function scanForOutlet(n) {
+          if (!n || typeof n !== "object") return false;
+          if (Array.isArray(n)) {
+            for (const c of n) if (scanForOutlet(c)) return true;
+            return false;
+          }
+          if (n.kind === "markup" && n.tag === "outlet") return true;
+          if (Array.isArray(n.children) && scanForOutlet(n.children)) return true;
+          if (Array.isArray(n.body) && scanForOutlet(n.body)) return true;
+          if (Array.isArray(n.defChildren) && scanForOutlet(n.defChildren)) return true;
+          if (Array.isArray(n.consequent) && scanForOutlet(n.consequent)) return true;
+          if (Array.isArray(n.alternate) && scanForOutlet(n.alternate)) return true;
+          if (Array.isArray(n.arms)) {
+            for (const arm of n.arms) {
+              if (arm && Array.isArray(arm.body) && scanForOutlet(arm.body)) return true;
+            }
+          }
+          // Markup if-chain (kind:"if-chain") stores its branch elements in
+          // `branches[].element` + `elseBranch` (single nodes) — the twin of
+          // collectOutlets in symbol-table.ts. An outlet in an if/else branch
+          // counts as PRESENT (no false "absent").
+          if (Array.isArray(n.branches)) {
+            for (const br of n.branches) {
+              if (br && br.element && scanForOutlet(br.element)) return true;
+            }
+          }
+          if (n.elseBranch && scanForOutlet(n.elseBranch)) return true;
+          return false;
+        })(entryProgramNode.children);
+
+        if (!shellHasOutlet) {
           const span =
             entryProgramNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           errors.push(new TABError(
-            "W-PROGRAM-SPA-INFERRED",
-            `W-PROGRAM-SPA-INFERRED: The compiler has inferred SPA (single-page application) shape from the filesystem: ` +
-            `the entry file declares a top-level \`<program>\` element, the \`<program>\` body contains zero \`<page>\` siblings, ` +
-            `and no \`pages/\` directory exists at the project root. ` +
-            `If SPA is your intent, this lint is informational only — no action required. ` +
-            `If you intended a multi-page app, add \`<page>\` declarations to the entry-file \`<program>\` body or create a \`pages/\` directory at the project root. ` +
-            `To suppress this lint, create an empty \`pages/\` directory at the project root (signals adopter awareness of the multi-page option). ` +
-            `Per SPEC §40.8.1 the SPA-vs-multi-page-app shape is filesystem-inferred exclusively; no \`<program spa>\` boolean attribute exists.`,
+            "W-OUTLET-ABSENT-SOFT-NAV-DISABLED",
+            `W-OUTLET-ABSENT-SOFT-NAV-DISABLED: this multi-page project (a \`pages/\` directory exists at the project root) ` +
+            `declares a \`<program>\` shell with no \`<outlet>\`. The Client Router (§20.8) swaps the current route's content ` +
+            `into the shell's \`<outlet>\` region on a soft navigation; with no \`<outlet>\`, soft navigation and \`<a>\` ` +
+            `link-boost have no region to swap into and fall back to hard (full-document) navigation. ` +
+            `If SSR-first hard navigation is your intent, this lint is informational only — no action required. ` +
+            `To enable soft navigation, add a single \`<outlet/>\` to the shell where route content should render. ` +
+            `Per SPEC §20.8.1 the shell holds exactly one flat \`<outlet>\` in V1.`,
             span,
           ));
           errors[errors.length - 1].severity = "info";

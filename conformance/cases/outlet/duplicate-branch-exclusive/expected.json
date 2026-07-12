@@ -1,0 +1,12 @@
+{
+  "id": "outlet-duplicate-branch-exclusive",
+  "description": "§20.8.1 (V1 count ruling) — two `<outlet>` elements in mutually-exclusive if/else branches are STILL a duplicate. V1 = exactly one flat `<outlet>` per shell, counted STATICALLY across all edges (branch-exclusive / per-branch outlets are v1.next). The SYM outlet walker descends the markup if-chain `branches[].element` + `elseBranch` edges, so both outlets are counted and E-OUTLET-DUPLICATE fires. (Regression: the walker previously skipped if-chain branch edges, so branch-exclusive outlets were undercounted AND falsely tripped W-OUTLET-ABSENT.)",
+  "language-version": "1.0",
+  "spec": "§20.8.1, §20.8.6",
+  "rationale": "§20.8.1: 'V1 supports one flat `<outlet>` per shell.' Two outlets — even in disjoint if/else branches — exceed the one-static-outlet budget and fire E-OUTLET-DUPLICATE.",
+  "expect": {
+    "codes": ["E-OUTLET-DUPLICATE"],
+    "notCodes": ["E-OUTLET-OUTSIDE-SHELL"],
+    "severity": { "E-OUTLET-DUPLICATE": "error" }
+  }
+}

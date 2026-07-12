@@ -14266,6 +14266,7 @@ The render-expression REUSES the existing per-variant `renders` machinery (the b
 - The compiler SHALL infer the navigation type from context:
   - If the calling function is client-side: `navigate(path)` compiles to a history push (soft navigation).
   - If the calling function is server-escalated: `navigate(path)` compiles to a 302 redirect (hard navigation).
+- The soft (client-side) form is an in-place route swap over a persistent `<program>` shell — the **§20.8 Client Router** pipeline (fetch the target route's server-rendered HTML → swap the `<outlet>` region → hydrate → transition). A client-side `navigate()` SHALL NOT reload the document.
 
 ### 20.2 Explicit Navigation Type
 
@@ -14283,6 +14284,7 @@ navigate(path, .Soft)   // always history push
 - `navigate(path)` SHALL be valid inside any function in any context.
 - The navigation type SHALL be inferred from the function's server/client classification unless explicitly overridden.
 - Calling `navigate(path, .Hard)` from a client-side function SHALL cause the compiler to emit a server redirect. The compiler SHALL escalate the calling function to a server route if necessary, or emit a warning if the escalation is not possible (W-NAV-001).
+- A client-side `navigate(path)` (or `navigate(path, .Soft)`) SHALL execute the §20.8 soft-navigation pipeline (an in-place `<outlet>` swap + hydrate over the persistent shell); it SHALL NOT perform a full document reload (§20.8.2).
 
 ### 20.3a `render()` Built-in — Shadowing (a user-declared `render` wins)
 
@@ -14575,6 +14577,71 @@ A user-declared in-scope binding named `print` / `println` wins; the built-in st
 **Named codes (land WITH the impl per Rule 4 / §60·§61·§64 precedent):** `E-PRINT-NON-PRIMITIVE` (Error — a non-primitive arg to `print` / `println`); `W-PRINT-SHADOWED` (Info — a user binding shadows the built-in; reserved `E-PRINT-SHADOWED`).
 
 **Cross-references:** §20.6 (`log()` — the decorated dev-logger sibling; the print-vs-log contract) · §20.1 (`navigate()` — the location-transparent-builtin lowering precedent) · §12.2 Trigger 3 (host stdout as a server-only resource) · §64 (`kind="tool"` — the primary consumer; the tool emit inlines `_scrml_print` in its runtime-helper set, so it is NOT an E-TOOL-005 gap — S241) · §23.2.4 (the bare-`_{}` host-I/O context a tool also uses).
+
+### 20.8 The Client Router (soft navigation)
+
+> **Status: Nominal / spec-ahead (S250, 2026-07-11).** The normative behavior below is the target; the impl (runtime soft-nav engine · `<outlet>`/`<program>`-shell recognition · `<a>`-boost · `keep-alive` cache · `.Soft`/`.Hard`/`hard` · View-Transitions) + the §34 rows land in the build waves and flip this banner. Origin: issue #27 (Peter Oliver). Design authority: deep-dive `navigate-soft-nav-client-router-2026-07-11` (+ `-keepalive-invalidation-`).
+
+scrml owns whole-stack routing (§12). §20.8 extends that ownership to *client* navigation between already-routed pages: internal navigation is a soft, in-place route swap over a persistent shell — the fourth native leg (route · serve · **navigate** · style). SSR-first is preserved: every route is a real server-rendered document, and the router is a progressive enhancement over working links.
+
+#### 20.8.1 The persistent shell and `<outlet>`
+
+- A `<program>` is the **persistent application shell** in BOTH the single-file (`<page>` children) and multi-file (`pages/*.scrml`) forms. It boots once and stays live across soft navigations. Splitting an app into `pages/` SHALL NOT drop the shell.
+- The shell MAY contain exactly one **`<outlet>`** element — the region into which the current route's content renders. Route content is swapped into `<outlet>`; the rest of the shell (`<nav>`, `<footer>`, the client runtime) persists across navigations.
+- V1 supports **one flat `<outlet>`** per shell. Nested layouts (multiple / nested outlets, Remix-style) are v1.next.
+- More than one `<outlet>` in a shell SHALL be **E-OUTLET-DUPLICATE**; an `<outlet>` outside a `<program>` shell SHALL be **E-OUTLET-OUTSIDE-SHELL**. A multi-page project (`pages/` present) whose shell declares no `<outlet>` SHALL emit **W-OUTLET-ABSENT-SOFT-NAV-DISABLED** and fall back to hard navigation.
+
+#### 20.8.2 Soft-navigation pipeline (SSR-HTML transport)
+
+On a soft navigation to `path`, the runtime SHALL:
+1. **Fetch** the target route's server-rendered HTML (the same SSR output a hard load would receive; reuses the §12 route + `/__serverLoad` path). A prefetched copy (§40.9.7) SHOULD be used when present.
+2. **Swap** the `<outlet>` subtree with the fetched route's `<outlet>` content.
+3. **Hydrate** the swapped region (attach reactive wiring), reusing the route's client chunk.
+4. **Transition** the frames via the browser **View Transitions API** where available; where absent, the swap SHALL be instantaneous (§20.8.5 item 7).
+
+The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (duplicating the server render on the client) is explicitly NOT the transport model.
+
+#### 20.8.3 Link-boost (`<a href>` default soft-nav; `hard` opt-out)
+
+- An internal `<a href>` (a same-app route the compiler resolves via the §12 route graph) SHALL be **soft-navigated by default** — the click is intercepted and run through §20.8.2.
+- The following SHALL pass through untouched (native / hard navigation): external hrefs, `target="_blank"`, `download`, non-http(s) schemes (`mailto:` / `tel:` / …), hash-only (`#…`) same-page links, and modified clicks (cmd / ctrl / shift / alt / middle-click).
+- A link SHALL opt out of the boost with the boolean attribute **`hard`** (`<a href="/x" hard>` always hard-navigates) — the markup sibling of `navigate(…, .Hard)`.
+- Link-boost SHALL reuse the soft-nav engine (§20.8.2) and the `data-scrml-prefetch` manifest (§40.9.7).
+
+#### 20.8.4 Keep-alive (`<page keep-alive>`, data-level)
+
+- By default a route is **fresh per visit**: navigating away discards its `<outlet>` state; returning re-fetches + re-hydrates (still a large win over full-reload — the shell + runtime persist).
+- A route MAY opt into **`keep-alive`** (`<page keep-alive>`). A kept-alive route's **server-load payload** is cached client-side, keyed by **route + params**, and returning reuses the cache under a **stale-while-revalidate** policy.
+- **Invalidation SHALL be compiler-derived, not an author TTL.** The cache is held as per-`<var>` sub-payloads keyed by `(routeId, sessionScope, only-the-params that reach SQL)` (client-only params SHALL NOT fragment the cache; per-user loads auto-partition by `sessionScope`, the §52.15 SSR-scoping precedent). Each sub-payload's table read-set is derived at build time via `extractSelectProjection().fromTables` (the §14.8.9 protect-egress extractor; `!resolvable` fail-closed). Invalidation reuses the §38.13 machinery: one Postgres `AFTER INSERT/UPDATE/DELETE` trigger per read table (deduped with any `watches=` feed) pushing a `{__type:"__invalidate", table}` frame; the client keeps an inverted `table→entries` index and marks matching entries stale at **per-sub-load granularity, re-fetch-not-patch** (a collection result cannot be soundly patched from a row delta). Stale-while-revalidate serves the warm copy instantly; **reconnect → mark-all-stale** is the at-most-once backstop (inherits §38.13.6). Fallbacks: an unresolvable read-set disables that sub-load's cache + **W-KEEPALIVE-UNRESOLVABLE-READSET**; a non-Postgres substrate → focus-revalidate + **W-KEEPALIVE-NO-REALTIME-SUBSTRATE**; a multi-database route is push-coherent only for its Postgres reads (a named behavior). Pipe-not-store (§52.6.7-clean).
+
+#### 20.8.5 Correctness (normative behaviors)
+
+1. **Back/forward (popstate)** SHALL soft-navigate to the target (restoring from keep-alive when warm), reusing the `scrml:router` popstate handling.
+2. **Scroll** — a new navigation SHALL scroll to top (or the `#hash` target); back/forward SHALL restore the saved scroll position (`history.scrollRestoration = "manual"`, saved per history entry).
+3. **Focus** — after a swap, focus SHALL move to the `<outlet>` region (or its heading) for keyboard / assistive-tech users.
+4. **In-flight cancellation** — last-navigation-wins; a superseded in-flight fetch SHALL be aborted.
+5. **Nav-to-error (404/500)** — the error route's server-rendered HTML SHALL be swapped into `<outlet>`, integrated with the §19 error-boundary system (incl. §19.14.4 nested boundaries). A *transport* failure (network unreachable) MAY fall back to a hard navigation.
+6. **No-JS / hydration failure** — the boost is progressive enhancement: `<a href>` is a real link and a client `navigate()` degrades to a full navigation; the SSR HTML works with JS disabled (SSR-first preserved).
+7. **View Transitions absent** — the swap SHALL be instantaneous (no animation); no error.
+
+#### 20.8.6 Normative Statements (Client Router)
+
+- A `<program>` SHALL be the persistent shell across soft navigations in both single- and multi-file forms.
+- A shell SHALL contain at most one `<outlet>` in V1; more than one SHALL be `E-OUTLET-DUPLICATE`. `<outlet>` SHALL appear only inside a `<program>` shell; elsewhere SHALL be `E-OUTLET-OUTSIDE-SHELL`.
+- An internal `<a href>` SHALL soft-navigate by default unless it carries `hard`, is external / `target="_blank"` / `download` / non-http-scheme / hash-only, or the click is modified.
+- A kept-alive route's cached payload SHALL be invalidated by compiler-derived §52/§38 signals, never by an author-specified TTL.
+- Soft navigation SHALL NOT re-boot the shell runtime and SHALL preserve SSR-first (links work with JS off).
+
+#### 20.8.7 Error / Warning Codes (NAMED; §34 rows land WITH the impl per Rule 4 / §38.13·§23.5 precedent)
+
+- **E-OUTLET-DUPLICATE** — more than one `<outlet>` in a shell (V1 flat-outlet). Error.
+- **E-OUTLET-OUTSIDE-SHELL** — `<outlet>` outside a `<program>` shell. Error.
+- **W-OUTLET-ABSENT-SOFT-NAV-DISABLED** — a multi-page project whose shell declares no `<outlet>`; soft-nav / link-boost fall back to hard. Info.
+- **W-KEEPALIVE-UNRESOLVABLE-READSET** — a `keep-alive` sub-load whose SQL read-set is not statically resolvable; that sub-load's cache is disabled (fail-closed). Info.
+- **W-KEEPALIVE-NO-REALTIME-SUBSTRATE** — `keep-alive` on a non-Postgres (or multi-DB non-PG) read; falls back to focus-revalidation. Info.
+- **W-NAV-001** — (existing, §20.3) a client `.Hard` where server escalation is not possible.
+
+**Cross-references:** §12 (route inference — the graph that classifies internal `<a href>` + resolves the fetch target) · §40.9.7 (route-chunk prefetch — now feeds real soft-nav) · §19 / §19.14.4 (error boundaries — nav-to-error) · §47.9.2 (SPA-vs-MPA filesystem inference — the `<program>`-as-shell model extends it; no new mode flag) · §52 / §38 / §38.13 (the table-write signals the keep-alive cache invalidates on) · §20.1–20.3 (`navigate()` — the soft-nav entry point).
 
 
 ---
@@ -17787,6 +17854,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | ~~W-MACRO-001~~ | §4.9 | **Retired 2026-06-19 (S209 — state-as-primary unification follow-through).** Premised on a macro expansion altering block type at a `<` boundary via whitespace; under NR (§15.15.6) whitespace never reclassifies an opener (P1, 2026-04-30), so the trigger cannot occur. Macro-inserted leading whitespace surfaces W-WHITESPACE-001 (§15.15.5) instead. Spec-only — never implemented. | — |
 | W-PROTECT-001 | §11.4 | Function touches protected field but is not `server`-annotated | Warning |
 | W-NAV-001 | §20.3 | `navigate(path, .Hard)` from client function cannot be escalated | Warning |
+| E-OUTLET-DUPLICATE | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a.) More than one `<outlet>` in a `<program>` shell. V1 supports exactly one flat `<outlet>` per shell — the single region into which the current route's content renders (§20.8.2). Nested layouts (multiple / nested outlets, Remix-style) are v1.next. Remove the extra `<outlet>`. Fired at the SYM `<outlet>` placement pass (PASS 15.5, `compiler/src/symbol-table.ts`). | Error |
+| E-OUTLET-OUTSIDE-SHELL | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a.) An `<outlet>` appears outside a `<program>` shell. `<outlet>` is the shell's route-content swap region (§20.8.1); outside a shell there is no route content to swap in. Move the `<outlet>` to be a descendant of the `<program>` shell. Unlike `E-CHANNEL-OUTSIDE-PROGRAM` there is NO module-file dispensation — an outlet has no meaning without a shell, so the fire is unconditional. Fired at the SYM `<outlet>` placement pass (PASS 15.5, `compiler/src/symbol-table.ts`). | Error |
+| W-OUTLET-ABSENT-SOFT-NAV-DISABLED | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a; info-level.) A multi-page project (a `pages/` directory exists at the project root) declares a `<program>` shell with no `<outlet>`. Soft navigation + `<a>` link-boost (§20.8.2 / §20.8.3) have no region to swap into and fall back to hard (full-document) navigation; this is informational only (SSR-first hard navigation still works). To enable soft navigation, add a single `<outlet/>` to the shell where route content should render. Complementary to `W-PROGRAM-SPA-INFERRED` (§40.8.1) — that fires when `pages/` is ABSENT, this fires when `pages/` is PRESENT but the shell has no outlet; the two are mutually exclusive. Fired at the TAB filesystem-inference site (`compiler/src/ast-builder.js`, alongside `W-PROGRAM-SPA-INFERRED`). | Info |
 | W-NAME-001 | §15.6 | Component name misleadingly matches a different HTML element type | Warning |
 | W-LIN-001 | §35.7 | `lin` variable passed to server-escalated function; guarantee does not extend to server copy | Warning |
 | W-MATCH-001 | §18.6 | Unreachable default `else` arm (all variants already covered) | Warning |
