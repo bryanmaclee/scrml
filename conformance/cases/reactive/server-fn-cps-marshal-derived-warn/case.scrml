@@ -1,0 +1,14 @@
+<program db="sqlite:./app.db">
+  <db src="sqlite:./app.db" tables="orders">
+    ${
+      <price> = 10
+      const <total> = @price * 3
+      <lastRows> = []
+      function saveOrder() {
+        @lastRows = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}.all()
+      }
+    }
+    <button on:click=saveOrder()>Save</button>
+    <ul>${ for (let r of @lastRows) { lift <li>${r.id}</li> } }</ul>
+  </db>
+</program>

@@ -1,0 +1,13 @@
+<program db="sqlite:./app.db">
+  <db src="sqlite:./app.db" tables="prices">
+    ${
+      <sc server> = 0
+      <log> = []
+      function bump() {
+        @log = ?{`UPDATE prices SET n = ${@sc} + 1 RETURNING n`}.all()
+      }
+    }
+    <button on:click=bump()>Bump</button>
+    <ul>${ for (let r of @log) { lift <li>${r.n}</li> } }</ul>
+  </db>
+</program>

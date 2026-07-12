@@ -280,12 +280,12 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
         <items> = [{ name: "b", order: 2 }, { name: "a", order: 1 }]
         <buckets> = ""
 
-        server function bucketize() ! string {
-            const g = groupBy(@items, "name")
+        server function bucketize(items) ! string {
+            const g = groupBy(items, "name")
             return "ok"
         }
 
-        on mount { @buckets = bucketize() }
+        on mount { @buckets = bucketize(@items) }
     }
     <ul>
         \${ for (let it of sortBy(@items, "order")) {
@@ -391,12 +391,12 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
         <items> = [{ name: "b", order: 2 }, { name: "a", order: 1 }]
         <buckets> = ""
 
-        server function bucketize() ! string {
-            const g = groupBy(@items, "name")
+        server function bucketize(items) ! string {
+            const g = groupBy(items, "name")
             return "ok"
         }
 
-        on mount { @buckets = bucketize() }
+        on mount { @buckets = bucketize(@items) }
     }
     <ul>
         \${ for (let it of sortBy(@items, "order")) {

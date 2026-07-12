@@ -1,0 +1,14 @@
+<program db="sqlite:./app.db">
+  <db src="sqlite:./app.db" tables="todos">
+    ${
+      <items> = []
+      <draft> = ""
+      function add() {
+        @items = ?{`INSERT INTO todos (text) VALUES (${@draft}) RETURNING id, text`}.all()
+      }
+    }
+    <input bind:value=@draft>
+    <button on:click=add()>Add</button>
+    <ul>${ for (let t of @items) { lift <li>${t.text}</li> } }</ul>
+  </db>
+</program>

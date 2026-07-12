@@ -1,0 +1,11 @@
+{
+  "id": "reactive-server-fn-cps-marshal-raw-silent",
+  "description": "§6.6.9 / §19.9.9 (RULING: THE SPLIT) — a CPS-split fn (`@items = ?{…}` is a reactive assignment, so it round-trips) that reads a RAW client `@var` (`@draft`) MARSHALS it into the request body — the value crosses the wire, so no error and NO warning. `add` is the form-submit idiom: the client stub now sends `{ \"draft\": _scrml_reactive_get(\"draft\") }` and the server reads `_scrml_body[\"draft\"]`. Raw form fields marshal SILENTLY (ordinary form data). Asserts BOTH the E-REACTIVE-003 and W-SERVER-DERIVED-MARSHAL families stay absent. Incidental W-* SQL/program lints ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9: a CPS fn marshals the client-held cells its server batch reads; a raw `@var` form field marshals silently (no trust warning — normal form data).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-REACTIVE-003", "W-SERVER-DERIVED-MARSHAL"]
+  }
+}

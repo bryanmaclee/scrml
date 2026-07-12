@@ -1,0 +1,12 @@
+{
+  "id": "reactive-server-fn-derived-read-error",
+  "description": "§6.6.9 E-REACTIVE-003 (RULING A) — a WHOLLY server-escalated function reading a `const <name>` derived is a compile error. `saveOrder()` escalates (it touches a `?{}` SQL resource, §12) and reads the client-side `const <total>` derived; on the server that read lowers to `_scrml_body[\"total\"]`, but the fn has NO reactive assignment so it is NOT CPS-split — its client stub sends only declared params, so `@total` is never transported and resolves to `undefined` server-side. The compiler rejects the read. Fix: pass `@total` as an explicit argument (args ARE marshalled) or declare a §52 `<... server>` cell. Incidental W-PROGRAM-001 / W-SQL-ROW-UNTYPED ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9: 'A WHOLLY server-escalated function body that READS a client cell — a mutable @variable OR a const <name> derived — SHALL be a compile error, E-REACTIVE-003.' The value is not transported (`_scrml_body[\"total\"]` is never populated by a non-CPS stub), so the read is rejected rather than silently ship an undefined-valued query.",
+  "expect": {
+    "codes": ["E-REACTIVE-003"],
+    "notCodes": [],
+    "severity": { "E-REACTIVE-003": "error" }
+  }
+}

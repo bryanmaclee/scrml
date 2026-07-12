@@ -1,0 +1,12 @@
+{
+  "id": "reactive-server-fn-authority-wholly-server-error",
+  "description": "§6.6.9 (RULING: THE SPLIT) — a §52 `<... server>` cell read in a WHOLLY-server fn is E-REACTIVE-003, same as any client cell. Correction to the earlier draft: a `<price server>` cell is CLIENT-HELD (compiler-hydrated on mount, §52.4.2; the persist is the developer's own `?{}` fn, §52.6.2) — there is NO server-side cell store, so a server-side read lowers to `_scrml_body[\"price\"]` and resolves to `undefined`. `bump()` has no reactive assignment (not CPS), so the read is unmarshalled → error. Incidental W-AUTH-001 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9: a §52 `<... server>` cell is client-held; a wholly-server read is not transported and resolves to undefined, so it fires E-REACTIVE-003 identically to a plain client cell. (The earlier 'server-resolved, exempt' premise was empirically false.)",
+  "expect": {
+    "codes": ["E-REACTIVE-003"],
+    "notCodes": [],
+    "severity": { "E-REACTIVE-003": "error" }
+  }
+}

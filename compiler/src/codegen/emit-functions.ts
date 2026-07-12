@@ -10,6 +10,103 @@ import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts
 import { returnTypeAllowsAbsence } from "./wire-format.ts";
 import type { CompileContext } from "./context.ts";
 
+// ---------------------------------------------------------------------------
+// §6.6.9 / §19.9.9 (RULING: THE SPLIT) — CPS free-client-cell MARSHAL.
+//
+// A CPS-split server fn (§19.9.9) is a CLIENT function with an embedded server
+// round-trip (the form-submit / login idiom). Its server BATCH reads free client
+// cells, which emit-expr.ts lowers to `_scrml_body["<cell>"]` — but the CPS
+// client stub historically packed only declared params, so those reads resolved
+// to `undefined` (the g-cps-form-submit silent bug). We now pack the client-held
+// cells the server reads into the stub's `_scrml_body`, so the round-trip's
+// inputs actually cross the wire.
+//
+// Wholly-server fns (cpsSplit === null) do NOT marshal — they fire E-REACTIVE-003
+// (route-inference.ts); the author must pass the value explicitly.
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect EVERY reactive `state-decl` cell name of a file, mapped to whether it
+ * is a `const <name>` derived. INCLUDES §52 `<... server>` authority cells —
+ * they are CLIENT-HELD (compiler-hydrated on mount, §52.4.2; the persist is the
+ * developer's own `?{}` fn, §52.6.2), so at read time they behave as ordinary
+ * client cells and are marshalled/errored identically. Ambient identity
+ * (`@session` / `@currentUser`) is a compiler-provided singleton, not a
+ * `state-decl`, so it is absent here by construction (and never marshalled — the
+ * spoofing guard). Engine / projected-machine vars are not `state-decl`s either,
+ * so they are excluded (they use a different runtime getter).
+ */
+function collectAllStateCellNames(fileAST: unknown): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  const root = fileAST as Record<string, unknown> | null | undefined;
+  const nodes = (root?.nodes ?? (root?.ast as Record<string, unknown> | undefined)?.nodes) as unknown[] | undefined;
+  if (!Array.isArray(nodes)) return out;
+  const visit = (list: unknown[]): void => {
+    for (const node of list) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as Record<string, unknown>;
+      if (n.kind === "state-decl" && typeof n.name === "string") out.set(n.name as string, n.shape === "derived");
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body as unknown[]);
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+    }
+  };
+  visit(nodes);
+  return out;
+}
+
+/**
+ * Scan a server fn body for FREE CLIENT-CELL reads — `@<name>` reads whose bare
+ * name is in `cellNames`. Returns an ORDERED, de-duplicated `{ name, span }`.
+ * This is the SINGLE SOURCE OF TRUTH for the CPS marshal set: it mirrors the
+ * server-side lowering (`@cell` → `_scrml_body["cell"]`, emit-expr.ts) so that
+ * client-SEND == server-READ (anti-drift).
+ *
+ * SQL-aware (verified against real parser output): ExprNode `@<name>` idents
+ * anywhere (full-node recursion) + `sql` node `query` RAW text (a `?{...}`
+ * template stores interpolations as query text, not ExprNodes). Does NOT descend
+ * into nested `function-decl` bodies (own scope). The LHS of a `state-decl` is
+ * `node.name` (no `@`), so a `@x = …` write-target is never a read.
+ */
+function collectServerCellReads(
+  body: unknown,
+  cellNames: Set<string>,
+): Array<{ name: string; span: unknown }> {
+  const out: Array<{ name: string; span: unknown }> = [];
+  const seen = new Set<string>();
+  const visited = new WeakSet<object>();
+  if (!Array.isArray(body) || cellNames.size === 0) return out;
+  const record = (bare: string, span: unknown): void => {
+    if (seen.has(bare) || !cellNames.has(bare)) return;
+    seen.add(bare);
+    out.push({ name: bare, span });
+  };
+  const scanSql = (text: string, span: unknown): void => {
+    const re = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) record(m[1], span);
+  };
+  const visit = (node: unknown, stmtSpan: unknown): void => {
+    if (!node || typeof node !== "object" || visited.has(node as object)) return;
+    visited.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (n.kind === "function-decl") return;
+    const sp = (n.span && typeof n.span === "object") ? n.span : stmtSpan;
+    if (n.kind === "ident" && typeof n.name === "string"
+        && n.name.length > 1 && n.name.charCodeAt(0) === 0x40 /* @ */) {
+      record((n.name as string).slice(1), sp);
+    }
+    if (n.kind === "sql" && typeof n.query === "string") scanSql(n.query as string, sp);
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const val = n[key];
+      if (Array.isArray(val)) { for (const c of val) visit(c, sp); }
+      else if (val && typeof val === "object") visit(val, sp);
+    }
+  };
+  for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as Record<string, unknown>).span : undefined);
+  return out;
+}
+
 /**
  * A1c C16 — Helper: emit per-param boundary checks for a client-side function.
  *
@@ -488,6 +585,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // calls inside function bodies.
   const enginesWithMessageArms: Set<string> = collectEnginesWithMessageArms(ctx.fileAST);
   const engineMessageVariants: Map<string, Set<string>> = collectEngineMessageVariants(ctx.fileAST);
+  // §6.6.9 / §19.9.9 — the file's client-held cells (name → isDerived), including
+  // §52 `<... server>` cells. Drives the CPS free-client-cell marshal + the
+  // W-SERVER-DERIVED-MARSHAL trust warning on marshalled derived reads.
+  const allStateCells: Map<string, boolean> = collectAllStateCellNames(ctx.fileAST);
+  const allStateCellNames: Set<string> = new Set(allStateCells.keys());
   const lines: string[] = [];
 
   // Map from original function name → generated var name.
@@ -629,6 +731,55 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     //     prior batch's return cell (cross-batch parameter forwarding, M1.3).
     const _cps: CpsSplit | undefined = route.cpsSplit;
     const _fnBody = (fnNode.body as ASTNode[]) ?? [];
+
+    // §6.6.9 / §19.9.9 — CPS free-client-cell MARSHAL (RULING: THE SPLIT).
+    //
+    // For a CPS-split fn ONLY (`_cps` present), collect the client-held cells its
+    // body reads (the SAME reads emit-expr.ts lowers to `_scrml_body["<cell>"]`
+    // server-side — the anti-drift single source of truth) and pack them into the
+    // stub `_scrml_body` below. A wholly-server fn (`_cps` undefined) marshals
+    // NOTHING here — it fires E-REACTIVE-003 in route-inference instead.
+    //
+    // SPOOFING GUARD: `@session` / `@currentUser` are server-only ambient identity
+    // (§20.5 / §52) resolved server-side (`_scrml_currentUser`), NEVER from the
+    // request body. They are not `state-decl`s, so `allStateCellNames` already
+    // excludes them — the client can never spoof identity via this marshal.
+    const _marshalReads = _cps
+      ? collectServerCellReads(_fnBody, allStateCellNames)
+      : [];
+    // Emit the marshal key-lines for one `_scrml_body` builder at `indent`,
+    // SKIPPING any name already sent as a declared param (`currentParams`) — no
+    // duplicate key. Getter mirrors emit-expr.ts client mode: derived →
+    // `_scrml_derived_get`, plain reactive / §52 → `_scrml_reactive_get`.
+    const _emitMarshalBodyLines = (indent: string, currentParams: string[]): string[] => {
+      const _pset = new Set(currentParams);
+      const _out: string[] = [];
+      for (const _mr of _marshalReads) {
+        if (_pset.has(_mr.name)) continue;
+        const _getter = allStateCells.get(_mr.name) === true ? "_scrml_derived_get" : "_scrml_reactive_get";
+        _out.push(`${indent}${JSON.stringify(_mr.name)}: ${_getter}(${JSON.stringify(_mr.name)}),`);
+      }
+      return _out;
+    };
+    // §6.6.9 trust warning — a marshalled `const <name>` DERIVED read is a
+    // client-computed snapshot (esp. an aggregate), not a server-recomputed value.
+    // Raw `@var` form fields marshal SILENTLY (ordinary form data); only derived
+    // reads warrant the nudge. Fire once per distinct derived cell, per fn.
+    for (const _mr of _marshalReads) {
+      if (allStateCells.get(_mr.name) !== true) continue; // derived only
+      const _wSpan = (_mr.span ?? (fnNode.span as ASTNode) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2];
+      errors.push(new CGError(
+        "W-SERVER-DERIVED-MARSHAL",
+        `W-SERVER-DERIVED-MARSHAL: The server round-trip \`${name}\` marshals the ` +
+        `client-side derived value \`@${_mr.name}\` into the request body — the server ` +
+        `receives the CLIENT-computed snapshot (\`_scrml_body["${_mr.name}"]\`), not a ` +
+        `value it recomputed. This works, but the value is client-supplied: trust it ` +
+        `accordingly (validate an aggregate server-side before acting on it). See SPEC §6.6.9.`,
+        _wSpan,
+        "warning",
+      ));
+    }
+
     const _stubBatches: ClientBatch[] = _cps
       ? buildClientBatchPlan(_cps, _fnBody)
       : [{ batchIndex: -1, indices: [], monotonicity: undefined, returnCell: null, fwdResultNames: [] }];
@@ -684,6 +835,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       for (const p of paramNames) {
         lines.push(`    ${JSON.stringify(p)}: ${p},`);
       }
+      // §6.6.9 CPS free-client-cell marshal — the client-held cells the server
+      // reads via `_scrml_body["<cell>"]`, so the round-trip's inputs cross the wire.
+      for (const _ml of _emitMarshalBodyLines("    ", paramNames)) lines.push(_ml);
       lines.push(`  });`);
       if (emitIdempotencyKey) {
         // _scrml_fetch_with_csrf_retry's signature is (path, method, body);
@@ -739,6 +893,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       for (const p of paramNames) {
         lines.push(`      ${JSON.stringify(p)}: ${p},`);
       }
+      // §6.6.9 CPS free-client-cell marshal (see the csrf-retry branch above).
+      for (const _ml of _emitMarshalBodyLines("      ", paramNames)) lines.push(_ml);
       lines.push(`    }),`);
       lines.push(`  });`);
     }

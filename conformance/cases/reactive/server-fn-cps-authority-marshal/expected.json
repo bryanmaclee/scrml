@@ -1,0 +1,11 @@
+{
+  "id": "reactive-server-fn-cps-authority-marshal",
+  "description": "§6.6.9 / §52 (RULING: THE SPLIT) — a §52 `<... server>` cell is CLIENT-HELD (§52.4.2), so in a CPS-split fn it MARSHALS like any client cell. `bump` (`@log = ?{…}` reactive assignment → CPS) reads `<sc server>`; the client stub sends `{ \"sc\": _scrml_reactive_get(\"sc\") }` (a §52 cell is read via the reactive store) and the server reads `_scrml_body[\"sc\"]`. Clean — no error, and no derived warning (`@sc` is not a derived). Contrast with server-fn-authority-wholly-server-error (§52 in a wholly-server fn → E-REACTIVE-003). Incidental W-AUTH-001 / W-* SQL lints ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9 / §52.4.2: a `<... server>` cell is client-held; a CPS fn marshals it identically to a plain client cell — no error.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-REACTIVE-003", "W-SERVER-DERIVED-MARSHAL"]
+  }
+}

@@ -1,0 +1,10 @@
+${
+    <price> = 10
+    const <total> = @price * 3
+    function saveOrder() : number {
+        result = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}
+        return result
+    }
+}
+<button id="save" onclick=@price = saveOrder()>Save</>
+<p id="t">Total: ${@total}</>

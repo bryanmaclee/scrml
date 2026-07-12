@@ -3080,33 +3080,78 @@ ${ function reset() {
 
 ---
 
-#### 6.6.9 Derived Values Inside Server Functions — E-REACTIVE-003
+#### 6.6.9 Reading Client Cells Inside Server Functions — E-REACTIVE-003
 
-Derived reactive values are client-side constructs. Their dirty flag, cache, and
-subscription graph live in the browser. A server-escalated function (§12) runs in the Bun
-process, not in the browser, and has no access to the client-side reactive graph.
+Reactive cells — mutable `@variable`s AND `const <name>` derived values — are client-side
+constructs. Their store, dirty flags, cache, and subscription graph live in the browser. A
+server-escalated function (§12) runs in the Bun process, not in the browser.
 
 **Declaring** a `const <name> = expr` at file top-level is always valid. The compiler
-generates the derived node on the client. The derived value is client-resident.
+generates the derived node on the client. The value is client-resident.
 
-**Reading** a `const <name>` (read site `@name`) value inside a server-escalated function is a compile error
-(E-REACTIVE-003), because the server function cannot access the client-side reactive state
-at the time of execution.
+**Reading** a client cell — a mutable `@var` OR a `const <name>` derived (read site `@name`)
+— inside a WHOLLY server-escalated function is a compile error (E-REACTIVE-003). The reason
+is concrete, not abstract: the server-mode rewrite lowers the `@cell` read to
+`_scrml_body["cell"]` (the request body), but a non-CPS server function's client fetch stub
+transmits only the function's declared arguments. The cell value is therefore **NOT
+transported** — the server reads `undefined` at request time. Rather than silently ship a
+`undefined`-valued query/computation, the compiler rejects the read and directs the author
+to a path where the value actually crosses the wire.
+
+**The two fixes (either resolves E-REACTIVE-003):**
+
+1. **Pass the value as an explicit argument.** Function arguments ARE marshalled into the
+   request body. Give the function a parameter and read the parameter (a bare name, not
+   `@cell`); the caller passes the client cell at the call site, where it is a live
+   client-side value: `saveOrder(@total)` → `function saveOrder(total) { … total … }`.
+2. **Restructure so the server computes the value itself** — e.g. read the source data
+   inside the `?{}` query (server-authoritative), rather than passing a client-side
+   derivation. (Note: a §52 `<... server>` cell is NOT a fix here — it is client-held, so
+   reading one in a wholly-server function is the *same* E-REACTIVE-003, see below.)
 
 **Normative statements:**
 
 - A `const <name> = expr` declaration SHALL always be a client-side declaration. The
   compiler SHALL generate the derived node and its subscription graph in the client JS
   output, regardless of where in the source file the declaration appears.
-- A server-escalated function body that reads a `const <name>` derived reactive value SHALL
-  be a compile error (E-REACTIVE-003): "Derived reactive value `@total` is a client-side
-  construct and cannot be read inside a server-escalated function. Pass the value as a
-  function argument instead."
-- The error message SHALL suggest the fix: pass the current value as a parameter from the
-  call site, where it is available as a client-side value.
-- Reading a mutable `@variable` (not a `const <name>` derived) inside a server-escalated function is
-  governed by E-RI-002 (§12), which is a separate error code and a separate condition.
-  E-REACTIVE-003 is specific to `const <name>` derived values.
+- A WHOLLY server-escalated function body that READS a client cell — a mutable `@variable`
+  OR a `const <name>` derived — SHALL be a compile error, E-REACTIVE-003. The read-side
+  sibling of E-RI-002 (§12), which governs a server function *writing* a `@reactive` cell.
+- The error message SHALL name the cell, state that it resolves to `undefined` server-side
+  because the value is not transported, and offer both fixes above.
+- **CPS carve-out — the MARSHAL (the form-submit / login idiom).** A function that also
+  performs a reactive assignment (`@cell = …`) is CPS-split (§19.9.9) — a CLIENT function
+  with an embedded server round-trip. Its `@cell` reads sit in the server BATCH, and the
+  compiler SHALL MARSHAL every client-held cell the batch reads into the CPS client stub's
+  request body (`"<cell>": _scrml_reactive_get("<cell>")` for a raw `@var` / §52 cell,
+  `_scrml_derived_get("<cell>")` for a derived). The marshal set SHALL equal the set the
+  server lowers to `_scrml_body[<cell>]` (client-SEND == server-READ). So a CPS read is
+  transported — E-REACTIVE-003 SHALL NOT fire for a CPS-split function; only a wholly-server
+  function (no split) leaves the read unmarshalled.
+- **Trust warning on a marshalled derived (`W-SERVER-DERIVED-MARSHAL`, §34).** When a CPS
+  function marshals a `const <name>` DERIVED read, the compiler SHALL emit
+  `W-SERVER-DERIVED-MARSHAL` (severity `warning`): the server receives a CLIENT-computed
+  snapshot (esp. an aggregate), not a value it recomputed — validate it server-side before
+  acting on it. A marshalled raw `@var` form field is ordinary form data and marshals
+  SILENTLY (no warning).
+- **§52 `<... server>` cells are CLIENT-HELD.** A `<... server>` cell is compiler-hydrated on
+  mount (§52.4.2; the persist is the developer's own `?{}` fn, §52.6.2) — there is NO
+  server-side cell store. A server-side read therefore lowers to `_scrml_body["<cell>"]`
+  exactly like any client cell: it ERRORS (E-REACTIVE-003) in a wholly-server function and
+  MARSHALS in a CPS function, identically to a plain client cell.
+- **Exclusions (no error, never marshalled — the spoofing guard).** The ambient identity
+  singletons `@currentUser` and `@session` (§20.5 / §52) are compiler-provided server-side
+  singletons, NOT `state-decl` client cells. `@currentUser` lowers to the server-resolved
+  `_scrml_currentUser` (never the request body). `@session` is server-only identity and SHALL
+  NEVER be marshalled from the client — doing so would be a spoofing hole. (A raw form field
+  or a §52 cell IS marshalled in CPS; identity is not.) Declared function parameters (bare
+  names) are already marshalled. Channel-declared cells are governed by E-CHANNEL-SERVER-CELL-READ
+  (§38.4) instead.
+- **Retirement of the prior wording.** Earlier drafts scoped E-REACTIVE-003 to `const <name>`
+  derived values only and justified it as "the server cannot access client-side reactive
+  state." That was imprecise (the marshal machinery is real) and too narrow (a raw `@var`
+  read has the identical not-transported failure). E-REACTIVE-003 now covers ANY free client
+  cell read in a wholly-server function; the derived case is the sharpest instance.
 
 ---
 
@@ -3204,7 +3249,8 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 | Code | Trigger | Severity |
 |---|---|---|
 | E-REACTIVE-002 | Assignment to a `const <name>` derived reactive value after declaration | Error |
-| E-REACTIVE-003 | Reading a `const <name>` derived value inside a server-escalated function | Error |
+| E-REACTIVE-003 | Reading a free client cell (mutable `@var`, `const <name>` derived, OR §52 `<... server>`) inside a WHOLLY server-escalated function — the value is not transported and resolves to `undefined` server-side (a CPS-split fn marshals instead) | Error |
+| W-SERVER-DERIVED-MARSHAL | A CPS-split server round-trip marshals a `const <name>` derived read — the server gets a client-computed snapshot, not a recomputed value (a raw `@var` field marshals silently) | Warning |
 | E-REACTIVE-004 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | Circular dependency in the derived reactive graph | Error |
 | W-DERIVED-001 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
@@ -3327,26 +3373,61 @@ Error E-REACTIVE-005: Circular derived dependency detected.
 Cycle: @a → @b → @a
 ```
 
-**Invalid — reading derived value in server function (E-REACTIVE-003):**
+**Invalid — reading a client cell in a wholly-server function (E-REACTIVE-003):**
 
 ```scrml
 <price> = 10
 const <total> = @price * 3
 
 ${ function saveOrder() {
-    let amount = @total    // Error E-REACTIVE-003
-    ?{`INSERT INTO orders (amount) VALUES (${amount})`}.run()
+    ?{`INSERT INTO orders (amount) VALUES (${@total})`}.run()   // Error E-REACTIVE-003
 } }
 ```
 
-```
-Error E-REACTIVE-003: Derived reactive value `@total` is a client-side construct and
-cannot be read inside a server-escalated function. Pass the current value as a function
-argument instead:
+`saveOrder` escalates to the server (it touches a `?{}` SQL resource) and reads the
+client-side `@total` — but this function has no reactive assignment, so it is NOT CPS-split;
+its client stub sends no free cells, and the server read of `@total` resolves to `undefined`.
+(The identical error fires for a raw `@var` read, e.g. `${@price}` in the query.)
 
-  saveOrder(@total)   // call site passes current value
-  function saveOrder(amount) { ... }
 ```
+Error E-REACTIVE-003: Server-escalated function `saveOrder` reads the client-side derived
+value `@total`. A client cell lives in the browser; a wholly server-escalated function (§12)
+runs in the Bun process and receives only its declared arguments — this read lowers to
+`_scrml_body["total"]`, which the client stub never sends, so it resolves to `undefined` at
+request time (the value is not transported). Fix: pass it explicitly — `saveOrder(@total)`
+with a matching parameter (arguments ARE marshalled into the request body), or restructure so
+the server computes the value itself (e.g. read the source inside the `?{}` query). See SPEC §6.6.9.
+```
+
+**Valid — the escape hatch (pass the value as an argument):**
+
+```scrml
+<price> = 10
+const <total> = @price * 3
+
+${ function saveOrder(total: number) {
+    ?{`INSERT INTO orders (amount) VALUES (${total})`}.run()   // reads the param — marshalled
+} }
+```
+```scrml
+<button onclick=saveOrder(@total)>Save</>   // @total evaluated client-side, sent as an arg
+```
+
+**Valid — the CPS marshal (a client fn with an embedded server round-trip):**
+
+```scrml
+<price> = 10
+const <total> = @price * 3
+<lastId> = 0
+
+${ function saveOrder() {
+    // `@lastId = …` is a reactive assignment ⇒ CPS-split ⇒ the round-trip's inputs
+    // are MARSHALLED. `@total` crosses the wire; W-SERVER-DERIVED-MARSHAL warns (derived).
+    @lastId = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}.one()
+} }
+```
+The client stub sends `{ "total": _scrml_derived_get("total") }`; the server reads
+`_scrml_body["total"]` — the real value. A raw `@var` form field marshals the same way, silently.
 
 ---
 
@@ -3370,10 +3451,13 @@ argument instead:
   variable). Derived values that depend on `@var` receive dirty flags on each write. The
   `bind:` system and the derived system are orthogonal; no special interaction exists.
 
-- **§12 (Route Inference):** Derived reactive values are always client-side. The route
-  inference pass SHALL classify any function that reads a `const <name>` derived value as a
-  client-side function, not a server candidate. If that function also accesses server
-  resources, E-REACTIVE-003 fires.
+- **§12 (Route Inference):** Reactive cells (mutable `@var` and `const <name>` derived) are
+  always client-side. Reading one does NOT by itself keep a function on the client — a
+  function that also touches a server resource escalates normally (§12). If that escalated
+  function is WHOLLY server (no CPS split) and reads a free client cell, the read cannot be
+  transported (`_scrml_body["<cell>"]` is never populated by a non-CPS stub) and E-REACTIVE-003
+  fires. The route-inference pass owns this diagnostic (it is the read-side sibling of
+  E-RI-002); a CPS-split function marshals its server-batch reads and is exempt (§6.6.9).
 
 - **§34 (`lin`):** A `const <name>` derived value is not a `lin` variable. It may be read
   any number of times without consuming it. The `lin` keyword and `const <name>` are orthogonal.
@@ -17800,7 +17884,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-SCOPE-012 | §20.5 | `session` accessed in non-server-escalated function | Error |
 | E-REACTIVE-001 | §6.2 | `@variable` used before declaration | Error |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
-| E-REACTIVE-003 | §6.6.9 | Reading a `const <name>` derived value inside a server-escalated function | Error |
+| E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |
+| W-SERVER-DERIVED-MARSHAL | §6.6.9 | A CPS-split server round-trip (§19.9.9) MARSHALS a `const <name>` DERIVED read into the request body — the server receives the CLIENT-computed snapshot (`_scrml_body["<name>"]`), not a value it recomputed. This works (the value crosses the wire), but a client-computed aggregate is worth a trust nudge: validate it server-side before acting on it. Fires once per distinct derived cell. A marshalled raw `@var` form field is ordinary form data and marshals SILENTLY (no warning); a wholly-server derived read is the harder E-REACTIVE-003 (not transported at all). Emitted by codegen at the CPS stub `_scrml_body` builder (`compiler/src/codegen/emit-functions.ts`). Partitions into `result.warnings`. | Warning |
 | E-REACTIVE-004 | §6.6.5 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | §6.6.10 | Circular dependency in the derived reactive graph | Error |
 | E-REFINEMENT-NO-DEFAULT | §6.2, §53 | A refinement-typed state-cell declaration with no RHS (Shape 4, §6.2) whose base canonical-empty VIOLATES the refinement predicate — e.g. `<x>: number(>0)` (the canonical empty `0` fails `>0`). A refined type with no predicate-satisfying canonical empty cannot be auto-defaulted. Resolution: provide an explicit initializer (`<x>: number(>0) = 1`). Refinement types whose canonical empty SATISFIES the predicate (`number(>=0)` → `0`) get the canonical empty with no error. The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty). (S160 — Shape 4 generalization. SUPERSEDES E-DECL-NEEDS-INITIALIZER, which is RETIRED: every other no-RHS typed decl now resolves to a canonical empty or `not` per §6.2 Shape 4.) | Error |

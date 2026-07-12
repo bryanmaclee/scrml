@@ -1,0 +1,9 @@
+<program db="sqlite:./orders.db" auth>
+<price> = 10
+function saveOrder(p:number) : number {
+    result = ?{`INSERT INTO orders (amount, uid, sid) VALUES (${p}, ${@currentUser.id}, ${@session.userId}) RETURNING id`}
+    return result
+}
+<button id="save" onclick=@price = saveOrder(@price)>Save</>
+<p id="p">Price: ${@price}</>
+</program>
