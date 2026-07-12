@@ -1,0 +1,11 @@
+{
+  "id": "meta-emit-clean-pos",
+  "description": "§22.4 positive — a compile-time `^{ emit(...) }` block with a literal-markup argument fires nothing. `emit(\"<p>ok</p>\")` is a compile-time API pattern that references no runtime-only values (§22.4), so the whole E-META-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"]
+  }
+}

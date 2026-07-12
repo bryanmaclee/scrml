@@ -1,0 +1,13 @@
+{
+  "id": "apply-bare-clean-pos",
+  "description": "§26.8.1 / §26.8.2 baseline — a bare single-rule utility list (`.btn { @apply px-4 py-2 rounded-md bg-blue-500 text-white; }`) expands cleanly and fires NOTHING from the E-APPLY-* family. The no-false-positive floor for the v1 `@apply` core (bare named utilities). The enclosing `.btn` is an author-defined class (§26.5) and draws no W-TAILWIND-UNRECOGNIZED-CLASS where it is applied.",
+  "language-version": "1.0",
+  "spec": "§26.8.1, §26.8.2",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.2: `px-4`, `py-2`, `rounded-md`, `bg-blue-500`, `text-white` are all bare single-rule utilities — the v1 `@apply` core. Each expands to its declarations inline in source order; no E-APPLY-* code fires. §26.8.1 / §26.5: `.btn` is an author-defined class, so `class=\"btn\"` draws no W-TAILWIND-UNRECOGNIZED-CLASS. The whole E-APPLY-* / W-TAILWIND-* surface stays silent on well-formed `@apply` composition.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-APPLY-", "W-TAILWIND-"]
+  }
+}

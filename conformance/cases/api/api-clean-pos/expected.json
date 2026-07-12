@@ -1,0 +1,13 @@
+{
+  "id": "api-clean-pos",
+  "description": "§60.2/§60.4 — a canonical valid `<api>` + `<request api=>`: a required base=, a well-formed endpoint (recognized method, path template whose `${id}` binds the reqShape UserQuery.id, a variant `: ResponseT`), and a `<request>` naming that endpoint with a matching args cell. The compile-shape proof that the whole `<api>` contract parses + type-checks with NO E-API-* / E-TYPE-UNKNOWN-NAME / W-API-RESPONSE-NOT-VARIANT firing, and codegen (the emitted thin typed fetch + parseVariant decode) is clean.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.4, §60.5",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.2/§60.4: a well-formed `<api>` (base=, recognized method, bound path param, variant response) invoked by a shape-matching `<request api=>` is valid — none of the seven E-API-* codes, E-TYPE-UNKNOWN-NAME, the W-API-RESPONSE-NOT-VARIANT info-lint (the response is a variant), or E-CODEGEN-INVALID-LOGIC fire. §60.6 client-only: no server bundle is implied.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-API-"],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME", "W-API-RESPONSE-NOT-VARIANT", "E-CODEGEN-INVALID-LOGIC"]
+  }
+}

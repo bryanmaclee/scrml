@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-raw-escape",
+  "description": "§22.4.1 runtime (b) — `emit.raw(html)` passes its argument to the block splitter VERBATIM (no escape normalization). The source string value holds a literal two-char `\\n` (backslash-n, from the `\\\\n` source escape); emit.raw does NOT normalize it, so the rendered <pre> textContent is the literal `a\\nb`. Contrast with the sibling meta-emit-normalize-escape (`emit()`, which normalizes `\\n` to a real newline → \"a b\").",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: `emit.raw(html)` SHALL NOT apply any escape-sequence normalization; the string SHALL be passed to the block splitter exactly as provided. A literal backslash-n in the value therefore survives verbatim into the rendered text (it is NOT converted to a newline), so the <pre> textContent is the two-character sequence `\\n` between `a` and `b`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#n", "text": "a\\nb" }]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "api-path-param-unbound-neg",
+  "description": "§60.2/§60.9 — a `${param}` in an endpoint path template with no corresponding request-shape field (here the path names `${id}` but the reqShape Q carries only `name`) fires E-API-PATH-PARAM-UNBOUND (typer, W3). Every `${param}` in the path SHALL be a field of the request shape.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.2: every `${param}` in the path template SHALL be a field of the request shape (the path-template parameter source). Q has `name`, not `id`, so `${id}` is unbound → E-API-PATH-PARAM-UNBOUND. The response is a variant, so the raw-boundary info-lint stays silent.",
+  "expect": {
+    "codes": ["E-API-PATH-PARAM-UNBOUND"],
+    "notCodes": ["E-API-REQ-SHAPE-MISMATCH", "E-TYPE-UNKNOWN-NAME", "W-API-RESPONSE-NOT-VARIANT"],
+    "severity": { "E-API-PATH-PARAM-UNBOUND": "error" }
+  }
+}

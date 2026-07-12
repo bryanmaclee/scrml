@@ -1,0 +1,9 @@
+<program>
+
+  #{
+      .z { @apply prose; }
+  }
+
+  <span class="z">hi</>
+
+</program>

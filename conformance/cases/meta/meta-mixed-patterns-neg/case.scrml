@@ -1,0 +1,4 @@
+^{
+  emit.raw("<p>hi</p>")
+  meta.set("x", 1)
+}

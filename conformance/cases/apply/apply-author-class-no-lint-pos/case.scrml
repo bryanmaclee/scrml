@@ -1,0 +1,12 @@
+<program>
+
+  <active> = true
+
+  #{
+      .card { @apply px-4 py-2; }
+  }
+
+  <p id="s">${@active}</p>
+  <div class="${@active ? 'card' : ''}">hi</>
+
+</program>

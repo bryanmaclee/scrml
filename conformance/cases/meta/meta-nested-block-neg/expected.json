@@ -1,0 +1,11 @@
+{
+  "id": "meta-nested-block-neg",
+  "description": "§22.11 E-META-009 — a nested `^{}` inside a compile-time `^{}` meta block. The outer block is compile-time (`reflect(Color)` on a declared enum); nesting a second `^{}` inside it is not supported in this revision (§22.11), so it fires E-META-009 at checker time.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.11",
+  "expect": {
+    "codes": ["E-META-009"],
+    "notCodes": [],
+    "severity": { "E-META-009": "error" }
+  }
+}

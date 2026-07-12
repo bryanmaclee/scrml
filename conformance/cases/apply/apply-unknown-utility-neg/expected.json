@@ -1,0 +1,13 @@
+{
+  "id": "apply-unknown-utility-neg",
+  "description": "§26.8.2 / §26.8.3 — an `@apply` token that does not resolve to a Tailwind utility (`.x { @apply flexx; }`, a typo) fires E-APPLY-UNKNOWN-UTILITY as an ERROR. Deliberately harder than the info-level W-TAILWIND-UNRECOGNIZED-CLASS a `class=` token draws: an unresolved `@apply` token silently drops declarations the author explicitly asked to compose, so it is surfaced loudly. The unknown token routes to the E-APPLY error, NOT the class-lint (distinct surfaces).",
+  "language-version": "1.0",
+  "spec": "§26.8.2, §26.8.3",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.2: `@apply flexx` — `flexx` resolves to no utility → E-APPLY-UNKNOWN-UTILITY (Error), anchored at the `@apply` directive's span. §26.8.3 catalogs it as an Error (§34). It is classified UNKNOWN, not the sibling VARIANT-UNSUPPORTED / NON-INLINABLE codes, and it does NOT double-fire the info-level W-TAILWIND-UNRECOGNIZED-CLASS a `class=` token draws — the `@apply` path is deliberately the harder Error surface (§26.8.2).",
+  "expect": {
+    "codes": ["E-APPLY-UNKNOWN-UTILITY"],
+    "notCodes": ["E-APPLY-VARIANT-UNSUPPORTED", "E-APPLY-NON-INLINABLE-UTILITY", "W-TAILWIND-UNRECOGNIZED-CLASS"],
+    "severity": { "E-APPLY-UNKNOWN-UTILITY": "error" }
+  }
+}

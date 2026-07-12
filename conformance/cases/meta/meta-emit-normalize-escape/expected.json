@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-normalize-escape",
+  "description": "§22.4.1 runtime (b) — `emit(html)` NORMALIZES escape sequences before the block splitter: a literal two-char `\\n` (from the `\\\\n` source escape) is normalized to a real U+000A newline. The <pre> then holds a real newline between `a` and `b`, which the shared conformance normalizer collapses to a single space → textContent \"a b\". Sibling of meta-emit-raw-escape (verbatim → \"a\\nb\"), pinning the emit()-vs-emit.raw() distinction.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: `emit(html)` SHALL normalize escape sequences (the `\\n` table entry maps to U+000A LINE FEED) before the string is passed to the block splitter. The literal backslash-n in the value becomes a real newline in the rendered <pre>; the shared whitespace-collapsing normalizer renders that inter-character whitespace as a single space, so the textContent is \"a b\" (NOT the literal \"a\\nb\" that emit.raw preserves).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#n", "text": "a b" }]
+  }
+}

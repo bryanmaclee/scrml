@@ -1,0 +1,13 @@
+{
+  "id": "apply-arbitrary-value-pos",
+  "description": "§26.8.2 / §26.4 — arbitrary-value utilities inside `@apply` (`.tw { @apply bg-[#1da1f2] p-[3px]; }`) resolve via the §26.4 arbitrary path (same single-token rule) and fire NOTHING from the E-APPLY-* family. Arbitrary-value utilities are an explicit ✅ in the v1 scope.",
+  "language-version": "1.0",
+  "spec": "§26.8.2, §26.4",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.2 (✅ arbitrary-value utilities): `bg-[#1da1f2]` and `p-[3px]` resolve through the §26.4 arbitrary-value path — the same single-token rule as a bare utility — and inline their declarations. No E-APPLY-* fires; the tokens are recognized (no W-TAILWIND-*); `.tw` is an author-defined class (§26.5). (A `:`-in-brackets arbitrary value is NOT mistaken for a variant — §26.8.3; these two carry no colon.)",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-APPLY-", "W-TAILWIND-"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "meta-lift-in-block-neg",
+  "description": "§22.9 E-META-006 — `lift()` inside a `^{}` meta block. `lift` is a markup-context operation and meta is not markup context; a `^{}` block SHALL NOT contain `lift` calls (§22.9), so it fires E-META-006. Incidental E-SCOPE-001 (lift-arg resolution) ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.9",
+  "expect": {
+    "codes": ["E-META-006"],
+    "notCodes": [],
+    "severity": { "E-META-006": "error" }
+  }
+}

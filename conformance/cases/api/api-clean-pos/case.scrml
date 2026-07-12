@@ -1,0 +1,16 @@
+<program>
+
+type UserQuery:struct = { id: int }
+type UserResult:enum = {
+  Found(name: string, email: string)
+  NotFound
+}
+<query>: UserQuery = { id: 1 }
+
+<api base="https://api.example.com">
+  getUser(UserQuery) -> GET "/users/${id}" : UserResult
+</api>
+
+<request id="profile" api="getUser" args=@query></>
+
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "api-unknown-type-ref-neg",
+  "description": "§60.2/§14.1.2 — an endpoint reqShape referencing an undeclared type (`NopeQuery`) reuses the §14.1.2 unknown-name machinery and fires E-TYPE-UNKNOWN-NAME — NOT a dedicated E-API-* code. This pins §60.2's `<api> introduces no new type machinery`: an undeclared type-ref is the generic type error, and no E-API-* family code double-reports it.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9, §14.1.2",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.9: an undeclared endpoint reqShape/responseType ref reuses E-TYPE-UNKNOWN-NAME (the §14.1.2 machinery) — `<api>` adds no new type machinery (§60.2). The path `/users` has no `${param}`, so E-API-PATH-PARAM-UNBOUND stays silent and no E-API-* code fires.",
+  "expect": {
+    "codes": ["E-TYPE-UNKNOWN-NAME"],
+    "notCodePrefixes": ["E-API-"],
+    "severity": { "E-TYPE-UNKNOWN-NAME": "error" }
+  }
+}

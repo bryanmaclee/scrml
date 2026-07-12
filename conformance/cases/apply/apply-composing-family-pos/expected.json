@@ -1,0 +1,13 @@
+{
+  "id": "apply-composing-family-pos",
+  "description": "§26.8.2 / §26.7 — a composing-family `@apply` (`.card { @apply ring-2 shadow-lg; }`) composes the ring AND the shadow via the §26.7 inline-fallback `var()` model exactly as two `class=` tokens would, and fires NOTHING from the E-APPLY-* family. Composing-family utilities are an explicit ✅ in the v1 scope.",
+  "language-version": "1.0",
+  "spec": "§26.8.2, §26.7",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.2 (✅ composing-family utilities) + §26.8.1: `ring-2` and `shadow-lg` each expand to their `--tw-*` setters AND the `var()` composing shorthand, so `@apply ring-2 shadow-lg` composes both into `.card` — the §26.7 model carries through `@apply` unchanged and partial application stays valid. No E-APPLY-* fires; `ring-2` / `shadow-lg` are recognized composing utilities (no W-TAILWIND-*); `.card` is an author-defined class (§26.5).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-APPLY-", "W-TAILWIND-"]
+  }
+}

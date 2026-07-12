@@ -1,0 +1,9 @@
+<program>
+
+type UserQuery:struct = { id: int }
+
+<api base="https://api.example.com">
+  getUser(UserQuery) -> GET "/users/${id}"
+</api>
+
+</program>

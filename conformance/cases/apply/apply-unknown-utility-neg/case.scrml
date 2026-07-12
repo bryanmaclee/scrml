@@ -1,0 +1,9 @@
+<program>
+
+  #{
+      .x { @apply flexx; }
+  }
+
+  <span class="x">hi</>
+
+</program>

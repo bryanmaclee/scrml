@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-splice-render-rt",
+  "description": "§22.4 runtime (b) — a compile-time `emit()` inlines its markup into the rendered tree, so the post-run DOM carries the emitted `<p id=\"x\">hi</p>`. Pins the (b) RUNTIME EFFECT of compile-time emit: the ordinary run() renders it (no new driver).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4",
+  "spec": "§22.4",
+  "rationale": "§22.4: the compiler SHALL evaluate compile-time meta blocks during compilation and INLINE the result. A compile-time `emit(html)` splices `html` into the AST/rendered tree at compile time (per §22.4.1 it passes through the block splitter + AST builder), so the emitted `<p id=\"x\">hi</p>` is present in the final rendered DOM.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#x", "text": "hi" }]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "api-req-shape-mismatch-neg",
+  "description": "§60.4/§60.9 — a `<request api= args=@cell>` whose statically-resolvable args value fails the endpoint request-shape width check (here @query is a `{name}` struct but the endpoint expects `Q{id}`, so the required `id` field is missing) fires E-API-REQ-SHAPE-MISMATCH (typer, W3).",
+  "language-version": "1.0",
+  "spec": "§60.4, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.4: the `args` value SHALL type-check against the endpoint's request shape; a field-presence width mismatch on a statically-resolvable `args=@cell` is E-API-REQ-SHAPE-MISMATCH. The endpoint name resolves and `${id}` binds to the reqShape Q.id, so only the shape-mismatch code fires.",
+  "expect": {
+    "codes": ["E-API-REQ-SHAPE-MISMATCH"],
+    "notCodes": ["E-API-ENDPOINT-UNKNOWN", "E-API-PATH-PARAM-UNBOUND", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-API-REQ-SHAPE-MISMATCH": "error" }
+  }
+}

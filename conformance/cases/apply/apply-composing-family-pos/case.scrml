@@ -1,0 +1,9 @@
+<program>
+
+  #{
+      .card { @apply ring-2 shadow-lg; }
+  }
+
+  <div class="card">hi</>
+
+</program>

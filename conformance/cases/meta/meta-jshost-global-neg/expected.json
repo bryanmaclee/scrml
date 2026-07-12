@@ -1,0 +1,11 @@
+{
+  "id": "meta-jshost-global-neg",
+  "description": "§22.11 / §22.12 E-META-001 (condition 3) — a JS-host ambient global (`console`) referenced inside a `^{}` meta body. Approach-C bans JS-host globals in any `^{}` body (compile-time OR runtime); `console` is not in the META_BUILTINS set, so it fires E-META-001. NOTE: the §22.11 condition-(1) trigger (runtime `@var` inside a compile-time `emit` block) is SHADOWED by E-META-005 phase-mixing — see meta-mixed-patterns-neg — so this case pins E-META-001 via the isolable condition-(3) JS-host-global path.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": ["E-META-001"],
+    "notCodes": [],
+    "severity": { "E-META-001": "error" }
+  }
+}

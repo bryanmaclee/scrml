@@ -1,0 +1,11 @@
+{
+  "id": "meta-sql-in-runtime-block-neg",
+  "description": "§22.9 E-META-007 — a `?{}` SQL context inside a RUNTIME `^{}` meta block. The block has no compile-time API (only `meta.emit`), so it classifies runtime; a `?{}` SQL context is valid in a `^{}` block only when the block is compile-time evaluated (§22.9), so a `?{}` in a runtime block fires E-META-007. Incidental W-SQL-ROW-UNTYPED (info) ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.9",
+  "expect": {
+    "codes": ["E-META-007"],
+    "notCodes": [],
+    "severity": { "E-META-007": "error" }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "meta-compiler-namespace-neg",
+  "description": "§22.4 E-META-010 — a reference to the reserved `compiler.*` namespace inside a `^{}` block. `compiler.version` is in the reserved-for-future-use `compiler.*` namespace (§22.4); any `compiler.X` reference in a `^{}` block SHALL fire E-META-010. Incidental E-META-EVAL-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4",
+  "expect": {
+    "codes": ["E-META-010"],
+    "notCodes": [],
+    "severity": { "E-META-010": "error" }
+  }
+}

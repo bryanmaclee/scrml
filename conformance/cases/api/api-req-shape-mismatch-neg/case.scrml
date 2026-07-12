@@ -1,0 +1,17 @@
+<program>
+
+type Q:struct = { id: int }
+type Wrong:struct = { name: string }
+type UserResult:enum = {
+  Found(name: string)
+  NotFound
+}
+<query>: Wrong = { name: "a" }
+
+<api base="https://api.example.com">
+  getUser(Q) -> GET "/users/${id}" : UserResult
+</api>
+
+<request id="r" api="getUser" args=@query></>
+
+</program>

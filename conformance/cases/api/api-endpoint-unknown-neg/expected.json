@@ -1,0 +1,13 @@
+{
+  "id": "api-endpoint-unknown-neg",
+  "description": "§60.4/§60.9 — a `<request api=\"X\">` naming an endpoint declared in no in-scope `<api>` (here a misspelling) fires E-API-ENDPOINT-UNKNOWN (typer, W3). The endpoint name is resolved against the `<api>` endpoint set; an unknown name has nothing to bind the typed fetch to.",
+  "language-version": "1.0",
+  "spec": "§60.4, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.4: `<request api=\"endpointName\">` SHALL resolve `endpointName` against the in-scope `<api>` endpoints; unknown → E-API-ENDPOINT-UNKNOWN. Because the endpoint never resolves, no request-shape check runs, so E-API-REQ-SHAPE-MISMATCH stays silent.",
+  "expect": {
+    "codes": ["E-API-ENDPOINT-UNKNOWN"],
+    "notCodes": ["E-API-REQ-SHAPE-MISMATCH", "E-TYPE-UNKNOWN-NAME", "E-API-BASE-MISSING"],
+    "severity": { "E-API-ENDPOINT-UNKNOWN": "error" }
+  }
+}

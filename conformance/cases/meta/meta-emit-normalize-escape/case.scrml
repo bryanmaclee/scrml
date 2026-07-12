@@ -1,0 +1,3 @@
+^{
+  emit("<pre id=\"n\">a\\nb</pre>")
+}

@@ -1,0 +1,13 @@
+{
+  "id": "apply-author-class-no-lint-pos",
+  "description": "§26.8.1 / §26.5 — a class defined via `@apply` (`.card { @apply px-4 py-2; }`) is an author-defined class and draws NO W-TAILWIND-UNRECOGNIZED-CLASS wherever it is used, INCLUDING when applied dynamically (`class=\"${@active ? 'card' : ''}\"`). The §26.5 unrecognized-class-lint deferral resolved by §26.8.",
+  "language-version": "1.0",
+  "spec": "§26.8.1, §26.5",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.1: the enclosing selector of an `@apply` rule (`.card`) is an author-defined class (§26.5), so it draws no W-TAILWIND-UNRECOGNIZED-CLASS wherever applied — INCLUDING when applied dynamically inside a `${...}` interpolation (`class=\"${@active ? 'card' : ''}\"`), the exact dynamic form §26.5.1 discusses for utility tokens. The `@apply` composition is itself clean (no E-APPLY-*). This is the §26.5 author-class deferral resolved at §26.8: a named class an author composes is not a misspelled utility. (`@active` is also read in text so the cell is well-formed — orthogonal to the lint assertion.)",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-TAILWIND-UNRECOGNIZED-CLASS"],
+    "notCodePrefixes": ["E-APPLY-"]
+  }
+}

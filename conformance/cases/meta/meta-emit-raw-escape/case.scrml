@@ -1,0 +1,3 @@
+^{
+  emit.raw("<pre id=\"n\">a\\nb</pre>")
+}

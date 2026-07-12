@@ -1,0 +1,13 @@
+<program>
+
+type Q:struct = { id: int }
+type User:struct = {
+  id:   int
+  name: string
+}
+
+<api base="https://api.example.com">
+  getUser(Q) -> GET "/users/${id}" : User
+</api>
+
+</program>

@@ -1,0 +1,11 @@
+{
+  "id": "meta-invalid-token-neg",
+  "description": "§22.11 E-META-002 — an invalid token inside a `^{}` meta block. A stray `)` is a token the meta-block statement collector cannot classify or advance past; inside `^{}` this surfaces as E-META-002 (the meta-context specialization of E-PARSE-001), per ast-builder.js:9676 / :13239.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.11",
+  "expect": {
+    "codes": ["E-META-002"],
+    "notCodes": [],
+    "severity": { "E-META-002": "error" }
+  }
+}

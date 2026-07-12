@@ -1,0 +1,13 @@
+{
+  "id": "api-method-invalid-neg",
+  "description": "§60.2/§60.9 — an endpoint naming an HTTP method outside the recognized set (here `HEAD`) fires E-API-METHOD-INVALID (parse-time, W2). The recognized set is GET/POST/PUT/PATCH/DELETE (§60.2 http-method).",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-parser.test.js",
+  "rationale": "§60.2: `http-method` SHALL be one of GET/POST/PUT/PATCH/DELETE. A value outside that set (HEAD) is E-API-METHOD-INVALID (parse-time, W2). base= is present, the response is a variant, and ${id} binds to UserQuery.id, so only the method code fires.",
+  "expect": {
+    "codes": ["E-API-METHOD-INVALID"],
+    "notCodes": ["E-API-BASE-MISSING", "E-API-RESPONSE-TYPE-UNDECLARED", "E-API-ENDPOINT-MALFORMED", "E-API-PATH-PARAM-UNBOUND", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-API-METHOD-INVALID": "error" }
+  }
+}

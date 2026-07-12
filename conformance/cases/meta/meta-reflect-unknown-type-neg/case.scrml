@@ -1,0 +1,4 @@
+^{
+  const x = reflect(NoSuchType)
+  emit("<p>x</p>")
+}

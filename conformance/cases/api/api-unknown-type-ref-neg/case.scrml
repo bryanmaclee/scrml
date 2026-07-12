@@ -1,0 +1,12 @@
+<program>
+
+type UserResult:enum = {
+  Found(name: string)
+  NotFound
+}
+
+<api base="https://api.example.com">
+  getUser(NopeQuery) -> GET "/users" : UserResult
+</api>
+
+</program>

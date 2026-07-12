@@ -1,0 +1,7 @@
+<program>
+
+<api base="https://api.example.com">
+  this is not a valid endpoint declaration
+</api>
+
+</program>

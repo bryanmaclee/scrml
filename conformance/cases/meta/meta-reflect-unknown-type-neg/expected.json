@@ -1,0 +1,11 @@
+{
+  "id": "meta-reflect-unknown-type-neg",
+  "description": "§22.4.2 E-META-003 — `reflect()` called on an unknown type. `reflect(NoSuchType)` where `NoSuchType` matches no declared type is a compile error (§22.4.2: `reflect(unknownLiteral)` SHALL be E-META-003). E-META-003 is the diagnostic of record; incidental meta-eval codes (E-META-EVAL-001 / E-SCOPE-001 from the unresolved identifier) are ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.2",
+  "expect": {
+    "codes": ["E-META-003"],
+    "notCodes": [],
+    "severity": { "E-META-003": "error" }
+  }
+}

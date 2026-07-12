@@ -1,0 +1,11 @@
+{
+  "id": "meta-mixed-patterns-neg",
+  "description": "§22.8 E-META-005 — phase-separation violation. `emit.raw(...)` is a compile-time-only API pattern; `meta.set(...)` is runtime-only. A single `^{}` block SHALL NOT reference both compile-time API patterns and runtime-only values (§22.8); the compiler rejects it with E-META-005. E-META-005 is the diagnostic of record; incidental codes ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.8",
+  "expect": {
+    "codes": ["E-META-005"],
+    "notCodes": [],
+    "severity": { "E-META-005": "error" }
+  }
+}

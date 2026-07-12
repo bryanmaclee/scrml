@@ -1,0 +1,9 @@
+<program>
+
+  #{
+      .tw { @apply bg-[#1da1f2] p-[3px]; }
+  }
+
+  <div class="tw">hi</>
+
+</program>

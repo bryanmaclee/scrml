@@ -1,0 +1,13 @@
+{
+  "id": "apply-variant-unsupported-neg",
+  "description": "§26.8.2 / §26.8.3 — a variant-prefixed `@apply` token (`.y { @apply hover:bg-blue-500; }`, a `:` at bracket-depth 0) fires E-APPLY-VARIANT-UNSUPPORTED (Error). Variants require a nested/companion selector and cannot be flat-inlined in v1 (a bounded follow-on, lift when variants land). Classified as VARIANT before registry resolution, so it is NOT the UNKNOWN code.",
+  "language-version": "1.0",
+  "spec": "§26.8.2, §26.8.3",
+  "source-test": "compiler/tests/integration/apply-utility-composition.test.js",
+  "rationale": "§26.8.2: `hover:bg-blue-500` carries a variant prefix (`hover:`) — a nested/companion selector, not flat inlining → E-APPLY-VARIANT-UNSUPPORTED (Error, §26.8.3), anchored at the `@apply` span. `resolveApplyToken` classifies the variant BEFORE registry resolution, so the token fires VARIANT-UNSUPPORTED, never UNKNOWN-UTILITY or NON-INLINABLE. Lift when the §26.3 variant surface lands in `@apply`.",
+  "expect": {
+    "codes": ["E-APPLY-VARIANT-UNSUPPORTED"],
+    "notCodes": ["E-APPLY-UNKNOWN-UTILITY", "E-APPLY-NON-INLINABLE-UTILITY"],
+    "severity": { "E-APPLY-VARIANT-UNSUPPORTED": "error" }
+  }
+}

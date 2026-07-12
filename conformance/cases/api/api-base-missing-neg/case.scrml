@@ -1,0 +1,13 @@
+<program>
+
+type UserQuery:struct = { id: int }
+type UserResult:enum = {
+  Found(name: string)
+  NotFound
+}
+
+<api src="openapi.json">
+  getUser(UserQuery) -> GET "/users/${id}" : UserResult
+</api>
+
+</program>

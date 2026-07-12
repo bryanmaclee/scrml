@@ -1,0 +1,13 @@
+{
+  "id": "api-endpoint-malformed-neg",
+  "description": "§60.9 — an `<api>` body line that is not blank, not a comment, and conforms to none of the §60.2 endpoint grammar (stray prose, no `->` arrow) fires the catch-all E-API-ENDPOINT-MALFORMED (parse-time, W2). This is the catch-all the W2 parser needs alongside the precise response/method/base codes.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-parser.test.js",
+  "rationale": "§60.9: a body line matching none of the more-specific shapes (not blank, not a comment, not conforming to the §60.2 endpoint grammar) is E-API-ENDPOINT-MALFORMED. `this is not a valid endpoint declaration` has no `->` arrow, so it is malformed-as-endpoint.",
+  "expect": {
+    "codes": ["E-API-ENDPOINT-MALFORMED"],
+    "notCodes": ["E-API-BASE-MISSING", "E-API-METHOD-INVALID", "E-API-RESPONSE-TYPE-UNDECLARED"],
+    "severity": { "E-API-ENDPOINT-MALFORMED": "error" }
+  }
+}

@@ -1,0 +1,13 @@
+<program>
+
+type Q:struct = { name: string }
+type UserResult:enum = {
+  Found(name: string)
+  NotFound
+}
+
+<api base="https://api.example.com">
+  getUser(Q) -> GET "/users/${id}" : UserResult
+</api>
+
+</program>

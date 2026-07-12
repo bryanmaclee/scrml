@@ -1,0 +1,9 @@
+<program>
+
+  #{
+      .y { @apply hover:bg-blue-500; }
+  }
+
+  <span class="y">hi</>
+
+</program>

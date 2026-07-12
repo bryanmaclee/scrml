@@ -1,0 +1,14 @@
+{
+  "id": "api-response-not-variant-info",
+  "description": "§60.5/§60.9 — an endpoint whose resolved `: ResponseT` is a non-variant type (here a struct `User`) fires the info-lint W-API-RESPONSE-NOT-VARIANT (typer, W4). parseVariant (§41.13) is variant-only, so the response is raw-passed and the §60.5 boundary-parse guarantee does not apply; the lint keeps that raw boundary explicit (§60.3). The code is severity `info` — it lands in the warnings partition, never the errors stream.",
+  "language-version": "1.0",
+  "spec": "§60.5, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-typer.test.js",
+  "rationale": "§60.5: a non-variant `ResponseT` cannot be parseVariant-decoded and is raw-passed; the typer fires W-API-RESPONSE-NOT-VARIANT (Info, §34) so the raw boundary is explicit at the declaration site. severity:info asserts the §34 partition — it is NOT an Error (the cross-stream-honest check).",
+  "expect": {
+    "codes": ["W-API-RESPONSE-NOT-VARIANT"],
+    "notCodePrefixes": ["E-API-"],
+    "notCodes": ["E-TYPE-UNKNOWN-NAME"],
+    "severity": { "W-API-RESPONSE-NOT-VARIANT": "info" }
+  }
+}

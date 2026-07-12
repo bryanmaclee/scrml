@@ -1,0 +1,11 @@
+{
+  "id": "meta-reflect-outside-block-neg",
+  "description": "§22.4.2 E-META-008 — `reflect()` called outside any `^{}` meta block. `User` is a declared struct (so this is NOT E-META-003 unknown-type), but the `reflect(User)` call sits in a `${}` logic body, not a `^{}` block; §22.4.2 rule 4: a `reflect(expr)` call outside any `^{}` block SHALL be E-META-008. Incidental W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.2",
+  "expect": {
+    "codes": ["E-META-008"],
+    "notCodes": [],
+    "severity": { "E-META-008": "error" }
+  }
+}

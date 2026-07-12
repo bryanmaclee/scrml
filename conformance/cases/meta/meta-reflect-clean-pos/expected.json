@@ -1,0 +1,11 @@
+{
+  "id": "meta-reflect-clean-pos",
+  "description": "§22.4.2 positive — `reflect()` on a DECLARED type inside a `^{}` block fires nothing. `User` is a declared struct; `reflect(User)` resolves at compile time (§22.4.2 strategy 1, compile-time path) and the block is a valid compile-time meta block, so the whole E-META-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.2",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"]
+  }
+}

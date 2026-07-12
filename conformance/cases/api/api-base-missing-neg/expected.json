@@ -1,0 +1,13 @@
+{
+  "id": "api-base-missing-neg",
+  "description": "§60.2/§60.9 — an `<api>` declaration with no `base=` fires E-API-BASE-MISSING (parse-time, W2). `base=` is the external HTTP boundary's address; without it the emitted per-endpoint `fetch(base + path)` callable has no target. A lone `src=` (the A1-reserved ingest attribute, §60.8) does not satisfy the required `base=`.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-parser.test.js",
+  "rationale": "§60.2: an `<api>` SHALL declare a `base=` URL. A missing `base=` is E-API-BASE-MISSING (parse-time, W2). The endpoint's `${id}` binds to the declared UserQuery.id and the response is a variant, so only the base code fires.",
+  "expect": {
+    "codes": ["E-API-BASE-MISSING"],
+    "notCodes": ["E-API-METHOD-INVALID", "E-API-RESPONSE-TYPE-UNDECLARED", "E-API-ENDPOINT-MALFORMED", "E-API-PATH-PARAM-UNBOUND", "E-TYPE-UNKNOWN-NAME"],
+    "severity": { "E-API-BASE-MISSING": "error" }
+  }
+}

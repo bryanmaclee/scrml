@@ -1,0 +1,13 @@
+{
+  "id": "api-response-type-undeclared-neg",
+  "description": "§60.2/§60.9 — an endpoint that omits its `: ResponseT` fires the PRECISE E-API-RESPONSE-TYPE-UNDECLARED (parse-time, W2), NOT the catch-all E-API-ENDPOINT-MALFORMED. The response type is the parseVariant decode target (§60.5); without it the boundary-parse has nothing to decode against.",
+  "language-version": "1.0",
+  "spec": "§60.2, §60.9",
+  "source-test": "compiler/tests/unit/api-decl-parser.test.js",
+  "rationale": "§60.2: an endpoint declaration SHALL carry `: response-type`. A well-formed head with no `: ResponseT` gets the precise E-API-RESPONSE-TYPE-UNDECLARED (the parser recovers, recording the endpoint with responseType null) — it is NOT reported by the catch-all malformed code.",
+  "expect": {
+    "codes": ["E-API-RESPONSE-TYPE-UNDECLARED"],
+    "notCodes": ["E-API-ENDPOINT-MALFORMED", "E-API-BASE-MISSING", "E-API-METHOD-INVALID", "E-API-PATH-PARAM-UNBOUND"],
+    "severity": { "E-API-RESPONSE-TYPE-UNDECLARED": "error" }
+  }
+}

@@ -18,19 +18,21 @@ normalized DOM. **Mirror `conformance/cases/error/` + `conformance/cases/block-g
 `conformance/cases/error/` + `conformance/cases/block-grammar/` (pattern-to-mirror)
 
 ## Items (author each; commit per-case)
-1. **`meta-runtime-var-in-compiletime-neg`** `[status=open]` — a runtime `@cell` (or a JS-host ambient `bun`/`process`/`console`/`fetch`/`setTimeout`, the Approach-C ban) in a compile-time `^{}` → **E-META-001**.
-2. **`meta-invalid-token-neg`** `[status=open]` — invalid token inside `^{}` → **E-META-002**.
-3. **`meta-reflect-unknown-type-neg`** `[status=open]` — `reflect(NoSuchType)` → **E-META-003**.
-4. **`meta-mixed-patterns-neg`** `[status=open]` — `^{}` mixes compile-time API with runtime-only values → **E-META-005**.
-5. **`meta-lift-in-block-neg`** `[status=open]` — `lift` inside `^{}` → **E-META-006**.
-6. **`meta-sql-in-runtime-block-neg`** `[status=open]` — `?{}` SQL inside a runtime `^{}` → **E-META-007**.
-7. **`meta-reflect-outside-block-neg`** `[status=open]` — `reflect()` outside any `^{}` → **E-META-008**.
-8. **`meta-nested-block-neg`** `[status=open]` — nested `^{}` inside a compile-time `^{}` → **E-META-009**.
-9. **`meta-compiler-namespace-neg`** `[status=open]` — reference to reserved `compiler.*` → **E-META-010**.
-10. **`meta-reflect-clean-pos`** `[status=open]` — well-formed `^{ reflect(User) }` fires nothing → `notCodePrefixes:["E-META-"]`.
-11. **`meta-emit-clean-pos`** `[status=open]` — well-formed `^{ emit("<p>..</p>") }` fires nothing.
-12. **`meta-emit-splice-render-rt`** `[status=open]` — top-level `^{ emit("<p id=x>hi</p>") }` splices markup → `domAnchored:[{selector:"#x",text:"hi"}]` (carry `spec`+`rationale`, runtime case).
-13. **`meta-emit-raw-escape`** `[status=open, optional]` — §22.4.1 `\n` normalization in `emit()`.
+1. **`meta-runtime-var-in-compiletime-neg`** `[status=landed-RENAMED 6ff46b6e]` — RENAMED → **`meta-jshost-global-neg`**. FINDING: the primary trigger (runtime `@var` in a compile-time `emit` block) fires **E-META-005** (phase-mix), NOT E-META-001 — §22.11 condition-(1) is shadowed by E-META-005 and is not isolable from source. Pinned E-META-001 via the sanctioned Approach-C JS-host-global path (`console` in a `^{}` body) → **E-META-001** (isolable, clean).
+2. **`meta-invalid-token-neg`** `[status=landed 6ff46b6e]` — invalid token inside `^{}` → **E-META-002**.
+3. **`meta-reflect-unknown-type-neg`** `[status=landed 6ff46b6e]` — `reflect(NoSuchType)` → **E-META-003**.
+4. **`meta-mixed-patterns-neg`** `[status=landed 6ff46b6e]` — `^{}` mixes compile-time API with runtime-only values → **E-META-005**.
+5. **`meta-lift-in-block-neg`** `[status=landed 6ff46b6e]` — `lift` inside `^{}` → **E-META-006**.
+6. **`meta-sql-in-runtime-block-neg`** `[status=landed 6ff46b6e]` — `?{}` SQL inside a runtime `^{}` → **E-META-007**.
+7. **`meta-reflect-outside-block-neg`** `[status=landed 6ff46b6e]` — `reflect()` outside any `^{}` → **E-META-008**.
+8. **`meta-nested-block-neg`** `[status=landed 6ff46b6e]` — nested `^{}` inside a compile-time `^{}` → **E-META-009**.
+9. **`meta-compiler-namespace-neg`** `[status=landed 6ff46b6e]` — reference to reserved `compiler.*` → **E-META-010**.
+10. **`meta-reflect-clean-pos`** `[status=landed 6ff46b6e]` — well-formed `^{ reflect(User) }` fires nothing → `notCodePrefixes:["E-META-"]`.
+11. **`meta-emit-clean-pos`** `[status=landed 6ff46b6e]` — well-formed `^{ emit("<p>..</p>") }` fires nothing.
+12. **`meta-emit-splice-render-rt`** `[status=landed 6ff46b6e]` — top-level `^{ emit("<p id=x>hi</p>") }` splices markup → `domAnchored:[{selector:"#x",text:"hi"}]` (carry `spec`+`rationale`, runtime case).
+13. **`meta-emit-raw-escape`** `[status=landed-PAIR 6ff46b6e]` — §22.4.1 realized as a PAIR: **`meta-emit-raw-escape`** (raw verbatim, literal `\n`) + **`meta-emit-normalize-escape`** (bonus sibling, `emit` normalizes literal `\\n`→space). The distinction only surfaces with a literal double-backslash source; each alone is weaker, so both authored for an honest contrast.
 
 ## Progress
 `ss65.progress.md`. Land on `spa/ss65`; ping the PA inbox when ready. Do not touch main / do not push.
+
+**DONE (sPA ss65).** All 13 items landed on `spa/ss65` (14 cases: item-1 renamed, item-13 a pair). Cases commit `6ff46b6e`; suite 386→400. 0 parked. Re-integration signal in `handOffs/incoming/`.
