@@ -19,7 +19,10 @@ import { generate as astringGenerate } from "astring";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
-import { rewriteCodeSegments } from "./codegen/code-segments.ts";
+// `regexAllowedAfter` is the fence's context-tracking regex-vs-division decision
+// (ECMA preceding-token rule), reused by rewriteIsPredicates (S252, #1) to skip
+// the word `is` inside regex-literal interiors without fragmenting its LHS scan.
+import { rewriteCodeSegments, regexAllowedAfter } from "./codegen/code-segments.ts";
 
 import type {
   ExprNode, ExprSpan,
@@ -1256,6 +1259,42 @@ function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
  * BEFORE codegen, replacing the old misleading `E-DG-002` / `E-CODEGEN-INVALID-LOGIC`
  * mis-lowering. Mirror of E-EQ-002 (`x == not` → `x is not`); steers to `==`.
  */
+/**
+ * Scan a regex literal starting at its opening `/` (`s[openIdx] === "/"`).
+ * Returns the index just past the closing `/` + flags, or -1 if the literal is
+ * UNTERMINATED before a newline / end-of-string (regex bodies cannot span lines
+ * in JS, so an un-closed `/` was division, not a regex — the caller then treats
+ * the `/` as ordinary code). Mirrors the regex mode of `rewriteCodeSegments`
+ * (char-class `[...]` interiors, `\`-escapes, IdentifierPart flag tail).
+ */
+function scanRegexLiteralEnd(s: string, openIdx: number): number {
+  let j = openIdx + 1;
+  while (j < s.length) {
+    const c = s[j];
+    if (c === "\n") return -1;
+    if (c === "\\") { j += 2; continue; }
+    if (c === "[") {
+      // Char class — `/` is literal inside; consume to unescaped `]`.
+      j++;
+      while (j < s.length) {
+        if (s[j] === "\n") return -1;
+        if (s[j] === "\\") { j += 2; continue; }
+        if (s[j] === "]") { j++; break; }
+        j++;
+      }
+      continue;
+    }
+    if (c === "/") {
+      // Closing slash — consume IdentifierPart-shaped flags.
+      j++;
+      while (j < s.length && /[A-Za-z0-9_$]/.test(s[j])) j++;
+      return j;
+    }
+    j++;
+  }
+  return -1;
+}
+
 function rewriteIsPredicates(s: string, detector?: { valueRhsOnIs?: boolean }): string {
   let result = "";
   let i = 0;
@@ -1264,13 +1303,49 @@ function rewriteIsPredicates(s: string, detector?: { valueRhsOnIs?: boolean }): 
   while (i < s.length) {
     const c = s[i];
 
-    // String-literal tracking
+    // String-literal tracking (unchanged: `"` / `'` / backtick opaque interiors).
     if (inString === null) {
       if (c === '"' || c === "'" || c === "`") {
         inString = c;
         result += c;
         i++;
         continue;
+      }
+      // GITI-017 twin (S252, #1) — skip REGEX-literal and COMMENT interiors so
+      // the word `is` inside `/there is no.../i` (or a `//`/`/* */` comment) is
+      // NOT read as the `is` operator (the false-E-EQ-005 / literal-corruption
+      // class). This tracks the SAME regex/comment spans as the shared fence,
+      // reusing its context-tracking `regexAllowedAfter` for the regex-vs-division
+      // decision — but INLINE in the single forward scan, so `scanLhsLeft` still
+      // sees the full string `s` and an `is` LHS may span a string/regex literal
+      // (`foo("bar") is some`) without fragmentation.
+      if (c === "/" && s[i + 1] === "/") {
+        // Line comment — preserve verbatim, no `is`-scan inside.
+        let j = i + 2;
+        while (j < s.length && s[j] !== "\n") j++;
+        result += s.slice(i, j);
+        i = j;
+        continue;
+      }
+      if (c === "/" && s[i + 1] === "*") {
+        // Block comment — preserve verbatim.
+        let j = i + 2;
+        while (j < s.length && !(s[j] === "*" && s[j + 1] === "/")) j++;
+        j = Math.min(j + 2, s.length);
+        result += s.slice(i, j);
+        i = j;
+        continue;
+      }
+      if (c === "/" && regexAllowedAfter(s.slice(0, i))) {
+        const end = scanRegexLiteralEnd(s, i);
+        if (end !== -1) {
+          // A real, terminated regex literal — preserve verbatim, no `is`-scan.
+          result += s.slice(i, end);
+          i = end;
+          continue;
+        }
+        // Unterminated → the `/` was division, not a regex: fall through and
+        // treat it as ordinary code (so a following `is` is still processed).
       }
     } else {
       if (c === "\\") {

@@ -1,0 +1,9 @@
+${
+    type Widget:struct = { id: number, label: string }
+    <rows> : Widget[] = []
+    function loadAll() : Widget[] {
+        return ?{`SELECT id, label FROM widgets`}.all()
+    }
+}
+<button id="load" onclick=@rows = loadAll()>Load</>
+<p id="count">${@rows.length}</>

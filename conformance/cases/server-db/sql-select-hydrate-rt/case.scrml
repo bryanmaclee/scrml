@@ -1,0 +1,14 @@
+${
+    type User:struct = { id: number, name: string }
+    <users> : User[] = []
+    function loadUsers() : User[] {
+        return ?{`SELECT id, name FROM users`}.all()
+    }
+}
+<button id="load" onclick=@users = loadUsers()>Load</>
+<ul id="list">
+    <each in=@users key=@.id as u>
+        <li class="row">${u.name}</li>
+    </each>
+</ul>
+<p id="count">Count: ${@users.length}</>

@@ -1,0 +1,8 @@
+${
+    type User:struct = { id: number, name: string }
+    <current> = not
+    function loadOne() : User {
+        return ?{`SELECT id, name FROM users`}.get()
+    }
+}
+<button id="load" onclick=@current = loadOne()>Load</>

@@ -22,13 +22,16 @@ runtime case carries `spec`+`rationale`. **Mirror `protect/strip-client-visible-
 `compiler/SPEC.md` §8 (grep `## 8`) · `conformance/cases/{protect,server-fn,ssr}/` (the serverDb templates)
 
 ## Items (author each; commit per-case; `serverDb`+`state`/`domAnchored`)
-1. **`sql-select-hydrate-rt`** `[status=open]` — server-fn `?{SELECT * FROM users}` → client cell hydrates the seeded rows → `<each>` renders them (`serverDb` seed + `domAnchored`).
-2. **`sql-get-single-row-rt`** `[status=open]` — `.get()` → row[0] single-row hydrate (`state`).
-3. **`sql-all-array-shape-rt`** `[status=open]` — `.all()` → array-shape hydrate.
-4. **`sql-multi-table-sequence-rt`** `[status=open]` — two server-fns each reading a DISTINCT seeded table (no JOIN — the stub can't).
-5-6. **(optional)** extend protect-on-DB-rows / SSR-of-DB-rows only if a gap is found beyond the 5 existing green cases.
+Landed as category **`conformance/cases/server-db/`** (all 4 `[runtime]`, empirically verified via `runServer`).
+1. **`sql-select-hydrate-rt`** `[status=landed-on-branch b6e56a08]` — `.all()` → Row[] hydrates @users → `<each>` renders 2 `.row` + `#count`. ✓ (§8.3/§52.1; no WHERE — pure data-flow)
+2. **`sql-get-single-row-rt`** `[status=landed-on-branch b6e56a08]` — `.get()` → first row → single-object `state.current` (state-only, mirrors protect; nullable row NOT rendered). ✓
+3. **`sql-all-array-shape-rt`** `[status=landed-on-branch b6e56a08]` — `.all()` → length-3 array shape (`#count`=3). ✓
+4. **`sql-multi-table-sequence-rt`** `[status=landed-on-branch b6e56a08]` — two server-fns, two DISTINCT seeded tables (users×2, posts×3; no JOIN). ✓
+5-6. **[status=skipped — no gap]** protect-on-DB-rows / SSR-of-DB-rows already covered by the 5 existing green `protect/`+`ssr/` cases; no additional gap found. (Explicitly optional per list.)
 
-- **PARK + file as a DEV PREREQUISITE (escalate — NOT authorable here):** the **SQL-engine-semantics runtime** sub-surface (WHERE-filter · JOIN/aggregate/ORDER BY · INSERT/UPDATE/DELETE `.run()` + `RETURNING` §8.5.1 · transaction atomicity + ROLLBACK §8.5.3 · §8.7 `SqlError` variants · UNIQUE/FK/CHECK enforcement §39.5) — ~6-8 cases, **BLOCKED until a real-DB conformance adapter replaces `makeSqlStub`** (SQLite-backed `_scrml_sql`). This is a compiler/harness DEV task for the PA lane, not conformance authoring. File it in known-gaps.
+- **PARK item — `[status=parked → escalated to PA]`** — the **SQL-engine-semantics runtime** sub-surface (WHERE-filter · JOIN/aggregate/ORDER BY · INSERT/UPDATE/DELETE `.run()` + `RETURNING` §8.5.1 · transaction atomicity + ROLLBACK §8.5.3 · §8.7 `SqlError` variants · UNIQUE/FK/CHECK §39.5) — ~6-8 cases, **BLOCKED until a real-DB conformance adapter replaces `makeSqlStub`** (SQLite-backed `_scrml_sql`). A compiler/harness DEV task, NOT conformance authoring. **Ready-to-file known-gaps entry handed to the PA in the re-integration message** (not written to the PA-owned `docs/known-gaps.md` from this branch — the PA files it at re-integration).
 
 ## Progress
 `ss67.progress.md`. Land on `spa/ss67`; ping the PA inbox when ready. Do not touch main / do not push.
+
+**STATUS: COMPLETE — 4 authorable items landed on `spa/ss67` @ `b6e56a08`. 5-6 skipped (no gap). PARK item escalated. conformance 390/390 (was 386, +4).**

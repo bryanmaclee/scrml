@@ -1,0 +1,25 @@
+{
+  "id": "server-db-sql-select-hydrate-rt",
+  "description": "§8.3 / §52.1 / §12.2 SQL hydrate round-trip (RUNTIME, serverDb driver) — a client button calls the server fn loadUsers (a bare `SELECT id, name FROM users`.all()); the E-ADAPTER server-eval path evaluates the REAL emitted route handler, whose `_scrml_sql` returns the seeded rows, and the client-bound cell @users hydrates the array. The <each> then renders one .row per row and #count (reading @users.length) reads 2. Pure DATA-FLOW: no WHERE / JOIN / ordering (the SQL stub returns the whole seeded table — the case seeds exactly the rows it asserts).",
+  "language-version": "1.0",
+  "spec": "§8.3, §52.1",
+  "source-test": "conformance/cases/server-fn/basic-load-hydrate + conformance/cases/protect/strip-client-visible-runtime",
+  "rationale": "§12.2: loadUsers touches a server resource (`?{}` SQL) so it auto-escalates to server; the client call round-trips through the compiler-emitted route (serverDb server-eval runs the REAL handler). §8.3: `.all()` (≡ bare `?{}`) resolves to Row[] — all rows as an array — which hydrates the reactive cell @users; a settle-drained server-fn write re-renders the <each> rows AND the @users.length interpolation. The seeded rows reach the client verbatim and render; asserted purely as data-flow (no WHERE-filter / write-back / ordering — the BLOCKED engine-semantics surface). OQ1: whole-tree dom omitted — the async hydrate + <each> container are impl-private; the anchored .row count + #count text + @users state are impl-neutral.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice" },
+        { "id": 2, "name": "Bob" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "users": [{ "id": 1, "name": "Alice" }, { "id": 2, "name": "Bob" }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 2 },
+      { "selector": "#count", "text": "Count: 2" }
+    ]
+  }
+}

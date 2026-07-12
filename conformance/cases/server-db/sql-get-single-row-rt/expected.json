@@ -1,0 +1,21 @@
+{
+  "id": "server-db-sql-get-single-row-rt",
+  "description": "§8.3 / §52.1 SQL `.get()` single-row hydrate (RUNTIME, serverDb driver) — a client button calls the server fn loadOne (`SELECT id, name FROM users`.get()); the E-ADAPTER server-eval path runs the REAL handler, whose `_scrml_sql` returns the seeded rows, and `.get()` yields the FIRST row, which hydrates the client cell @current as a single object ({id, name}). State-only (mirrors protect/strip-client-visible-runtime — the nullable row is not rendered into first-paint DOM). Pure data-flow: `.get()` = row[0] of the seeded table (no WHERE — the stub ignores it; the case seeds Alice first so `.get()` → Alice).",
+  "language-version": "1.0",
+  "spec": "§8.3, §52.1",
+  "source-test": "conformance/cases/protect/strip-client-visible-runtime",
+  "rationale": "§8.3 (result-shape table): `.get()` resolves to `Row | not` — the first matching row, or `not` if none. §12.2 / §52.1: loadOne escalates to server and round-trips through the emitted route; the returned single row hydrates @current. The SQL stub returns the whole seeded table for `FROM users`, and `.get()` takes row[0]; the case seeds [Alice, Bob] so `.get()` → {id:1, name:\"Alice\"}. Asserted as pure data-flow (a single seeded row reaches the client) — NOT WHERE-filtering (that is the BLOCKED engine-semantics surface). The `<current> = not` initial cell is asserted only post-load in state; it is intentionally not interpolated into markup (a nullable-row read at first paint would deref `not`).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice" },
+        { "id": 2, "name": "Bob" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "current": { "id": 1, "name": "Alice" } }
+  }
+}

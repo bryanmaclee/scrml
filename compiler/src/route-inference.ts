@@ -406,22 +406,29 @@ interface ServerOnlyPattern {
 /**
  * Patterns that indicate server-only resource access.
  * Applied to bare-expr node `expr` strings.
+ *
+ * NOTE — the `Bun.*` / `process.*` namespace-member signal set is NOT in this
+ * string-scanned table. A raw-source regex over `emitStringFromTree(exprNode)`
+ * false-matches `Bun.serve(` inside a STRING LITERAL / COMMENT (`@msg =
+ * "docs mention Bun.serve(x)"` — emitStringFromTree renders the literal's quoted
+ * content, and the regex matches inside it), spuriously escalating a pure-client
+ * function (then cascading to E-CPS-NONIDEM-NO-STORAGE). Those signals are now
+ * detected at the AST level (`exprNodeCallsServerOnlyResource`, mirroring the
+ * §20.7 `exprNodeCallsPrintBuiltin` print detector) — a genuine `Bun.serve`
+ * MemberExpr, never a string's contents. The former regexes are retained in
+ * `SERVER_ONLY_NAMESPACE_FALLBACK_PATTERNS` below and applied ONLY on the rare
+ * `exprNode`-absent runtime-string fallback path (fail-closed, no leak).
+ * (g-route-inference-signals-string-blind, S252.)
  */
 const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   // SQL context sigil (?{}) — all database access is server-side (§12.2 Trigger 1)
   { pattern: /\?\{/, resourceType: "sql-query" },
-  // Bun-specific APIs
-  { pattern: /\bBun\.file\s*\(/, resourceType: "Bun.file" },
-  { pattern: /\bBun\.write\s*\(/, resourceType: "Bun.write" },
-  { pattern: /\bBun\.spawn\s*\(/, resourceType: "Bun.spawn" },
-  { pattern: /\bBun\.serve\s*\(/, resourceType: "Bun.serve" },
-  { pattern: /\bBun\.env\b/, resourceType: "Bun.env" },
-  { pattern: /\bnew\s+Bun\.Server\b/, resourceType: "Bun.Server" },
   { pattern: /\bnew\s+Database\s*\(/, resourceType: "bun:sqlite Database" },
   // §44 Bun.SQL constructor — driver-agnostic SQL client. Server-only because
-  // any DB connection is a server-side resource (escalation trigger §12.2).
+  // any DB connection is a server-side resource (escalation trigger §12.2). The
+  // bare-ident `new SQL(...)` form stays string-scanned; the `new Bun.SQL(...)`
+  // form is a Bun.* member (AST-detected, see SERVER_ONLY_NAMESPACE_MEMBERS).
   { pattern: /\bnew\s+SQL\s*\(/, resourceType: "Bun.SQL" },
-  { pattern: /\bnew\s+Bun\.SQL\s*\(/, resourceType: "Bun.SQL" },
   // Node.js fs module calls
   { pattern: /\bfs\.readFile\s*\(/, resourceType: "fs.readFile" },
   { pattern: /\bfs\.writeFile\s*\(/, resourceType: "fs.writeFile" },
@@ -434,17 +441,6 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   { pattern: /\bfs\.existsSync\s*\(/, resourceType: "fs.existsSync" },
   { pattern: /\breadFileSync\s*\(/, resourceType: "readFileSync" },
   { pattern: /\bwriteFileSync\s*\(/, resourceType: "writeFileSync" },
-  // process.env is server-only
-  { pattern: /\bprocess\.env\b/, resourceType: "process.env" },
-  // Insight 26 Batch 1 — D2: complete process.* server-only set (2026-05-08).
-  // Per stdlib-empty-body-audit-2026-05-08.md §3.6, these patterns escape
-  // the original regex set and stdlib/process/index.scrml relies on them.
-  { pattern: /\bprocess\.cwd\s*\(/, resourceType: "process.cwd" },
-  { pattern: /\bprocess\.argv\b/, resourceType: "process.argv" },
-  { pattern: /\bprocess\.platform\b/, resourceType: "process.platform" },
-  { pattern: /\bprocess\.exit\s*\(/, resourceType: "process.exit" },
-  { pattern: /\bprocess\.uptime\s*\(/, resourceType: "process.uptime" },
-  { pattern: /\bprocess\.memoryUsage\s*\(/, resourceType: "process.memoryUsage" },
   // §20.7 print()/println() are NOT in this string-scanned table — a raw-source
   // regex false-matches `print(` inside a STRING LITERAL / COMMENT (`@msg =
   // "call print(x)"`), spuriously escalating a pure-client function. They are
@@ -452,8 +448,6 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   // bare-expr branch of walkBodyForTriggers) — a genuine builtin CallExpr,
   // never a string's contents — which also honors the §20.7.5 shadow (a user
   // `function print` is not the builtin, so it does not escalate).
-  // Bun.cron — Bun ≥1.3.12 in-process scheduler. Server-only.
-  { pattern: /\bBun\.cron\b/, resourceType: "Bun.cron" },
   // env() built-in is server-only unless prefixed with `public`
   { pattern: /(?<!public )\benv\s*\(/, resourceType: "env()" },
   // The §20.5 SERVER-only `session` object (available only in server-escalated
@@ -475,6 +469,83 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   // blanket `/@currentUser\b/` would collide with a USER-declared `<currentUser>`
   // reactive cell (the ambient is active only when no such cell exists; see
   // `_currentUserAmbientActive`), wrongly server-escalating a client function.
+];
+
+// ---------------------------------------------------------------------------
+// §12.2 Trigger 1 — server-only NAMESPACE-MEMBER signals, AST-level (S252).
+//
+// g-route-inference-signals-string-blind: the `Bun.*` / `process.*` server-only
+// signal set moved OFF the raw-source regex table (SERVER_ONLY_PATTERNS) and onto
+// the parsed ExprNode, mirroring the §20.7 `exprNodeCallsPrintBuiltin` print
+// detector. A member access on the `Bun` / `process` GLOBAL (a genuine
+// `{kind:"member", object:{kind:"ident", name:"Bun"}, property:"serve"}` node) is
+// a real host-resource use; the same text inside a STRING LITERAL / COMMENT is a
+// `lit` node's contents (or elided at parse), never a member node — so a client
+// fn merely MENTIONING `"…Bun.serve(x)…"` no longer spuriously server-escalates.
+// The AST path also side-steps the regex-vs-division undecidability that sank the
+// S244 raw-text literal-scanner (there is no `/`-scan on the ExprNode path), and
+// is precise about the receiver by construction: `foo.Bun.serve()` (Bun as a
+// PROPERTY of a USER object, not the global) does NOT match (its object is a
+// member, not ident "Bun") — the shadow-blindness edge the old regex
+// `\bBun\.serve\(` over-fired on. The receiver root is resolved by
+// `resolveServerOnlyNamespaceRoot`, which ALSO accepts the canonical explicit
+// global form `globalThis.Bun` / `window.process` (S252 S239-review follow-up —
+// closes the HIGH leak where `globalThis.Bun.serve({port})` silently shipped to
+// the client because the `serve` receiver's object was a member, not the bare
+// ident). A `globalThis`/`window`/`self`/`global` prefix is unwrapped; any OTHER
+// receiver root (a user local `foo`) is not — so the FP fix is preserved.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `Bun` / `process` global members whose access is a server-only signal.
+ * `Bun.Server` / `Bun.SQL` are the member callees of `new Bun.Server(...)` /
+ * `new Bun.SQL(...)`; matched as members (the `new` node's callee), so no
+ * `new`-specific branch is needed. The bare-ident `new SQL(...)` /
+ * `new Database(...)` forms are NOT namespace members — they remain string-scanned.
+ */
+const SERVER_ONLY_NAMESPACE_MEMBERS: Record<string, Set<string>> = {
+  Bun: new Set(["file", "write", "spawn", "serve", "env", "cron", "Server", "SQL"]),
+  process: new Set(["env", "cwd", "argv", "platform", "exit", "uptime", "memoryUsage"]),
+};
+
+/** The server-only namespace GLOBAL roots (`Bun` / `process`), from the map keys. */
+const SERVER_ONLY_NAMESPACE_ROOTS = new Set<string>(
+  Object.keys(SERVER_ONLY_NAMESPACE_MEMBERS),
+);
+
+/**
+ * The global-object aliases through which the Bun/JS globals are canonically
+ * reached explicitly. `globalThis.Bun` / `window.process` denote the SAME global
+ * as the bare `Bun` / `process` ident and MUST escalate identically.
+ */
+const GLOBAL_OBJECT_ALIASES = new Set<string>([
+  "globalThis", "window", "self", "global",
+]);
+
+/**
+ * Raw-source fallback for the AST-migrated `Bun.*` / `process.*` signals, applied
+ * ONLY when a node carries no parsed `exprNode` (the rare runtime string-fallback
+ * path). Kept fail-closed so an `exprNode`-less bare-expr / decl / return still
+ * escalates on a real `Bun.serve(` / `process.env` — the string-literal FP is
+ * acceptable ONLY here because it never leaks (over-fire, not under-fire). These
+ * mirror the exact regexes formerly inlined in SERVER_ONLY_PATTERNS.
+ */
+const SERVER_ONLY_NAMESPACE_FALLBACK_PATTERNS: ServerOnlyPattern[] = [
+  { pattern: /\bBun\.file\s*\(/, resourceType: "Bun.file" },
+  { pattern: /\bBun\.write\s*\(/, resourceType: "Bun.write" },
+  { pattern: /\bBun\.spawn\s*\(/, resourceType: "Bun.spawn" },
+  { pattern: /\bBun\.serve\s*\(/, resourceType: "Bun.serve" },
+  { pattern: /\bBun\.env\b/, resourceType: "Bun.env" },
+  { pattern: /\bBun\.cron\b/, resourceType: "Bun.cron" },
+  { pattern: /\bnew\s+Bun\.Server\b/, resourceType: "Bun.Server" },
+  { pattern: /\bnew\s+Bun\.SQL\s*\(/, resourceType: "Bun.SQL" },
+  { pattern: /\bprocess\.env\b/, resourceType: "process.env" },
+  { pattern: /\bprocess\.cwd\s*\(/, resourceType: "process.cwd" },
+  { pattern: /\bprocess\.argv\b/, resourceType: "process.argv" },
+  { pattern: /\bprocess\.platform\b/, resourceType: "process.platform" },
+  { pattern: /\bprocess\.exit\s*\(/, resourceType: "process.exit" },
+  { pattern: /\bprocess\.uptime\s*\(/, resourceType: "process.uptime" },
+  { pattern: /\bprocess\.memoryUsage\s*\(/, resourceType: "process.memoryUsage" },
 ];
 
 /**
@@ -526,6 +597,128 @@ function detectServerOnlyResource(expr: string): string | null {
     if (pattern.test(expr)) return resourceType;
   }
   return null;
+}
+
+/**
+ * Raw-source fallback scan for the AST-migrated `Bun.*` / `process.*` namespace
+ * signals. Used ONLY when a node carries no parsed `exprNode` (see
+ * SERVER_ONLY_NAMESPACE_FALLBACK_PATTERNS). Fail-closed backstop; the AST path
+ * (`exprNodeCallsServerOnlyResource`) is primary and string-literal-FP-free.
+ */
+function detectServerOnlyNamespaceString(expr: string): string | null {
+  for (const { pattern, resourceType } of SERVER_ONLY_NAMESPACE_FALLBACK_PATTERNS) {
+    if (pattern.test(expr)) return resourceType;
+  }
+  return null;
+}
+
+/**
+ * Resolve the server-only namespace GLOBAL (`Bun` / `process`) a receiver node
+ * denotes, or null. Accepts BOTH:
+ *   - the bare global ident: `{kind:"ident", name:"Bun"|"process"}`; and
+ *   - a global-object-rooted access: `globalThis.Bun` / `window.process` /
+ *     `self.Bun` / `global.process` — a `{kind:"member", object:{kind:"ident",
+ *     name:<globalObjectAlias>}, property:"Bun"|"process"}` node.
+ * A `globalThis.`/`window.` prefix is the canonical EXPLICIT way to reach the
+ * JS/Bun globals, so it denotes the SAME global as the bare ident. A receiver
+ * rooted at any OTHER ident (a USER local `foo` in `foo.process.env`) is NOT a
+ * match — preserving the string-literal FP fix. (S252 S239-review follow-up:
+ * closes the HIGH leak where `globalThis.Bun.serve({port})` silently shipped to
+ * the client because the `serve` receiver's `object` was a member, not an ident.)
+ */
+function resolveServerOnlyNamespaceRoot(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  // Bare global ident: `Bun` / `process`.
+  if (
+    n.kind === "ident" &&
+    typeof n.name === "string" &&
+    SERVER_ONLY_NAMESPACE_ROOTS.has(n.name)
+  ) {
+    return n.name;
+  }
+  // Global-object-rooted: `globalThis.Bun` / `window.process`.
+  if (
+    n.kind === "member" &&
+    typeof n.property === "string" &&
+    SERVER_ONLY_NAMESPACE_ROOTS.has(n.property)
+  ) {
+    const root = n.object as Record<string, unknown> | undefined;
+    if (
+      root && typeof root === "object" &&
+      root.kind === "ident" &&
+      typeof root.name === "string" &&
+      GLOBAL_OBJECT_ALIASES.has(root.name)
+    ) {
+      return n.property;
+    }
+  }
+  return null;
+}
+
+/**
+ * §12.2 Trigger 1 — AST-level detection of a server-only `Bun.*` / `process.*`
+ * namespace-member access anywhere in an expression tree. STRING/COMMENT-SAFE by
+ * construction (the S252 fix for g-route-inference-signals-string-blind): a
+ * genuine member node's `property` is in the server-only member set AND its
+ * `object` resolves (via `resolveServerOnlyNamespaceRoot`) to the `Bun`/`process`
+ * global — either the bare ident OR a `globalThis.`/`window.`-rooted access. The
+ * contents of a `"…Bun.serve…"` string literal is a `lit` node, never a member
+ * node, so it does not match; a USER object (`foo.Bun.serve()`) does not match
+ * either (its receiver root is a user local, not a global). Returns the matched
+ * resource (`"Bun.serve"`, `"process.env"`, …) or null. Mirrors
+ * `exprNodeCallsPrintBuiltin`.
+ */
+function exprNodeCallsServerOnlyResource(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  if (n.kind === "member" && typeof n.property === "string") {
+    const nsRoot = resolveServerOnlyNamespaceRoot(n.object);
+    if (nsRoot !== null) {
+      const members = SERVER_ONLY_NAMESPACE_MEMBERS[nsRoot];
+      if (members && members.has(n.property)) {
+        return `${nsRoot}.${n.property}`;
+      }
+    }
+  }
+  for (const k in n) {
+    if (k === "span") continue;
+    const v = n[k];
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        const hit = exprNodeCallsServerOnlyResource(c);
+        if (hit) return hit;
+      }
+    } else if (v && typeof v === "object") {
+      const hit = exprNodeCallsServerOnlyResource(v);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/**
+ * §12.2 Trigger 1 — unified server-only-resource detection for a statement's
+ * expression surface. The SINGLE entry point every trigger scanner routes
+ * through so the AST-migrated `Bun.*` / `process.*` namespace set is detected
+ * string/comment-safe (via the parsed `exprNode`) at EVERY site, not just the
+ * bare-expr one. Order:
+ *   1. the reduced string patterns (fs.*, `?{`, env(), session, `new SQL/Database`)
+ *      — these have no clean AST form here and keep their prior string behaviour;
+ *   2. the namespace set (`Bun.*` / `process.*`) via the AST when `exprNode` is
+ *      present (the FP fix), or via the fail-closed string fallback when it is
+ *      absent (rare runtime-string path; over-fires but never leaks).
+ * Returns the matched resourceType, or null.
+ */
+function detectServerOnlyResourceForNode(
+  exprNode: unknown,
+  exprString: string,
+): string | null {
+  const strHit = detectServerOnlyResource(exprString);
+  if (strHit !== null) return strHit;
+  return exprNode
+    ? exprNodeCallsServerOnlyResource(exprNode)
+    : detectServerOnlyNamespaceString(exprString);
 }
 
 /**
@@ -1116,8 +1309,9 @@ export function walkBodyForTriggers(
       // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
       const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
 
-      // Trigger 1: server-only resource access.
-      const resourceType = detectServerOnlyResource(expr);
+      // Trigger 1: server-only resource access. Bun.*/process.* are detected on
+      // the parsed exprNode (string/comment-safe, S252); the rest via string.
+      const resourceType = detectServerOnlyResourceForNode((node as any).exprNode, expr);
       if (resourceType !== null) {
         triggers.push({
           kind: "server-only-resource",
@@ -1252,7 +1446,7 @@ export function walkBodyForTriggers(
       }
 
       // Trigger 1: server-only resource in the init expression (e.g. ?{} SQL sigil, Bun.file(), etc.)
-      const resourceType = detectServerOnlyResource(init);
+      const resourceType = detectServerOnlyResourceForNode((node as any).initExpr, init);
       if (resourceType !== null) {
         triggers.push({
           kind: "server-only-resource",
@@ -1319,7 +1513,7 @@ export function walkBodyForTriggers(
 
       // Trigger 1: server-only resource in the init expression (e.g. ?{} SQL sigil).
       // Matches the same check applied to let-decl/const-decl/tilde-decl above.
-      const reactDeclResourceType = detectServerOnlyResource(init);
+      const reactDeclResourceType = detectServerOnlyResourceForNode((node as any).initExpr, init);
       if (reactDeclResourceType !== null) {
         triggers.push({
           kind: "server-only-resource",
@@ -1380,7 +1574,7 @@ export function walkBodyForTriggers(
       const expr = (node as any).exprNode
         ? emitStringFromTree((node as any).exprNode)
         : ((node as any).expr ?? "");
-      const resourceType = detectServerOnlyResource(expr);
+      const resourceType = detectServerOnlyResourceForNode((node as any).exprNode, expr);
       if (resourceType !== null) {
         triggers.push({
           kind: "server-only-resource",
@@ -1551,8 +1745,9 @@ export function walkBodyForTriggers(
       // detectors see the same text they would on a string-field initializer.
       let exprStr: string;
       try { exprStr = emitStringFromTree(v); } catch { return; }
-      // Trigger 1: server-only resource access.
-      const resourceType = detectServerOnlyResource(exprStr);
+      // Trigger 1: server-only resource access. `v` IS the ExprNode, so the
+      // Bun.*/process.* namespace set is detected string/comment-safe (S252).
+      const resourceType = detectServerOnlyResourceForNode(v, exprStr);
       if (resourceType !== null) {
         triggers.push({
           kind: "server-only-resource",
@@ -2157,8 +2352,9 @@ function hasServerOnlyResourceInInit(
   // Check for SQL sigil (?{`)
   if (/\?\{`/.test(init)) return true;
 
-  // Check for other server-only resource patterns
-  if (detectServerOnlyResource(init) !== null) return true;
+  // Check for other server-only resource patterns (Bun.*/process.* via the
+  // parsed initExpr — string/comment-safe, S252 — plus the string patterns).
+  if (detectServerOnlyResourceForNode((node as any).initExpr, init) !== null) return true;
 
   // Insight 26 D2c — server-only namespace member access (e.g. `redis.get(key)`).
   if (importedServerNamespaces.size > 0) {
@@ -2245,10 +2441,12 @@ function controlFlowContainsServerTrigger(
   if (kind === "function-decl") return false;
 
   // Helper: server-only-resource / namespace / protected-field / server-fn-call
-  // detection on a raw expression string (mirrors walkBodyForTriggers).
-  const stringHasServerTrigger = (expr: string): boolean => {
+  // detection on a raw expression string (mirrors walkBodyForTriggers). The
+  // optional `exprNode` lets the Bun.*/process.* namespace set be detected on
+  // the AST (string/comment-safe, S252) rather than the string surface.
+  const stringHasServerTrigger = (expr: string, exprNode?: unknown): boolean => {
     if (!expr) return false;
-    if (detectServerOnlyResource(expr) !== null) return true;
+    if (detectServerOnlyResourceForNode(exprNode, expr) !== null) return true;
     if (importedServerNamespaces.size > 0) {
       for (const name of importedServerNamespaces) {
         const re = new RegExp(`\\b${escapeRegex(name)}\\.[A-Za-z_$]`);
@@ -2301,7 +2499,7 @@ function controlFlowContainsServerTrigger(
         : ((node as any).exprNode
             ? emitStringFromTree((node as any).exprNode)
             : ((node as any).expr ?? ""));
-    if (stringHasServerTrigger(expr)) return true;
+    if (stringHasServerTrigger(expr, (node as any).exprNode)) return true;
     if (calleeHasServerTrigger(node, "expr")) return true;
   }
 
@@ -2309,7 +2507,7 @@ function controlFlowContainsServerTrigger(
     const init = (node as any).initExpr
       ? emitStringFromTree((node as any).initExpr)
       : (typeof (node as any).init === "string" ? (node as any).init : "");
-    if (stringHasServerTrigger(init)) return true;
+    if (stringHasServerTrigger(init, (node as any).initExpr)) return true;
     for (const fieldName of protectedFields) {
       if (declDestructuresField(init, fieldName)) return true;
     }
@@ -2320,7 +2518,7 @@ function controlFlowContainsServerTrigger(
     const expr = (node as any).exprNode
       ? emitStringFromTree((node as any).exprNode)
       : (typeof (node as any).expr === "string" ? (node as any).expr : "");
-    if (stringHasServerTrigger(expr)) return true;
+    if (stringHasServerTrigger(expr, (node as any).exprNode)) return true;
     if (calleeHasServerTrigger(node, "expr")) return true;
   }
 
@@ -2397,8 +2595,8 @@ function isServerTriggerStatement(
     // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
     const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
 
-    // Server-only resource access
-    if (detectServerOnlyResource(expr) !== null) return true;
+    // Server-only resource access (Bun.*/process.* via the parsed exprNode — S252).
+    if (detectServerOnlyResourceForNode((node as any).exprNode, expr) !== null) return true;
 
     // D2c (Insight 26): server-only namespace member access
     if (matchesNamespaceRef(expr)) return true;
@@ -2429,8 +2627,8 @@ function isServerTriggerStatement(
       if (declDestructuresField(init, fieldName)) return true;
     }
 
-    // Server-only resource in init
-    if (detectServerOnlyResource(init) !== null) return true;
+    // Server-only resource in init (Bun.*/process.* via the parsed initExpr — S252).
+    if (detectServerOnlyResourceForNode((node as any).initExpr, init) !== null) return true;
 
     // D2c (Insight 26): server-only namespace member access in init
     if (matchesNamespaceRef(init)) return true;

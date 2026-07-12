@@ -3433,6 +3433,199 @@ class ScopeChain {
 }
 
 // ---------------------------------------------------------------------------
+// §14.1.1 — Curated host-method return-type table (Option D)
+// ---------------------------------------------------------------------------
+//
+// The typer has no built-in model of the JS host methods scrml emits onto
+// (`charCodeAt`, `substring`, `.length`, …). Without a model every member-call
+// bound to a local resolved to `asIs` — the SILENT sanctioned escape hatch
+// (§14.1.1) — which DISABLES the checks that would catch a wrong use of the
+// result (a `match` on it is E-TYPE-025 friction; an `==` against a mismatched
+// type is silently accepted).
+//
+// Option D (deep-dive typer-soundness-poison-2026-07-12, bryan S251): model the
+// high-value, corpus-exercised subset whose JS return type is INVARIANT — a true,
+// total fact about the runtime scrml compiles onto. Encoding a true invariant
+// runtime fact is exactly what a sound type rule is; the fix NARROWS what falls
+// into `asIs` — it does NOT make `asIs` loud (the hatch stays silent).
+//
+// HARD DISCIPLINE (§4 HARD-3): only methods whose return type is invariant
+// (never element-/argument-dependent) appear here. Polymorphic / overloaded
+// methods (`map`/`filter`/`reduce`/`find`/`pop`/`shift`/…) stay `asIs` BY DESIGN
+// — the sanctioned silent hatch. A single wrong entry would turn a silent-
+// permissive hole into a silent-WRONG rejection, so this table is a curation
+// discipline, not a one-time write.
+//
+// Numeric-returning methods resolve to `tPrimitive("number")` (NOT "integer"):
+// GCP3 classifies every numeric literal as "number" (§45), so modeling
+// `charCodeAt() -> number` keeps the correct `charCodeAt() == 10` clean while
+// still catching `charCodeAt() == "x"`.
+
+/**
+ * receiver-kind (`"string"` | `"array"` | `"number"`) -> method -> return type.
+ * Receiver-kind normalizes `"integer"` -> `"number"` (§53 integer is a number
+ * refinement) before lookup, so a field typed `int` resolves its host methods.
+ */
+const HOST_METHOD_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = new Map([
+  ["string", new Map<string, ResolvedType>([
+    // string -> string
+    ["charAt", tPrimitive("string")],
+    ["substring", tPrimitive("string")],
+    ["substr", tPrimitive("string")],
+    ["slice", tPrimitive("string")],
+    ["toUpperCase", tPrimitive("string")],
+    ["toLowerCase", tPrimitive("string")],
+    ["trim", tPrimitive("string")],
+    ["trimStart", tPrimitive("string")],
+    ["trimEnd", tPrimitive("string")],
+    ["repeat", tPrimitive("string")],
+    ["padStart", tPrimitive("string")],
+    ["padEnd", tPrimitive("string")],
+    ["concat", tPrimitive("string")],
+    ["replace", tPrimitive("string")],
+    ["replaceAll", tPrimitive("string")],
+    ["normalize", tPrimitive("string")],
+    // string -> number
+    ["charCodeAt", tPrimitive("number")],
+    ["codePointAt", tPrimitive("number")],
+    ["indexOf", tPrimitive("number")],
+    ["lastIndexOf", tPrimitive("number")],
+    ["localeCompare", tPrimitive("number")],
+    // string -> boolean
+    ["includes", tPrimitive("boolean")],
+    ["startsWith", tPrimitive("boolean")],
+    ["endsWith", tPrimitive("boolean")],
+    // string -> array<string> (invariant: split always yields string[])
+    ["split", tArray(tPrimitive("string"))],
+  ])],
+  ["array", new Map<string, ResolvedType>([
+    // array -> number (push/unshift return the new length; index/count queries)
+    ["push", tPrimitive("number")],
+    ["unshift", tPrimitive("number")],
+    ["indexOf", tPrimitive("number")],
+    ["lastIndexOf", tPrimitive("number")],
+    // array -> boolean
+    ["includes", tPrimitive("boolean")],
+    // array -> string (join always yields a string regardless of element type)
+    ["join", tPrimitive("string")],
+    // NB: pop/shift/find/map/filter/reduce/slice/concat/flat are element-
+    // dependent (polymorphic) and INTENTIONALLY absent — they stay `asIs`.
+  ])],
+  ["number", new Map<string, ResolvedType>([
+    // number -> string
+    ["toFixed", tPrimitive("string")],
+    ["toPrecision", tPrimitive("string")],
+    ["toExponential", tPrimitive("string")],
+    ["toString", tPrimitive("string")],
+  ])],
+]);
+
+/**
+ * Property (non-call) member accesses whose type is invariant per receiver-kind.
+ * `s.length` / `arr.length` -> number. Keyed identically to HOST_METHOD_RETURNS.
+ */
+const HOST_PROPERTY_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = new Map([
+  ["string", new Map<string, ResolvedType>([["length", tPrimitive("number")]])],
+  ["array", new Map<string, ResolvedType>([["length", tPrimitive("number")]])],
+]);
+
+/** Normalize a resolved receiver type to its host-method table key, or null. */
+function hostReceiverKind(t: ResolvedType | null | undefined): string | null {
+  if (!t) return null;
+  if (t.kind === "array") return "array";
+  if (t.kind === "primitive") {
+    const name = (t as PrimitiveType).name;
+    if (name === "string") return "string";
+    // §53 — `integer` is a number refinement (maps to number at runtime).
+    if (name === "number" || name === "integer") return "number";
+  }
+  return null;
+}
+
+/**
+ * Resolve the type of a receiver ExprNode from the scope chain WITHOUT consulting
+ * any host-method model — used to find the receiver-kind for a member call. Handles
+ * the shapes the reactivity/string corpus actually exercises: a bound identifier, a
+ * string/number/bool literal, a struct-field access (`c.source`), and a nested
+ * modeled host member (`s.trim().length`). Returns null when it cannot prove a type
+ * (the caller then leaves the value `asIs` — the sanctioned silent fallback).
+ */
+function resolveReceiverExprType(node: unknown, scopeChain: ScopeChain): ResolvedType | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as { kind?: string; name?: string; object?: unknown; property?: unknown; callee?: unknown; litType?: string };
+
+  if (n.kind === "ident" && typeof n.name === "string") {
+    let name = n.name;
+    if (name.startsWith("@")) name = name.slice(1);
+    const entry = scopeChain.lookup(name);
+    return entry ? (entry.resolvedType as ResolvedType) ?? null : null;
+  }
+
+  if (n.kind === "lit") {
+    if (n.litType === "string" || n.litType === "template") return tPrimitive("string");
+    if (n.litType === "number") return tPrimitive("number");
+    if (n.litType === "bool") return tPrimitive("boolean");
+    return null;
+  }
+
+  // Struct-field access: resolve the base struct, then read the field type.
+  if (n.kind === "member" && typeof n.property === "string") {
+    const baseType = resolveReceiverExprType(n.object, scopeChain);
+    if (baseType && baseType.kind === "struct") {
+      const fieldType = (baseType as StructType).fields.get(n.property);
+      if (fieldType) return fieldType;
+    }
+    // A modeled host property on a known receiver (e.g. `s.length` used as a
+    // receiver — rare, but keeps the recursion honest).
+    const recvKind = hostReceiverKind(baseType);
+    if (recvKind) {
+      const propType = HOST_PROPERTY_RETURNS.get(recvKind)?.get(n.property);
+      if (propType) return propType;
+    }
+    return null;
+  }
+
+  // Nested modeled host call as a receiver (e.g. `s.trim().charCodeAt(0)`).
+  if (n.kind === "call") {
+    return resolveHostMemberCallType(node, scopeChain);
+  }
+
+  return null;
+}
+
+/**
+ * If `node` is a member CALL (`recv.method(args)`) whose receiver resolves to a
+ * modeled receiver-kind and whose method is in HOST_METHOD_RETURNS, return the
+ * modeled return type. Otherwise null (leave the value `asIs`).
+ */
+function resolveHostMemberCallType(node: unknown, scopeChain: ScopeChain): ResolvedType | null {
+  if (!node || typeof node !== "object") return null;
+  const call = node as { kind?: string; callee?: { kind?: string; object?: unknown; property?: unknown } };
+  if (call.kind !== "call" || !call.callee || call.callee.kind !== "member") return null;
+  const method = call.callee.property;
+  if (typeof method !== "string" || !method) return null;
+  const recvType = resolveReceiverExprType(call.callee.object, scopeChain);
+  const recvKind = hostReceiverKind(recvType);
+  if (!recvKind) return null;
+  return HOST_METHOD_RETURNS.get(recvKind)?.get(method) ?? null;
+}
+
+/**
+ * If `node` is a member PROPERTY access (`recv.prop`, no call) whose receiver
+ * resolves to a modeled receiver-kind and whose property is in
+ * HOST_PROPERTY_RETURNS (`.length`), return the modeled type. Otherwise null.
+ */
+function resolveHostMemberPropType(node: unknown, scopeChain: ScopeChain): ResolvedType | null {
+  if (!node || typeof node !== "object") return null;
+  const m = node as { kind?: string; object?: unknown; property?: unknown };
+  if (m.kind !== "member" || typeof m.property !== "string") return null;
+  const recvType = resolveReceiverExprType(m.object, scopeChain);
+  const recvKind = hostReceiverKind(recvType);
+  if (!recvKind) return null;
+  return HOST_PROPERTY_RETURNS.get(recvKind)?.get(m.property) ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Type registry builder
 // ---------------------------------------------------------------------------
 
@@ -9867,6 +10060,21 @@ function annotateNodes(
             if (_sig && _sig.returnType && _sig.returnType.kind !== "asIs" && _sig.returnType.kind !== "unknown") {
               resolvedType = _sig.returnType;
             }
+          }
+        }
+        // §14.1.1 Option D — host-method return-type table. When the init is a
+        // MEMBER call (`c.source.charCodeAt(c.pos)`) or a modeled property access
+        // (`s.length`) on a known-shape receiver, bind the MODELED return type
+        // instead of the default `asIs`. This closes F5 (a `match` on a
+        // `substring()` result now types as `string`, no annotation needed) and
+        // gives host-derived locals real types for downstream checks. Un-modeled
+        // methods return null here and stay `asIs` — the sanctioned silent hatch.
+        if (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") {
+          const _memberInit = (n as any).initExpr;
+          const _hostType = resolveHostMemberCallType(_memberInit, scopeChain)
+            ?? resolveHostMemberPropType(_memberInit, scopeChain);
+          if (_hostType) {
+            resolvedType = _hostType;
           }
         }
         // §2a — E-SCOPE-001 on undeclared identifiers inside the initializer

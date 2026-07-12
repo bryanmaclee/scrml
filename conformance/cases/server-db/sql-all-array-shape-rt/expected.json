@@ -1,0 +1,25 @@
+{
+  "id": "server-db-sql-all-array-shape-rt",
+  "description": "§8.3 / §52.1 SQL `.all()` array-shape hydrate (RUNTIME, serverDb driver) — the explicit `.all()` form resolves to Row[] and hydrates the client cell @rows as an ARRAY. Distinct from the `.get()` sibling: three seeded rows hydrate as a length-3 array (#count reads @rows.length → 3). Pure data-flow (no WHERE / ordering).",
+  "language-version": "1.0",
+  "spec": "§8.3, §52.1",
+  "source-test": "conformance/cases/server-fn/basic-load-hydrate",
+  "rationale": "§8.3 (result-shape table): `.all()` resolves to Row[] — ALL matching rows as an array (identical shape to a bare `?{}`). §12.2 / §52.1: loadAll escalates to server and round-trips; the returned array hydrates @rows. Three seeded widgets → a length-3 array; #count (reading @rows.length) reads 3 — the array-shape proof (contrast the `.get()` single-object sibling). Asserted purely as data-flow: the seeded rows reach the client as an array of the seeded count (no WHERE-filter / ordering — BLOCKED engine surface).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "widgets": [
+        { "id": 1, "label": "a" },
+        { "id": 2, "label": "b" },
+        { "id": 3, "label": "c" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "rows": [{ "id": 1, "label": "a" }, { "id": 2, "label": "b" }, { "id": 3, "label": "c" }] },
+    "domAnchored": [
+      { "selector": "#count", "text": "3" }
+    ]
+  }
+}

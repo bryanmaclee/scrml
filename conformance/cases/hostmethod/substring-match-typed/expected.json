@@ -1,0 +1,16 @@
+{
+  "id": "hostmethod-substring-match-typed",
+  "description": "§14.1.1 Option D — the F5 closure, end to end. `s.substring(a, b)` is now MODELED as `string` instead of the silent `asIs` escape hatch, so a `match` on that result no longer fires E-TYPE-025 (`cannot match on asIs-typed subject`) and needs NO `const ch: string =` annotation workaround. The modeled type flows through: `classify` matches the first char of \"abc\" against \"a\" and the derived cell `firstKind` resolves to \"vowel\", rendered at #out. Pins BOTH the type-system half (E-TYPE-025 gone) and the runtime effect the tabling enables.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/hostmethod-return-type-option-d.test.js",
+  "spec": "§14.1.1",
+  "rationale": "§14.1.1 — `asIs` is the sanctioned SILENT untyped escape hatch for a value whose shape genuinely cannot be expressed; it is never errored. The Option-D fix (typer-soundness-poison-2026-07-12) NARROWS what falls into `asIs` by modeling the curated invariant-return host-method surface: `string.substring -> string` is a total, invariant fact about the JS runtime scrml emits onto, so encoding it is a sound type rule. With the substring result typed `string`, the §18 `match` subject is a typed primitive (E-TYPE-025 requires a typed subject), so E-TYPE-025 SHALL NOT fire and the match dispatches: the first char of \"abc\" (\"a\") selects the \"a\" arm, so `firstKind` == \"vowel\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-025", "E-CODEGEN-INVALID-LOGIC"],
+    "state": { "firstKind": "vowel" },
+    "domAnchored": [
+      { "selector": "#out", "text": "vowel" }
+    ]
+  }
+}

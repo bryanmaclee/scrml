@@ -1,0 +1,38 @@
+{
+  "id": "server-db-sql-multi-table-sequence-rt",
+  "description": "§8.3 / §52.1 two server-fns over two DISTINCT seeded tables (RUNTIME, serverDb driver) — loadUsers reads `FROM users`, loadPosts reads `FROM posts`; each hydrates its own client cell (@users ← 2 rows, @posts ← 3 rows) from its own seeded table. Proves the serverDb driver keys rows by table and dispatches two independent routes. NO JOIN (the SQL stub cannot join — two separate single-table reads).",
+  "language-version": "1.0",
+  "spec": "§8.3, §52.1",
+  "source-test": "conformance/cases/server-fn/basic-load-hydrate",
+  "rationale": "§12.2 / §52.1: two functions each touch a server resource and escalate independently; two clicks round-trip through two distinct emitted routes. §8.3: each `.all()` resolves to Row[] for its own table. The serverDb driver seeds `users` and `posts` separately, and `_scrml_sql` keys the returned rows by the `FROM <table>` extracted from each query — so @users hydrates the 2 seeded users and @posts the 3 seeded posts, independently. Asserted purely as data-flow across two tables — deliberately NO JOIN / cross-table query (the BLOCKED engine-semantics surface; the stub returns each whole table).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice" },
+        { "id": 2, "name": "Bob" }
+      ],
+      "posts": [
+        { "id": 10, "title": "x" },
+        { "id": 11, "title": "y" },
+        { "id": 12, "title": "z" }
+      ]
+    },
+    "input": [
+      { "click": "#lu" },
+      { "wait": "settle" },
+      { "click": "#lp" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "users": [{ "id": 1, "name": "Alice" }, { "id": 2, "name": "Bob" }],
+      "posts": [{ "id": 10, "title": "x" }, { "id": 11, "title": "y" }, { "id": 12, "title": "z" }]
+    },
+    "domAnchored": [
+      { "selector": "#uc", "text": "2" },
+      { "selector": "#pc", "text": "3" }
+    ]
+  }
+}

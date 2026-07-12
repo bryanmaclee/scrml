@@ -1,0 +1,16 @@
+${
+    type User:struct = { id: number, name: string }
+    type Post:struct = { id: number, title: string }
+    <users> : User[] = []
+    <posts> : Post[] = []
+    function loadUsers() : User[] {
+        return ?{`SELECT id, name FROM users`}.all()
+    }
+    function loadPosts() : Post[] {
+        return ?{`SELECT id, title FROM posts`}.all()
+    }
+}
+<button id="lu" onclick=@users = loadUsers()>LoadUsers</>
+<button id="lp" onclick=@posts = loadPosts()>LoadPosts</>
+<p id="uc">${@users.length}</>
+<p id="pc">${@posts.length}</>
