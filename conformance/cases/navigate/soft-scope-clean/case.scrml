@@ -1,0 +1,6 @@
+<program>
+  <h1>Shell</h1>
+  <outlet/>
+  ${ function go() { navigate("/reports") } }
+  <button onclick=go()>Go</button>
+</program>

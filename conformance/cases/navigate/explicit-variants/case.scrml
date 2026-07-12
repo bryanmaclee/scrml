@@ -1,0 +1,7 @@
+<program>
+  <outlet/>
+  ${ function hardNav() { navigate("/x", .Hard) } }
+  ${ function softNav() { navigate("/y", .Soft) } }
+  <button onclick=hardNav()>Hard</button>
+  <button onclick=softNav()>Soft</button>
+</program>

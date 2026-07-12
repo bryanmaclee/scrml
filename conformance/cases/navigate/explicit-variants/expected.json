@@ -1,0 +1,13 @@
+{
+  "id": "navigate-explicit-variants",
+  "description": "§20.2 (Client Router — navigate-soft-nav Wave-1b). The explicit navigation-type overrides `navigate(path, .Hard)` and `navigate(path, .Soft)` compile clean: the bare-dot `.Hard` / `.Soft` variant is recognized as the navigation-type selector (NOT an undeclared identifier or a mis-inferred enum variant), so no E-SCOPE-001 and no E-VARIANT-* / E-TYPE-* fires. `.Hard` lowers to the full-document hard nav, `.Soft` to `_scrml_navigate_soft`; the variant is consumed by codegen, never forwarded as a runtime argument.",
+  "language-version": "1.0",
+  "spec": "§20.2, §20.3",
+  "rationale": "§20.2: `.Hard` / `.Soft` are built-in navigation-type variants the developer MAY use to override the inferred type. They are compiler-consumed selectors — the call site must compile without a scope/variant error.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "notCodePrefixes": ["E-OUTLET-", "E-SCOPE-", "E-VARIANT-"],
+    "domAnchored": [{ "selector": "[data-scrml-outlet]", "count": 1 }]
+  }
+}
