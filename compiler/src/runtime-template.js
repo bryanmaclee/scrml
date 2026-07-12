@@ -2502,7 +2502,9 @@ function _scrml_nav_scroll(restore) {
 // so the NEXT nav can tear them down (finding #1 + #2). Reuses the ordinary boot
 // helpers (_scrml_ssr_seed_apply + the per-file wiring the rehydrators close over).
 function _scrml_rehydrate_region(root) {
-  if (typeof _scrml_ssr_seed_apply === "function") _scrml_ssr_seed_apply();
+  // #5 — REHYDRATE seed-apply skips the persistent shell's cells (skipShell=true)
+  // so a mutated shell cell survives the nav; route cells still re-seed.
+  if (typeof _scrml_ssr_seed_apply === "function") _scrml_ssr_seed_apply(true);
   var scope = root || (typeof document !== "undefined" ? document : null);
   for (var i = 0; i < _scrml_rehydrators.length; i++) {
     try { _scrml_rehydrators[i](scope); }
@@ -5333,11 +5335,22 @@ function _scrml_ssr_seeded(name) {
     && window.__scrml_ssr_state != null
     && Object.prototype.hasOwnProperty.call(window.__scrml_ssr_state, name);
 }
-function _scrml_ssr_seed_apply() {
+// navigate-wave1b #5 — skipShell gates the SOFT-NAV REHYDRATE path. The fetched
+// route's SSR seed carries the persistent shell's program-top-level cells at their
+// SSR-INITIAL values; re-applying them on a soft nav would RESET a shell cell the
+// user mutated (a nav counter, a sidebar toggle) — breaking the persistent shell
+// that is the whole point of the router (§20.8.2 "The shell runtime SHALL NOT be
+// re-booted."). Shell membership is a COMPILE-TIME set (_scrml_shell_cells, emitted
+// by codegen for the cells declared OUTSIDE the <outlet>/page region). The INITIAL
+// page-load call (no skipShell) still seeds EVERY cell — the shell needs its
+// first-paint values too; only the rehydrate skips the shell cells.
+function _scrml_ssr_seed_apply(skipShell) {
   if (typeof window === "undefined" || window.__scrml_ssr_state == null) return;
   var _seed = window.__scrml_ssr_state;
+  var _shell = (skipShell && typeof _scrml_shell_cells !== "undefined") ? _scrml_shell_cells : null;
   for (var _k in _seed) {
     if (Object.prototype.hasOwnProperty.call(_seed, _k)) {
+      if (_shell && Object.prototype.hasOwnProperty.call(_shell, _k)) continue; // shell cell — persist the live value
       _scrml_reactive_set(_k, _seed[_k]);
     }
   }

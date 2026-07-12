@@ -710,6 +710,31 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   if (serverVarDecls.length > 0 || serverAuthorityTypesForSeed.length > 0) {
     lines.push("");
     lines.push("// --- §52.8 SSR pre-render seed application (ssr-b-substrate) ---");
+    // navigate-wave1b #5 — when this page is a <program> shell (has an <outlet>),
+    // emit the compile-time set of program-top-level (shell) cell names so the
+    // soft-nav REHYDRATE seed-apply (_scrml_ssr_seed_apply(true)) can skip them: a
+    // mutated shell cell (nav counter, sidebar toggle) MUST survive a soft nav, not
+    // reset to the fetched route's SSR-initial value. The INITIAL page load seeds
+    // everything (the bare _scrml_ssr_seed_apply() below). Only a shell that has ≥1
+    // shell cell overlapping the seed needs the set — gate on that intersection so
+    // a route-only-seed page emits nothing (byte-identical to before).
+    if (fileHasOutlet(fileAST)) {
+      const shellCells = collectShellCellNames(fileAST);
+      const seedShellCells: string[] = [];
+      for (const decl of serverVarDecls) {
+        const n = decl.name as string;
+        if (shellCells.has(n)) seedShellCells.push(n);
+      }
+      for (const decl of serverAuthorityTypesForSeed) {
+        const n = decl.name as string;
+        if (shellCells.has(n)) seedShellCells.push(n);
+      }
+      if (seedShellCells.length > 0) {
+        const entries = seedShellCells.map((n) => `${JSON.stringify(n)}: true`).join(", ");
+        lines.push(`// navigate-wave1b #5 — shell cells skipped by the soft-nav rehydrate seed-apply.`);
+        lines.push(`var _scrml_shell_cells = { ${entries} };`);
+      }
+    }
     lines.push("_scrml_ssr_seed_apply();");
   }
   if (serverVarDecls.length > 0) {
@@ -894,6 +919,78 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   }
 
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// navigate-wave1b #5 — persistent-shell cell membership
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect the names of PROGRAM-TOP-LEVEL (shell) cells — `state-decl`s declared
+ * OUTSIDE any `<outlet>`/`<page>` region — so the soft-nav rehydrate seed-apply
+ * can SKIP re-seeding them (finding #5). A shell cell (a nav counter, a sidebar
+ * toggle) belongs to the persistent `<program>` shell that survives a soft nav;
+ * re-applying the fetched route's SSR-initial value would RESET a value the user
+ * mutated. A cell declared INSIDE the outlet/page IS route-scoped and re-seeds
+ * with the new route's values on every swap.
+ *
+ * The walk mirrors `classifyMarkupNodes`'s `insideOutlet` region tracking, but
+ * (a) descends into `logic` bodies (where `state-decl`s live — the classifier
+ * SKIPS them) and (b) treats `<outlet>` AND `<page>` as region boundaries.
+ * Membership is COMPILE-TIME only — no runtime shortcut (per the finding).
+ */
+function collectShellCellNames(fileAST: any): Set<string> {
+  const shell = new Set<string>();
+  function visit(nodeList: any[], insideRegion: boolean): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      // A cell declared OUTSIDE any outlet/page region is a shell cell.
+      if (node.kind === "state-decl" && node.name && !insideRegion) {
+        shell.add(node.name as string);
+      }
+      // An <outlet>/<page> subtree is route-scoped: descend with the region bit set.
+      let childRegion = insideRegion;
+      if (node.kind === "markup") {
+        const tag: string = node.tag ?? "";
+        if (tag === "outlet" || tag === "page") childRegion = true;
+      }
+      if (node.kind === "logic" && Array.isArray(node.body)) visit(node.body, insideRegion);
+      if (Array.isArray(node.children)) visit(node.children, childRegion);
+      if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) {
+        visit((node as any).bodyChildren, insideRegion);
+      }
+      // Control-flow bodies carry the region bit unchanged.
+      if (node.kind === "match-stmt" && Array.isArray((node as any).body)) visit((node as any).body, insideRegion);
+      if (node.kind === "if-stmt") {
+        if (Array.isArray((node as any).consequent)) visit((node as any).consequent, insideRegion);
+        if (Array.isArray((node as any).alternate)) visit((node as any).alternate, insideRegion);
+      }
+    }
+  }
+  visit(getNodes(fileAST), false);
+  return shell;
+}
+
+/**
+ * Does the file contain an `<outlet>` anywhere in its markup? Soft-nav (and thus
+ * the `_scrml_shell_cells` skip) is only applicable to a `<program>` shell with a
+ * swap region, so `_scrml_shell_cells` is emitted only when an outlet is present.
+ */
+function fileHasOutlet(fileAST: any): boolean {
+  let found = false;
+  function visit(nodeList: any[]): void {
+    if (found || !Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (found) return;
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "markup" && node.tag === "outlet") { found = true; return; }
+      if (Array.isArray(node.children)) visit(node.children);
+      if (node.kind === "engine-decl" && Array.isArray((node as any).bodyChildren)) visit((node as any).bodyChildren);
+    }
+  }
+  visit(getNodes(fileAST));
+  return found;
 }
 
 // ---------------------------------------------------------------------------

@@ -53,6 +53,9 @@ function mount(html, clientJs) {
     "window._scrml_reactive_get = _scrml_reactive_get;\n" +
     "window._scrml_reactive_set = _scrml_reactive_set;\n" +
     "window._scrml_timer_registry = typeof _scrml_timer_registry !== 'undefined' ? _scrml_timer_registry : undefined;\n" +
+    "window._scrml_ssr_seed_apply = typeof _scrml_ssr_seed_apply === 'function' ? _scrml_ssr_seed_apply : undefined;\n" +
+    "window._scrml_shell_cells = typeof _scrml_shell_cells !== 'undefined' ? _scrml_shell_cells : undefined;\n" +
+    "window._scrml_input_keyboard_registry = typeof _scrml_input_keyboard_registry !== 'undefined' ? _scrml_input_keyboard_registry : undefined;\n" +
     "})();";
   // eslint-disable-next-line no-eval
   eval(code);
@@ -512,5 +515,69 @@ describe("finding #4 — a cross-route target hard-navigates (no frozen swap)", 
     // outlet is LEFT AS-IS (never frozen-swapped with the cross-route content).
     expect(document.querySelector("#cross")).toBeNull();
     expect(document.querySelector("[data-scrml-outlet]").innerHTML).toBe(before);
+  });
+});
+
+// A persistent-shell app: a SERVER-AUTHORITY shell cell (`@accounts`, declared at
+// program-top-level, OUTSIDE the outlet → in the SSR seed) + an outlet with route
+// content. The shell cell is the "nav counter / sidebar toggle" of the finding.
+const SHELL5 = [
+  '<program db="sqlite:./app.db">',
+  '${',
+  '  < Account authority="server" table="users">',
+  '    id: number',
+  '    name: string',
+  '  </>',
+  '  <Account> @accounts',
+  '}',
+  '  <outlet><p>region</p></outlet>',
+  '  ${ function go() { navigate("/page2") } }',
+  '  <button onclick=go()>Go</button>',
+  '</program>',
+].join("\n");
+
+describe("finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehydrate", () => {
+  test("the compiler emits _scrml_shell_cells listing the program-top-level cell", () => {
+    const { clientJs } = compileInline(SHELL5);
+    // @accounts is declared OUTSIDE the outlet → a shell cell → skipped on rehydrate.
+    expect(clientJs).toContain("_scrml_shell_cells");
+    expect(clientJs).toContain('"accounts": true');
+  });
+
+  test("a mutated shell cell SURVIVES the nav; the seed-apply would otherwise reset it", async () => {
+    const { html, clientJs } = compileInline(SHELL5);
+    // The Tier-1 server-authority cell fires a boot-time /__serverLoad fetch; mock
+    // it (benign empty rows) BEFORE mount so happy-dom's real fetch never runs, and
+    // register the nav target.
+    restoreFetch = globalThis.fetch;
+    globalThis.fetch = (input) => {
+      const path = typeof input === "string" ? input : (input && input.url) || "";
+      if (path.indexOf("/page2") !== -1) return Promise.resolve({ ok: true, status: 200, redirected: false, url: path, text: async () => ssrDoc("<p>two</p>", { accounts: [{ id: 1, name: "ssr-initial" }] }) });
+      return Promise.resolve({ ok: true, status: 200, redirected: false, url: path, json: async () => [], text: async () => "[]" });
+    };
+    mount(html, clientJs);
+    await flush(); // let the boot server-load settle before we mutate.
+    // The compile-time shell set is present at runtime.
+    expect(window._scrml_shell_cells && window._scrml_shell_cells.accounts).toBe(true);
+
+    // The user mutated the shell cell (a nav counter bumped, a sidebar opened).
+    window._scrml_reactive_set("accounts", [{ id: 9, name: "MUTATED" }]);
+    expect(window._scrml_reactive_get("accounts")).toEqual([{ id: 9, name: "MUTATED" }]);
+
+    // Soft-nav: the fetched route's SSR seed carries `accounts` at its SSR-INITIAL
+    // value (an UNSCOPED seed-apply would clobber the user's mutation). The fetch
+    // mock installed above serves /page2 with that seed.
+    window._scrml_navigate_soft("/page2");
+    await flush();
+
+    // #5 — the shell cell KEPT its mutated value; the rehydrate skipped it. This is
+    // the persistent shell the router exists to preserve (§20.8.2).
+    expect(window._scrml_reactive_get("accounts")).toEqual([{ id: 9, name: "MUTATED" }]);
+
+    // Load-bearing proof: the seed DID contain `accounts`, and the INITIAL-load
+    // seed-apply (no skipShell) DOES set it — so the skip above is what protected
+    // the mutation, not an inert no-op.
+    window._scrml_ssr_seed_apply(false);
+    expect(window._scrml_reactive_get("accounts")).toEqual([{ id: 1, name: "ssr-initial" }]);
   });
 });
