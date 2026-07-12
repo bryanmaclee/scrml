@@ -77,7 +77,9 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     // Count wiring blocks under "--- Reactive display wiring ---"
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // The <p>${@isInsert}</p> placeholder gets _scrml_logic_3 (after program=1, ${}=2)
-    expect(wiringSection).toMatch(/const el = document\.querySelector\('\[data-scrml-logic="_scrml_logic_\d+"\]'\)/);
+    // navigate-wave1b: reactive display is wired inside `_scrml_nav_rewire(root)`
+    // so it re-binds on a soft nav; the query is `(root || document)`-scoped.
+    expect(wiringSection).toMatch(/const el = \(root \|\| document\)\.querySelector\('\[data-scrml-logic="_scrml_logic_\d+"\]'\)/);
   });
 
   test("named derived rewrite routes through _scrml_derived_get (not _scrml_reactive_get)", () => {
@@ -150,7 +152,9 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     const { clientJs } = compileSource(src, "mixed-direct-derived");
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // Both placeholders should produce wiring blocks.
-    const blockCount = (wiringSection.match(/const el = document\.querySelector/g) || []).length;
+    // navigate-wave1b: reactive display wiring is `(root || document)`-scoped
+    // (inside `_scrml_nav_rewire`) so it re-binds on a soft nav.
+    const blockCount = (wiringSection.match(/const el = \(root \|\| document\)\.querySelector/g) || []).length;
     expect(blockCount).toBe(2);
     // Direct expression uses reactive_get on @mode.
     expect(wiringSection).toContain('_scrml_reactive_get("mode")');

@@ -867,13 +867,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // #2 — no leak / no double-update). Shell display effects (outside the outlet)
   // fail the closest() check and persist.
   const reactiveRewire: string[] = [];
-  // Emit a reactive-display block to the inline boot (`document`-scoped) and,
-  // when `rebind` (the block wires a REACTIVE effect that must re-bind to swapped
-  // nodes), ALSO to the rehydrator buffer (`root`-scoped). A STATIC one-shot
-  // render (no effect) is NOT re-emitted: a soft nav's swapped-in SSR HTML
-  // already carries the server-rendered value, so re-running it client-side is
-  // redundant. `body` are the inner statements — they reference `el` and use
-  // `_scrml_region_track(el, _scrml_effect(...))` for the effect.
+  // Emit a reactive-display block. A REACTIVE block (`rebind`) is emitted ONCE,
+  // into the `_scrml_nav_rewire(root)` rehydrator (`root`-scoped): it runs at
+  // boot via `_scrml_nav_rewire(document)` AND re-runs scoped to the swapped
+  // region on a soft nav (finding #1) — a single emission, so occurrence counts
+  // are unchanged from the pre-Wave-1b inline form. A STATIC one-shot render (no
+  // effect, `rebind=false`) is emitted inline at boot ONLY: a soft nav's
+  // swapped-in SSR HTML already carries the server-rendered value. `body` are the
+  // inner statements — they reference `el` and use `_scrml_region_track(el, …)`
+  // for the effect (so a nav away disposes it, finding #2).
   const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void => {
     const wrap = (scope: string, sink: string[], ind: string): void => {
       sink.push(`${ind}{`);
@@ -883,9 +885,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       sink.push(`${ind}  }`);
       sink.push(`${ind}}`);
     };
-    wrap("document", lines, "  ");
     if (rebind) wrap("(root || document)", reactiveRewire, "    ");
+    else wrap("document", lines, "  ");
   };
+  // Emit a region-tracked reactive-display effect as TWO statements — the bare
+  // `_scrml_effect(function() { <inner> });` (its exact shape preserved for the
+  // codegen-shape tests) followed by `_scrml_region_track(el, <dispose>);` so a
+  // soft nav away disposes it (finding #2). `inner` is the effect body.
+  const regionEffectLines = (inner: string): string[] => [
+    `const _scrml_disp = _scrml_effect(function() { ${inner} });`,
+    `_scrml_region_track(el, _scrml_disp);`,
+  ];
 
   for (const [eventName, entries] of byEventType) {
     const domEvent = eventName.replace(/^on/, ""); // onclick → click
@@ -933,14 +943,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
       lines.push(`  };`);
 
-      // Emit one querySelectorAll to wire all handlers for this event type
-      lines.push(`  document.querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
-      lines.push(`    const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
-      lines.push(`    if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
-      lines.push(`  });`);
-
-      // Re-runnable, region-scoped twin (soft-nav rehydration, §20.8.2 step 3).
-      // Closes over the same dispatch map; scopes to the swapped `root`.
+      // Wire all handlers for this event type into `_scrml_nav_rewire(root)`
+      // (§20.8.2 step 3) — a SINGLE emission that runs at boot via
+      // `_scrml_nav_rewire(document)` AND re-attaches scoped to the swapped
+      // `root` on a soft nav (the swapped-in nodes are fresh; delegable
+      // click/submit live on `document` and survive on their own).
       nonDelegatedRewire.push(`    (root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
       nonDelegatedRewire.push(`      const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
       nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
@@ -1035,7 +1042,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             // re-render under a region-tracked effect (re-runs the reads → tracks).
             cfBody.push(`const ${cfRenderFn} = function() { return ${valueExpr}; };`);
             cfBody.push(`_scrml_render_value(el, ${cfRenderFn}());`);
-            cfBody.push(`_scrml_region_track(el, _scrml_effect(function() { _scrml_render_value(el, ${cfRenderFn}()); }));`);
+            cfBody.push(...regionEffectLines(`_scrml_render_value(el, ${cfRenderFn}());`));
           } else {
             // Static scrutinee/condition: one-shot render.
             cfBody.push(`_scrml_render_value(el, ${valueExpr});`);
@@ -1633,10 +1640,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           const asyncRun = `(async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
           if (_guardCond) {
             dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
-            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { if (!(${_guardCond})) return; ${asyncRun} }));`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
           } else {
             dispBody.push(asyncRun);
-            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { ${asyncRun} }));`);
+            dispBody.push(...regionEffectLines(`${asyncRun}`));
           }
         } else {
           // markup-as-value (§1.4/§7.4 Pillar 1): node-aware display. A markup-
@@ -1645,10 +1652,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // (core chunk) dispatches on `instanceof Node` at runtime.
           if (_guardCond) {
             dispBody.push(`if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
-            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr}); }));`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr});`));
           } else {
             dispBody.push(`_scrml_render_value(el, ${rewrittenExpr});`);
-            dispBody.push(`_scrml_region_track(el, _scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); }));`);
+            dispBody.push(...regionEffectLines(`_scrml_render_value(el, ${rewrittenExpr});`));
           }
         }
         pushRebindableDisplay(placeholderId, dispBody);
@@ -1825,20 +1832,26 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     }
   }
 
-  // §20.8.2 step 3 — register the region-scoped rehydrator (soft nav). It
-  // re-attaches this file's non-delegable handlers AND re-binds the reactive
-  // display to the swapped-in <outlet> subtree (WITHOUT re-booting the shell).
-  // Emitted at the END of the boot body so it closes over the handler dispatch
-  // maps + carries every reactive-display rebind line collected during Step 9.
-  // Guarded on `_scrml_register_rehydrator` (the 'utilities' runtime chunk) so a
-  // page with no navigate() call — chunk tree-shaken — stays a clean no-op.
+  // §20.8.2 step 3 — the element-scoped wiring function. `_scrml_nav_rewire(root)`
+  // attaches this file's non-delegable handlers AND binds the reactive display
+  // scoped to `root`. It is invoked ONCE at boot with `document` (wiring the whole
+  // page), and REGISTERED as a soft-nav rehydrator so it re-runs scoped to the
+  // swapped <outlet> subtree on each navigation (WITHOUT re-booting the shell) —
+  // re-attaching handlers (finding #1) + re-binding display effects that
+  // `_scrml_region_track` disposes on the next nav (finding #2). Delegable
+  // click/submit listeners are wired inline above (boot-only, document-level) and
+  // survive a swap on their own. Registration is guarded on
+  // `_scrml_register_rehydrator` (the 'utilities' runtime chunk) so a page with no
+  // navigate() call — chunk tree-shaken — simply never registers (boot wiring is
+  // unaffected).
   if (nonDelegatedRewire.length > 0 || reactiveRewire.length > 0) {
     lines.push("");
-    lines.push("  // --- soft-nav rehydration: re-wire non-delegable handlers + reactive display scoped to a swapped region ---");
+    lines.push("  // --- element-scoped wiring (non-delegable handlers + reactive display); re-run on soft-nav ---");
     lines.push("  function _scrml_nav_rewire(root) {");
     for (const l of nonDelegatedRewire) lines.push(l);
     for (const l of reactiveRewire) lines.push(l);
     lines.push("  }");
+    lines.push("  _scrml_nav_rewire(document);");
     lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 

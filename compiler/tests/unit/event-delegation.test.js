@@ -377,8 +377,11 @@ describe("§10: reactive display wiring unchanged", () => {
     }), new Map());
     const out = result.join("\n");
 
-    // Reactive display still uses per-element querySelector
-    expect(out).toContain('document.querySelector(\'[data-scrml-logic="_scrml_logic_50"]\'');
+    // Reactive display still uses per-element querySelector (navigate-wave1b:
+    // wired inside `_scrml_nav_rewire(root)`, so `(root || document)`-scoped —
+    // NOT batch querySelectorAll).
+    expect(out).toContain('.querySelector(\'[data-scrml-logic="_scrml_logic_50"]\'');
+    expect(out).not.toContain('querySelectorAll(\'[data-scrml-logic="_scrml_logic_50"]\'');
     // Event wiring uses delegation for click
     expect(out).toContain('document.addEventListener("click"');
   });
