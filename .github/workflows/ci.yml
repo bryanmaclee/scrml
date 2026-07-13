@@ -5,19 +5,23 @@
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #
 # TWO jobs:
-#   • gate     — BLOCKING. Mirrors the local pre-push BLOCKING scope (proven green — what you push on
-#                today) + the self-host dist build + the TodoMVC gauntlet. This is the merge-gate. A
-#                clean ubuntu runner also gives the self-host/browser env the local machine lacks.
-#   • tracking — NON-BLOCKING (continue-on-error). Browser (the ~7 whitespace false-fails resolve on the
-#                clean runner) + the M6.x within-node parser-parity backlog + canary. Visible, never
-#                blocks the gate; promote a check into `gate` as it goes green.
+#   • gate     — BLOCKING. The GUARANTEED-GREEN core: unit + integration + conformance (the pre-commit
+#                subset, proven green on every commit, no artifact deps) + the TodoMVC gauntlet. This is
+#                the merge-gate. lsp/commands PROMOTE into gate once a `tracking` run confirms them green
+#                on the clean runner.
+#   • tracking — NON-BLOCKING (continue-on-error). lsp + commands (promotion candidates) + browser (has
+#                REAL fails beyond env-whitespace, e.g. g-emit-lift-markup-text-interp) + the M6.x
+#                within-node parser-parity backlog + canary. Visible, never blocks the gate.
 #
-# WHY split (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the known
-# M6.x within-node parity backlog, which is a tracked migration workstream, NOT a merge regression, and
-# which the local pre-push deliberately excludes. A gate that's red on a known backlog can't be trusted
-# to drop the redundant local pre-push full-suite (the wall-time). This makes the gate == the local
-# authoritative gate. Once this is confirmed green at origin, the local pre-push full-suite run is
-# redundant and drops to the fast subset — the wall-time win.
+# EXCLUDED from CI entirely: `compiler/tests/self-host` — it depends on a locally-built, gitignored dist
+# that CANNOT be rebuilt on a clean checkout (the self-host `.scrml` sources don't compile against the
+# current compiler: `null`, `!==`, `try` — the post-v1.0 self-host migration workstream, master-list B4).
+# It passes locally only via a stale dist artifact; it is not a real merge-gate.
+#
+# WHY (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the M6.x within-node
+# backlog + the un-rebuildable self-host dist. A gate red on known backlog can't be trusted to retire
+# the redundant local pre-push full-suite (the wall-time). This gate == the guaranteed-green core; once
+# confirmed green at origin, the local pre-push full-suite drops to the fast subset — the wall-time win.
 
 name: CI
 
@@ -41,19 +45,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
-      - name: Build self-host dist (gitignored — self-host tests need it on a clean checkout)
-        run: bun run scripts/rebuild-self-host-dist.ts
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: Gate suite (unit + integration + conformance + lsp + self-host + commands)
-        run: >-
-          bun test
-          compiler/tests/unit
-          compiler/tests/integration
-          compiler/tests/conformance
-          compiler/tests/lsp
-          compiler/tests/self-host
-          compiler/tests/commands
+      - name: Gate suite (unit + integration + conformance)
+        run: bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
@@ -69,7 +64,9 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures
         run: bun run pretest
-      - name: Browser tests (clean-runner env — the ~7 whitespace false-fails resolve here)
+      - name: lsp + commands (promotion candidates — move to gate once green here)
+        run: bun test compiler/tests/lsp compiler/tests/commands
+      - name: Browser tests (real fails + env-whitespace — tracking)
         run: bun test compiler/tests/browser
-      - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking only)
+      - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking)
         run: bun test compiler/tests/parser-conformance-within-node.test.js
