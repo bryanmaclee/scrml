@@ -5,18 +5,20 @@
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #
 # TWO jobs:
-#   • gate     — BLOCKING. The GUARANTEED-GREEN core: unit + integration + conformance (the pre-commit
-#                subset, proven green on every commit, no artifact deps) + the TodoMVC gauntlet. This is
-#                the merge-gate. lsp/commands PROMOTE into gate once a `tracking` run confirms them green
-#                on the clean runner.
-#   • tracking — NON-BLOCKING (continue-on-error). lsp + commands (promotion candidates) + browser (has
-#                REAL fails beyond env-whitespace, e.g. g-emit-lift-markup-text-interp) + the M6.x
-#                within-node parser-parity backlog + canary. Visible, never blocks the gate.
+#   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
+#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
+#                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
+#                green in `tracking` (integration needs self-host-smoke relocated/dist-guarded first).
+#   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
+#                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
+#                interp) + the M6.x within-node parser-parity backlog + canary. Visible, never blocks.
 #
-# EXCLUDED from CI entirely: `compiler/tests/self-host` — it depends on a locally-built, gitignored dist
-# that CANNOT be rebuilt on a clean checkout (the self-host `.scrml` sources don't compile against the
-# current compiler: `null`, `!==`, `try` — the post-v1.0 self-host migration workstream, master-list B4).
-# It passes locally only via a stale dist artifact; it is not a real merge-gate.
+# KEY FINDING (S253): the local "full gate" (pre-push) partly PASSES ON UN-REPRODUCIBLE LOCAL ARTIFACTS —
+# the self-host tests (`compiler/tests/self-host` AND `integration/self-host-smoke.test.js`) need a
+# locally-built, gitignored dist that CANNOT be rebuilt on a clean checkout (the self-host `.scrml`
+# sources don't compile against the current compiler: `null`/`!==`/`try` — the post-v1.0 self-host
+# migration, master-list B4). A trustworthy cloud gate can only include what's reproducibly green from
+# source; self-host + the M6.x within-node backlog + browser env-fails are tracked, not gated.
 #
 # WHY (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the M6.x within-node
 # backlog + the un-rebuildable self-host dist. A gate red on known backlog can't be trusted to retire
@@ -47,8 +49,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: Gate suite (unit + integration + conformance)
-        run: bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance
+      - name: Gate suite (unit + conformance — reproducibly green from source)
+        run: bun test compiler/tests/unit compiler/tests/conformance
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
@@ -64,8 +66,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures
         run: bun run pretest
-      - name: lsp + commands (promotion candidates — move to gate once green here)
-        run: bun test compiler/tests/lsp compiler/tests/commands
+      - name: integration + lsp + commands (promotion candidates — integration needs self-host-smoke dist-guarded)
+        run: bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
       - name: Browser tests (real fails + env-whitespace — tracking)
         run: bun test compiler/tests/browser
       - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking)
