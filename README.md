@@ -264,13 +264,15 @@ A quick brief on every feature. Each links to the full mechanics in [NERDME.md](
 
 **Server / client split** — whole-program inference classifies anything touching SQL / server stdlib / `protect=` fields as server-side and generates the routes, fetch, CSRF, and serialization. Automatic N+1 batching, implicit transaction envelopes, per-route per-role bundle splitting. → [deep dive](./NERDME.md#server--client-split)
 
+**Client navigation** — `navigate(path)` swaps a `<page>` into the persistent `<program>`-shell `<outlet>`: same-page soft-nav, no full reload, no router library, and shell state (nav counters, sidebars) survives the swap. A hard-navigation mode forces a real page load for the cases that need it — logout, auth redirects. → [deep dive](./NERDME.md#realtime-and-workers)
+
 **Realtime & workers** — `<channel>` is a WebSocket endpoint with auto-syncing shared state; a nested `<program>` is a Web Worker / WASM module / sidecar with typed RPC and supervised restarts. No raw socket or `postMessage` code. → [deep dive](./NERDME.md#realtime-and-workers)
 
 **The `~` pipeline & linear types** — `~` skips naming a throwaway intermediate: an unbound expression drops its result into `~`, the next statement consumes it — exactly-once, compiler-checked. `lin` generalizes that exact-once guarantee to any value, verified across branches, loops, and closures. → [deep dive](./NERDME.md#linear-types-and-the--accumulator)
 
 **Pure functions — `fn`** — compiler-*enforced* purity: the prohibitions (no SQL, no DOM, no reactive writes, no `fetch`, no `<request>`) are verified statically — break one and it won't compile. `function` is the general callable. → [deep dive](./NERDME.md#pure-functions--fn)
 
-**Styles** — scoped CSS via native `@scope` (no class mangling, no leaks), plus a built-in Tailwind engine that emits only the utilities you use — no CLI, no PostCSS, no purge step. → [deep dive](./NERDME.md#styles)
+**Styles — the third native leg** — scoped CSS via native `@scope` (no class mangling, no leaks); a built-in Tailwind engine that emits only the utilities you use (no CLI, no PostCSS, no purge step); and a **scrml-native CSS model** (§65) that brings the same discipline markup and logic already have: **flat specificity** — an unconditional same-property conflict on a provably-shared element is a *compile error* (`E-STYLE-CONFLICT`), not a silent last-wins surprise — a **bounded cascade** (selector-cascade killed, DOM-inheritance kept), a `<theme>` element for reactive theming, and a built-in reset. Predictable styling as a language guarantee — styling's analog of exhaustive `match`. → [deep dive](./NERDME.md#styles)
 
 **Metaprogramming** — `^{}` runs at compile time (`reflect()`, `emit()`, macros); a meta block that reads reactive state runs at runtime instead. → [deep dive](./NERDME.md#metaprogramming-)
 
