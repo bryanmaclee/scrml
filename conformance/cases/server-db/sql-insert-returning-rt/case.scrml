@@ -1,0 +1,26 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <inserted> = []
+    <total> = not
+    function addNote(body: string) {
+        return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all()
+    }
+    function countNotes() {
+        return ?{`SELECT COUNT(*) AS n FROM notes`}.get()
+    }
+    function onAdd() {
+        @inserted = addNote("second")
+    }
+    function onCount() {
+        @total = countNotes()
+    }
+    <button id="add" onclick=onAdd()>Add note</button>
+    <button id="count" onclick=onCount()>Count</button>
+    <p if=@inserted id="i">saved</p>
+    <p if=@total id="t">counted</p>
+</program>

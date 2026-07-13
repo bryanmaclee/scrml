@@ -1,0 +1,7 @@
+${
+    <admins> = []
+    function loadByRole(role: string) {
+        return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all()
+    }
+}
+<button id="load" onclick=@admins = loadByRole("admin")>Load admins</>

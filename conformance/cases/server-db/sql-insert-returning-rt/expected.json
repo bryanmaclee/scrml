@@ -1,0 +1,29 @@
+{
+  "id": "server-db-sql-insert-returning-rt",
+  "description": "§8.5.1 INSERT + RETURNING (RUNTIME, sqlEngine:\"real\") — a write returns the written row + a follow-up SELECT reflects it. addNote runs `INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`.all(); the real Bun.SQL engine assigns the autoincrement id (from the <schema> `id: integer primary key`) and RETURNING yields the written row {id:2, body:\"second\"}. countNotes then reads `SELECT COUNT(*) AS n`.get() → {n:2}, proving the write persisted. The stub returns [] for an INSERT (no FROM match) and, for COUNT, returns the raw seed row — so both assertions pass ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.5.1",
+  "source-test": "conformance/cases/server-db/sql-get-single-row-rt",
+  "rationale": "§8.5.1: `.run()`/write returns void, but a RETURNING clause read via `.all()` returns the written row(s) — Bun.SQL executes RETURNING natively (verified). Fork B derive-from-<schema>: the `notes` DDL (`id: integer primary key`) comes from the case's <schema> via schema-differ generateCreateTable, so the autoincrement id is real (seed row id=1 → inserted id=2). The follow-up COUNT proves persistence within the run's single _scrml_sql instance. Two cells (@inserted, @total) are guard-rendered (`if=`) purely to consume them (avoids E-DG-002); the assertions are state-only.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 1, "body": "first" }
+      ]
+    },
+    "input": [
+      { "click": "#add" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "inserted": [{ "id": 2, "body": "second" }],
+      "total": { "n": 2 }
+    }
+  }
+}

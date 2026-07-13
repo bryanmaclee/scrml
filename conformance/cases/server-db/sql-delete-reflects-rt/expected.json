@@ -1,0 +1,30 @@
+{
+  "id": "server-db-sql-delete-reflects-rt",
+  "description": "§8.5 DELETE + follow-up SELECT reflects the write (RUNTIME, sqlEngine:\"real\"). removeTask(id) runs `DELETE FROM tasks WHERE id = ${id}`.run(); the real Bun.SQL engine removes the WHERE-matched row from its in-memory table. countTasks then reads `SELECT COUNT(*) AS n`.get() → {n:2} (3 seeded, 1 deleted). The stub's `.run()` is a no-op (it never mutates the seed) and its COUNT `.get()` returns the raw first seed row — so {n:2} passes ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.5, §8.5.4",
+  "source-test": "conformance/cases/server-db/sql-get-single-row-rt",
+  "rationale": "§8.5: `.run()` executes a write (server-escalated, §8.5.4). The real engine persists the DELETE across driven clicks within the run's single _scrml_sql instance, so the follow-up COUNT observes the row count drop 3→2. Fork B loose-infer: tasks(id INTEGER, title TEXT) from the seed rows. The stub cannot express a write-then-read (it holds no table) — empirically its COUNT `.get()` returns {id:1,title:\"a\"}.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "tasks": [
+        { "id": 1, "title": "a" },
+        { "id": 2, "title": "b" },
+        { "id": 3, "title": "c" }
+      ]
+    },
+    "input": [
+      { "click": "#del" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "remaining": { "n": 2 }
+    }
+  }
+}

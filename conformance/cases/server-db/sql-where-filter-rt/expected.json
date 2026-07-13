@@ -1,0 +1,28 @@
+{
+  "id": "server-db-sql-where-filter-rt",
+  "description": "§8.2/§8.3/§8.4 real WHERE-filter SELECT (RUNTIME, sqlEngine:\"real\") — the seam proof. loadByRole(role) runs `SELECT id, name FROM users WHERE role = ${role} ORDER BY id`.all(); a real Bun.SQL in-memory SQLite (Fork B loose-infer: columns id/name/role inferred from the seed rows) actually EVALUATES the WHERE and binds the ?1 param, returning only the two admin rows (id/name columns). The regex stub ignored WHERE and returned the whole 3-row table with all columns — so this assertion passes ONLY on the real engine, proving the sqlEngine:\"real\" seam.",
+  "language-version": "1.0",
+  "spec": "§8.2, §8.3, §8.4",
+  "source-test": "conformance/cases/server-db/sql-get-single-row-rt",
+  "rationale": "§8.2 bound-param semantics: `${role}` compiles to a positional param the emitted `_scrml_sql`...` binds — the STUB drops `...v` entirely. §8.3 `.all()` = Row[]. The real Bun.SQL engine filters `role = 'admin'` server-side; the stub returned all rows for `FROM users`. Seeds [Alice/admin, Bob/user, Carol/admin]; the filtered `.all()` hydrates @admins with the two admin rows (id-ordered). This is the minimal real-engine dimension the stub structurally cannot express (empirically: the stub yields all 3 rows with all columns). No <schema> is needed — the seed rows loose-infer the columns; constraint-bearing cases carry a <schema> instead.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "role": "admin" },
+        { "id": 2, "name": "Bob", "role": "user" },
+        { "id": 3, "name": "Carol", "role": "admin" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": {
+      "admins": [
+        { "id": 1, "name": "Alice" },
+        { "id": 3, "name": "Carol" }
+      ]
+    }
+  }
+}

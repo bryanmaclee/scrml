@@ -79,6 +79,15 @@ export interface ExpectedCase {
      *  SSR compose actually execute (the client observes redacted data / the
      *  composed first-paint). Mutually exclusive with `serverStub`. */
     serverDb?: ServerDb;
+    /** Fork A opt-in (real-DB conformance adapter). `"real"` runs the emitted
+     *  server against a REAL seeded Bun.SQL in-memory SQLite (Fork B: DDL from
+     *  the case's `<schema>`, loose-infer fallback) — so WHERE / bound params /
+     *  JOIN / RETURNING / aggregate / DDL constraints behave as at deploy. Every
+     *  existing case omits this field and keeps the byte-identical regex stub
+     *  (`"stub"`, the default) — zero regression. Requires `serverDb`; a
+     *  `"real"` case whose seeded table has no `<schema>` DDL must be
+     *  loose-inferable (a non-empty seed) or the harness errors. */
+    sqlEngine?: "stub" | "real";
     /** E-ADAPTER SSR mode: compose the §52.8 first-paint (`_scrml_ssr_compose_
      *  handler`), mount THAT + seed `window.__scrml_ssr_state`, then hydrate.
      *  Implied by `firstPaint`; set explicitly to hydrate without a first-paint
@@ -266,9 +275,21 @@ export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
   // it, the verbatim `serverStub` mock path. `firstPaint` (or explicit `ssr`)
   // selects the SSR compose→hydrate flow.
   const ssr = e.ssr === true || e.firstPaint !== undefined;
+  // Fork A validation: `sqlEngine:"real"` is meaningful only over a serverDb
+  // seed (it swaps the `_scrml_sql` stub for a real seeded Bun.SQL). A "real"
+  // case with no seed is a case-authoring error — fail loud, not silently-stub.
+  if (e.sqlEngine === "real" && e.serverDb === undefined) {
+    return ['sqlEngine:"real" requires a `serverDb` seed (nothing to stand up a real DB from)'];
+  }
   const r =
     e.serverDb !== undefined
-      ? await runServer(c.source, { input: e.input ?? [], auxFiles: c.auxFiles, serverDb: e.serverDb, ssr })
+      ? await runServer(c.source, {
+          input: e.input ?? [],
+          auxFiles: c.auxFiles,
+          serverDb: e.serverDb,
+          ssr,
+          sqlEngine: e.sqlEngine,
+        })
       : await run(c.source, e.input ?? [], c.auxFiles, e.serverStub ?? {});
 
   // firstPaint — §52.8 composed first-paint substring assertions (SSR mode). The

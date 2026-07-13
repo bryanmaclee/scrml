@@ -1,0 +1,28 @@
+{
+  "id": "server-db-sql-order-limit-rt",
+  "description": "§8.3 real ORDER BY + LIMIT (RUNTIME, sqlEngine:\"real\"). topTwo() runs `SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`.all(); the real Bun.SQL engine sorts by points descending and takes the top two, yielding [{player:b,points:90},{player:c,points:60}]. The stub returns all three seed rows in insert order (no ORDER BY, no LIMIT) — so the ordered+limited result passes ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.3",
+  "source-test": "conformance/cases/server-db/sql-all-array-shape-rt",
+  "rationale": "§8.3 `.all()` = Row[]. ORDER BY DESC + LIMIT is engine-side sort+truncate the stub cannot express (it returns the seed rows verbatim in insert order). Fork B loose-infer: scores(id,player,points) from the seed rows. Seed order (a=30, b=90, c=60) differs from the sorted top-two (b=90, c=60) — empirically the stub yields all 3 rows unsorted, so the assertion distinguishes real from stub.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "scores": [
+        { "id": 1, "player": "a", "points": 30 },
+        { "id": 2, "player": "b", "points": 90 },
+        { "id": 3, "player": "c", "points": 60 }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": {
+      "top": [
+        { "player": "b", "points": 90 },
+        { "player": "c", "points": 60 }
+      ]
+    }
+  }
+}

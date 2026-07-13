@@ -1,0 +1,28 @@
+{
+  "id": "server-db-sql-aggregate-group-rt",
+  "description": "§8.3 real GROUP BY aggregate (RUNTIME, sqlEngine:\"real\"). regionTotals() runs `SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`.all(); the real Bun.SQL engine groups the rows by region and sums amount per group, yielding [{region:east,total:20},{region:west,total:15}]. The stub returns the three raw seed rows untouched (no grouping, no SUM) — so the aggregated result passes ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.3",
+  "source-test": "conformance/cases/server-db/sql-all-array-shape-rt",
+  "rationale": "§8.3 `.all()` = Row[]. GROUP BY + SUM is a set-oriented computation the stub structurally cannot express (it returns the seed rows verbatim). Fork B loose-infer: sales(id,region,amount) from the seed rows. The aggregate collapses 3 rows into 2 grouped rows with computed totals — empirically the stub yields all 3 raw rows.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "sales": [
+        { "id": 1, "region": "west", "amount": 10 },
+        { "id": 2, "region": "east", "amount": 20 },
+        { "id": 3, "region": "west", "amount": 5 }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": {
+      "totals": [
+        { "region": "east", "total": 20 },
+        { "region": "west", "total": 15 }
+      ]
+    }
+  }
+}

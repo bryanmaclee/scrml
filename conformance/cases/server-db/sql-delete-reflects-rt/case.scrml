@@ -1,0 +1,18 @@
+${
+    <remaining> = not
+    function removeTask(id: number) {
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
+    }
+    function countTasks() {
+        return ?{`SELECT COUNT(*) AS n FROM tasks`}.get()
+    }
+    function onDelete() {
+        removeTask(2)
+    }
+    function onCount() {
+        @remaining = countTasks()
+    }
+}
+<button id="del" onclick=onDelete()>Delete task 2</>
+<button id="count" onclick=onCount()>Count</>
+<p if=@remaining id="r">counted</>
