@@ -94,6 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `ea1d1067` — chore(s252): WRAP — hand-off + changelog + known-gaps currency + user-voice; PA-contract dedup = next arc — **pushed**
 - `b869eea7` — chore(s251): WRAP — hand-off + changelog + rotate S250 hand-off — **pushed**
 - `a3198d60` — chore(s250): WRAP — hand-off + changelog + delta-log [474]-[482] — **pushed**
 - `ebb285f2` — chore(s249): WRAP docs — S249 hand-off + delta-log [466]-[473] + S250 inbox->read — **pushed**
@@ -101,7 +102,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `fe91bb26` — chore(s245): WRAP — hand-off CLOSE + delta-log [438]-[446] + changelog + gap-state regen — **pushed**
 - `f9d37153` — chore(s244): WRAP — CSS-native model (SPEC §65 draft) + E-CG-001 HIGH + flobase boot fix + string-blind reverted — **pushed**
 - `02425f54` — chore(s243): WRAP — hand-off CLOSE + changelog + delta-log [415]-[432] + BRIEF-P1 — **pushed**
-- `3b399ab0` — chore(s242): WRAP — hand-off + changelog + delta-log [402-414] + master-list; BaaS #3 introspect landed, realtime DD, Peter PA (no push, no maps) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

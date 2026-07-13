@@ -6,6 +6,37 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
 
+### 2026-07-13 (S253 — **PA-contract fold (pa-base v2) + Peter onboarded + 3 schema-decl codes + E-TYPE-082 construction-arity (+6 conformance → 433) + ⭐ cloud-PA gate offload (push wall-time solved)**)
+
+An enormous single-writer session. The **PA-contract dedup** landed (the S217-deferred grown-form
+migration): the `pa-scrml.md` monolith folded into `pa-base.md` v2 (universal) + `pa-scrml-overlay.md`
+(scrml delta) + `pa-profile-<slug>.md` (per-user), retiring the parallel-copy drift; Peter (`pjoliver11`)
+onboarded onto it trivially. Two compiler landings, **both with S239-caught defects fixed pre-land**
+(the adversarial gate went 4-for-4 across the session's codegen dispatches). And the **cloud-PA
+beachhead**: the GitHub Actions CI gate was tuned to a trustworthy green + the local pre-push full-suite
+was dropped — a normal push went from ~5 min to ~3.6 s.
+
+- **`E-SCHEMA-001` / `E-SCHEMA-002` / `W-SCHEMA-001`** (`5385b7dc`) — 3 of the 6 ss66 Class-A static
+  `<schema>` diagnostics, spec'd in §39.3/§39.5/§39.12 but with zero emit sites, now fire:
+  a `<schema>` in a `<program>` with no `db=` (§39.3); more than one `<schema>` per file; a table with
+  no primary key (§39.5.1). `checkSchemaDeclarations` (Check 5) in `gauntlet-phase1-checks.js`, reusing
+  `schema-differ parseSchemaBlock`. +4 conformance cases; a latently-non-conformant tutorial migrated.
+  `E-SCHEMA-006` was removed as **unsound** (a static references-check can't honor §39.5.5's live-DB
+  allowance → fatal false-positive on valid incremental schemas; re-scoped to the real-DB adapter work).
+  `E-SCHEMA-004` (32-file corpus type-alias migration) + `E-SQL-007` (SPEC-currency) remain **held**.
+- **`E-TYPE-082` — enum-variant construction payload-arity** (`4adafe29`) — constructing a nullary or
+  wrong-arity variant with the wrong payload count is now a compile error (was silent). The construction
+  sibling of `E-TYPE-021` (destructuring), fired at the variant-constructor site so it covers `fail`,
+  `let`, `return`, and reactive construction uniformly; no `E-ERROR-009` double-fire. SPEC
+  §14.4/§18.7/§18.15/§19.3.3/§34. +6 conformance cases (→ 433). The S239 review caught 4 flagship §19
+  samples that were themselves latently constructing nullary variants with payloads (migrated) + a
+  trailing-comma false-positive (fixed) + a green-trap guard test.
+- **Cloud-PA gate offload (dev-workflow infra)** — `.github/workflows/ci.yml` retuned: a blocking `gate`
+  job (unit + conformance + gauntlet, reproducibly green from source) + a non-blocking `tracking` job
+  (integration/self-host/lsp/commands/browser/within-node — the M6.x + env backlog, now visible). The
+  local pre-push full-suite is dropped; CI is the authoritative async gate. Rationale + the full
+  architecture: `scrml-support/docs/deep-dives/cloud-pa-gate-offload-2026-07-13.md`.
+
 ### 2026-07-12 (S252 — **2 freeze-blockers fixed (both caught by the S239 gate) + sPA conformance coverage +36 → 427/427 + README shill; PA-contract dedup surfaced as the next arc**)
 
 Concurrent boot to LIVE S251 → took the baton when S251 wrapped → led as single writer to main. A large execution session: fired the pre-V1 conformance coverage-tail via 5 sPAs and re-integrated all of them, fixed the two ruled typer/scanner freeze-blockers (both re-fixed after the S239 adversarial review caught confirmed regressions their green self-verify missed), shilled the README, and — pivoting on a Peter-onboarding request — discovered the real pre-Peter work is a PA-contract dedup.
