@@ -13,16 +13,17 @@ The boot command is an explicit instruction to start the PA session — canonica
 `read pa.md and start session`, or any of: `start session` · `start full session` ·
 `thin start` · `execution session` · `Profile B` · an explicit *"boot the PA"* /
 *"be the scrml PA"*. If the FIRST user message is one of these → proceed to boot
-(read on, follow `pa-scrml.md` session-start).
+(read on, follow the session-start in `pa-base.md` + `pa-scrml-overlay.md`).
 
 **If the first message is ANYTHING ELSE** — a question, a bug report, a code request,
 a "can you…", a pasted error, a one-off task — **DO NOT BOOT AS PA.** Do not read
-`pa-scrml.md`, do not run the session-start checklist, do not rotate hand-offs, do not
-read the PRIMER/SPEC-INDEX, do not assume PA identity or authority. **Just answer the
-actual request as a normal assistant.** The user will issue the boot command when they
-want the PA. A fresh instance that presumptively boots burns ~20% of context and then
-acts with half-loaded context on a request that never asked for the PA. The repo being
-scrml, or this file existing, is NOT a boot signal — only the explicit command is.
+`pa-base.md` / `pa-scrml-overlay.md`, do not run the session-start checklist, do not
+rotate hand-offs, do not read the PRIMER/SPEC-INDEX, do not assume PA identity or
+authority. **Just answer the actual request as a normal assistant.** The user will
+issue the boot command when they want the PA. A fresh instance that presumptively boots
+burns ~20% of context and then acts with half-loaded context on a request that never
+asked for the PA. The repo being scrml, or this file existing, is NOT a boot signal —
+only the explicit command is.
 
 ### Rule 2 — Boot is ATOMIC. Once you start session-start, FINISH it completely before acting on anything else.
 
@@ -41,52 +42,61 @@ that's a control signal, always honored. A typed task is not a stop.)
 > but the rule never hardened into the contract. This gate hardens it.
 
 Both rules are **universal-methodology class** (they apply to ANY PA instance, not just
-scrml) — when the `pa-base.md` migration lands (S217 multi-user PA), they belong in
-`pa-base.md`; until then the authority copy lives in `pa-scrml.md` § "Session start" and
-this stub carries the trigger-point gate. See also `pa-scrml.md` § "Session profiles".
+scrml). The S217 multi-user migration **LANDED S253** — the authority copy now lives in
+`pa-base.md` §4 "Boot gate + boot atomicity"; this stub carries the trigger-point gate.
 
 ---
 
-The Primary Agent directives for this repo live at:
+The Primary Agent directives for this repo live in **two layers** in scrml-support
+(folded from the retired `pa-scrml.md` monolith, S253 —
+`../scrml-support/docs/deep-dives/pa-contract-dedup-fold-plan-2026-07-12.md`):
 
-    ../scrml-support/pa-scrml.md
+    ../scrml-support/pa-base.md            (Layer 1 — universal doctrine; read FIRST)
+    ../scrml-support/pa-scrml-overlay.md   (Layer 2+3 — the scrml delta; read SECOND)
 
-That file is the authoritative two-party-exchange contract between the user
-and the scrml PA. It carries the session-start checklist, the five permanent
-Rules (no marketing without prompt / full-production fidelity / right answer
-beats easy / SPEC is normative / shoot straight), the hardened addenda
-covering worktree isolation, commit discipline, cross-machine sync hygiene,
-agent dispatch protocols, and every memory-rule precedent.
+`pa-base.md` carries the session-start checklist shape, the five permanent Rules (Rules
+3/4/5 universal; Rules 1/2 in the overlay), and every hardened addendum (worktree
+isolation, landing + coherence, verify-both-directions + adversarial review, cross-machine
+sync, concurrent-session board, dispatch protocols). `pa-scrml-overlay.md` fills the
+base's scrml slots (paths, agent identities, SPEC as the normative source, VCS verbs) and
+adds scrml-only content. The per-USER layer (`pa-profile-<slug>.md`, resolved by
+`git config user.name`) fills the communication register. scrml reads all three DIRECTLY
+from scrml-support (co-located — no vendored copy).
 
 ## Two session profiles (S156 ratification)
 
 The user picks the profile at session open. Default to **A** when no signal is given.
 
 - **Profile A — FULL** (design / deliberation / multi-arc / spec-from-scratch /
-  debate / DD). **Read `../scrml-support/pa-scrml.md` IN FULL**, then the rest
-  of the full session-start (PRIMER + SPEC-INDEX + master-list §0 + hand-off +
-  user-voice tail). Signals (these pick A-vs-B *once a boot command has been given* per
-  the BOOT GATE — they are NOT themselves boot triggers): "start full session",
-  "full session". A design-shaped first message is ANSWERED DIRECTLY, not booted
-  (BOOT GATE Rule 1); a design ask selects Profile A only after you've been told to boot.
+  debate / DD). **Read `../scrml-support/pa-base.md` IN FULL, then
+  `../scrml-support/pa-scrml-overlay.md` IN FULL**, then the rest of the full
+  session-start (PRIMER + SPEC-INDEX + master-list §0 + hand-off + user-voice tail +
+  `pa-profile-<slug>.md`). Signals (these pick A-vs-B *once a boot command has been
+  given* per the BOOT GATE — they are NOT themselves boot triggers): "start full
+  session", "full session". A design-shaped first message is ANSWERED DIRECTLY, not
+  booted (BOOT GATE Rule 1); a design ask selects Profile A only after you've been told
+  to boot.
 
 - **Profile B — THIN / EXECUTION** (one already-designed, spec-landed arc whose
   hand-off + brief carry the context-sweep). **Read `../scrml-support/pa-core-scrml.md`**
-  (the condensed thin read — ~140L: 5 Rules + dispatch checklist + wrap + sync/push +
-  Profile-B operating rules) instead of the full pa.md, and skip the bulk reads.
+  (the condensed thin read — 5 Rules + dispatch checklist + wrap + sync/push +
+  Profile-B operating rules) instead of the full base+overlay, and skip the bulk reads.
   Signals: "thin start", "execution session", "Profile B", or a hand-off-staged
-  execution bootstrap the user confirms. `pa-core-scrml.md` is to `pa-scrml.md`
-  what `SPEC-INDEX.md` is to `SPEC.md` — thin copy; the full file is authority.
-  If a thin session hits work needing design/context the thin reads don't carry,
-  escalate to Profile A (scope_blindness guardrail).
+  execution bootstrap the user confirms. `pa-core-scrml.md` is the thin copy; the full
+  contract (base + overlay) is authority. *(Post-fold note: `pa-core-scrml.md` still
+  references the retired monolith; its base+overlay reconciliation is a deferred follow-on
+  — see the fold-plan FORK 5. Until then it remains a valid thin read.)* If a thin session
+  hits work needing design/context the thin reads don't carry, escalate to Profile A
+  (scope_blindness guardrail).
 
 **Why pa.md lives in scrml-support, not here** (S96 ratification): pa.md is
 *not* language or compiler content. It's about how the user and PA interact
 to build the language. scrml is public/MIT; this two-party-exchange contract
 is the wrong audience for the public repo. scrml-support is the storage hub
 for cross-cutting PA-user content (user-voice, design-insights, deep-dives —
-and now PA directives). This stub exists only so the global "read pa.md in
+and the PA directives). This stub exists only so the global "read pa.md in
 project root first" convention still resolves mechanically.
 
 This file is intentionally tiny. If you find yourself reading PA directives
-HERE, you have the wrong file — go to `../scrml-support/pa-scrml.md`.
+HERE, you have the wrong file — go to `../scrml-support/pa-base.md` +
+`pa-scrml-overlay.md`.

@@ -1,7 +1,8 @@
 # .pa-base/profile — the scrml PA boot manifest (boot rehydrates from this; do not re-derive)
 # scrml · hand-authored (NOT /flobase-assembled — this is the reference PA flobase emulates).
 # The flobase /boot reads this to know the module-set + the Profile-A read-set. It does NOT
-# replace pa-scrml.md — it POINTS at it. Authority always defers to ../scrml-support/pa-scrml.md.
+# replace the contract — it POINTS at it. Authority always defers to ../scrml-support/pa-base.md +
+# ../scrml-support/pa-scrml-overlay.md (S253 fold; the pa-scrml.md monolith is retired → archive/).
 
 IDENTITY:
   git config user.name -> slugify -> first token -> read ../scrml-support/pa-profile-<slug>.md
@@ -28,7 +29,7 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-
   - MERGE-BLOCKER for a claimed surface: a conformance case pinning it (both codes-half + runtime-half).
 
 MODULES:
-  loaded:    CORE (~/.claude/CLAUDE.md), role-pa (-> pa-scrml.md), continuity (delta-log + flogence digest),
+  loaded:    CORE (~/.claude/CLAUDE.md), role-pa (-> pa-base.md + pa-scrml-overlay.md), continuity (delta-log + flogence digest),
              maps, stack-pack-scrml
   on-demand: role-dpa (deliberation/DD + debate), role-spa (execution throughput; the conformance-authoring
              + self-host lineups), pa-global (~/.claude/pa-global.md — deep-dive/debate/registry/dispatch)
@@ -36,12 +37,13 @@ MODULES:
   dropped:   none permanently (vPA deputy ELIMINATED S219 — maintenance reverts to PA-at-wrap)
 
 PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT):
-  read IN FULL, in order (the pa-scrml.md "Session-start checklist"):
+  read IN FULL, in order (the pa-base §4 "Session-start checklist" + the overlay Profile-A read-set):
   0. flogence digest (STATE only):  bun ../flogence/scripts/digest.ts scrml --fresh   (~1k tok; drill delta-log on demand)
   0.5. active-sessions board (UNCONDITIONAL, both profiles): read ../scrml-support/handOffs/active-sessions/S*.md + claims.md;
        LIVE sibling => you are a SUCCESSOR (partition by write-footprint · dispatches CLAIMED-not-lost · defer only the WRAP);
        REGISTER your own S<N>.md even when SOLO (else a pre-wrap successor boots blind — the S243 miss). See CONCURRENT-SESSIONS below.
-  1. ../scrml-support/pa-scrml.md         IN FULL   (the two-party contract — 5 Rules, dispatch, wrap, all addenda)
+  1a. ../scrml-support/pa-base.md          IN FULL   (Layer 1 — universal doctrine; read FIRST. S253 fold: pa-base v2)
+  1b. ../scrml-support/pa-scrml-overlay.md IN FULL   (Layer 2+3 — the scrml delta: slot-fills + Rules 1/2 + repo content)
   2. docs/PA-SCRML-PRIMER.md              IN FULL   (the language-expert snapshot)
   3. compiler/SPEC-INDEX.md               IN FULL   (the spec navigation map; SPEC.md is too big to full-read)
   4. master-list.md §0                    IN FULL   (the live v0.next/V1 phase dashboard)
@@ -88,7 +90,7 @@ PROJECT-INTENT: scrml is "the future of how programming is done for the browser"
   layer over a BaaS — scrml IS the backend. V1 = language-1.0 (freeze on high coverage). The mitosis (many
   smaller compiler/language PAs + a near-autonomous conformance-driven compiler build) is the near horizon.
 
-CONVENTIONS (the load-bearing ones; full text in pa-scrml.md):
+CONVENTIONS (the load-bearing ones; full text in pa-base.md + pa-scrml-overlay.md):
   5 Rules (no-marketing-unprompted · full-production-fidelity · right-beats-easy · SPEC-normative · shoot-straight/
   field-directness) · Profile A default · commit-to-main ONLY after explicit in-session authorization ·
   commit PATHSPEC form + background-commit (dodge config-B post-commit-hook timeout; foreground push needs
