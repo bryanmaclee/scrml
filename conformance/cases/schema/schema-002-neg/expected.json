@@ -1,0 +1,12 @@
+{
+  "id": "schema-schema-002-neg",
+  "description": "§39.3 single-block rejection — the file declares two `<schema>` blocks (one for `users`, one for `posts`), both correctly placed as immediate children of `<program db=\"./app.db\">`. §39.3: a file SHALL NOT contain more than one `<schema>` block. The gauntlet declaration check counts `<schema>` nodes per file and rejects the second (and each subsequent) block with E-SCHEMA-002. Resolution: merge the two table declarations into a single `<schema>`.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/e-schema-decl-checks.test.js",
+  "spec": "§39.3",
+  "rationale": "§39.12 error table + §39.3 normative statement: a file SHALL NOT contain more than one `<schema>` block. A second `<schema>` block in the same file SHALL be a compile error (E-SCHEMA-002). Both tables belong in one `<schema>` block.",
+  "expect": {
+    "codes": ["E-SCHEMA-002"],
+    "notCodes": ["E-SCHEMA-003"]
+  }
+}

@@ -42,10 +42,31 @@
  *                  placement enforcement landed S133 — Phase 2 amendment
  *                  closure F-019.)
  *
+ *   E-SCHEMA-001 — `<schema>` block whose enclosing `<program>` root has no
+ *                  `db=` attribute. §39.3: a `<schema>` is valid only inside a
+ *                  file whose `<program>` root has a `db=`. (The standalone
+ *                  no-`<program>` case stays E-SCHEMA-003 — placement.)
+ *
+ *   E-SCHEMA-002 — More than one `<schema>` block in the same file. §39.3: a
+ *                  file SHALL NOT contain more than one `<schema>` block. Fired
+ *                  on the 2nd and each subsequent block.
+ *
+ *   W-SCHEMA-001 — A table declaration has no `primary key` column. §39.5.1.
+ *                  Warning (routes to result.warnings via the W- prefix).
+ *
+ *   (E-SCHEMA-006 — references-target validation — is NOT wired here: §39.5.5
+ *    permits a `references` target to be a table in the EXISTING database
+ *    schema when it is not being re-created, so a within-block-only check
+ *    false-positives on valid incremental-migration schemas and never sees the
+ *    referenced column. It re-scopes to the real-DB adapter work — like
+ *    E-SCHEMA-005/007/009 it needs live-DB context to be sound.)
+ *
  * All errors use the same shape as TAB/TS diagnostics — `{ code, message,
  * span, severity }` — and are collected into the compiler's global error
  * stream by the api.js driver.
  */
+
+import { parseSchemaBlock } from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -579,6 +600,170 @@ function checkSchemaPlacement(ast, filePath, errors) {
 }
 
 // ---------------------------------------------------------------------------
+// Check 5 — `<schema>` declaration validation
+//   E-SCHEMA-001 (db-anchor) · E-SCHEMA-002 (singleton) ·
+//   W-SCHEMA-001 (no primary key)
+//
+// NOTE: E-SCHEMA-004 (column type not in the §39.4 legal set) is intentionally
+// NOT wired here. Strict §39.4 enforcement fires on the pervasive corpus
+// convention of JS-style schema types (`string` / `number` / `int` in place of
+// `text` / `integer` / `real`) — 32 files / ~124 columns as of 2026-07-13,
+// including shipped examples (26-type-derived-schema, 32-external-api,
+// schemaFor-basic). Landing a fatal E-SCHEMA-004 would break those examples'
+// compilation and requires a corpus migration (with `number`→`integer`-vs-`real`
+// judgment) that is a separate, PA-scoped task. See the dispatch report.
+//
+// NOTE: E-SCHEMA-006 (references target) is also NOT wired here. §39.5.5 allows
+// a `references` target to be a table in the EXISTING database schema when it is
+// not being re-created, so a within-block-only static check false-positives on a
+// valid incremental-migration schema (and never validates the referenced
+// column, which §39.5.5 also requires). It re-scopes to the real-DB adapter work
+// where live-DB context is available (like E-SCHEMA-005/007/009).
+// ---------------------------------------------------------------------------
+
+/**
+ * Concatenate the `text`-kind children of a `<schema>` state node into its raw
+ * body text — the same shape schema-differ's `parseSchemaBlock` consumers read
+ * (mirrors protect-analyzer.ts `collectSchemaBodyText`; inlined here so this
+ * post-TAB module stays dependency-light and does not pull the protect-analyzer
+ * import chain).
+ */
+function schemaBodyText(node) {
+  const children = node && node.children;
+  if (!Array.isArray(children)) return "";
+  let text = "";
+  for (const c of children) {
+    if (c && c.kind === "text" && typeof c.value === "string") text += c.value;
+  }
+  return text;
+}
+
+/**
+ * Read the `db=` attribute string off a `<program>` markup node, or `null` when
+ * absent/empty. Mirrors the codegen/index.ts attr-reading shape
+ * (`node.attributes ?? node.attrs`; value in `.value.value` or `.value.name`).
+ */
+function programDbValue(programNode) {
+  const attrs = programNode.attributes ?? programNode.attrs ?? [];
+  if (!Array.isArray(attrs)) return null;
+  const dbAttr = attrs.find((a) => a && a.name === "db");
+  if (!dbAttr) return null;
+  const v = dbAttr.value?.value ?? dbAttr.value?.name ?? "";
+  return String(v).trim() === "" ? null : String(v);
+}
+
+/**
+ * Per §39.3 / §39.5.1, validate each `<schema>` block:
+ *
+ *   - E-SCHEMA-001: the schema's enclosing `<program>` root has no `db=`.
+ *   - E-SCHEMA-002: more than one `<schema>` block in the file (2nd+).
+ *   - W-SCHEMA-001: a table with no `primary key` column.
+ *
+ * Implementation: one top-down walk collects every `<schema>` state node with
+ * the nearest enclosing `<program>` root, then the body-level check parses each
+ * block via schema-differ's `parseSchemaBlock` (no hand DSL re-parse).
+ *
+ * @param {object} ast — FileAST
+ * @param {string} filePath
+ * @param {GauntletError[]} errors
+ */
+function checkSchemaDeclarations(ast, filePath, errors) {
+  if (!ast) return;
+  const topNodes = ast.nodes ?? [];
+
+  /** @type {Array<{ node: object, programRoot: object|null }>} */
+  const schemaEntries = [];
+
+  function walk(nodes, programRoot) {
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      const nextProgram =
+        node.kind === "markup" && node.tag === "program" ? node : programRoot;
+      if (node.kind === "state" && node.stateType === "schema") {
+        schemaEntries.push({ node, programRoot: nextProgram });
+      }
+      if (Array.isArray(node.children))     walk(node.children, nextProgram);
+      if (Array.isArray(node.body))         walk(node.body, nextProgram);
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, nextProgram);
+      if (Array.isArray(node.defChildren))  walk(node.defChildren, nextProgram);
+      if (Array.isArray(node.then))         walk(node.then, nextProgram);
+      if (Array.isArray(node.else))         walk(node.else, nextProgram);
+      if (Array.isArray(node.consequent))   walk(node.consequent, nextProgram);
+      if (Array.isArray(node.alternate))    walk(node.alternate, nextProgram);
+      if (Array.isArray(node.arms)) {
+        for (const arm of node.arms) {
+          if (arm && Array.isArray(arm.body)) walk(arm.body, nextProgram);
+        }
+      }
+    }
+  }
+  walk(topNodes, null);
+
+  if (schemaEntries.length === 0) return;
+
+  const fallbackSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+
+  // E-SCHEMA-002 — a file SHALL NOT contain more than one `<schema>` block.
+  // Fire on the 2nd and each subsequent block (the first is the legal one).
+  for (let i = 1; i < schemaEntries.length; i++) {
+    errors.push(new GauntletError(
+      "E-SCHEMA-002",
+      `E-SCHEMA-002: this file contains more than one \`<schema>\` block ` +
+      `(${schemaEntries.length} found). A file SHALL contain at most one \`<schema>\` block. ` +
+      `Merge the table declarations into a single \`<schema>\`. (See SPEC §39.3.)`,
+      schemaEntries[i].node.span ?? fallbackSpan,
+    ));
+  }
+
+  for (const { node, programRoot } of schemaEntries) {
+    const span = node.span ?? fallbackSpan;
+
+    // E-SCHEMA-001 — the enclosing `<program>` root must carry a `db=`
+    // attribute. When there is no `<program>` ancestor at all (a standalone
+    // file-top `<schema>`), placement is already reported as E-SCHEMA-003 by
+    // Check 4; we do not double-report the db-anchor there.
+    if (programRoot && programDbValue(programRoot) === null) {
+      errors.push(new GauntletError(
+        "E-SCHEMA-001",
+        `E-SCHEMA-001: this \`<schema>\` block's enclosing \`<program>\` root has no \`db=\` attribute. ` +
+        `A \`<schema>\` is valid only inside a file whose \`<program>\` root declares the database path ` +
+        `(\`<program db="./app.db">\`). Add a \`db=\` attribute to the \`<program>\` root. (See SPEC §39.3.)`,
+        span,
+      ));
+    }
+
+    // Body-level checks — parse the DSL once via schema-differ.
+    const body = schemaBodyText(node);
+    if (!body || body.trim().length === 0) continue;
+    let parsed;
+    try {
+      parsed = parseSchemaBlock(body);
+    } catch {
+      parsed = { tables: [] };
+    }
+    const tables = Array.isArray(parsed.tables) ? parsed.tables : [];
+
+    for (const table of tables) {
+      if (!table || typeof table.name !== "string") continue;
+      const cols = Array.isArray(table.columns) ? table.columns : [];
+
+      // W-SCHEMA-001 — the table has no `primary key` column (§39.5.1).
+      if (cols.length > 0 && !cols.some((c) => c && c.primaryKey)) {
+        errors.push(new GauntletError(
+          "W-SCHEMA-001",
+          `W-SCHEMA-001: table \`${table.name}\` has no \`primary key\` column. ` +
+          `Every table should designate exactly one \`primary key\` column ` +
+          `(e.g. \`id: integer primary key\`). (See SPEC §39.5.1.)`,
+          span,
+          "warning",
+        ));
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -598,6 +783,7 @@ export function runGauntletPhase1Checks(bsResult, tabResult) {
   checkAstMisplacedDecls(tabResult?.ast, filePath, errors);
   checkFileScopeDuplicateBindings(tabResult?.ast, filePath, errors);
   checkSchemaPlacement(tabResult?.ast, filePath, errors);
+  checkSchemaDeclarations(tabResult?.ast, filePath, errors);
 
   return errors;
 }

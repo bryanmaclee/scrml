@@ -1,0 +1,14 @@
+<program db="./app.db">
+    <schema>
+        users {
+            id: integer primary key
+            email: text not null unique
+        }
+    </>
+    <schema>
+        posts {
+            id: integer primary key
+            title: text not null
+        }
+    </>
+</program>

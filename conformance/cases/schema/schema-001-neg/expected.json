@@ -1,0 +1,12 @@
+{
+  "id": "schema-schema-001-neg",
+  "description": "§39.3 compile-time db-anchor rejection — a `<schema>` block is placed correctly as an immediate child of `<program>`, but the `<program>` root has no `db=` attribute. §39.1/§39.3: a `<schema>` reads its database path from the enclosing `<program db=\"...\">`, so a `<schema>` without that anchor is a compile error (E-SCHEMA-001). The gauntlet declaration check (checkSchemaDeclarations) walks the AST, pairs each `<schema>` node with its nearest enclosing `<program>` root, and rejects the block when that root carries no `db=`.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/e-schema-decl-checks.test.js",
+  "spec": "§39.3",
+  "rationale": "§39.12 error table + §39.3 normative statement: a `<schema>` block SHALL be valid only inside a file whose `<program>` root element has a `db=` attribute. A `<schema>` without an enclosing `<program db=\"...\">` SHALL be a compile error (E-SCHEMA-001). Resolution: add a `db=` attribute to the `<program>` root (e.g. `<program db=\"./app.db\">`). The standalone no-`<program>` case is instead reported as E-SCHEMA-003 (placement).",
+  "expect": {
+    "codes": ["E-SCHEMA-001"],
+    "notCodes": ["E-SCHEMA-003"]
+  }
+}

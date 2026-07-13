@@ -1,6 +1,6 @@
 // 02b-counter-persisted.scrml — counter that survives a refresh.
 
-<program>
+<program db="counter.db">
 
   <schema>
     counters {

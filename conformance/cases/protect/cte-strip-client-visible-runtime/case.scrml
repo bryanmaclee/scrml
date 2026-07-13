@@ -1,4 +1,4 @@
-<program auth="none">
+<program auth="none" db="app.db">
   <schema>
     ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
   </schema>

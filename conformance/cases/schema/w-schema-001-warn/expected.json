@@ -1,0 +1,15 @@
+{
+  "id": "schema-w-schema-001-warn",
+  "description": "§39.5.1 no-primary-key warning — the `logs` table declares only `message` and `created_at` columns, with no `primary key`. §39.5.1: a `<schema>` table declaration with no `primary key` column SHALL generate a compile warning (W-SCHEMA-001). The gauntlet declaration check inspects each parsed table's columns and emits W-SCHEMA-001 (severity warning → routes to result.warnings, non-fatal, CLI exit unchanged) when none is marked `primary key`. This case pins the code as a WARNING, not an error.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/e-schema-decl-checks.test.js",
+  "spec": "§39.5.1",
+  "rationale": "§39.12 error table + §39.5.1 normative statement: a `<schema>` table declaration with no `primary key` column SHALL generate a compile warning (W-SCHEMA-001: table has no primary key). The severity assertion guards the diagnostic-stream partition — a W- code lands in the warnings stream, never the fatal errors stream.",
+  "expect": {
+    "codes": ["W-SCHEMA-001"],
+    "notCodes": [],
+    "severity": {
+      "W-SCHEMA-001": "warning"
+    }
+  }
+}
