@@ -1,0 +1,12 @@
+{
+  "id": "error-construct-variant-payload-arity-ok",
+  "description": "§14.4/§18.7 — correct-arity construction is clean: `fail MyError.NotFound(\"x\")` binds the sole `id` field (1 arg / 1 field); `let a = MyError.Timeout` names a nullary variant with no payload; `let b = MyError.NotFound(\"y\")` binds `id`. `notCodes` asserts the E-TYPE-082 arity check does NOT false-positive on well-formed construction across the fail, nullary, and payload shapes.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §14.4, §18.7",
+  "spec": "§14.4",
+  "rationale": "§14.4: construction that supplies exactly one positional argument per declared payload field (and no payload on a nullary variant) is well-formed and SHALL NOT fire E-TYPE-082.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-082"]
+  }
+}

@@ -1,0 +1,8 @@
+${
+    type MyError:enum = { NotFound(id: string), Timeout }
+
+    function g() {
+        return MyError.Timeout("oops")
+    }
+}
+<p>x</>

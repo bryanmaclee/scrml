@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-variant-payload-arity-too-few-neg",
+  "description": "§14.4/§18.7 E-TYPE-082 — `fail MyError.NotFound()` names a VALID variant but supplies ZERO arguments to a variant that declares ONE payload field (`id`). Too-few is the mirror of the too-many `let` case; the fail locus routes through the shared construction-arity check. The variant name is valid (E-ERROR-009 does NOT fire). Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §14.4, §18.7",
+  "spec": "§14.4",
+  "rationale": "§14.4: all declared payload fields MUST be bound at construction (there is no partial positional construction); too few arguments SHALL be a compile error (E-TYPE-082).",
+  "expect": {
+    "codes": ["E-TYPE-082"],
+    "notCodes": ["E-ERROR-009", "E-ERROR-001"],
+    "severity": { "E-TYPE-082": "error" }
+  }
+}

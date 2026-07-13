@@ -7731,6 +7731,7 @@ type Shape:enum = {
 - Variants are declared one per line inside `{ }`.
 - A variant with no parentheses is a unit variant (carries no payload).
 - A variant with `(field:type, ...)` is a payload variant. Each named field has a type annotation.
+- **Construction arity.** Constructing a payload variant (`Shape.Rectangle(w, h)`, `.Circle(r)`) supplies exactly one positional argument per declared field, in declaration order — mirroring the positional payload-destructuring rule (§18.7). A construction whose argument count does not match the variant's declared payload field count — too few, too many, or any payload on a unit variant (`Shape.Point(x)`) — is a hard error (**E-TYPE-082**, §34), the construction-side sibling of §18.7's positional-destructuring **E-TYPE-021**. The check lives at the variant-constructor site and applies uniformly across every construction locus — `let` / `const` / state-cell initializers, `return`, and `fail` (§19.3) — because construction arity is a construction-wide contract, not tied to any one statement form. E-TYPE-082 is distinct from **E-ERROR-009** (a `fail` naming an invalid variant NAME, §19.3.3): E-TYPE-082 fires only when the variant is valid but its payload arity is wrong, so the two never double-fire on the same construction.
 - Enum variant names SHALL begin with an uppercase letter. A violation is a hard error (**E-ENUM-VARIANT-CASE**, §34), fired at the enum parse/type stage upstream of codegen — NOT a silent drop. Only the variant name is checked; payload field names are lowercase by convention and are not flagged.
 - Enum type names SHALL begin with an uppercase letter. A violation is a hard error (**E-ENUM-TYPE-CASE**, §34).
 
@@ -11922,6 +11923,37 @@ spec gap with explicit forbidden-mix wording.
   (E-TYPE-022).
 - Partial binding (naming fewer than all fields) is valid only in the named form.
 
+**Construction-side arity — the E-TYPE-021 sibling (E-TYPE-082):**
+
+The arity rules above govern DESTRUCTURING (binding a variant's fields in a match arm). The
+mirror-image constraint governs CONSTRUCTION (building a variant value): constructing a
+payload variant supplies exactly one positional argument per declared field, in declaration
+order (§14.4). A construction whose positional argument count does not match the variant's
+declared payload field count SHALL be a compile error (**E-TYPE-082**: enum-variant
+construction payload arity mismatch) — too few, too many, or ANY payload on a unit variant
+(`Shape.Point(x)` where `Point` declares no fields). E-TYPE-082 is the construction-side
+sibling of E-TYPE-021: same underlying contract (positional arity against the declared field
+count), distinct diagnostic surface (a `.Variant(args)` application vs a match-arm pattern).
+
+The check lives at the variant-CONSTRUCTOR site, so it covers every construction locus with
+one rule — `let` / `const` / state-cell initializers (`let e = MyError.Timeout("oops")`),
+`return` positions (`return MyError.Timeout("oops")`), and the `fail` statement (§19.3:
+`fail MyError.Timeout("oops")`) — because construction arity is a construction-wide contract,
+not a fail-only concern. In the `fail` locus E-TYPE-082 is distinct from **E-ERROR-009**
+(§19.3.3, which fires when the named variant is not a valid variant of the declared error
+type): E-TYPE-082 fires only when the variant IS valid but its payload arity is wrong, so a
+single `fail` never fires both.
+
+```scrml
+type MyError:enum = { NotFound(id:string), Timeout }
+
+fail MyError.Timeout("oops")   // Error E-TYPE-082: `.Timeout` is a unit variant
+                               // (no payload fields), but 1 argument was supplied.
+fail MyError.NotFound()        // Error E-TYPE-082: `.NotFound` has 1 payload field
+                               // (id), but 0 arguments were supplied.
+let e = MyError.NotFound("a", "b")  // Error E-TYPE-082: 2 args for 1 field.
+```
+
 **Worked example — valid, named form:**
 ```scrml
 type Person:enum = {
@@ -12277,6 +12309,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | E-TYPE-020 | Non-exhaustive match over enum type (missing variant, no `_` arm) | Error |
 | E-TYPE-006 | Non-exhaustive match over union type | Error |
 | E-TYPE-021 | Payload arity mismatch in positional destructuring | Error |
+| E-TYPE-082 | Payload arity mismatch in variant CONSTRUCTION (the §18.7 construction sibling of E-TYPE-021; `fail` / `let` / `return`) | Error |
 | E-TYPE-022 | Named binding references nonexistent payload field | Error |
 | E-TYPE-023 | Duplicate arm for the same variant | Error |
 | E-TYPE-024 | Match over a struct type (not supported) | Error |
@@ -12989,6 +13022,7 @@ fail PaymentError::ExpiredCard
 
 - `fail` SHALL be valid only inside a function body declared with the `!` modifier. Using `fail` in a function without `!` SHALL be a compile error: **E-ERROR-001** -- `'fail' used in function '{name}' which is not declared as failable. Add '!' to the function signature: 'function {name}(...)! -> {ErrorType}'.`
 - `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error: **E-ERROR-009** -- `'fail' names variant '{Variant}' which is not a valid variant of the declared error type '{ErrorType}' for function '{name}'. Valid variants: {list}.` This covers a variant undeclared by the declared enum, a `fail` naming a foreign enum entirely, and a `fail` target that is not an enum variant. For a bare-`!` function the declared error type is the built-in `Error` enum (§19.4.2), whose sole valid variant is `Generic`.
+- When the `fail` names a VALID variant of the declared error type but supplies the wrong number of payload arguments (too few, too many, or any payload on a unit variant), that is a distinct error class from E-ERROR-009: it SHALL be a compile error **E-TYPE-082** (enum-variant construction payload arity mismatch, §14.4 / §18.7). Because `fail MyError.Timeout("oops")` is a variant CONSTRUCTION, the arity check is the same one applied to non-`fail` construction (`let e = MyError.Timeout("oops")`, `return MyError.Timeout("oops")`) — it lives at the variant-constructor site, not the `fail` handler alone. E-ERROR-009 (invalid variant NAME) and E-TYPE-082 (valid variant, wrong arity) never double-fire on the same `fail`.
 - `fail` SHALL cause the enclosing function to return immediately with the error variant value. Statements after `fail` in the same block are unreachable. The compiler MAY emit a warning for unreachable code after `fail`.
 - `fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.
 
@@ -18328,6 +18362,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TYPE-045 | §17.6, §42.10 | `not` used in prefix position as a boolean negation operator — bare `not @x` OR parenthesized `not (expr)`, in ANY expression position (if/while condition, attr `if=`, `${...}` interpolation, ternary, `&&`/`\|\|`, return, call-arg, derived-RHS). `not` is the absence value, not a negation operator — use `!expr` / `!(expr)` for boolean negation, or `expr is not` for absence. (Catalog addition S78 audit; enforcement broadened to all positions + bare form S188 — detected at the lowering choke-point `compiler/src/expression-parser.ts` `preprocessForAcorn`, emitted by `harvestNotPrefixNegation` at `compiler/src/type-system.ts:15270`.) | Error |
 | E-TYPE-071 | §16.8, §15.14 | `render` invocation appears outside a markup-producing context (component body or markup-typed position). `render` is only valid where its output is consumed as markup. (Catalog addition S78 audit; emitted at `compiler/src/codegen/rewrite.ts:1398`.) | Error |
 | E-TYPE-081 | §18.16 | `partial match` used in a rendering or `lift` context. `partial match` returns `T | not` (a possibly-`not` value; §42), which is incoherent in positions that must produce concrete markup. Resolution: cover all variants, or convert to a value-position match. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:3753, 4838`.) | Error |
+| E-TYPE-082 | §14.4, §18.7 | Enum-variant CONSTRUCTION payload-arity mismatch — a `.Variant(args)` construction supplies a positional-argument count that does not match the variant's declared payload field count (§14.4): too few, too many, or ANY payload on a unit variant (`Shape.Point(x)` where `Point` declares no fields). Constructing a payload variant supplies exactly one positional argument per declared field, in declaration order (mirroring the §18.7 positional-destructuring rule). E-TYPE-082 is the CONSTRUCTION-side sibling of §18.7's **E-TYPE-021** (positional DESTRUCTURING arity): same positional-arity contract, distinct diagnostic surface (a variant-constructor application vs a match-arm pattern) — the E-ENGINE-PAYLOAD-ARITY-MISMATCH / E-TYPE-021 locus-split precedent (§51.0.B.1). The check lives at the variant-constructor site, so ONE rule covers every construction locus: `let` / `const` / state-cell initializers, `return`, and the `fail` statement (§19.3) — construction arity is a construction-wide contract, not a fail-only concern (the non-fail `let e = MyError.Timeout("oops")` evades a fail-only check). Distinct from **E-ERROR-009** (§19.3.3, a `fail` naming an invalid variant NAME): E-TYPE-082 fires only when the variant IS valid but its arity is wrong, so a single construction never fires both. The built-in `Error` default enum (§19.4.2) is not in the type registry, so its `Generic` variant is conservatively skipped at both loci. Resolution: supply exactly one argument per declared field in declaration order, or drop the payload on a unit variant. (Catalog addition S253 — `g-fail-variant-payload-arity`; emitted at `compiler/src/type-system.ts` `checkVariantConstructionArity`, called from the variant-ctor-arg walker `inferBareVariantsAtVariantCtorArgs` and the `fail` handler's E-ERROR-009 valid-variant branch.) | Error |
 | E-PROTECT-003 | §8.10.7 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that also appears in the handler's client-visible return type. Protected fields must not leak to client-visible cache rows. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:552`.) | Error |
 | E-SYNTAX-042 | §17.6, §45 | `null` or `undefined` appears in a scrml value position. scrml's absence sentinel is `not`; `null`/`undefined` are not valid scrml literals. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js:519, 613`.) | Error |
 | E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x :>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:5002, 7661`.) | Error |

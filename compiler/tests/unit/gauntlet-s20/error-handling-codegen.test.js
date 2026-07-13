@@ -46,7 +46,7 @@ function compileSource(source, filename = "test.scrml") {
 describe("fail codegen (§19.3)", () => {
   test("fail Type.Variant(args) inside if-body emits tagged return", () => {
     const source = `\${
-  type E:enum = { Bad }
+  type E:enum = { Bad(reason:string) }
   function f(x)! -> E {
     if (x < 0) { fail E.Bad("negative") }
     return "ok"
@@ -55,13 +55,13 @@ describe("fail codegen (§19.3)", () => {
 <p>x</>`;
     const { fatalErrors, clientJs } = compileSource(source, "fail-nested.scrml");
     expect(fatalErrors.length).toBe(0);
-    expect(clientJs).toContain(`return { __scrml_error: true, type: "E", variant: "Bad", data: "negative" };`);
+    expect(clientJs).toContain(`return { __scrml_error: true, type: "E", variant: "Bad", data: { reason: "negative" } };`);
     expect(clientJs).not.toContain(`fail;`);
   });
 
   test("fail with :: alias is equivalent to fail with . separator", () => {
     const source = `\${
-  type E:enum = { A }
+  type E:enum = { A(v:string) }
   function f()! -> E {
     fail E::A("one")
   }
@@ -73,7 +73,7 @@ describe("fail codegen (§19.3)", () => {
     const { fatalErrors, clientJs } = compileSource(source, "fail-alias.scrml");
     expect(fatalErrors.length).toBe(0);
     // Both function bodies emit the same tagged return shape
-    const matches = clientJs.match(/__scrml_error: true, type: "E", variant: "A", data: "one"/g);
+    const matches = clientJs.match(/__scrml_error: true, type: "E", variant: "A", data: \{ v: "one" \}/g);
     expect(matches?.length).toBe(2);
   });
 
@@ -98,10 +98,10 @@ describe("fail codegen (§19.3)", () => {
 
   test("generated JS is syntactically valid", async () => {
     const source = `\${
-  type E:enum = { Bad }
+  type E:enum = { Bad(reason:string), Empty }
   function f(x)! -> E {
     if (x == 0) { fail E.Bad("zero") }
-    if (x == 1) { fail E.Bad }
+    if (x == 1) { fail E.Empty }
     return "ok"
   }
 }
@@ -119,7 +119,7 @@ describe("fail codegen (§19.3)", () => {
 describe("? propagation codegen (§19.5)", () => {
   test("let x = fallible()? inside function body emits propagate check", () => {
     const source = `\${
-  type E:enum = { Bad }
+  type E:enum = { Bad(reason:string) }
   function risky(n)! -> E {
     if (n < 0) { fail E.Bad("neg") }
     return n
@@ -159,7 +159,7 @@ describe("? propagation codegen (§19.5)", () => {
 describe("!{} inline catch codegen (§19.4.3)", () => {
   test("!{} checks __scrml_error and matches on .variant", () => {
     const source = `\${
-  type E:enum = { NotFound, Forbidden }
+  type E:enum = { NotFound(msg:string), Forbidden }
   function load(id)! -> E {
     if (id == 0) { fail E.NotFound("missing") }
     return "ok"
@@ -183,9 +183,9 @@ describe("!{} inline catch codegen (§19.4.3)", () => {
     // Must match by variant name
     expect(clientJs).toContain(`.variant === "NotFound"`);
     expect(clientJs).toContain(`.variant === "Forbidden"`);
-    // Binding reads .data
+    // Binding reads the named payload field off .data
     expect(clientJs).toContain(`const msg =`);
-    expect(clientJs).toMatch(/const msg = _scrml_\w+\.data;/);
+    expect(clientJs).toMatch(/const msg = _scrml_\w+\.data\.msg;/);
   });
 
   test("!{} without wildcard still emits else-return as fallback", () => {
@@ -193,7 +193,7 @@ describe("!{} inline catch codegen (§19.4.3)", () => {
     // be covered, so in typed scrml this fallback is unreachable. But the
     // codegen emits the else-return for defence-in-depth. Confirm the shape.
     const source = `\${
-  type E:enum = { OnlyBad }
+  type E:enum = { OnlyBad(e:string) }
   function f()! -> E { fail E.OnlyBad("x") }
   function g()! -> E {
     let x = f() !{
@@ -210,7 +210,7 @@ describe("!{} inline catch codegen (§19.4.3)", () => {
 
   test("generated JS for !{} is syntactically valid and behaves correctly", () => {
     const source = `\${
-  type E:enum = { Bad }
+  type E:enum = { Bad(reason:string) }
   function f(x)! -> E {
     if (x == 0) { fail E.Bad("zero") }
     return "ok"

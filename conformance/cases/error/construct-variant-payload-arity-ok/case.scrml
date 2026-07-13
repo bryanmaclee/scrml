@@ -1,0 +1,11 @@
+${
+    type MyError:enum = { NotFound(id: string), Timeout }
+
+    function f()! MyError {
+        fail MyError.NotFound("x")
+    }
+
+    let a = MyError.Timeout
+    let b = MyError.NotFound("y")
+}
+<p>x</>

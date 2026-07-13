@@ -9663,6 +9663,25 @@ function annotateNodes(
                     `E-ERROR-009: 'fail' names variant '${failVariant}' which is not a valid variant of the declared error type '${declaredType}' for function '${fnName}'. Valid variants: ${validList}.`,
                     failSpanE9,
                   ));
+                } else {
+                  // (3) VALID variant of the declared enum — the remaining
+                  // construction check is payload arity (E-TYPE-082), the §19.3
+                  // construction-site sibling of the ctor-arg walker's check.
+                  // Because we reach this branch ONLY when the variant name is
+                  // valid, E-ERROR-009 has NOT fired — no double-fire. The raw
+                  // `fail`-payload arg string is counted top-level (comma-split,
+                  // string- and bracket-aware). The built-in `Error` default is
+                  // not in the registry (its VariantDef is unavailable), so it
+                  // is skipped here — consistent with the ctor-arg walker, which
+                  // also cannot resolve the built-in's variant.
+                  const declEnum = typeRegistry.get(declaredType);
+                  if (declEnum && declEnum.kind === "enum") {
+                    const vdef = (declEnum as EnumType).variants.find((v) => v.name === failVariant);
+                    if (vdef) {
+                      const failArgs = ((stmt as Record<string, unknown>).args as string) ?? "";
+                      checkVariantConstructionArity(vdef, countTopLevelArgs(failArgs), failSpanE9, errors);
+                    }
+                  }
                 }
               }
             }
@@ -14854,6 +14873,92 @@ function inferBareVariantsAtCallArgs(
 }
 
 /**
+ * Count top-level (comma-separated) argument expressions in a raw argument
+ * string — the CONSTRUCTION-side arity primitive for the `fail E.V(args)` locus,
+ * whose `fail-expr` node carries its payload as a raw string (§19.3.1) rather
+ * than an AST arg array. String-aware (a comma inside a `"…"` / `'…'` / `` `…` ``
+ * literal is NOT a separator) and bracket-depth-aware (a comma inside a nested
+ * `()`/`[]`/`{}` is NOT a separator), so `E.V(foo(1, 2))` counts 1 arg and
+ * `E.V("a,b")` counts 1 arg. An empty / whitespace-only string is zero args.
+ *
+ * A TRAILING comma is ignored (`E.V("a",)` counts 1, not 2): trailing commas are
+ * valid scrml (`[1,2,3,]`, `h("a","b",)`), and acorn drops the trailing comma on
+ * the non-fail construction path (`n.args.length === 1`), so the `fail`-locus
+ * count MUST match that AST behavior — hence non-empty top-level segments are
+ * counted, not raw top-level commas.
+ */
+function countTopLevelArgs(raw: string): number {
+  const s = raw.trim();
+  if (s.length === 0) return 0;
+  let depth = 0;
+  let inStr: string | null = null;
+  let segStart = 0;
+  const segments: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "\\") { i++; continue; } // skip an escaped char inside a string
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      segments.push(s.slice(segStart, i));
+      segStart = i + 1;
+    }
+  }
+  segments.push(s.slice(segStart));
+  // Count only NON-EMPTY top-level segments — a trailing comma yields an empty
+  // final segment (valid scrml), which acorn drops on the non-fail path.
+  return segments.filter((seg) => seg.trim().length > 0).length;
+}
+
+/**
+ * E-TYPE-082 (§14.4 / §18.7) — enum-variant CONSTRUCTION payload-arity check.
+ *
+ * The construction-side sibling of §18.7's `E-TYPE-021` (positional payload
+ * DESTRUCTURING arity). Constructing a payload variant supplies exactly one
+ * positional argument per declared field, in declaration order (§14.4); the
+ * supplied argument count MUST equal the variant's declared payload field count.
+ * Fires when:
+ *   - a NULLARY / unit variant is constructed WITH arguments (`.Timeout("oops")`
+ *     where `Timeout` declares no payload) — any payload on a nullary variant; or
+ *   - a payload variant is constructed with too FEW or too MANY arguments.
+ *
+ * GENERAL across construction loci — this is called at the variant-CONSTRUCTOR
+ * site (the ctor-arg walker: non-fail `let e = E.V(x)` / `const` / `return E.V(x)`
+ * / `if` / bare-expr / reactive-init) AND at the `fail E.V(x)` locus (§19.3) —
+ * because arity is a construction-wide contract, NOT a fail-only concern.
+ *
+ * Distinct from `E-ERROR-009` (invalid variant NAME, §19.3.3): E-TYPE-082 fires
+ * only when the variant IS valid but its payload arity is wrong. Callers gate on
+ * a resolved `VariantDef`, so the two never double-fire on the same construction.
+ */
+function checkVariantConstructionArity(
+  variant: VariantDef,
+  argCount: number,
+  span: Span,
+  errors: TSError[],
+): void {
+  const fieldCount = variant.payload ? variant.payload.size : 0;
+  if (argCount === fieldCount) return;
+  const argWord = argCount === 1 ? "argument was" : "arguments were";
+  const expected = fieldCount === 0
+    ? `'.${variant.name}' is a unit variant (no payload fields)`
+    : `'.${variant.name}' has ${fieldCount} payload field${fieldCount === 1 ? "" : "s"} ` +
+      `(${Array.from(variant.payload!.keys()).join(", ")})`;
+  errors.push(new TSError(
+    "E-TYPE-082",
+    `E-TYPE-082: enum-variant construction payload arity mismatch — ${expected}, ` +
+    `but ${argCount} ${argWord} supplied. Construction supplies exactly one positional ` +
+    `argument per declared field, in declaration order (§14.4).`,
+    span,
+  ));
+}
+
+/**
  * ss16 C5 (§14.10 position-3 — enum-payload-variant CONSTRUCTOR arg) — bare-
  * variant inference at variant-constructor call-arg positions.
  *
@@ -14963,6 +15068,16 @@ function inferBareVariantsAtVariantCtorArgs(
     if (n.kind === "call") {
       const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
       const variant = resolveCtorVariant(n.callee);
+      // E-TYPE-082 — construction-site payload-arity check (§14.4 / §18.7
+      // sibling of E-TYPE-021). Fires for a resolved variant REGARDLESS of
+      // payload presence, so it catches a nullary variant constructed with args
+      // (`.Timeout("oops")`) as well as too-few / too-many on a payload variant.
+      // The variant resolved here, so its NAME is valid — E-ERROR-009 (invalid
+      // name) cannot also apply on this node, so there is no double-fire.
+      if (variant) {
+        const callSpan = ((n as { span?: Span }).span) ?? span;
+        checkVariantConstructionArity(variant, args.length, callSpan, errors);
+      }
       // Only payload-bearing variants take positional args. A unit-variant
       // callee (payload === null) or an unresolved callee falls through.
       if (variant && variant.payload && variant.payload.size > 0) {

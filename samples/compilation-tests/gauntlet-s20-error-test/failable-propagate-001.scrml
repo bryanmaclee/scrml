@@ -2,7 +2,7 @@
 // Should compile clean.
 
 ${
-  type ApiError:enum = { BadRequest, NotFound }
+  type ApiError:enum = { BadRequest(reason:string), NotFound }
 
   function getUser(id)! -> ApiError {
     if (id <= 0) {

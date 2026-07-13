@@ -1,0 +1,13 @@
+{
+  "id": "error-construct-variant-payload-arity-let-neg",
+  "description": "§14.4/§18.7 E-TYPE-082 — non-fail construction: `let e = MyError.NotFound(\"a\", \"b\")` supplies TWO arguments to a variant that declares ONE payload field (`id`). Arity is unchecked construction-wide, so the check lives at the variant-constructor site and fires here even though there is no `fail`. Incidental W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §14.4, §18.7",
+  "spec": "§14.4",
+  "rationale": "§14.4: construction supplies exactly one positional argument per declared payload field, in declaration order; too many arguments SHALL be a compile error (E-TYPE-082).",
+  "expect": {
+    "codes": ["E-TYPE-082"],
+    "notCodes": ["E-ERROR-009", "E-ERROR-001"],
+    "severity": { "E-TYPE-082": "error" }
+  }
+}

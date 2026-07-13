@@ -2,7 +2,7 @@
 // Should compile clean.
 
 ${
-  type LoadError:enum = { NotFound, Forbidden }
+  type LoadError:enum = { NotFound(msg:string), Forbidden }
 
   function loadItem(id)! -> LoadError {
     if (id == 0) {

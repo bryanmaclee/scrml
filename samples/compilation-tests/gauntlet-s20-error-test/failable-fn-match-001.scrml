@@ -2,7 +2,7 @@
 // Should compile clean.
 
 ${
-  type FetchError:enum = { Network, Timeout }
+  type FetchError:enum = { Network(msg:string), Timeout }
 
   function fetchData(url)! -> FetchError {
     if (url == "") {

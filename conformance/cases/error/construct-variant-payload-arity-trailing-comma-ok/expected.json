@@ -1,0 +1,12 @@
+{
+  "id": "error-construct-variant-payload-arity-trailing-comma-ok",
+  "description": "§14.4/§18.7 — a TRAILING comma in a variant construction is valid scrml (`[1,2,3,]`, `h(\"a\",)`) and MUST NOT over-count as an extra argument. `fail MyError.NotFound(\"x\",)` (fail locus, raw-string arg count) and `let e = MyError.NotFound(\"y\",)` (non-fail locus, acorn drops the trailing comma) each bind the sole `id` field — 1 arg / 1 field. Regression guard: the fail-locus raw-string counter must match acorn's trailing-comma-dropping behavior so it does not false-fire E-TYPE-082 on well-formed trailing-comma construction. `notCodes` asserts E-TYPE-082 does not fire.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §14.4, §18.7",
+  "spec": "§14.4",
+  "rationale": "§14.4: construction supplies one positional argument per declared field; a trailing comma is syntactic sugar, not an argument, and SHALL NOT fire E-TYPE-082.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-082"]
+  }
+}

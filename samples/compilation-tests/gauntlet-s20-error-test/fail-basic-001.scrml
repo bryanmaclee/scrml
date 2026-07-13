@@ -2,7 +2,7 @@
 // Should compile clean.
 
 ${
-  type PaymentError:enum = { InvalidAmount, CustomerNotFound, ExpiredCard }
+  type PaymentError:enum = { InvalidAmount(reason:string), CustomerNotFound, ExpiredCard }
 
   function processPayment(amount, customerId)! -> PaymentError {
     if (amount <= 0) {

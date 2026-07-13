@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-variant-payload-arity-neg",
+  "description": "§14.4/§18.7 E-TYPE-082 — `fail` constructs a VALID variant (`Timeout`) of the declared error enum but supplies a payload argument to a NULLARY variant. The variant NAME is valid, so E-ERROR-009 does NOT fire; only the payload arity is wrong. E-TYPE-082 is the construction-side sibling of §18.7's E-TYPE-021 (positional destructuring arity), fired at the variant-constructor site so it covers the `fail` locus (§19.3) as well as non-fail construction. Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §14.4, §18.7",
+  "spec": "§14.4",
+  "rationale": "§14.4: constructing a variant supplies exactly one positional argument per declared payload field, in declaration order; a nullary variant declares no fields. Any payload on a nullary variant SHALL be a compile error (E-TYPE-082). Distinct from E-ERROR-009 (invalid variant NAME) — the two never double-fire on the same construction.",
+  "expect": {
+    "codes": ["E-TYPE-082"],
+    "notCodes": ["E-ERROR-009", "E-ERROR-001"],
+    "severity": { "E-TYPE-082": "error" }
+  }
+}
