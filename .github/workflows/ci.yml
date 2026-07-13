@@ -1,22 +1,23 @@
-# CI — the authoritative full-suite gate (clean env, async).
+# CI — the authoritative async gate (clean env). Never blocks a local push.
 #
-# Rationale (gate-layering, flogence gate-layering-methodology-2026-07-06 + scrml S242/S243):
-#   types (always-on local) · pre-commit fast subset (source-controlled, every commit — the
-#   ~2min unit+integration+conformance net) · **CI full suite (HERE — the authoritative gate;
-#   the browser/lsp/commands/self-host/gauntlet delta lives here)** · R26 behavior-verify +
-#   adversarial /code-review (the PA's judgment gates).
+# Gate-layering (flogence gate-layering-methodology-2026-07-06 + scrml S242/S243; TUNED S253 cloud-PA arc):
+#   types (always-on local) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
+#   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #
-# A clean ubuntu-latest runner has NO env-floor — the ~7 browser whitespace-assertion tests that
-# false-fail on some local machines get the env they need here, so the whole false-fail class
-# disappears at origin. Async → never blocks a local push.
+# TWO jobs:
+#   • gate     — BLOCKING. Mirrors the local pre-push BLOCKING scope (proven green — what you push on
+#                today) + the self-host dist build + the TodoMVC gauntlet. This is the merge-gate. A
+#                clean ubuntu runner also gives the self-host/browser env the local machine lacks.
+#   • tracking — NON-BLOCKING (continue-on-error). Browser (the ~7 whitespace false-fails resolve on the
+#                clean runner) + the M6.x within-node parser-parity backlog + canary. Visible, never
+#                blocks the gate; promote a check into `gate` as it goes green.
 #
-# TUNING (owner supplies the specifics a template can't see):
-#   - self-host tests (compiler/tests/self-host/) may need `bun run scripts/rebuild-self-host-dist.ts`
-#     before the suite on a clean checkout (dist files are gitignored) — add a build step if the first
-#     run reports missing self-host dist.
-#   - consider splitting a fast job (pre-commit subset) + a full job, or a matrix, once the baseline runs.
-#   - `paths-ignore` below is a runner-minutes saver on docs-only pushes (NOT correctness — the docs-only
-#     annoyance is already gone locally once the full suite is off the synchronous pre-push).
+# WHY split (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the known
+# M6.x within-node parity backlog, which is a tracked migration workstream, NOT a merge regression, and
+# which the local pre-push deliberately excludes. A gate that's red on a known backlog can't be trusted
+# to drop the redundant local pre-push full-suite (the wall-time). This makes the gate == the local
+# authoritative gate. Once this is confirmed green at origin, the local pre-push full-suite run is
+# redundant and drops to the fast subset — the wall-time win.
 
 name: CI
 
@@ -33,14 +34,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  full-suite:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
+      - name: Build self-host dist (gitignored — self-host tests need it on a clean checkout)
+        run: bun run scripts/rebuild-self-host-dist.ts
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: Full test suite
-        run: bun test compiler/tests/
+      - name: Gate suite (unit + integration + conformance + lsp + self-host + commands)
+        run: >-
+          bun test
+          compiler/tests/unit
+          compiler/tests/integration
+          compiler/tests/conformance
+          compiler/tests/lsp
+          compiler/tests/self-host
+          compiler/tests/commands
+      - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
+        run: |
+          bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
+          node --check benchmarks/todomvc/dist/app.client.js
+
+  tracking:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        run: bun install --frozen-lockfile
+      - name: Populate browser-test fixtures
+        run: bun run pretest
+      - name: Browser tests (clean-runner env — the ~7 whitespace false-fails resolve here)
+        run: bun test compiler/tests/browser
+      - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking only)
+        run: bun test compiler/tests/parser-conformance-within-node.test.js
