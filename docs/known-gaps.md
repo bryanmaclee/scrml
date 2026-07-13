@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 19 |
-| LOW | 16 |
+| MED | 20 |
+| LOW | 19 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -74,6 +74,9 @@ Surfaced by sPA ss63 (api §60 conformance). §60 is client-only (§60.6, no ser
 
 ### g-conformance-sql-engine-semantics-needs-real-db-adapter — the SQL-engine-semantics runtime surface (WHERE/JOIN/writes/transactions/constraints) is unpinnable — makeSqlStub is a regex stub — `NEW S252 (ss67 conformance); MED (freeze-coverage); open`
 Surfaced by sPA ss67 (serverDb conformance). `conformance/adapters/impl1-ts.ts makeSqlStub` regex-extracts `FROM <table>` and returns the whole seeded table — WHERE not evaluated; no JOIN/aggregate/write-back/transaction/constraint. So ss67 pins only data-FLOW; the ~6-8 SQL-engine-semantics runtime cases (§8.5.1 writes/RETURNING · §8.5.3 transaction ROLLBACK · §8.7 SqlError variants · §39.5 UNIQUE/FK/CHECK) are BLOCKED until a real SQLite-backed `_scrml_sql` adapter replaces the stub. A compiler/harness DEV task (freeze coverage-tail dependency). <!-- @gap id=g-conformance-sql-engine-semantics-needs-real-db-adapter sev=MED status=open -->
+
+### g-spec-sql-schema-codes-zero-emission — ~13 §8.6/§39.12 SQL/schema codes are cataloged in SPEC but the compiler emits NONE (SPEC ahead of compiler) — `NEW S252 (ss66 conformance); MED (freeze-currency); open`
+Surfaced by sPA ss66 (SQL/schema compile-code conformance). Of 23 planned §8.6/§39.12 code cases, only **5 authorable** (E-SQL-005, W-BATCH-001, E-SCHEMA-003 + 2 clean-pos). **13 are SPEC-vs-compiler GAPS — ZERO emission:** E-SQL-002 (no compile-time SQL-syntax validation), E-SQL-004 (comment-only; falls back to `:memory:`), E-SQL-007 (no async surface), E-SCHEMA-001/002/004-009 (the `<schema>` DSL body isn't validated on the string-compile path; 007/008/009 are migration/live-DB-time), W-SCHEMA-001/003. The other 5 have real emission but are UNREACHABLE via the conformance `compile()` path (sub-`compile()` API / runtime throw / migration-diff-time). **Rule-4 freeze-currency question:** are these UNBUILT (→ reclassify Nominal/v1.next, drop the freeze-coverage obligation) or does §8.6/§39.12 OVER-CLAIM (→ prune the catalog)? The freeze bar ("pin every CLAIMED code") can't be met for zero-emission codes — needs a per-code triage (built-elsewhere / migration-time / genuinely-unbuilt). Authority: ss66 progress + on-branch re-integration (spa/ss66 `fec5412b`). <!-- @gap id=g-spec-sql-schema-codes-zero-emission sev=MED status=open -->
 
 ### G-MARKUP-VALUE-ATTR-INTERP-STRING-BRACE — a `${…}` in an ATTRIBUTE string value inside a recovered markup-value bails the whole markup-value when the interp body contains a nested quote/brace — `NEW S241; MED; open` (GITI-034)
 

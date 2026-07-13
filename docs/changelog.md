@@ -6,7 +6,17 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
 
-### 2026-07-12 (S251 — **four arcs landed+pushed (Fork-A split · #26 P0 Windows auth-bypass · conformance +19 · navigate Wave-1b) + a full pre-V1 strategic plan: 5 design DDs ratified around a flogence-tandem release**)
+### 2026-07-12 (S252 — **2 freeze-blockers fixed (both caught by the S239 gate) + sPA conformance coverage +36 → 427/427 + README shill; PA-contract dedup surfaced as the next arc**)
+
+Concurrent boot to LIVE S251 → took the baton when S251 wrapped → led as single writer to main. A large execution session: fired the pre-V1 conformance coverage-tail via 5 sPAs and re-integrated all of them, fixed the two ruled typer/scanner freeze-blockers (both re-fixed after the S239 adversarial review caught confirmed regressions their green self-verify missed), shilled the README, and — pivoting on a Peter-onboarding request — discovered the real pre-Peter work is a PA-contract dedup.
+
+- **sPA conformance coverage-tail (+36 cases → 427/427):** ss63 api §60 (10 E-API-*/W-API-* codes) · ss64 @apply §26.8 (7) · ss65 meta ^{} §22 (14 E-META-*) · ss66 SQL §8 + schema §39 compile-codes (5 — but a footprint finding: only 5 of 23 authorable; 13 are SPEC-vs-compiler emission gaps) · ss67 serverDb §8 runtime (4).
+- **Freeze-blocker: typer Option-D (F5-half).** A sound, receiver-keyed host-method return-type table (`charCodeAt`→int, `substring`→string, `.length`→int) that closes the `match`-on-`asIs` E-TYPE-025. The GCP3 syntactic mirror was built then DROPPED (bryan-ruled) after the S239 review proved it a soundness inversion (fired hard E-EQ-001 on valid `asIs`-receiver code); the equality-half defers to a post-freeze GCP3 re-architecture.
+- **Freeze-blocker: string-blind scanners (both).** route-inference's `Bun.*`/`process.*` server-only detection moved to AST-node-based (leak-free by construction, ending the S244 raw-text saga); `rewriteIsPredicates` skips regex/comment interiors via the GITI-017 fence. The S239 security re-review caught + closed a `globalThis.`/`window.`-rooted silent client leak.
+- **README shill** — Client navigation (navigate() soft-nav) + Styles reframed as the third native leg (§65 scrml-native CSS).
+- **known-gaps currency** — 3 gaps resolved, 7 residuals filed (incl. the deferred equality gap + the ss66 SPEC-vs-compiler emission gap + the freeze-coverage real-DB-adapter dependency).
+
+
 
 Booted concurrent to S250, took over main after S250 wrapped. Execution phase landed four arcs; strategy phase reframed the pre-V1 push around flogence releasing *in tandem* with scrml V1 ("do it right, go all the way") and ratified five design deep-dives. Conformance 386/386, gate green. Plan-of-record: `scrml-support/docs/pre-v1-execution-board-2026-07-12.md`.
 

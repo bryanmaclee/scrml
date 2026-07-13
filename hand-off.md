@@ -1,89 +1,96 @@
-# scrml — Session 251 (WRAP) — landed 4 arcs + a full pre-V1 strategic plan (5 DDs ratified)
+# scrml — Session 252 (WRAP) — freeze-blocker batch landed+pushed; the PA-contract DEDUP is the next arc
 
-**Date:** 2026-07-12. **Profile:** A (`/boot`). **Successor to S250** (booted concurrent, took over main
-after S250 wrapped). Two-phase session: **(1) execution** — landed + PUSHED four arcs; **(2) strategy** —
-reframed the whole pre-V1 push around a flogence-tandem release + ratified five design DDs. Next session =
-EXECUTION against the ruled backlog.
+**Date:** 2026-07-12. **Profile:** A (`/boot`). **Baton:** booted concurrent to LIVE S251 → S251 wrapped
+mid-session → I took the commit-lock and LED (single writer to main). Enormous execution session +
+a late strategic pivot (Peter-onboarding → it's tiny → the real work is a PA-contract dedup).
 
 ## ⚠️ READ FIRST
-- **EVERYTHING IS PUSHED. origin/main == HEAD == `af6da1ee` (0/0 coherent).** No push-hold. The NUL-fix commit
-  `af6da1ee` sat 1-ahead → **this wrap pushes it** (verify 0/0 at boot).
-- **THE PLAN-OF-RECORD is `../scrml-support/docs/pre-v1-execution-board-2026-07-12.md`** — read it first next
-  session. It carries the reframe, the tandem-critical tracks, the freeze-blockers, the SPA tail, and the
-  execution classification. The five DD design docs are in `../scrml-support/docs/deep-dives/*-2026-07-12.md`.
-- **commit-lock: RELEASED at this wrap** (S251). Next boot: `commit-lock.sh status <your-S-num>` → FREE → acquire.
-- **ONE open input gates Track A:** **Fork 3** — is flogence's MCP stdio leg (`fsp-mcp`) a v1 tandem gate or
-  fast-follow? Answer unblocks the server-shape dispatch.
+- **EVERYTHING PUSHED except this wrap.** origin/main was `55b49ff1` at the batch push; ss66 (`35a73e9f`)
+  + this wrap sit local-ahead — **this wrap pushes them** (verify 0/0 at boot). scrml-support pushed (`5ae170b`).
+- **commit-lock RELEASED at this wrap** (S252). Next boot: `commit-lock.sh status <uuid>` → FREE → acquire.
+- **🔴 THE NEXT ARC = the PA-contract DEDUP (do this BEFORE Peter).** bryan's read, S252-confirmed: the scrml
+  PA reads the **`pa-scrml.md` monolith (1443L)**, which **duplicates most of `pa-base.md` (645L)'s universal
+  doctrine** (Rules 3/4/5 · scope+doc-currency · A/B profiles · boot-gate · wrap · hand-off density · worktree
+  isolation F4/S88/S90/S99/S126 · R26/verify · landing) PLUS the scrml-specific delta (repo layout · Rules 1/2 ·
+  versioning · per-repo scope · maps-discipline · scrml paths). `pa-base` is a PARALLEL, UN-CONSUMED copy → DRIFT
+  (proven: `pa-base` §3 has a developed R0–R4 deliberation ladder `pa-scrml` doesn't carry). **The dedup = the
+  S217-deferred "grown-form migration":** fold `pa-scrml` → `pa-base` (universal) + a THIN `pa-scrml-overlay`
+  (scrml delta only), scrml consumes base+overlay like giti/6nz. HIGH-STAKES + careful — merge-best-of (take
+  pa-base's newer §3 ladder, keep pa-scrml's fuller S136/138/147 addenda), dedupe WITHOUT dropping content
+  ([[feedback_doc_cleanup_reorg_not_content_cut]]). On the §3 ladder's own terms ~R1/R2 (direction ratified S217).
+  **Owed parting artifact bryan half-asked for:** the exact fold-plan (which pa-scrml sections merge into which
+  pa-base §, which extract to the overlay). NOT authored this session — do it first next session.
 
-## ✅ LANDED + PUSHED THIS SESSION (all on origin @ af6da1ee)
-1. **Fork A — the server-fn/client-cell "SPLIT"** (`47ea59ac`): a huge design arc (C→A→split). E-REACTIVE-003
-   fires on a WHOLLY-server fn reading a free client cell (error, pass-as-arg); a CPS fn (form-submit idiom)
-   MARSHALS the reads. **Fixed a systemic bug: the canonical form/login idiom silently POSTed `undefined`**
-   (verified react-auth login hashed undefined). §52 `<x server>` is CLIENT-HELD (§52.4.2). @session/@currentUser
-   never client-marshalled (spoofing guard). +9 conformance. Adversarially reviewed (anti-drift verified).
-2. **#26 P0 Windows auth-bypass** (`66483cdf`): `isStdlibFilePath` hardcoded `/` vs native `\` → the async-stdlib
-   classifier failed on Windows → verifyPassword shipped un-awaited → accept-all. Fix = separator-normalize +
-   a Windows-simulating regression test. **Root-caused, fixed, and replied to Peter on the issue** (posted as
-   bryanmaclee, comment 4951048439). Issue still OPEN pending Peter's clean-build confirm.
-3. **Conformance +19** (`f8336f07`): capability/error-boundary/lifecycle/loop/table-for. Surfaced (board-logged)
-   §49 loop divergences: E-LOOP-003/004 disabled (braceless-if FP), **E-LOOP-007 inverted** (fires on the
-   SPEC-valid lift form, silent on the error form) — parser-entangled, backlog.
-4. **Navigate Wave-1b** (`0a41a327` merge): same-chunk soft-nav complete. #5 shell-reset showstopper + #7
-   input-handler leak + #4/#6/#9, and a **NEW security-adjacent mode-inversion** (a `match`-arm `navigate(.Hard)`
-   was still soft-navving a forced auth redirect) — S251-adversarially-verified robust. #8/#3 deferred (gzip-gate/invasive).
-5. **NUL-fix** (`af6da1ee`): `rewrite.ts:143` carried a raw 0x00 (a real cache-key separator stored as a byte,
-   not an escape) → the file classified as binary → grep silently dropped matches (bit two reviews). Escaped it,
-   behavior-identical. rewrite.ts is now grep-able text.
+## ✅ LANDED + PUSHED THIS SESSION
+- **5 sPA lists minted** (ss63-67 conformance coverage-tail) + pushed (`40b580c5`). bryan fired all 6 (ss63-67).
+- **sPA coverage re-integrated (+36 conformance cases → 427/427):** ss63 api §60 (10) · ss64 @apply §26.8 (7) ·
+  ss65 meta §22 (14) · ss67 serverDb §8 runtime (4) · ss66 SQL/schema §8/§39 compile-codes (5). Commits
+  `8df25c00` (ss63-65) · `3a18cf7b` (typer+string-blind+ss67) · `35a73e9f` (ss66).
+- **2 FREEZE-BLOCKERS fixed** (in `3a18cf7b`): **typer Option-D F5-half** (sound receiver-keyed host-method
+  return-type table, type-system.ts — closes the `match`-on-asIs E-TYPE-025) + **string-blind BOTH scanners**
+  (route-inference→AST · is-predicate→GITI-017 fence). **⭐ Both were caught by the S239 gate with CONFIRMED
+  regressions their green self-verify MISSED** — typer's GCP3 mirror was a soundness INVERSION (fired on `asIs`
+  receivers); string-blind had a `globalThis.Bun.serve()`-rooted SILENT client leak. bryan ruled typer option-a
+  (drop mirror, land F5, defer equality → RULING 4b); both re-fixed + independently re-reviewed clean before land.
+- **README shill** (`55b49ff1`) — +Client navigation (navigate() soft-nav) + Styles-as-third-native-leg (§65 CSS,
+  claimed per bryan's V1-Nominal ruling). LIVE public.
+- **known-gaps currency** (`55b49ff1`): 3 gaps → RESOLVED (2 string-blind + typer-F5-split) · 7 residuals filed
+  (equality-deferred RULING-4b + egress-scan-sibling + computed-bracket + class-attr-DG + apiStub + SQL-engine-adapter
+  + [this wrap: ss66's SPEC-vs-compiler emission gap]).
 
-## 🧭 THE PRE-V1 REFRAME (bryan, S251) — read the board doc for the full plan
-More runway before freeze (flogence must **release in tandem** with scrml V1). Spirit: **"do it right, go all
-the way"** — pull v1.next into V1 *where flogence exercises it*. flogence sweep corrected two assumptions:
-**local-first** (§58 cloud-deploy NOT tandem-blocking) + **single-page** (navigate 2-3 NOT tandem-driven).
-**Tandem-critical = Track A (server-shape) · §65-W2→#7 (floStyle) · the lang-gap fixes + coupled-CI.**
+## 🔴 PETER ONBOARDING — it's TINY (bryan's actual intent; I over-built it, then verify shrank it twice)
+bryan's vision = **Peter just branches + `/boot`s in the scrml repo.** The multi-user machinery already supports
+it (`.pa-base/profile` identity → `pa-profile-<slug>`). Two verify-catches collapsed my over-scoped "lift":
+(1) DON'T commit the 84 memory files — the load-bearing ones are already pa-scrml addenda; (2) `pa-base` §3
+ALREADY has the deliberation ladder — my "trigger discipline" draft was a weaker duplicate (SUPERSEDED, not landed).
+**So Peter = (after the dedup): `pa-base`+overlay + a 30-line `pa-profile-peter` + collaborator access.** DRAFTS in
+the S252 scratchpad (`pa-profile-peter-DRAFT` — CORRECTED: Peter is a **technical peer, limited HAND-CODING only**,
+NOT "non-technical"; the ⭐ proactive overlay points at §3's ladder + says propose-the-rung-readily-until-reflex-matures ·
+`peter-adopter-CLAUDE-DRAFT` context-2 dropbox-bridge · `portability-lift-manifest-DRAFT` mostly-superseded).
+Leans bryan approved: home=pa-base (moot — already there); review-gate=explicit "missed-DD?" checklist; slug=peter
+(rename if git-config→pjoliver11). Human actions owed: bryan adds pjoliver11 as scrml-support collaborator; Peter forks+configs.
 
-## 🔬 FIVE DDs RATIFIED (bryan: cruxes + defaults) — designs banked, BUILDABLE
-Anchors + cruxes ruled; DD-recommended defaults taken on the rest. Full ruling sets in the docs.
-- **#5 server-program-shape** = **1A** (`kind="tool" serve=`); ~80% exists; load-bearing = 2A decouple
-  emit-server. **OPEN Fork 3** (stdio v1-gate?). ⚠️ concentrates in `emit-server.ts`/`route-inference.ts` —
-  navigate's files → do NOT run navigate concurrently with Track A.
-- **#7 style-provenance** = **data-scrml-sid**; GATED on §65 Wave-2 `<theme>` parse (unbuilt).
-- **Cask-0** = freezes STRUCTURE-not-content → **CUT-NOW** (un-gated by coverage). Crux D2 (schema-vs-content
-  split). Net-new = surface→daughter ownership map. Freeze = cross-repo tag pair. flobase mechanics → flogence inbox.
-- **protect-denylist** = overloaded-null → total-classify-UNKNOWN-strips; crux R-4 (scoped-strip + named warning).
-  ⚠️ conformance `protect/` has ZERO guard for the 6 leak shapes → ship red-then-green.
-- **typer-soundness** = HALVED (anon-struct-poison is a MISDIAGNOSIS); real bug = hostmethod-return-asis;
-  fix = Option-D curated host-method table (+ a GCP3 mirror for the equality silent-accept).
-
-## 📋 NEXT SESSION = EXECUTION (from the board doc)
-Buildable now: **Cask-0 cut** (un-gated, PA-direct — author the ownership map + D2 split + cross-repo tag) ·
-**protect-denylist** (lock-PA, red-then-green) · **typer Option-D** (concurrent/SPA) · **Track A** (pending
-Fork 3, off-navigate) · **§65 Wave-2 → #7** (concurrent). **SPA queue**: coverage-tail · ~66 negative-space +
-~40 engine cases · standing-gaps (19 MED/16 LOW) · string-blind fixes · fail-variant-arity E-TYPE-082 · flush ·
-#25 Windows pathFor · doc-debt (drop E-ATTR-012 · E-ERROR-010 rows). **Owed infra:** coupled-CI (flogence vs
-scrml HEAD). Also open: navigate Wave-1c/2/3 (lower urgency, scrml-completeness).
+## 📋 OPEN THREADS (awaiting bryan or next-session)
+- **fail-arity mint** (freeze-blocker `g-fail-variant-payload-arity`, still OPEN) — I probed: arity is unchecked
+  CONSTRUCTION-WIDE (not fail-only). Recommended a GENERAL code (E-TYPE-082-style) over error-specific E-ERROR-010.
+  **Awaiting bryan's mint ruling** → then dispatchable.
+- **Fork 3** (S251's Track-A gate) — is flogence's MCP stdio leg a v1 tandem-gate or fast-follow? **Awaiting bryan.**
+- **Cloud-maps CI** — drafted (`regen-maps-workflow-DRAFT`, GitHub Action on merge-to-main). Shared prereq w/ Peter:
+  commit project-mapper past the `.claude/` ignore. Parked, ready.
+- **2 freeze-COVERAGE residuals (MED):** a real-DB conformance adapter (unblocks ~6-8 SQL-engine-semantics cases +
+  the ss66 findings) · the class-attr-interp DG-002 bug. **13 SPEC-vs-compiler emission gaps** (ss66 §8.6/§39.12)
+  — a Rule-4 currency question: are those codes unbuilt (Nominal→v1.next) or SPEC over-claim? Needs triage.
+- **S251 buildable backlog** (from `docs/pre-v1-execution-board-2026-07-12.md`): Cask-0 cut (PA-direct) · protect-denylist
+  (lock-PA) · typer Option-D equality-half (post-freeze) · Track A (pending Fork 3) · §65 W2→#7. + SPA tail (ss66's
+  finding narrows the SQL-code coverage).
+- ss66 note: only 5/23 authorable; the rest are gaps/unreachable. The list's SQL-code-coverage assumption was wrong.
+- Housekeeping: ~21 prior-session stale worktrees (broad sweep owed) · the flogence `commit-lock-DISTILLED` inbox
+  message (moved to read/ unread — a flogence PA distillation of the commit-lock; read next session).
 
 ## 🔬 METHODOLOGY (the irreducible)
-- **Commit-lock: trust the tool, never `ps`.** Booted, `status` said HELD-by-S250-leased; I over-rode it with a
-  dead-pid `ps` check and inferred a crash — S250 was live. The exact anti-pattern the lock exists to kill. The
-  acquire-time pid ROTATES; the lease is authoritative. [[feedback_commit_lock_main_authority]] hardened.
-- **Read the FULL adopter thread before posting.** Posted the #26 Peter reply off the tail; it held only because
-  I'd root-caused from code independently. Read the whole issue next time.
-- **Adversarial review keeps earning it.** Fork A's agent had carve-out holes TWICE (§52 exclusion, CPS marshal
-  premise) that green masked — caught by compiling + inspecting emitted artifacts. Wave-1b's mode-inversion +
-  the same. Green ≠ complete. [[feedback_adversarial_verify_not_confirmatory]]
-- **DD-ahead-of-execution paid off:** verify-before-claim SHRANK two freeze-blockers (typer halved via
-  misdiagnosis; Cask-0 cut-now). Deliberate hard arcs before building.
+- **S239 adversarial review earned its keep TWICE this session** — both codegen dispatches shipped green self-verify
+  ("zero regressions, byte-identical corpus") that HID confirmed regressions the adversarial pass caught (soundness
+  inversion + a security leak). Green ≠ complete; the mandatory PA-side S239 is non-negotiable. [[feedback_adversarial_verify_not_confirmatory]]
+- **Verify-the-authoritative-real-thing prevented 2 corpus-ouroboros duplications** on the Peter lift (the 84-memory
+  drop; the pa-base-§3-already-has-the-ladder catch). Reading §3 BEFORE writing a "trigger discipline" caught a
+  near-duplicate to the flagship contract — the deliberation discipline validating itself.
+- **Commit lands despite a hook TIMEOUT** — the ss63-65 commit's pre-commit subset ran ~6.5min under mem pressure
+  and the shell timed out (exit 143), but HEAD had already advanced (the hook passed, commit finalized). Verify the
+  git STATE (HEAD/lock/staged), never the command exit. [[feedback_commit_hook_timeout_and_F_flag]]
+- **Memory-gated commit under concurrent agents** — held the sPA commit while free<6G + agents ran; branches are the
+  durable record meanwhile. [[feedback_memory_gated_commit_cross_session_oom]]
+- **Over-scoping correction** — I twice over-built (the Peter "lift"); bryan course-corrected toward simplicity.
+  Default to the SIMPLE reading of an ask; verify before elaborating an arc.
 
 ## 🚦 STATE @ CLOSE
-- git: scrml main `af6da1ee`, pushed (0/0). scrml-support: this wrap commits the 6 DD docs + board doc +
-  user-voice S251 + design-insights + board files, then pushes. Conformance **386/386** · gate green at close.
-- lock: RELEASED (S251). worktrees: cleanup attempted this wrap (dry-run first; ~20 present).
-- No live sibling PA.
+- git: scrml main `35a73e9f` (+ this wrap) — pushes at wrap; conformance **427/427**; full suite green at the
+  `55b49ff1` push. scrml-support `5ae170b` pushed. commit-lock RELEASED. No live sibling PA.
+- Board: active-sessions/S252.md (leading). Worktrees: this session's 6 landed removed (29→23); ~21 stale remain.
 
 ## pa.md directives in force
-R1-R5 · S239 adversarial (incl PA-side) · S138 R26 empirical · commit-lock (trust-tool-not-ps) · commit-to-main
-after authz · orchestrate-don't-grind + default-GO · DD-ahead-of-execution for hard arcs.
+R1-R5 · S239 adversarial (caught 2 regressions) · S138 R26 · commit-lock (trust-tool) · commit/push after authz ·
+orchestrate-don't-grind + default-GO · the deliberation ladder (verify-authoritative-real-thing before elaborating).
 
 ## Tags
-#session-251 #four-arcs-landed-pushed #fork-a-split #issue-26-p0-fixed #navigate-wave1b #pre-v1-strategy
-#five-dds-ratified #flogence-tandem #cask0-cut-now #typer-halved #do-it-right
+#session-252 #concurrent-to-leading #freeze-blockers-typer-stringblind #s239-caught-2x #spa-coverage-+36 #427-conformance
+#readme-shill #peter-is-tiny #pa-contract-dedup-NEXT-ARC #verify-caught-2-ouroboros #enormous-session
