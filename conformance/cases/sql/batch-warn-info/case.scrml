@@ -1,0 +1,13 @@
+${
+    <items> = []
+    server function loadPair(id) {
+        ?{`BEGIN`}
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
+        ?{`COMMIT`}
+        return { a, b }
+    }
+}
+<program db="test.db">
+    <button id="load" onclick=@items = loadPair(1)>Load</>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "sql-clean-pos",
+  "description": "§8.6 positive control — a well-formed `?{}` SQL query in a route-inferred server handler against a valid SQLite `<program db=\"./app.db\">`. A single `SELECT ... FROM tasks` with a `.all()` terminal is the canonical happy-path SQL shape: the driver resolves (relative path → sqlite), the query is a literal template with no interpolation, and there is exactly one SQL site so no coalescing envelope is synthesized. The whole E-SQL-* and E-BATCH-* families stay silent — pinned via `notCodePrefixes` so any future spurious member of either family fails this case.",
+  "language-version": "1.0",
+  "spec": "§8.6",
+  "rationale": "§8.6 defines the E-SQL-* / E-BATCH-* diagnostic families for malformed SQL contexts (bad driver prefix, `.prepare()`, unterminated `?{`, transaction-envelope composition). A conforming, well-formed `?{}` query fires none of them. This case asserts family-glob absence of both prefixes as the soundness backstop for the negative SQL cases.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SQL-", "E-BATCH-"]
+  }
+}

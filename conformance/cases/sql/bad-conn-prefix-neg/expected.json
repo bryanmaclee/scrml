@@ -1,0 +1,12 @@
+{
+  "id": "sql-bad-conn-prefix-neg",
+  "description": "§8.6 compile-time rejection — the `<program db=\"ftp://bad\">` connection string uses a URI scheme (`ftp://`) that is not a recognized `?{}` SQL driver. The db-driver resolver (§44.2 matrix) classifies the `db=` value by prefix; an unrecognized `scheme://` form has no driver and is rejected with E-SQL-005 during codegen. A `?{}` query is present (loadTasks) so the program actually resolves a driver for the enclosing `<program db>`, which is what fires the diagnostic.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/program-db-driver-resolution.test.js",
+  "spec": "§8.6",
+  "rationale": "§8.6 error table, E-SQL-005: an unrecognized database connection string prefix in a `db=` attribute SHALL be a compile error. §44.2 enumerates the legal driver matrix (`:memory:`, `sqlite:`, relative/absolute file paths, `postgres://`/`postgresql://`, `mysql://`); any other `scheme://` value (here `ftp://`) matches no driver and SHALL emit E-SQL-005. Resolution: use a supported connection string — a SQLite path (`./app.db`), `:memory:`, or a `postgres://` / `mysql://` URI.",
+  "expect": {
+    "codes": ["E-SQL-005"],
+    "notCodes": []
+  }
+}

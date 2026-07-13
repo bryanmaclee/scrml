@@ -1,0 +1,12 @@
+{
+  "id": "schema-clean-pos",
+  "description": "§39.12 positive control — a well-formed `<schema>` block placed correctly as an immediate child of `<program db=\"./app.db\">`, declaring a single `users` table with a primary key and legal column types (`integer`, `text`) plus recognized constraints (`primary key`, `not null`, `unique`). This is the canonical §39.2 valid shape; the whole E-SCHEMA-* family stays silent — pinned via `notCodePrefixes` so any future spurious member of the family fails this case.",
+  "language-version": "1.0",
+  "spec": "§39.12",
+  "rationale": "§39.12 defines the E-SCHEMA-* diagnostic family for malformed schema declarations (missing `db=`, duplicate blocks, misplacement, unknown column types, bad defaults/references/renames). A conforming `<schema>` block — correctly placed, with a primary key and only legal column types + constraints — fires none of them. This case asserts family-glob absence of the E-SCHEMA- prefix as the soundness backstop for the negative schema case.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-SCHEMA-"]
+  }
+}

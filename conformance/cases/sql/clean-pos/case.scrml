@@ -1,0 +1,9 @@
+${
+    <items> = []
+    function loadTasks() {
+        return ?{`SELECT id, text FROM tasks`}.all()
+    }
+}
+<program db="./app.db">
+    <button id="load" onclick=@items = loadTasks()>Load</>
+</program>

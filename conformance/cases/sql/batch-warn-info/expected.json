@@ -1,0 +1,15 @@
+{
+  "id": "sql-batch-warn-info",
+  "description": "§8.6 / §8.9.2 non-fatal diagnostic — a server handler with two or more coalescing-candidate `?{}` queries (the `SELECT` on users + the `SELECT` on posts) also contains an explicit `?{BEGIN}` (and `?{COMMIT}`). The explicit BEGIN suppresses the implicit per-handler transaction envelope the batch planner would otherwise synthesize (§8.9.2 / §19.10.5), and that suppression is surfaced as the WARNING-severity W-BATCH-001 so the author knows the implicit envelope did not compose. The `severity` assertion pins W-BATCH-001 as `warning` (§8.6 error table) — NOT `info`. NOTE (scaffold): the explicit `server` modifier is required here — the batch planner keys on the parse-time `isServer` flag, so a route-inference-escalated bare `function` does not reach the W-BATCH-001 path; the incidental W-DEPRECATED-SERVER-MODIFIER is expected and outside the asserted set (superset match).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/batch-planner.test.js",
+  "spec": "§8.6",
+  "rationale": "§8.9.2 normative statement: an explicit `?{BEGIN}` inside the handler suppresses the implicit per-handler transaction envelope and SHALL emit W-BATCH-001. §8.6 error table classifies W-BATCH-001 at Warning severity ('Explicit `?{BEGIN}` suppresses implicit per-handler transaction; use `transaction { }` or `.nobatch()` for clarity'). Resolution: replace the manual `?{BEGIN}` / `?{COMMIT}` with an explicit `transaction { }` block, or mark the outer queries `.nobatch()` to opt them out of coalescing.",
+  "expect": {
+    "codes": ["W-BATCH-001"],
+    "notCodes": [],
+    "severity": {
+      "W-BATCH-001": "warning"
+    }
+  }
+}

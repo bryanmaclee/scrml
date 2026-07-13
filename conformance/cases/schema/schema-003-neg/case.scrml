@@ -1,0 +1,10 @@
+<program db="./app.db">
+    <div>
+        <schema>
+            users {
+                id: integer primary key
+                email: text not null unique
+            }
+        </>
+    </div>
+</program>

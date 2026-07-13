@@ -1,0 +1,12 @@
+{
+  "id": "schema-schema-003-neg",
+  "description": "§39.12 compile-time placement rejection — the `<schema>` block is nested inside a `<div>` rather than sitting as an immediate child of the `<program>` root. The gauntlet placement check walks the AST with a parent-kind stack; a `state`/`stateType:\"schema\"` node whose immediate parent is anything other than the `<program>` root markup is rejected with E-SCHEMA-003. Here the schema's parent is `<div>`, so the diagnostic fires.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/e-schema-003-placement.test.js",
+  "spec": "§39.12",
+  "rationale": "§39.12 error table + §39.3 normative statement: a `<schema>` block SHALL appear as an immediate child of the `<program>` root. A `<schema>` block nested inside any other block (logic context, component body, `<page>`, `<db>`, `<div>`, etc.) SHALL be a compile error (E-SCHEMA-003). Resolution: move the `<schema>` block out so it is a direct child of `<program>`.",
+  "expect": {
+    "codes": ["E-SCHEMA-003"],
+    "notCodes": []
+  }
+}
