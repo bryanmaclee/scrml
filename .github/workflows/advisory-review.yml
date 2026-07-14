@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: read              # read the diff
       pull-requests: write         # post the review comment(s)
+      id-token: write              # GitHub-native OIDC — the action authenticates its GH API calls via this (no App install / no explicit github_token needed; official pr-review examples use it)
     steps:
       - uses: actions/checkout@v6
         with:
