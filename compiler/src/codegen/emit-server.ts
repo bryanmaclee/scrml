@@ -971,6 +971,19 @@ function collectEndpointDecls(nodes: any[]): any[] {
   return out;
 }
 
+/**
+ * MOD `exportRegistry` shape (per-module by-name export metadata) as threaded
+ * into the server emitters. Named once so both entry points
+ * (`generateServerJs`, `generateHeadlessServerJs`) share the exact type without
+ * respelling the component-flag field (P3-FOLLOW routing-read budget: this file
+ * is allowed a single TYPE-ANNOTATION mention; codegen routes on `category`/
+ * `isAsync`, never on the component flag).
+ */
+type ServerExportRegistry = Map<
+  string,
+  Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
+>;
+
 /** A single parsed arm payload binding (§18.0.1 / §51.0.B.1). */
 interface EndpointArmBinding {
   discard: boolean;        // `_` — bind nothing
@@ -1022,7 +1035,24 @@ export function generateServerJs(
   // the per-file CompileContext. Consulted (with the ctx path) to auto-await
   // Promise-returning stdlib import calls in server-fn bodies. NULL → no stdlib
   // await (test harnesses / files with no stdlib imports).
-  exportRegistryLegacy?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null,
+  exportRegistryLegacy?: ServerExportRegistry | null,
+  // Unit 1 (server-program-shape Fork 2A) — PROGRAM SHAPE axis. The §61
+  // `<endpoint>` + §37 SSE route-handler emit + the WinterCG `fetch`-handler
+  // assembly are PROGRAM-SHAPE-AGNOSTIC: they are a server route handler + its
+  // transport framing, independent of whether the program also ships a UI. This
+  // parameter selects which shape hosts them:
+  //   - "web-app"  (DEFAULT) — today's behavior EXACTLY: the route handlers ride
+  //                 alongside the web-`<program>` scaffold (session/CSRF middleware,
+  //                 per-route CSRF gates, §52 server-authority/serverLoad/mount-
+  //                 hydrate routes, SSR HTML composition). BYTE-IDENTICAL to the
+  //                 pre-Fork-2A emit — every scaffold gate below defaults true.
+  //   - "headless" — a listener-owning program with NO UI: route handlers + the
+  //                 `fetch` handler mounting them + the opt-in `cors=` middleware
+  //                 ONLY. The web-app-only scaffold (CSRF, SSR, session/serverLoad/
+  //                 mount-hydrate) is STRUCTURALLY omitted (see `_webAppShape` gates).
+  // Threaded positionally (mirrors modeLegacy) so every existing call site keeps
+  // the default. Prefer the `generateHeadlessServerJs` entry for the headless path.
+  programShapeLegacy?: "web-app" | "headless",
 ): string {
   // Support both new (ctx) and legacy (fileAST, routeMap, errors, authMW, mwConfig) signatures
   let fileAST: any;
@@ -1139,6 +1169,21 @@ export function generateServerJs(
   // param; defaults to "browser" so every legacy positional call site (and all
   // browser-mode compiles) behave exactly as before.
   const effectiveMode: "browser" | "library" = ctxForCache?.mode ?? modeLegacy ?? "browser";
+
+  // Unit 1 (server-program-shape Fork 2A) — resolve the PROGRAM SHAPE. Read from
+  // the ctx (new signature) else the trailing legacy positional; defaults to
+  // "web-app" so every existing call site is byte-identical. `_webAppShape` is
+  // the master gate ANDed into each web-app-only scaffold block below (session/
+  // CSRF middleware, per-route CSRF gates, §52 server-authority/serverLoad/mount-
+  // hydrate routes, SSR HTML composition). In "headless" mode every such gate is
+  // false, so a listener-owning program emits ONLY route handlers + the `fetch`
+  // aggregate + the opt-in `cors=` middleware — no html/client/CSRF/SSR scaffold.
+  // The route-handler + `fetch` emit itself is shape-INVARIANT (it runs in both
+  // shapes); the shape axis gates the SCAFFOLD, never the routes.
+  const programShape: "web-app" | "headless" =
+    (ctxForCache as { programShape?: "web-app" | "headless" } | null)?.programShape
+      ?? programShapeLegacy ?? "web-app";
+  const _webAppShape: boolean = programShape !== "headless";
 
   // S95 Bug 2 — set up the variant-fields registry for the rewriter so that
   // `.Variant(args)` payload-bearing constructor calls in server-fn bodies
@@ -1469,7 +1514,17 @@ export function generateServerJs(
   // it (byte-identical). The store is process-global (one session store shared
   // across every emitted server route, so a login on one route is visible to a
   // serverLoad on another).
-  if (_needsSessionInfra) {
+  // Fork 2A: cookie-session infra is WEB-APP-ONLY and UNIFORMLY ABSENT in headless
+  // shape (`&& _webAppShape`). A `kind="tool" serve=` listener-owning program has
+  // no cookie `scrml_sid` / ambient credential — its auth story is BEARER (Forks
+  // 5/6, a later unit), NOT cookie-session. So in headless there is NO session
+  // store / middleware / @currentUser resolver / serverLoad-401 gate, AND (in
+  // lockstep) no reference to them: the route-handler auth-check + per-route CSRF +
+  // SSR CSRF-meta call sites are `_webAppShape`-gated below, and the §38 channel WS
+  // upgrade's cookie-auth reference is gated off via the `_webAppShape` flag passed
+  // to `emitChannelServerJs`. Headless routes/channels carry NO auth guard until
+  // the bearer unit lands (recorded as a deferred gap in progress.md).
+  if (_needsSessionInfra && _webAppShape) {
     // §40.2 / §39.2.3 — with `<program auth=>` + `csrf="auto"` the CSRF token is
     // a SESSION-BOUND SYNCHRONIZER token (not the no-auth double-submit cookie).
     // When csrf is auto the middleware mints + surfaces it (see below); otherwise
@@ -1539,10 +1594,13 @@ export function generateServerJs(
   }
 
   // Session/auth middleware (Option C hybrid) — the page-navigation 302 gate, CSRF
-  // helpers, and session.destroy() route. The session MIDDLEWARE + store now live
-  // in the §52 infra block above (emitted whenever auth is configured, so the
-  // hoisted `_scrml_session_middleware` reference here always resolves).
-  if (authMiddlewareEntry) {
+  // helpers, and session.destroy() + §20.5 session-projection HTTP routes. The
+  // session MIDDLEWARE + store live in the §52 infra block above.
+  // Fork 2A: web-app-only cookie-session machinery — UNIFORMLY ABSENT in headless
+  // shape (`&& _webAppShape`). No `_scrml_auth_check`, no `_scrml_generate/validate_csrf`,
+  // and NO reserved `_scrml_session_destroy` / `_scrml_session_projection` HTTP
+  // routes leak into a headless `routes` array. Headless auth is bearer (later unit).
+  if (authMiddlewareEntry && _webAppShape) {
     const { loginRedirect, csrf, sessionExpiry } = authMiddlewareEntry;
 
     lines.push("// --- Session expiry (compiler-generated) ---");
@@ -1632,7 +1690,12 @@ export function generateServerJs(
     return m !== "GET" && m !== "HEAD";
   });
 
-  if (!authMiddlewareEntry && hasStateMutatingRoutes) {
+  // Fork 2A: web-app-only cookie double-submit CSRF. A headless program's state-
+  // mutating routes authenticate by explicit bearer token (CSRF-exempt by
+  // construction), so it emits NO baseline CSRF helpers (`&& _webAppShape`) — kept
+  // consistent with the per-route `useBaselineCsrf` gate below (helpers + call
+  // sites are both `_webAppShape`-gated, so neither dangles).
+  if (!authMiddlewareEntry && hasStateMutatingRoutes && _webAppShape) {
     lines.push("// --- Baseline CSRF protection (compiler-generated, double-submit cookie) ---");
     lines.push("function _scrml_ensure_csrf_cookie(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
@@ -2075,7 +2138,9 @@ export function generateServerJs(
         lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return null; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !Number.isNaN(Number(_v))) return Number(_v); return _v; })();`);
       }
 
-      if (authMiddlewareEntry) {
+      // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
+      // route gates via bearer, not `_scrml_auth_check` which is session-infra).
+      if (authMiddlewareEntry && _webAppShape) {
         lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
         lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
         lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
@@ -2172,7 +2237,11 @@ export function generateServerJs(
 
     const httpMethod: string = route.explicitMethod ?? "POST";
     const isStateMutating: boolean = httpMethod !== "GET" && httpMethod !== "HEAD";
-    const useBaselineCsrf: boolean = !authMiddlewareEntry && isStateMutating;
+    // Fork 2A: `_webAppShape` — headless routes never emit cookie double-submit
+    // CSRF (false → the per-route emit takes the non-CSRF `else` branch below, and
+    // the baseline CSRF helper defs above are gated identically). Bearer-auth is
+    // CSRF-exempt by construction, so a state-mutating headless route is clean.
+    const useBaselineCsrf: boolean = !authMiddlewareEntry && isStateMutating && _webAppShape;
 
     // ----------------------------------------------------------------------
     // Ext 1 M1.5 — multi-stub emit.
@@ -2318,13 +2387,15 @@ export function generateServerJs(
     lines.push(`  const _scrml_url = new URL(_scrml_req.url, 'http://localhost');`);
     lines.push(`  const route = { query: Object.fromEntries(_scrml_url.searchParams) };`);
 
-    if (authMiddlewareEntry && isStateMutating) {
+    // Fork 2A: cookie-session auth-check + auth-path CSRF are web-app-only (they
+    // reference the `_needsSessionInfra` scaffold, gated identically above).
+    if (authMiddlewareEntry && isStateMutating && _webAppShape) {
       lines.push(`  // Auth check (compiler-generated)`);
       lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
       lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
     }
 
-    if (authMiddlewareEntry?.csrf === "auto" && isStateMutating) {
+    if (authMiddlewareEntry?.csrf === "auto" && isStateMutating && _webAppShape) {
       lines.push(`  // CSRF validation (compiler-generated, auth path — §40.2 session synchronizer token)`);
       lines.push(`  const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);`);
       lines.push(`  if (!_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {`);
@@ -3186,7 +3257,9 @@ export function generateServerJs(
   // all loaders in parallel (Promise.all) and returns a keyed JSON object.
   // Tier 1 coalescing (§8.9.2) applies automatically when the loaders share
   // this handler (sibling DGNodes) — see §8.11.2.
-  if (_needsMountHydrate) {
+  // Fork 2A: the /__mountHydrate route is client-cell hydration infra (a headless
+  // program has no client cells to hydrate) — web-app-only (`&& _webAppShape`).
+  if (_needsMountHydrate && _webAppShape) {
     const mhHandlerName = "_scrml_mountHydrate_handler";
     const mhRouteName = "_scrml_route___mountHydrate";
     lines.push("// --- §8.11 synthetic __mountHydrate route (compiler-generated) ---");
@@ -3229,7 +3302,10 @@ export function generateServerJs(
   // client-side load IIFE (emit-sync emitServerAuthorityLoad) POSTs to it on
   // mount and lands the rows via the ordinary reactive set. The WRITE is the
   // developer's own `?{}` server fn (§52.6.2, Q1=C) — no write route.
-  for (const inst of _serverAuthorityInstances) {
+  // Fork 2A: §52 server-authority /__serverLoad routes hydrate CLIENT reactive
+  // cells; a headless (no-UI) program has none, so the loop is shape-gated (the
+  // iterable is empty in headless mode → zero /__serverLoad routes emitted).
+  for (const inst of (_webAppShape ? _serverAuthorityInstances : [])) {
     const varName = inst.name as string;
     const table = (inst as any).serverAuthorityTable as string;
     const slHandler = `_scrml_serverLoad_${varName}_handler`;
@@ -3285,7 +3361,9 @@ export function generateServerJs(
   // bound params are handled identically. Param-free only (the filter already
   // excludes param-bearing forms); the query never leaks to the client (the
   // route is SERVER-only, and the client fetch POSTs an empty body).
-  for (const decl of _patternCLoadDecls) {
+  // Fork 2A: Pattern-C /__serverLoad routes are also client-cell hydration —
+  // shape-gated (empty iterable in headless mode → zero routes emitted).
+  for (const decl of (_webAppShape ? _patternCLoadDecls : [])) {
     const varName = decl.name as string;
     const sqlNode = (decl as any).sqlNode;
     const slHandler = `_scrml_serverLoad_${varName}_handler`;
@@ -3364,7 +3442,11 @@ export function generateServerJs(
     // route is emitted even for an auth+csrf app with NO server-authority seed:
     // the meta-tag first-paint token delivery needs a per-request HTML rewrite.
     const _csrfMetaInject = authMiddlewareEntry?.csrf === "auto";
-    if (_hasSsrSeed || _csrfMetaInject) {
+    // Fork 2A: the SSR pre-render / CSRF-meta HTML-composition route is the
+    // request-time text/html emitter for a UI program — web-app-only. A headless
+    // listener-owning program emits no html (`&& _webAppShape`); this also keeps
+    // the `_scrml_session_middleware` reference inside (CSRF-meta) from dangling.
+    if ((_hasSsrSeed || _csrfMetaInject) && _webAppShape) {
       const _ssrHtmlBase = _pathBasename(filePath, ".scrml");
       const _ssrServedPath = computeServedPath(filePath, (fileAST as any)._outputBaseDir);
       // §52 (S233) Fork-3 — a Pattern-C seed query reads @currentUser iff it
@@ -3565,6 +3647,11 @@ export function generateServerJs(
         errors,
         filePath ?? "",
         !!authMiddlewareEntry,
+        // Fork 2A — the WS upgrade cookie-session auth guard (`_scrml_auth_check`)
+        // is web-app-only; a headless listener-owning program's channels carry no
+        // cookie auth (bearer is the later unit), so the reference is gated OFF in
+        // headless — in lockstep with the suppressed `_scrml_auth_check` definition.
+        _webAppShape,
       );
       for (const l of chServerLines) lines.push(l);
     }
@@ -4170,4 +4257,57 @@ export function generateServerJs(
   }
 
   return finalEmitted;
+}
+
+// ---------------------------------------------------------------------------
+// Unit 1 (server-program-shape Fork 2A) — the HEADLESS-shape entry.
+//
+// A thin front door onto the program-shape-agnostic emitter (`generateServerJs`
+// with `programShape="headless"`). It emits the SAME §61 `<endpoint>` + §37 SSE
+// route handlers + the WinterCG `fetch` aggregate a web-app program emits, but
+// STRUCTURALLY omits the web-app-only scaffold: no session/CSRF middleware, no
+// per-route CSRF gate, no §52 server-authority/serverLoad/mount-hydrate routes,
+// no SSR HTML composition. (html + the client bundle are separate emitters at
+// the orchestration layer and are simply not invoked for a headless program.)
+//
+// This proves the route/fetch emit is SEPARABLE from the UI pipeline. The real
+// consumer is Unit 2 (the `kind="tool" serve=` serve-harness), which mounts the
+// returned `routes`/`fetch` onto a `Bun.serve` listener. Unit 1 exercises it via
+// a unit test only — it adds NO authored surface and NO serve-harness.
+//
+// SIGNATURE — mirrors `generateServerJs`'s positional parameter order EXACTLY for
+// params 1-7 + protectAnalysis + exportRegistry (the `mode` slot is forced
+// "browser" and `programShape` is forced "headless"), so a caller reusing
+// `generateServerJs`'s argument order maps every object to the right slot. NOTE on
+// `authMiddleware`: it is accepted for signature-compatibility but a headless
+// program has NO cookie-session auth — the shape gates UNIFORMLY suppress every
+// cookie-session definition AND reference in "headless" shape, so passing an auth
+// entry here yields NO auth guard (bearer is a later unit; see the deferred gap in
+// progress.md — Unit 2's `serve=` surface should warn/error on cookie `auth=`).
+// ---------------------------------------------------------------------------
+export function generateHeadlessServerJs(
+  fileAST: any,
+  routeMap: any,
+  errors: CGError[] = [],
+  authMiddleware: any | null = null,
+  middlewareConfig: any | null = null,
+  batchPlan?: any,
+  batchPlannerErrors?: Array<{ code: string; message: string; span?: any }>,
+  protectAnalysis?: unknown,
+  exportRegistry?: ServerExportRegistry | null,
+): string {
+  return generateServerJs(
+    fileAST,
+    routeMap,
+    errors,
+    authMiddleware,       // pos 4 — mirrors generateServerJs; cookie-session effects are
+                          //          uniformly _webAppShape-gated off in headless shape.
+    middlewareConfig,     // pos 5
+    batchPlan,            // pos 6
+    batchPlannerErrors,   // pos 7
+    "browser",            // pos 8 — effectiveMode (browser-target framing; not the §21.5 library carve-out).
+    protectAnalysis ?? null, // pos 9
+    exportRegistry ?? null,  // pos 10
+    "headless",           // pos 11 — programShape (the Fork 2A axis).
+  );
 }
