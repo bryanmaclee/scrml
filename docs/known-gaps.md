@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 19 |
+| MED | 21 |
 | LOW | 19 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2877,3 +2877,9 @@ SPEC §44.7.1/§21.5.1: a pure-fn file with `?{}` and NO top-level `<db src>` SH
 
 ### g-tool-over-imports-all-lib-exports — a `kind="tool"` importing a SUBSET of a lib emits an import of ALL the lib's exports, all resolved to `.js` — `NEW S239 (flogence R26 fleet --route); MED; open (crash-half fixed by W5b)`
 A tool source importing only `{ routeScore, R2_THRESHOLD }` from `fsp-core.scrml` emitted `import { routeScore, R2_THRESHOLD, ensureFspSchema, routeSemantic } from "./fsp-core.js"` — pulling in unreferenced exports AND resolving every symbol to `.js`. Two bugs: (1) OVER-IMPORT (whole export set, not the named subset); (2) resolves `?{}` server exports to `.js`. PRE-W5b this crashed (`SyntaxError: Export named 'ensureFspSchema' not found` — the `?{}` exports were null-stubbed in `.js`, Finding E). **W5b (S239) FIXES the crash half** — `?{}` lib fns now emit as real in-process callables in the tool-dep `.js`, so the over-imported db fns resolve. The OVER-IMPORT remains: emit-tool.ts buildImportHeader should emit ONLY the source-referenced named subset, not the whole export set (root = survey `fileAST.imports`/auto-gather). flogence workaround: pure-only router split. Surfaced by flogence fleet --route R26 (1251). <!-- @gap id=g-tool-over-imports-all-lib-exports sev=MED status=open -->
+
+### G-SQL-TRANSACTION-UNIMPLEMENTED — `transaction {}` fires E-SCOPE-001 + is dropped (unimplemented in the live pipeline) — `NEW S254; MED; open`
+Surfaced by the real-DB conformance adapter (Part 1). A `transaction { … }` block statement fires E-SCOPE-001 in the function-body parser and emits a bare `transaction;` (block dropped) — even the canonical `gauntlet-s20-sql/sql-transaction-001.scrml` sample fails to compile. §8.5.3 rollback semantics do not run. Candidate V1 build arc. <!-- @gap id=g-sql-transaction-unimplemented sev=MED status=open -->
+
+### G-SQL-ERROR-SURFACE-UNWIRED — server-side SQL errors never reach a scrml `SqlError`/`!{}` — `NEW S254; MED; open`
+Surfaced by the real-DB conformance adapter (Part 1). A thrown Bun.SQL error on the server (constraint violation etc.) is NOT mapped to a `SqlError` variant/envelope — `grep -rn SqlError compiler/src` = 0. So a `!{}` arm `::ConstraintViolation` (§8.7 / §19.8.1) can NEVER fire; violations are only observable via `INSERT OR IGNORE` + COUNT. Candidate V1 build arc. <!-- @gap id=g-sql-error-surface-unwired sev=MED status=open -->

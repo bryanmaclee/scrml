@@ -6,6 +6,17 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
 
+### 2026-07-14 (S254 — **⭐ PR-FLOW CUTOVER (main branch-protected) + real-DB Part 1 & E-SCHEMA-004 landed via the first PR + state-cell-singleton deliberation trail**)
+
+Enormous session. Landed two arcs via the NEW PR-flow, then cut the whole main-authority model over to GitHub branch protection and retired the commit-lock. Ran bryan's nagging state-cell-singleton question to a documented verdict.
+
+- **⭐ PR-flow cutover** — `main` is now GitHub **branch-protected** (`enforce_admins` · required `gate` check · PR-only · 0 approvals so the merge is the stamp). Direct pushes to main are dead; the PA works branch→PR→gate→merge. **Commit-lock RETIRED** (branch protection owns main natively — proven when Peter pushed straight through the held lock). Pre-push hook relaxed (feature-branch pushes skip the local full suite; cloud `gate` on the PR is authoritative; bryan-authorized). First dogfood: **PR #30** merged `29de5b32`.
+- **real-DB adapter Part 1** (`0cc5ab15`) — real `Bun.SQL(":memory:")` seam behind opt-in `sqlEngine:"real"` + 8 runtime cases (WHERE/JOIN/GROUP-BY/ORDER-LIMIT/RETURNING/DELETE/UNIQUE). Conformance 436→444. Salvaged from a 2×-stalled dispatch; S239 workflow review (17 agents) → 4 seam hardenings (false-green guard · identifier escaping · handle-close · clear DDL error), all PA-direct.
+- **E-SCHEMA-004** (`78b0de96`) — strict §39.4 `<schema>` column types wired (one of the 13 ss66 zero-emission codes). Migrated 15 `.scrml` + 2 inline test fixtures; full suite 0 fail.
+- **State-cell-singleton trail** — DD: parameterized-singleton = NO-GAP (composed by engine+component). DEBATE: the real itch (free-shaped client-auth cross-file shared cell) → **P3 narrow `<shared>` cell wins** (ties P1 16-16), GATED on a witnessed-corpus gate + an S178-reopen ruling. Trail in `scrml-support/docs/deep-dives/`.
+- **Findings filed** — 2 live compiler gaps (§8.5.3 `transaction{}` unimplemented; §8.7 SQL-error→`SqlError` unwired). Adversarial cloud check scoped (advisory-not-hard-required recommended).
+- **Test:** conformance 444/444; full unit+integration+conformance 0 fail. CI `gate` green on main.
+
 ### 2026-07-13 (S253 — **PA-contract fold (pa-base v2) + Peter onboarded + 3 schema-decl codes + E-TYPE-082 construction-arity (+6 conformance → 433) + ⭐ cloud-PA gate offload (push wall-time solved)**)
 
 An enormous single-writer session. The **PA-contract dedup** landed (the S217-deferred grown-form

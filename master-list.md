@@ -94,6 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `7bb9e587` — chore(s253): WRAP — hand-off + changelog + known-gaps(regen) + delta-log; E-TYPE-082 BRIEF archived — **pushed**
 - `ea1d1067` — chore(s252): WRAP — hand-off + changelog + known-gaps currency + user-voice; PA-contract dedup = next arc — **pushed**
 - `b869eea7` — chore(s251): WRAP — hand-off + changelog + rotate S250 hand-off — **pushed**
 - `a3198d60` — chore(s250): WRAP — hand-off + changelog + delta-log [474]-[482] — **pushed**
@@ -101,7 +102,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `1e80de67` — chore(s248): WRAP (no push, branch-baton→S249) — hand-off + delta-log [452]-[465] + inbox — **pushed**
 - `fe91bb26` — chore(s245): WRAP — hand-off CLOSE + delta-log [438]-[446] + changelog + gap-state regen — **pushed**
 - `f9d37153` — chore(s244): WRAP — CSS-native model (SPEC §65 draft) + E-CG-001 HIGH + flobase boot fix + string-blind reverted — **pushed**
-- `02425f54` — chore(s243): WRAP — hand-off CLOSE + changelog + delta-log [415]-[432] + BRIEF-P1 — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
