@@ -1,0 +1,52 @@
+# Advisory AI code review — a NON-BLOCKING second-opinion `/code-review` on every code PR.
+#
+# WHY (S255): the PA runs its own adversarial `/code-review` before landing ITS OWN dispatches (S239),
+# but that pass does NOT cover human-authored PRs (bryan-direct) or Peter's (pjoliver11) contributions.
+# This closes that gap — independent review on every code PR the PA never dispatched.
+#
+# ADVISORY BY CONSTRUCTION: this workflow is deliberately LEFT OFF the branch-protection required checks.
+# The deterministic `ci.yml` `gate` stays the sole merge-blocker; this job only comments (never fails the
+# PR on findings — AI review is a nondeterministic second opinion, gating on it would false-block).
+#
+# ACTIVATION: needs the `ANTHROPIC_API_KEY` repo secret (`gh secret set ANTHROPIC_API_KEY`). Until it is
+# set, a triggered run errors → a HARMLESS advisory-red check (off the required list, cannot block a merge).
+#
+# Comment-only ⇒ the default GITHUB_TOKEN suffices (the "GITHUB_TOKEN commits don't re-trigger CI" gotcha
+# only bites commit-producing jobs; this pushes nothing). NOTE: scrml is a PUBLIC repo — fork PRs from
+# external contributors get no secrets, so this won't run on them (same-repo branches only: bryan + Peter).
+
+name: AI Code Review (advisory)
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+    paths:                                  # skip docs-only / bookkeeping PRs → save tokens
+      - "compiler/**"
+      - "stdlib/**"
+      - "lsp/**"
+
+concurrency:                                # cancel a superseded review when a new commit is pushed
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    # ⚠️ Do NOT add this job to branch-protection required checks — that is what keeps it ADVISORY.
+    permissions:
+      contents: read              # read the diff
+      pull-requests: write         # post the review comment(s)
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Install the packaged /code-review skill and run it on this PR's diff
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          use_sticky_comment: true   # one updating PR comment instead of a new one per push
+          claude_args: "--model claude-sonnet-4-6 --max-turns 15"
