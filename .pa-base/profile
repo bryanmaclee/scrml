@@ -3,6 +3,13 @@
 # The flobase /boot reads this to know the module-set + the Profile-A read-set. It does NOT
 # replace the contract — it POINTS at it. Authority always defers to ../scrml-support/pa-base.md +
 # ../scrml-support/pa-scrml-overlay.md (S253 fold; the pa-scrml.md monolith is retired → archive/).
+#
+# ⚑ PR-FLOW (S255) — scrml `main` is GitHub BRANCH-PROTECTED. Land via feature branch → push →
+#   `gh pr create` → cloud CI `gate` green → `gh pr merge`. NO direct commit/push to main. The
+#   commit-lock is RETIRED (branch protection owns main). scrml-support is NOT protected (direct
+#   push). Full instantiation: pa-scrml-overlay.md fills {{landing_command_fills}}/{{coherence_check_fills}}/
+#   {{concurrent_sessions_fills}}/{{wrap_step_fills}}/{{git_hook_fills}}. The GATE/CONTINUITY/
+#   CONCURRENT-SESSIONS/CONVENTIONS lines below are annotated for PR-flow inline.
 
 IDENTITY:
   git config user.name -> slugify -> first token -> read ../scrml-support/pa-profile-<slug>.md
@@ -20,7 +27,10 @@ SCOPE:  large — compiler/src ~24.7K LOC · SPEC.md ~24K lines/~410k tokens · 
         18 stdlib modules · samples/ + examples/ · lsp/ + editors/. Single operator (bryan) / two machines.
 GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-on).
   - pre-commit hook: `bun test compiler/tests/{unit,integration,conformance} --bail` (0 failures = contract).
-  - pre-push (config B, this machine): FULL `bun run test` (~5min) — NEVER --no-verify without authz.
+  - pre-push (config B, this machine): RELAXED (S254) — a NEW-REF feature-branch push SKIPS the full suite
+    (cloud `gate` on the PR is authority); release-tag/forced pushes still run FULL `bun run test`. NEVER --no-verify without authz.
+  - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`unit+conformance+gauntlet`) — GREEN gates the PR merge.
+    Boot pulls status: `gh run list --branch main --limit 3` + `gh pr list`. This REPLACES the retired commit-lock main-authority check.
   - conformance: `bun conformance/run.ts` (69->~220 cases; DATA-not-TS; the language-1.0 gate).
   - R26 EMPIRICAL (S138): HIGH codegen fixes re-compile real adopter .scrml on the post-fix baseline
     before claim-closed (regression-tests-pass != empirical-pass). Reverse-direction: verify-before-dispatch.
@@ -55,7 +65,7 @@ PROFILE-B read-set (THIN/execution — ONE landed-spec arc whose hand-off+brief 
   scope_blindness guardrail: escalate to A if the arc needs design/context the thin reads don't carry.
   DEFAULT = Profile A when the user gives no signal. The USER picks; PA may recommend, never auto-switch.
 
-CONTINUITY store (PA is single-writer to main's HEAD + durable state):
+CONTINUITY store (PR-flow: main's HEAD is advanced by PR merge [gate-serialized, branch-protected], NOT direct PA commit; PA remains single-AUTHORIZER of durable state):
   live hand-off: hand-off.md   rotate -> handOffs/hand-off-<N>.md
   delta-log: handOffs/delta-log.md (PA-written terse stream; flogence bridge.ts consumes it for the digest)
   changelog: docs/changelog.md   gaps: docs/known-gaps.md (+ `bun scripts/state.ts` §0 rollup)
@@ -70,18 +80,17 @@ CROSS-MACHINE (S43 — the thing a thin boot drops; two machines, each a separat
   (This exact miss happened S240: scrml-support was 141 commits behind; pa-scrml.md read as absent.)
   AT WRAP, surface push-state for every repo touched; NEVER silent unpushed work.
 
-CONCURRENT-SESSIONS (S242/S243 — the pre-wrap-next-session-start pattern; read-set step 0.5 is the boot half):
-  >1 PA session live (cross-machine OR a successor booted BEFORE the predecessor wraps) => the
-  `../scrml-support/handOffs/active-sessions/` board is the present-tense partition signal (the hand-off is a
-  boot snapshot; the delta-log/digest are past-tense single-writer + collide cross-machine). Boot step 0.5 is
-  UNCONDITIONAL: REGISTER your S<N>.md at boot even solo (a solo session that skips it is invisible to its own
-  later successor — the S243 miss, which made the S244 pre-wrap boot false-alarm S243's live Realtime-P1 agent
-  as "lost"), and READ the board before taking work. A LIVE sibling => SUCCESSOR-mode: full session on
-  NON-intersecting write-footprints; sibling in-flight dispatches are CLAIMED not lost (no false alarms); only
-  the WRAP defers (needs the predecessor's full hand-off + wrap signal). S-number minted at the serial wrap
-  point. v2-hardened protocol: `active-sessions/README.md` (footprint claims + claims.md CAS via ff-only push +
-  lease-until + pre-push self-revalidation). Durable home: a flobase `continuity`/`concurrent-sessions` module
-  (README names it; proposal routed to flogence S244). This is the scrml reference flobase emulates until then.
+CONCURRENT-SESSIONS (PR-FLOW, S255 — main-authority is now branch protection, NOT the commit-lock):
+  MAIN-AUTHORITY = GitHub branch protection (native, forge-enforced). The COMMIT-LOCK IS RETIRED
+  (marker active-sessions/COMMIT-LOCK-RETIRED.md — no acquire/release/heartbeat/status). Serialization =
+  PR merge-order (strict:true → the 2nd of two conflicting PRs rebases; the cloud `gate` full-suite is the
+  write-skew backstop). The claims.md footprint-CAS is no longer load-bearing (history only).
+  The BOARD (active-sessions/S<N>.md) is SUPERSEDED for authority but RETAINED for cross-machine VISIBILITY:
+  boot step 0.5 still REGISTER your S<N>.md even solo (a solo session invisible to its own pre-wrap successor
+  is still the S243 miss) + READ the board. A LIVE sibling => SUCCESSOR-mode: full session on NON-intersecting
+  work; sibling open PRs / in-flight dispatches are CLAIMED not lost; only the WRAP defers. Boot authority
+  check = `gh run list --branch main` + `gh pr list` (replaces `commit-lock.sh status`). Full instantiation:
+  overlay {{concurrent_sessions_fills}}. Durable home: a flobase continuity module (scrml is the reference).
 
 PROJECT-INTENT: scrml is "the future of how programming is done for the browser" (Rule 2) — a WHOLE-STACK
   compiler: the developer writes markup+logic+style+data in one .scrml; the compiler owns routing, server/
@@ -92,10 +101,11 @@ PROJECT-INTENT: scrml is "the future of how programming is done for the browser"
 
 CONVENTIONS (the load-bearing ones; full text in pa-base.md + pa-scrml-overlay.md):
   5 Rules (no-marketing-unprompted · full-production-fidelity · right-beats-easy · SPEC-normative · shoot-straight/
-  field-directness) · Profile A default · commit-to-main ONLY after explicit in-session authorization ·
-  commit PATHSPEC form + background-commit (dodge config-B post-commit-hook timeout; foreground push needs
-  timeout>=300000) · S147 coherence (origin/main...HEAD 0/0 after push) · S226 landing-concurrency (3-way-merge
-  shared files) · S67 file-delta landing · S88/S90/S99/S126 worktree isolation + path discipline · S136 BRIEF.md
-  archival · S219 orchestrate-don't-grind + default-GO (only a blocking-Q pauses) · S227 dock (query-not-grep) ·
-  `---` answer-delimiter · scope principle (current-truth-only in scrml; stale -> scrml-support) · doc-currency
-  status: enum + same-landing supersession.
+  field-directness) · Profile A default · PR-MERGE-to-main ONLY after explicit in-session authorization (S255;
+  was direct-commit) · commit PATHSPEC form + background-commit (dodge config-B post-commit-hook timeout;
+  foreground push needs timeout>=300000) · S147 coherence (origin/main...HEAD 0/0 after post-merge re-sync) ·
+  landing-concurrency now at PR-rebase (strict:true up-to-date; 3-way on conflict) · S67 file-delta REVIEW
+  survives → lands onto a feature branch → PR → `gate` → merge (NOT direct main commit) · S88/S90/S99/S126
+  worktree isolation + path discipline · S136 BRIEF.md archival · S219 orchestrate-don't-grind + default-GO
+  (only a blocking-Q pauses) · S227 dock (query-not-grep) · `---` answer-delimiter · scope principle
+  (current-truth-only in scrml; stale -> scrml-support) · doc-currency status: enum + same-landing supersession.
