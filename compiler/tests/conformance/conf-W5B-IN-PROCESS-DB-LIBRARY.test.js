@@ -13,11 +13,12 @@
  * (routed from `codegen/index.ts` for a db-context tool-dep lib).
  */
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
 
 function compileToolWithDbLib(libSrc, toolSrc, slug) {

@@ -16,12 +16,13 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
 import { generateMachineTestJs } from "../../../src/codegen/emit-machine-property-tests.ts";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 function compileSrcWithFlag(source, flag, testName = `s26-${flag ? "auto" : "plain"}-${++tmpCounter}`) {

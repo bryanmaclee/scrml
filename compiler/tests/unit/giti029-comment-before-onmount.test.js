@@ -18,6 +18,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -25,7 +26,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { generateHtml } from "../../src/codegen/emit-html.js";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 function compileHtml(source) {

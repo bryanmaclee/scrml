@@ -25,6 +25,12 @@ docs/m1-benchmark-results.md
 # debounce-throttle-attribute.test.js compileInline). Regenerated each run.
 compiler/tests/unit/__fixtures__/
 
+# Integration-test scratch roots — each test mkdirSync's a `_tmp_<name>` dir in
+# beforeAll and rmSync's it in afterAll (server-fn-calls, sql-runtime, peer-in-
+# template, fn-implicit-return, lin-e2e, …). Ephemeral; never track (S254 — 13
+# got accidentally staged into a codemod commit mid-test-run).
+compiler/tests/integration/_tmp_*/
+
 # Playwright e2e — generated test artifacts (Wave 3 Dispatch 1 + S100 docs harness)
 e2e/test-results/
 e2e/playwright-report/

@@ -8,6 +8,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 import { execSync } from "child_process";
@@ -16,7 +17,7 @@ import { execSync } from "child_process";
 // Resolve paths (works in both main repo and worktrees)
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
 function findProjectRoot() {
   // In a worktree, --show-toplevel returns the worktree root which has the files

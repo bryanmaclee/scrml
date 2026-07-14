@@ -35,6 +35,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { readdirSync, statSync, writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { resolve, join, basename, dirname } from "path";
 import { tmpdir } from "os";
@@ -50,7 +51,7 @@ import {
 // Paths
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const projectRoot = resolve(testDir, "..", "..", "..");
 const examplesDir = resolve(projectRoot, "examples");
 // S25: artifacts land in os.tmpdir() rather than inside the repo tree.

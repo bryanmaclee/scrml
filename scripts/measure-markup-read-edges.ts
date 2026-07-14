@@ -15,6 +15,7 @@
  * Run: bun run scripts/measure-markup-read-edges.ts
  */
 import { readdirSync, statSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { splitBlocks } from "../compiler/src/block-splitter.js";
 import { buildAST } from "../compiler/src/ast-builder.js";
@@ -24,7 +25,7 @@ import { runRI, buildFunctionIndex } from "../compiler/src/route-inference.ts";
 import { runDG } from "../compiler/src/dependency-graph.ts";
 import { resolveModules } from "../compiler/src/module-resolver.js";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function walk(dir: string, acc: string[] = []): string[] {
   let entries: string[] = [];

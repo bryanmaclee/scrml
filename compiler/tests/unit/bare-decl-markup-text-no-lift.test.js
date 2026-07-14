@@ -25,6 +25,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
@@ -35,7 +36,7 @@ import { buildAST } from "../../src/ast-builder.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 /**

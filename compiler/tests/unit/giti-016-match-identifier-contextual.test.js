@@ -34,6 +34,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, mkdirSync, readFileSync } from "fs";
 import { execSync } from "child_process";
@@ -41,7 +42,7 @@ import { compileScrml } from "../../src/api.js";
 import { parseExprToNode } from "../../src/expression-parser.ts";
 import { tokenizeLogic, reclassifyContextualMatch } from "../../src/tokenizer.ts";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 /** Compile a scrml source string; return { errors, clientJs }. */

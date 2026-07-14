@@ -1,9 +1,9 @@
 {
   "id": "reactive-reset-handler",
-  "description": "Two handlers mutating one cell (§6.1). inc() x2 then reset() drives @count 0->1->2->0; #display and the snapshot both read 0.",
+  "description": "Two handlers mutating one cell (§6.1). inc() x2 then clearCount() drives @count 0->1->2->0; #display and the snapshot both read 0. (Handler is clearCount, not `reset` — `reset` is a reserved identifier per §6.8.2.)",
   "language-version": "1.0",
   "spec": "§6.1",
-  "rationale": "§6.1 reactive cells: distinct handlers (inc/reset) writing the same cell each re-render its interpolation; the final write (reset to 0) wins.",
+  "rationale": "§6.1 reactive cells: distinct handlers (inc/clearCount) writing the same cell each re-render its interpolation; the final write (clearCount to 0) wins.",
   "expect": {
     "codes": [],
     "notCodes": [],

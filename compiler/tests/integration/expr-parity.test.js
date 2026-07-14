@@ -13,6 +13,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { readdirSync, statSync, readFileSync } from "fs";
 import { resolve, join, basename, dirname } from "path";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -24,7 +25,7 @@ import { emitExpr } from "../../src/codegen/emit-expr.ts";
 // Paths
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const projectRoot = resolve(testDir, "..", "..", "..");
 const examplesDir = resolve(projectRoot, "examples");
 const samplesDir = resolve(projectRoot, "samples", "compilation-tests");

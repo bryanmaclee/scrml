@@ -3,10 +3,10 @@ ${
     function inc() {
         @count = @count + 1
     }
-    function reset() {
+    function clearCount() {
         @count = 0
     }
 }
 <button id="inc" onclick=inc()>+</>
-<button id="reset" onclick=reset()>Reset</>
+<button id="reset" onclick=clearCount()>Reset</>
 <p id="display">Count: ${@count}</>

@@ -40,13 +40,14 @@
 //   edges: implements|decided-by|cites = a flograph @node id ; bare `verified` = the dock-level grounding bit.
 
 import { existsSync, readdirSync, mkdtempSync, rmSync } from "fs";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join, basename } from "path";
 import { build, defaultCorpus, SUPERSEDED, globSync, rel, type Node } from "./flograph.ts";
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 // Default CODE corpus: scrml's own scripts (small, self-referential — dog-foods on flograph.ts/dock.ts/
 // state.ts). Override with --corpus for a wider sweep. (The thin slice intentionally does NOT default to

@@ -24,12 +24,13 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import vm from "node:vm";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_nested_template_raw_mangle");
 let tmpCounter = 0;
 

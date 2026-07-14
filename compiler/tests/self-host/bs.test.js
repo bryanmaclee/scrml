@@ -24,6 +24,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import {
   splitBlocks as splitBlocksJS,
   runBlockSplitter as runBlockSplitterJS,
@@ -40,7 +41,7 @@ import { resolve, dirname } from "path";
 import { compileScrml } from "../../src/api.js";
 
 const scrmlPath = resolve(
-  dirname(new URL(import.meta.url).pathname),
+  dirname(fileURLToPath(new URL(import.meta.url))),
   "../../self-host/bs.scrml"
 );
 

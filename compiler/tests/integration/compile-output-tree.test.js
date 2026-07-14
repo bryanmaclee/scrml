@@ -32,6 +32,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -262,7 +263,7 @@ describe("F-COMPILE-001 §4: collision detection emits E-CG-015", () => {
     // the post-Option-A world without explicit fixture trickery, so we encode
     // the contract here so future refactors don't silently remove it.
     const apiSrc = await Bun.file(
-      new URL("../../src/api.js", import.meta.url).pathname,
+      fileURLToPath(new URL("../../src/api.js", import.meta.url)),
     ).text();
 
     expect(apiSrc).toContain("E-CG-015");

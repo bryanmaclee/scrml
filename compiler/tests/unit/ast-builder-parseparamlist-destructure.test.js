@@ -34,6 +34,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -66,7 +67,7 @@ function getFn(result, name) {
   return fns.find((f) => f.name === name);
 }
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 /**

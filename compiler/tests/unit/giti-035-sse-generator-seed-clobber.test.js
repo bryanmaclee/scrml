@@ -25,13 +25,14 @@
 // the subscribe-via-callback rewrite this fix makes seed-aware.
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 
-const _testDir = dirname(new URL(import.meta.url).pathname);
+const _testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmpCounter = 0;
 
 // Compile a single .scrml source string -> {server, client, errors, warnings}.

@@ -18,13 +18,14 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const REPO_ROOT = resolve(testDir, "../../..");
 const SAMPLE_PATH = resolve(REPO_ROOT, "samples/compilation-tests/input-canvas-demo.scrml");
 const TMP_ROOT = resolve(testDir, "_tmp_input_canvas");
