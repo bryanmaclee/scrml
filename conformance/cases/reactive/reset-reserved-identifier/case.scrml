@@ -1,0 +1,7 @@
+${
+    <count> = 0
+    function reset() {
+        @count = 0
+    }
+}
+<p id="d">${@count}</>

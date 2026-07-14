@@ -17,6 +17,44 @@ Enormous session. Landed two arcs via the NEW PR-flow, then cut the whole main-a
 - **Findings filed** — 2 live compiler gaps (§8.5.3 `transaction{}` unimplemented; §8.7 SQL-error→`SqlError` unwired). Adversarial cloud check scoped (advisory-not-hard-required recommended).
 - **Test:** conformance 444/444; full unit+integration+conformance 0 fail. CI `gate` green on main.
 
+### 2026-07-14 (S254-win / Peter, cross-machine — **Windows test-suite unblocked: 150-file `.pathname`→`fileURLToPath` codemod + `reset` reserved-identifier gap closed**)
+
+> Concurrent cross-machine session (Peter, `pjoliver11`, on Windows); landed as a separate PR and rebased onto the bryan-side S254 above. The two "S254"s are a cross-machine S-number collision (see delta-log); this arc renumbers at its wrap. Conformance below stacks on the post-real-DB **444** baseline → **445**.
+
+A Windows-hardening session (Peter, `pjoliver11`, on Windows). The **`.pathname` path-bug class** was
+swept: `new URL(import.meta.url).pathname` yields `/C:/…` on Windows (leading slash, drive inline),
+which `path.resolve` treats as relative and prepends the cwd drive → `EPERM: mkdir 'C:'`, breaking most
+of the test suite on Windows before any assertion runs. The blessed fix is `fileURLToPath` (the
+`module-resolver.js:704` S213/PongAI precedent); the S253 "Windows canary pass" fixed the harness but
+left the individual files. A reviewed codemod applied `new URL(<args incl. import.meta.url>).pathname`
+→ `fileURLToPath(new URL(<args>))` + a `fileURLToPath` import across **150 files** (57 unit · 25
+conformance · 22 integration · 36 gauntlet · self-host · scripts), scoped strictly to `import.meta.url`
+sites so request-URL parsing (`new URL(req.url,'http://localhost').pathname`, correct code in
+emit-server.ts / section-assembly.js) is untouched. Canary `conf-INPUT-001` 0/2 → 2/2; `bun
+scripts/state.ts` (the gap-count rollup) now runs on Windows instead of crashing ENOENT.
+
+- **`g-reset-reserved-identifier-unenforced` (LOW) RESOLVED** — the enforcement was in fact already
+  implemented (the known-gaps register was **stale**): `ast-builder.js` carries four parse-guards firing
+  `E-RESERVED-IDENTIFIER` on `function reset()` / `fn reset {...}`. The `reactive/reset-handler`
+  conformance case passed vacuously only because the runner's codes-check is a superset (it tolerated the
+  incidental error). Closed the loop: renamed that case's handler `reset`→`clearCount` (compiles clean;
+  runtime half now exercised) + added `reactive/reset-reserved-identifier` pinning the code. Conformance
+  444 → 445 (post-rebase; +1 case on the bryan-side real-DB baseline), all green.
+- **`state.ts --write` CRLF corruption fixed** — `findAnchorSpan` skipped only `\n` after a `@generated`
+  START marker, so on a CRLF (Windows) doc it spliced the generated block onto the marker line
+  (`… START -->| HIGH | 0 |`), corrupting `known-gaps.md` + `master-list.md` on every Windows `--write`.
+  Now skips `\r\n` as a unit + emits the block in the file's own EOL + compares EOL-normalized (this last
+  also cleared a Windows-only false-`STALE` in `--check`, which was the pre-existing `gap-counts` staleness).
+- **Verification + honesty (zero regressions):** the canary `conf-INPUT-001` went 0/2 → 2/2. Baselining
+  proved **no test the codemod touched went from pass→fail**: of 18 files with failures, 17 were never
+  touched by the codemod; the 18th (`self-host-module-resolver`) went from a whole-file *load crash*
+  (`Cannot find module 'C:\C:\…'`) to *loading + surfacing 7 real assertions*. The codemod FIXED the
+  crash class and thereby UNMASKED **~59 pre-existing Windows path-separator / CRLF failures** — now
+  tracked as `g-windows-path-separator-crlf-test-suite` (MED). Linux CI is unaffected (`fileURLToPath ≡
+  .pathname` on POSIX) but must be confirmed green on the first CI run before merge. **Gate note:** the
+  pre-commit hook (`--bail`) fails on Windows on those 59 until they close — Windows contributors can't
+  yet commit through the gate.
+
 ### 2026-07-13 (S253 — **PA-contract fold (pa-base v2) + Peter onboarded + 3 schema-decl codes + E-TYPE-082 construction-arity (+6 conformance → 433) + ⭐ cloud-PA gate offload (push wall-time solved)**)
 
 An enormous single-writer session. The **PA-contract dedup** landed (the S217-deferred grown-form

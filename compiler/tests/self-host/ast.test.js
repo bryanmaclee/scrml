@@ -31,6 +31,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import {
   buildAST as buildASTJS,
   runTAB as runTABJS,
@@ -49,7 +50,7 @@ import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 
 const scrmlPath = resolve(
-  dirname(new URL(import.meta.url).pathname),
+  dirname(fileURLToPath(new URL(import.meta.url))),
   "../../self-host/ast.scrml"
 );
 const scrmlSource = readFileSync(scrmlPath, "utf8");
@@ -62,7 +63,7 @@ const jsBody = scrmlSource.slice(openTag + 2, closeTag);
 // The ^{} import block references ./tokenizer.js — we need to provide it.
 // Replace the ^{} import with a direct import from the source tokenizer.
 const tokenizerImportPath = resolve(
-  dirname(new URL(import.meta.url).pathname),
+  dirname(fileURLToPath(new URL(import.meta.url))),
   "../../src/tokenizer.js"
 );
 

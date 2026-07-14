@@ -17,6 +17,7 @@
  */
 
 import { describe, test, expect, beforeAll } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { execSync } from "child_process";
@@ -26,7 +27,7 @@ import { compileScrml } from "../../src/api.js";
 // Path resolution (works in main repo and worktrees)
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
 function findMainProjectRoot() {
   try {

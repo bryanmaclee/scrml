@@ -21,6 +21,7 @@
  */
 
 import { mkdirSync, existsSync, copyFileSync, readFileSync } from "fs";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { compileScrml } from "../src/api.js";
 
@@ -28,7 +29,7 @@ import { compileScrml } from "../src/api.js";
 // Paths
 // ---------------------------------------------------------------------------
 
-const scriptDir = dirname(new URL(import.meta.url).pathname);
+const scriptDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const compilerRoot = resolve(scriptDir, "..");           // compiler/
 const projectRoot = resolve(compilerRoot, "..");          // scrml8/
 const stdlibCompilerDir = resolve(projectRoot, "stdlib", "compiler");

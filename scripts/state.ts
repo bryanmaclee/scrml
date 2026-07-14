@@ -26,9 +26,10 @@
 //   This reproduces the canonical S170 hand-count HIGH 0 · MED 9 · LOW 18 · Nominal 9.
 
 import { readFileSync, writeFileSync } from "fs";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 function sh(cmd: string, args: string[]): { stdout: string; stderr: string; ok: boolean } {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -103,10 +104,14 @@ function findAnchorSpan(text: string, name: string): AnchorSpan | null {
   const endMarkerStart = em.index;
   if (endMarkerStart < startMarkerEnd) return null; // END before START → malformed
   // Content lives between the newline after START and the newline before END.
+  // Handle BOTH LF and CRLF (Windows): skip a leading "\r\n" as one unit, else a
+  // lone "\r" after START leaves the generated block spliced onto the marker line.
   let betweenStart = startMarkerEnd;
+  if (text[betweenStart] === "\r") betweenStart += 1;
   if (text[betweenStart] === "\n") betweenStart += 1;
   let betweenEnd = endMarkerStart;
   if (text[betweenEnd - 1] === "\n") betweenEnd -= 1;
+  if (text[betweenEnd - 1] === "\r") betweenEnd -= 1;
   return { betweenStart, betweenEnd, current: text.slice(betweenStart, betweenEnd) };
 }
 
@@ -114,13 +119,21 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Normalize CRLF→LF so cross-platform (Windows CRLF vs LF) content compares equal.
+function eolNorm(s: string): string {
+  return s.replace(/\r\n/g, "\n");
+}
+
 // Regenerate one section's content in-place within `text`. Returns the new text + whether it
 // changed, or null if the anchor pair is missing (caller reports, does not crash).
 function regenInText(text: string, sec: GenSection): { text: string; changed: boolean } | null {
   const span = findAnchorSpan(text, sec.name);
   if (!span) return null;
-  const fresh = sec.produce();
-  if (span.current === fresh) return { text, changed: false };
+  // Emit the generated block in the file's own EOL so a CRLF (Windows) doc stays
+  // CRLF; compare EOL-normalized so a CRLF file is not perpetually reported stale.
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const fresh = sec.produce().replace(/\r\n/g, "\n").replace(/\n/g, eol);
+  if (eolNorm(span.current) === eolNorm(fresh)) return { text, changed: false };
   const next = text.slice(0, span.betweenStart) + fresh + text.slice(span.betweenEnd);
   return { text: next, changed: true };
 }
@@ -190,7 +203,7 @@ function runCheck(): number {
       continue;
     }
     const fresh = sec.produce();
-    if (span.current === fresh) ok.push(`@generated:${sec.name} (${rel(sec.file)})`);
+    if (eolNorm(span.current) === eolNorm(fresh)) ok.push(`@generated:${sec.name} (${rel(sec.file)})`);
     else stale.push(`@generated:${sec.name} (${rel(sec.file)})`);
   }
 

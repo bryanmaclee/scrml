@@ -17,6 +17,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { readFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import { resolve, dirname, join } from "path";
@@ -25,7 +26,7 @@ import { resolve, dirname, join } from "path";
 // Resolve paths (works in both main repo and worktrees)
 // ---------------------------------------------------------------------------
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
 // Resolve the main project root. In a git worktree, --show-toplevel returns the
 // worktree root (which may have only partial files). We need the main working tree

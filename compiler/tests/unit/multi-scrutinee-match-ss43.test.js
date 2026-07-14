@@ -13,11 +13,12 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
 
 function compileSource(scrmlSource, testName) {

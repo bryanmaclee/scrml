@@ -25,11 +25,12 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
 // Use a per-compile random suffix so parallel tests in the same file cannot
 // collide on the tmp path or output filename.

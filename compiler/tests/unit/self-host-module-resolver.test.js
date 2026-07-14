@@ -10,12 +10,13 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { execSync } from "child_process";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 
 // Import from the original JS source to validate the test assertions.
-const compilerModuleResolver = resolve(dirname(new URL(import.meta.url).pathname), "../../src/module-resolver.js");
+const compilerModuleResolver = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../src/module-resolver.js");
 const {
   buildImportGraph,
   detectCircularImports,
@@ -59,7 +60,7 @@ function makeFile(filePath, imports = [], exports = []) {
 // ---------------------------------------------------------------------------
 
 describe("self-host: module-resolver.scrml compilation", () => {
-  const scrmlFile = resolve(dirname(new URL(import.meta.url).pathname), "../../../stdlib/compiler/module-resolver.scrml");
+  const scrmlFile = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../stdlib/compiler/module-resolver.scrml");
 
   test("scrml file exists", () => {
     expect(existsSync(scrmlFile)).toBe(true);
@@ -78,7 +79,7 @@ describe("self-host: module-resolver.scrml compilation", () => {
   // All three fixed in changes/a1-scope-walker-export-class-closures
   // (commits 8f16e01 + 92ce1f3 + de7af98).
   test("compiles without errors [A2-SURFACED — fixed by A1]", () => {
-    const compilerRoot = resolve(dirname(new URL(import.meta.url).pathname), "../../../compiler");
+    const compilerRoot = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../compiler");
     const cli = resolve(compilerRoot, "src/cli.js");
 
     if (!existsSync(cli)) {

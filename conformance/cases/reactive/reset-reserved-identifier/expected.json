@@ -1,0 +1,12 @@
+{
+  "id": "reactive-reset-reserved-identifier",
+  "description": "§6.8.2 — `reset` is a RESERVED IDENTIFIER. Declaring a local `function reset() {...}` shadows the `reset(@cell)` builtin and fires E-RESERVED-IDENTIFIER (compile error, §34). Pins the enforcement so the impl (ast-builder function/fn parse guards) cannot silently regress.",
+  "language-version": "1.0",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.2: declaring a local function named `reset` (either `function reset() {...}` or `fn reset {...}`) is E-RESERVED-IDENTIFIER. The `function` form is used here (a `fn` form would additionally fire E-FN-003 for the reactive write). Author must rename the handler (e.g. `clearCount`) or use the `reset(@cell)` builtin.",
+  "expect": {
+    "codes": ["E-RESERVED-IDENTIFIER"],
+    "notCodes": ["E-FN-003"],
+    "severity": { "E-RESERVED-IDENTIFIER": "error" }
+  }
+}

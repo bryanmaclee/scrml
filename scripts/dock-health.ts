@@ -37,12 +37,13 @@
 //   bun scripts/dock-health.ts --json         emit the raw metric tables as JSON (for piping)
 
 import { execSync } from "child_process";
+import { fileURLToPath } from "node:url";
 import { readFileSync, existsSync, mkdtempSync, rmSync, statSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import { join, basename } from "path";
 import { globSync, rel } from "./flograph.ts";
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 // Default corpus = the dock --coverage corpus (stdlib + examples) so the numbers line up with the
 // 628-unit coverage baseline. Override with --corpus for a wider/narrower sweep.

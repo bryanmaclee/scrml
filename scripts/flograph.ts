@@ -36,8 +36,9 @@
 //                a real edge is BARE [[type: target]]; backtick-wrapped is a syntax-reference.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SUPPORT = `${ROOT}/../scrml-support`;
 
 // ── Corpus (spec §2.4 durable tier) ─────────────────────────────────────────

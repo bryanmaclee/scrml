@@ -12,11 +12,12 @@
  * "warning"; api.js surfaces it through `result.errors[]` (severity preserved).
  */
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
 
 function compile(source, slug) {

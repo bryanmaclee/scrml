@@ -17,6 +17,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { runTS } from "../../src/type-system.js";
 // §8b S133 fix tests — end-to-end compileScrml path (markup false-positive regression)
 import { resolve, dirname } from "path";
@@ -811,7 +812,7 @@ describe("§8: E-FN-003 — outer-scope variable mutation inside fn", () => {
 // above use synthetic AST nodes and don't exercise the text-heuristic).
 
 describe("§8b: E-FN-003 — markup-attribute false-positive (S133 fix)", () => {
-  const testDir = dirname(new URL(import.meta.url).pathname);
+  const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
   let tmpCounter = 0;
 
   function compileWholeScrml(source, testName = `s133-efn003-${++tmpCounter}`) {

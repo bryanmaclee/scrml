@@ -10,12 +10,13 @@
  */
 
 import { parseExprToNode } from "../../src/expression-parser.ts";
+import { fileURLToPath } from "node:url";
 import { describe, test, expect } from "bun:test";
 import { execSync } from "child_process";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 
-const metaCheckerPath = resolve(dirname(new URL(import.meta.url).pathname), "../../src/meta-checker.ts");
+const metaCheckerPath = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../src/meta-checker.ts");
 
 const {
   MetaError,
@@ -83,7 +84,7 @@ function makeFileAST(filePath, typeDecls = [], nodes = [], components = []) {
 // ---------------------------------------------------------------------------
 
 describe("self-host: meta-checker.scrml compilation", () => {
-  const scrmlFile = resolve(dirname(new URL(import.meta.url).pathname), "../../../stdlib/compiler/meta-checker.scrml");
+  const scrmlFile = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../stdlib/compiler/meta-checker.scrml");
 
   test("scrml file exists", () => {
     expect(existsSync(scrmlFile)).toBe(true);
@@ -95,7 +96,7 @@ describe("self-host: meta-checker.scrml compilation", () => {
   // parseRecursiveBody. SPEC §7.3.1 + §48.11. Meta-checker compile is now
   // clean (no E-SCOPE-001 errors).
   test("compiles without errors", () => {
-    const compilerRoot = resolve(dirname(new URL(import.meta.url).pathname), "../../../compiler");
+    const compilerRoot = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../compiler");
     const cli = resolve(compilerRoot, "src/cli.js");
 
     if (!existsSync(cli)) {

@@ -32,12 +32,13 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_input_read_path_bug_ac");
 
 const REPRO = `<mouse id="cursor"/>

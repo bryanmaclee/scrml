@@ -21,6 +21,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { generateLibraryJs } from "../../src/codegen/emit-library.ts";
 
 // ---------------------------------------------------------------------------
@@ -413,7 +414,7 @@ describe("emit-library §7: integration", () => {
     const { resolve, dirname } = await import("path");
     const { existsSync, readFileSync } = await import("fs");
 
-    const testDir = dirname(new URL(import.meta.url).pathname);
+    const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
     const scrmlFile = resolve(testDir, "../../../stdlib/compiler/module-resolver.scrml");
     if (!existsSync(scrmlFile)) {
       console.log("Skipping — module-resolver.scrml not found");

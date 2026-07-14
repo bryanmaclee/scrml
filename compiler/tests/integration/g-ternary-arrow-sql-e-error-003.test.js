@@ -33,12 +33,13 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
-const testDir = dirname(new URL(import.meta.url).pathname);
+const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_ternary_arrow_sql");
 let counter = 0;
 
