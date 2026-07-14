@@ -49,9 +49,9 @@ import { buildAST } from "../../src/ast-builder.js";
 const SAMPLE = `<program db="postgres://localhost/app">
   <schema>
     orders {
-      id: int primary key
-      status: string
-      total: number
+      id: integer primary key
+      status: text
+      total: real
     }
   </schema>
   <channel name="orders-feed" watches=orders>
@@ -361,8 +361,8 @@ describe("§38.13.2 (vii) no-PK watches feed", () => {
   const NOPK = `<program db="postgres://localhost/app">
   <schema>
     events {
-      label: string
-      ts: number
+      label: text
+      ts: real
     }
   </schema>
   <channel name="events-feed" watches=events>
@@ -408,9 +408,9 @@ describe("§14.8.9 (viii) protected-column egress on the watches feed", () => {
   const USERS = `<program db="postgres://localhost/app">
   <schema>
     users {
-      id: int primary key
-      email: string
-      passwordHash: string
+      id: integer primary key
+      email: text
+      passwordHash: text
     }
   </schema>
   <channel name="users-feed" watches=users>

@@ -123,7 +123,7 @@ describe("§12.6 Library-mode Emission — body-escalated .server.js suppression
 <schema>
   table users {
     id: integer primary key
-    name: string
+    name: text
   }
 </>
 <db src="./real.db" tables="users">

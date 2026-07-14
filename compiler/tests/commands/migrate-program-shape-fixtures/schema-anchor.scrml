@@ -7,6 +7,6 @@
 
 <program db="./demo.db">
   <schema>
-    users: { id: int, name: string }
+    users: { id: integer, name: text }
   </schema>
 </program>

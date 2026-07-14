@@ -2,8 +2,8 @@
 
   <schema>
     events {
-      label: string
-      ts: number
+      label: text
+      ts: real
     }
   </schema>
 
