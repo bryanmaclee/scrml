@@ -828,7 +828,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
  * `discoverServerRoutes` (build.js) and `loadServerRoutes` (dev.js) can find them.
  * Channel WS upgrade routes must follow the same pattern.
  */
-export function emitChannelServerJs(node: any, errors: CGError[], filePath: string, hasAuth = false): string[] {
+export function emitChannelServerJs(node: any, errors: CGError[], filePath: string, hasAuth = false, webAppShape = true): string[] {
   const lines: string[] = [];
   const { name, safeName, topic, hasChannelAuth } = extractChannelAttrs(node);
 
@@ -843,7 +843,12 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   lines.push(`  isWebSocket: true,`);
   lines.push(`  handler: (req, server) => {`);
 
-  if (hasAuth || hasChannelAuth) {
+  // Fork 2A — the cookie-session WS upgrade auth guard is WEB-APP-ONLY. `_scrml_auth_check`
+  // is emitted only in web-app shape (emit-server.ts gates its definition on
+  // `_webAppShape`), so a headless listener-owning program must NOT reference it —
+  // headless channels carry no cookie auth (bearer is a later unit). `webAppShape`
+  // defaults true, so every existing (web-app) caller is byte-identical.
+  if ((hasAuth || hasChannelAuth) && webAppShape) {
     lines.push(`    // Auth check for WebSocket upgrade (§38.5)`);
     lines.push(`    const _authResult = _scrml_auth_check(req);`);
     lines.push(`    if (_authResult) return _authResult;`);
