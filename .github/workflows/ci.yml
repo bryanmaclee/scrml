@@ -4,7 +4,7 @@
 #   types (always-on local) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #
-# TWO jobs:
+# THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
 #                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
 #                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
@@ -12,6 +12,9 @@
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
 #                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
 #                interp) + the M6.x within-node parser-parity backlog + canary. Visible, never blocks.
+#   • windows  — NON-BLOCKING (continue-on-error). unit + conformance on windows-latest — surfaces the
+#                OS-path-separator regressions the Linux gate can't see (#25/#26 `\` vs `/`). Promote into
+#                `gate` (windows-latest matrix) once green. The owed Windows-CI runner (4th+ OS-path report).
 #
 # KEY FINDING (S253): the local "full gate" (pre-push) partly PASSES ON UN-REPRODUCIBLE LOCAL ARTIFACTS —
 # the self-host tests (`compiler/tests/self-host` AND `integration/self-host-smoke.test.js`) need a
@@ -72,3 +75,20 @@ jobs:
         run: bun test compiler/tests/browser
       - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking)
         run: bun test compiler/tests/parser-conformance-within-node.test.js
+
+  windows:
+    # NON-BLOCKING (continue-on-error) — surfaces OS-path-separator regressions on every PR without gating
+    # merges on a currently-imperfect Windows state. scrml's compiler has repeated Windows path-sensitivity
+    # bugs (issue #25 nested-pages prefix, #26 isStdlibFilePath auth-bypass — both `\` vs `/`), invisible on
+    # the Linux `gate`. Runs the dist-independent core (unit + conformance — "reproducibly green from source,
+    # no dist/env deps") on windows-latest so a Windows-only classifier/path bug goes RED here, visibly.
+    # Promote into the blocking `gate` (add windows-latest to a matrix) once this is confirmed green.
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        run: bun install --frozen-lockfile
+      - name: Unit + conformance on Windows (catches `\` vs `/` OS-path bugs — #25/#26 class)
+        run: bun test compiler/tests/unit compiler/tests/conformance
