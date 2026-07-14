@@ -1,0 +1,11 @@
+${
+    <top> = []
+    function topTwo() {
+        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all()
+    }
+    function onLoad() {
+        @top = topTwo()
+    }
+}
+<button id="load" onclick=onLoad()>Top two</>
+<p if=@top id="p">top</>

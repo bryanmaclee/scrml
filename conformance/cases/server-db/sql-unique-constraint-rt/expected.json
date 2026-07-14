@@ -1,0 +1,28 @@
+{
+  "id": "server-db-sql-unique-constraint-rt",
+  "description": "§39.5 real DDL UNIQUE constraint enforced by the engine (RUNTIME, sqlEngine:\"real\"). The <schema> declares `email: text unique`; Fork B derives the CREATE TABLE (with the UNIQUE constraint) from that block via schema-differ generateCreateTable. tryAdd runs `INSERT OR IGNORE INTO members (email) VALUES (${email})`.run() with a duplicate email; the real engine's UNIQUE constraint makes OR IGNORE skip the row. memberCount then reads COUNT(*) → {n:1} (unchanged). The stub has no table and no constraint — its COUNT `.get()` returns the raw seed row — so {n:1} proves the real DDL constraint fired.",
+  "language-version": "1.0",
+  "spec": "§39.5, §8.5",
+  "source-test": "conformance/cases/server-db/sql-insert-returning-rt",
+  "rationale": "§39.5: a `unique` column constraint lowers to SQL `UNIQUE` in the generated DDL (schema-differ generateCreateTable — the exact helper protect-analyzer uses). Fork B derive-from-<schema>: the constraint is REAL only because the DDL comes from the case's own schema. `INSERT OR IGNORE` observes the constraint WITHOUT the (currently unimplemented) server-side SqlError→::ConstraintViolation envelope: a duplicate is silently skipped, so the count stays 1. NOTE — the §8.7 error-surface form (a throwing constraint violation caught by an `!{}` `::ConstraintViolation` arm) is BLOCKED: the compiler emits the client-side envelope dispatch but NO server-side SqlError classification, so the throw never becomes a scrml error. This case pins the ENGINE-level enforcement; the error-surface is a separate compiler gap (surfaced in the dispatch report). FK enforcement is out of scope (SQLite foreign_keys pragma is OFF by default — matching deploy).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "members": [
+        { "id": 1, "email": "a@x.com" }
+      ]
+    },
+    "input": [
+      { "click": "#add" },
+      { "wait": "settle" },
+      { "click": "#count" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "total": { "n": 1 }
+    }
+  }
+}

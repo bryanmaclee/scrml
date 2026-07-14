@@ -131,6 +131,13 @@ import { SCRML_RUNTIME } from "../../compiler/src/runtime-template.js";
 import { driveInputs, type InputStep, type ConformanceHook } from "../driver.ts";
 import { normalizeDom, runAnchored, type AnchoredAssertion } from "../normalize.ts";
 import { FakeClock } from "../fake-clock.ts";
+// Real-DB conformance path (Fork B: derive DDL from the case's own `<schema>`).
+// SAME helper `protect-analyzer.ts` uses to synthesize CREATE TABLE from a
+// `<schema>` block — so a case's schema IS its seed DDL (constraints included).
+import { parseSchemaBlock, generateCreateTable } from "../../compiler/src/schema-differ.js";
+// Bun's unified SQL client — the SAME engine the emitted `_scrml_sql` runs
+// against at deploy (`import { SQL } from "bun"`). Instantiated in-memory here.
+import { SQL } from "bun";
 
 /**
  * The conformance introspection shim — impl#1's realization of the OQ3 contract.
@@ -516,16 +523,174 @@ function makeSqlStub(db: ServerDb): (strings: TemplateStringsArray, ...v: unknow
   };
 }
 
+// ---------------------------------------------------------------------------
+// Fork A/B — the REAL Bun.SQL binding (opt-in `sqlEngine: "real"`).
+// ---------------------------------------------------------------------------
+//
+// Where `makeSqlStub` fakes SELECT-by-FROM-table (WHERE/params/JOIN/write/tx/
+// constraint all ignored), the real path stands up an in-memory SQLite via
+// Bun.SQL — the SAME engine the deploy runs — seeds it from the case's own
+// `<schema>` DDL (Fork B: `parseSchemaBlock` + `generateCreateTable`, the
+// protect-analyzer helper), and passes THAT as `_scrml_sql`. The emitted server
+// bytes are unchanged; every WHERE / bound param / JOIN / RETURNING / aggregate
+// / constraint is Bun.SQL's own — identical to deploy.
+
+/** Map a JS seed value to a SQLite column type (loose-infer fallback, Fork B). */
+function inferSqliteColumnType(v: unknown): string {
+  if (typeof v === "number") return Number.isInteger(v) ? "INTEGER" : "REAL";
+  if (typeof v === "boolean") return "INTEGER"; // SQLite has no BOOLEAN
+  return "TEXT";
+}
+
+/** Coerce a JS seed value to a SQLite-bindable primitive (booleans → 0/1,
+ *  nested objects/arrays → JSON text; string/number/`null` pass through). */
+function toBindableSeedValue(v: unknown): unknown {
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (v !== null && typeof v === "object") return JSON.stringify(v);
+  return v;
+}
+
+/** Quote a SQL identifier for `unsafe()` interpolation — double any embedded
+ *  `"` so a seed table/column name can't break out of the quoted identifier.
+ *  (Values are parameterized via `?`; identifiers are not, so they need this.) */
+function qid(id: string): string {
+  return '"' + String(id).replace(/"/g, '""') + '"';
+}
+
+/** Concatenate every `<schema>` block body out of the raw case source — the
+ *  same declarative DDL text `schema-differ.parseSchemaBlock` consumes. */
+function extractSchemaBodies(source: string): string {
+  let body = "";
+  const re = /<schema\b[^>]*>([\s\S]*?)<\/schema>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) body += m[1] + "\n";
+  return body;
+}
+
+/**
+ * Stand up a REAL in-memory Bun.SQL SQLite, seed it from the case's `<schema>`
+ * DDL (loose-infer fallback), and return it as the `_scrml_sql` binding. A
+ * FRESH instance per call → hermetic across cases and the determinism re-run.
+ *
+ * Fork B DDL source: the case's own `<schema>` block (constraints — UNIQUE /
+ * CHECK / REFERENCES — come from that DDL, which is what makes constraint
+ * semantics real). A seeded table with no matching `<schema>` table falls back
+ * to loose columns inferred from the seed rows' keys/JS types. A seeded table
+ * with neither is a clear harness error (Fork A validation).
+ */
+async function makeRealSql(source: string, db: ServerDb): Promise<SQL> {
+  const sql = new SQL(":memory:");
+
+  // Derive CREATE TABLE per declared `<schema>` table (lowercased key).
+  const ddlByTable = new Map<string, string>();
+  // Every table the `<schema>` DECLARES (even one whose body parsed to zero
+  // columns) — so a declared-but-underivable table can fail loud instead of
+  // silently loose-inferring away its constraints (the false-green guard below).
+  const declaredTables = new Set<string>();
+  const schemaBody = extractSchemaBodies(source);
+  if (schemaBody.trim().length > 0) {
+    let parsed: { tables?: Array<{ name?: unknown; columns?: unknown }> };
+    try {
+      parsed = parseSchemaBlock(schemaBody) as typeof parsed;
+    } catch {
+      parsed = { tables: [] };
+    }
+    for (const t of parsed.tables ?? []) {
+      if (t && typeof t.name === "string") {
+        declaredTables.add(t.name.toLowerCase());
+        if (Array.isArray(t.columns) && t.columns.length > 0) {
+          ddlByTable.set(t.name.toLowerCase(), generateCreateTable(t));
+        }
+      }
+    }
+  }
+
+  for (const table of Object.keys(db)) {
+    const rows = db[table];
+    const key = table.toLowerCase();
+    const ddl = ddlByTable.get(key);
+    if (ddl) {
+      // A derived-DDL failure (e.g. a pattern() CHECK lowering to REGEXP, which
+      // in-memory SQLite has no function for) becomes a CLEAR harness error
+      // rather than a raw SQLite throw the case author has to decode.
+      try {
+        await sql.unsafe(ddl);
+      } catch (e) {
+        throw new Error(
+          `sqlEngine:"real": table "${table}" — its <schema>-derived DDL failed to create ` +
+            `(${(e as Error).message}). A pattern() CHECK lowers to REGEXP, which in-memory ` +
+            `SQLite lacks; simplify the column or drop sqlEngine:"real" for this case.`,
+        );
+      }
+    } else if (declaredTables.has(key)) {
+      // FALSE-GREEN GUARD: the table IS declared in <schema> but yielded no derivable
+      // columns (degraded/truncated parse). Loose-inferring here would silently drop its
+      // constraints/PK and let a constraint case PASS while enforcing nothing — the
+      // corrosive false-green a conformance oracle must never produce. Fail LOUD.
+      throw new Error(
+        `sqlEngine:"real": table "${table}" is declared in <schema> but its DDL could not be ` +
+          `derived (no columns parsed) — the real engine would enforce no constraints, so a ` +
+          `constraint assertion here would be a false green. Fix the <schema> block.`,
+      );
+    } else {
+      // Loose-infer: union of the seed rows' keys, typed by first-seen value.
+      // Sanctioned ONLY for a table with NO <schema> declaration (the loose-seed path).
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error(
+          `sqlEngine:"real": table "${table}" has neither a <schema> DDL nor an ` +
+            `inferable seed row — add a <schema> block declaring it, or a non-empty seed.`,
+        );
+      }
+      const cols = new Map<string, string>();
+      for (const r of rows) {
+        if (r && typeof r === "object") {
+          for (const k of Object.keys(r)) {
+            if (!cols.has(k)) cols.set(k, inferSqliteColumnType((r as Record<string, unknown>)[k]));
+          }
+        }
+      }
+      const colDefs = [...cols].map(([c, ty]) => `${qid(c)} ${ty}`).join(", ");
+      await sql.unsafe(`CREATE TABLE ${qid(table)} (${colDefs})`);
+    }
+
+    // Seed the rows (per-row keys → parameterized INSERT; the real engine
+    // enforces the DDL, so a seed that violates a constraint throws here — the
+    // case author's signal that the seed is malformed).
+    if (Array.isArray(rows)) {
+      for (const r of rows) {
+        if (!r || typeof r !== "object") continue;
+        const keys = Object.keys(r);
+        if (keys.length === 0) continue;
+        const colList = keys.map((k) => qid(k)).join(", ");
+        const placeholders = keys.map(() => "?").join(", ");
+        const values = keys.map((k) => toBindableSeedValue((r as Record<string, unknown>)[k]));
+        await sql.unsafe(`INSERT INTO ${qid(table)} (${colList}) VALUES (${placeholders})`, values);
+      }
+    }
+  }
+
+  return sql;
+}
+
 /**
  * Evaluate the emitted server bundle into its drivable surface. Mirrors the D2
  * browser harness compose wrapper: strip the `import { SQL } from "bun"` + the
- * `new SQL(...)` handle decl (both replaced by the `_scrml_sql` stub param),
+ * `new SQL(...)` handle decl (both replaced by the `_scrml_sql` binding param),
  * strip `export ` (the wrapper `return`s the bindings instead), and neutralize
  * `import.meta.url` (the compose handler reads a sibling `.html` off it — the
  * `Bun.file` stub answers with the in-memory `html`). The emitted server code is
  * otherwise UNMODIFIED — the same bytes a real deploy ships.
+ *
+ * `sqlBinding` is the `_scrml_sql` value: a REAL seeded Bun.SQL instance
+ * (`sqlEngine: "real"`) or `undefined`, in which case the `makeSqlStub`
+ * regex stub is used (the byte-identical default for every existing case).
  */
-function evalServerModule(serverJs: string, html: string, db: ServerDb): ServerModule {
+function evalServerModule(
+  serverJs: string,
+  html: string,
+  db: ServerDb,
+  sqlBinding?: unknown,
+): ServerModule {
   const g = globalThis as any;
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
@@ -540,7 +705,7 @@ function evalServerModule(serverJs: string, html: string, db: ServerDb): ServerM
       ` compose: typeof _scrml_ssr_compose_handler !== "undefined" ? _scrml_ssr_compose_handler : null` +
       ` };`,
   );
-  return wrapper(makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL) as ServerModule;
+  return wrapper(sqlBinding ?? makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL) as ServerModule;
 }
 
 /**
@@ -644,6 +809,12 @@ export interface ServerRunOptions {
   serverDb: ServerDb;
   /** When true, compose the SSR first-paint, mount THAT + seed, then hydrate. */
   ssr?: boolean;
+  /** Fork A opt-in. `"real"` stands up a real seeded Bun.SQL in-memory SQLite
+   *  (Fork B: DDL from the case's `<schema>`, loose-infer fallback) as
+   *  `_scrml_sql` — so WHERE / bound params / JOIN / RETURNING / aggregate /
+   *  constraints run against the SAME engine as deploy. `"stub"` (default)
+   *  keeps the byte-identical regex stub. */
+  sqlEngine?: "stub" | "real";
 }
 
 /**
@@ -655,7 +826,7 @@ export interface ServerRunOptions {
  * non-determinism never reaches asserted output.
  */
 export async function runServer(source: string, opts: ServerRunOptions): Promise<ServerRunResult> {
-  const { input = [], auxFiles = {}, serverDb, ssr = false } = opts;
+  const { input = [], auxFiles = {}, serverDb, ssr = false, sqlEngine = "stub" } = opts;
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   // A real document URL is required for happy-dom's cookie jar (the baseline CSRF
   // double-submit reads/writes `document.cookie`); about:blank rejects cookies.
@@ -665,6 +836,7 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
   const dir = mkdtempSync(join(tmpdir(), "scrml-conf-server-"));
   const file = writeCaseFiles(dir, source, auxFiles);
   let restoreFetch: (() => void) | null = null;
+  let sqlBinding: SQL | undefined;
   const restoreCsrf = installCsrfRetryFallback();
   try {
     const result = compileScrml({
@@ -679,7 +851,11 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
     const clientJs = (out && out.clientJs) || "";
     const serverJs = (out && out.serverJs) || "";
 
-    const mod = evalServerModule(serverJs, html, serverDb);
+    // Fork A: `"real"` seeds a live Bun.SQL in-memory SQLite from the case's
+    // `<schema>` and binds it as `_scrml_sql`; `"stub"` keeps the regex stub
+    // (byte-identical to every pre-existing serverDb case).
+    sqlBinding = sqlEngine === "real" ? await makeRealSql(source, serverDb) : undefined;
+    const mod = evalServerModule(serverJs, html, serverDb, sqlBinding);
     restoreFetch = installServerDispatchFetch(mod);
 
     // SSR mode: compose the first-paint, mount THAT (its <body>), and seed
@@ -724,6 +900,9 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
     if (restoreFetch) restoreFetch();
     restoreCsrf();
     clock.restore();
+    // Close the real in-memory SQLite handle (a fresh one per real-engine case /
+    // determinism re-run) so the conformance run doesn't accumulate open handles.
+    if (sqlBinding) { try { sqlBinding.close(); } catch { /* best-effort */ } }
   }
 }
 

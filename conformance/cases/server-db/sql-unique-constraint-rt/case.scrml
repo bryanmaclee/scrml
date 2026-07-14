@@ -1,0 +1,24 @@
+<program db="./app.db">
+    <schema>
+        members {
+            id: integer primary key
+            email: text unique
+        }
+    </schema>
+    <total> = not
+    function tryAdd(email: string) {
+        ?{`INSERT OR IGNORE INTO members (email) VALUES (${email})`}.run()
+    }
+    function memberCount() {
+        return ?{`SELECT COUNT(*) AS n FROM members`}.get()
+    }
+    function onAdd() {
+        tryAdd("a@x.com")
+    }
+    function onCount() {
+        @total = memberCount()
+    }
+    <button id="add" onclick=onAdd()>Add duplicate</button>
+    <button id="count" onclick=onCount()>Count</button>
+    <p if=@total id="t">counted</p>
+</program>

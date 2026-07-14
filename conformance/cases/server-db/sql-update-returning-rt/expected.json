@@ -1,0 +1,23 @@
+{
+  "id": "server-db-sql-update-returning-rt",
+  "description": "§8.5.1 UPDATE + RETURNING (RUNTIME, sqlEngine:\"real\") — a write returns the mutated row. bump(id, by) runs `UPDATE items SET qty = qty + ${by} WHERE id = ${id} RETURNING id, qty`.all(); the real Bun.SQL engine applies the arithmetic (qty = 5 + 3) to the WHERE-matched row and RETURNING yields {id:1, qty:8}. The stub returns [] for an UPDATE (no FROM match) and never evaluates the SET arithmetic — so the assertion passes ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.5.1",
+  "source-test": "conformance/cases/server-db/sql-get-single-row-rt",
+  "rationale": "§8.5.1: a RETURNING clause read via `.all()` surfaces the written row (Bun.SQL executes UPDATE ... RETURNING natively — verified). Fork B loose-infer: items(id INTEGER, qty INTEGER) is inferred from the single seed row {id:1, qty:5}; no <schema> is required because there is no constraint under test. The `${by}`/`${id}` bound params + the `qty = qty + ${by}` arithmetic are all real-engine work the stub cannot express (empirically the stub yields []).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "items": [
+        { "id": 1, "qty": 5 }
+      ]
+    },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": {
+      "updated": [{ "id": 1, "qty": 8 }]
+    }
+  }
+}

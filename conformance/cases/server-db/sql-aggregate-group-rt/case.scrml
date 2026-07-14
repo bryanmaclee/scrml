@@ -1,0 +1,11 @@
+${
+    <totals> = []
+    function regionTotals() {
+        return ?{`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`}.all()
+    }
+    function onLoad() {
+        @totals = regionTotals()
+    }
+}
+<button id="load" onclick=onLoad()>Region totals</>
+<p if=@totals id="g">grouped</>

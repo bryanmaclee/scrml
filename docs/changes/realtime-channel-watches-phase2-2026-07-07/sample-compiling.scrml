@@ -17,9 +17,9 @@
 <program db="postgres://localhost/app">
   <schema>
     orders {
-      id: int primary key
-      status: string
-      total: number
+      id: integer primary key
+      status: text
+      total: real
     }
   </schema>
   <channel name="orders-feed" watches=orders>

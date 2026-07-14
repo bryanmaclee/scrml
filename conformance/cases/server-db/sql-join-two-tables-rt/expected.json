@@ -1,0 +1,30 @@
+{
+  "id": "server-db-sql-join-two-tables-rt",
+  "description": "§8.3 real JOIN across two tables (RUNTIME, sqlEngine:\"real\"). booksByAuthor(name) runs `SELECT b.title, a.name FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`.all(); the real Bun.SQL engine joins books→authors, aliases the columns, and filters by the bound author name. The stub matches only the first FROM table (`books`) and returns its raw rows — it cannot join, alias, or reach the authors row — so the joined result passes ONLY on the real engine.",
+  "language-version": "1.0",
+  "spec": "§8.3",
+  "source-test": "conformance/cases/server-db/sql-multi-table-sequence-rt",
+  "rationale": "§8.3 `.all()` = Row[]. A JOIN is the canonical multi-table read the stub structurally cannot express (its regex extracts one `FROM <table>`). Fork B loose-infer: authors(id,name) + books(id,title,author_id) from the seed rows; no constraint under test so no <schema> is needed. The `${name}` bound param + the ON/WHERE/alias/ORDER BY are all real-engine work — empirically the stub returns the raw books rows (id/title/author_id), never {title, author}.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "authors": [
+        { "id": 1, "name": "Ada" }
+      ],
+      "books": [
+        { "id": 1, "title": "Notes", "author_id": 1 },
+        { "id": 2, "title": "Essays", "author_id": 1 }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": {
+      "list": [
+        { "title": "Notes", "author": "Ada" },
+        { "title": "Essays", "author": "Ada" }
+      ]
+    }
+  }
+}

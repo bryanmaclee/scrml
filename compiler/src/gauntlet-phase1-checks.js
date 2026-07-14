@@ -704,6 +704,14 @@ function checkSchemaDeclarations(ast, filePath, errors) {
 
   const fallbackSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
 
+  // §39.4 legal `<schema>` column types (the fixed set that maps to SQLite
+  // affinities). A raw column-type token outside this set is E-SCHEMA-004.
+  // NB `boolean` + `timestamp` ARE canonical scrml-flavored names (not literal
+  // SQLite affinities); the JS-style `string`/`int`/`number`/`bool`/`float` are not.
+  const LEGAL_SCHEMA_COLUMN_TYPES = new Set([
+    "text", "integer", "real", "blob", "boolean", "timestamp",
+  ]);
+
   // E-SCHEMA-002 — a file SHALL NOT contain more than one `<schema>` block.
   // Fire on the 2nd and each subsequent block (the first is the legal one).
   for (let i = 1; i < schemaEntries.length; i++) {
@@ -758,6 +766,24 @@ function checkSchemaDeclarations(ast, filePath, errors) {
           span,
           "warning",
         ));
+      }
+
+      // E-SCHEMA-004 — a column type name outside the §39.4 legal set. `scrmlType`
+      // is the RAW author token (lowercased). Constraints (`req`/`unique`/`primary
+      // key`/…) are parsed into their own fields, so this never mis-fires on a
+      // constraint; a `${ schemaFor(T) }` delegation body has no `name: type` lines,
+      // so parseColumns yields no column and this stays silent for that form.
+      for (const col of cols) {
+        if (col && typeof col.scrmlType === "string" &&
+            !LEGAL_SCHEMA_COLUMN_TYPES.has(col.scrmlType)) {
+          errors.push(new GauntletError(
+            "E-SCHEMA-004",
+            `E-SCHEMA-004: column \`${col.name}\` in table \`${table.name}\` has unrecognized ` +
+            `type \`${col.scrmlType}\`. Legal \`<schema>\` column types are: text, integer, real, ` +
+            `blob, boolean, timestamp. (See SPEC §39.4.)`,
+            span,
+          ));
+        }
       }
     }
   }
