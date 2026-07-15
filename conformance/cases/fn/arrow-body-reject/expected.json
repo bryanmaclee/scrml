@@ -1,0 +1,12 @@
+{
+  "id": "fn-arrow-body-reject",
+  "description": "§48.2.1 — the `fn(args) => expr` form (the `fn` keyword + a parenthesized param list + an ARROW `=>` body) is NOT a sanctioned scrml shape and SHALL fire E-FN-ARROW-BODY at parse. `arr.map(fn(n) => n * 2)` mixes the two canonical anonymous-callable forms — the block-body anonymous `fn` (`fn(args) { return expr }`) and the plain inline lambda (`args => expr`). Reject-path (pos) half of the pin; the clean neg is `fn/plain-arrow-clean` (the valid `n => n * 2` inline lambda — silent). Regression guard: pre-fix this fell through the codegen `fn`→`function` text-rewrite to invalid JS, mis-framed as E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/g-fn-shortform-arrow-reject.test.js",
+  "spec": "§48.2.1",
+  "rationale": "§48.2.1: the two canonical anonymous-callable forms are the block-body anonymous `fn` (`fn(args) { return expr }`) and the plain inline lambda (`args => expr`). The mixed `fn(args) => expr` form is unsanctioned and is rejected at parse with E-FN-ARROW-BODY, which steers to both valid forms.",
+  "expect": {
+    "codes": ["E-FN-ARROW-BODY"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

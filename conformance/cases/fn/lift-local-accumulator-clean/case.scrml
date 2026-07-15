@@ -1,0 +1,9 @@
+<program>
+${
+    fn helper() {
+        lift "a"
+        return ~
+    }
+}
+<ul>${helper()}</ul>
+</program>

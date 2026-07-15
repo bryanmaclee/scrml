@@ -1,0 +1,9 @@
+<program>
+${
+    fn build(x) {
+        let t = x + 1
+        return t
+    }
+}
+<p>${build(1)}</>
+</program>

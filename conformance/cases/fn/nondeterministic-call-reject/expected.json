@@ -1,0 +1,11 @@
+{
+  "id": "fn-nondeterministic-call-reject",
+  "description": "§48.3.4 — a non-deterministic call (`Date.now()`) inside a pure `fn` body SHALL fire E-FN-004. A zero-arg `fn` that reads the wall clock returns different values across calls, breaking referential transparency. Reject-path (pos) half of the E-FN-004 pin; the clean neg is `fn/deterministic-call-clean` (a pure arithmetic value of the inputs — silent). (`Math.random`, `crypto.randomUUID`, `performance.now`, and mutable global reads like `window.location` are the sibling triggers in the same clause.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/fn-constraints.test.js",
+  "spec": "§48.3.4",
+  "rationale": "§48.3.4: `fn` must be a pure function of its inputs; a non-deterministic call (`Date.now`/`Math.random`/`crypto.randomUUID`/…) in a `fn` body is E-FN-004. Generate the value outside `fn` and pass it as a parameter.",
+  "expect": {
+    "codes": ["E-FN-004"]
+  }
+}

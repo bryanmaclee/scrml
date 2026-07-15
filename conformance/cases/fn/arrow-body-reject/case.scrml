@@ -1,0 +1,10 @@
+<program>
+${
+    function doit() {
+        const arr = [1, 2, 3]
+        const d = arr.map(fn(n) => n * 2)
+        return { d: d }
+    }
+}
+<button onclick=doit()>go</button>
+</program>

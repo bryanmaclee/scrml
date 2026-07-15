@@ -1,0 +1,12 @@
+{
+  "id": "fn-sql-access-in-function-clean",
+  "description": "§48.3.1 clean neg — the SAME `?{}` SQL access as `fn/sql-access-reject`, but inside a plain `function` (not a `fn`) body, SHALL NOT fire E-FN-001. The purity prohibition is `fn`-scoped; a `function` may perform database operations (it route-infers to the server per §12.2). `notCodes` asserts E-FN-001 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/fn-prohibitions.test.js",
+  "spec": "§48.3.1",
+  "rationale": "§48.3.1 is a `fn`-body prohibition — it does not apply to `function` bodies. A `?{}` query in a `function` is the normal server-fn shape (§12.2 route inference), not E-FN-001.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-001"]
+  }
+}

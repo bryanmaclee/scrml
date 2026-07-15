@@ -1,0 +1,11 @@
+{
+  "id": "fn-dom-mutation-reject",
+  "description": "§48.3.2 — a DOM-mutation call inside a pure `fn` body SHALL fire E-FN-002. `fn build(x)` calls `document.createElement(\"div\")`; a `fn` may not touch the DOM (it holds no effect capability). Reject-path (pos) half of the E-FN-002 pin; the clean neg is `fn/dom-mutation-pure-value-clean` (pure value computation — silent). Note: `document.createElement` is in the §48.3.4 DOM-node-member carve-out, so it fires E-FN-002 only, never a double E-FN-004.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/fn-constraints.test.js",
+  "spec": "§48.3.2",
+  "rationale": "§48.3.2: `fn` is a pure function and may not mutate the DOM; a `document.*`/DOM-node mutation call in a `fn` body is E-FN-002. Use `<state>` fields to hold configuration and let the runtime render the DOM from state.",
+  "expect": {
+    "codes": ["E-FN-002"]
+  }
+}
