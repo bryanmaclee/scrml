@@ -1,0 +1,11 @@
+{
+  "id": "equality-cross-type-primitive-reject",
+  "description": "§45 — `==` across two different primitive types SHALL fire E-EQ-001. `if (n == b)` compares an `int` (`let n = 0`) with a `boolean` (`let b = false`); scrml never coerces across types, so the cross-type comparison is rejected before evaluation. Reject-path (pos) half of the E-EQ-001 pin (Wave-2 `==` strict-semantics, tier-1 freeze); clean neg is `equality/same-type-primitive-clean` (same-type `==` → silent).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: scrml equality is strict and never coerces across types; `==`/`!=` between two distinct primitive types is E-EQ-001. Convert one side explicitly (e.g. `toString`/`toNumber`) before comparing.",
+  "expect": {
+    "codes": ["E-EQ-001"]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "e-type-any-forbidden-pos",
+  "description": "The literal type-token `any` in a type-annotation position fires E-TYPE-ANY-FORBIDDEN (§14.x). `any` is not a type in scrml — the field `a: any` is rejected and the diagnostic steers the author to `asIs`. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.x",
+  "rationale": "§14.x the literal `any` token is rejected in EVERY type-annotation position (E-TYPE-ANY-FORBIDDEN); previously it collapsed silently to `asIs`. The diagnostic points the author to the explicit `asIs` escape hatch.",
+  "expect": {
+    "codes": ["E-TYPE-ANY-FORBIDDEN"],
+    "notCodes": [],
+    "severity": { "E-TYPE-ANY-FORBIDDEN": "error" }
+  }
+}

@@ -1,0 +1,17 @@
+<program>
+type Book:enum = {
+    Idle,
+    Loaded(title: string, author: string, count: int)
+}
+
+<engine for=Book initial=.Idle>
+    <Idle rule=.Loaded></>
+    <Loaded bogus=b rule=.Idle>
+        <p>${b}</p>
+    </>
+</>
+
+<div class="library">
+    <button onclick=${@book = Book.Loaded("t", "a", 1)}>Load</button>
+</div>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-026-match-in-markup-pos",
+  "description": "§18.9 — a bare `match ...` written DIRECTLY in markup content (not inside a `${...}` logic interpolation) is kept as text by the block-splitter and SHALL fire E-TYPE-026, steering the author to wrap the match in a logic interpolation. Regression guard: `match` is a statement, not markup text; unwrapped it would render literally.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.9",
+  "rationale": "§18.9: `match` is not valid directly in markup; wrap it in a logic interpolation (`${ match subject { ... } }`) so the parser recognises it as a statement rather than text content. A bare markup-level `match` fires E-TYPE-026.",
+  "expect": {
+    "codes": ["E-TYPE-026"],
+    "notCodes": []
+  }
+}

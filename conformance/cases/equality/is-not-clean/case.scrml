@@ -1,0 +1,9 @@
+${
+    let x: string | not = not
+    if (x is not) {
+        let _ok = 1
+    }
+}
+<program>
+    <p>x</>
+</program>

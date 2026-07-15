@@ -1,0 +1,6 @@
+${
+    <ready>: string | not = not
+}
+<program>
+    ${ if (@ready is not) { <p id="p">waiting</> } }
+</>

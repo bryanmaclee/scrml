@@ -1,0 +1,8 @@
+<program>
+${ type Status:enum = { Open, Closed } }
+<status>: Status = .Open
+<match for=Status on=@status>
+  <Open>open</>
+  <Closed>closed</>
+</match>
+</program>

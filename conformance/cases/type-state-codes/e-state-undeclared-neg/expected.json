@@ -1,0 +1,12 @@
+{
+  "id": "e-state-undeclared-neg",
+  "description": "A `@x = expr` write to a cell that WAS structurally declared does not fire E-STATE-UNDECLARED (§6.1.2). `<count> = 0` declares the cell first, so `@count = 42` is a well-formed write and `${@count}` a well-formed read; the undeclared-cell check stays silent. The clean twin of e-state-undeclared-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§6.1.2",
+  "rationale": "§6.1.2 once a cell is declared structurally (`<count> = 0`), both `@count = …` writes and `@count` reads resolve to it; E-STATE-UNDECLARED fires only when no declaration is in scope.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STATE-UNDECLARED"]
+  }
+}

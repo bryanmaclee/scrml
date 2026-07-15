@@ -1,0 +1,12 @@
+{
+  "id": "e-type-045-prefix-not-negation-neg",
+  "description": "The absence-CHECK form `@x is not` does not fire E-TYPE-045 (§42.10). `if (@ready is not)` is the canonical postfix absence check, not a prefix negation, so E-TYPE-045 stays silent. The clean twin of e-type-045-prefix-not-negation-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42.10",
+  "rationale": "§42.10 `expr is not` is the sanctioned absence check; E-TYPE-045 fires only on the forbidden PREFIX `not expr` negation form.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-045"]
+  }
+}

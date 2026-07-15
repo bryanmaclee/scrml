@@ -1,0 +1,9 @@
+${
+    type Status:enum = { Active, Inactive }
+    <status>: Status = .Active
+}
+<program>
+    <p id="p">${ partial match @status {
+        .Active :> "active"
+    } }</>
+</>

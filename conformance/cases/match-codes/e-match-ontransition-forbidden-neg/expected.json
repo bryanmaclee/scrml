@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-ontransition-forbidden-neg",
+  "description": "§18.0.2 — an exhaustive block-`<match>` whose arm bodies contain NO `<onTransition>` element SHALL NOT fire E-MATCH-ONTRANSITION-FORBIDDEN (nor E-MATCH-EFFECT-FORBIDDEN). Acceptance sibling of e-match-ontransition-forbidden-pos: display-only arm bodies compile clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.2",
+  "rationale": "§18.0.2: a `<match>` arm body with only display markup carries no transition handler, so the engine-only `<onTransition>` check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ONTRANSITION-FORBIDDEN", "E-MATCH-EFFECT-FORBIDDEN"]
+  }
+}

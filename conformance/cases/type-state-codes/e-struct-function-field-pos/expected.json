@@ -1,0 +1,13 @@
+{
+  "id": "e-struct-function-field-pos",
+  "description": "A struct field typed as a function type fires E-STRUCT-FUNCTION-FIELD (§14.3, S174 ruling). The field `cb: fn()` stores behavior on value data; a function has no structural equality, is not serializable, and cannot be a map key, so it SHALL NOT be a struct field — the type system rejects the declaration. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/struct-fn-field-reject.test.js",
+  "spec": "§14.3",
+  "rationale": "§14.3 (limit-the-primitive axiom §14.1.1) a struct is a collection of data and state, NOT a behavior-bearing object; a function-typed field is the STORED face of the passed-vs-stored rule and is a hard compile error (E-STRUCT-FUNCTION-FIELD). Model behavior with an enum tag or an engine.",
+  "expect": {
+    "codes": ["E-STRUCT-FUNCTION-FIELD"],
+    "notCodes": [],
+    "severity": { "E-STRUCT-FUNCTION-FIELD": "error" }
+  }
+}

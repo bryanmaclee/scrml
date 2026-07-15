@@ -1,0 +1,5 @@
+${
+    <count> = 0
+    function f() { @count = 42 }
+}
+<program><p id="p" onClick=f()>${@count}</></>

@@ -1,0 +1,12 @@
+{
+  "id": "e-state-transition-illegal-neg",
+  "description": "Calling a DECLARED transition on a substate binding does not fire E-STATE-TRANSITION-ILLEGAL (§54.6.3). `sub` is typed `Draft` and `sub.validate()` names the transition `Draft` declares, so the transition-call check stays silent. The clean twin of e-state-transition-illegal-pos (E-TYPE-UNKNOWN-NAME + W-WHITESPACE-001 co-fire incidentally from the canonical substate syntax and are left out of notCodes).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/transition-decl-illegal.test.js",
+  "spec": "§54.6.3",
+  "rationale": "§54.6.3 a call to a transition the binding's substate DOES declare is legal; E-STATE-TRANSITION-ILLEGAL fires only on an undeclared transition name.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STATE-TRANSITION-ILLEGAL"]
+  }
+}

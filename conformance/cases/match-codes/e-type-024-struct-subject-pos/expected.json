@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-024-struct-subject-pos",
+  "description": "§18.8.2 — a `match` whose subject is a STRUCT-typed value (`match p` where `p: Post` is a struct) SHALL fire E-TYPE-024: `match` supports enums, unions, and primitive literals, not structs. Regression guard: matching a whole struct is a category error; the steer is to access a field (`match p.role`) or destructure instead.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.2",
+  "rationale": "§18.8.2: `match` requires an enum, union, or primitive-literal subject; a struct-typed subject has no variant set to discriminate and is rejected with E-TYPE-024. Use field access (`p.role`) or destructuring.",
+  "expect": {
+    "codes": ["E-TYPE-024"],
+    "notCodes": []
+  }
+}

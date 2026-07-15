@@ -1,0 +1,10 @@
+${
+    type Status:enum = { Active, Inactive }
+    <status>: Status = .Active
+}
+<program>
+    <p id="p">${ match @status {
+        .Active :> "active"
+        .Inactive :> "inactive"
+    } }</>
+</>

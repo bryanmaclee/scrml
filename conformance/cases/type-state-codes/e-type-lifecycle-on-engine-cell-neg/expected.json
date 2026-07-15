@@ -1,0 +1,12 @@
+{
+  "id": "e-type-lifecycle-on-engine-cell-neg",
+  "description": "A plain engine with no colliding lifecycle-annotated cell does not fire E-TYPE-LIFECYCLE-ON-ENGINE-CELL (§14.12.4 / §51.0). Dropping the `<phase>: (.Idle to .Active)` declaration leaves the `<engine for=Phase …>` as the sole progression mechanism for the `phase` cell, so the lifecycle-on-engine check stays silent. The clean twin of e-type-lifecycle-on-engine-cell-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.12.4",
+  "rationale": "§14.12.4 / §51.0 an engine cell driven only by rule= / initial= is well-formed; E-TYPE-LIFECYCLE-ON-ENGINE-CELL fires only when a lifecycle annotation is layered onto the engine cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-LIFECYCLE-ON-ENGINE-CELL"]
+  }
+}

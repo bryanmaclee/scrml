@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-026-match-in-logic-neg",
+  "description": "§18.9 — a `match` wrapped in a `${...}` logic interpolation (`<p>${ match @role { ... } }</p>`) is recognised as a statement and SHALL NOT fire E-TYPE-026. Acceptance sibling of e-type-026-match-in-markup-pos: proves the bare-match-in-markup detector is scoped to unwrapped text, not the well-formed interpolated form.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.9",
+  "rationale": "§18.9: a `match` inside a `${...}` logic interpolation is a valid statement position, so the markup-level-match check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-026"]
+  }
+}

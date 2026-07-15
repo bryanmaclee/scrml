@@ -1,0 +1,11 @@
+{
+  "id": "equality-strict-operator-reject",
+  "description": "§45 — the JavaScript strict-equality operator `===` is NOT a valid scrml operator and SHALL fire E-EQ-004. `if (a === b)` is rejected; scrml has a single equality operator `==` (already strict, with type-matching). Reject-path (pos) half of the E-EQ-004 pin; clean neg is `equality/equality-operator-clean` (the valid `==` form → silent). (`!==` is the sibling trigger, recovering to `!=`.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: scrml equality is always strict, so there is one operator `==` (and `!=`); the `===`/`!==` triple-equals forms are not valid scrml and are E-EQ-004 (recovers to `==`/`!=`).",
+  "expect": {
+    "codes": ["E-EQ-004"]
+  }
+}

@@ -1,0 +1,12 @@
+${
+  type Role:enum = { Admin, Editor }
+  fn label(r: Role, u: Role | not) -> string {
+    match (r, u) {
+      (.Admin, _)  :> "a"
+      (.Editor, _) :> "b"
+    }
+  }
+}
+<program>
+  <p>hi</p>
+</program>

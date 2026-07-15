@@ -1,0 +1,12 @@
+{
+  "id": "e-type-041-not-assign-mismatch-neg",
+  "description": "Assigning `not` to an OPTIONAL type does not fire E-TYPE-041 (§42). `let x: string | not = not` binds the absence value to an optional `string | not`, which is exactly where `not` is assignable, so the assignability check stays silent. The clean twin of e-type-041-not-assign-mismatch-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42",
+  "rationale": "§42 `not` IS assignable to an optional `T | not`; E-TYPE-041 fires only when the target type is non-optional.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-041"]
+  }
+}
