@@ -43,6 +43,7 @@ import { generateValueOnlyServerJs } from "./codegen/emit-server.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
+import { stripPagesPrefix } from "./codegen/utils.ts";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
 import { runNRBatch } from "./name-resolver.ts";
@@ -2721,12 +2722,13 @@ export function compileScrml(options = {}) {
         // outputBase/sub/pages/X.scrml is NOT stripped because the leading
         // segment is `sub`, not `pages` — this preserves outputBase semantics
         // when the user invokes the compiler with a non-`./` outputBase.
-        let relDir = relDirRaw;
-        if (relDirRaw === "pages") {
-          relDir = ".";
-        } else if (relDirRaw.startsWith("pages/")) {
-          relDir = relDirRaw.slice("pages/".length);
-        }
+        // Issue #25: relDirRaw is a `dirname(relative())` → HOST separator, but
+        // the `pages/` strip is `/`-oriented; a Windows `pages\auth` misses both
+        // the `=== "pages"` and `startsWith("pages/")` branches → nested pages
+        // keep the prefix → dist lands under `dist/pages/...` → the route 404s.
+        // stripPagesPrefix normalizes `\`→`/` first (no-op on POSIX), then strips;
+        // the `/`-separated result is re-nativized by `join()` for the FS write.
+        const relDir = stripPagesPrefix(relDirRaw);
         // relative() may yield "." for files at outputBaseDir itself.
         const targetDir = (relDir === "." || relDir === "") ? outputDir : join(outputDir, relDir);
         return { targetDir, base, fullPath: join(targetDir, `${base}${suffix}`) };

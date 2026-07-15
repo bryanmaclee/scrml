@@ -1,6 +1,6 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
-import { routePath, paramSignature, paramName } from "./utils.ts";
+import { routePath, paramSignature, paramName, stripPagesPrefix } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
@@ -128,9 +128,11 @@ function computeServedPath(filePath: string, outputBaseDir: string | null | unde
   const base = _pathBasename(filePath, ".scrml");
   let segs: string[] = [];
   if (outputBaseDir) {
-    let relDir = _pathDirname(_pathRelative(outputBaseDir, filePath));
-    if (relDir === "pages") relDir = ".";
-    else if (relDir.startsWith("pages/")) relDir = relDir.slice("pages/".length);
+    // Issue #25: normalize the HOST-separator dirname before the `/`-oriented
+    // strip + split — a Windows `pages\customer` else keeps the prefix and the
+    // served route becomes `/pages\customer/...` (nested routes 404). Mirrors
+    // api.js `pathFor` via the shared `stripPagesPrefix`.
+    const relDir = stripPagesPrefix(_pathDirname(_pathRelative(outputBaseDir, filePath)));
     if (relDir !== "." && relDir !== "" && !relDir.startsWith("..")) {
       segs = relDir.split("/").filter((x) => x.length > 0);
     }

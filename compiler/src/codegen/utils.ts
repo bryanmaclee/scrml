@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 
 /**
@@ -5,6 +6,41 @@ import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
  */
 export function routePath(generatedRouteName: string): string {
   return `/_scrml/${generatedRouteName}`;
+}
+
+/**
+ * Clean-URL page-prefix strip, separator-canonical (Issue #25).
+ *
+ * Both the dist WRITE path (`api.js` `pathFor`) and the served route URL
+ * (`emit-server.ts` `computeServedPath`) strip a leading `pages/` segment from
+ * `dirname(relative(outputBaseDir, source))` so filesystem-inferred routes
+ * (§47.9.2) map `pages/customer/loads.scrml` → `/customer/loads`.
+ *
+ * The input is a `path.relative()` result → HOST separator (`\` on Windows).
+ * The strip (`=== "pages"` / `startsWith("pages/")`) and every caller's later
+ * `.split("/")` are `/`-oriented, so a raw Windows `pages\customer` misses BOTH
+ * branches → nested pages keep the `pages\` prefix → the dist file lands under
+ * `dist/pages/...` and the served route becomes `/pages\customer/...` → nested
+ * routes 404 (top-level `pages\foo` has no separator, so `=== "pages"` fires and
+ * it strips — hence the bug is nested-only). Normalize the HOST separator to `/`
+ * FIRST, then strip the leading `pages` segment.
+ *
+ * We split on the platform `sep` (NOT a hardcoded `\`): on POSIX `sep === "/"`,
+ * so this is a TRUE no-op — a literal backslash is a legal Unix filename char and
+ * MUST be preserved unchanged (a hardcoded `\`→`/` would silently rename a POSIX
+ * `we\ird` dir to `we/ird`, relocating output + routes). On Windows `sep === "\"`,
+ * so the native backslashes normalize. Mirrors `migrate.js`'s `.split(sep).join("/")`.
+ *
+ * The strip stays segment-aligned: only an exact leading `pages` segment is
+ * removed. `sub/pages/x` is NOT stripped (leading segment is `sub`), preserving
+ * outputBase semantics for a non-`./` outputBase. Returns a `/`-separated
+ * relative dir, or `"."` when it collapses to the output root.
+ */
+export function stripPagesPrefix(relDirRaw: string): string {
+  const rel = relDirRaw.split(sep).join("/");
+  if (rel === "pages") return ".";
+  if (rel.startsWith("pages/")) return rel.slice("pages/".length);
+  return rel;
 }
 
 /**
