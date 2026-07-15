@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-012-tnot-not-arm-exhaustive-neg",
+  "description": "§42 — a value-form `match` over a `T | not` subject made exhaustive by a SPEC-canonical `not` arm (plus present-case `.Variant` arms covering every enum variant) SHALL NOT fire E-MATCH-012 nor the co-fired E-TYPE-006. This is the `not`-arm sibling of e-match-012-tnot-else-exhaustive-neg (which uses `else`). §42 (SPEC.md:23152), the E-MATCH-012 message, and §18's canonical `T | not` match form (SPEC.md:8594-8606) all say a `not` arm clears the error exactly as an `else`/wildcard does. This pins the impl-to-SPEC alignment: the `not` arm covers the `not` (absence) member and the `.Admin`/`.Editor` present-case arms cover every variant of the `Role` (present) member, so BOTH union members are covered and the match is exhaustive.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/not-keyword.test.js",
+  "spec": "§42",
+  "rationale": "§42 (SPEC.md:23152): a `match` on `T | not` WITH a `not` arm handles the absence case; with the present member also fully covered the match is exhaustive, so neither E-MATCH-012 nor E-TYPE-006 SHALL fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-012", "E-TYPE-006"]
+  }
+}
