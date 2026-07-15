@@ -1,0 +1,7 @@
+<program>
+type Article:enum = { Draft, Published(publishedAt: string) }
+
+<phase>: (.Draft to .Published) = Article.Draft
+
+${ if (@phase is .Draft) { <p>${@phase.publishedAt}</p> } }
+</program>

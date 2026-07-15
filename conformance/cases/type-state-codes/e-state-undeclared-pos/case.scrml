@@ -1,0 +1,4 @@
+${
+    function f() { @undecl = 42 }
+}
+<program><p id="p" onClick=f()>ok</></>

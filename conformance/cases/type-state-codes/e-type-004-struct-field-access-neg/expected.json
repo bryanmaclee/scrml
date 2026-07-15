@@ -1,0 +1,12 @@
+{
+  "id": "e-type-004-struct-field-access-neg",
+  "description": "Accessing a DECLARED struct field does not fire E-TYPE-004 (§14.3). `p.x` names a field the `Point` type declares, so the nominal field-access check stays silent. The clean twin of e-type-004-struct-field-access-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.3",
+  "rationale": "§14.3 a member access naming a DECLARED field is well-typed; E-TYPE-004 fires only on an undeclared field.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-004"]
+  }
+}

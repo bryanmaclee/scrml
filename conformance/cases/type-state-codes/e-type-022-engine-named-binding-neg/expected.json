@@ -1,0 +1,12 @@
+{
+  "id": "e-type-022-engine-named-binding-neg",
+  "description": "A named payload binding that references a DECLARED variant field does not fire E-TYPE-022 (§18.7 / §51.0.B.1). `<Loaded title=t …>` binds by the declared field `title`, so the named-form field check stays silent. The clean twin of e-type-022-engine-named-binding-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.7",
+  "rationale": "§18.7 / §51.0.B.1 a named binding whose `field` IS a declared variant field is well-formed; E-TYPE-022 fires only on an unknown field name.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-022"]
+  }
+}

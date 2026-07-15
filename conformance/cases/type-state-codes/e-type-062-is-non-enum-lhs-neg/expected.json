@@ -1,0 +1,12 @@
+{
+  "id": "e-type-062-is-non-enum-lhs-neg",
+  "description": "The `is .Variant` operator applied to an ENUM-typed left operand does not fire E-TYPE-062 (§18.17). `role` is typed `Role` (an enum); `role is .Admin` is a well-typed discrimination, so E-TYPE-062 stays silent. The clean twin of e-type-062-is-non-enum-lhs-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.17",
+  "rationale": "§18.17 `is .Variant` is well-typed over an enum-typed LHS; E-TYPE-062 fires only when the LHS is not enum-typed.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-062"]
+  }
+}

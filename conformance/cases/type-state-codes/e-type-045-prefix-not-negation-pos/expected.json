@@ -1,0 +1,13 @@
+{
+  "id": "e-type-045-prefix-not-negation-pos",
+  "description": "Using `not` in prefix position as a boolean negation operator fires E-TYPE-045 (§42.10). `if (not @ready)` treats `not` as a negation operator, but `not` is the absence VALUE, not an operator — use `!expr` for boolean negation or `expr is not` for absence. The lowering choke-point reports E-TYPE-045. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42.10",
+  "rationale": "§42.10 `not` is the absence value, never a prefix negation operator; a prefix `not expr` in any expression position is a compile error (E-TYPE-045), steering to `!expr` (negation) or `expr is not` (absence check).",
+  "expect": {
+    "codes": ["E-TYPE-045"],
+    "notCodes": [],
+    "severity": { "E-TYPE-045": "error" }
+  }
+}

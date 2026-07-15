@@ -1,0 +1,4 @@
+${
+    type T:struct = { a: any, b: string }
+}
+<program><p id="p">ok</></>

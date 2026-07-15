@@ -1,0 +1,13 @@
+{
+  "id": "e-state-undeclared-pos",
+  "description": "A bare `@x = expr` write to a cell with no prior structural `<x>` declaration in scope fires E-STATE-UNDECLARED (§6.1.2). Inside `function f()`, `@undecl = 42` writes a cell that was never declared via `<undecl>`, so the post-CE type-system stage reports E-STATE-UNDECLARED (the auto-synth path that once silently promoted such writes is removed). Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§6.1.2",
+  "rationale": "§6.1.2 state cells are declared structurally (`<x> = init`); a bare `@x = expr` write with no such declaration in scope is a compile error (E-STATE-UNDECLARED), never a silent auto-declaration.",
+  "expect": {
+    "codes": ["E-STATE-UNDECLARED"],
+    "notCodes": [],
+    "severity": { "E-STATE-UNDECLARED": "error" }
+  }
+}

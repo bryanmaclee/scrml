@@ -1,0 +1,13 @@
+{
+  "id": "e-type-081-partial-match-render-pos",
+  "description": "A `partial match` inside a markup interpolation (a rendering context) fires E-TYPE-081 (§18.18). The `${ partial match @status { .Active :> \"active\" } }` covers only `.Active` and, being partial, would silently produce no output for `.Inactive` — indistinguishable from a missing case — so the type system reports E-TYPE-081. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.18",
+  "rationale": "§18.18 `partial match` is forbidden in a rendering or lift context: silently omitting output for unhandled variants is incoherent where concrete markup must be produced, so the compiler SHALL emit E-TYPE-081. Cover all variants or move the match to a value position.",
+  "expect": {
+    "codes": ["E-TYPE-081"],
+    "notCodes": [],
+    "severity": { "E-TYPE-081": "error" }
+  }
+}

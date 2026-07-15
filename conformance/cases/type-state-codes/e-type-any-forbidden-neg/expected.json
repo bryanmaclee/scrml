@@ -1,0 +1,12 @@
+{
+  "id": "e-type-any-forbidden-neg",
+  "description": "The explicit `asIs` escape-hatch type does not fire E-TYPE-ANY-FORBIDDEN (§14.x). `a: asIs` is the sanctioned opaque type, so the any-token check stays silent. The clean twin of e-type-any-forbidden-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.x",
+  "rationale": "§14.x `asIs` is the explicit, sanctioned opaque type; E-TYPE-ANY-FORBIDDEN fires only on the literal `any` token, which `asIs` replaces.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-ANY-FORBIDDEN"]
+  }
+}
