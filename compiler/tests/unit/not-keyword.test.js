@@ -19,7 +19,7 @@ import { rewriteNotKeyword, rewritePresenceGuard, rewriteExpr } from "../../src/
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { emitLogicNode } from "../../src/codegen/emit-logic.ts";
 import { parseExprToNode, emitStringFromTree } from "../../src/expression-parser.ts";
-import { tNot, tPrimitive, tUnion, tUnknown, tAsIs, checkExhaustiveness, checkUnionExhaustiveness, isOptionalType, checkNotAssignment, checkNotReturn, BUILTIN_TYPES } from "../../src/type-system.ts";
+import { tNot, tPrimitive, tUnion, tEnum, tUnknown, tAsIs, checkExhaustiveness, checkUnionExhaustiveness, isOptionalType, checkNotAssignment, checkNotReturn, BUILTIN_TYPES } from "../../src/type-system.ts";
 
 // GITI-017 residual (S125): round-trip an expression through preprocessForAcorn
 // (the SECOND `not`-lowering site, in expression-parser.ts). parseExprToNode
@@ -611,6 +611,100 @@ describe("E-MATCH-012 — match exhaustiveness with not (§42)", () => {
     const typeErrors = errors.filter(e => e.code === "E-TYPE-006");
     expect(matchErrors.length).toBe(1);
     expect(typeErrors.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §23d-§25d: E-MATCH-012 — REAL-representation `T | not` enum exhaustiveness.
+//
+// The §23-§27 block above models a `not` arm as `{kind:"is-type",typeName:"not"}`
+// — a SYNTHETIC shape the real pipeline never emits. `extractArmsFromMatchNode`
+// (the single-scrutinee path) records a `not :>` arm as `{kind:"variant",
+// variantName:"not"}` (`not` is a keyword — never a real enum variant), a
+// present `.Variant` arm as `{kind:"variant",variantName:<V>}`, and a canonical
+// §18 `given u :>` present-case arm as `{kind:"present-binding"}`. These are the
+// shapes that were mis-counted, letting E-MATCH-012 + E-TYPE-006 co-fire on a
+// SPEC-canonical exhaustive `T | not` match (SPEC.md:23152, SPEC.md:8594-8606).
+// These tests pin the fix at the shapes the real pipeline produces.
+// ---------------------------------------------------------------------------
+
+describe("E-MATCH-012 — real-representation T | not enum exhaustiveness (§42)", () => {
+  const roleUnion = () => tUnion([
+    tEnum("Role", [
+      { name: "Admin", payload: null, renders: null },
+      { name: "Editor", payload: null, renders: null },
+    ]),
+    tNot(),
+  ]);
+  const span = () => ({ file: "test.scrml", start: 0, end: 10, line: 1, col: 1 });
+
+  // (a) not-arm-clean — `not` arm + all present variant arms → exhaustive.
+  test("§23d checkUnionExhaustiveness — `not` arm + all present variants clears T | not", () => {
+    const result = checkUnionExhaustiveness(roleUnion(), [
+      { kind: "variant", variantName: "Admin" },
+      { kind: "variant", variantName: "Editor" },
+      { kind: "variant", variantName: "not" },
+    ]);
+    expect(result.missing.length).toBe(0);
+  });
+
+  test("§23e checkUnionExhaustiveness — `not` arm + `given` present-binding clears T | not", () => {
+    const result = checkUnionExhaustiveness(roleUnion(), [
+      { kind: "variant", variantName: "not" },
+      { kind: "present-binding" },
+    ]);
+    expect(result.missing.length).toBe(0);
+  });
+
+  // (b) not-arm-only-still-fires — `not` arm but NO present coverage → the T
+  // member is still missing (soundness: absence handled, present is not).
+  test("§23f checkUnionExhaustiveness — `not` arm only (missing T) reports the T member missing", () => {
+    const result = checkUnionExhaustiveness(roleUnion(), [
+      { kind: "variant", variantName: "not" },
+    ]);
+    expect(result.missing).toContain("Role");
+    expect(result.missing).not.toContain("not");
+  });
+
+  // Adversarial: a `not` arm + a PARTIAL present variant set (missing `.Editor`)
+  // must NOT be accepted as exhaustive (do-not-over-accept).
+  test("§23g checkUnionExhaustiveness — `not` arm + partial variants (missing .Editor) is non-exhaustive", () => {
+    const result = checkUnionExhaustiveness(roleUnion(), [
+      { kind: "variant", variantName: "Admin" },
+      { kind: "variant", variantName: "not" },
+    ]);
+    expect(result.missing).toContain("Role");
+  });
+
+  // End-to-end via checkExhaustiveness — the three core shapes.
+  test("§25b checkExhaustiveness — `not` arm + present variants emits NO E-MATCH-012 / E-TYPE-006", () => {
+    const errors = [];
+    checkExhaustiveness({ arms: [
+      { kind: "variant", variantName: "Admin" },
+      { kind: "variant", variantName: "Editor" },
+      { kind: "variant", variantName: "not" },
+    ] }, roleUnion(), span(), errors);
+    expect(errors.filter(e => e.code === "E-MATCH-012").length).toBe(0);
+    expect(errors.filter(e => e.code === "E-TYPE-006").length).toBe(0);
+  });
+
+  test("§25c checkExhaustiveness — `not` arm only (missing T) fires E-TYPE-006, NOT E-MATCH-012", () => {
+    const errors = [];
+    checkExhaustiveness({ arms: [
+      { kind: "variant", variantName: "not" },
+    ] }, roleUnion(), span(), errors);
+    expect(errors.filter(e => e.code === "E-TYPE-006").length).toBe(1);
+    expect(errors.filter(e => e.code === "E-MATCH-012").length).toBe(0);
+  });
+
+  test("§25d checkExhaustiveness — present arms only (no not) fires E-MATCH-012, NOT E-TYPE-006", () => {
+    const errors = [];
+    checkExhaustiveness({ arms: [
+      { kind: "variant", variantName: "Admin" },
+      { kind: "variant", variantName: "Editor" },
+    ] }, roleUnion(), span(), errors);
+    expect(errors.filter(e => e.code === "E-MATCH-012").length).toBe(1);
+    expect(errors.filter(e => e.code === "E-TYPE-006").length).toBe(0);
   });
 });
 

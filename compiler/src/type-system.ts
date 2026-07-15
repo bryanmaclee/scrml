@@ -15612,37 +15612,83 @@ function checkUnionExhaustiveness(
   unionType: UnionType,
   armPatterns: ArmPattern[],
 ): UnionExhaustivenessResult {
-  const memberNames = new Set<string>();
-  for (const member of (unionType.members ?? [])) {
-    if (member.kind === "primitive") {
-      memberNames.add((member as PrimitiveType).name);
-    } else if (member.kind === "enum") {
-      memberNames.add((member as EnumType).name);
-    } else if (member.kind === "asIs") {
-      memberNames.add("asIs");
-    } else {
-      memberNames.add(member.kind);
-    }
-  }
+  const members = unionType.members ?? [];
 
-  const coveredMembers = new Set<string>();
+  const memberName = (m: ResolvedType): string =>
+    m.kind === "primitive" ? (m as PrimitiveType).name
+    : m.kind === "enum" ? (m as EnumType).name
+    : m.kind === "asIs" ? "asIs"
+    : m.kind;
+
+  // Scan the arm patterns for the coverage signals a union match can carry.
+  //   - wildcard          `else` / `_`      — covers every member
+  //   - `not` arm         `not :>`          — covers the `not` (absence) member
+  //   - present-binding   `given u :>`      — covers every PRESENT member (the
+  //                                           T half of `T | not`); the binding
+  //                                           catches any present value (§18)
+  //   - is-type           `is T`            — covers the named member
+  //   - present variant   `.Variant`        — contributes to an enum member's
+  //                                           per-variant coverage
+  // The `not` arm is recorded by `extractArmsFromMatchNode` as a `variant`
+  // whose name is `not` (a keyword — never a real enum variant), so it is
+  // unambiguously distinguishable from a present-case `.Variant` arm.
   let hasWildcard = false;
-
+  let hasNotArm = false;
+  let hasPresentBinding = false;
+  const coveredTypeNames = new Set<string>();
+  const coveredVariantNames = new Set<string>();
   for (const pattern of armPatterns) {
-    if (pattern.kind === "wildcard") {
-      hasWildcard = true;
-      break;
-    }
-    if (pattern.kind === "is-type") {
-      coveredMembers.add(pattern.typeName!);
+    if (pattern.kind === "wildcard") { hasWildcard = true; continue; }
+    if (pattern.kind === "present-binding") { hasPresentBinding = true; continue; }
+    if (pattern.kind === "is-type") { coveredTypeNames.add(pattern.typeName!); continue; }
+    if (pattern.kind === "variant") {
+      if (pattern.variantName === "not") hasNotArm = true;
+      else if (pattern.variantName) coveredVariantNames.add(pattern.variantName);
     }
   }
+
+  const hasNotMember = members.some(m => m.kind === "not");
+
+  // Non-`not` unions: preserve the exact pre-existing is-type/wildcard coverage
+  // semantics. The §42 `T | not` decomposition below is localized to unions that
+  // actually carry a `not` (absence) member, so ordinary unions are untouched.
+  if (!hasNotMember) {
+    const memberNames = new Set(members.map(memberName));
+    const missing = hasWildcard
+      ? []
+      : [...memberNames].filter(m => !coveredTypeNames.has(m));
+    const unreachableWildcard = hasWildcard && coveredTypeNames.size >= memberNames.size;
+    return { missing, unreachableWildcard };
+  }
+
+  // §42 `T | not` — decompose coverage per member (SPEC.md:23152). A member is
+  // covered (ignoring any wildcard) when:
+  //   - `not` member  ← a `not` arm
+  //   - enum member T ← a `given` present-binding, an `is T`, OR ALL its
+  //                     variants appear as `.Variant` arms (a partial variant
+  //                     set is still non-exhaustive — soundness guard)
+  //   - other member  ← a `given` present-binding OR an `is T`
+  const coveredWithoutWildcard = (m: ResolvedType): boolean => {
+    // The absence member is covered by a `not` arm (real pipeline: a `variant`
+    // whose name is `not`) OR by an explicit `is not` type pattern (the
+    // synthetic/`checkExhaustiveness`-caller representation).
+    if (m.kind === "not") return hasNotArm || coveredTypeNames.has("not");
+    if (hasPresentBinding) return true;
+    if (coveredTypeNames.has(memberName(m))) return true;
+    if (m.kind === "enum") {
+      const variants = ((m as EnumType).variants ?? []).map(v => v.name);
+      return variants.length > 0 && variants.every(v => coveredVariantNames.has(v));
+    }
+    return false;
+  };
 
   const missing = hasWildcard
     ? []
-    : [...memberNames].filter(m => !coveredMembers.has(m));
+    : members.filter(m => !coveredWithoutWildcard(m)).map(memberName);
 
-  const unreachableWildcard = hasWildcard && coveredMembers.size >= memberNames.size;
+  // The trailing wildcard is unreachable iff every member is ALREADY covered by
+  // an explicit (non-wildcard) arm.
+  const unreachableWildcard = hasWildcard && members.every(coveredWithoutWildcard);
 
   return { missing, unreachableWildcard };
 }
@@ -15970,6 +16016,16 @@ function extractArmsFromMatchNode(node: ASTNodeLike): ExtractedArms {
   for (let i = 0; i < body.length; i++) {
     const arm = body[i];
     if (!arm || typeof arm !== "object") continue;
+    // §18 / §42 — a `given u :>` present-case arm parses to a `given-guard`
+    // node (ast-builder.js), NOT a `match-arm-*`. In the canonical `T | not`
+    // match form `{ not :> …  given u :> … }` (SPEC.md:8594-8606) the `given`
+    // arm binds the whole PRESENT value, so it covers every present union
+    // member (the T half of `T | not`). Record it as a `present-binding` arm so
+    // `checkUnionExhaustiveness` counts the present case as covered.
+    if (arm.kind === "given-guard") {
+      armPatterns.push({ kind: "present-binding" });
+      continue;
+    }
     if (arm.kind === "match-arm-block") {
       if (arm.isWildcard) pushWildcard(false);
       else if (arm.isNotArm) pushWildcard(true);
