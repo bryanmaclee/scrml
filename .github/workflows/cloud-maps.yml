@@ -72,7 +72,7 @@ jobs:
           git config user.name  "scrml-maps-ci"
           git config user.email "scrml-maps-ci@users.noreply.github.com"
           git checkout -b "$BR"
-          git add .claude/maps master-list.md
+          git add -f .claude/maps master-list.md      # -f: .claude/ is gitignored (maps are force-tracked)
           git commit -m "chore(maps): scheduled nav-map + @generated regen"
           git push -u origin "$BR"
           gh pr create --base main --head "$BR" \
