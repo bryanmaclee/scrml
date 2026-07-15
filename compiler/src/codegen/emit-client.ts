@@ -1962,6 +1962,55 @@ export function generateClientJs(ctx: CompileContext): string {
     }
   }
 
+  // GITI-036 (2026-07-15) — POST-EMIT reference gate for the PRECG-presence-
+  // walker-gated helpers (`equality` / `reset`).
+  //
+  // Root cause: the `equality` and `reset` chunks are gated by the AST-cached
+  // `hasEqualityExpr` / `hasResetExpr` flags (see the O(1) gates near the top of
+  // `detectRuntimeChunks`). Those flags are computed at PRECG time by
+  // `compute-pgo-flags.ts` (`detectEqualityExprPresence` / `detectResetExprPresence`),
+  // which walk the AST looking for a `binary` (`==`/`!=`) / `reset-expr` NODE.
+  // But a `<match>` arm body is stored RAW at TAB and only lowered to ExprNodes
+  // at CG time (`emit-match.ts` caches the lowered arms on `__scrmlCachedArms`).
+  // When a `==` (or a `reset`) lives inside such a deferred arm body — e.g.
+  // `${ d.scope == "empty" ? <p/> : "" }` inside a `<Loaded(d)>` arm that also
+  // carries an `<each>` — no `binary`/`reset-expr` node exists at PRECG, so the
+  // presence-walker returns false and the chunk is tree-shaken out. The CG-time
+  // lowering then emits `_scrml_structural_eq(` into `*.client.js`, leaving a
+  // dangling reference → `ReferenceError: _scrml_structural_eq is not defined`
+  // on every reactive re-dispatch of that arm (giti GITI-036).
+  //
+  // Fix: scan the EMITTED client body (ground truth — immune to any AST-shape
+  // drift) for the helper CALL, exactly as the `log` / `ssr` gates above do, and
+  // seed the defining chunk when present. This mirrors the server path
+  // (`emit-server.ts` `emitted.includes("_scrml_structural_eq(")`), which never
+  // had the bug because it inlines helpers by post-emit scan rather than an
+  // AST-shape gate.
+  //
+  // Reference-GATED (over-inclusion guard): a page that emits no `_scrml_structural_eq(`
+  // / `_scrml_reset(` reference seeds nothing, so an `==`-free / reset-free page
+  // still tree-shakes these chunks out. The runtime placeholder slot is still
+  // empty at this point (spliced below), so this scans ONLY emitted client code,
+  // never the chunk's own recursive self-reference.
+  //
+  // `_scrml_structural_eq` is empirically confirmed (GITI-036). `_scrml_reset`
+  // shares the identical root cause (same PRECG presence-walker, same deferred-
+  // arm lowering) and is covered defensively — the reference gate makes it a
+  // no-op for every build that does not actually emit a `_scrml_reset(` call.
+  const POST_EMIT_HELPER_CHUNK_GATES: Array<[string, string]> = [
+    ["_scrml_structural_eq(", "equality"],
+    ["_scrml_reset(", "reset"],
+  ];
+  for (const [helperCall, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
+    if (ctx.usedRuntimeChunks.has(chunkName)) continue;
+    for (const _ln of lines) {
+      if (typeof _ln === "string" && _ln.includes(helperCall)) {
+        ctx.usedRuntimeChunks.add(chunkName);
+        break;
+      }
+    }
+  }
+
   // ss27-4 (runtime-minimality) — POST-EMIT tree-shake of client-SAFE stdlib
   // runtime chunks used ONLY in server code. A `scrml:NAME` capability lowers
   // to `const { ... } = _scrml_stdlib.NAME;` at emit-imports and lights up the
