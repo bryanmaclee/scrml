@@ -1,75 +1,80 @@
-> ## ⚠️ CROSS-MACHINE — Peter/Windows S254 also wrapped (2026-07-15), AFTER this S255 hand-off
-> A concurrent Windows-seat session (Peter, `pjoliver11`) landed **two PRs to main after S255 wrapped**:
-> **PR #37** (`95a912c` — 150-file `.pathname`→`fileURLToPath` codemod + reset-gap) and **PR #43**
-> (`a4192be` — cross-OS hardening partial, reviewed 16-agent high: `isStdlibFile`→single #26 gate ·
-> posix `deriveWatchFiles` · `os.tmpdir()` test portability · `docs/cross-os-invariants.md`). Windows
-> `unit+conformance` **59→37 fails, 0 regressions; POSIX no-op**. Absorb delta-log **[513]-[516]**.
-> **Top Windows arc for next boot:** the **path-model canonicalization refactor** — the 37 remaining are
-> ONE root cause (inconsistent native/posix path KEYS); design + rejected-approaches (474-fail
-> entry-norm) in `scrml-support/docs/deep-dives/windows-path-model-canonicalization-2026-07-14.md`.
-> It's security-adjacent (#26) + defines the cross-OS path *contract* → **Bryan-adjacent, own reviewed arc.**
-> Housekeeping: stale remote branch `s254-windows-pathname-fix` (delete needs naming). scrml-support @ `86d5c71`.
-> _(bryan's S255 wrap follows, unchanged.)_
+# scrml — Session 256 (WRAP) — ⭐ Cross-OS path-model canonicalization landed to PR #55 (Windows +25 fixes, 0 regressions)
 
-# scrml — Session 255 (WRAP) — ⭐ Track-A Units 1+2 landed + PA-contract PR-flow migration + advisory review + Windows CI
-
-**Date:** 2026-07-14/15. **Profile:** A (`/boot`). A very large multi-arc session: migrated the PA contract to
-the S254 PR-flow model, built the advisory cloud review + the Windows CI, then scoped **Track A
-(server-program-shape)** and landed its first two units — the `emit-server` decouple + the
-`kind="tool" serve=` harness. Coordinated a concurrent Peter (pjoliver11) session that self-merged PR #37.
+**Date:** 2026-07-15. **Seat:** Peter / `pjoliver11` (Windows). **Profile:** A (`/boot`). Continued the
+S255→S256 tee-up: cleared the smaller GitHub issues, then executed the **top Windows arc** — the path-model
+canonicalization refactor from deep-dive `windows-path-model-canonicalization-2026-07-14.md` ([515]).
 
 ## ⚠️ READ FIRST — state as of close
-- **main = `74e22ea3`**, both repos 0/0, CI `gate` GREEN. PR-flow is the norm (branch → PR → gate → merge).
-- **Track A: Units 1 + 2 LANDED.** A `<program kind="tool" serve=PORT>` now hosts native `<endpoint>`/SSE
-  off a compiler-emitted `Bun.serve`. Units 3-6 remain (see OPEN THREADS).
-- **Advisory review is BROKEN pending a decision** — the `claude-code-action` workflow (PR #33) + its OIDC
-  fix (PR #35) are in, but the run fails: **"Claude Code is not installed on this repository"**. FIX:
-  either bryan installs the **Claude Code GitHub App** (github.com/apps/claude → install on scrml; the clean
-  fix, branded identity) OR add `github_token: ${{ secrets.GITHUB_TOKEN }}` to the workflow to skip the
-  App (PA can PR that; github-actions[bot] identity). Non-blocking (off required checks) — harmless red.
-- **The PA contract is MIGRATED** to PR-flow (overlay v2 + boot manifest + thin read + board banner). Trust
-  the migrated contract now (not the pre-S254 direct-commit/commit-lock language).
+- **PR #55 is OPEN, blocking Linux `gate` is GREEN, awaiting a HUMAN merge.** I did NOT self-merge (PR-flow +
+  the auto-classifier require human review). **First action next boot: `gh pr view 55`.** If merged → the
+  path model is on main and `scrml:path` is the only remaining Windows arc; if not → ping Bryan/Peter to merge.
+- **`origin/main` = `d5b3c77`** (advanced via #52 etc. since the S255 hand-off's `74e22ea3` — the hand-off doc
+  lagged, normal under PR-flow). PR #55 forked earlier; the cloud gate tests the merge-with-current-main and
+  PASSED, so it's mergeable. If GitHub flags a conflict it'll be trivial (docs vs compiler/src).
+- **`module-resolver.js` runtime is UNCHANGED by the #26 fork resolution** — only the #26 TEST changed. The
+  sep-aware carve-out stands (Peter ruled Option A). No security behavior changed.
 
-## ✅ LANDED THIS SESSION (all via PR-flow)
-1. **PA-contract → PR-flow migration** — scrml-support `45633d8` (overlay v2 · pa-core · README banner · S255 board) + PR #32 (`.pa-base/profile`). The top S255 task; done.
-2. **Advisory cloud review** — PR #33 (workflow) + PR #35 (OIDC `id-token: write`). Secret set. **Blocked on the App-install decision above.**
-3. **Windows CI** — PR #36: a NON-BLOCKING `windows-latest` job (unit+conformance). Confirmed working: **16061 pass / 926 fail** on Windows (the OS-path gap Peter's been the canary for, now automated). Promote to the blocking `gate` once green.
-4. **Track A Unit 1 (Fork 2A decouple)** — PR #34 (`0bb16591`). `generateServerJs` gains a `programShape` axis; `<endpoint>`/SSE route+fetch emit is program-shape-agnostic; `generateHeadlessServerJs` export. Byte-identical web-app. **3 adversarial review rounds** (see NARRATIVES).
-5. **Track A Unit 2 (Fork 1A serve-harness)** — PR #38 (`74e22ea3`). `serve=`/`cors=` on `kind="tool"`; `Bun.serve` mounting the headless routes; main-optional (§64.3); the cookie-auth guardrail; new §64.9 SPEC + 4 `E-TOOL-SERVE-*` codes + `E-TOOL-ROUTE-NEEDS-SERVE`. **1 fix round** (6 review bugs).
-6. **Peter's PR #37** (concurrent) — his 150-file `.pathname→fileURLToPath` Windows codemod (#25/#26 class) self-merged via PR-flow. Disjoint from our work; the multi-contributor model working as designed.
+## ✅ LANDED / IN-FLIGHT THIS SESSION
+1. **⭐ Path-model canonicalization — PR #55** (2 commits: `61df239` refactor + `a0c22c2` #26 test adapt).
+   One `path-canonical.js` boundary (`toPosix` **sep-aware** + `PathKeyedMap`/`PathKeyedSet`); posix INTERNAL
+   keys, **native-uniform `filePath`** (public `outputs` contract — gathered files use the newly-exported
+   `resolveModulePathNative`, NOT posix, so the 474-fail-class native comparisons stay intact); hybrid
+   drive-aware resolve (`C:\`/`\\`/`//`→native, drive-less→`path.posix`). **`/code-review high` (16-agent) → 5
+   findings all fixed**, incl. a native-value correction that closed a **latent desync the review missed**
+   (tool-dep-closure walk `codegen/index.ts:942`). **Rigorous stash-diff: main 17060/61 → branch 17093/36 =
+   0 regressions, +25 Windows cross-file fixes.** windows-latest CI 17191/47skip/12fail (all pre-existing).
+2. **#25 Windows nested-page routes 404 — PR #48 (`85efaf7`, MERGED).** Sep-aware `stripPagesPrefix`. The
+   S255 hand-off's "#25 fixed via #37" was WRONG (verified against code) — fixed properly. **#25 closeable.**
+3. **#26 verified already-fixed → closeable.** **#28** diagnosed 2 RCs: RC1 fixed on WIP branch
+   `fix/issue-28-markup-gte-swallow` (no PR); RC2 grammar-fork PAUSED for Bryan ("he's on it").
 
 ## 📋 OPEN THREADS / FORKS
-1. **Advisory review App-install vs github_token** — decide (above). Non-blocking.
-2. **Track A Units 3-6** (from the DD `server-program-shape-2026-07-12.md`, per SCOPING `docs/changes/server-program-shape-v1/SCOPING.md`):
-   - **Unit 3 — Fork 5A:** `route.header(name)` + `route.frameId` (request-frame access).
-   - **Unit 4 — Fork 4A:** JSON-RPC discriminator + wire-tag remap on `accepts=`.
-   - **Unit 5 — H4 + H1:** GET-discovery (no-`accepts=` endpoint) + notification-204.
-   - **Unit 6 — Fork 6A:** bearer `<guard>` arm (6C `handle()` is the interim). **This is the "headless auth" story deferred all through Units 1+2** — until it lands, a headless serve= program's routes/channels have no auth guard (Unit 2 fail-closes cookie-auth via E-TOOL-SERVE-AUTH-UNSUPPORTED).
-   - **Fork 3 (stdio)** = fast-follow/post-V1 (bryan ruled via flogence inbox this session).
-   - **DoD / merge-blocker:** flogence `fsp-wire-smoke` (11 assertions) re-hosted on the scrml-native server + a conformance case.
-3. **Peter's GitHub issues (all his):** #26 (P0 Windows auth-bypass) **FIXED on main** (`66483cdf`) — **closeable** (was awaiting his Windows sign-off). #25 (nested-pages prefix) **fixed via #37**, closeable. #27 (navigate soft-nav) — navigate Wave-1b landed S251; likely stale, **triage**. #28 (markup `>`→`>=`), #29 (auth example 4 codegen bugs) — **untriaged**.
-4. **2 pre-existing gaps filed** (Unit-1 review surfaced, NOT decouple regressions): `g-currentuser-plain-handler-dangling` + `g-channel-auth-only-authcheck-dangling` (both MED, both real ReferenceErrors). See known-gaps.
+1. **`scrml:path` stdlib — DEFERRED behind Bryan's ruling** (the 12 remaining windows fails). Q: *what does an
+   absolute path MEAN on Windows — keep the drive?* `path.posix` drops the drive letter + mangles native `..`
+   ([514]). This is the last Windows arc after PR #55 merges. Bryan-owned semantics decision.
+2. **#28 RC2 grammar fork** (markup `>`/`>=` close-check direction + unclosed-edge) — **Bryan owns**, in flight
+   his end. RC1 fix sits un-PR'd on `fix/issue-28-markup-gte-swallow`. **#27** (navigate soft-nav — likely
+   stale, triage) and **#29** (auth example 4 codegen bugs) untouched.
+3. **INHERITED from S255 (Bryan, still open):** (a) **Track A Units 3-6** (server-program-shape — Unit 3
+   `route.header`/`frameId`, Unit 4 JSON-RPC discriminator, Unit 5 GET-discovery+204, **Unit 6 bearer `<guard>`
+   = the deferred headless-auth story**); DoD = flogence `fsp-wire-smoke` re-hosted + a conformance case.
+   (b) **Advisory cloud review BROKEN** pending the Claude-Code-GitHub-App install vs `github_token` fallback
+   decision (non-blocking red). See archived `handOffs/hand-off-255.md` for full detail.
 
 ## 🔬 IRREDUCIBLE NARRATIVES (anomalies + what to watch)
-- **The adversarial gate caught real bugs on BOTH units — twice on MY spec, not just agent error.** Unit 1: 3 rounds (round 1 a dangling auth ref; round 2 an over/under-emit *I* caused with a wrong fix-brief that told the agent to make cookie-auth work in headless — WRONG, headless auth is bearer; round 3 the clean subtractive gate-off-and-defer). Unit 2: 1 round (6 bugs incl. a channel-auth fail-open — my guardrail spec only checked program-level auth). **Lesson: the mandatory `/code-review` is load-bearing; write fix-briefs that gate-OFF-and-defer, don't "make it work."**
-- **Unit 2 agent STALLED during finalization** (stream watchdog, post-commit) — salvaged from the committed branch tip (`8d9f6593`, worktree clean); the work + gate (20176/0) were done before the stall. [[feedback_agent_notification_transient_disconnect_resume]] [[feedback_agent_crash_partial_recovery]].
-- **PR #37 base-drift mid-Unit-2** — Peter self-merged his codemod while Unit 2 ran; main moved under it. Verified zero file overlap (his 150 files, 0 in compiler/src), rebased Unit 2 onto #37, re-ran R26 on the new base. **Watch: a concurrent Peter session can move main any time now.** [[feedback_file_delta_vs_cherry_pick]] [[feedback_parallel_dispatch_shared_test_baseline]].
-- **The wrap stash tangle** — my uncommitted bookkeeping (known-gaps) collided with #37's known-gaps changes; stashed it aside to land Unit 2, popped + 3-way-merged at wrap (both survived). The stash also carried a stale Unit-2 snapshot that conflicted with the landed version → resolved by taking HEAD.
-- **Commit-hook timeouts** — the pre-commit gate now runs ~5min (20176+ tests under load); foreground commits timed out at the 5min wrapper but ALWAYS finalized (verify git STATE, not the exit code). [[feedback_commit_hook_timeout_and_F_flag]].
-- **claude-code-guide was wrong twice** on the advisory setup (id-token commented out; "no App needed"). Verify Claude tooling against actual runs, not just its guidance.
+- **The first cloud gate caught a real Linux-only regression I'd missed locally** — my sep-aware
+  `isStdlibFilePath` (deep-dive-ordered) broke the #26 P0 auth-bypass test, which SYNTHESIZES Windows backslash
+  paths on the Linux gate (unconditional-fold-dependent). Sep-awareness and that synthesis are mutually
+  exclusive. **Resolved per Peter's Option A** (surfaced as a load-bearing security fork): keep the sep-aware
+  carve-out; gate the 3 synthetic-Windows assertions behind `sep==="\\"` → run FOR REAL on windows-latest (the
+  runner the test's "WITHOUT a Windows runner" note predates). **Lesson (→ memory
+  `cross-os-forced-posix-presubmit`): run the touched security suite under a forced-POSIX sim BEFORE pushing a
+  cross-OS change** — a local-Windows baseline hides the Linux-only divergence; I burned a cloud cycle finding it.
+- **The review's finding-1 pushed toward POSIX gathered filePaths; that was the WRONG fix** — it would re-open
+  the 474-fail class in every native `filePath` comparison. Keeping gathered values native (exported
+  `resolveModulePathNative`) is the deeper-correct fix AND it surfaced the latent `visitDeps` desync the review
+  itself missed. Checking the "obvious" review fix against the invariant paid off.
+- **Watch: a concurrent Bryan/Ryan session can move main any time** (PR-flow). PR #55 forked off an older main;
+  re-check mergeability if main churns before merge.
 
 ## 🚦 STATE @ CLOSE
-- git: main `74e22ea3` (Units 1+2 + #37 + all infra), 0/0. scrml-support pushed (contract migration).
-- Conformance 41 categories; full gate 20176/0 (Unit-2 PR). CI `gate` GREEN on main.
-- **Worktrees: 22 agent worktrees exist.** This session's 2 (Unit 1 `agent-a1ef88d0`, Unit 2 `agent-a485f1c4`) cleaned at wrap. **~20 stale from prior sessions — broad sweep still OWED** (S83 disk risk; dry-run first per discipline).
-- **Maps: ~130 commits behind** (stamped `fbb4d9fd`, 2026-07-09). Refresh OWED (navigated by grep all session; a project-mapper refresh is a next-session task).
-- Mechanical state: `handOffs/delta-log.md` `[505]+` + `docs/changelog.md` S255.
+- git (scrml): branch `fix/path-model-canonicalization` @ `a0c22c2`, pushed, **working tree clean**. `origin/main`
+  `d5b3c77`. Only the main checkout worktree (no agent worktrees this session). scrml-support clean 0/0.
+- **Gate:** blocking Linux `gate` GREEN on PR #55; local unit+conformance 17093/36 (subset of main's fails);
+  windows-latest 17191/47skip/12fail (all pre-existing backlog); TodoMVC gauntlet + R26 adopters green.
+- **Maps: UNCHANGED this session** — no code landed to main (PR #55 unmerged); a refresh follows the merge.
+  (Still ~130+ behind from prior sessions — a standing refresh is owed, Bryan-side per S255.)
+- Mechanical state: `handOffs/delta-log.md` **[517]-[521]** + `docs/changelog.md` S256 block. Memory:
+  `~/.claude/.../memory/cross-os-forced-posix-presubmit.md`.
 
 ## pa.md directives in force
-R1-R5 · **PR-flow (branch→PR→gate→merge; NO direct main push)** · S239 mandatory adversarial `/code-review` pre-land (caught bugs on both units) · S138 R26 · orchestrate-don't-grind · default-GO · the deliberation ladder · Peter is a live concurrent contributor (PR-flow coordinates).
+R1-R5 · **PR-flow (branch→PR→gate→HUMAN-merge; NO direct main push, NO self-merge)** · S239 mandatory
+adversarial `/code-review high` pre-land (caught the Linux regression + 5 findings) · **surface load-bearing
+security forks to the operator** (Option A carve-out ruling) · shoot-straight (verify-before-closing, rigorous
+stash-diff not a stored baseline) · Peter is a live concurrent contributor.
 
 ## Tags
-#session-255 #track-a-server-program-shape #unit1-decouple-LANDED #unit2-serve-harness-LANDED
-#pa-contract-pr-flow-MIGRATED #advisory-review-app-install-PENDING #windows-ci-LANDED
-#peter-pr37-concurrent #adversarial-gate-caught-both-units #agent-stall-salvaged #maps-130-behind-owed
-#worktree-sweep-owed #track-a-units-3-6-remain #big-session
+#session-256 #peter-windows #path-model-canonicalization-PR55-OPEN #gate-green-awaiting-human-merge
+#plus25-windows-fixes-0-regressions #issue-25-LANDED-PR48 #issue-26-carve-out-fork-option-A
+#scrml-path-DEFERRED-bryan-ruling #issue-28-RC2-bryan #track-a-units-3-6-inherited #advisory-review-app-PENDING
+#forced-posix-presubmit-lesson
