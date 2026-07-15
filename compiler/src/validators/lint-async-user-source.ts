@@ -51,23 +51,8 @@
  */
 import { isMetaKind } from "../types/ast.ts";
 import type { FileAST, Span } from "../types/ast.ts";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
-
-/**
- * The stdlib root absolute path — files under this directory are exempt from
- * async/await rejection per the §13.1 stdlib carve-out (Q5 ratified S89).
- *
- * Resolution mirrors `compiler/src/module-resolver.js` STDLIB_ROOT so the two
- * definitions track each other:
- *   `<repo>/compiler/src/validators/lint-async-user-source.ts`
- *   → `../../..` = `<repo>`
- *   → `../../../stdlib` = `<repo>/stdlib`
- */
-const STDLIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../stdlib");
-
-/** Trailing slash sentinel so `foo/stdlibSidecar/` doesn't false-match `foo/stdlib`. */
-const STDLIB_ROOT_PREFIX = STDLIB_ROOT.endsWith("/") ? STDLIB_ROOT : STDLIB_ROOT + "/";
+import { resolve } from "path";
+import { isStdlibFilePath } from "../module-resolver.js";
 
 export type AsyncAwaitRejectCode =
   | "E-ASYNC-NOT-IN-SCRML"
@@ -82,17 +67,21 @@ export interface AsyncAwaitRejectDiagnostic {
 }
 
 /**
- * Test whether a file path is inside the stdlib carve-out region.
- * Exact `STDLIB_ROOT` match counts as inside; child paths also count.
+ * Test whether a file path is inside the stdlib carve-out region (§13.1, Q5
+ * ratified S89). Exact stdlib-root match counts as inside; child paths also count.
+ *
+ * Delegates to `module-resolver.js`'s `isStdlibFilePath` — the SINGLE canonical
+ * carve-out predicate (the #26 auth-bypass gate). S254 review: this was a
+ * hand-maintained second copy; two copies of a security predicate must stay
+ * bit-identical forever, so there is now exactly one. `resolve()` first because
+ * `isStdlibFilePath` expects an absolute path and the carve-out must also accept
+ * a relative input.
  *
  * Exported for unit testing — callers should use `runAsyncAwaitReject`.
  */
 export function isStdlibFile(filePath: string | null | undefined): boolean {
   if (!filePath) return false;
-  // Resolve in case the path is relative; preserves exact-match semantics.
-  const resolved = resolve(filePath);
-  if (resolved === STDLIB_ROOT) return true;
-  return resolved.startsWith(STDLIB_ROOT_PREFIX);
+  return isStdlibFilePath(resolve(filePath));
 }
 
 // The canonical steer shared by all three messages — points to the body-split

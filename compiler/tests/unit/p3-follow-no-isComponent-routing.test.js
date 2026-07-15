@@ -185,7 +185,9 @@ describe("P3-FOLLOW: isComponent routing reads are bounded", () => {
     const files = listFiles(SRC_DIR);
     const violations = [];
     for (const file of files) {
-      const rel = relative(SRC_DIR, file);
+      // POSIX-canonical key: relative() yields `\` on Windows; the ALLOWED map
+      // keys are `/`-form, so normalize before the lookup.
+      const rel = relative(SRC_DIR, file).replace(/\\/g, "/");
       const text = readFileSync(file, "utf8");
       const count = countOccurrences(text, "isComponent");
       if (count === 0) continue; // file doesn't mention isComponent — fine
