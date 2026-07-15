@@ -23,3 +23,19 @@ The value data-model: §59 (value-native maps — `[K:V]` literal / `[:]` empty 
 
 ## Progress
 `spa-lists/ss62.progress.md`. Land per-item on `spa/ss62`; ping PA inbox. Do NOT push. PA re-integrates + run.ts green. ESCALATE impl#1-vs-SPEC divergences.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-5 above are LANDED — do NOT touch them. This section adds the freeze-blocking **`==`
+strict-semantics** codes (§45) the S256 tier split places in tier-1 ("`==` strict-semantics" soundness
+family — the silent-wrong class where a wrong comparison compiles). Same method + core files as above
+(§45 read in full per code). Grep each code live in `compiler/src` for its exact trigger. Harness-clean.
+> No additional refinement/map tier-1 codes: the §59 map + §53 refinement families are tier-2 (covered by
+> items 1-5). This Wave-2 is the equality set only.
+
+6. **E-EQ-001** (codes) `[status=pending]` — `cannot compare X and Y` with `==` — incomparable types (`gauntlet-phase3-eq-checks.js:613`). Pos (`==` across incomparable types → E-EQ-001) + neg (comparable same-type `==` → silent).
+7. **E-EQ-002** (codes) `[status=pending]` — an `==` misuse detected in the AST builder (`ast-builder.js:4701`). Grep the exact trigger; pos + neg.
+8. **E-EQ-003** (codes) `[status=pending]` — a map-key type not comparable for `==` (`type-system.ts:2599`, "map key type ..."). Pos + neg.
+9. **E-EQ-004** (codes) `[status=pending]` — an `==` misuse sibling in the AST builder (`ast-builder.js:4685`). Grep the exact trigger; pos + neg.
+10. **W-EQ-PAYLOAD-VARIANT** (codes/severity) `[status=pending]` — the always-false `==` on a payload-carrying variant, a warning-level lint (`type-system.ts:14610`). Pos (`==` on a payload variant → warning) + neg + a `severity:"warning"` assertion.
+
+**Wave-2 DoD:** all 5 equality codes pinned (codes + severity); every case GREEN on run.ts; divergences ESCALATED.

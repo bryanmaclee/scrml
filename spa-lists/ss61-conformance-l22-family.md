@@ -21,3 +21,35 @@ The type-as-argument family: §53.14 (family framing + discipline) · §41.13 pa
 
 ## Progress
 `spa-lists/ss61.progress.md`. Land per-item on `spa/ss61`; ping PA inbox. Do NOT push. PA re-integrates + run.ts green. ESCALATE impl#1-vs-SPEC divergences.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-3 above are LANDED — do NOT touch them. This section pins the **formFor §41.14 reject-path codes**
+(the asymmetrically-uncovered edge: schemaFor/tableFor error paths ARE pinned in items 2-3; formFor's
+aren't — FINDINGS) + any remaining **tableFor** tier-1. Same method + core files as above. Grep each code
+live in `compiler/src/type-system.ts` (the formFor/tableFor type-walk emitters) for the exact trigger.
+Harness-clean (compile-time type-walk).
+> **VERIFY-FIRST (tableFor):** landed item-3 asserts it covered "the 13 E-TABLEFOR-* codes." The 5
+> E-TABLEFOR-* below are in the S256 candidate-holes (unasserted at audit HEAD `3b2b5f53`) — CHECK whether
+> item-3's cases already assert each; if covered, mark done (no dup case). If the audit HEAD predates the
+> ss61 landing, they may already be green. Author only the genuinely-uncovered ones.
+
+**formFor §41.14 (the 9 reject-path codes — all in `type-system.ts` ~19281-19539):**
+4. **E-FORMFOR-TYPE-NOT-STRUCT** (codes) `[status=pending]` — `formFor(NonStruct)` (`type-system.ts:19281`). Pos + neg (a `:struct` arg → silent).
+5. **E-FORMFOR-NOT-IMPORTED** (codes) `[status=pending]` — `formFor` used without its import (`type-system.ts:8719`). Pos + neg.
+6. **E-FORMFOR-PICK-INVALID-FIELD** (codes) `[status=pending]` — `pick(...)` names a field not on the struct (`type-system.ts:19345`). Pos + neg.
+7. **E-FORMFOR-OMIT-INVALID-FIELD** (codes) `[status=pending]` — `omit(...)` names an unknown field (`type-system.ts:19370`). Pos + neg.
+8. **E-FORMFOR-PICK-OMIT-CONFLICT** (codes) `[status=pending]` — `pick` + `omit` conflict (`type-system.ts:19331`). Pos + neg.
+9. **E-FORMFOR-ERROR-STRATEGY-INVALID** (codes) `[status=pending]` — an invalid error-strategy (`type-system.ts:19403`). Pos + neg.
+10. **E-FORMFOR-SLOT-UNKNOWN** (codes) `[status=pending]` — a `slot=` names an unknown field (`type-system.ts:19446`). Pos + neg.
+11. **E-FORMFOR-NESTED-STRUCT-NO-SLOT** (codes) `[status=pending]` — a nested struct field with no slot (`type-system.ts:19482`). Pos + neg.
+12. **E-FORMFOR-ONSUBMIT-SIGNATURE** (codes) `[status=pending]` — an `onSubmit` handler signature mismatch (`type-system.ts:19539`). Pos + neg.
+
+**tableFor §41.16 remaining (verify vs landed item-3 first):**
+13. **E-TABLEFOR-ROWS-WRONG-TYPE** (codes) `[status=verify-vs-item3]` — `rows=` wrong type (`type-system.ts:20592`). Pos + neg.
+14. **E-TABLEFOR-NESTED-STRUCT-NO-SLOT** (codes) `[status=verify-vs-item3]` — nested struct, no slot (`type-system.ts:20881`). Pos + neg.
+15. **E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1** (codes) `[status=verify-vs-item3]` — a variant-payload enum (v1 limit; `type-system.ts:20892`). Pos + neg.
+16. **E-TABLEFOR-NO-DISPLAY-MAPPING** (codes) `[status=verify-vs-item3]` — no display mapping (`type-system.ts:20903`). Pos + neg.
+17. **E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS** (codes) `[status=verify-vs-item3]` — `sortable` requires cell rows (`type-system.ts:20942`). Pos + neg.
+
+**Wave-2 DoD:** the 9 formFor reject codes pinned; the 5 tableFor codes verified-covered-or-authored; run.ts
+green; divergences ESCALATED. The L22 formFor asymmetry (happy-path-only) is closed.

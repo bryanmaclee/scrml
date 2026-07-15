@@ -35,3 +35,28 @@ Landed as category **`conformance/cases/server-db/`** (all 4 `[runtime]`, empiri
 `ss67.progress.md`. Land on `spa/ss67`; ping the PA inbox when ready. Do not touch main / do not push.
 
 **STATUS: COMPLETE — 4 authorable items landed on `spa/ss67` @ `b6e56a08`. 5-6 skipped (no gap). PARK item escalated. conformance 390/390 (was 386, +4).**
+
+## Wave-2 — tier-1 completion: E-SERVER-FN-IN-SYNC-CALLBACK + the 4 Direction-B runtime cases (S256 audit)
+The landed items above are the SQL-hydrate data-flow surface — do NOT touch them. This section adds the
+one remaining tier-1 server code + the **4 Direction-B runtime holes** (`DIRECTION-B-runtime.md`) the S256
+tier split places in tier-1. The `serverStub`/`serverDb` + `firstPaint` runtime drivers are BUILT (see
+`conformance/README.md` server-eval section + the ss67 core-files). Grep the code live for the exact
+trigger. Escalate any impl#1-vs-SPEC divergence.
+
+**server code (codes):**
+5. **E-SERVER-FN-IN-SYNC-CALLBACK** (codes) `[status=pending]` — a server function called in a sync callback (`codegen/emit-server.ts:1943`). Pos (a server fn invoked from a sync-only callback → E-SERVER-FN-IN-SYNC-CALLBACK) + neg (an async/awaited call site → silent).
+
+**Direction-B runtime holes (RT — the `serverStub`/`serverDb`/`firstPaint` drivers):**
+6. **endpoint §61 runtime** (RT) `[status=pending]` — `DIRECTION-B-runtime.md` item 1: a route request→response runtime via `serverStub` (harness stubs the route + response). Assert `state`/`domAnchored` after the request settles. (The §60 `<api>` external-fetch runtime stays BLOCKED — ss63 note; this is the §61 INBOUND endpoint, expressible.)
+7. **auth §40 runtime** (RT) `[status=pending]` — `DIRECTION-B-runtime.md` item 2: a login→gated-content / redirect runtime sequence expressible via `input` + `serverStub`. Assert gated content appears only post-login.
+8. **print §20.7 runtime** (RT) `[status=pending]` — `DIRECTION-B-runtime.md` item 3: a `stdout` runtime case (the `stdout` expect field is currently unused). Assert the printed output.
+9. **channel-watches-feed §38.13 runtime** (RT) `[status=pending]` — `DIRECTION-B-runtime.md` item 4: a `<channel watches=>` server-feed runtime case (the single-client-expressible half). Assert the fed rows reach the client.
+
+**Freeze DECISION (not backlog):** channel §38 multi-client V5-strict cell-sync is harness-limited
+(single-client driver cannot express cross-client sync) → **accept codes-only at freeze with an explicit
+note** (`DIRECTION-B-runtime.md` "freeze DECISION"). Re-open if the harness gains a multi-client mode. Do
+NOT author it; record the accept-with-note in the re-integration ping for the PA.
+
+**Wave-2 DoD:** E-SERVER-FN-IN-SYNC-CALLBACK pinned; the 4 Direction-B runtime cases authored (RT halves,
+via the built serverStub/serverDb/firstPaint drivers); the channel multi-client freeze-DECISION recorded
+(accept-with-note); run.ts green; divergences ESCALATED.

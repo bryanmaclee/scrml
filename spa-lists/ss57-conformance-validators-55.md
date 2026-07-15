@@ -26,3 +26,13 @@ The validity surface: §55 (universal-core §55.1 · isValid/errors §55.5/.6 ·
 
 ## Progress
 `spa-lists/ss57.progress.md`. Land per-item on `spa/ss57`; ping PA inbox per item. Do NOT push. PA re-integrates (S67 file-delta + independent run.ts green). ESCALATE any impl#1-vs-SPEC divergence.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-8 above are LANDED — do NOT touch them. This section pins the two remaining tier-1 validator/
+validity-surface codes the S256 tier split places in tier-1. Same method + core files as above. Grep each
+code live in `compiler/src` for the exact trigger. Harness-clean (compile-time).
+
+9. **E-SYNTHESIZED-WRITE** (codes) `[status=pending]` — an assignment to an auto-synthesized property (`symbol-table.ts:5156`). Pos (a write to a compiler-synthesized validity property, e.g. `@field.isValid = …` → E-SYNTHESIZED-WRITE) + neg (a write to a user cell → silent). (Scope/state soundness — the auto-synthesized §55 validity surface is read-only.)
+10. **E-CONTRACT-004-WARN** (codes/severity) `[status=pending]` — a `bind:value` attribute conflict warning (`codegen/emit-html.ts:2202`). Pos (a `bind:value` + conflicting content → warning) + neg + a `severity:"warning"` assertion.
+
+**Wave-2 DoD:** both codes pinned (codes + severity where applicable); run.ts green; divergences ESCALATED.
