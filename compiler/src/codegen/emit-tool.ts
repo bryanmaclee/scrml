@@ -31,7 +31,9 @@ import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
-import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
+import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs } from "./emit-server.ts";
+import { getToolServeConfig } from "../tool-program.ts";
+import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -285,15 +287,49 @@ function buildImportHeader(fileAST: ASTNode): string {
 }
 
 /**
+ * The emit-server inputs a `kind="tool" serve=` program threads into the
+ * headless route/fetch emit (§64, Fork 1A). Supplied by codegen/index.ts (which
+ * owns the route-inference routeMap + the auth/middleware/protect stage results);
+ * absent for a NON-serve tool (the CLI-tool path emits no routes).
+ */
+export interface ToolServeEmitDeps {
+  routeMap: unknown;
+  authMiddleware?: unknown;
+  middlewareConfig?: unknown;
+  batchPlan?: unknown;
+  batchPlannerErrors?: Array<{ code: string; message: string; span?: unknown }>;
+  protectAnalysis?: unknown;
+  exportRegistry?: unknown;
+}
+
+/**
  * Generate the standalone-tool module JS for a `kind="tool"` program (§64).
+ *
+ * When the program carries a `serve=` listener (§64, Fork 1A) AND the caller
+ * supplies `serveEmitDeps` (the route-inference routeMap + stage results), the
+ * emit routes to the SERVE-HARNESS path (`generateServeHarnessToolJs`): a
+ * compiler-owned `Bun.serve({ port, fetch, websocket? })` mounting the program's
+ * `<endpoint>` / SSE routes (replacing the §64.7 hand-rolled `_{}` `Bun.serve`).
+ * A NON-serve tool (or a serve= tool with no deps threaded) stays on the plain
+ * CLI/long-running-`main` path below — byte-identical to the pre-Unit-2 emit.
  */
 export function generateToolJs(
   ctxOrFileAST: CompileContext | ASTNode,
   errors?: unknown[],
   asyncImportedNames?: Set<string>,
+  serveEmitDeps?: ToolServeEmitDeps,
 ): string {
   const { fileAST, filePath } = resolveFileAST(ctxOrFileAST);
   const sourceText = (fileAST._sourceText ?? null) as string | null;
+
+  // §64 (Fork 1A, Unit 2) — the listener-owning `kind="tool" serve=` serve-target.
+  const serveConfig = getToolServeConfig(fileAST);
+  if (serveConfig && serveEmitDeps) {
+    return generateServeHarnessToolJs(
+      fileAST, filePath, serveConfig, serveEmitDeps, errors, asyncImportedNames,
+    );
+  }
+
   const stmts = collectTopLevelStatements(fileAST);
   const fns = stmts.filter(isFunctionDecl);
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
@@ -386,6 +422,252 @@ export function generateToolJs(
   // helpers) — shared with generateToolLibraryJs; must LEAD the module.
   const header = assembleModuleHeaders(fileAST, filePath, body, errors);
   return header + body + "\n" + harness.join("\n") + "\n";
+}
+
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * §64 (Fork 1A, Unit 2) — emit a LISTENER-OWNING `kind="tool" serve=` module.
+ *
+ * The move: delegate the WHOLE §61 `<endpoint>` + §37 SSE route/handler/`fetch`
+ * surface to `generateHeadlessServerJs` (Unit 1 — a self-contained headless
+ * server module: enum backing objects, decode helpers, route handlers, the
+ * private arm helper fns, `export const routes`, `export async function fetch`,
+ * `export const _scrml_ws_handlers` when the program has §38 channels, its ES
+ * imports + Bun.SQL db handles + inlined runtime helpers), then bolt a
+ * compiler-owned `Bun.serve({ port, fetch, websocket? })` serve-harness on top —
+ * replacing the §64.7 hand-rolled `_{}` `Bun.serve`. NO html, NO client bundle,
+ * NO CSRF scaffold (the headless shape already omits them, Unit 1).
+ *
+ * The serve-harness iterates `routes` DIRECTLY (mirroring the web-app entry in
+ * commands/build.js), passing `(request, server)` to a WS upgrade route (which
+ * needs `server.upgrade`) and `(request)` to an HTTP route — the WinterCG
+ * aggregate `fetch(request)` is single-arg and cannot upgrade a WS, so the
+ * harness does not route through it. A `cors=`-emitted `/*` OPTIONS preflight
+ * route matches any pathname for its method.
+ *
+ * §64.3 main-optional: with NO `function main` the serve-harness IS the active
+ * handle (its `Bun.serve` keeps the process alive). A COMPOSING no-return `main`
+ * (setup) is emitted + `await`ed BEFORE the harness holds the process; a
+ * numeric-return `main` + `serve=` already fired E-TOOL-SERVE-MAIN-EXITS at TS.
+ */
+function generateServeHarnessToolJs(
+  fileAST: ASTNode,
+  filePath: string,
+  serveConfig: ToolServeConfig,
+  deps: ToolServeEmitDeps,
+  errors?: unknown[],
+  asyncImportedNames?: Set<string>,
+): string {
+  const cgErrors = (errors ?? []) as never[];
+  // 1. The headless server module — the full §61/§37 route/fetch/ws surface. The
+  //    §39 middleware config (`cors=`/`log=`/…) is the REAL config codegen/index.ts
+  //    threads from `fileAST.middlewareConfig` (compute-program-config, §39.2); a
+  //    `serve= cors=` tool's CORS preflight route + headers emit from it.
+  const headlessModule = generateHeadlessServerJs(
+    fileAST as never,
+    deps.routeMap as never,
+    cgErrors,
+    (deps.authMiddleware ?? null) as never,
+    (deps.middlewareConfig ?? null) as never,
+    deps.batchPlan as never,
+    deps.batchPlannerErrors as never,
+    deps.protectAnalysis as never,
+    (deps.exportRegistry ?? null) as never,
+  );
+  const hasRoutes = /export const routes = \[/.test(headlessModule);
+  const hasWs = /export const _scrml_ws_handlers\b/.test(headlessModule);
+
+  // 2. Emit the top-level fns the headless module did NOT emit — the composing
+  //    `main` + any `main`-only helper. A fn the headless already emits (a server-
+  //    boundary route fn, OR a private arm/value-export helper `function NAME(`)
+  //    is skipped (no double-definition); the enum backing objects + imports + db
+  //    handles all ride on the headless module.
+  const sourceText = (fileAST._sourceText ?? null) as string | null;
+  const stmts = collectTopLevelStatements(fileAST);
+  const fns = stmts.filter(isFunctionDecl);
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
+  const foreignCrossingErrors: unknown[] = [];
+  const emitOpts = {
+    boundary: "server" as const,
+    serverFnNames: asyncFnNames,
+    syncPeerCalls: [] as Array<{ name: string; span: unknown }>,
+    foreignCrossingErrors,
+    declaredNames: new Set<string>(),
+  };
+  const routeMap = deps.routeMap as { functions?: Map<string, { boundary?: string }> } | undefined;
+  const isRouteFn = (fn: ASTNode): boolean => {
+    const sp = (fn as { span?: { start?: number } }).span;
+    const id = `${filePath}::${sp?.start}`;
+    const r = routeMap?.functions?.get(id);
+    return !!r && r.boundary === "server";
+  };
+  const headlessDefinesFn = (name: string): boolean =>
+    new RegExp("function\\*?\\s+" + escapeRegExp(name) + "\\s*\\(").test(headlessModule);
+
+  const extraLines: string[] = [];
+  let mainFn: ASTNode | null = null;
+  // A top-level `const`/`let` (or `export const`) the headless module already
+  // emits (an exported value-export binding) — do not re-emit it (double-decl).
+  const headlessDeclaresBinding = (name: string): boolean =>
+    new RegExp("(?:export\\s+)?(?:const|let)\\s+" + escapeRegExp(name) + "\\b").test(headlessModule);
+
+  for (const stmt of stmts) {
+    if (isFunctionDecl(stmt)) {
+      const name = (stmt.name ?? "anon") as string;
+      if (name === "main") mainFn = stmt;
+      // The headless already emits route fns + private/value-export helpers.
+      if (name !== "main" && (isRouteFn(stmt) || headlessDefinesFn(name))) continue;
+      const params = (stmt.params ?? []) as unknown[];
+      const paramList = params.map((p, i) => toolParamSignature(p, i)).join(", ");
+      const star = stmt.isGenerator ? "*" : "";
+      const asyncPrefix = asyncFnNames.has(name) ? "async " : "";
+      extraLines.push(`${asyncPrefix}function${star} ${name}(${paramList}) {`);
+      for (const bodyStmt of (stmt.body ?? []) as ASTNode[]) {
+        if (!bodyStmt) continue;
+        const code = emitLogicNode(bodyStmt, emitOpts as never);
+        if (code) for (const line of code.split("\n")) extraLines.push(`  ${line}`);
+      }
+      extraLines.push("}");
+      extraLines.push("");
+      continue;
+    }
+    // A top-level `const`/`let` / other top-level logic — the PLAIN CLI tool path
+    // emits these, and the headless ROUTE emit does NOT (it emits only EXPORTED
+    // value bindings + §14 enum objects). A non-exported top-level `const`
+    // referenced by an `<endpoint>` arm AND/OR `main` would otherwise be a runtime
+    // `ReferenceError`. Emit it (unless the headless already declares it — no
+    // double-decl); a `type X:enum` lowers to "" here (the enum object rides on
+    // the headless module), so it is naturally skipped.
+    const code = emitLogicNode(stmt as never, emitOpts as never);
+    if (!code || !code.trim()) continue;
+    const declared = [...code.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
+    if (declared.length > 0 && declared.every((nm) => headlessDeclaresBinding(nm))) continue;
+    for (const line of code.split("\n")) extraLines.push(line);
+    extraLines.push("");
+  }
+  const extraBody = extraLines.join("\n");
+
+  // Inline the runtime helpers the composing `main`/helpers reference that the
+  // headless module does NOT already define (log/print/structural-eq); fail-closed
+  // (E-TOOL-005) on any other un-inlined `_scrml_*` helper the headless lacks.
+  const extraHelperHeader = buildServeExtraHelperHeader(extraBody, headlessModule, filePath, errors);
+
+  // 3. Resolve the listen PORT (§64.7) — literal / `${expr}` (typer already fired
+  //    E-TOOL-SERVE-PORT-INVALID on an invalid shape; emit a safe 0 placeholder).
+  let portJs: string;
+  if (serveConfig.port.kind === "literal") {
+    portJs = String(serveConfig.port.value);
+  } else if (serveConfig.port.kind === "expr") {
+    const node = parseExprToNode(serveConfig.port.raw, filePath, 0);
+    portJs = emitExprField(node as never, serveConfig.port.raw, { mode: "server" } as never);
+  } else {
+    portJs = "0";
+  }
+
+  // 4. Surface any E-FOREIGN-006 crossing-shadow diagnostics from the extra-fn emit.
+  if (errors && foreignCrossingErrors.length > 0) for (const e of foreignCrossingErrors) errors.push(e);
+
+  // 5. Assemble: banner + headless module + extra helper header + extra fns +
+  //    the serve-harness. The headless module leads with its own ES imports (they
+  //    hoist); the extra helper header is a plain function/const block after it.
+  const out: string[] = [];
+  out.push("// Generated listener-owning tool — scrml compiler output (§64, Fork 1A)");
+  out.push(`// Headless serve-target: \`bun <this-file>.js\` starts Bun.serve on the declared port.`);
+  out.push("");
+  out.push(headlessModule.replace(/\n+$/, ""));
+  out.push("");
+  if (extraHelperHeader) { out.push(extraHelperHeader.replace(/\n+$/, "")); out.push(""); }
+  if (extraBody.trim()) { out.push(extraBody.replace(/\n+$/, "")); out.push(""); }
+
+  out.push("// --- §64.3 serve-harness (Fork 1A) — compiler-emitted Bun.serve listener ---");
+  if (!hasRoutes) {
+    // A serve= program with no `<endpoint>`/SSE route serves nothing but a 404 —
+    // define an empty routes array so the harness references a real binding.
+    out.push("const routes = [];");
+  }
+  if (mainFn) {
+    // §64.3 compose — run the no-return setup `main` BEFORE the serve-harness holds
+    // the process (a numeric-return main + serve= is E-TOOL-SERVE-MAIN-EXITS at TS).
+    out.push("await main(process.argv.slice(2));");
+  }
+  out.push(`const _scrml_serve_port = ${portJs};`);
+  out.push(`const _scrml_server = Bun.serve({`);
+  out.push("  port: _scrml_serve_port,");
+  // Match the web-app entry's idleTimeout (S221 — a legit >10s route must not be
+  // truncated by Bun's 10s default).
+  out.push("  idleTimeout: 120,");
+  out.push("  async fetch(request, server) {");
+  out.push("    const url = new URL(request.url);");
+  out.push("    for (const _scrml_route of routes) {");
+  out.push("      if ((_scrml_route.path === url.pathname || _scrml_route.path === \"/*\") && _scrml_route.method === request.method) {");
+  // A WS upgrade route needs the `server` handle for `server.upgrade`; an HTTP
+  // route takes only the request (the WinterCG aggregate `fetch` is single-arg).
+  out.push("        return _scrml_route.isWebSocket ? _scrml_route.handler(request, server) : _scrml_route.handler(request);");
+  out.push("      }");
+  out.push("    }");
+  out.push("    return new Response(\"Not Found\", { status: 404 });");
+  out.push("  },");
+  if (hasWs) out.push("  websocket: _scrml_ws_handlers,");
+  out.push("});");
+  // Expose the server handle on globalThis: §38.6 needs it for a channel-scoped
+  // `broadcast()` (`_scrml_active_server.publish(topic, msg)`, mirrors build.js),
+  // and it is the in-process boot/drive/STOP seam for a harness test (the DD H6
+  // conformance shape — `_scrml_active_server.stop(true)`). Unconditional: a
+  // headless serve-target has no client, so exposing its own server is harmless.
+  out.push("globalThis._scrml_active_server = _scrml_server;");
+  // Operator-visible startup line on STDERR (stdout stays clean for machine output).
+  out.push("console.error(`scrml serve-target listening on http://localhost:${_scrml_serve_port}`);");
+  out.push("");
+  return out.join("\n");
+}
+
+/**
+ * Runtime-helper header for the composing `main`/helpers of a serve-harness tool:
+ * inline each TOOL_RUNTIME_HELPER the extra-fn body references that the headless
+ * module does NOT already define, and fail-closed (E-TOOL-005) on any other
+ * un-inlined `_scrml_*` helper the headless lacks (never a silent ReferenceError).
+ */
+function buildServeExtraHelperHeader(
+  extraBody: string,
+  headlessModule: string,
+  filePath: string,
+  errors?: unknown[],
+): string {
+  if (!extraBody.trim()) return "";
+  const parts: string[] = [];
+  const inlinedNames = new Set<string>();
+  for (const { sig, src } of TOOL_RUNTIME_HELPERS) {
+    if (extraBody.includes(sig) && !headlessModule.includes(sig)) {
+      parts.push(src);
+      inlinedNames.add(sig.slice(0, -1));
+    }
+  }
+  const referenced = new Set<string>();
+  const re = /\b(_scrml_[A-Za-z0-9_]+)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(extraBody)) !== null) referenced.add(m[1]);
+  for (const name of referenced) {
+    if (inlinedNames.has(name)) continue;
+    if (headlessModule.includes(name + "(")) continue; // headless defines/uses it
+    if (name.startsWith("_scrml_sql")) continue;         // db handle (headless db header)
+    if (TOOL_SELF_DEFINED_HELPERS.has(name)) continue;
+    if (errors) {
+      errors.push(new CGError(
+        "E-TOOL-005",
+        `E-TOOL-005: the \`serve=\` tool's \`main\`/setup references the runtime helper ` +
+        `\`${name}\`, but neither the headless serve-target module nor the v1 tool-emit ` +
+        `inlines it (§64) — the emitted module would throw \`ReferenceError: ${name} is not ` +
+        `defined\`. Move the logic into an \`<endpoint>\`/route (served by the headless module), ` +
+        `or use a supported form.`,
+        { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      ));
+    }
+  }
+  return parts.length > 0 ? parts.join("\n") + "\n" : "";
 }
 
 /**

@@ -81,7 +81,7 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
-import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes } from "./tool-program.ts";
+import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes, programHasServeAttr, getToolServeConfig, resolveServePort, collectToolProgramChannels } from "./tool-program.ts";
 // §38.13 (realtime feed over external DB writes) — synthesize the per-feed
 // `RowChange` enum from the watched table's `<schema>` row shape + PK. Phase 1
 // stamps the synthesized descriptor onto the `watches=` channel node for the
@@ -130,6 +130,13 @@ const TS_SPEC_BARE_LITERAL_ATTRS = new Set<string>([
   "reconnect", "channel-reconnect",
   "interval", "running",
   "delay",
+  // §64 (Fork 1A, Unit 2) — `serve=7878` on a `kind="tool"` program is a bare
+  // integer LISTEN port (a value-shape-aware exemption: the numeric literal is
+  // parsed as a `variable-ref` whose `name` IS "7878"; it is not a scope ref).
+  // A `serve=${expr}` runtime port parses as an `expr`, not a variable-ref, and
+  // does not hit this branch; a bare-identifier `serve=port` still scope-checks
+  // (and the typer additionally fires E-TOOL-SERVE-PORT-INVALID on that shape).
+  "serve",
 ]);
 
 // §51.0.B.1 — local-identifier shape (mirror of parsePayloadBindings'
@@ -12629,6 +12636,15 @@ function annotateNodes(
         ));
       }
     } else if (value.kind === "expr") {
+      // §64.9 (Fork 1A, Unit 2) — a `serve=${expr}` runtime port on a `kind="tool"`
+      // program legitimately references the program's OWN top-level `const`s (a
+      // `${PORT}` with `const PORT = 8181`). Those consts are declared in the
+      // program's logic body, which the main walk binds AFTER visiting the program
+      // node's attrs — so the scope-checker would false-fire E-SCOPE-001 on a valid
+      // port ref (source-order, like the g-channel-topic-forward-ref cell case). The
+      // port expr is compiler-consumed + shape-validated by the typer
+      // (E-TOOL-SERVE-PORT-INVALID); skip its scope-check.
+      if (attr.name === "serve") return;
       // F5 (S31): attribute value is a `${...}` interpolation — walk the
       // parsed exprNode through the logic-scope checker the same way a
       // bare-expr inside a logic child would. Without this, `value=${count}`
@@ -21295,6 +21311,26 @@ function spanOfNode(node: ASTNodeLike | null | undefined, fallback: Span): Span 
   return (sp && typeof sp === "object" ? (sp as Span) : fallback);
 }
 
+/** Read a program's `auth=` value ("required"|"optional"|"none") or null. §52.13. */
+function getProgramAuthAttr(programNode: ASTNodeLike | null | undefined): string | null {
+  if (!programNode) return null;
+  const attrs = (programNode as { attrs?: Array<{ name?: string; value?: unknown }> }).attrs;
+  if (!Array.isArray(attrs)) return null;
+  const a = attrs.find((x) => x && x.name === "auth");
+  if (!a) return null;
+  const v = a.value as { value?: unknown } | string | undefined;
+  if (typeof v === "string") return v.replace(/^["']|["']$/g, "").trim();
+  if (v && typeof v === "object" && typeof v.value === "string") return (v.value as string).replace(/^["']|["']$/g, "").trim();
+  return null;
+}
+
+/** True when `main`'s signature declares a return type (§64.3 exit-harness arm). */
+function toolMainDeclaresReturn(mainFn: ASTNodeLike): boolean {
+  return ((mainFn as { hasReturnType?: unknown }).hasReturnType === true)
+    || (typeof (mainFn as { returnTypeAnnotation?: unknown }).returnTypeAnnotation === "string"
+        && ((mainFn as { returnTypeAnnotation?: string }).returnTypeAnnotation as string).trim().length > 0);
+}
+
 function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): void {
   const allPrograms = findAllProgramNodes(fileAST);
   if (allPrograms.length === 0) return;
@@ -21320,8 +21356,43 @@ function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): 
     }
   }
 
+  // §64 (Unit 2, Fork 1A) — `serve=` PLACEMENT. `serve=` is the listener surface
+  // of a TOP-LEVEL `kind="tool"` program only. On a NESTED <program> (a §43
+  // worker/sidecar, not a listener-owning target) it is E-TOOL-SERVE-MISPLACED.
+  for (const prog of allPrograms) {
+    if (prog === topLevel) continue;
+    if (!programHasServeAttr(prog)) continue;
+    errors.push(new TSError(
+      "E-TOOL-SERVE-MISPLACED",
+      `E-TOOL-SERVE-MISPLACED: \`serve=\` is the listener surface of a TOP-LEVEL ` +
+      `\`kind="tool"\` program (§64, Fork 1A) and is not valid on a nested <program>. A ` +
+      `nested <program> is a §43 worker/sidecar execution context, not a listener-owning ` +
+      `serve-target — remove the \`serve=\` from the nested <program>.`,
+      spanOfNode(prog, fileSpan),
+    ));
+  }
+
+  // The top-level program's serve-config (`serve=` + optional `cors=`), or null.
+  const serveConfig = getToolServeConfig(fileAST);
+  const hasServe = serveConfig != null;
+
   // No `kind=` attribute at all on the top-level <program> → normal web app.
-  if (!programHasKindAttr(topLevel)) return;
+  if (!programHasKindAttr(topLevel)) {
+    // §64 (Unit 2) — `serve=` without `kind="tool"` is a mistake: the serve-harness
+    // is a headless serve-target emit, which only `kind="tool"` selects (§64.1).
+    if (hasServe) {
+      errors.push(new TSError(
+        "E-TOOL-SERVE-MISPLACED",
+        `E-TOOL-SERVE-MISPLACED: \`serve=\` requires \`kind="tool"\` (§64, Fork 1A) — it emits a ` +
+        `headless serve-target (a compiler-owned \`Bun.serve\` mounting the program's ` +
+        `\`<endpoint>\`/SSE routes), which is the standalone-tool output shape. A web-app ` +
+        `\`<program>\` hosts its routes via its own server pipeline. Add \`kind="tool"\`, or ` +
+        `remove \`serve=\`.`,
+        spanOfNode(topLevel, fileSpan),
+      ));
+    }
+    return;
+  }
   const kind = getProgramKind(topLevel);
 
   // E-TOOL-002 (value) — closed vocabulary v1: "tool" is the only legal value.
@@ -21341,18 +21412,123 @@ function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): 
     return;
   }
 
-  // kind="tool" — the tool-body validations.
+  // §64 (Unit 2) — `serve=` PORT SHAPE (E-TOOL-SERVE-PORT-INVALID). The two
+  // canonical forms are an integer literal (`serve=7878`) and a `${expr}` runtime
+  // port; a bare identifier / non-numeric string is neither.
+  if (hasServe && serveConfig.port.kind === "invalid") {
+    const shown = serveConfig.port.raw ? ` (found \`${serveConfig.port.raw}\`)` : "";
+    errors.push(new TSError(
+      "E-TOOL-SERVE-PORT-INVALID",
+      `E-TOOL-SERVE-PORT-INVALID: \`serve=\` expects a listen PORT${shown} — either an ` +
+      `integer literal (\`serve=7878\`, 1–65535) or a \`\${expr}\` runtime port ` +
+      `(\`serve=\${port}\`). A bare identifier / non-numeric value is neither (§64, Fork 1A).`,
+      spanOfNode(topLevel, fileSpan),
+    ));
+  }
+
+  // §64 (Unit 2) — the cookie-session AUTH GUARDRAIL (E-TOOL-SERVE-AUTH-UNSUPPORTED).
+  // A `serve=` tool emits HEADLESS routes; the headless shape (Unit 1) gates
+  // cookie-session auth/CSRF OFF (it is web-app-shaped). So cookie-session auth on
+  // a `serve=` tool would emit its routes / §38 WS upgrade with NO auth guard,
+  // SILENTLY. Fail closed. The guardrail enumerates EVERY cookie-auth locus — the
+  // program `auth=` AND each `<channel auth=…>` (§38.5) — NOT just the program (a
+  // per-channel `auth="required"` on its own would otherwise ship an unguarded WS
+  // upgrade). Bearer auth on a headless serve-target is a later unit.
+  if (hasServe) {
+    const isCookieAuth = (v: string | null): boolean => v === "required" || v === "optional";
+    const progAuth = getProgramAuthAttr(topLevel);
+    if (isCookieAuth(progAuth)) {
+      errors.push(new TSError(
+        "E-TOOL-SERVE-AUTH-UNSUPPORTED",
+        `E-TOOL-SERVE-AUTH-UNSUPPORTED: \`auth="${progAuth}"\` (cookie-session auth, §52.13) is ` +
+        `not supported on a \`kind="tool" serve=\` program (§64, Fork 1A). Cookie-session auth ` +
+        `is web-app-shaped — a headless serve-target has no cookie session, so the compiler ` +
+        `would emit its routes with NO auth guard. Bearer-token auth on a headless serve-target ` +
+        `is a later unit; remove \`auth=\` (or guard the routes explicitly) until it lands.`,
+        spanOfNode(topLevel, fileSpan),
+      ));
+    }
+    // §38.5 per-channel `<channel auth=…>` — the WS upgrade cookie-auth guard is
+    // web-app-only (Unit 1 gates `_scrml_auth_check` OFF in headless), so a
+    // `auth="required"`/`"optional"` channel in a `serve=` tool ships an
+    // UNGUARDED WS upgrade. Fire per offending channel.
+    for (const ch of collectToolProgramChannels(fileAST)) {
+      const chAuth = getProgramAuthAttr(ch);
+      if (!isCookieAuth(chAuth)) continue;
+      const chName = (() => {
+        const attrs = (ch as { attrs?: Array<{ name?: string; value?: { value?: unknown } }> }).attrs;
+        const a = Array.isArray(attrs) ? attrs.find((x) => x && x.name === "name") : undefined;
+        const nm = a?.value?.value;
+        return typeof nm === "string" ? nm : "";
+      })();
+      errors.push(new TSError(
+        "E-TOOL-SERVE-AUTH-UNSUPPORTED",
+        `E-TOOL-SERVE-AUTH-UNSUPPORTED: \`<channel${chName ? ` name="${chName}"` : ""} auth="${chAuth}">\` ` +
+        `(cookie-session WS-upgrade auth, §38.5/§52.13) is not supported on a \`kind="tool" serve=\` ` +
+        `program (§64, Fork 1A). A headless serve-target has no cookie session, so the compiler would ` +
+        `emit the channel's WebSocket upgrade with NO auth guard (\`_scrml_auth_check\` is web-app-only). ` +
+        `Bearer-token auth on a headless serve-target is a later unit; remove the channel's \`auth=\` ` +
+        `until it lands.`,
+        spanOfNode(ch, fileSpan),
+      ));
+    }
+  }
+
+  // §64.1 (Unit 2) — an `<endpoint>` / SSE `server function* route=` in a
+  // NON-serve `kind="tool"` program has NO listener to host it: the tool emits no
+  // `Bun.serve`, so the route is silently un-hosted (a §49 no-silent-bad-output
+  // violation — the dev ships a tool that appears to define an API but serves
+  // nothing). Fire a clear error naming `serve=` as the fix. (A serve= tool HOSTS
+  // these — §64.9 — so this fires ONLY when serve= is absent.)
+  if (!hasServe) {
+    const routeConstructs: ASTNodeLike[] = [];
+    const walkForEndpoints = (node: unknown): void => {
+      if (!node || typeof node !== "object") return;
+      const n = node as ASTNodeLike;
+      if (n.kind === "endpoint-decl") routeConstructs.push(n);
+      const kids = n.children as unknown;
+      if (Array.isArray(kids)) for (const c of kids) walkForEndpoints(c);
+    };
+    walkForEndpoints(topLevel);
+    for (const fn of collectTopLevelFunctionDecls(fileAST)) {
+      const route = (fn as { route?: unknown }).route;
+      if (typeof route === "string" && route.length > 0) routeConstructs.push(fn);
+    }
+    for (const rc of routeConstructs) {
+      const isEndpoint = (rc as { kind?: unknown }).kind === "endpoint-decl";
+      const path = (rc as { path?: unknown; route?: unknown }).path ?? (rc as { route?: unknown }).route;
+      const what = isEndpoint
+        ? `an \`<endpoint${typeof path === "string" ? ` path="${path}"` : ""}>\` route`
+        : `an SSE \`server function* ${(rc as { name?: unknown }).name ?? ""}() route=${typeof path === "string" ? `"${path}"` : ""}\``;
+      errors.push(new TSError(
+        "E-TOOL-ROUTE-NEEDS-SERVE",
+        `E-TOOL-ROUTE-NEEDS-SERVE: ${what} appears in a \`kind="tool"\` program with no \`serve=\` ` +
+        `listener to host it (§64.1). A non-serve tool emits NO \`Bun.serve\`, so the route would be ` +
+        `silently un-hosted — the tool would appear to define an API but serve nothing. Add ` +
+        `\`serve=PORT\` to the \`<program>\` (§64.9 — the compiler then emits a \`Bun.serve\` mounting ` +
+        `the route), or remove the route.`,
+        spanOfNode(rc, fileSpan),
+      ));
+    }
+  }
+
   // E-TOOL-001 / E-TOOL-004 — the `main` entry convention (§64.2).
   const mainFn = findToolMainFn(fileAST);
   if (!mainFn) {
-    errors.push(new TSError(
-      "E-TOOL-001",
-      `E-TOOL-001: \`<program kind="tool">\` declares no top-level \`function main\` ` +
-      `entry. A standalone tool SHALL declare exactly one \`function main(args: string[])\` ` +
-      `(optionally \`: number\` for the process exit code; §64.2/§64.3). Add a ` +
-      `\`function main\` — the emitted module runs \`main(process.argv.slice(2))\`.`,
-      spanOfNode(topLevel, fileSpan),
-    ));
+    // §64.3 (Unit 2, main-optional) — a `serve=` tool's compiler-emitted serve-harness
+    // IS the §64.3 active handle (its `Bun.serve` keeps the process alive), so NO
+    // `function main` is required. E-TOOL-001 fires ONLY for a NON-serve tool.
+    if (!hasServe) {
+      errors.push(new TSError(
+        "E-TOOL-001",
+        `E-TOOL-001: \`<program kind="tool">\` declares no top-level \`function main\` ` +
+        `entry. A standalone tool SHALL declare exactly one \`function main(args: string[])\` ` +
+        `(optionally \`: number\` for the process exit code; §64.2/§64.3), OR carry a ` +
+        `\`serve=\` listener (§64, Fork 1A — the serve-harness is the entry). Add a ` +
+        `\`function main\` — the emitted module runs \`main(process.argv.slice(2))\`.`,
+        spanOfNode(topLevel, fileSpan),
+      ));
+    }
   } else if (mainFn.fnKind === "fn") {
     errors.push(new TSError(
       "E-TOOL-004",
@@ -21360,6 +21536,20 @@ function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): 
       `program's IMPURE entry point (it reads argv, calls \`process.exit\`, and does \`_{}\` ` +
       `host I/O), and \`fn\` (§48.11) is the canonical PURE form which cannot hold those ` +
       `side effects. Declare it \`function main(args: string[])\` (§64.2).`,
+      spanOfNode(mainFn, fileSpan),
+    ));
+  } else if (hasServe && toolMainDeclaresReturn(mainFn)) {
+    // §64.3 — a `serve=` tool + a numeric-return `main` is the ONE incoherent combo:
+    // a declared return selects the exit-harness (`process.exit(code)`), which would
+    // kill the live serve-harness. A composing `main` MUST be no-return (setup-only).
+    errors.push(new TSError(
+      "E-TOOL-SERVE-MAIN-EXITS",
+      `E-TOOL-SERVE-MAIN-EXITS: \`function main\` in a \`serve=\` tool declares a return type, ` +
+      `which selects the §64.3 exit-harness (\`process.exit(code)\`) — that would kill the ` +
+      `compiler-emitted serve-harness the moment \`main\` returns. A \`serve=\` program's ` +
+      `\`main\` is OPTIONAL, and when present it COMPOSES as no-return setup (\`function ` +
+      `main(args: string[])\` with no \`: number\`) that runs BEFORE the serve-harness holds ` +
+      `the process. Drop \`main\`'s return type (§64, Fork 1A).`,
       spanOfNode(mainFn, fileSpan),
     ));
   }
@@ -21370,6 +21560,11 @@ function checkToolProgram(fileAST: FileAST, errors: TSError[], fileSpan: Span): 
   for (const child of progChildren) {
     if (!child || typeof child !== "object") continue;
     const ck = (child as { kind?: unknown }).kind as string | undefined;
+    // §64.1 (Unit 2, amended) — a `serve=` tool HOSTS native transports: an
+    // `<endpoint>` (parses to `endpoint-decl`, already not `markup`) and a §38
+    // `<channel>` (WS) are its mounted route surface, NOT E-TOOL-003. `<page>` /
+    // body text / reactive UI state stay rejected (still no html/client).
+    if (hasServe && ck === "markup" && (child as { tag?: unknown }).tag === "channel") continue;
     if (ck === "markup") {
       const tag = (child as { tag?: unknown }).tag as string | undefined;
       const isPage = tag === "page";
