@@ -24,3 +24,31 @@ The failable-fn + call-site-handler model: §6 (the `fail`/`!{}` primer spine) �
 
 ## Progress
 `spa-lists/ss58.progress.md`. Land per-item on `spa/ss58`; ping PA inbox. Do NOT push. PA re-integrates + confirms run.ts green. ESCALATE divergences + the real-DB adapter gate (§19.10.5 runtime).
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-6 above are LANDED — do NOT touch them. This section pins the remaining tier-1 **error-model
+diagnostic codes** (§19 — the `!`/`<errors>`/`<render>` contract) + the **CPS §19.9** idempotency codes,
+per the S256 tier split. Same method + core files as above (§19 read in full per code). Grep each code
+live in `compiler/src` (`type-system.ts` + `codegen/emit-html.ts` + `dependency-graph.ts` + `api.js` +
+`cps-batch-planner.ts`) for the exact trigger. Harness-clean (compile-time; the value-error path).
+
+**error model §19 (the `!`/`?`/`<render>`/`<errors>` contract):**
+7. **E-ERROR-003** (codes) `[status=pending]` — `?` propagation in a non-`!` function (§19.5.4; `type-system.ts:9709`). Pos + neg (`?` in a `!`-declared fn → silent).
+8. **E-ERROR-004** (codes) `[status=pending]` — `?` applied to a non-failable callee (§19.5.4; `type-system.ts:9718`). Pos + neg (`?` on a failable call → silent).
+9. **E-ERRORS-001** (codes) `[status=pending]` — an `<errors>` element error (`codegen/emit-html.ts:1320`). Grep the exact trigger; pos + neg.
+10. **E-ERRORS-002** (codes) `[status=pending]` — an `<errors>` unrecognized value shape ("Got an unrecognized value shape", `codegen/emit-html.ts:1369`). Pos + neg.
+11. **E-RENDER-NO-CLAUSE** (codes) `[status=pending]` — a `<render>` with no clause (`type-system.ts:9008`). Pos + neg.
+12. **E-RENDER-NO-OF** (codes) `[status=pending]` — a `<render>` with no `of=` (`type-system.ts:8970`). Pos + neg.
+13. **E-RENDER-NOT-ENUM** (codes) `[status=pending]` — a `<render>` subject that is not an enum (`type-system.ts:9023`). Pos + neg.
+14. **E-MU-001** (codes) `[status=pending]` — a variable declared but never used before its scope closes (must-use; `type-system.ts:18373`). Pos + neg (a used variable → silent).
+15. **E-LIFT-001** (codes) `[status=pending]` — two independent operations in the same logic block both have `lift` (`dependency-graph.ts:3666`). Pos + neg (a single lift → silent).
+
+**CPS §19.9 idempotency (5 codes):**
+16. **E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH** (codes) `[status=pending]` — an idempotency-store driver mismatch (`api.js:1852`). Pos + neg.
+17. **E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT** (codes) `[status=pending]` — the idempotency store's import is missing (`api.js:1862`). Pos + neg.
+18. **E-CPS-MULTIBATCH-MACHINE-CROSSING** (codes) `[status=pending]` — a multi-batch CPS machine crossing (`cps-batch-planner.ts:85`). Pos + neg.
+19. **E-CPS-MULTIBATCH-REORDER** (codes) `[status=pending]` — a multi-batch CPS reorder violation (`cps-batch-planner.ts:84`). Pos + neg.
+20. **E-CPS-NONIDEM-NO-STORAGE** (codes) `[status=pending]` — a CPS-eligible non-idempotent function with no storage (`api.js:1874`). Pos + neg.
+
+**Wave-2 DoD:** all 14 error-model/CPS codes pinned (codes-half; reject pos + clean neg per code); run.ts
+green; divergences ESCALATED. The `!`/`<render>`/`<errors>`/CPS diagnostic edge moves to conformance-covered.

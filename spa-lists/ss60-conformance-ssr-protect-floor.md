@@ -26,3 +26,26 @@ The §52 server-authority + §14.8.9 egress-redaction floor: §52.8 (SSR pre-ren
 
 ## Progress
 `spa-lists/ss60.progress.md`. Land per-item on `spa/ss60`; ping PA inbox. Do NOT push. PA re-integrates + run.ts green. ESCALATE: the SSR-compose adapter gap (item 1/3), the WS/SSE driver gate (item 6), any impl#1-vs-SPEC divergence.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-6 above are LANDED — do NOT touch them. This section adds the freeze-blocking **security floor +
+route-serialization** codes the S256 tier split (`scrml-support/.../v1-conformance-coverage-2026-07-15/`)
+places in tier-1 (the audit's TOP FINDING). Same method + core files as above. **CORRECTNESS ESCALATION
+(FINDINGS §"security trio"):** the three `W-AUTH-*`/`W-SERVERLOAD-*` floors currently fire only a
+**warning** and are unpinned — before authoring, the PA/user must rule whether they should be **errors**
+(freeze-blocking regardless of the coverage decision). Author the codes half against CURRENT severity;
+FLAG the error-vs-warning question per code. Grep each code live in `compiler/src` for the exact trigger.
+
+7. **W-AUTH-CONTENT-NOT-GATED** (codes/severity) `[status=pending]` — §40.9.5: `<auth role="X">` gates the JS but ships the HTML to ALL viewers (`auth-graph.ts:584`, one warning per `<auth role>` site). Author pos (gated content, HTML shipped ungated → warning) + neg (properly server-gated → silent) + a `severity` assertion. **ESCALATE error-vs-warning.**
+8. **W-SERVERLOAD-UNGATED** (codes/severity) `[status=pending]` — §52.15: the `/__serverLoad/<name>` read route serves server-authority data PAST the auth gate (`type-system.ts:10799`). Pos (server-authority read reachable ungated → warning) + neg. **ESCALATE error-vs-warning.**
+9. **W-AUTH-LOGIN-MISSING** (codes/severity) `[status=pending]` — §40: an auth gate with no reachable login route (`auth-graph.ts:440`, compilation-scoped). Pos + neg (login route present → silent).
+10. **W-SSR-PRERENDER-UNSCOPED** (codes/severity) `[status=pending · being fixed→info-lint]` — §52.15/§52.8: cross-user rows baked into first-paint HTML (`type-system.ts:10820`). **NOTE:** the SSR fix in flight converts this hole into a fixed+pinned **info-lint** — author against the POST-fix state (verify severity live: `info`, not `warning`); coordinate with the SSR work.
+11. **E-PROTECT-003** (codes) `[status=pending]` — the §14.8.9 protect egress-boundary fail-closed error (`batch-planner.ts:89` union; the raw/FFI-egress path). Pos (unredacted protected column reaches an egress sink → error) + neg.
+12. **E-PA-002** (codes) `[status=pending]` — protect-analyzer cannot build the shadow DB: missing `CREATE TABLE` for at least one table (`protect-analyzer.ts:821`). Pos + neg.
+13. **E-PA-005** (codes) `[status=pending]` — protect-analyzer: tables-in-scope unspecified ("Specify which tables to bring into scope", `protect-analyzer.ts:1042`). Pos + neg. (`E-PA-003/004/007` are tier-2 — excluded.)
+14. **E-PA-006** (codes) `[status=pending]` — protect-analyzer: SQLite DB path unspecified (`protect-analyzer.ts:997`). Pos + neg.
+15. **E-ROUTE-003** (codes) `[status=pending]` — §61 server-fn arg/return **serialization** contract violation (`type-system.ts:4420`, "Server function ..."). A non-serializable arg/return across the client↔server boundary → error. Pos + neg (serializable shape → silent).
+16. **E-ROUTE-004** (codes) `[status=pending]` — §61 server-fn serialization sibling (`type-system.ts:4397`). Pos + neg. (`E-ROUTE-001` computed-member → ss63.)
+17. **I-AUTH-REDIRECT-UNRESOLVED** (codes/severity) `[status=pending]` — §40: an auth redirect path that cannot be statically resolved (`auth-graph.ts:17`, info-lint). Pos (unresolvable redirect target → info) + neg. TIER-SPLIT "I-AUTH-REDIRECT".
+
+**Wave-2 DoD:** all 11 security/serialization codes pinned (codes + severity partition); the 3-4 error-vs-warning correctness questions ESCALATED per code (not silently enshrined at warning); run.ts green.
