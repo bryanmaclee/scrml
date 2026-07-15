@@ -29,4 +29,16 @@ row9  CTX001=0 ATTROP=0 Compiled=1 (PASS — paren-tracked >=)
 Discriminator = "is there a pending unquoted attribute value?" i.e. a depth-0 unquoted `=` seen earlier in this opener.
 - scanAttributes: swallow `>=`-as-comparison only when `sawUnquotedEq` (prior depth-0 unquoted `=`); else `>` terminates. Strictly narrows (only changes openers where `>=` appears with NO prior `=` — exactly the leading-`=`-after-bare-tag bug). Preserves S188 reject for `if=@n >= 3`.
 - classify: an opener whose `>` is IMMEDIATELY followed by `=` (no whitespace, no prior attr `=`) is NOT a state-decl child.
-- peek line 1595: mirror the narrowing for site-consistency, guarding so it stays FALSE for leading-`=` markup (does not newly gobble). TBD after empirical check.
+- peek line 1595: DECISION = leave untouched. Empirically it is NOT the fire site for issue #28. For any `<x>=...` (immediate `>=`) shape the S188 skip at 1595 makes the peek run past the leading `=` and return FALSE (a harmless false-negative), so the peek never mis-gobbles leading-`=` markup as a decl; scanAttributes + classify handle those cases. The ONLY input 1595 mis-handles is the no-space top-level decl `<count>=0` (returns markup instead of decl) — a SEPARATE, pre-existing, out-of-scope bug (matrix row 8 uses the space form `<count> = 0`, which works). Narrowing 1595 would require close-tag disambiguation in the peek too and would incidentally repair `<count>=0` — scope creep the brief forbids. Surfaced to PA instead.
+
+## Fixes landed
+- Commit 9b86bc4b — scanAttributes: `sawUnquotedEq` gate on the S188 `>=` reject (fixes direct-child leading-`=` rows 1b/3/4 + the `<td>` leaf of row 2).
+- (this commit) classify: `openerHasMatchingCloseTag` close-tag discriminator on the state-decl `=` branch (fixes nested-compound rows 1/2; prevents `<div>`/`<tr>` false-compound gobble).
+
+## Full matrix (post scanAttributes + classify) — ALL PASS
+row1  CTX001=0 Compiled=1 | row1b CTX001=0 Compiled=1 | row2 CTX001=0 Compiled=1
+row3  CTX001=0 Compiled=1 | row4  CTX001=0 Compiled=1 | row5 CTX001=0 Compiled=1
+row6  CTX001=0 Compiled=1 | row7  CTX001=0 ATTROP=1 Compiled=0 (reject preserved, NO E-CTX-001)
+row8  CTX001=0 Compiled=1 | row9  CTX001=0 Compiled=1
+Block-tree text bodies verified: "= hi" / "=" / "=a=b=c" / "=SUM(A1:A9)" preserved.
+Full suite green @ scanAttributes: 20198 pass / 0 fail / 20264 tests (157s).

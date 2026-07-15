@@ -1968,6 +1968,48 @@ export function splitBlocks(filePath, source) {
   // ---------------------------------------------------------------------------
 
   /**
+   * issue #28 — disambiguate a leading-`=` markup body from a `<name> = RHS`
+   * state-decl. Scans forward from `fromPos` (just past an opener's `>`) for a
+   * matching `</tagName>` close tag. Returns true iff one is found — meaning the
+   * opener is a MARKUP element (`<span>= hi</span>`), NOT a state-decl whose RHS
+   * merely begins with `=` (a state-decl child has no `</name>` close).
+   *
+   * String literals and `//` / block comments are skipped so a `</tagName>`
+   * appearing inside a quoted value (`<x> = "</x>"`) or a comment does not
+   * false-positive. Finding ANY same-named close after the opener is sufficient
+   * evidence of markup — a genuine state-decl RHS is a single expression and
+   * does not contain its own close tag outside a string. Bounded by EOF.
+   */
+  function openerHasMatchingCloseTag(tagName, fromPos) {
+    let i = fromPos;
+    let inD = false;
+    let inS = false;
+    while (i < len) {
+      const c = source[i];
+      if (inD) { if (c === "\\") { i += 2; continue; } if (c === '"') inD = false; i++; continue; }
+      if (inS) { if (c === "\\") { i += 2; continue; } if (c === "'") inS = false; i++; continue; }
+      if (c === '"') { inD = true; i++; continue; }
+      if (c === "'") { inS = true; i++; continue; }
+      if (c === "/" && source[i + 1] === "/") {
+        if (urlSlashesAt(source, i)) { i += 2; continue; }
+        i = skipLineComment(source, i);
+        continue;
+      }
+      if (c === "/" && source[i + 1] === "*") { i = skipBlockComment(source, i); continue; }
+      if (c === "<" && source[i + 1] === "/") {
+        let j = i + 2;
+        const nameStart = j;
+        while (j < len && /[A-Za-z0-9_\-]/.test(source[j])) j++;
+        if (source.slice(nameStart, j) === tagName) return true;
+        i = j;
+        continue;
+      }
+      i++;
+    }
+    return false;
+  }
+
+  /**
    * Helper for scanCompoundBlockEnd — classify a `<ident...>` opener at
    * offset `p` as one of:
    *   - "state-decl": followed by `=` or `:` after `>` (no close tag needed)
@@ -1986,7 +2028,9 @@ export function splitBlocks(filePath, source) {
     let q = p + 1;
     if (q >= len) return null;
     if (!/[A-Za-z_]/.test(source[q])) return null;
+    const nameStartC = q;
     while (q < len && /[A-Za-z0-9_\-]/.test(source[q])) q++;
+    const cTagName = source.slice(nameStartC, q);
     // Attr scan with balanced quotes / braces / parens — mirrors
     // peekTopLevelStateDeclSignal's pattern.
     let braceDepth = 0;
@@ -2037,7 +2081,18 @@ export function splitBlocks(filePath, source) {
     if (r < len) {
       if (source[r] === "=") {
         const nxt = r + 1 < len ? source[r + 1] : "";
-        if (nxt !== "=" && nxt !== ">") return { kind: "state-decl", afterOpener: q };
+        // issue #28 — a `<name>` whose element body BEGINS with `=`
+        // (`<span>= hi</span>`, `<td>=SUM(A1:A9)</td>`) is MARKUP with a
+        // leading-`=` text body, NOT a `<name> = RHS` state-decl child. The two
+        // shapes are locally indistinguishable (both are `>` then `=` then a
+        // char), so disambiguate structurally: a state-decl child has NO
+        // matching close tag, whereas markup does. Without this the parent
+        // (`<div>`/`<tr>`) is misread as a compound state-decl, the subtree is
+        // gobbled + auto-lifted (→ a phantom `@div` reactive var → E-DG-002),
+        // and the tag stack corrupts into an E-CTX-001 cascade.
+        if (nxt !== "=" && nxt !== ">" && !openerHasMatchingCloseTag(cTagName, q)) {
+          return { kind: "state-decl", afterOpener: q };
+        }
       } else if (source[r] === ":") {
         return { kind: "state-decl", afterOpener: q };
       }
