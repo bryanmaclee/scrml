@@ -1,3 +1,16 @@
+> ## ⚠️ CROSS-MACHINE — Peter/Windows S254 also wrapped (2026-07-15), AFTER this S255 hand-off
+> A concurrent Windows-seat session (Peter, `pjoliver11`) landed **two PRs to main after S255 wrapped**:
+> **PR #37** (`95a912c` — 150-file `.pathname`→`fileURLToPath` codemod + reset-gap) and **PR #43**
+> (`a4192be` — cross-OS hardening partial, reviewed 16-agent high: `isStdlibFile`→single #26 gate ·
+> posix `deriveWatchFiles` · `os.tmpdir()` test portability · `docs/cross-os-invariants.md`). Windows
+> `unit+conformance` **59→37 fails, 0 regressions; POSIX no-op**. Absorb delta-log **[513]-[516]**.
+> **Top Windows arc for next boot:** the **path-model canonicalization refactor** — the 37 remaining are
+> ONE root cause (inconsistent native/posix path KEYS); design + rejected-approaches (474-fail
+> entry-norm) in `scrml-support/docs/deep-dives/windows-path-model-canonicalization-2026-07-14.md`.
+> It's security-adjacent (#26) + defines the cross-OS path *contract* → **Bryan-adjacent, own reviewed arc.**
+> Housekeeping: stale remote branch `s254-windows-pathname-fix` (delete needs naming). scrml-support @ `86d5c71`.
+> _(bryan's S255 wrap follows, unchanged.)_
+
 # scrml — Session 255 (WRAP) — ⭐ Track-A Units 1+2 landed + PA-contract PR-flow migration + advisory review + Windows CI
 
 **Date:** 2026-07-14/15. **Profile:** A (`/boot`). A very large multi-arc session: migrated the PA contract to
