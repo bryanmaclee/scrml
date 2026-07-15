@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-025-enum-subject-neg",
+  "description": "§18.8.2 — a `match` over an ENUM-typed subject (`match r` where `r: Role`) SHALL NOT fire E-TYPE-025: an enum is a well-typed matchable subject. Acceptance sibling of e-type-025-asis-subject-pos: proves the non-matchable-subject rejection is scoped to opaque `asIs`, not narrowed enum types.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.2",
+  "rationale": "§18.8.2: an enum-typed subject is matchable, so the `asIs`/non-matchable-subject check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-025"]
+  }
+}

@@ -1,0 +1,14 @@
+${
+  type Role:enum = { Admin, Editor, Viewer }
+  type Post:struct = { role: Role req }
+
+  fn label(p: Post) -> string {
+    match p.role {
+      else    :> "other"
+      .Admin  :> "admin"
+    }
+  }
+}
+<program>
+  <p>hi</p>
+</program>

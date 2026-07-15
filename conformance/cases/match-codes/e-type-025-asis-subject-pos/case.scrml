@@ -1,0 +1,11 @@
+${
+  fn label(x: asIs) -> string {
+    match x {
+      "a" :> "a"
+      "b" :> "b"
+    }
+  }
+}
+<program>
+  <p>hi</p>
+</program>

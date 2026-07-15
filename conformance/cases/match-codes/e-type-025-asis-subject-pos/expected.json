@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-025-asis-subject-pos",
+  "description": "§18.8.2 — a `match` whose subject is an `asIs`-typed value (the opaque escape-hatch type) SHALL fire E-TYPE-025: `match` requires a typed subject (enum, union, or primitive), and `asIs` carries no discriminable structure. Regression guard: an `asIs` subject must be narrowed via a type annotation before matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.2",
+  "rationale": "§18.8.2: `match` requires a typed subject (enum, union, or primitive); an `asIs`-typed subject is opaque and is rejected with E-TYPE-025. Narrow the type first (`let x: SomeType = ...`) before matching.",
+  "expect": {
+    "codes": ["E-TYPE-025"],
+    "notCodes": []
+  }
+}

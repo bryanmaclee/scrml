@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-ontransition-forbidden-pos",
+  "description": "§18.0.2 — an `<onTransition>` element inside a block-`<match>` arm body SHALL fire E-MATCH-ONTRANSITION-FORBIDDEN. `<onTransition>` is engine-only — transitions do not occur in a read-only match — so the diagnostic steers to `<engine for=Type initial=.Variant>` (Tier 2). Regression guard: a match arm renders per current variant; it never fires transition handlers.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.2",
+  "rationale": "§18.0.2: `<onTransition>` appearing inside a `<match>` arm body is a compile error (E-MATCH-ONTRANSITION-FORBIDDEN) — transition handlers are engine-only. Use `<engine for=Type initial=.Variant>` for transition handlers.",
+  "expect": {
+    "codes": ["E-MATCH-ONTRANSITION-FORBIDDEN"],
+    "notCodes": []
+  }
+}

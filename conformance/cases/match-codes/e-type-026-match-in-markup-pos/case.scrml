@@ -1,0 +1,10 @@
+${
+  type Role:enum = { Admin, Editor }
+  <role>: Role = .Admin
+}
+<program>
+  match @role {
+    .Admin :> "admin"
+    .Editor :> "editor"
+  }
+</program>

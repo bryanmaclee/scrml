@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-syntax-011-guard-clause-pos",
+  "description": "§18.10 — a value-form `match` arm carrying a guard CONDITION (`.Admin | p.active :> ...`, i.e. a `| cond` boolean guard, distinct from `| .Variant` pattern alternation) SHALL fire E-SYNTAX-011: arm guard clauses are not supported in v1. Regression guard: `| cond` / `if cond` guards must be rejected so the condition is moved into an `if` inside the arm body.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.10",
+  "rationale": "§18.10: match arm guard clauses (`| cond` or `if cond`) are not supported in v1 (E-SYNTAX-011). Resolution: use a plain pattern and move the condition into an `if` inside the arm body.",
+  "expect": {
+    "codes": ["E-SYNTAX-011"],
+    "notCodes": []
+  }
+}

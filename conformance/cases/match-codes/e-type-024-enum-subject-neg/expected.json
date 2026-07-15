@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-024-enum-subject-neg",
+  "description": "§18.8.2 — a `match` over a struct FIELD of enum type (`match p.role` where `role: Role`) SHALL NOT fire E-TYPE-024: the subject resolves to the field's enum type, a matchable subject. Acceptance sibling of e-type-024-struct-subject-pos: proves the struct-subject rejection is scoped to whole-struct subjects, not enum-typed member access.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.8.2",
+  "rationale": "§18.8.2: an enum-typed subject (a struct field accessed via `.role`) is matchable, so the struct-subject check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-024"]
+  }
+}
