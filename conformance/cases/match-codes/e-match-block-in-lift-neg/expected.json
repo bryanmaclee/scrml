@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-block-in-lift-neg",
+  "description": "§18.0.1 — a block `<match for=Type on=expr>` at ordinary MARKUP position (not inside a `${ ... lift ... }` loop) is recognized by the BS-layer match-block builder (builds a `match-block` node), so the unrecognized-lift-block signal is absent and E-MATCH-BLOCK-IN-LIFT SHALL NOT fire. Acceptance sibling of e-match-block-in-lift-pos: proves the lift-context detector is scoped to the lift path and does not over-fire on the normal markup-position block-`<match>`.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/uvb-w1-post-ce-invariant.test.js",
+  "spec": "§18.0.1",
+  "rationale": "§18.0.1: a markup-position block-`<match>` compiles via the recognized match-block path; only the inline-markup/lift-loop path produces the residual `markup tag=match` node that E-MATCH-BLOCK-IN-LIFT keys on.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-BLOCK-IN-LIFT", "E-COMPONENT-035"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-006-multi-scrutinee-union-pos",
+  "description": "§18.19 / §18.8.2 — a non-exhaustive multi-scrutinee `match (r, u)` over the (Role x Role|not) product, where a scrutinee position (`u`) is a UNION type, SHALL fire E-TYPE-006 naming the uncovered combination(s). The single arm `(.Admin, _)` covers only the Role=Admin column, leaving the (.Editor x *) cells uncovered. Regression guard: because a union position is present, the product-exhaustiveness gap is reported as E-TYPE-006 (the union variant) rather than E-TYPE-020 (the all-enum variant).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.19",
+  "rationale": "§18.19 / §18.8.2: a multi-scrutinee `match` must cover the cross-product of the per-position variant sets; when a position is a union type, an uncovered product cell is E-TYPE-006. Add arms for the uncovered cells, a per-position `_`, or a whole-product `else`.",
+  "expect": {
+    "codes": ["E-TYPE-006"],
+    "notCodes": []
+  }
+}

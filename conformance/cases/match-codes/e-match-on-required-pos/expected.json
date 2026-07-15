@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-on-required-pos",
+  "description": "§18.0.1 — a block `<match for=Phase>` with NO `on=` scrutinee and NO in-scope `<engine for=Phase>` cannot auto-imply its subject and SHALL fire E-MATCH-ON-REQUIRED. Regression guard (Q-MB-5 §34 row): auto-implied `on=` resolution is legal ONLY when a same-type engine is in scope; otherwise the scrutinee must be given explicitly. NOTE (impl#1 oracle): a benign W-severity E-DG-002 co-fires because omitting `on=` leaves `@phase` unread; E-MATCH-ON-REQUIRED is the target this case pins.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.1",
+  "rationale": "§18.0.1 + §34: `<match for=Type>` is missing required `on=` and no `<engine for=Type>` is in scope (auto-implied resolution requires a same-type engine), so E-MATCH-ON-REQUIRED fires. Resolution: add `on=expr` or declare a compatible engine.",
+  "expect": {
+    "codes": ["E-MATCH-ON-REQUIRED"],
+    "notCodes": []
+  }
+}

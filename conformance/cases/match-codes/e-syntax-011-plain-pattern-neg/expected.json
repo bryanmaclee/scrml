@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-syntax-011-plain-pattern-neg",
+  "description": "§18.10 — a value-form `match` whose arms are plain `.Variant` patterns with NO guard clause SHALL NOT fire E-SYNTAX-011. Acceptance sibling of e-syntax-011-guard-clause-pos: proves the guard detector does not over-fire on ordinary variant patterns.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.10",
+  "rationale": "§18.10: plain arm patterns without a `| cond` / `if cond` guard are the supported v1 form, so the guard-clause check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SYNTAX-011"]
+  }
+}

@@ -1,0 +1,15 @@
+${
+  type Phase:enum = { Idle, Loading, Ready }
+  <phase>: Phase = .Idle
+}
+<match for=Phase on=@phase>
+  <Idle>
+    <p data-arm="idle">Idle</p>
+  </>
+  <Loading>
+    <p data-arm="loading">Loading</p>
+  </>
+  <Ready>
+    <p data-arm="ready">Ready</p>
+  </>
+</match>

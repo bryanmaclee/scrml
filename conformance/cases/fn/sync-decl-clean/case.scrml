@@ -1,0 +1,8 @@
+<program>
+${
+    fn loadProfile(id) {
+        return id
+    }
+}
+<p>${loadProfile(1)}</>
+</program>

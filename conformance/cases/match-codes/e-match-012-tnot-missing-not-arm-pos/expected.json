@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-012-tnot-missing-not-arm-pos",
+  "description": "§42 — a value-form `match` over a `T | not` (optional) subject (`match r` where `r: Role | not`) that provides arms for the present-case variants but NO `not` arm and NO `else`/`_` wildcard is non-exhaustive on the absence case and SHALL fire E-MATCH-012. Regression guard: the `T | not` absence arm is the §42 discrimination point; dropping it silently would let an absent value fall through unhandled. NOTE (impl#1 oracle): impl#1 CO-FIRES E-TYPE-006 here (its value-form union checker also treats the `Role` member as uncovered — see the divergence recorded on the NEG sibling); E-MATCH-012 is the target code this case pins.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42",
+  "rationale": "§42 (SPEC.md:23152): 'A `match` on `T | not` without a `not` arm or `else` arm SHALL be compile error E-MATCH-012.' The match supplies `.Admin` / `.Editor` present-case arms but neither a `not` arm nor an `else`/`_` wildcard, so the absence case is unhandled.",
+  "expect": {
+    "codes": ["E-MATCH-012"],
+    "notCodes": []
+  }
+}

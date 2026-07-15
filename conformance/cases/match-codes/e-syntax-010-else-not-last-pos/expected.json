@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-syntax-010-else-not-last-pos",
+  "description": "§18.6 — an `else` arm that is NOT the last arm in a value-form `match` block SHALL fire E-SYNTAX-010. Regression guard: arms after `else` are unreachable; `else` is the catch-all and must sit at the bottom. (Trigger confirmed: in match context the type-system.ts:16490 else-position check fires, NOT the §42 rewrite.ts null-in-value trigger which is a different code path.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.6",
+  "rationale": "§18.6: the `else` arm SHALL be the last arm in a `match` block; an `else` followed by further arms is E-SYNTAX-010. Resolution: move `else` to the bottom or remove the trailing arms.",
+  "expect": {
+    "codes": ["E-SYNTAX-010"],
+    "notCodes": []
+  }
+}

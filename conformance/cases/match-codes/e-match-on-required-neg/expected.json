@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-on-required-neg",
+  "description": "§18.0.1 — a block `<match for=Phase on=@phase>` with an explicit `on=` scrutinee SHALL NOT fire E-MATCH-ON-REQUIRED. Acceptance sibling of e-match-on-required-pos: the explicit scrutinee satisfies the requirement, so the auto-implied-resolution check stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.1",
+  "rationale": "§18.0.1: when `on=expr` is present the `<match>` has an explicit subject and no auto-implied engine resolution is needed, so E-MATCH-ON-REQUIRED is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ON-REQUIRED"]
+  }
+}

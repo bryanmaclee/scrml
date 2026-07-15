@@ -1,0 +1,12 @@
+{
+  "id": "fn-dom-mutation-pure-value-clean",
+  "description": "§48.3.2 clean neg — a pure `fn build(x)` that computes a value (`x * 2`) with no DOM access SHALL NOT fire E-FN-002. Confirms the DOM-mutation walker does not false-fire on ordinary pure arithmetic. `notCodes` asserts E-FN-002 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/fn-constraints.test.js",
+  "spec": "§48.3.2",
+  "rationale": "§48.3.2 fires only on DOM-node mutation/creation calls (`document.*`, `.appendChild`, `.innerHTML`, …). A `fn` body that only computes a value of its inputs touches no DOM and is silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-002"]
+  }
+}

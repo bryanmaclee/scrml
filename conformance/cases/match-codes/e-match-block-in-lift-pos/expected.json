@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-block-in-lift-pos",
+  "description": "§18.0.1 / §34 — a block `<match for=Type on=expr>` written inside a `${ for (...) { lift ... } }` logic loop is parsed by the inline-markup path (not the BS-layer match-block recognizer), so its variant arms are unrecognized. impl#1 emits ONE targeted E-MATCH-BLOCK-IN-LIFT per unrecognized `<match>`, steering to `<each>`, and REPLACES the misleading E-COMPONENT-035 'unresolved component' cascade on the arm tags. Regression guard (S212 ruling / S213 impl): without the steer the `<Open>`/`<Closed>` arms surface a phantom cross-file component-import error.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/uvb-w1-post-ce-invariant.test.js",
+  "spec": "§18.0.1",
+  "rationale": "§18.0.1 (block-form `<match>`) + §17.7 (`<each>`): the per-item block-`<match>` form is not supported inside a `${ ... lift ... }` logic loop; the supported per-item container is `<each in=@collection as item> ... <match for=Type on=item> ... </match> ... </each>`. impl#1 fires E-MATCH-BLOCK-IN-LIFT (§34) and suppresses the E-COMPONENT-035 cascade on the arm nodes.",
+  "expect": {
+    "codes": ["E-MATCH-BLOCK-IN-LIFT"],
+    "notCodes": ["E-COMPONENT-035"]
+  }
+}

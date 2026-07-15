@@ -1,0 +1,9 @@
+<program>
+${ @value = 42 }
+${
+    fn pureRead(a) {
+        return a + @value
+    }
+}
+<p>${pureRead(1)}</>
+</program>

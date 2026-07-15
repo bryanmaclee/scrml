@@ -1,0 +1,10 @@
+<program>
+${ @counter = 0 }
+${
+    fn badWrite(a) {
+        @counter = a
+        return a
+    }
+}
+<p>${badWrite(1)}</>
+</program>
