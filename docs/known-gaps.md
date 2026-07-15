@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 22 |
+| MED | 24 |
 | LOW | 18 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2886,3 +2886,9 @@ Surfaced by the real-DB conformance adapter (Part 1). A `transaction { … }` bl
 
 ### G-SQL-ERROR-SURFACE-UNWIRED — server-side SQL errors never reach a scrml `SqlError`/`!{}` — `NEW S254; MED; open`
 Surfaced by the real-DB conformance adapter (Part 1). A thrown Bun.SQL error on the server (constraint violation etc.) is NOT mapped to a `SqlError` variant/envelope — `grep -rn SqlError compiler/src` = 0. So a `!{}` arm `::ConstraintViolation` (§8.7 / §19.8.1) can NEVER fire; violations are only observable via `INSERT OR IGNORE` + COUNT. Candidate V1 build arc. <!-- @gap id=g-sql-error-surface-unwired sev=MED status=open -->
+
+### G-CURRENTUSER-PLAIN-HANDLER-DANGLING — `@currentUser` in a plain (non-serverLoad/non-SSR) server-fn handler emits an ungated `_scrml_currentUser` reference with no binding → `ReferenceError` — `NEW S255; MED; open`
+Surfaced by the Track-A Unit-1 (server-program-shape decouple) adversarial review (finding 2). A plain RPC/SSE server-fn body reading `@currentUser` lowers (emit-expr.ts ~L673) to a shape-INVARIANT, ungated `_scrml_currentUser` reference, but the `_scrml_currentUser` BINDING emits ONLY inside the §52 serverLoad / SSR paths (`emit-server.ts` ~L3390/~L3484). So a handler like `return { id: _scrml_currentUser.id }` with no serverLoad/SSR on the route dangles `_scrml_currentUser` → `ReferenceError` at request time (HTTP 500). **PRE-EXISTING, verified web-app** (agent a1ef88d0: a plain web-app RPC handler reading `@currentUser` emits ZERO `const _scrml_currentUser` bindings — dangles in web-app today, INDEPENDENT of the Fork-2A change; NOT a decouple regression). Fix (not scoped): emit the `_scrml_currentUser` binding whenever a route handler reads `@currentUser`, not only in serverLoad/SSR. <!-- @gap id=g-currentuser-plain-handler-dangling sev=MED status=open -->
+
+### G-CHANNEL-AUTH-ONLY-AUTHCHECK-DANGLING — a `<channel auth=>`-only program (no program-level auth middleware) references `_scrml_auth_check` in the WS handler but never defines it → `ReferenceError` — `NEW S255; MED; open`
+Surfaced by the Track-A Unit-1 completeness sweep. The §38 channel WS upgrade handler (`emit-server.ts:3646`) references `_scrml_auth_check(req)` gated on `!!authMiddlewareEntry || hasChannelAuth`, but the `_scrml_auth_check` DEFINITION (`emit-server.ts` ~L1597, and the fix's `_channelWsRefsAuthCheck`) is gated on `authMiddlewareEntry` presence. So a program with a `<channel auth=>` but NO program-level auth middleware (`hasChannelAuth` true, `authMiddlewareEntry` null) emits the reference without the definition → dangling `_scrml_auth_check` → `ReferenceError` at WS upgrade. **PRE-EXISTING, dangles in BOTH shapes** (an authMiddlewareEntry-vs-hasChannelAuth def/ref mismatch orthogonal to the Fork-2A shape axis; the Unit-1 fix reconciled only the shape-gating for the authMiddlewareEntry case). Fix (not scoped): the `_scrml_auth_check` definition gate must cover the channel-auth-only case (`hasChannelAuth`), matching its reference-site condition. <!-- @gap id=g-channel-auth-only-authcheck-dangling sev=MED status=open -->
