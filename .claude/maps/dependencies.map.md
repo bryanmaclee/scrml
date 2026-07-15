@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-09  commit: fbb4d9fd
+# updated: 2026-07-14T18:58:34-06:00  commit: f079d0a9
 
 ## Runtime Dependencies — root package.json (v0.7.1)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
@@ -25,8 +25,11 @@ puppeteer@^24.40.0 — headless browser support for e2e/docs tooling
 ## Editor-tooling Dev Dependencies — editors/vscode/package.json
 vscode-textmate, vscode-oniguruma — bundled TextMate-grammar test harness (tokenize.js / regression-scan.js); not part of the compiler pre-commit gate, needs its own `npm i`.
 
+## CI-only External Actions (not npm deps — GitHub Actions)
+actions/checkout@v4/v6, oven-sh/setup-bun@v2, anthropics/claude-code-action@v1 — see build.map.md / infra.map.md for CI wiring; anthropics/claude-code-action needs the `ANTHROPIC_API_KEY` repo secret to activate.
+
 ## Runtime Engine
-bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$).
+bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$, Bun.SQL).
 
 ## Internal Module Graph — compiler pipeline (compiler/src/api.js is the spine)
 
@@ -42,6 +45,7 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
 | Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen |
 | Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test) |
+| Tool serve-harness | tool-program.ts, codegen/emit-tool.ts, codegen/emit-server.ts | §64.9 `serve=` listener-owning headless target (Fork 1A, Unit 1+2, landed this window) |
 | CSS conflict check | codegen/css-conflict-check.ts | run post-CE at api.js Stage 3.4 over `collectCssBlocks`; emits E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
 | Validate emit | codegen/validate-emit.ts | final artifact sanity (single-JS-expression checks etc.) |
 | Meta-eval | meta-eval.ts | `^{}` meta-block execution |
@@ -54,16 +58,21 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | codegen/collect.ts | FileAST-shape collectors (server var decls, load-kind classification) |
 | codegen/binding-registry.ts | pure data registry for event/logic bindings, no imports |
 | codegen/log-loc.ts | source-location resolver, standalone |
+| codegen/route-splitter.ts | per-route chunk manifest serialization (`serializeChunksManifest`) |
+| codegen/mcp-descriptors.ts | MCP tool descriptor synthesis (`buildMcpDescriptors`) |
 | engine-statechild-grammar.ts | pure constants shared by type-system.ts + codegen (no cycle) |
 | channel-watches.ts | shared §38.13 `watches=` schema/RowChange derivation, consumed by symbol-table.ts (SYM validation) + type-system.ts (typer synthesis) |
 | theme-body-parser.ts | §65 `<theme>`/`<defaults>` body-form parser |
 | module-resolver.js | resolves `scrml:*` stdlib imports + relative imports; STDLIB_ROOT via `fileURLToPath` |
 
+## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)
+A server-only `scrml:*` re-export whose {kind, isAsync} cannot be resolved now FAILS CLOSED (defaults to async) instead of fail-open to sync — hardened after the 2026-07-11 jwt-auth-bypass regression (an unresolved `verifyJwt` export was misclassified sync, emitted unawaited, and its always-truthy Promise defeated the `if (!result.valid)` guard). Root cause was two parser bugs (block-splitter.js JSDoc comment-scan leak + tokenizer.ts regex-vs-divide misclassification on a leading `=`), both fixed; this seed is the standing backstop for the whole `scrml:*` re-export surface, not just auth.
+
 ## stdlib module pairing (compiler/runtime/stdlib/*.js <-> stdlib/*/index.scrml)
 21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5 provider sub-modules: discord/github/google/microsoft/pkce), path, process, random, redis, regex, router, store, test, time. Each ships BOTH a canonical `.scrml` source (stdlib/<mod>/) and a JS host shim (compiler/runtime/stdlib/<mod>.js) that the emitted client/server bundles import at `scrml:<mod>`.
 
 ## Tags
-#scrml #map #dependencies #module-graph #stdlib #css-conflict-check #pipeline #bun #acorn
+#scrml #map #dependencies #module-graph #stdlib #css-conflict-check #pipeline #bun #acorn #server-shape #tool-serve
 
 ## Links
 - [primary.map.md](./primary.map.md)
