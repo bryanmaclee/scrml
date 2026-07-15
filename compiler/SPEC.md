@@ -17849,6 +17849,11 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) | Error |
 | E-TOOL-005 | §64.6 | A `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit path does not yet inline. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; NOT yet inlined → this code: value-native map/set (§59), `!{}`/`fail` error helpers, wire/protect. FAIL-CLOSED (§49 no-silent-bad-output): a loud compile error naming the missing helper instead of a silent runtime `ReferenceError` in the emitted module. Marks the v1 tool-emit helper-coverage boundary; closing a helper removes its E-TOOL-005. (S238 — ratified after the Surface-1 impl surfaced the value-native-map case.) | Error |
 | E-TOOL-006 | §64.6 | A `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 library-shaped: exports-bearing, no top-level `<program>` / page markup). Such a dep emits no runnable `<base>.js`, so the tool's emitted `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED (§49 no-silent-bad-output) at compile time. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). (S239 fix-round — the §64 tool-import surface.) | Error |
+| E-TOOL-SERVE-MISPLACED | §64.9 | `serve=` on a non-`kind="tool"` top-level `<program>` (serve= selects the headless serve-target output shape, which only `kind="tool"` names), OR `serve=` on a NESTED `<program>` (a §43 worker/sidecar execution context is not a listener-owning target). Add `kind="tool"`, or remove `serve=`. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
+| E-TOOL-SERVE-PORT-INVALID | §64.9 | A `serve=` value that is neither an integer literal (`serve=7878`, 0–65535 — 0 = the OS-assigned ephemeral port) nor a `${expr}` runtime port (a bare identifier / non-numeric string is neither). The serve-harness needs a concrete listen port. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
+| E-TOOL-SERVE-AUTH-UNSUPPORTED | §64.9 | A `serve=` tool carries cookie-session auth at ANY locus — the program `auth="required"`/`auth="optional"` (§52.13) OR a per-channel `<channel auth="required"/"optional">` (§38.5). The headless serve-target has NO cookie session, so the routes / the §38 WS upgrade would emit with NO auth guard — FAIL-CLOSED (§49 no-silent-bad-output) rather than a silent unguarded server. Fires per offending locus. Bearer-token auth on a headless serve-target is a later unit. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
+| E-TOOL-SERVE-MAIN-EXITS | §64.9 | A `serve=` tool's `function main` declares a return type. The §64.3 exit-harness (`process.exit(code)`) would kill the live serve-harness the moment `main` returns; a composing `main` MUST be no-return setup that runs BEFORE the serve-harness holds the process. Drop `main`'s return type. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
+| E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
@@ -34988,15 +34993,34 @@ infers nested kinds).
 ### 64.1 Emit shape
 
 A `kind="tool"` top-level program emits a plain ES module: NO html, NO client.js bundle, NO CSRF
-scaffold, NO HTTP-web server-route emission. The module contains the file's logic (fn/const/type
-declarations), its `_{}` foreign blocks (via `lang=`), its `?{}` db calls (via `db=` + §44), and the
-`main()` invocation harness (§64.3). It is runnable directly (`bun <emitted>.js <args…>`).
+scaffold. The module contains the file's logic (fn/const/type declarations), its `_{}` foreign blocks
+(via `lang=`), its `?{}` db calls (via `db=` + §44), and the `main()` invocation harness (§64.3). It is
+runnable directly (`bun <emitted>.js <args…>`).
+
+**Route emission is `serve=`-gated (Fork 1A, Unit 2 — see §64.9).** A tool with NO `serve=` emits NO
+HTTP-web server routes — a CLI tool has no listener to host them. A tool that declares a `serve=PORT`
+listener (§64.9) DOES emit its `<endpoint>` (§61) / `server function* route=` SSE (§37) route handlers,
+via the program-shape-agnostic **headless** route/`fetch` emit, mounted onto a compiler-emitted
+`Bun.serve({ port, fetch, websocket? })` **serve-harness** — replacing the §64.7 hand-rolled `_{}`
+`Bun.serve`. The headless emit strips every web-app-only scaffold (session/CSRF middleware, per-route
+CSRF, §52 server-authority/serverLoad/mount-hydrate routes, SSR): a `serve=` tool is a **listener-owning
+headless serve-target**, not a web app (and NOT a "server shell" — that aliases the §20.8 SPA client
+shell). Cookie-session `auth=` on a `serve=` tool is `E-TOOL-SERVE-AUTH-UNSUPPORTED` (§64.9): the
+headless shape has no cookie session, so bearer auth is the (later-unit) headless auth story.
 
 ### 64.2 Entry convention — `function main(args: string[]): number`
 
 A `kind="tool"` program SHALL declare exactly one top-level entry `function main`. Its parameter is the
 argv slice (`string[]`); its return type governs the process lifecycle (§64.3). A `kind="tool"` program
 with NO `main` → `E-TOOL-001`.
+
+**`main` is OPTIONAL when `serve=` is present (Fork 1A, Unit 2).** A `serve=` tool's compiler-emitted
+serve-harness (§64.9) IS the §64.3 active handle — its `Bun.serve` keeps the process alive — so no
+`function main` is required, and `E-TOOL-001` does NOT fire for a `serve=` tool with no `main`. When a
+`main` IS also written it **composes**: a no-return `main` runs as setup (`await main(process.argv.slice(2))`)
+BEFORE the serve-harness holds the process. A **numeric-return** `main` + `serve=` is the one incoherent
+combo — the §64.3 exit-harness (`process.exit(code)`) would kill the live server — and is
+`E-TOOL-SERVE-MAIN-EXITS` (§64.9). `E-TOOL-001` STILL fires for a NON-serve tool with no `main`.
 
 **`function`, not `fn` (impure entry, ratified S238).** `main` is declared with `function`, NOT `fn`.
 `fn` is the canonical PURE form (§48.11) and cannot hold the side effects `main` exists to perform —
@@ -35080,6 +35104,11 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 | `E-TOOL-004` | `fn main` in a `kind="tool"` program — `main` is impure; use `function main` (§64.2) | Error |
 | `E-TOOL-005` | a `kind="tool"` module references an `_scrml_*` runtime helper the v1 tool-emit does not yet inline (value-native maps/sets §59, `!{}`/`fail` error helpers, wire/protect) — FAIL-CLOSED: a loud compile error naming the missing helper, instead of a silent runtime `ReferenceError`. v1 inlines `_scrml_structural_eq` (§45 `==`), `_scrml_log` (§20.6), `_scrml_print` (§20.7 clean-stdout — S241), and §14 enum backing objects; this code marks the v1 tool-emit helper-coverage boundary — closing a helper removes its E-TOOL-005. Ratified S238. | Error |
 | `E-TOOL-006` | a `kind="tool"` program imports a local `.scrml` module that is NOT an importable library (§21.5 — it has a top-level `<program>` / page markup or no `export`s), so no runnable `<base>.js` is emitted and the tool's `import … from "./x.js"` would fail at runtime (Cannot find module) — FAIL-CLOSED: a loud compile error instead of a silent runtime module-not-found. A tool imports only library-shaped `.scrml` or `scrml:`/vendor modules (§64.5.1). Ratified S239 (fix-round). | Error |
+| `E-TOOL-SERVE-MISPLACED` | `serve=` on a non-`kind="tool"` top-level `<program>` (serve requires the tool output shape), OR `serve=` on a nested `<program>` (a §43 worker/sidecar, not a listener-owning target) — §64.9 (Fork 1A). | Error |
+| `E-TOOL-SERVE-PORT-INVALID` | `serve=` value is neither an integer literal (`serve=7878`, 0–65535; 0 = ephemeral) nor a `${expr}` runtime port — §64.9 (Fork 1A). | Error |
+| `E-TOOL-SERVE-AUTH-UNSUPPORTED` | a `serve=` tool carries cookie-session auth at ANY locus — program `auth="required"`/`"optional"` (§52.13) OR a per-channel `<channel auth=…>` (§38.5); the headless serve-target has no cookie session, so the routes / WS upgrade would emit with NO auth guard; bearer auth is a later unit — §64.9 (Fork 1A). FAIL-CLOSED, per locus. | Error |
+| `E-TOOL-SERVE-MAIN-EXITS` | a `serve=` tool's `function main` declares a return type (the §64.3 exit-harness `process.exit(code)` would kill the live serve-harness); a composing `main` MUST be no-return setup — §64.9 (Fork 1A). | Error |
+| `E-TOOL-ROUTE-NEEDS-SERVE` | an `<endpoint>` (§61) / SSE `server function* route=` (§37) in a `kind="tool"` program with NO `serve=` listener to host it — a non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (§64.1). Add `serve=PORT` (§64.9) or remove the route. FAIL-CLOSED. | Error |
 
 ### 64.7 Worked examples
 
@@ -35094,11 +35123,24 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 </program>
 ```
 ```scrml
-// fsp-wire.ts → fsp-wire.scrml — long-running server; main does NOT return
-<program kind="tool" lang="ts">
-    function main(args: string[]) {
-        _={ Bun.serve({ port: 8787, fetch(req) { … } }) }=
-        // no return → invoke-only harness → Bun.serve's handle keeps the process alive
+// fsp-wire.scrml — a LISTENER-OWNING headless serve-target (Fork 1A, §64.9).
+// The compiler emits Bun.serve mounting the <endpoint>/SSE routes; NO main needed
+// (the serve-harness is the §64.3 active handle). Replaces the hand-rolled `_{}`
+// `Bun.serve` this example used to show.
+<program kind="tool" serve=7878 cors="*">
+    ${ type FspMethod:enum = { FleetStatus, Dispatch(prompt: string, project: string) } }
+
+    <endpoint path="/fsp" method="POST" accepts=FspMethod>
+        <FleetStatus            : { jsonrpc: "2.0", result: fleetStatus() }>
+        <Dispatch(prompt, proj) : { jsonrpc: "2.0", result: dispatch(prompt, proj) }>
+    </endpoint>
+
+    ${
+        server function* fspDeltas() route="/fsp/deltas" {
+            for (let row of ?{`SELECT seq, kind FROM delta_log WHERE seq > ${route.query.since}`}.all()) {
+                yield { event: "delta", id: row.seq, data: row }
+            }
+        }
     }
 </program>
 ```
@@ -35110,8 +35152,50 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 is imported) · §23.2.4 (the amended bare-`_{}` context admission) · §23.5 (`capabilities=`) · §44 / W5b
 (`?{}` under `db=`) · §23.2 (`_{}` under `lang=`) · §20.7 (`print()` / `println()` — the clean-stdout program-output primitive a
 tool uses for machine-parsed output; the tool emit inlines `_scrml_print` in its runtime-helper set, so it
-is NOT an E-TOOL-005 gap — S241). Consumer/R26: flogence (fleet.ts db-only cleanest
-first; dispatch.ts db+`_{}`; the 18 db-bound files).
+is NOT an E-TOOL-005 gap — S241) · §64.9 (the `serve=` listener surface) · §61 (`<endpoint>` — the typed
+inbound route a `serve=` tool hosts) · §37 (`server function* route=` SSE — the streaming route a `serve=`
+tool hosts). Consumer/R26: flogence (fleet.ts db-only cleanest
+first; dispatch.ts db+`_{}`; the 18 db-bound files; fsp-wire.scrml the `serve=` wire).
+
+### 64.9 The `serve=` listener surface (Fork 1A, Unit 2)
+
+**Added S255 (Fork 1A — the server-program-shape ruling, `server-program-shape-2026-07-12`).** A
+`kind="tool"` program MAY declare a **`serve=PORT`** listener, turning it into a **listener-owning
+headless serve-target**: the compiler emits a `Bun.serve({ port, fetch, websocket? })` **serve-harness**
+mounting the program's `<endpoint>` (§61) / `server function* route=` SSE (§37) / §38 `<channel>` WS
+routes — the ONE piece §64 previously punted to a hand-rolled `_{}` `Bun.serve` (§64.7). This does not
+add a new top-level concept (no `kind="server"`): a `serve=` tool is a `kind="tool"` whose serve-harness
+is its §64.3 active handle (§64.2, main-optional). The name is **listener-owning program** /
+**headless serve-target** — NEVER "server shell" / "persistent shell" (those alias the §20.8 SPA client
+shell).
+
+**Attribute surface** (top-level `kind="tool"` `<program>` only):
+
+| Attribute | Value | Meaning |
+|---|---|---|
+| `serve=` | integer literal (`serve=7878`, **0–65535** — 0 = the OS-assigned ephemeral port, consistent across the literal and `${0}` forms) OR `${expr}` runtime port (which resolves the program's own top-level `const`s) | the HTTP listen port of the serve-harness. Required for the serve-target shape; misshapen → `E-TOOL-SERVE-PORT-INVALID`; on a non-tool / nested `<program>` → `E-TOOL-SERVE-MISPLACED`. |
+| `cors=` | origin string (`"*"`, an origin) | opt-in §39.2 CORS — emits the `_scrml_cors_headers()` + the `/*` OPTIONS preflight route the serve-harness mounts. Optional. (The same §40.2 `cors=` a web-app `<program>` uses.) |
+
+**Semantics.**
+
+1. **Route emit is headless** (§64.1) — the route/`fetch` handlers emit via the program-shape-agnostic
+   headless shape: NO html, NO client bundle, NO CSRF scaffold, NO session/serverLoad/mount-hydrate/SSR.
+2. **The serve-harness mounts every route kind.** It iterates the emitted `routes` and dispatches on
+   `path` + `method`, passing the `server` handle to a WS-upgrade route (`isWebSocket`, which needs
+   `server.upgrade`) and the request alone to an HTTP route; a `/*` OPTIONS route matches any path (CORS
+   preflight); an unmatched request → `404`. When the program has §38 channels the harness sets
+   `websocket:` to the merged channel handler and exposes the server handle for `broadcast()`.
+3. **`main` is optional and composes** (§64.2). No `main` → the serve-harness is the entry. A no-return
+   `main` → `await main(...)` runs as setup BEFORE the serve-harness holds the process. A numeric-return
+   `main` + `serve=` → `E-TOOL-SERVE-MAIN-EXITS`.
+4. **Cookie-session auth is unsupported at EVERY locus** (§64.1) — the guardrail enumerates the program
+   `auth="required"`/`"optional"` AND every per-channel `<channel auth="required"/"optional">` (§38.5);
+   ANY cookie-auth locus → `E-TOOL-SERVE-AUTH-UNSUPPORTED` (FAIL-CLOSED, fires per offending locus). The
+   headless shape has no cookie session — a per-channel `auth=` on its own would otherwise ship an
+   unguarded WS upgrade. Bearer auth on a headless serve-target is a later unit.
+5. **A route with no listener is an error, not a silent drop** (§64.1) — an `<endpoint>` / SSE route in a
+   `kind="tool"` program with NO `serve=` fires `E-TOOL-ROUTE-NEEDS-SERVE` (the non-serve tool emits no
+   `Bun.serve`, so the route would be un-hosted).
 
 ## 65. The scrml-native CSS Model — predictable, cascade-free styling
 

@@ -1036,8 +1036,12 @@ export function runCG(input: CgInput): CgOutput {
     // resolved identity); when a user `<currentUser>` cell shadows the name it
     // keeps the ordinary reactive / request-body form. Mirrors the @session gate.
     setCurrentUserAmbientActive(!collectReactiveVarNames(fileAST).has("currentUser"));
-    // Resolve §39 middleware config from AST (compiler-auto tier)
-    const middlewareCfg = (fileAST as any).middlewareConfig ?? null;
+    // Resolve §39 middleware config from AST (compiler-auto tier). PRECG
+    // (compute-program-config) sets it on the INNER FileAST; at codegen the file
+    // may be the `{ ast: {…} }` wrapper (TAB result), so read the `.ast` fallback
+    // too — mirrors api.js's `f.middlewareConfig ?? f.ast?.middlewareConfig` read
+    // (without this, `cors=`/`log=`/etc. silently do not reach the emit).
+    const middlewareCfg = (fileAST as any).middlewareConfig ?? (fileAST as any).ast?.middlewareConfig ?? null;
 
     // S79 audit fix C.2 — apply per-file <program batch-in-list-cap=> override
     // to the emit-control-flow module-level cap. Reset to null after the file
@@ -1093,8 +1097,23 @@ export function runCG(input: CgInput): CgOutput {
       // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
       checkToolImportsAreImportable(fileAST, files, filePath, errors);
       const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files);
+      // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
+      // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
+      // route-inference routeMap + the auth/middleware/protect stage results
+      // (the SAME objects the web-app `generateServerJs` call receives) so the
+      // serve-harness path can delegate to `generateHeadlessServerJs`. A NON-serve
+      // tool ignores these (getToolServeConfig → null → the plain CLI path).
+      const serveEmitDeps = {
+        routeMap: safeRouteMap,
+        authMiddleware: authMW,
+        middlewareConfig: middlewareCfg,
+        batchPlan,
+        batchPlannerErrors,
+        protectAnalysis,
+        exportRegistry: exportRegistryInput,
+      };
       const toolJs: string = codegenStage("emit-tool", () =>
-        generateToolJs(fileAST as unknown as Record<string, unknown>, errors, asyncImportedNames)
+        generateToolJs(fileAST as unknown as Record<string, unknown>, errors, asyncImportedNames, serveEmitDeps)
       );
       const toolOutput: CgFileOutput = {
         sourceFile: filePath,
