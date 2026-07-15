@@ -1,0 +1,3 @@
+<div id="wrap"><span id="cell">= hi</span></div>
+<span id="lone">=</span>
+<span id="formula">=SUM(A1:A9)</span>
