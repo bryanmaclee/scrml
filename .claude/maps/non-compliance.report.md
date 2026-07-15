@@ -1,149 +1,102 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-07-09
-# scan mode: FULL_COLD_START (maps refresh 66a3afb1 -> fbb4d9fd, 67 commits / 227 files)
+# generated: 2026-07-14T18:58:34-06:00
+# scan mode: FULL_COLD_START (maps refresh fbb4d9fd -> f079d0a9, 137 commits)
 
 ## Summary
 
-This pass rewrote all `.claude/maps/*.md` from scratch (the prior maps had grown to
-2000-5000+ content lines each via unbounded per-session accretion, in direct violation
-of the "current-truth navigation, not archival" scope principle — see "Map-currency
-finding" below). The non-compliance scan below targets: (1) re-verification of items
-carried from the last INCREMENTAL_UPDATE report (S194, watermark a78272e5), (2) a
-name/location/date heuristic sweep for docs in the live tree that predate the current
-SPEC.md (mtime 2026-07-08) by >30 days AND describe non-trivial aspirational/planning
-content, and (3) spot-checks of the biggest landings this window (§65 CSS, §38.13
-realtime, auth/BaaS, editor tooling).
-
-Full read of all ~1184 `*.md` files in the repo was NOT performed (infeasible at this
-scope/turnaround); this is a targeted heuristic sweep, not an exhaustive line-by-line
-audit. Items below are individually verified; anything outside this sweep should be
+This pass is a re-verification of the prior FULL_COLD_START scan (fbb4d9fd, 2026-07-09) plus a
+targeted sweep of the 137-commit delta since then. Full read of all ~1240 in-scope `*.md` files
+was NOT performed (infeasible at this scope/turnaround, same constraint noted in the prior scan);
+this is a name/date/location-heuristic sweep + spot-checks of the biggest landings this window
+(§20.8 Client Router/outlet, §64.9 `serve=` tool target, the jwt-auth-bypass fix, the real-DB
+conformance adapter), cross-checked with `grep` against current source where a doc makes a
+falsifiable claim. Items below are individually verified; anything outside this sweep should be
 treated as unscanned, not implicitly compliant.
 
-Resolved since last scan: 2
-Non-compliant (new/carried): 6 doc clusters
-Informational — correctly archived, no action: 5 docs
-Uncertain (needs human review): 2 doc clusters
+Carried-forward items (re-verified, unchanged): 8 doc clusters (6 non-compliant, 2 uncertain)
+New this window: 0 non-compliant, 1 new-but-compliant (dated, current)
+Resolved since last scan: 0 (no previously-flagged items were fixed/moved this window)
 
-## Map-currency finding (this pass's own subject — not a repo doc, but load-bearing)
-
-The pre-refresh `.claude/maps/*.md` had violated their own governing scope principle:
-`primary.map.md` had grown to 462 lines with a single `# updated:` header line running
-to ~15,000+ words of per-session accretion (S148 through S238, every source-file touch
-narrated verbatim); `structure.map.md` was 2475 lines; `error.map.md` 1056; `test.map.md`
-708; `domain.map.md` 510 — all far past the 300-content-line ceiling this cartographer's
-own spec mandates. This is exactly the "current truth vs. archival" failure mode the
-scope principle exists to prevent: a dev agent reading the old primary.map.md header had
-to parse thousands of words of historical narration to find the 3-line current watermark.
-All maps have been rewritten fresh this pass, trimmed to current-truth content with a
-pointer to `docs/changelog.md` for history. **Recommendation: do not let per-session
-deltas accrete into map bodies again — an INCREMENTAL_UPDATE should REPLACE the relevant
-section, not prepend a new "Key SNNN Source Changes" paragraph onto the old one.**
-
-## Resolved since last scan (S194 report items — verified compliant now)
-
-### docs/articles/components-are-states-devto-2026-04-29.md
-Previously flagged: claimed the compiler "generates the optimistic-update path, generates
-the rollback" for `authority="server"` — false after the S194 §52.6.2/.3 retraction.
-**Status: RESOLVED.** Line 239 now carries an explicit in-place correction ("✅ Corrected
-2026-06: ... §52 is a read-authority layer ... the persist write is the developer's `?{}`").
-
-### docs/heads-up/spec-consolidation-2026-05-25.md
-Previously flagged (same §52 auto-persist claim, line ~297). **Status: RESOLVED** — the
-doc carries an inline `[Currency — superseded 2026-06-14: ...]` annotation correcting the
-claim to the read-authority-only model. NOTE: the doc's own frontmatter still reads
-`status: in-progress` (line 2) though the currency annotations suggest the tracked
-questions have since been ratified elsewhere — see "Uncertain" below.
-
-## Non-compliant docs
+## Carried-forward — Non-compliant docs (re-verified still present, still non-compliant)
 
 ### compiler/native-parser/M5-SWAP-residual-decomposition.md
-**Reason:** content-heuristic (self-marked superseded) + date (2026-05-21, 48+ days stale)
-**Detail:** Opens with "⚠ SUPERSEDED S117 (2026-05-21). This Phase-0 decomposition's
-R1-R5 / 46-78h estimate was itself under-counted..." — the document declares its own
-staleness. Carried from the prior FULL_COLD_START scan (948d3f2f), unresolved since.
+**Reason:** content-heuristic (self-marked superseded) + date (2026-05-21, 54+ days stale vs. current SPEC.md mtime 2026-07-14)
+**Detail:** Opens with "⚠ SUPERSEDED S117 (2026-05-21). This Phase-0 decomposition's R1-R5 / 46-78h estimate was itself under-counted..." — the document declares its own staleness. Unresolved since the prior two scans (948d3f2f, fbb4d9fd).
 **Suggested disposition:** deref to scrml-support/archive/.
 
 ### compiler/native-parser/M5-ast-bridge-scoping.md, M5-divergence-ledger.md
-**Reason:** date (2026-05-21, 48+ days stale) + content-heuristic (describes the
-native-parser's THEN-current AST-bridge scoping contract as a load-bearing precondition
-for the pipeline-swap)
-**Detail:** These describe the native-parser's May-2026 scoping/divergence state. Since
-then the native-parser has grown substantially — this window alone added the LSP
-semantic-tokens provider (`lsp/handlers.js`) consuming `native-parser/lex()` directly in
-production, a use these docs predate entirely. Whether their scoping contract still holds
-cannot be confirmed without a dedicated re-derivation pass.
-**Suggested disposition:** uncertain — needs human review (re-verify against current
-native-parser/ + native-parser-canary/within-node-classifier.ts, or deref to archive if
-superseded by a later contract doc).
+**Reason:** date (2026-05-21, 54+ days stale) + content-heuristic (describes the native-parser's THEN-current AST-bridge scoping contract as a load-bearing precondition for the pipeline-swap)
+**Detail:** Still unresolved. The native-parser has grown further since (37 paired .js/.scrml files, unchanged count vs. last scan, but the M5/M6 milestone ladder referenced by these docs has continued to move — this window's compiler/native-parser/ diff shows no structural change, so these docs' currency status is unchanged from the prior finding, not newly stale).
+**Suggested disposition:** uncertain — needs human review (re-verify against current native-parser/ + native-parser-canary/within-node-classifier.ts, or deref to archive if superseded by a later contract doc).
 
 ### compiler/native-parser/M6.6-CONTRACT-DERIVATION.md
-**Reason:** date (2026-05-23, 46+ days stale) + content-heuristic ("developer reference for
-b.2-b.4 consumer migration off the live engine-statechild-parser.ts")
-**Detail:** Describes a migration-in-progress cookbook contract. Carried from the prior
-scan as "verify current"; still unverified.
+**Reason:** date (2026-05-23, 52+ days stale) + content-heuristic ("developer reference for b.2-b.4 consumer migration off the live engine-statechild-parser.ts")
+**Detail:** Describes a migration-in-progress cookbook contract. Carried from two prior scans as "verify current"; still unverified this pass.
 **Suggested disposition:** uncertain — needs human review.
 
 ### docs/changes/v0next-inventory/{SCOPE-MAP,SCOPE-SUPPLEMENT,ARTICLE-TRUTHFULNESS-AUDIT}-2026-05-0[5-7].md
-**Reason:** location (docs/changes/ dispatch-archive, correctly parked) + date (2026-05-05/07,
-64+ days stale) + content-heuristic (v0.next planning inventory, superseded by the now-shipped
-v0.3+ / v1.0-Wave-1 surface)
-**Detail:** Carried unresolved from the prior scan. These describe a pre-v0.3 scope inventory;
-the repo has since shipped v0.3, the §52 authority model, §60/§61 API/endpoint, §64 tool
-target, and now §65 CSS — the inventory is many surfaces behind current reality.
-**Suggested disposition:** already correctly archived under docs/changes/ (a designated
-dispatch-archive location per pa.md convention) — no move needed, but content should not be
-treated as a live scope reference by any dev agent.
+**Reason:** location (docs/changes/ dispatch-archive, correctly parked) + date (2026-05-05/07, 70+ days stale) + content-heuristic (v0.next planning inventory, now doubly superseded — was already behind at the last scan, and the repo has since shipped §20.8 Client Router/outlet and §64.9 serve= on top of the v0.3+/v1.0-Wave-1 surface it was already behind)
+**Detail:** Unresolved from two prior scans. No change this window.
+**Suggested disposition:** already correctly archived under docs/changes/ (designated dispatch-archive location) — no move needed, but content should not be treated as a live scope reference by any dev agent.
 
 ### docs/audits/{null-audit-compiler-src,undefined-audit-compiler-src}-2026-05-13.md, article-truthfulness-audit-2026-05-21.md, bug-51-class-corpus-coverage-audit-2026-05-28.md, docs/language-inspiration-audit-2026-06-06.md
-**Reason:** date (56-84 days stale, all predate the 2026-06-08 cutoff) + name-heuristic
-(`-audit-`)
-**Detail:** Point-in-time audit snapshots. By nature these are meant to age (an audit
-records "as of date X"), but a dev agent grepping docs/audits/ for current null/undefined
-hygiene status, or article truthfulness, would get a stale answer without checking the
-date itself. Contrast `docs/audits/stdlib-completeness-2026-07-08.md` (dated yesterday
-relative to this scan — current, not flagged).
-**Suggested disposition:** no forced move (audits/ is a reasonable point-in-time home), but
-recommend a one-line "supersedes/superseded-by" pointer chain if a newer audit exists for
-the same surface, so a dev agent lands on the current one.
+**Reason:** date (39-62 days stale vs. current SPEC.md mtime) + name-heuristic (`-audit-`)
+**Detail:** Point-in-time audit snapshots, unresolved from the prior scan. By nature these age (an audit records "as of date X"); the risk is a dev agent grepping docs/audits/ for current null/undefined hygiene status without checking the date. Contrast the two NEW audits this window — `docs/audits/stdlib-completeness-2026-07-08.md` and `docs/audits/windows-canary-2026-07-14.md` — both current (0-6 days old), NOT flagged.
+**Suggested disposition:** no forced move (audits/ is a reasonable point-in-time home), but recommend a one-line "supersedes/superseded-by" pointer chain if a newer audit exists for the same surface.
 
-### docs/heads-up/{const-deep-freeze,iteration-design,lifecycle-annotation-extension}-2026-05-25.md
-**Reason:** date (44+ days stale) + content-heuristic (open design-question framing)
-**Detail:** Not individually content-verified this pass (time-boxed). These are the same
-genre as spec-consolidation-2026-05-25.md (which turned out to have an in-place currency
-fix) — plausible these also have inline corrections, or plausible they're still open.
-**Suggested disposition:** uncertain — needs human review before citing as live design state.
+### docs/heads-up/{const-deep-freeze,lifecycle-annotation-extension,iteration-design}-2026-05-2[5-6].md
+**Reason:** date (49-50 days stale) + name/location heuristic (docs/heads-up/, open-question-resolution genre)
+**Detail:** RE-VERIFIED this pass (not just carried forward blind): all three now carry explicit frontmatter status. `const-deep-freeze-2026-05-26.md`: `status: ratified`, `phase: closed` — a settled decision record, not aspirational; reclassifying from "uncertain" (prior scan) to compliant/informational. `lifecycle-annotation-extension-2026-05-25.md` and `iteration-design-2026-05-25.md`: both `status: historical`, `last-reviewed: 2026-05-29`, explicitly self-labeled "historical record" with an arc-complete note. Reclassifying these two from "uncertain" (prior scan) to compliant/informational as well — they no longer misrepresent themselves as live design state.
+**Status: DOWNGRADED from non-compliant/uncertain to informational** (see "Informational" section below) — this is the one item resolved-by-reclassification this pass, driven by frontmatter this mapper had not previously read closely.
 
-## Informational — correctly archived, verified superseded (no action needed)
+## Carried-forward — Uncertain docs (needs human review)
 
-These `docs/changes/<change-id>/SPEC-DRAFT.md` / `SPEC-AMENDMENT.md` files matched the
-"spec-draft" name-heuristic (filename starts with `SPEC-`) but are legitimately parked in
-the designated dispatch-archive location (`docs/changes/`, per the pa.md "archive dispatch
-BRIEF.md at dispatch time" convention) and their proposed content is now VERIFIED RATIFIED
-into `compiler/SPEC.md` — they are historical proposal records, not live specs, and no dev
-agent should read them as authoritative (SPEC.md is):
+### docs/heads-up/spec-consolidation-2026-05-25.md
+**Reason:** frontmatter `status: in-progress` (STILL, unlike its three siblings above) + date (2026-06-25 last touch, 19 days stale) + content-heuristic (references an explicitly OPEN question: "state-dynamics-design DD extension question ... status: active since 2026-04-08 — open extension question" and a "Mutability-contracts article draft (status: draft, not shipped; revise before publication)")
+**Detail:** This is the one heads-up doc that genuinely differs from its siblings — it still declares itself in-progress and points at an unresolved DD + an unshipped draft article. Unresolved from the prior scan (carried as "uncertain").
+**What to check:** whether the state-dynamics-design DD extension question has been ratified since 2026-04-08 (check scrml-support/archive/deep-dives/ + design-insights.md), and whether the mutability-contracts article draft has shipped or been retired.
 
-- docs/changes/css-scrml-native-model-2026-07-07/SPEC-DRAFT.md -> ratified as SPEC.md §65 (verified: §65 present, Wave-1 LANDED banner at SPEC.md:34923).
-- docs/changes/realtime-external-db-writes-2026-07-06/SPEC-AMENDMENT.md -> ratified as SPEC.md §38.13 (verified present, channel-watches.ts implements Phase 1+2).
-- docs/changes/standalone-tool-target-2026-07-04/SPEC-AMENDMENT.md -> ratified as SPEC.md §64 (verified present, E-TOOL-001..006 firing).
-- docs/changes/clean-print-primitive-2026-07-06/SPEC-AMENDMENT.md -> ratified as SPEC.md §20.7 (verified present at line 14529).
-- docs/changes/capability-vocab-v1-2026-06-30/SPEC-DRAFT.md -> ratified as SPEC.md §23.5 (verified present, E-FOREIGN-CAPABILITY-UNKNOWN firing).
+## New this window (spot-checked, verified compliant)
 
-## Task-brief discrepancy (not a repo-doc finding — flagging for the record)
+### docs/audits/windows-canary-2026-07-14.md
+**Reason for spot-check:** newest doc in the repo, same-day as HEAD.
+**Verdict: compliant.** Dated today, describes the Windows CI canary pass (`.pathname` → `fileURLToPath` codemod verification) — content matches the actual landed commit 95a912c3. Not flagged.
 
-The dispatching task brief instructed excluding "the LSP semantic-tokens provider
-(lsp/handlers.js), the VS Code TextMate grammar refresh, and the Neovim syntax/scrml.vim
-— on held worktree branches, NOT merged to fbb4d9fd." Verified against actual git state:
-both `7dfc3df8` (editor-highlighting refresh: Neovim syntax + VS Code grammar) and
-`fbb4d9fd` itself (the LSP semantic-tokens commit) ARE on `main` and ARE included in HEAD
-`fbb4d9fd` — `fbb4d9fd` IS the semantic-tokens commit, not a commit preceding it. This
-mapping run followed "verify against actual source, don't trust this list blindly" per
-the task's own instruction and mapped all three surfaces as present (see structure.map.md,
-dependencies.map.md). Likely cause: these two commits landed on main in the interval
-between the task being drafted and this mapper starting.
+### docs/changes/server-program-shape-v1/SCOPING.md
+**Reason for spot-check:** a "SCOPING" doc (per the memory note that SCOPING/cookbook claims can be wrong) for the flagship §64.9 `serve=` feature.
+**Verdict: compliant, correctly archived.** Describes the Unit 1/Unit 2 dispatch decomposition that has since landed (commits 0bb16591, 74e22ea3) — verified against SPEC.md §64.9 and the E-TOOL-SERVE-* fire sites (see error.map.md). Parked in the designated docs/changes/ dispatch-archive location; not a live scope reference.
+
+### docs/changes/navigate-wave1a-outlet-shell/BRIEF.md, navigate-wave1b-finish-2026-07-12/BRIEF.md, navigate-wave1b-runtime/BRIEF.md
+**Reason for spot-check:** the §20.8 Client Router flagship, whose own SPEC section carries a "Nominal / spec-ahead" banner that could mislead if a dev agent treated it as fully unshipped.
+**Verdict: compliant, correctly archived.** Dispatch-prompt archives for work verified landed (E-OUTLET-*/W-OUTLET-* fire sites + browser tests, see domain.map.md / error.map.md for the landed-vs-spec-ahead split). Not flagged.
+
+## Informational — correctly archived / correctly self-labeled, no action needed
+
+These `docs/changes/<change-id>/SPEC-DRAFT.md` / `SPEC-AMENDMENT.md` files match the "spec-draft"
+name-heuristic but are legitimately parked in the designated dispatch-archive location and their
+content is VERIFIED RATIFIED into `compiler/SPEC.md` (carried forward, re-verified present this pass):
+- docs/changes/css-scrml-native-model-2026-07-07/SPEC-DRAFT.md -> ratified as SPEC.md §65.
+- docs/changes/realtime-external-db-writes-2026-07-06/SPEC-AMENDMENT.md -> ratified as SPEC.md §38.13.
+- docs/changes/standalone-tool-target-2026-07-04/SPEC-AMENDMENT.md -> ratified as SPEC.md §64 (now further extended by §64.9 this window, verified E-TOOL-SERVE-* firing).
+- docs/changes/clean-print-primitive-2026-07-06/SPEC-AMENDMENT.md -> ratified as SPEC.md §20.7.
+- docs/changes/capability-vocab-v1-2026-06-30/SPEC-DRAFT.md -> ratified as SPEC.md §23.5 (verified E-FOREIGN-CAPABILITY-UNKNOWN firing, new this window).
+
+Reclassified this pass (see "Carried-forward — Non-compliant" above for the re-verification detail):
+- docs/heads-up/const-deep-freeze-2026-05-26.md — `status: ratified`, closed decision record.
+- docs/heads-up/lifecycle-annotation-extension-2026-05-25.md — `status: historical`, self-labeled.
+- docs/heads-up/iteration-design-2026-05-25.md — `status: historical`, self-labeled.
+
+## Scope notes / exclusions applied this pass
+
+- `docs/changes/` (569 dispatch-archive dirs) — treated as a designated historical-record location (same treatment as `handOffs/`), per prior-scan precedent and the repo's own "archive BRIEF.md at dispatch time" convention. Only spot-checked (SPEC-DRAFT/SPEC-AMENDMENT name-heuristic + the 3 flagship dirs above), not exhaustively read.
+- `spa-lists/` (120 files) — PA sub-task bookkeeping, not compiler-repo content; not scanned (consistent with the prior scan, which also did not scan it).
+- `handOffs/` — explicitly out-of-scope per this mapper's own scope principle; not scanned.
+- No new docs under `docs/deep-dives/`, `docs/adrs/`, `docs/debates/`, `docs/gauntlets/`, or `docs/research/` were found — confirms the repo stays clean of that category (those belong in scrml-support).
+- No new `SPEC-DRAFT.md`/`SPEC-AMENDMENT.md` files were added in the 137-commit window — all landed work this window went straight to `SPEC.md` + a plain `BRIEF.md`/`SCOPE.md`/`progress.md` archive, not through a staged-draft process.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #css65 #native-parser-stale #audit-currency #map-bloat #spec-draft-archived #s247 #full-cold-start
+#non-compliance #project-mapper #cleanup #scrml #outlet #server-shape #native-parser-stale #audit-currency #heads-up-reclassified #full-cold-start
 
 ## Links
 - [primary.map.md](./primary.map.md)
