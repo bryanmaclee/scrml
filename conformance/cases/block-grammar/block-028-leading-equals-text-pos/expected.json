@@ -1,0 +1,17 @@
+{
+  "id": "block-028-leading-equals-text-pos",
+  "description": "§4.18.1 free-text mode: a plain-markup element whose body text BEGINS with `=` (`<span>= hi</span>`, `<span>=</span>`, a spreadsheet cell `=SUM(A1:A9)`) renders the literal `=` text. The tag-closing `>` terminates the opener; the leading `=` is display text — it is NOT a state-decl `=` nor a stray `>=` comparison operator. Regression guard for issue #28 (block-splitter tag-close leading-equals): the pre-fix S188 `>=` guard swallowed the `>` + leading `=`, corrupting the tag stack into an E-CTX-001 cascade on the outer tags.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/block-splitter.test.js",
+  "spec": "§4.18.1",
+  "rationale": "§4.18.1: a plain-markup element (`<div>`, `<span>`, …) body is in FREE-TEXT mode — a bare (unquoted) run is display text. `= hi` / `=` / `=SUM(A1:A9)` are therefore literal text content, rendered verbatim. The opener's `>` closes the tag; the leading `=` is body text, so no E-CTX-001 (`tags don't match`) and no phantom `@wrap`/`@div` reactive-var (E-DG-002) may arise.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTX-001", "E-DG-002"],
+    "domAnchored": [
+      { "selector": "#cell", "text": "= hi" },
+      { "selector": "#lone", "text": "=" },
+      { "selector": "#formula", "text": "=SUM(A1:A9)" }
+    ]
+  }
+}

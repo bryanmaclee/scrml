@@ -42,3 +42,29 @@ row6  CTX001=0 Compiled=1 | row7  CTX001=0 ATTROP=1 Compiled=0 (reject preserved
 row8  CTX001=0 Compiled=1 | row9  CTX001=0 Compiled=1
 Block-tree text bodies verified: "= hi" / "=" / "=a=b=c" / "=SUM(A1:A9)" preserved.
 Full suite green @ scanAttributes: 20198 pass / 0 fail / 20264 tests (157s).
+
+## Broad-suite A/B (adversarial no-regression proof)
+Ran `bun test compiler/tests/` (full tree incl browser/self-host/canaries) on BASE
+(7d5fda26 block-splitter) vs HEAD (fix): BOTH 27669 pass / 29 fail / 27912 tests.
+Fail SETS byte-identical (diff empty) — the 29 are pre-existing baseline (browser
+bind:value, dual-pipeline hoist canary, each-ternary, emit-lift, within-node parity
+budgets), NONE introduced by the fix. (Note: the earlier 167-fail post-commit count
+was an un-populated samples/compilation-tests/dist ENV-GAP; fixed by `bun run pretest`.)
+
+## Discriminator refinement (conformance case caught it)
+The first conformance case (with `id="cell"` attributes) FAILED with E-CTX-001: the
+`sawUnquotedEq` flag was too coarse — a QUOTED attribute `id="cell"` set it (its `=`
+is a depth-0 assignment), so a leading-`=` body after quoted attrs got mis-swallowed.
+The matrix rows had NO attributes so this was masked. Fix: renamed to `inUnquotedValue`
+— set true at a depth-0 `=`, reset FALSE the moment a delimited value opens (`"`, `'`,
+`(`, `{`, `[`, sigil-brace). A quoted/parenthesized/braced value is not a bare unquoted
+comparison value. Added 2 unit tests + the conformance case covering the attr-bearing
+shape (`<span id="cell">= hi</span>`, `<td class="c">=SUM(A1:A9)</td>`).
+
+## Tests added
+- compiler/tests/unit/block-splitter.test.js — describe("issue #28 …"): 9 tests
+  (rows 1/1b/2/3/4 positive, 2 attr-bearing, row-7 negative-preserved, paren+quote).
+  File: 150 -> 159 pass, 0 fail.
+- conformance/cases/block-grammar/block-028-leading-equals-text-pos/ — (b)-runtime case
+  (§4.18.1 free-text), domAnchored asserts rendered "= hi" / "=" / "=SUM(A1:A9)";
+  notCodes E-CTX-001 + E-DG-002. Passes via the gated corpus bridge.

@@ -1182,17 +1182,20 @@ export function splitBlocks(filePath, source) {
     // a `:`-shorthand. Legacy `derived=@ident` and `derived=match @x {...}` are
     // unaffected (no stray comparison operator at depth-0).
     let inDerivedExpr = false;
-    // issue #28 (leading-`=` body text) — track whether this opener has entered
-    // an unquoted attribute VALUE (a depth-0 `=` assignment such as `if=`). The
-    // S188 cluster-A `>=` reject below (a depth-0 `>` immediately followed by
-    // `=` treated as a stray comparison operator) is legitimate ONLY inside such
-    // a value. At a BARE tag terminator — an opener with no preceding attribute
-    // value whose element body simply begins with `=` (`<span>= hi>`,
-    // `<td>=SUM(A1:A9)>`) — the `>` must close the opener and the leading `=` is
-    // body text. Without this gate the `>` + leading `=` were swallowed together,
-    // the opener never terminated, and a misleading E-CTX-001 cascade fired on
-    // the outer structural tags.
-    let sawUnquotedEq = false;
+    // issue #28 (leading-`=` body text) — track whether the scanner is CURRENTLY
+    // inside an UNQUOTED attribute VALUE (`if=@n …`). The S188 cluster-A `>=`
+    // reject below (a depth-0 `>` immediately followed by `=` treated as a stray
+    // comparison operator) is legitimate ONLY inside such a value. It becomes
+    // true at a depth-0 `=` assignment and FALSE again the moment a delimited
+    // value is opened (`"`, `'`, `(`, `{`, `[`, or a sigil-brace) — a quoted/
+    // parenthesized/braced value is not a bare unquoted comparison value, so a
+    // leading-`=` body after e.g. `id="cell"` (`<span id="cell">= hi>`) must NOT
+    // be read as a comparison. At a BARE tag terminator (no unquoted value in
+    // progress — `<span>= hi>`, `<td>=SUM(A1:A9)>`) the `>` closes the opener and
+    // the leading `=` is body text. Without this gate the `>` + leading `=` were
+    // swallowed together, the opener never terminated, and a misleading
+    // E-CTX-001 cascade fired on the outer structural tags.
+    let inUnquotedValue = false;
 
     while (pos < len) {
       const c = source[pos];
@@ -1329,12 +1332,12 @@ export function splitBlocks(filePath, source) {
           }
           // else: genuine opener close — fall through to the `>` handler below.
         }
-        // issue #28 — the S188 cluster-A `>=` reject fires ONLY inside an
-        // unquoted attribute value (a prior depth-0 `=` was seen). At a bare
-        // tag terminator (no attribute value) the `>` closes the opener; the
-        // following `=` is leading body text, handled by the plain `>` case
-        // below.
-        if (c === ">" && ch(1) === "=" && sawUnquotedEq) {
+        // issue #28 — the S188 cluster-A `>=` reject fires ONLY while inside an
+        // unquoted attribute value (`inUnquotedValue`). At a bare tag terminator
+        // (no unquoted value in progress — including after a quoted attribute
+        // like `id="cell"`) the `>` closes the opener; the following `=` is
+        // leading body text, handled by the plain `>` case below.
+        if (c === ">" && ch(1) === "=" && inUnquotedValue) {
           attrRaw += c;
           step();
           continue;
@@ -1407,6 +1410,7 @@ export function splitBlocks(filePath, source) {
         // Sigil-prefixed brace openers: ${, ?{, #{, !{, ^{, ~{
         if ((c === "$" || c === "?" || c === "#" || c === "!" || c === "^" || c === "~") && ch(1) === "{") {
           braceDepth = 1;
+          inUnquotedValue = false; // issue #28 — a braced value is not a bare unquoted value
           attrRaw += c;
           step();
           attrRaw += source[pos];
@@ -1429,6 +1433,7 @@ export function splitBlocks(filePath, source) {
         // This fixes parsing of function type annotations like 'onClick: () => void'.
         if (c === "{") {
           braceDepth++;
+          inUnquotedValue = false; // issue #28 — braced value is not a bare unquoted value
           attrRaw += c;
           step();
           continue;
@@ -1437,6 +1442,7 @@ export function splitBlocks(filePath, source) {
         // Track paren depth so '>' inside the value is not treated as a tag-close.
         if (c === "(") {
           parenDepth++;
+          inUnquotedValue = false; // issue #28 — parenthesized value is not a bare unquoted value
           attrRaw += c;
           step();
           continue;
@@ -1446,25 +1452,29 @@ export function splitBlocks(filePath, source) {
         // doesn't close the tag.
         if (c === "[") {
           bracketDepth++;
+          inUnquotedValue = false; // issue #28 — bracketed value is not a bare unquoted value
           attrRaw += c;
           step();
           continue;
         }
-        // issue #28 — a depth-0 unquoted `=` marks entry into an attribute
-        // VALUE, which is the only context where a subsequent depth-0 `>=` is a
-        // (stray) comparison operator rather than the opener terminator. This
-        // runs inside the `!localDouble && !localSingle` block, so an `=` inside
-        // a quoted value (`title="a=b"`) never sets the flag. No `continue` —
-        // the `=` still appends via the catch-all below.
-        if (c === "=") { sawUnquotedEq = true; }
+        // issue #28 — a depth-0 `=` (attribute assignment) enters an attribute
+        // value. It is provisionally an UNQUOTED value; if the value turns out to
+        // be delimited (`"`, `'`, `(`, `{`, `[`, sigil-brace) the opener handlers
+        // above/below clear the flag on the very next char. This runs inside the
+        // `!localDouble && !localSingle` block, so an `=` inside a quoted value
+        // (`title="a=b"`) never sets it. No `continue` — the `=` still appends
+        // via the catch-all below.
+        if (c === "=") { inUnquotedValue = true; }
         if (c === '"') {
           localDouble = true;
+          inUnquotedValue = false; // issue #28 — quoted value is not a bare unquoted value
           attrRaw += c;
           step();
           continue;
         }
         if (c === "'") {
           localSingle = true;
+          inUnquotedValue = false; // issue #28 — quoted value is not a bare unquoted value
           attrRaw += c;
           step();
           continue;

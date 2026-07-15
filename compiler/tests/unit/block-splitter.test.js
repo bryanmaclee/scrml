@@ -1408,3 +1408,142 @@ describe("S144 Bug X — `//` inside string literal is content, not a comment", 
     expect(program).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// issue #28 — element text beginning with `=` (tag-close leading-equals)
+//
+// When an element's text body BEGINS with `=` (`<span>= hi</span>`,
+// `<td>=SUM(A1:A9)</td>`), the tag-closing `>` must terminate the opener and
+// the leading `=` is body text. Pre-fix, the S188 `>=`-as-comparison guard
+// fired UNCONDITIONALLY: scanAttributes swallowed the `>` together with the
+// leading `=` (direct markup children), and classifyOpenerForCompoundScan
+// misread the child as a Shape-1 state-decl (promoting the parent to a false
+// compound). Both corrupted the tag stack into a misleading E-CTX-001 cascade
+// on the OUTER tags (`</div>`/`</page>`) — far from the real site.
+//
+// Fix: the `>=` reject fires only inside an unquoted attribute VALUE (a prior
+// depth-0 `=`); the compound classifier disambiguates a leading-`=` markup body
+// from a `<name> = RHS` state-decl by the presence of a matching close tag.
+// ---------------------------------------------------------------------------
+
+describe("issue #28 — element text beginning with `=`", () => {
+  // Recursively find the first markup node with the given tag name.
+  function findMarkup(nodes, name) {
+    for (const n of nodes) {
+      if (n.type === "markup" && n.name === name) return n;
+      if (n.children && n.children.length) {
+        const hit = findMarkup(n.children, name);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+  // Concatenated raw of a node's direct text children.
+  function textOf(node) {
+    return node.children.filter((c) => c.type === "text").map((c) => c.raw).join("");
+  }
+
+  test("row 1 — <span>= hi</span> nested in <div> is markup; text is '= hi'", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div>\n    <span>= hi</span>\n  </div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    // The parent <div> must remain MARKUP — NOT gobbled as a compound
+    // state-decl text block (the pre-fix corruption).
+    const div = findMarkup(r.blocks, "div");
+    expect(div).not.toBeNull();
+    expect(div.type).toBe("markup");
+    const span = findMarkup(r.blocks, "span");
+    expect(span).not.toBeNull();
+    expect(textOf(span)).toBe("= hi");
+  });
+
+  test("row 2 — <td>=SUM(A1:A9)</td> (spreadsheet cell) is markup; text preserved", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <table><tr><td>=SUM(A1:A9)</td></tr></table>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const table = findMarkup(r.blocks, "table");
+    expect(table).not.toBeNull();
+    expect(table.type).toBe("markup");
+    const td = findMarkup(r.blocks, "td");
+    expect(td).not.toBeNull();
+    expect(textOf(td)).toBe("=SUM(A1:A9)");
+  });
+
+  test("row 3 — <span>=</span> (body is a lone `=`) is markup; text is '='", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <span>=</span>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const span = findMarkup(r.blocks, "span");
+    expect(span).not.toBeNull();
+    expect(textOf(span)).toBe("=");
+  });
+
+  test("row 4 — <div>=a=b=c</div> (multiple `=`) is markup; text is '=a=b=c'", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div>=a=b=c</div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const div = findMarkup(r.blocks, "div");
+    expect(div).not.toBeNull();
+    expect(textOf(div)).toBe("=a=b=c");
+  });
+
+  test("row 1b — <span>= hi</span> as a DIRECT page child is markup; text is '= hi'", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <span>= hi</span>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const span = findMarkup(r.blocks, "span");
+    expect(span).not.toBeNull();
+    expect(textOf(span)).toBe("= hi");
+  });
+
+  test("leading `=` body after a QUOTED attribute — <span id=\"cell\">= hi</span> — is markup", () => {
+    // Regression guard for the discriminator: a quoted attribute (`id=\"cell\"`)
+    // must NOT leave the scanner \"in an unquoted value\", so the leading-`=`
+    // body still terminates the opener. (A too-coarse \"saw any `=`\" flag would
+    // mis-swallow the `>=` here — the spreadsheet-cell shape.)
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div id="wrap"><span id="cell">= hi</span></div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const span = findMarkup(r.blocks, "span");
+    expect(span).not.toBeNull();
+    expect(textOf(span)).toBe("= hi");
+    expect(findMarkup(r.blocks, "div").type).toBe("markup");
+  });
+
+  test("leading `=` body after a quoted attribute — <td class=\"c\">=SUM(A1:A9)</td>", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <table><tr><td class="c">=SUM(A1:A9)</td></tr></table>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const td = findMarkup(r.blocks, "td");
+    expect(td).not.toBeNull();
+    expect(textOf(td)).toBe("=SUM(A1:A9)");
+  });
+
+  test("row 7 — bare unquoted `<p if=@n >= 3>` still flows the operator into the opener (NO E-CTX-001)", () => {
+    // Regression guard: the S188 reject path is preserved. At the block-splitter
+    // stage the `>=` operator must flow INTO the opener (captured in attrRaw)
+    // rather than terminating it early — so the tag stack stays balanced and NO
+    // E-CTX-001 fires. The canonical E-ATTR-UNQUOTED-OPERATOR reject fires later
+    // at the TAB stage (parenthesize/quote), not here.
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <n> = 5\n  <p if=@n >= 3>ok</p>\n</page>\n`);
+    expect(r.errors.map((e) => e.code)).not.toContain("E-CTX-001");
+    const p = findMarkup(r.blocks, "p");
+    expect(p).not.toBeNull();
+    // The whole `if=@n >= 3` operator condition is captured inside the opener.
+    expect(p.raw).toContain("if=@n >= 3");
+    expect(textOf(p)).toBe("ok");
+  });
+
+  test("parenthesized `<p if=(@n >= 3)>` and quoted `<p if=\"@n >= 3\">` remain valid openers", () => {
+    const paren = splitBlocks("test.scrml",
+      `<page auth="none">\n  <n> = 5\n  <p if=(@n >= 3)>ok</p>\n</page>\n`);
+    expect(paren.errors).toHaveLength(0);
+    expect(findMarkup(paren.blocks, "p")).not.toBeNull();
+
+    const quoted = splitBlocks("test.scrml",
+      `<page auth="none">\n  <n> = 5\n  <p if="@n >= 3">ok</p>\n</page>\n`);
+    expect(quoted.errors).toHaveLength(0);
+    expect(findMarkup(quoted.blocks, "p")).not.toBeNull();
+  });
+});
