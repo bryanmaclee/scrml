@@ -1,5 +1,6 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { relative, basename } from "path";
+import { toPosix } from "../path-canonical.js";
 import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
@@ -136,11 +137,15 @@ function buildModuleRegistryFooter(
 
   // Is THIS file imported by another .scrml in the compile unit? Scan every
   // file's import edges for one whose resolved absSource === this file.
+  // `imp.absSource` is always posix (buildImportGraph keys it via
+  // resolveModulePath); `filePath` may be native — canonicalize it ONCE
+  // instead of per inner-loop iteration.
+  const fpKey = toPosix(filePath);
   let isImportedByAnother = false;
   for (const [, entry] of importGraph) {
     if (!entry || !Array.isArray(entry.imports)) continue;
     for (const imp of entry.imports) {
-      if (imp.absSource === filePath) { isImportedByAnother = true; break; }
+      if (imp.absSource === fpKey) { isImportedByAnother = true; break; }
     }
     if (isImportedByAnother) break;
   }
@@ -585,10 +590,11 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     }
     // (b) this file is imported by another `.scrml`?
     if (!crossFileLocal && importGraph && filePath) {
+      const fpKey = toPosix(filePath); // absSource is posix; hoist the fold
       for (const [, entry] of importGraph) {
         if (!entry || !Array.isArray(entry.imports)) continue;
         for (const imp of entry.imports) {
-          if (imp.absSource === filePath) { crossFileLocal = true; break; }
+          if (imp.absSource === fpKey) { crossFileLocal = true; break; }
         }
         if (crossFileLocal) break;
       }

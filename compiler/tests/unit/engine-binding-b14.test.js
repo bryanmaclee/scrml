@@ -28,6 +28,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { resolve, dirname } from "path";
+// Production keys the exportRegistry via PathKeyedMap (posix-canonical keys,
+// cross-OS). These synthetic "production-shape" registries mirror that so the
+// absolute-keyed lookups match on Windows (native `resolve()` keys would else
+// miss the posix production lookup — the #path-model desync).
+import { PathKeyedMap } from "../../src/path-canonical.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import {
@@ -447,7 +452,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
 <program>
   <marioState/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const engineSourceMap = new Map();
     engineSourceMap.set("marioState", {
       kind: "engine",
@@ -467,7 +472,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
 <program>
   <helper/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const fnSourceMap = new Map();
     fnSourceMap.set("helper", {
       kind: "function",
@@ -489,7 +494,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
 <program>
   <Card/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const componentSourceMap = new Map();
     componentSourceMap.set("Card", {
       kind: "const",
@@ -522,7 +527,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
 <program>
   <topic/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const channelSourceMap = new Map();
     channelSourceMap.set("topic", {
       kind: "channel",
@@ -551,7 +556,7 @@ describe("B14 SYM PASS 10.B — cross-file engine mount validation", () => {
     const src = `<program>
   <hr/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const sym = runUpToSYM(src, "test.scrml", exportRegistry);
     const errs = getEngineMountNotEngineErrors(sym);
     expect(errs.length).toBe(0);
@@ -587,7 +592,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <marioState/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const engineSourceMap = new Map();
     engineSourceMap.set("marioState", {
       kind: "engine",
@@ -612,7 +617,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <helper/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const fnSourceMap = new Map();
     fnSourceMap.set("helper", {
       kind: "function",
@@ -638,7 +643,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <Card/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const componentSourceMap = new Map();
     componentSourceMap.set("Card", {
       kind: "const",
@@ -665,7 +670,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <ticker/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const channelSourceMap = new Map();
     channelSourceMap.set("ticker", {
       kind: "channel",
@@ -691,7 +696,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <marioState/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const engineSourceMap = new Map();
     engineSourceMap.set("marioState", {
       kind: "engine",
@@ -715,7 +720,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <appPhase/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const engineSourceMap = new Map();
     engineSourceMap.set("appPhase", {
       kind: "engine",
@@ -742,7 +747,7 @@ describe("B14 SYM PASS 10.B — path-shape resilience (S75 fix)", () => {
 <program>
   <sysState/>
 </program>`;
-    const exportRegistry = new Map();
+    const exportRegistry = new PathKeyedMap();
     const engineSourceMap = new Map();
     engineSourceMap.set("sysState", {
       kind: "engine",
