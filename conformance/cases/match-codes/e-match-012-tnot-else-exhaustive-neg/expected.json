@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-012-tnot-else-exhaustive-neg",
+  "description": "§42 — a value-form `match` over a `T | not` subject made exhaustive by an `else` wildcard SHALL NOT fire E-MATCH-012 (the absence case is caught by the catch-all). Acceptance sibling of e-match-012-tnot-missing-not-arm-pos. IMPL#1-vs-SPEC DIVERGENCE (recorded, NOT fixed): §42 (SPEC.md:23152) and the E-MATCH-012 message both say a `not` arm ALSO clears the error, and §18's canonical `T | not` match form (SPEC.md:8594-8606) is `{ not :> ...  given u :> ... }`; but impl#1's value-form union exhaustiveness checker (type-system.ts:15611) counts a union member as covered ONLY by an `is-type` pattern or a wildcard, so a `not` arm (recorded as a `variant` pattern by extractArmsFromMatchNode, type-system.ts:15963) does NOT clear E-MATCH-012 — only an `else`/`_` wildcard does. This NEG therefore uses the `else` form (the only impl#1-clean shape) rather than the SPEC-canonical `not` arm.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42",
+  "rationale": "§42 (SPEC.md:23152): a `match` on `T | not` WITH an `else` (or wildcard) arm handles the absence case and is exhaustive, so neither E-MATCH-012 nor the co-fired E-TYPE-006 SHALL fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-012", "E-TYPE-006"]
+  }
+}

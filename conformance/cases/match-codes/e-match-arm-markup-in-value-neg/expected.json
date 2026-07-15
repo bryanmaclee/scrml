@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-arm-markup-in-value-neg",
+  "description": "§18.0 — a value-form `match` whose every arm returns a VALUE (a string expression, incl. a computed `\"Failed: \" + reason`-style concatenation) SHALL NOT fire E-MATCH-ARM-MARKUP-IN-VALUE. Acceptance sibling of e-match-arm-markup-in-value-pos: proves the markup-opener detector (`^<tagname`) does NOT over-fire on ordinary value arms.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0",
+  "rationale": "§18.0: a value-form `match` arm returns a VALUE; when every arm body is a value expression the arm-body-is-markup steer is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ARM-MARKUP-IN-VALUE"]
+  }
+}

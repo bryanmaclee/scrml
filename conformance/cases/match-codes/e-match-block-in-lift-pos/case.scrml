@@ -1,0 +1,14 @@
+<program>
+${ type Status:enum = { Open, Closed } }
+<items>: Status[] = []
+<ul>
+${ for (let s of @items) {
+  lift <li>
+    <match for=Status on=s>
+      <Open>open</>
+      <Closed>closed</>
+    </match>
+  </li>
+} }
+</ul>
+</program>

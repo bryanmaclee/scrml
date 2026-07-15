@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-effect-forbidden-pos",
+  "description": "§18.0.2 — an `effect=` attribute on a block-`<match>` arm (`<Idle effect=${...}>`) SHALL fire E-MATCH-EFFECT-FORBIDDEN. Effects presuppose transitions, and transitions do not occur in a read-only match; the diagnostic steers to `<engine for=Type initial=.Variant>` (Tier 2). Regression guard: a match arm is not a transition site, so an effect there is inert-and-misleading and must be rejected.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.2",
+  "rationale": "§18.0.2: `effect=` declared on any `<match>` arm is a compile error (E-MATCH-EFFECT-FORBIDDEN) — effects presuppose transitions; `match` is read-only on the matched value. Use `<engine for=Type initial=.Variant>` (Tier 2) to attach `effect=` / `<onTransition>`.",
+  "expect": {
+    "codes": ["E-MATCH-EFFECT-FORBIDDEN"],
+    "notCodes": []
+  }
+}

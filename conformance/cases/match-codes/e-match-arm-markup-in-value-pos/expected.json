@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-arm-markup-in-value-pos",
+  "description": "§18.0 — a VALUE-form `match` arm (`match p.role { .Admin :> <p>admin</p> ... }`) whose body is a markup element instead of a value SHALL fire E-MATCH-ARM-MARKUP-IN-VALUE, steering the author to the structural `<match for=Type on=expr>` block form for rendering UI per variant. Regression guard: a value-form arm returns a VALUE; emitting markup there is an altitude error the steer must catch (it REPLACES the downstream E-SCOPE-001 / E-CODEGEN-INVALID-LOGIC cascade with one clear diagnostic).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0",
+  "rationale": "§18.0: a value-form `match` arm returns a VALUE, not markup. An arm body that is a markup element (`<p>...</p>`) is rejected with E-MATCH-ARM-MARKUP-IN-VALUE; to render a UI tree per variant use the Tier-1 block `<match for=Type [on=expr]>` form (§18.0.1).",
+  "expect": {
+    "codes": ["E-MATCH-ARM-MARKUP-IN-VALUE"],
+    "notCodes": []
+  }
+}

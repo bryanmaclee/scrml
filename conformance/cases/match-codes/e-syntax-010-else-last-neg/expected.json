@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-syntax-010-else-last-neg",
+  "description": "§18.6 — a value-form `match` whose `else` arm is the LAST arm SHALL NOT fire E-SYNTAX-010. Acceptance sibling of e-syntax-010-else-not-last-pos: `else` in the terminal position is the well-formed catch-all placement.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.6",
+  "rationale": "§18.6: an `else` arm at the bottom of the `match` block is the correct catch-all placement, so the else-position check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SYNTAX-010"]
+  }
+}
