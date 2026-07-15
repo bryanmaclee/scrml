@@ -87,6 +87,15 @@ ELEMENT_ATTR_REGISTRY.set("program", {
     // typer (E-TOOL-002); registering here suppresses the W-ATTR-001 unknown-attr
     // warning so the recognized attribute flows cleanly to the tool-emit path.
     ["kind",          attrSpec({ supportsInterpolation: false })],
+    // §64 (Fork 1A, Unit 2) — the listener-owning `kind="tool" serve=PORT`
+    // surface. `serve=` names the HTTP listen port for a headless serve-target
+    // (an integer literal `serve=7878` OR a `${expr}` runtime port). Placement
+    // (top-level `kind="tool"` only), port-shape (E-TOOL-SERVE-PORT-INVALID),
+    // and the cookie-auth guardrail (E-TOOL-SERVE-AUTH-UNSUPPORTED) are owned by
+    // the typer; registering here suppresses the incidental W-ATTR-001 so the
+    // recognized attribute flows to the serve-harness emit. supportsInterpolation
+    // true — a `${expr}` port is a valid runtime value.
+    ["serve",         attrSpec({ supportsInterpolation: true })],
     ["db",            attrSpec({ supportsInterpolation: false })],
     ["tables",        attrSpec({ supportsInterpolation: false })],
     ["html",          attrSpec({ supportsInterpolation: false })],

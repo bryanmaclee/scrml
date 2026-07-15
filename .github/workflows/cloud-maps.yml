@@ -1,0 +1,86 @@
+# Cloud-maps CI — the S253 cloud-PA "beachhead" (build-first, lowest-risk seam).
+#
+# PURPOSE (docs/deep-dives ../scrml-support cloud-pa-gate-offload-2026-07-13 §6/§8 step 1): prove the
+#   CLOUD-BOT-WRITES-TO-PROTECTED-MAIN seam + offload the maps/@generated bookkeeping the PA otherwise
+#   pays by hand every wrap (maps drift ~130+ commits between manual refreshes).
+#
+# BRANCH-PROTECTION-AWARE (post-S254): main is protected (enforce_admins), so this NEVER pushes to main
+#   directly. It opens a `maps/regen-*` PR and enables auto-merge. `gate` runs on the PR (ci.yml's
+#   `pull_request:` trigger has NO path filter → fires on docs-only PRs) and passes (maps/@generated are
+#   docs), then auto-merge stamps it (0 required approvals). NO branch-protection bypass — front door only.
+#
+# WHY A GITHUB APP TOKEN (not default GITHUB_TOKEN): a PR opened by GITHUB_TOKEN does NOT trigger `gate`
+#   ("events from GITHUB_TOKEN don't cascade") → auto-merge would wait forever on a gate that never fires.
+#   An App-token-opened PR DOES fire gate. Needs the `scrml-maps-bot` GitHub App + its two secrets
+#   (MAPS_APP_ID / MAPS_APP_PRIVATE_KEY). Until those exist a run reds at the token step — HARMLESS (this
+#   workflow is off the required-checks list, it cannot block a merge).
+#
+# TWO STAGES: (1) deterministic `bun scripts/state.ts --write` (@generated rollup; zero AI cost) then
+#   (2) the `project-mapper` agent (committed at .claude/agents/, force-added since .claude/ is gitignored)
+#   regenerates .claude/maps/. Claude GitHub App (github.com/apps/claude) must be installed for step 2.
+
+name: cloud-maps
+
+on:
+  workflow_dispatch: {}            # manual — use this to TEST the seam first
+  schedule:
+    - cron: "17 9 * * *"           # daily ~09:17 UTC — keeps maps ≤24h stale, predictable cost
+
+concurrency:
+  group: cloud-maps
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint GitHub App token          # identity whose opened PR triggers `gate`
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.MAPS_APP_ID }}
+          private-key: ${{ secrets.MAPS_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+
+      - name: Stage 1 — regenerate @generated state rollup (deterministic, no AI cost)
+        run: bun scripts/state.ts --write
+
+      - name: Stage 2 — regenerate nav-maps via the project-mapper agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >-
+            Use the project-mapper subagent in FULL_COLD_START mode to regenerate every file under
+            .claude/maps/ from the current source and spec. Do not commit or push — only write the map
+            files; the workflow lands them.
+          claude_args: "--permission-mode acceptEdits --max-turns 20"
+
+      - name: Open maps/@generated PR + enable auto-merge (only if drift)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if [ -z "$(git status --porcelain -- .claude/maps master-list.md)" ]; then
+            echo "No maps/@generated drift — nothing to land."; exit 0
+          fi
+          BR="maps/regen-${{ github.run_id }}"
+          git config user.name  "scrml-maps-bot[bot]"
+          git config user.email "scrml-maps-bot[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add .claude/maps master-list.md
+          git commit -m "chore(maps): scheduled nav-map + @generated regen"
+          git push -u origin "$BR"
+          gh pr create --base main --head "$BR" \
+            --title "chore(maps): scheduled regen" \
+            --body "Automated maps + @generated regen (cloud-maps beachhead). \`gate\` runs on this PR; auto-merges on green. No branch-protection bypass."
+          gh pr merge "$BR" --squash --auto --delete-branch

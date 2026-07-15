@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-09  commit: fbb4d9fd
+# updated: 2026-07-14T18:58:34-06:00  commit: f079d0a9
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -16,7 +16,7 @@ e2e / e2e:ui / e2e:docs — Playwright suites (playwright.config.ts / playwright
 e2e:install — `playwright install chromium firefox webkit`
 
 ## scrml CLI subcommands (compiler/src/cli.js -> commands/*.js)
-compile, dev, build, serve, migrate, promote, generate, init, introspect.
+compile, dev, build, serve, migrate, promote, generate, init, introspect. Unchanged this window (no diff to cli.js/commands/ since fbb4d9fd).
 
 ### `scrml compile` flags
 --parser (live|scrml-native), --mode, --output/--output-dir, --watch, --embed-runtime, --self-host, --convert-legacy-css, --prod/--production (§20.6.5 log() strip), --validate-emit/--no-validate-emit, --no-gather, --debug-perf, --verbose, --chunk-size-budget, --emit-batch-plan, --emit-block-analysis, --emit-engine-graph, --emit-reachability, --emit-token-set, --emit-per-route, --emit-machine-tests, --help.
@@ -27,19 +27,35 @@ compile, dev, build, serve, migrate, promote, generate, init, introspect.
 ### `scrml build` flags
 --target, --minify, --output, --idle-timeout, --embed-runtime, --copy-config, --validate-emit/--no-validate-emit, --verbose, --help.
 
-## CI/CD Pipeline  [.github/workflows/ci.yml]
-Single job `full-suite` on ubuntu-latest: checkout -> setup-bun -> `bun install --frozen-lockfile` -> `bun run pretest` (populate browser fixtures) -> `bun test compiler/tests/` (the FULL suite, incl. browser/lsp/commands/self-host — the layer above the local pre-commit subset).
-Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: cancel-in-progress` per ref.
+## CI/CD Pipeline  [.github/workflows/ci.yml] — REWORKED this window (was a single `full-suite` job at fbb4d9fd)
+Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
+
+**gate** — BLOCKING (the merge-gate). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js).
+Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
+
+**tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests, browser tests (known real fails tracked, not gated), and the parser-conformance-within-node.test.js M6.x native-parser-migration backlog. Same checkout/install/pretest steps as gate.
+
+**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. Runs unit + conformance only (the dist-independent core) to surface OS-path-separator regressions (`\` vs `/`, the issue #25/#26 class) invisible on the Linux gate. Candidate for promotion into `gate` (as a matrix leg) once confirmed green.
+
+Rationale banner in the workflow (S253): the prior single-job CI ran the FULL suite and went red on known self-host/within-node backlog (self-host tests need a locally-built, non-reproducible-from-source dist) — untrustworthy as a merge gate. `gate` is now the guaranteed-green-from-source core only.
+
+## CI/CD Pipeline  [.github/workflows/advisory-review.yml] — NEW this window
+**ai-review** job — non-blocking second-opinion AI `/code-review` on every code PR (deliberately NOT in branch-protection required checks; comments only, never fails the PR).
+Triggers: `pull_request` (opened/synchronize/ready_for_review/reopened), paths-filtered to `compiler/**`, `stdlib/**`, `lsp/**` (skips docs-only PRs to save tokens). `concurrency: group ai-review-${{pr#}}, cancel-in-progress: true`.
+Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill against the PR diff (`claude-sonnet-4-6`, max 15 turns). Needs the `ANTHROPIC_API_KEY` repo secret — unset today, so a run currently errors at the auth step (harmless; not a required check). Public-repo caveat: fork PRs from external contributors get no secrets, so this only runs on same-repo branches (bryan + Peter).
+
+## Pending / not-yet-merged CI (informational — NOT current truth at HEAD)
+`.github/workflows/cloud-maps.yml` exists on branch `feat/cloud-maps-beachhead` (commit 4f5a6b8d) but is NOT merged into `main` as of this HEAD (f079d0a9) — a scheduled + dispatch nav-map regen workflow (mints a scrml-maps-bot App token, runs `bun scripts/state.ts --write` + this project-mapper agent, opens an auto-merge `maps/regen-*` PR). Needs the `scrml-maps-bot` GitHub App + `MAPS_APP_ID`/`MAPS_APP_PRIVATE_KEY` secrets before it can go green. Not reflected in the CI section above because it is not part of the checked-out tree.
 
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
-pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); skipped when the staged diff is docs-only (*.md/*.txt/handOffs/); warns (non-blocking) on direct commits to `main` and on unread `handOffs/incoming/` inbox files.
-pre-push — full test suite + gauntlet quick check; additionally runs the README-vs-source extraction gate (`scripts/extract-readme-scrml.js`) ONLY when the push includes a `refs/tags/v*` release tag.
+pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`. Unchanged this window.
+pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check (TodoMVC compile + emitted-JS parse check); refreshes samples/compilation-tests/ fixtures first (stale fixtures previously faked ~9 browser-suite failures, S250); README-vs-source extraction gate (`scripts/extract-readme-scrml.js`) ONLY on a `refs/tags/v*` release-tag push.
 
 ## Docker
-None. No Dockerfile / docker-compose in this repo.
+None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #cli-flags #ci #pre-commit #pre-push #bun-test
+#scrml #map #build #cli-flags #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -47,3 +63,4 @@ None. No Dockerfile / docker-compose in this repo.
 - [pa.md](../../pa.md)
 - [test.map.md](./test.map.md)
 - [config.map.md](./config.map.md)
+- [infra.map.md](./infra.map.md)

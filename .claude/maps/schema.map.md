@@ -1,9 +1,9 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-09  commit: fbb4d9fd
+# updated: 2026-07-14T18:58:34-06:00  commit: f079d0a9
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
-`compiler/src/types/ast.ts` (2097 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
+`compiler/src/types/ast.ts` (2097 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants; unchanged since fbb4d9fd). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
 
 ## Root pipeline types
 ### FileAST  [types/ast.ts:1551]
@@ -54,13 +54,16 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 IdentExpr [1631], LitExpr [1653], ArrayExpr [1676], ObjectExpr [1682] / ObjectProp [1689], SpreadExpr [1695], UnaryExpr [1712], BinaryExpr [1740], AssignExpr [1762], TernaryExpr [1774], MemberExpr [1792], IndexExpr [1803], CallExpr [1813], NewExpr [1823], LambdaExpr [1851], CastExpr [1879], MatchExpr [1897], MapEntry [1922] / MapLitExpr [1949] (§59 value-native map/set), SqlRefExpr [1970], InputStateRefExpr [1984] (§36 `<#id>` reads), EscapeHatchExpr [1998] (`_{}` foreign block), ResetExpr [2063], MarkupValueExpr [2075].
 
 ## §65 CSS-native model — NOT a dedicated FileAST shape
-`<theme>` / `<defaults>` are recognized as ordinary MarkupNode instances via the structural-element registry (`compiler/src/attribute-registry.js:454` onchange, `:472` theme, `:485` defaults) — same pattern as `<endpoint>` (§61) and `<onchange>` (§38.13). No `ThemeDeclNode`/`EndpointDeclNode`/`OnchangeNode` type exists in ast.ts as of this watermark; theme-body-parser.ts + symbol-table.ts + type-system.ts consume the raw markup body directly. Codegen-internal (non-FileAST) types for these features: `ProtectContext`/`ProtectedColumns` (protect-egress.ts, §14.8.9), css-conflict-check.ts's internal `CssConflictFinding` (E-STYLE-CONFLICT/W-STYLE-CONFLICT-POSSIBLE), `RowChange` synthesis (channel-watches.ts, §38.13, pipeline-internal not an AST node), `EndpointArmBinding`/`IfDisplayGuard` (codegen-internal, §61).
+`<theme>` / `<defaults>` are recognized as ordinary MarkupNode instances via the structural-element registry (`compiler/src/attribute-registry.js:474` onchange, `:492` theme, `:505` defaults — shifted +20 lines this window vs. the fbb4d9fd watermark) — same pattern as `<endpoint>` (§61) and `<onchange>` (§38.13). No `ThemeDeclNode`/`EndpointDeclNode`/`OnchangeNode` type exists in ast.ts as of this watermark; theme-body-parser.ts + symbol-table.ts + type-system.ts consume the raw markup body directly. Codegen-internal (non-FileAST) types for these features: `ProtectContext`/`ProtectedColumns` (protect-egress.ts:47/101, §14.8.9), css-conflict-check.ts's internal `CssConflictFinding` (E-STYLE-CONFLICT/W-STYLE-CONFLICT-POSSIBLE), `RowChange` synthesis (channel-watches.ts, §38.13, pipeline-internal not an AST node), `EndpointArmBinding`/`IfDisplayGuard` (codegen-internal, §61).
+
+## `<outlet>` (§20.8) — also NOT a dedicated FileAST shape
+Same structural-element-registry pattern as `<theme>`/`<defaults>`/`<onchange>` — no `OutletNode` type in ast.ts. Landed this window (soft-navigation Wave-1a/1b); recognized/validated by symbol-table.ts PASS 15.5 (E-OUTLET-DUPLICATE / E-OUTLET-OUTSIDE-SHELL / W-OUTLET-ABSENT-SOFT-NAV-DISABLED).
 
 ## Type-system ResolvedType layer (type-system.ts, not ast.ts)
-FunctionType, MapType (with `.set?: boolean` for §59.12 value-native Set), PredicatedType (with `subsetVariants`), the `<fn-return>` over-approximation sentinel. NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
+FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom). type-system.ts grew substantially this window (+2013/-95 lines) but these core exported shapes are unchanged.
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet
 
 ## Links
 - [primary.map.md](./primary.map.md)
