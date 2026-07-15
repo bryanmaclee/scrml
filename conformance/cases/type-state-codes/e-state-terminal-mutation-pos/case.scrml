@@ -1,0 +1,12 @@
+<program>
+< Submission id(string)>
+    < Draft body(string)>
+        validate() => < Validated> { }
+    </>
+    < Validated body(string)></>
+</>
+${
+  let done: Validated = < Validated></>;
+  done.body = "tampered";
+}
+</program>

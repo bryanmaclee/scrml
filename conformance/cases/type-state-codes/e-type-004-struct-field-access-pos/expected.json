@@ -1,0 +1,13 @@
+{
+  "id": "e-type-004-struct-field-access-pos",
+  "description": "Accessing a field that a struct type does not declare fires E-TYPE-004 (§14.3). `p` is a local typed `Point` (fields x, y); `p.bogus` names no declared field, so the type system reports E-TYPE-004 naming the offending field and the available field set. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.3",
+  "rationale": "§14.3 struct field access is nominal: a member access on a struct-typed binding must name a declared field, otherwise the compiler SHALL error (E-TYPE-004). The check runs at the type-system stage over the local's resolved struct type.",
+  "expect": {
+    "codes": ["E-TYPE-004"],
+    "notCodes": [],
+    "severity": { "E-TYPE-004": "error" }
+  }
+}

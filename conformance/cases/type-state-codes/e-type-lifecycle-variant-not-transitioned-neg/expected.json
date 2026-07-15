@@ -1,0 +1,12 @@
+{
+  "id": "e-type-lifecycle-variant-not-transitioned-neg",
+  "description": "Discriminating the source variant WITHOUT accessing any post-transition variant field does not fire E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED (§14.12.6.2). The cell `phase` has the `(.Draft to .Published)` lifecycle; inside `if (@phase is .Draft)` the body renders a constant and reads no post-transition field, so there is no premature access and the check stays silent. The clean twin of e-type-lifecycle-variant-not-transitioned-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.12.6.2",
+  "rationale": "§14.12.6.2 the error fires only on a post-transition FIELD read before transition(); discriminating the source variant and reading no such field is well-formed.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED"]
+  }
+}
