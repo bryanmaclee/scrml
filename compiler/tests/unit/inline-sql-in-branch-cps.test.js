@@ -39,8 +39,11 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Script } from "node:vm";
+import { tmpdir } from "node:os";
 
-const TMP_ROOT = "/tmp/scrml-inline-sql-branch-tests";
+// OS-portable temp root (see note in s144 test): hardcoded "/tmp/…" is drive-less
+// on Windows and mismatches the compiler's resolve()-to-absolute output key.
+const TMP_ROOT = join(tmpdir(), "scrml-inline-sql-branch-tests");
 
 function setupDir(name) {
   const dir = join(TMP_ROOT, name);
