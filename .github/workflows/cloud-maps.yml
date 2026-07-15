@@ -34,6 +34,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write          # claude-code-action (Stage 2) needs OIDC even with anthropic_api_key + the Claude App
 
 jobs:
   regen:
@@ -58,7 +59,7 @@ jobs:
             Use the project-mapper subagent in FULL_COLD_START mode to regenerate every file under
             .claude/maps/ from the current source and spec. Do not commit or push — only write the map
             files; the workflow lands them.
-          claude_args: "--permission-mode acceptEdits --max-turns 20"
+          claude_args: "--permission-mode acceptEdits --max-turns 40"
 
       - name: Open maps/@generated PR + enable auto-merge (only if drift)
         env:
