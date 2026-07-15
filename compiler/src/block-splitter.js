@@ -1182,6 +1182,17 @@ export function splitBlocks(filePath, source) {
     // a `:`-shorthand. Legacy `derived=@ident` and `derived=match @x {...}` are
     // unaffected (no stray comparison operator at depth-0).
     let inDerivedExpr = false;
+    // issue #28 (leading-`=` body text) — track whether this opener has entered
+    // an unquoted attribute VALUE (a depth-0 `=` assignment such as `if=`). The
+    // S188 cluster-A `>=` reject below (a depth-0 `>` immediately followed by
+    // `=` treated as a stray comparison operator) is legitimate ONLY inside such
+    // a value. At a BARE tag terminator — an opener with no preceding attribute
+    // value whose element body simply begins with `=` (`<span>= hi>`,
+    // `<td>=SUM(A1:A9)>`) — the `>` must close the opener and the leading `=` is
+    // body text. Without this gate the `>` + leading `=` were swallowed together,
+    // the opener never terminated, and a misleading E-CTX-001 cascade fired on
+    // the outer structural tags.
+    let sawUnquotedEq = false;
 
     while (pos < len) {
       const c = source[pos];
@@ -1318,7 +1329,12 @@ export function splitBlocks(filePath, source) {
           }
           // else: genuine opener close — fall through to the `>` handler below.
         }
-        if (c === ">" && ch(1) === "=") {
+        // issue #28 — the S188 cluster-A `>=` reject fires ONLY inside an
+        // unquoted attribute value (a prior depth-0 `=` was seen). At a bare
+        // tag terminator (no attribute value) the `>` closes the opener; the
+        // following `=` is leading body text, handled by the plain `>` case
+        // below.
+        if (c === ">" && ch(1) === "=" && sawUnquotedEq) {
           attrRaw += c;
           step();
           continue;
@@ -1434,6 +1450,13 @@ export function splitBlocks(filePath, source) {
           step();
           continue;
         }
+        // issue #28 — a depth-0 unquoted `=` marks entry into an attribute
+        // VALUE, which is the only context where a subsequent depth-0 `>=` is a
+        // (stray) comparison operator rather than the opener terminator. This
+        // runs inside the `!localDouble && !localSingle` block, so an `=` inside
+        // a quoted value (`title="a=b"`) never sets the flag. No `continue` —
+        // the `=` still appends via the catch-all below.
+        if (c === "=") { sawUnquotedEq = true; }
         if (c === '"') {
           localDouble = true;
           attrRaw += c;
