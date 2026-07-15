@@ -1,0 +1,12 @@
+{
+  "id": "equality-unit-variant-compare-clean",
+  "description": "§45.5 clean neg — comparing `==` against a UNIT (payload-free) enum variant (`@phase == Phase.Idle`, where `Idle` carries no payload) SHALL NOT fire W-EQ-PAYLOAD-VARIANT. Unit variants lower to a string tag and compare normally, so the always-false lint does not apply. `notCodes` asserts W-EQ-PAYLOAD-VARIANT stays silent (contrast with `equality/payload-variant-compare-warn`).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/eq-payload-variant-lint-ss16-c4.test.js",
+  "spec": "§45.7",
+  "rationale": "§45.7: W-EQ-PAYLOAD-VARIANT targets only payload-bearing variant CONSTRUCTORS; a unit variant (`Phase.Idle`) is a string tag and compares as a value, so the comparison is meaningful and the lint does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-EQ-PAYLOAD-VARIANT"]
+  }
+}

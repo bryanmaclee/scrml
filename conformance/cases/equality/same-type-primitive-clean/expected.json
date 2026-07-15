@@ -1,0 +1,12 @@
+{
+  "id": "equality-same-type-primitive-clean",
+  "description": "§45 clean neg — `==` between two values of the SAME primitive type (`if (n == m)`, both `int`) SHALL NOT fire E-EQ-001. Confirms the cross-type gate does not false-fire on a well-typed same-type comparison. `notCodes` asserts E-EQ-001 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: `==` between two values of the same type is the canonical valid comparison; E-EQ-001 fires only across distinct types.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EQ-001"]
+  }
+}

@@ -1,0 +1,10 @@
+${
+    let n = 0
+    let b = false
+    if (n == b) {
+        let _bad = 1
+    }
+}
+<program>
+    <p>x</>
+</program>

@@ -1,0 +1,11 @@
+{
+  "id": "equality-map-key-function-field-reject",
+  "description": "§45 / §59.4 — a map whose KEY type is a struct containing a function-typed field SHALL fire E-EQ-003. `<m>: [Handler: int]` keys by `Handler:struct = { name: string, onFire: () => void }`; functions have no structural equality (§45.2), so the key is not §45-comparable and the map is rejected. Reject-path (pos) half of the E-EQ-003 pin (map-key variant, `type-system.ts` `classifyMapKey`); clean neg is `equality/map-key-comparable-clean` (a struct key with only comparable fields → silent). (The struct decl also fires the sibling E-STRUCT-FUNCTION-FIELD; the codes assertion is a superset, so the sibling is not asserted.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§59.4 / §45.2: a map key must be §45-comparable so that two structurally-equal keys are the same key; a key type containing a function-typed field is not comparable and is E-EQ-003 (the function-specific case, distinct from the general E-MAP-KEY-NOT-COMPARABLE).",
+  "expect": {
+    "codes": ["E-EQ-003"]
+  }
+}
