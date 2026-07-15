@@ -37,8 +37,12 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
-const TMP_ROOT = "/tmp/scrml-s144-AB-tests";
+// OS-portable temp root: a hardcoded "/tmp/…" is drive-less on Windows, so the
+// compiler's internal resolve()-to-absolute output key (C:\tmp\…) won't match a
+// drive-less lookup key → empty slices. tmpdir() yields an absolute native path.
+const TMP_ROOT = join(tmpdir(), "scrml-s144-AB-tests");
 
 function setupDir(name) {
   const dir = join(TMP_ROOT, name);

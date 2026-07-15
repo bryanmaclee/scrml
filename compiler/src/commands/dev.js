@@ -17,7 +17,7 @@
 
 import { statSync, readdirSync, watch } from "fs";
 import { resolve, dirname, join, basename } from "path";
-import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
+import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -410,12 +410,17 @@ export function injectHotReloadScript(html) {
  * @returns {string[]} de-duped absolute `.scrml` file paths
  */
 export function deriveWatchFiles(opts, gatheredFiles) {
+  // Cross-OS invariant: the watch set is POSIX-canonical (`/`). Callers pass
+  // already-absolute paths (CLI-resolved inputs + scanDirectory-gathered files),
+  // so we normalize separators rather than re-root via resolve() — resolve()
+  // would inject the current drive on Windows (`/proj/x` → `C:\proj\x`), which
+  // both mangles the path and defeats dedup against the un-rooted form.
   const set = new Set();
   for (const f of opts.inputFiles || []) {
-    if (typeof f === "string" && f.endsWith(".scrml")) set.add(resolve(f));
+    if (typeof f === "string" && f.endsWith(".scrml")) set.add(toPosixSpecifier(f));
   }
   for (const f of gatheredFiles || []) {
-    if (typeof f === "string" && f.endsWith(".scrml")) set.add(resolve(f));
+    if (typeof f === "string" && f.endsWith(".scrml")) set.add(toPosixSpecifier(f));
   }
   return [...set];
 }
