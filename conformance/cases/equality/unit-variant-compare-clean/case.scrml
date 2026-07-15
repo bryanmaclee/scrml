@@ -1,0 +1,7 @@
+<program>${
+    type Phase:enum = { Idle, Serving(angle: int) }
+    <phase>: Phase = .Idle
+    <ok> = @phase == Phase.Idle
+}
+<p id="s">${@ok}</>
+</program>

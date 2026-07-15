@@ -1,0 +1,7 @@
+${
+    type Handler:struct = { name: string, onFire: () => void }
+    <m>: [Handler: int] = [:]
+}
+<program>
+    <p id="p">${@m.size}</>
+</program>

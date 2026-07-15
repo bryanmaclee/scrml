@@ -1,0 +1,10 @@
+${
+    let a = 1
+    let b = 2
+    if (a === b) {
+        let _bad = 1
+    }
+}
+<program>
+    <p>x</>
+</program>

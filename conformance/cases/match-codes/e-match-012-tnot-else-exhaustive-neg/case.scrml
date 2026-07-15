@@ -1,0 +1,13 @@
+${
+  type Role:enum = { Admin, Editor }
+  fn label(r: Role | not) -> string {
+    match r {
+      .Admin  :> "admin"
+      .Editor :> "editor"
+      else    :> "none"
+    }
+  }
+}
+<program>
+  <p>hi</p>
+</program>

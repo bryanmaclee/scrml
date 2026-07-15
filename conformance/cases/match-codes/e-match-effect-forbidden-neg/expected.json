@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-match-effect-forbidden-neg",
+  "description": "§18.0.2 — an exhaustive block-`<match>` whose arms carry NO `effect=` attribute SHALL NOT fire E-MATCH-EFFECT-FORBIDDEN (nor E-MATCH-ONTRANSITION-FORBIDDEN). Acceptance sibling of e-match-effect-forbidden-pos: the read-only match compiles clean when its arms declare only display bodies.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.0.2",
+  "rationale": "§18.0.2: match-block arm attribute legality — a match arm with only a display body (no `effect=`) is legal; the forbidden-effect check is correctly silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-EFFECT-FORBIDDEN", "E-MATCH-ONTRANSITION-FORBIDDEN"]
+  }
+}

@@ -1,0 +1,16 @@
+${
+  type Phase:enum = { Idle, Loading, Ready }
+  <phase>: Phase = .Idle
+  <count>: number = 0
+}
+<match for=Phase on=@phase>
+  <Idle effect=${@count = 1}>
+    <p data-arm="idle">Idle</p>
+  </>
+  <Loading>
+    <p data-arm="loading">Loading</p>
+  </>
+  <Ready>
+    <p data-arm="ready">Ready</p>
+  </>
+</match>

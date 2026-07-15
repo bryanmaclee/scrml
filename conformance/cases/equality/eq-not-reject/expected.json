@@ -1,0 +1,11 @@
+{
+  "id": "equality-eq-not-reject",
+  "description": "§45 — `== not` (equality against the `not` absence sentinel) SHALL fire E-EQ-002. `if (x == not)` uses the wrong form for an absence check; the canonical form is the keyword `x is not`. Reject-path (pos) half of the E-EQ-002 pin; clean neg is `equality/is-not-clean` (the correct `x is not` form → silent).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: absence is checked with the keyword form `x is not`, not by comparing against a `not` sentinel with `==`. `== not` / `!= not` is E-EQ-002 (recovers to `is not` / `is not not`).",
+  "expect": {
+    "codes": ["E-EQ-002"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "match-codes-e-type-006-multi-scrutinee-exhaustive-neg",
+  "description": "§18.19 — an EXHAUSTIVE multi-scrutinee `match (r, u)` over the (Role x Role|not) product SHALL NOT fire E-TYPE-006 (nor E-TYPE-020). The two arms `(.Admin, _)` and `(.Editor, _)` cover both Role columns via a per-position `_` on the union position, covering every product cell. Acceptance sibling of e-type-006-multi-scrutinee-union-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.19",
+  "rationale": "§18.19: a per-position `_` covers all values in that position; `(.Admin, _)` + `(.Editor, _)` together cover the whole Role x (Role|not) product, so product-exhaustiveness is satisfied and no E-TYPE-006 / E-TYPE-020 fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-006", "E-TYPE-020"]
+  }
+}

@@ -1,0 +1,10 @@
+${
+    let n = 0
+    let m = 5
+    if (n == m) {
+        let _ok = 1
+    }
+}
+<program>
+    <p>x</>
+</program>

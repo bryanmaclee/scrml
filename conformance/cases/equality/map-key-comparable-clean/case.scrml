@@ -1,0 +1,7 @@
+${
+    type Route:struct = { from: string, to: string }
+    <m>: [Route: int] = [:]
+}
+<program>
+    <p id="p">${@m.size}</>
+</program>
