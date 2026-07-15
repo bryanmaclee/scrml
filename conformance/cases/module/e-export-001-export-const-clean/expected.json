@@ -1,0 +1,8 @@
+{
+  "id": "e-export-001-export-const-clean",
+  "description": "§21.2 — exporting a `const` (`export const total = 42`) is a legal Form-2 export; E-EXPORT-001 stays silent (a const is in the exportable set, not a reactive cell).",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2: `const` is in the Form-2 exportable set (type / function / fn / const / let). Exporting `total` is legal, so E-EXPORT-001 must not fire — the clean twin of the state-cell export case.",
+  "expect": { "codes": [], "notCodes": ["E-EXPORT-001"] }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "components-unresolved-component-ref-clean",
+  "description": "§15.14 clean neg — a component reference with a matching same-file definition SHALL NOT fire E-COMPONENT-020.",
+  "language-version": "1.0",
+  "spec": "§15.14",
+  "rationale": "§15.14.3 fires E-COMPONENT-020 only when CE's lookup fails to find a matching definition. `Known` is defined in the same file, so `Wrapper`'s reference to `<Known/>` resolves.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-020"]
+  }
+}

@@ -6,7 +6,7 @@
   "rationale": "§15.13.4 a component subscribes to the @var references it contains; the <each> over the `items` prop is driven by the caller's reactive @todos cell, so a write to @todos re-renders the component list. §42 keyed <each> reconciles to the new 3-item list. alpha, beta, +gamma.",
   "expect": {
     "codes": [],
-    "notCodes": [],
+    "notCodes": ["E-COMPONENT-010", "E-COMPONENT-011"],
     "input": [{ "click": "#add" }],
     "state": { "todos": [{ "id": "1", "name": "alpha" }, { "id": "2", "name": "beta" }, { "id": "3", "name": "gamma" }] },
     "domAnchored": [

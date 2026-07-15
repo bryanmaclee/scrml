@@ -1,0 +1,8 @@
+{
+  "id": "formfor-omit-valid-clean",
+  "description": "§41.14.5 — omit=[\"agree\"] names ONLY a valid Signup field. Near-miss sibling of formfor-omit-invalid-field: proves E-FORMFOR-OMIT-INVALID-FIELD is gated on unknown field names specifically, not on the mere presence of omit=.",
+  "language-version": "1.0",
+  "spec": "§41.14.5",
+  "rationale": "§41.14.5: omit=[...] SHALL accept an array literal of bare field-name strings that are all declared struct fields; a fully-valid omit list does NOT fire E-FORMFOR-OMIT-INVALID-FIELD.",
+  "expect": { "codes": [], "notCodes": ["E-FORMFOR-OMIT-INVALID-FIELD"] }
+}

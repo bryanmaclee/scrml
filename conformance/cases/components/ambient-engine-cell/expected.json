@@ -6,7 +6,7 @@
   "rationale": "§15.13.4 a component establishes a subscriber on every enclosing-scope @var it references; @phase is the engine's auto-derived cell, so when the engine transitions the StatePill re-renders. §15.13.5 keeps the engine a singleton outside the (multi-instance) component while the component reads its variant value.",
   "expect": {
     "codes": [],
-    "notCodes": [],
+    "notCodes": ["E-COMPONENT-010", "E-COMPONENT-011"],
     "input": [{ "click": "#go" }],
     "state": { "phase": "Active" },
     "domAnchored": [

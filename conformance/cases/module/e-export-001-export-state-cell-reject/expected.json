@@ -1,0 +1,8 @@
+{
+  "id": "e-export-001-export-state-cell-reject",
+  "description": "§21.2 — exporting a reactive state cell (`<count> = 0` then `export { count }`) fires E-EXPORT-001. A state cell is not in the Form-2 exportable set (type / function / fn / const / let); a reactive cell holds per-instance runtime state and has no cross-file meaning.",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2: a reactive state cell SHALL NOT be exported. `export { count }` where `count` binds to a `<count> = 0` state-decl is rejected E-EXPORT-001 (export a function returning it, a const of its value, or wrap it in a component).",
+  "expect": { "codes": ["E-EXPORT-001"], "notCodes": [] }
+}

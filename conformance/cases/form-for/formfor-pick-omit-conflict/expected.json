@@ -1,0 +1,11 @@
+{
+  "id": "formfor-pick-omit-conflict",
+  "description": "§41.14.5 — supplying BOTH pick=[...] AND omit=[...] on the same <formFor> fires E-FORMFOR-PICK-OMIT-CONFLICT. Both name VALID fields (pick=[\"name\"], omit=[\"email\"]), so this pins the mutual-exclusivity rule specifically, NOT a field-validity error — the two transforms are inverses (pick names the only fields to render; omit names fields to exclude) and cannot be combined. Because the fields are valid, E-FORMFOR-PICK-INVALID-FIELD / E-FORMFOR-OMIT-INVALID-FIELD MUST NOT fire.",
+  "language-version": "1.0",
+  "spec": "§41.14.5",
+  "rationale": "§41.14.5 E-FORMFOR-PICK-OMIT-CONFLICT: pick= and omit= SHALL NOT be combined on the same <formFor> call. Fix: use exactly one per call, or layer Pick over Omit at the type level and pass the derived type.",
+  "expect": {
+    "codes": ["E-FORMFOR-PICK-OMIT-CONFLICT"],
+    "notCodes": ["E-FORMFOR-PICK-INVALID-FIELD", "E-FORMFOR-OMIT-INVALID-FIELD"]
+  }
+}

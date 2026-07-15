@@ -1,0 +1,8 @@
+{
+  "id": "e-scope-010-filescope-distinct-clean",
+  "description": "§7.6 — two file-level `${ }` blocks declaring DISTINCT names (`one`, `two`) share the file scope without collision; E-SCOPE-010 stays silent.",
+  "language-version": "1.0",
+  "spec": "§7.6",
+  "rationale": "§7.6: distinct file-scope bindings across multiple `${ }` blocks are legal — the file scope is shared, not duplicated. E-SCOPE-010 fires only on a same-name re-declaration; distinct names must not fire.",
+  "expect": { "codes": [], "notCodes": ["E-SCOPE-010"] }
+}

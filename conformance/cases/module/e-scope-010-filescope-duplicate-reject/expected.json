@@ -1,0 +1,8 @@
+{
+  "id": "e-scope-010-filescope-duplicate-reject",
+  "description": "§7.6 — two file-level `${ }` blocks each declaring `const dup` collide in the shared file scope, firing E-SCOPE-010 (duplicate binding in file scope). File-level `${ }` blocks do NOT introduce isolated scopes (§7.6), so the second declaration re-declares a name already in scope.",
+  "language-version": "1.0",
+  "spec": "§7.6",
+  "rationale": "§7.6: re-declaring a name already declared at file scope in a later file-level `${ }` block SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope). Two `${ }` blocks both binding `dup` trip exactly this.",
+  "expect": { "codes": ["E-SCOPE-010"], "notCodes": [] }
+}

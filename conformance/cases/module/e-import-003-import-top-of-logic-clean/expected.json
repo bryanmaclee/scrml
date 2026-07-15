@@ -1,0 +1,8 @@
+{
+  "id": "e-import-003-import-top-of-logic-clean",
+  "description": "§21.3 — an `import` at the top of a file-level `${ }` logic block (with the sibling m.scrml present via the `files` convention) is the correct placement; E-IMPORT-003 and E-IMPORT-006 both stay silent.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: imports belong at file top-level in a `${ }` logic preamble. This is the well-placed twin of the reject case; E-IMPORT-003 (import-in-function-body) must not fire. The aux m.scrml exports helper() so E-IMPORT-004/006 also stay silent.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-003"], "notCodePrefixes": ["E-IMPORT-"] }
+}

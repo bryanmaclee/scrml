@@ -1,0 +1,8 @@
+{
+  "id": "e-import-pinned-const-clean",
+  "description": "§21.8.1 — a `pinned` modifier on the import of a `const` (`import { appPhase pinned }` where m.scrml exports `const appPhase`) does NOT fire E-IMPORT-PINNED-INVALID. Per the best-effort Option A policy, const/let pins are ACCEPTED because an engine-form export (`export <engine var=appPhase>` desugaring to `export const appPhase`) is indistinguishable from an arbitrary const today.",
+  "language-version": "1.0",
+  "spec": "§21.8.1",
+  "rationale": "§21.8.1: `pinned` is meaningful for cell/engine-typed names; engines desugar to `export const`, so a pinned const is a possible engine pin and is accepted (best-effort — trades false negatives for zero false positives). E-IMPORT-PINNED-INVALID must not fire on a const pin — the clean twin of the function-pin case.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-PINNED-INVALID"] }
+}

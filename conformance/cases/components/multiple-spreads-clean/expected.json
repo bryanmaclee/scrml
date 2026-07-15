@@ -1,0 +1,11 @@
+{
+  "id": "components-multiple-spreads-clean",
+  "description": "§16.4 clean neg — a component body with exactly one spread SHALL NOT fire E-COMPONENT-030.",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4 fires the multiple-spread error only when a component body declares the unnamed children spread more than once. `Wrap`'s body contains a single `${children}`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-030"]
+  }
+}

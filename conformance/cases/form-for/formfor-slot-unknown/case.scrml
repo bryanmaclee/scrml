@@ -1,0 +1,14 @@
+${
+  import { formFor } from 'scrml:data'
+
+  type Signup:struct = {
+    name:  string req length(>=2)
+    email: string req pattern(/^[^@]+@[^@]+$/)
+    agree: boolean req
+  }
+}
+<program>
+  <formFor for=Signup>
+    <slot name="nope">override</slot>
+  </formFor>
+</program>

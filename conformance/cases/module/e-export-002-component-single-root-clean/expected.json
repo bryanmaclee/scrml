@@ -1,0 +1,8 @@
+{
+  "id": "e-export-002-component-single-root-clean",
+  "description": "§21.2 Form 1 — an `export <Card>` with a single markup root (`<div>`) is a well-formed Form-1 component; E-EXPORT-002 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2 Form 1: a single-rooted body is the required shape. `export <Card><div>a</div></Card>` desugars to `export const Card = <div>a</div>`, so E-EXPORT-002 must not fire — the clean twin of the multi-root case.",
+  "expect": { "codes": [], "notCodes": ["E-EXPORT-002"] }
+}

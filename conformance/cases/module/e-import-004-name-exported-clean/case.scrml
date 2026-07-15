@@ -1,0 +1,4 @@
+${
+    import { present } from './m.scrml'
+}
+<p>${present()}</>

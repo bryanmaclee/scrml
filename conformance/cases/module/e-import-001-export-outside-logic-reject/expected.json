@@ -1,0 +1,8 @@
+{
+  "id": "e-import-001-export-outside-logic-reject",
+  "description": "§21.2 — a bare `export { count }` at file top level, outside any `${ }` logic context, fires E-IMPORT-001. `export` is a logic-context declaration; it may only appear inside `${ }` (or as the §21.2 Form-1 `export <Component>` / Form-2 `export const` shapes, neither of which this is).",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2: all `export` statements must appear inside a `${ }` logic context (exceptions are Form-1 `export <ComponentName>...</>` and Form-2 `export const Name = ...`). A bare braced re-export list `export { count }` at file top is neither Form and is rejected E-IMPORT-001.",
+  "expect": { "codes": ["E-IMPORT-001"], "notCodes": [] }
+}

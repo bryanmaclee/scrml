@@ -1,0 +1,11 @@
+{
+  "id": "components-extra-undeclared-prop-clean",
+  "description": "§15.10 clean neg — passing only declared props at the call site SHALL NOT fire E-COMPONENT-011.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10 fires E-COMPONENT-011 only when the call site passes an attribute absent from the props block. `<Badge label=\"Inbox\"/>` passes only the declared `label` prop.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-011"]
+  }
+}

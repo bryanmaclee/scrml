@@ -1,0 +1,8 @@
+{
+  "id": "e-use-001-use-inside-logic-reject",
+  "description": "§41 — a `use scrml:ui` declaration placed inside a `${ }` logic block fires E-USE-001. `use` is a file-preamble declaration (markup scope), not a logic-block statement.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41: `use` brings names into MARKUP scope and must live in the file preamble, outside any `${ }` logic context (which is a distinct value scope, §41 line 21994). A `use` inside `${ }` is rejected E-USE-001.",
+  "expect": { "codes": ["E-USE-001"], "notCodes": [] }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "formfor-error-strategy-invalid",
+  "description": "§41.14.6 — error-strategy=\"X\" on <formFor> is only valid as \"per-field\" (default), \"summary\", or \"both\". An unrecognized value fires E-FORMFOR-ERROR-STRATEGY-INVALID.",
+  "language-version": "1.0",
+  "spec": "§41.14.6",
+  "rationale": "§41.14.6: error-strategy= SHALL accept one of three string literal values (\"per-field\" | \"summary\" | \"both\"); unknown values SHALL emit E-FORMFOR-ERROR-STRATEGY-INVALID.",
+  "expect": { "codes": ["E-FORMFOR-ERROR-STRATEGY-INVALID"], "notCodes": [] }
+}

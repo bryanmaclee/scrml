@@ -1,0 +1,8 @@
+{
+  "id": "formfor-nested-struct-no-slot",
+  "description": "§41.14.8 — <formFor for=Signup> has a struct-typed field (address: Address) but no <slot name=\"address\"> override. v1.0 does NOT auto-recurse into nested struct fields, so this fires E-FORMFOR-NESTED-STRUCT-NO-SLOT.",
+  "language-version": "1.0",
+  "spec": "§41.14.8",
+  "rationale": "§41.14.8: a struct-typed field with no explicit <slot name=\"<fieldName>\"> override SHALL emit E-FORMFOR-NESTED-STRUCT-NO-SLOT (auto-recursive nested-struct rendering is reserved for v1.next per OQ-FF-11).",
+  "expect": { "codes": ["E-FORMFOR-NESTED-STRUCT-NO-SLOT"], "notCodes": [] }
+}

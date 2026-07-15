@@ -1,0 +1,4 @@
+${
+    import { appPhase pinned } from './m.scrml'
+}
+<p>${appPhase}</>

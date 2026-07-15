@@ -1,0 +1,5 @@
+<program>
+const Known = <span class="known">static</>
+const Wrapper = <div class="wrapper"><Known/></>
+<Wrapper/>
+</program>

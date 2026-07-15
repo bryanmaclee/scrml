@@ -1,0 +1,8 @@
+<program>
+const Card = <div class="card" props={ header?: snippet }>
+    <div class="card__header" if=header>${render header()}</div>
+</div>
+<Card>
+    <h3 slot="nope">title</h3>
+</Card>
+</program>

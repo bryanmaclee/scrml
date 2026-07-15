@@ -1,0 +1,3 @@
+export function present() -> integer {
+    return 1
+}

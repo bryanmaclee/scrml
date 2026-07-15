@@ -1,0 +1,7 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Result:enum = { Ok(value: string), Err(message: string) }
+    type Job:struct = { id: integer, status: Result }
+    <jobs>: Job[] = []
+}
+<tableFor for=Job rows=@jobs></tableFor>

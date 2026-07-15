@@ -1,0 +1,10 @@
+{
+  "id": "components-slot-targets-non-snippet-reject",
+  "description": "§16.5 — a `slot=\"name\"` child whose `name` does not match any declared `snippet`-typed prop on the target component SHALL fire E-COMPONENT-033. `Card` declares one snippet prop (`header`); the use site's child carries `slot=\"nope\"`, which has no matching declaration. Reject (pos) half of the E-COMPONENT-033 pin; clean neg is components/slot-targets-non-snippet-clean.",
+  "language-version": "1.0",
+  "spec": "§16.5",
+  "rationale": "§16.5: '`slot=\"name\"` targeting a non-snippet prop is E-COMPONENT-023 [impl#1: E-COMPONENT-033 — see the sPA-ss68 escalation report for the §16.5-vs-impl code-number divergence].' `nope` is not declared as a snippet prop on `Card` (only `header` is), so the compiler cannot desugar the slot fill to a prop assignment.",
+  "expect": {
+    "codes": ["E-COMPONENT-033"]
+  }
+}

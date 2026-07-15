@@ -1,0 +1,3 @@
+<program>
+const Counter = <div class="counter" props={ bind count: number }>static</>
+</program>

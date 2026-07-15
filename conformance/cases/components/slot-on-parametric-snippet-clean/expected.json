@@ -1,0 +1,11 @@
+{
+  "id": "components-slot-on-parametric-snippet-clean",
+  "description": "§16.6 clean neg — filling a parametric snippet prop with the required lambda form SHALL NOT fire E-COMPONENT-034.",
+  "language-version": "1.0",
+  "spec": "§16.6",
+  "rationale": "§16.6 fires the parametric-snippet error only when a caller uses `slot=` (the zero-parameter desugaring) on a parametric snippet prop. `<TabStrip row={ (item) => ... } />` supplies the lambda form the grammar requires for `snippet(item: string)`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-034"]
+  }
+}

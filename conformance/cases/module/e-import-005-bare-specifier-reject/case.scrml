@@ -1,0 +1,4 @@
+${
+    import { map } from 'lodash'
+}
+<p>hi</>

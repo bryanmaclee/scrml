@@ -1,0 +1,11 @@
+{
+  "id": "components-post-ce-residual-component-clean",
+  "description": "§15.14 clean neg — a component reference resolved (same-file definition, successfully expanded by CE) SHALL NOT fire E-COMPONENT-035.",
+  "language-version": "1.0",
+  "spec": "§15.14",
+  "rationale": "§15.14.2: 'Same-file declarations are resolved by CE before VP-2 runs and so SHALL NOT trigger E-COMPONENT-035.' `Known` is defined and successfully expanded, so no `isComponent === true` node survives to the post-CE walk.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-035"]
+  }
+}

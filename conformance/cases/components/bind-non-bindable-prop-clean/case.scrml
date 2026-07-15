@@ -1,0 +1,5 @@
+<program>
+const Tag = <span class="tag" props={ bind label: string }>static</>
+<v> = "x"
+<Tag bind:label=@v />
+</program>

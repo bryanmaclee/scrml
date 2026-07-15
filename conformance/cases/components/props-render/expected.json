@@ -6,7 +6,7 @@
   "rationale": "§15.13.2 a non-`bind` prop is captured by value at the call site and read inside the component body; `${label} ${status}` substitutes the two passed strings -> \"Inbox open\".",
   "expect": {
     "codes": [],
-    "notCodes": [],
+    "notCodes": ["E-COMPONENT-010", "E-COMPONENT-011"],
     "input": [],
     "domAnchored": [
       { "selector": ".badge", "count": 1, "text": "Inbox open" }

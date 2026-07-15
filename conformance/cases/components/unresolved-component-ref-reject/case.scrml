@@ -1,0 +1,4 @@
+<program>
+const Wrapper = <div class="wrapper"><Unknown/></>
+<Wrapper/>
+</program>

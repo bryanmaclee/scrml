@@ -1,0 +1,8 @@
+{
+  "id": "e-use-002-use-after-markup-reject",
+  "description": "§41 — a `use scrml:ui` line appearing AFTER the first markup element (`<p>`) fires E-USE-002. `use` declarations must live in the file preamble, before any markup.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41: `use` is a preamble-only declaration. Once markup has begun, a later `use` is out of place and rejected E-USE-002 (`use` after the first markup element).",
+  "expect": { "codes": ["E-USE-002"], "notCodes": [] }
+}

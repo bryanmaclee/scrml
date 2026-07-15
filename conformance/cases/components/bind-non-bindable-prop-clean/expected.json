@@ -1,0 +1,11 @@
+{
+  "id": "components-bind-non-bindable-prop-clean",
+  "description": "§15.11.1 clean neg — `bind:propName=@var` targeting a prop declared WITH the `bind` keyword SHALL NOT fire E-COMPONENT-013. Incidental note: impl#1 currently still emits a spurious `E-ATTR-011` on this genuinely-valid form too (see the sPA-ss68 escalation report — same CE-does-not-strip-the-attribute root cause as the reject case); `notCodes` asserts only that E-COMPONENT-013 itself stays silent, which is the code under test here.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1 fires E-COMPONENT-013 only when `bind:propName` targets a prop not declared `bind`. `Tag` declares `bind label: string`, so `bind:label=@v` targets a genuinely bindable prop.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-013"]
+  }
+}

@@ -1,0 +1,4 @@
+export <Card>
+    <div>a</div>
+    <span>b</span>
+</Card>

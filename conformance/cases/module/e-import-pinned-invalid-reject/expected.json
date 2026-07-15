@@ -1,0 +1,8 @@
+{
+  "id": "e-import-pinned-invalid-reject",
+  "description": "§21.8.1 — a `pinned` modifier on the import of a plain function (`import { present pinned }` where m.scrml exports `function present()`) fires E-IMPORT-PINNED-INVALID. `pinned` is only meaningful for cell-typed and engine-typed names. Uses the `files` convention so MOD's export registry classifies `present` as kind:function.",
+  "language-version": "1.0",
+  "spec": "§21.8.1",
+  "rationale": "§21.8.1: `pinned` on a non-engine non-state-cell import (e.g. a regular function) is E-IMPORT-PINNED-INVALID. m.scrml exports `present` as a function, so pinning it is rejected.",
+  "expect": { "codes": ["E-IMPORT-PINNED-INVALID"], "notCodes": [] }
+}

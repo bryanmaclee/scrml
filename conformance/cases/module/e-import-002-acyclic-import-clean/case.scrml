@@ -1,0 +1,4 @@
+${
+    import { fromA } from './a.scrml'
+}
+<p>${fromA}</>

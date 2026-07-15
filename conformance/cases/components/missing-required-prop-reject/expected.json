@@ -1,0 +1,10 @@
+{
+  "id": "components-missing-required-prop-reject",
+  "description": "§15.10 — a required prop omitted at the call site SHALL fire E-COMPONENT-010. `Badge` declares two required props (`label`, `status`); the use site `<Badge label=\"Inbox\"/>` omits `status`. Reject (pos) half of the E-COMPONENT-010 pin; clean neg is components/missing-required-prop-clean.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10: 'Props declared in the props block are required by default. A required prop that is absent at the call site SHALL be a compile error (E-COMPONENT-010).' `status` has no `?` and no default, so omitting it at the call site is a hard error.",
+  "expect": {
+    "codes": ["E-COMPONENT-010"]
+  }
+}

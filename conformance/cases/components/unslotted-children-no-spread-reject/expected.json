@@ -1,0 +1,10 @@
+{
+  "id": "components-unslotted-children-no-spread-reject",
+  "description": "§16.4 — a caller passing unslotted children to a component whose body has no unnamed spread SHALL fire E-COMPONENT-031. `Card`'s body has only `${render header()}` (a named snippet render, not a spread); the use site passes a `slot=\"header\"` child (fine) AND an unslotted `<p>stray</p>` (has nowhere to go). Reject (pos) half of the E-COMPONENT-031 pin; clean neg is components/unslotted-children-no-spread-clean.",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4: 'If no spread exists and the caller provides unslotted children, this is E-COMPONENT-021 [impl#1: E-COMPONENT-031 — see the sPA-ss68 escalation report for the §16.4-vs-impl code-number divergence].' `Card` declares no `${...}`/`${children}` spread, so the unslotted `<p>stray</p>` child has no fill-site to flow into.",
+  "expect": {
+    "codes": ["E-COMPONENT-031"]
+  }
+}

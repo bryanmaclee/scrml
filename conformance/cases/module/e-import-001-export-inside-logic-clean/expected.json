@@ -1,0 +1,8 @@
+{
+  "id": "e-import-001-export-inside-logic-clean",
+  "description": "§21.2 — an `export const greeting = ...` inside a `${ }` logic block is the canonical Form-2 export placement; E-IMPORT-001 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2 Form 2: `export const Name = ...` inside `${ }` is a well-placed export. E-IMPORT-001 fires ONLY for `export` outside a logic context; here it is inside one, so the code must not fire.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-001"] }
+}

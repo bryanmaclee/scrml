@@ -1,0 +1,10 @@
+{
+  "id": "components-extra-undeclared-prop-reject",
+  "description": "§15.10 — an attribute at the call site not declared in the component's `props` block SHALL fire E-COMPONENT-011. `Badge` declares only `label`; the use site also passes `extra=\"x\"`. Reject (pos) half of the E-COMPONENT-011 pin; clean neg is components/extra-undeclared-prop-clean.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10: 'Extra props provided at the call site that are not declared in the props block SHALL be a compile error (E-COMPONENT-011).' `extra` has no matching entry in `Badge`'s props block.",
+  "expect": {
+    "codes": ["E-COMPONENT-011"]
+  }
+}

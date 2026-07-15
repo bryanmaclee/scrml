@@ -1,0 +1,11 @@
+{
+  "id": "tablefor-sortable-requires-cell-rows",
+  "description": "§41.16.7 — when at least one `<column sortable>` slot is present, `rows=` must be a cell-reference expression (`rows=@<varName>`, with optional `.method()` chains) so the synthesized `@<varName>.sortedBy` cell has a stable name. A non-cell `rows=` (here a literal `[]` array) fires E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS.",
+  "language-version": "1.0",
+  "spec": "§41.16.7",
+  "rationale": "§41.16.7 E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS: the sort surface synthesizes a state cell named after the rows source, which requires `rows=@<varName>`. Resolution: hoist the rows expression into a reactive cell (`<items> = ...` then `rows=@items`), OR remove the `sortable` attribute from the `<column>` slot if external sort is not needed.",
+  "expect": {
+    "codes": ["E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS"],
+    "notCodes": ["E-TABLEFOR-ROWS-MISSING", "E-TABLEFOR-ROWS-WRONG-TYPE"]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "components-multiple-spreads-reject",
+  "description": "§16.4 — a component body with more than one unnamed children spread SHALL fire E-COMPONENT-030. `Wrap`'s body contains `${children}${children}` (two spreads). Reject (pos) half of the E-COMPONENT-030 pin; clean neg is components/multiple-spreads-clean.",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4: 'A component body MAY contain zero or one spread (either form). More than one is E-COMPONENT-020 [impl#1: E-COMPONENT-030 — see the sPA-ss68 escalation report for the §16.4-vs-impl code-number divergence].' `Wrap` declares the unnamed spread twice, which has no defined semantics (which occurrence receives the caller's children?).",
+  "expect": {
+    "codes": ["E-COMPONENT-030"]
+  }
+}

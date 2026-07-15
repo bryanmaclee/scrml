@@ -1,0 +1,11 @@
+{
+  "id": "components-invalid-prop-decl-syntax-clean",
+  "description": "§15.10 clean neg — a well-formed `name: type` prop-decl entry SHALL NOT fire E-COMPONENT-019.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10 fires E-COMPONENT-019 only when a props-block entry matches none of the accepted grammar shapes. `label: string` matches the base `identifier ':' type-expr` shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-019"]
+  }
+}

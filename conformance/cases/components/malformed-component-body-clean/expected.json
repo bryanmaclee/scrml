@@ -1,0 +1,11 @@
+{
+  "id": "components-malformed-component-body-clean",
+  "description": "§16.4 clean neg — the `${children}` spread alias re-parses successfully and SHALL NOT fire E-COMPONENT-021, in an otherwise byte-identical component body to the reject case (only the spread spelling differs).",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4 documents `${children}` as the (impl#1-supported) legacy alias for the unnamed children spread. CE's local re-parse of `Wrap`'s body succeeds with this form, so no E-COMPONENT-021 is raised.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-021"]
+  }
+}
