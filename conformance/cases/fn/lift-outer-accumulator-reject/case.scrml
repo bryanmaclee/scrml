@@ -1,0 +1,10 @@
+<program>
+${
+    ~acc = []
+    fn helper() {
+        lift "from-fn"
+    }
+    helper()
+}
+<ul>${acc}</ul>
+</program>

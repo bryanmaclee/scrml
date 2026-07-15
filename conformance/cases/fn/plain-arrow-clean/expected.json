@@ -1,0 +1,12 @@
+{
+  "id": "fn-plain-arrow-clean",
+  "description": "§48.2.1 clean neg — the valid inline-lambda form `arr.map(n => n * 2)` (a plain arrow, no `fn` keyword) SHALL NOT fire E-FN-ARROW-BODY. Confirms the detector keys on the mixed `fn(args) => expr` shape only, never on an ordinary arrow. `notCodes` asserts E-FN-ARROW-BODY stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/g-fn-shortform-arrow-reject.test.js",
+  "spec": "§48.2.1",
+  "rationale": "§48.2.1: `args => expr` is one of the two sanctioned anonymous-callable forms (the plain inline lambda). Only the mixed `fn(args) => expr` is rejected; a bare arrow compiles clean.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-ARROW-BODY"]
+  }
+}

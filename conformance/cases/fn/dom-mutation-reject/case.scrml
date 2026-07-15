@@ -1,0 +1,9 @@
+<program>
+${
+    fn build(x) {
+        let el = document.createElement("div")
+        return x
+    }
+}
+<p>${build("hi")}</>
+</program>

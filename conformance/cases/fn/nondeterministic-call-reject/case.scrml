@@ -1,0 +1,9 @@
+<program>
+${
+    fn build(x) {
+        let t = Date.now()
+        return x
+    }
+}
+<p>${build(1)}</>
+</program>

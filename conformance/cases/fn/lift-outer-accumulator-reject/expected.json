@@ -1,0 +1,11 @@
+{
+  "id": "fn-lift-outer-accumulator-reject",
+  "description": "§48.5.2 — a `lift` inside a `fn` body that targets a `~` accumulator initialized OUTSIDE the `fn` boundary SHALL fire E-FN-008. `~acc = []` is declared at program scope; `fn helper()` does `lift \"from-fn\"`, which would accumulate past the `fn` boundary. Reject-path (pos) half of the E-FN-008 pin; the clean neg is `fn/lift-local-accumulator-clean` (a `fn`-local `~` closed with `return ~` — silent, §48.5.1).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/fn-prohibitions.test.js",
+  "spec": "§48.5.2",
+  "rationale": "§48.5.2: `lift` inside a `fn` may only accumulate into a `~` initialized within the same `fn` body; a `lift` targeting a `~` from outer scope crosses the `fn` boundary (a hidden outer-scope mutation) and is E-FN-008.",
+  "expect": {
+    "codes": ["E-FN-008"]
+  }
+}

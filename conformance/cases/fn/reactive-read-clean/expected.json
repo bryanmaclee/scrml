@@ -1,0 +1,12 @@
+{
+  "id": "fn-reactive-read-clean",
+  "description": "§48.3.3 / §48.5.3 clean neg — a READ-ONLY use of a reactive `@`-cell (`return a + @value`) inside a pure `fn` body SHALL NOT fire E-FN-003. Pure-value reads of `@`-variables are permitted (E-FN-009, the live-subscription capture case, is deferred); only WRITES are the mutation the code targets. `notCodes` asserts E-FN-003 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s20/fn-purity-reactive.test.js",
+  "spec": "§48.3.3",
+  "rationale": "§48.3.3 targets outer-scope MUTATION; reading an `@`-cell as a pure value (§48.5.3) is not a mutation and is allowed inside `fn`. E-FN-003 fires on `@x = ...`, not on `... + @x`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-003"]
+  }
+}

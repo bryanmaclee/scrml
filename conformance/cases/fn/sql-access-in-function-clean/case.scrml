@@ -1,0 +1,9 @@
+<program db="./test.db">
+${
+    function loadName(id) {
+        let row = ?{`SELECT name FROM users WHERE id = ${id}`}.get()
+        return row.name
+    }
+}
+<p>${loadName(1)}</>
+</program>

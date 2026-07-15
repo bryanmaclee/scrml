@@ -1,0 +1,11 @@
+{
+  "id": "fn-async-decl-reject",
+  "description": "§48.3.5 — an `async` modifier on a `fn` declaration SHALL fire E-FN-005. `fn` is always synchronous; the `async fn loadProfile(id)` declaration is rejected (the `fn`-scope manifestation of the language-wide §19.9.8 no-async rule, S114). Reject-path (pos) half of the E-FN-005 pin; the clean neg is `fn/sync-decl-clean` (the same body as a plain sync `fn` — silent). (The whole-program `async`-in-scrml gate also fires E-ASYNC-NOT-IN-SCRML here; the codes assertion is a superset, so the incidental sibling code is not asserted.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/fn-prohibitions.test.js",
+  "spec": "§48.3.5",
+  "rationale": "§48.3.5: `fn` is always synchronous — an `async` declaration (or an `await` in the body) is E-FN-005. Perform the `await` at the call site and pass the resolved value as a parameter to `fn`.",
+  "expect": {
+    "codes": ["E-FN-005"]
+  }
+}

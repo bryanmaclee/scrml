@@ -1,0 +1,12 @@
+{
+  "id": "fn-sync-decl-clean",
+  "description": "§48.3.5 clean neg — the SAME body as `fn/async-decl-reject` but declared as a plain synchronous `fn loadProfile(id)` (no `async`) SHALL NOT fire E-FN-005. Confirms E-FN-005 keys on the `async` modifier / `await`, not on the declaration itself. `notCodes` asserts E-FN-005 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/fn-prohibitions.test.js",
+  "spec": "§48.3.5",
+  "rationale": "§48.3.5 fires on an `async` `fn` declaration or an `await` in the body; a sync `fn` with neither is the canonical form and is silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-005"]
+  }
+}

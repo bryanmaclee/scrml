@@ -1,0 +1,12 @@
+{
+  "id": "fn-deterministic-call-clean",
+  "description": "§48.3.4 clean neg — a `fn build(x)` whose body is a deterministic function of its input (`x + 1`) SHALL NOT fire E-FN-004. Confirms the non-determinism walker does not false-fire on ordinary pure computation (only wall-clock / entropy / mutable-global reads trip it). `notCodes` asserts E-FN-004 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/fn-constraints.test.js",
+  "spec": "§48.3.4",
+  "rationale": "§48.3.4 fires only on non-deterministic calls/reads (`Date.now`, `Math.random`, `window.*`, …). A `fn` that returns a deterministic value of its inputs is referentially transparent and silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-004"]
+  }
+}

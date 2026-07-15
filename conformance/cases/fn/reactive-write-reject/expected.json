@@ -1,0 +1,11 @@
+{
+  "id": "fn-reactive-write-reject",
+  "description": "§48.3.3 — a reactive-variable write (`@counter = a`) inside a pure `fn` body SHALL fire E-FN-003. `@`-cells are program-scope reactive state; writing one from inside `fn` is an outer-scope mutation. Reject-path (pos) half of the E-FN-003 pin; the clean neg is `fn/reactive-read-clean` (read-only `@`-cell use — silent, §48.5.3).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s20/fn-purity-reactive.test.js",
+  "spec": "§48.3.3",
+  "rationale": "§48.3.3: `fn` is a pure function and may not mutate reactive state; a `@cell = ...` write in a `fn` body is E-FN-003 (an outer-scope mutation — `@`-cells are always program-level). Move the write outside `fn`, or use `function` if the side effect is intentional.",
+  "expect": {
+    "codes": ["E-FN-003"]
+  }
+}

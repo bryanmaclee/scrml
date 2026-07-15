@@ -1,0 +1,12 @@
+{
+  "id": "fn-lift-local-accumulator-clean",
+  "description": "§48.5.1 clean neg — a `lift` inside a `fn` body that accumulates into a `fn`-LOCAL `~`, closed by `return ~`, SHALL NOT fire E-FN-008. This is the SPEC-canonical valid shape (§48.5: 'a `fn` body does permit `lift`: it accumulates into a `~` local to the `fn` body, which the `fn` then returns explicitly with `return ~`'). Contrast with `fn/lift-outer-accumulator-reject` (targets an outer `~`). `notCodes` asserts E-FN-008 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/fn-constraints.test.js",
+  "spec": "§48.5.1",
+  "rationale": "§48.5.1: `lift` inside `fn` is valid when it accumulates into a `~` local to the same `fn` body and the `fn` returns it with `return ~`; nothing crosses the `fn` boundary, so E-FN-008 does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FN-008"]
+  }
+}

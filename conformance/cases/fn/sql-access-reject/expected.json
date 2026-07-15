@@ -1,0 +1,11 @@
+{
+  "id": "fn-sql-access-reject",
+  "description": "§48.3.1 — a `?{}` SQL access inside a pure `fn` body SHALL fire E-FN-001. `fn loadName(id)` runs `?{ SELECT ... }.get()` in its body; the declaration-site purity contract rejects it regardless of route-inference server-escalation (§48.3.1 + §33.3: 'E-FN-001 fires regardless of the execution context'). Reject-path (pos) half of the E-FN-001 pin; the clean neg is `fn/sql-access-in-function-clean` (same `?{}` in a `function` body — silent).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/fn-prohibitions.test.js",
+  "spec": "§48.3.1",
+  "rationale": "§48.3.1: a `fn` is a pure, deterministic value function and may not perform database operations; a `?{}` block in a `fn` body is E-FN-001. Move the query outside `fn` and pass the result as a parameter.",
+  "expect": {
+    "codes": ["E-FN-001"]
+  }
+}
