@@ -1519,6 +1519,59 @@ describe("issue #28 — element text beginning with `=`", () => {
     expect(textOf(td)).toBe("=SUM(A1:A9)");
   });
 
+  // Odd-quote / apostrophe / inch-mark in leading-`=` MARKUP BODY TEXT.
+  // The close-tag disambiguators (openerHasMatchingCloseTag + scanCompoundBlockEnd)
+  // MUST treat `'` / `"` as LITERAL characters here (free-text, §4.18.1) — NOT
+  // string delimiters. An odd quote otherwise opens a phantom string that
+  // swallows the real `</name>` close and RE-TRIGGERS the exact E-CTX cascade
+  // #28 removes (adversarial-review CONFIRMED-1). These are the corpus shapes
+  // the suite was missing.
+  test("odd apostrophe in leading-`=` prose — <note>= today's</note> — is markup, no cascade", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div><note>= today's</note></div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    expect(textOf(findMarkup(r.blocks, "note"))).toBe("= today's");
+    expect(findMarkup(r.blocks, "div").type).toBe("markup");
+  });
+
+  test("odd apostrophe + a following SIBLING (the confirmed cascade shape) stays clean", () => {
+    // <div><note>= don't</note><b>it's</b></div> — pre-fix this produced 2×
+    // E-CTX-001 (phantom string from `don't` swallowed `</note>`, then the
+    // sibling's quote closed the phantom at the wrong tag → `</div>` orphaned).
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div><note>= don't</note><b>it's</b></div>\n</page>\n`);
+    expect(r.errors.map((e) => e.code)).not.toContain("E-CTX-001");
+    expect(r.errors).toHaveLength(0);
+    expect(textOf(findMarkup(r.blocks, "note"))).toBe("= don't");
+    expect(textOf(findMarkup(r.blocks, "b"))).toBe("it's");
+  });
+
+  test("two sibling leading-`=` cells each with an odd apostrophe — no cascade", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div><note>= a's b</note><other>c's d</other></div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    expect(textOf(findMarkup(r.blocks, "note"))).toBe("= a's b");
+    expect(textOf(findMarkup(r.blocks, "other"))).toBe("c's d");
+  });
+
+  test("lone inch-mark (odd double-quote) in leading-`=` prose — <cell>= 5\" wide</cell>", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div><cell>= 5" wide</cell><cell>12" tall</cell></div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    const cells = [];
+    (function collect(nodes) { for (const n of nodes) { if (n.name === "cell") cells.push(n); if (n.children) collect(n.children); } })(r.blocks);
+    expect(cells).toHaveLength(2);
+    expect(textOf(cells[0])).toBe('= 5" wide');
+    expect(textOf(cells[1])).toBe('12" tall');
+  });
+
+  test("even quotes (`it's o'clock`) were always clean — parity control", () => {
+    const r = splitBlocks("test.scrml",
+      `<page auth="none">\n  <div><note>= it's o'clock</note></div>\n</page>\n`);
+    expect(r.errors).toHaveLength(0);
+    expect(textOf(findMarkup(r.blocks, "note"))).toBe("= it's o'clock");
+  });
+
   test("row 7 — bare unquoted `<p if=@n >= 3>` still flows the operator into the opener (NO E-CTX-001)", () => {
     // Regression guard: the S188 reject path is preserved. At the block-splitter
     // stage the `>=` operator must flow INTO the opener (captured in attrRaw)

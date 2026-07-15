@@ -1979,44 +1979,73 @@ export function splitBlocks(filePath, source) {
 
   /**
    * issue #28 — disambiguate a leading-`=` markup body from a `<name> = RHS`
-   * state-decl. Scans forward from `fromPos` (just past an opener's `>`) for a
-   * matching `</tagName>` close tag. Returns true iff one is found — meaning the
-   * opener is a MARKUP element (`<span>= hi</span>`), NOT a state-decl whose RHS
-   * merely begins with `=` (a state-decl child has no `</name>` close).
+   * state-decl. Returns true iff a matching `</tagName>` close tag appears
+   * at-or-after `fromPos` (just past an opener's `>`) — meaning the opener is a
+   * MARKUP element (`<span>= hi</span>`), NOT a state-decl whose RHS merely
+   * begins with `=` (a state-decl child has no `</name>` close).
    *
-   * String literals and `//` / block comments are skipped so a `</tagName>`
-   * appearing inside a quoted value (`<x> = "</x>"`) or a comment does not
-   * false-positive. Finding ANY same-named close after the opener is sufficient
-   * evidence of markup — a genuine state-decl RHS is a single expression and
-   * does not contain its own close tag outside a string. Bounded by EOF.
+   * The scanned region is MARKUP BODY TEXT — free-text (§4.18.1), where `'` and
+   * `"` are LITERAL characters, not string delimiters. It MUST NOT track string
+   * state: doing so mis-reads an apostrophe / inch-mark in ordinary prose
+   * (`= don't`, `= 5" wide`) as opening a phantom string that swallows the real
+   * `</name>` close — re-triggering the exact E-CTX-001/E-CTX-003 cascade this
+   * fix removes (adversarial-review CONFIRMED-1). Only `//` / block comments
+   * (universal, §27.1) are skipped.
+   *
+   * Performance: the `</tagName>` positions are indexed once per compile
+   * (`closeTagIndex`, built lazily) and answered by binary search, so a run of
+   * closeless `<x>=…` children cannot blow the scan up to O(N^2).
    */
   function openerHasMatchingCloseTag(tagName, fromPos) {
-    let i = fromPos;
-    let inD = false;
-    let inS = false;
-    while (i < len) {
-      const c = source[i];
-      if (inD) { if (c === "\\") { i += 2; continue; } if (c === '"') inD = false; i++; continue; }
-      if (inS) { if (c === "\\") { i += 2; continue; } if (c === "'") inS = false; i++; continue; }
-      if (c === '"') { inD = true; i++; continue; }
-      if (c === "'") { inS = true; i++; continue; }
-      if (c === "/" && source[i + 1] === "/") {
-        if (urlSlashesAt(source, i)) { i += 2; continue; }
-        i = skipLineComment(source, i);
-        continue;
-      }
-      if (c === "/" && source[i + 1] === "*") { i = skipBlockComment(source, i); continue; }
-      if (c === "<" && source[i + 1] === "/") {
-        let j = i + 2;
-        const nameStart = j;
-        while (j < len && /[A-Za-z0-9_\-]/.test(source[j])) j++;
-        if (source.slice(nameStart, j) === tagName) return true;
-        i = j;
-        continue;
-      }
-      i++;
+    const positions = getCloseTagPositions(tagName);
+    if (positions.length === 0) return false;
+    // Smallest recorded `</tagName>` position >= fromPos (binary search).
+    let lo = 0, hi = positions.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (positions[mid] >= fromPos) hi = mid; else lo = mid + 1;
     }
-    return false;
+    return lo < positions.length;
+  }
+
+  // issue #28 (perf) — lazily built index: tag name -> sorted array of the
+  // source offsets at which a `</tagName>` close tag begins. Built by ONE linear
+  // pass over the source that skips `//` line and `/* */` block comments (a
+  // `</name>` inside a comment is not a real close) but does NOT track string
+  // state (the disambiguation target is markup body text where quotes are
+  // literal — see openerHasMatchingCloseTag). Amortizes the close-tag lookup to
+  // O(log k) per query instead of an O(N) forward scan.
+  let closeTagIndex = null;
+  function getCloseTagPositions(tagName) {
+    if (closeTagIndex === null) {
+      closeTagIndex = new Map();
+      let i = 0;
+      while (i < len) {
+        const c = source[i];
+        if (c === "/" && source[i + 1] === "/") {
+          if (urlSlashesAt(source, i)) { i += 2; continue; }
+          i = skipLineComment(source, i);
+          continue;
+        }
+        if (c === "/" && source[i + 1] === "*") { i = skipBlockComment(source, i); continue; }
+        if (c === "<" && source[i + 1] === "/") {
+          const start = i;
+          let j = i + 2;
+          const nameStart = j;
+          while (j < len && /[A-Za-z0-9_\-]/.test(source[j])) j++;
+          const name = source.slice(nameStart, j);
+          if (name.length > 0) {
+            let arr = closeTagIndex.get(name);
+            if (!arr) { arr = []; closeTagIndex.set(name, arr); }
+            arr.push(start);
+          }
+          i = j;
+          continue;
+        }
+        i++;
+      }
+    }
+    return closeTagIndex.get(tagName) || [];
   }
 
   /**
@@ -2156,25 +2185,20 @@ export function splitBlocks(filePath, source) {
     let p = cls.afterOpener;
     let depth = 1; // we're now inside the parent compound
 
-    let inDouble = false;
-    let inSingle = false;
+    // issue #28 (adversarial-review CONFIRMED-1) — this scan walks the compound
+    // body, which INCLUDES markup-child bodies (free-text per §4.18.1) where `'`
+    // and `"` are LITERAL characters, not string delimiters. It MUST NOT track
+    // string state: an odd apostrophe / inch-mark in a markup child's prose
+    // (`<note>= don't</note>`, `<cell>= 5" wide</cell>`) would otherwise open a
+    // phantom string that swallows the real `</name>` closer, mis-balance the
+    // depth count, and re-trigger the E-CTX-001/E-CTX-003 cascade this fix
+    // removes. (A `</name>`/`<tag>` embedded in a genuine state-decl RHS *string*
+    // is the same rare, contrived tradeoff accepted for openerHasMatchingCloseTag.)
     while (p < len && depth > 0) {
       const c = source[p];
-      if (inDouble) {
-        if (c === "\\") { p += 2; continue; }
-        if (c === '"') inDouble = false;
-        p++;
-        continue;
-      }
-      if (inSingle) {
-        if (c === "\\") { p += 2; continue; }
-        if (c === "'") inSingle = false;
-        p++;
-        continue;
-      }
       // R28-BUG-3 (S143): skip `//` line / `/* */` block comments (SPEC §27.1)
-      // so a comment body containing `<` / quote chars cannot derail the
-      // depth count or string-state tracking of the compound-span scan.
+      // so a comment body containing `<` chars cannot derail the depth count of
+      // the compound-span scan.
       // url-in-comment (2026-07): a `//` that is part of a URL VALUE (`://`
       // scheme or CSS `url(...)`) in this compound body is DATA, not a comment;
       // skipping it would eat a `</>` / `</NAME>` closer and corrupt the span.
@@ -2184,8 +2208,6 @@ export function splitBlocks(filePath, source) {
         continue;
       }
       if (c === "/" && source[p + 1] === "*") { p = skipBlockComment(source, p); continue; }
-      if (c === '"') { inDouble = true; p++; continue; }
-      if (c === "'") { inSingle = true; p++; continue; }
       if (c === "<") {
         const next = p + 1 < len ? source[p + 1] : "";
         if (next === "/") {

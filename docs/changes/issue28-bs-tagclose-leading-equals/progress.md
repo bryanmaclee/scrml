@@ -68,3 +68,36 @@ shape (`<span id="cell">= hi</span>`, `<td class="c">=SUM(A1:A9)</td>`).
 - conformance/cases/block-grammar/block-028-leading-equals-text-pos/ — (b)-runtime case
   (§4.18.1 free-text), domAnchored asserts rendered "= hi" / "=" / "=SUM(A1:A9)";
   notCodes E-CTX-001 + E-DG-002. Passes via the gated corpus bridge.
+
+## S239 adversarial-review round (fix-of-fix)
+CONFIRMED-1 (correctness): openerHasMatchingCloseTag + scanCompoundBlockEnd tracked
+`'`/`"` as STRING delimiters, but that region is MARKUP BODY TEXT (free-text §4.18.1)
+where quotes are literal. An ODD quote opened a phantom string that swallowed the
+real `</name>` close -> the leading-`=` child was misread as a state-decl -> false
+compound -> RE-TRIGGERED the E-CTX-001/E-CTX-003 cascade #28 was meant to kill, on
+ordinary apostrophe/inch prose. My minimal repros compiled by ACCIDENT (a fragile
+double-bug cancellation: openerHasMatchingCloseTag false-compound + scanCompoundBlockEnd
+phantom -> -1 -> fallback to correct markup); adding a SIBLING breaks the cancellation.
+Confirmed failing: `<div><note>= don't</note><b>it's</b></div>` and
+`<div><note>= a's b</note><other>c's d</other></div>` -> 2x E-CTX-001 each.
+FIX: removed `'`/`"` string tracking from BOTH loops (keep `//` + `/* */` skips).
+
+PLAUSIBLE-2 (perf): openerHasMatchingCloseTag scanned to EOF per leading-`=` child
+= O(N^2). Micro-bench 16000 closeless children: forward-scan 8797ms vs base ~2s
+(matches review's 9.31s). FIX: build a per-compile close-tag position index once
+(getCloseTagPositions / closeTagIndex), answer each query by binary search.
+Re-measured: 8000=11ms, 16000=16ms -> O(N), bounded. (This ALSO implements the
+CONFIRMED-1 no-string-tracking correction — the index build skips only comments.)
+
+PLAUSIBLE-3 (diagnostic move) — CONFIRMED + ACCEPTABLE. The deferred no-space decl
+`<count>=0` is still broken on both (out of scope). Its diagnostic vs TRUE base
+(7d5fda26): base E-CTX-001 -> fix E-CTX-003 ("Unclosed <count>"). E-CTX-003 is MORE
+accurate (there genuinely is an unclosed `<count>` tag) — not a quality regression.
+The common no-space compound-child form `<street>=""` (inside `${...}`) still compiles.
+
+Tests added this round (unit/block-splitter.test.js, 159 -> 164):
+- `<note>= today's</note>` (odd apostrophe), the confirmed SIBLING cascade shape
+  (`<note>= don't</note><b>it's</b>`), two-odd-sibling, lone inch-mark `= 5" wide`,
+  and the even-quote parity control (`it's o'clock`).
+- conformance block-029-leading-equals-quote-prose-pos: (b)-runtime, domAnchored
+  renders "= don't"/"it's"/'= 5" wide'/'12" tall'; notCodes E-CTX-001/003 + E-DG-002.
