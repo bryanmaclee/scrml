@@ -1,0 +1,13 @@
+{
+  "id": "e-type-022-engine-named-binding-pos",
+  "description": "A named payload binding on an engine state-child that references a field the variant does not declare fires E-TYPE-022 (§18.7 / §51.0.B.1). The `.Loaded` variant declares fields title/author/count; the state-child `<Loaded bogus=b …>` binds by the name `bogus`, which no declared field matches, so the symbol-table pass reports E-TYPE-022. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.7",
+  "rationale": "§18.7 / §51.0.B.1 named-form payload bindings bind by DECLARED field name; a named binding `field=local` whose `field` is not on the variant is a compile error (E-TYPE-022), steering the author to a correct field name or the positional form.",
+  "expect": {
+    "codes": ["E-TYPE-022"],
+    "notCodes": [],
+    "severity": { "E-TYPE-022": "error" }
+  }
+}

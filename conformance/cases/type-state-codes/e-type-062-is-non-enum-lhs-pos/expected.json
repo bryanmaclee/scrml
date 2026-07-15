@@ -1,0 +1,13 @@
+{
+  "id": "e-type-062-is-non-enum-lhs-pos",
+  "description": "The `is .Variant` operator applied to a non-enum-typed left operand fires E-TYPE-062 (§18.17). `name` is a string local; `name is .Admin` compares a string against an enum variant, which is ill-typed, so the type system reports E-TYPE-062 (the `is` operator requires an enum-typed LHS). Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.17",
+  "rationale": "§18.17 the `is .Variant` discrimination operator requires an enum-typed left-hand operand; applying it to a string/number/other non-enum value is a compile error (E-TYPE-062).",
+  "expect": {
+    "codes": ["E-TYPE-062"],
+    "notCodes": [],
+    "severity": { "E-TYPE-062": "error" }
+  }
+}

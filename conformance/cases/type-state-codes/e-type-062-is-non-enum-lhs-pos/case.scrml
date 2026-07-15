@@ -1,0 +1,6 @@
+${
+    let name = "Alice"
+}
+<program>
+    ${ if (name is .Admin) { <p id="p">admin</> } }
+</>

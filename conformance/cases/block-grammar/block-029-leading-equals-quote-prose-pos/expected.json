@@ -1,0 +1,18 @@
+{
+  "id": "block-029-leading-equals-quote-prose-pos",
+  "description": "§4.18.1 free-text: a leading-`=` markup body containing an ODD apostrophe (`= don't`) or inch-mark (`= 5\" wide`), followed by a sibling that also carries a quote, renders each literal `'`/`\"` verbatim. Quotes in markup body text are LITERAL characters, not string delimiters. Regression guard for issue #28 adversarial-review CONFIRMED-1: a phantom string opened on the odd quote used to swallow the real `</name>` close and re-trigger the E-CTX-001/E-CTX-003 cascade on the outer tags.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/block-splitter.test.js",
+  "spec": "§4.18.1",
+  "rationale": "§4.18.1: a plain-markup element body is FREE-TEXT mode — a bare run is display text and `'`/`\"` are literal characters (no string/expression scanning applies). `= don't` / `it's` / `= 5\" wide` / `12\" tall` are therefore literal text, rendered verbatim; the tag-close disambiguation must not treat the quotes as delimiters, so no E-CTX-001 (`tags don't match`) / E-CTX-003 (`unclosed`) / phantom `@wrap` (E-DG-002) may arise.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTX-001", "E-CTX-003", "E-DG-002"],
+    "domAnchored": [
+      { "selector": "#a", "text": "= don't" },
+      { "selector": "#b", "text": "it's" },
+      { "selector": "#c", "text": "= 5\" wide" },
+      { "selector": "#d", "text": "12\" tall" }
+    ]
+  }
+}

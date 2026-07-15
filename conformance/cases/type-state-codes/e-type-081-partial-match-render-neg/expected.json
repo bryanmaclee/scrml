@@ -1,0 +1,12 @@
+{
+  "id": "e-type-081-partial-match-render-neg",
+  "description": "A FULL (non-partial) `match` in a rendering context does not fire E-TYPE-081 (§18.18). The `${ match @status { .Active :> … .Inactive :> … } }` covers every variant, so there is no silent-drop hazard and E-TYPE-081 stays silent. The clean twin of e-type-081-partial-match-render-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§18.18",
+  "rationale": "§18.18 a full exhaustive `match` produces output for every variant, so it is valid in a rendering context; E-TYPE-081 fires only on the `partial match` form there.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-081"]
+  }
+}

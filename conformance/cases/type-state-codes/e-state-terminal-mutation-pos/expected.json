@@ -1,0 +1,13 @@
+{
+  "id": "e-state-terminal-mutation-pos",
+  "description": "Writing a field of a binding in a terminal substate fires E-STATE-TERMINAL-MUTATION (§54.6.4). `done` is typed `Validated`, a terminal substate (zero declared outgoing transitions); `done.body = \"tampered\"` mutates a resting state's field, which has no defined semantics, so the type system reports E-STATE-TERMINAL-MUTATION. The canonical `< Validated body(string)>` substate syntax incidentally co-fires E-TYPE-UNKNOWN-NAME + W-WHITESPACE-001, left out of notCodes; W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/transition-decl-terminal.test.js",
+  "spec": "§54.6.4",
+  "rationale": "§54.6.4 a terminal substate (no outgoing transitions) is a resting state; writing any of its fields is a compile error (E-STATE-TERMINAL-MUTATION), steering to either declaring a transition or reconsidering the life-cycle design.",
+  "expect": {
+    "codes": ["E-STATE-TERMINAL-MUTATION"],
+    "notCodes": [],
+    "severity": { "E-STATE-TERMINAL-MUTATION": "error" }
+  }
+}

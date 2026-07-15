@@ -1,0 +1,13 @@
+{
+  "id": "e-type-lifecycle-on-engine-cell-pos",
+  "description": "A lifecycle annotation `(A to B)` on a cell whose name collides with an engine cell fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL (§14.12.4 / §51.0). The `<engine for=Phase …>` auto-declares the cell `phase`; the sibling `<phase>: (.Idle to .Active) = .Idle` puts a lifecycle annotation on that same cell, creating a second, redundant progression mechanism, so the type system reports the error. The name collision is the trigger vehicle, so E-ENGINE-VAR-DUPLICATE co-fires and is left out of notCodes; W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.12.4",
+  "rationale": "§14.12.4 / §51.0 engine cells declare their variant-graph progression via rule= / initial= / <onTransition>; a lifecycle annotation on the same cell is forbidden (E-TYPE-LIFECYCLE-ON-ENGINE-CELL) because it would create a second redundant progression mechanism. Value-shape progression belongs on a plain reactive cell.",
+  "expect": {
+    "codes": ["E-TYPE-LIFECYCLE-ON-ENGINE-CELL"],
+    "notCodes": [],
+    "severity": { "E-TYPE-LIFECYCLE-ON-ENGINE-CELL": "error" }
+  }
+}

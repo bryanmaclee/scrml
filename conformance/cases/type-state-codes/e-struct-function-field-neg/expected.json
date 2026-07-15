@@ -1,0 +1,12 @@
+{
+  "id": "e-struct-function-field-neg",
+  "description": "A struct field typed as value data does not fire E-STRUCT-FUNCTION-FIELD (§14.3). With `cb: string`, every field is serializable value data, so the function-field reject stays silent. The clean twin of e-struct-function-field-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/struct-fn-field-reject.test.js",
+  "spec": "§14.3",
+  "rationale": "§14.3 a value-typed struct field (string, number, enum, nested struct) is well-formed; E-STRUCT-FUNCTION-FIELD fires only on a function-typed field.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STRUCT-FUNCTION-FIELD"]
+  }
+}

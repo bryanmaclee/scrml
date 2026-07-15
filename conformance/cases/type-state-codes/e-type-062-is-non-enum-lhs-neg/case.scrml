@@ -1,0 +1,7 @@
+${
+    type Role:enum = { Admin, Viewer }
+    let role: Role = .Admin
+}
+<program>
+    ${ if (role is .Admin) { <p id="p">admin</> } }
+</>
