@@ -1,0 +1,7 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Address:struct = { street: string, city: string }
+    type User:struct = { id: integer, name: string, address: Address }
+    <users>: User[] = []
+}
+<tableFor for=User rows=@users></tableFor>

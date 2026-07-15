@@ -1,0 +1,7 @@
+${
+    function build() -> integer {
+        import { helper } from './m.scrml'
+        return 1
+    }
+}
+<p>${build()}</>

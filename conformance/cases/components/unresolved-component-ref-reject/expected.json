@@ -1,0 +1,10 @@
+{
+  "id": "components-unresolved-component-ref-reject",
+  "description": "§15.14 — a PascalCase tag with no matching `const Name = <element .../>` definition anywhere in scope SHALL fire E-COMPONENT-020 at CE time. `<Unknown/>` is referenced inside `Wrapper`'s own body, where CE's component-body registry lookup fails to resolve it. Reject (pos) half of the E-COMPONENT-020 pin; clean neg is components/unresolved-component-ref-clean. Empirical note: a TOP-LEVEL (`<program>`-body) unresolved reference does NOT fire E-COMPONENT-020 in impl#1 — Name Resolution classifies an unresolvable PascalCase tag `resolvedKind:'unknown'` before CE ever walks it as component-markup, so `expandComponentNode`'s E-COMPONENT-020 emission is never reached; only the post-CE invariant (E-COMPONENT-035) catches it there (see components/post-ce-residual-component-reject and the sPA-ss68 escalation report). Nesting the unresolved reference inside another component's OWN body (re-parsed locally by CE without NR's resolvedKind) is the reproduction that reliably fires E-COMPONENT-020.",
+  "language-version": "1.0",
+  "spec": "§15.14",
+  "rationale": "§15.14.3: 'E-COMPONENT-020 fires when CE looks up a component and cannot find it in either the same-file registry or the import graph.' `Unknown` has no definition anywhere, so CE's lookup inside `Wrapper`'s body fails.",
+  "expect": {
+    "codes": ["E-COMPONENT-020"]
+  }
+}

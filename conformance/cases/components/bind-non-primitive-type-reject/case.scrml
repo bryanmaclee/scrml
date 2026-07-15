@@ -1,0 +1,3 @@
+<program>
+const List = <div class="list" props={ bind data: string[] }>static</>
+</program>

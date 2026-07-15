@@ -1,0 +1,11 @@
+{
+  "id": "components-duplicate-prop-decl-clean",
+  "description": "§15.10 clean neg — a props-block declaration with no colliding bare attribute on the def root SHALL NOT fire E-COMPONENT-012.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10 fires E-COMPONENT-012 only when a prop name appears both in the props block and as a bare attribute on the same root element. `Badge`'s root `<span class=\"badge\" props={ status: string }>` declares `status` once, only in the props block.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-012"]
+  }
+}

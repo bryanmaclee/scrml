@@ -1,0 +1,8 @@
+{
+  "id": "e-import-006-present-file-clean",
+  "description": "§21.3 — importing from `./m.scrml` with the sibling present (via the `files` convention) resolves on disk; E-IMPORT-006 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: a relative import that resolves to a real sibling module is legal. m.scrml is written alongside the entry, so the path resolves and E-IMPORT-006 must not fire — the clean twin of the missing-file case.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-006"], "notCodePrefixes": ["E-IMPORT-"] }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "e-use-001-use-toplevel-clean",
+  "description": "§41 — a `use scrml:ui` in the file preamble (before any markup, outside any `${ }`) is the correct placement; E-USE-001 stays silent.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41: a top-level `use scrml:ui` is the canonical form. E-USE-001 fires only for `use` inside a `${ }` logic block; a preamble `use` must not fire.",
+  "expect": { "codes": [], "notCodes": ["E-USE-001"] }
+}

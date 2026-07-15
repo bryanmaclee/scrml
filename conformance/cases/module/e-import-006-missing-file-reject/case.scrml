@@ -1,0 +1,4 @@
+${
+    import { thing } from './nope.scrml'
+}
+<p>${thing}</>

@@ -1,0 +1,4 @@
+${
+    export const total = 42
+}
+<p>${total}</>

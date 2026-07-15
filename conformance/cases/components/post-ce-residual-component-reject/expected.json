@@ -1,0 +1,10 @@
+{
+  "id": "components-post-ce-residual-component-reject",
+  "description": "§15.14 — any markup node still carrying `isComponent === true` (or an unresolved uppercase tag) after CE returns SHALL fire E-COMPONENT-035, the post-CE invariant's defense-in-depth catch. `<Unknown/>` at the TOP LEVEL of `<program>` (no definition anywhere) is Name-Resolution-classified `resolvedKind: 'unknown'` before CE walks it, so CE's own component-registry lookup (and its E-COMPONENT-020 emission) is never reached for this shape — VP-2's residual-node walk is the only diagnostic that fires. Reject (pos) half of the E-COMPONENT-035 pin; clean neg is components/post-ce-residual-component-clean. Empirical divergence note: this contradicts the E-COMPONENT-035 recipe's own same-file-vs-cross-file disambiguation hint (\"a same-file <Unknown/> fires 020, NOT 035\") — that holds for a component-BODY-nested unresolved reference (see components/unresolved-component-ref-reject) but NOT for a top-level program-body one, where impl#1 fires 035 only. See the sPA-ss68 escalation report.",
+  "language-version": "1.0",
+  "spec": "§15.14",
+  "rationale": "§15.14.2: 'After CE returns, the compiler SHALL walk the resolved AST and emit E-COMPONENT-035 for every markup node where isComponent === true.' §15.14.3 further describes this as catching 'any future shape where CE silently drops resolution' — impl#1's own post-ce-invariant.ts comments this exact case as case (b): 'a tag that LOOKS like a component reference ... but NR could not resolve it ... the silent phantom-DOM emission case VP-2 was created to catch.'",
+  "expect": {
+    "codes": ["E-COMPONENT-035"]
+  }
+}

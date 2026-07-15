@@ -1,0 +1,8 @@
+{
+  "id": "e-import-005-bare-specifier-reject",
+  "description": "§21.3 — a bare npm-style import specifier (`import { map } from 'lodash'`) fires E-IMPORT-005. scrml import specifiers must be relative (`./`), stdlib (`scrml:`), or vendor (`vendor:`).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3 (§40.4): a bare `lodash` specifier is not project-scoped. To import from an npm package it must be vendored and referenced as `vendor:lodash`; a bare name is rejected E-IMPORT-005.",
+  "expect": { "codes": ["E-IMPORT-005"], "notCodes": [] }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-name-exported-clean",
+  "description": "§21.3 — importing `{ present }` from a sibling m.scrml that DOES export `present()` resolves cleanly; E-IMPORT-004 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: an import of a name that exists in the target's export set is legal. m.scrml exports `present`, so `import { present }` must not fire E-IMPORT-004 — the clean twin of the name-not-exported case.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-004"], "notCodePrefixes": ["E-IMPORT-"] }
+}

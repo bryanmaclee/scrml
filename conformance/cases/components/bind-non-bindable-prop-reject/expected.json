@@ -1,0 +1,10 @@
+{
+  "id": "components-bind-non-bindable-prop-reject",
+  "description": "§15.11.1 — `bind:propName=@var` at a call site where `propName` is declared WITHOUT the `bind` keyword SHALL fire E-COMPONENT-013. `Tag` declares plain `label: string` (not `bind label: string`); the use site writes `bind:label=@v`. Reject (pos) half of the E-COMPONENT-013 pin; clean neg is components/bind-non-bindable-prop-clean. Incidental note: impl#1 currently also emits a spurious `E-ATTR-011` here (see the sPA-ss68 escalation report — the caller's `bind:label` attribute is not stripped by CE and survives to the codegen HTML-emission bind: validator, which rejects it against the DOM `bind:value/checked/selected/group/this` allowlist); that cascade is UNRELATED to the E-COMPONENT-013 assertion under test.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: '`bind:propName=@var` on a component call where propName is NOT declared as a bind prop SHALL be a compile error (E-COMPONENT-013: prop propName is not declared as bindable; use bind propName: type in the props block to make it bindable).' `label` has no `bind` keyword in `Tag`'s props block.",
+  "expect": {
+    "codes": ["E-COMPONENT-013"]
+  }
+}

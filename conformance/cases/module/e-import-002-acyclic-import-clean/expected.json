@@ -1,0 +1,8 @@
+{
+  "id": "e-import-002-acyclic-import-clean",
+  "description": "§21.3 — an acyclic 2-file import graph (case.scrml imports fromA from a.scrml; a.scrml imports nothing back) resolves cleanly; E-IMPORT-002 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: a directed acyclic import graph is legal. With a.scrml importing nothing from the entry there is no cycle, so E-IMPORT-002 must not fire — the clean twin of the circular case.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-002"] }
+}

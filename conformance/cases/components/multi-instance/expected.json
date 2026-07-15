@@ -6,7 +6,7 @@
   "rationale": "§15.13.5 a component definition is a MULTI-INSTANCE vehicle: each <Badge/> tag instantiates a fresh component with its own props. Two instances -> two .badge nodes, each rendering its own label (alpha, beta). 'If you want many of them, use a component.'",
   "expect": {
     "codes": [],
-    "notCodes": [],
+    "notCodes": ["E-COMPONENT-010", "E-COMPONENT-011"],
     "input": [],
     "domAnchored": [
       { "selector": ".badge", "count": 2 },

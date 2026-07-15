@@ -1,0 +1,8 @@
+{
+  "id": "e-import-006-missing-file-reject",
+  "description": "§21.3 — importing from `./nope.scrml` with NO such sibling in the case dir fires E-IMPORT-006 (import target file does not exist on disk).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: a relative import must resolve to a real module. No `nope.scrml` is written alongside the entry (no `files` fixture), so the path does not resolve and the compiler rejects it E-IMPORT-006.",
+  "expect": { "codes": ["E-IMPORT-006"], "notCodes": [] }
+}

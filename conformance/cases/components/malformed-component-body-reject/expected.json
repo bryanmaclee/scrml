@@ -1,0 +1,10 @@
+{
+  "id": "components-malformed-component-body-reject",
+  "description": "§16.4 — a component-def body that CE's local re-parse cannot successfully re-parse SHALL fire E-COMPONENT-021 (\"Phase 1 supports self-closing and simple open-tag component definitions only\"). Reject (pos) half of the E-COMPONENT-021 pin; clean neg is components/malformed-component-body-clean. Empirical/SPEC-divergence note: §16.4 states the unnamed children spread has TWO interchangeable forms — the literal `${...}` ellipsis and the `${children}` alias — \"both forms are accepted.\" impl#1 does NOT accept the literal `${...}` form inside a component-def body: it fails CE's re-parse and is wrapped into E-COMPONENT-021, while the semantically-identical `${children}` form (used in the clean neg) compiles with zero diagnostics. See the sPA-ss68 escalation report.",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4: '`${...}` inside a component body is the unnamed children spread ... `${children}` is a legacy alias with identical semantics; both forms are accepted.' Per impl#1's actual re-parse behavior only `${children}` is accepted; the literal `${...}` form fails CE's local re-parse of the component-def body, which `parseComponentDef` reports as E-COMPONENT-021 (a malformed-body / Phase-1-limitation diagnostic, distinct from the E-COMPONENT-030/031 spread-count/unslotted-children checks that run on a SUCCESSFULLY re-parsed body).",
+  "expect": {
+    "codes": ["E-COMPONENT-021"]
+  }
+}

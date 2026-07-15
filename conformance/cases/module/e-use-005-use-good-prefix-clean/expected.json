@@ -1,0 +1,8 @@
+{
+  "id": "e-use-005-use-good-prefix-clean",
+  "description": "§41 — a `use scrml:ui` declaration with the recognized `scrml:` prefix is legal; E-USE-005 stays silent.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41: `scrml:` is a recognized `use` prefix (stdlib capability). E-USE-005 fires only on an unrecognized prefix; a `scrml:` specifier must not fire.",
+  "expect": { "codes": [], "notCodes": ["E-USE-005"] }
+}

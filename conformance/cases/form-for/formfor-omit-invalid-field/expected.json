@@ -1,0 +1,11 @@
+{
+  "id": "formfor-omit-invalid-field",
+  "description": "§41.14.5 — omit=[\"X\", ...] on <formFor for=T> naming a field not present on struct T fires E-FORMFOR-OMIT-INVALID-FIELD. Signup has { name, email, agree }; omit=[\"nope\"] names a non-field.",
+  "language-version": "1.0",
+  "spec": "§41.14.5",
+  "rationale": "§41.14.5 E-FORMFOR-OMIT-INVALID-FIELD: the omit=[...] attribute SHALL name only declared struct fields; an unknown name is rejected. Fix: correct or remove the invalid field name from the omit array.",
+  "expect": {
+    "codes": ["E-FORMFOR-OMIT-INVALID-FIELD"],
+    "notCodes": ["E-FORMFOR-PICK-INVALID-FIELD", "E-FORMFOR-PICK-OMIT-CONFLICT"]
+  }
+}

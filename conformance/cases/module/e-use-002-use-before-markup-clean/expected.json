@@ -1,0 +1,8 @@
+{
+  "id": "e-use-002-use-before-markup-clean",
+  "description": "§41 — a `use scrml:ui` placed before any markup element is correctly positioned; E-USE-002 stays silent.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41: `use` in the preamble, ahead of the first markup element, is legal. E-USE-002 fires only when `use` follows markup; a preamble `use` must not fire.",
+  "expect": { "codes": [], "notCodes": ["E-USE-002"] }
+}

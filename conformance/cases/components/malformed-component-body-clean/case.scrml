@@ -1,0 +1,3 @@
+<program>
+const Wrap = <div class="wrap">${children}</div>
+</program>

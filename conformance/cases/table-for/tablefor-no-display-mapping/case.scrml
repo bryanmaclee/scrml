@@ -1,0 +1,6 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Item:struct = { id: integer, tags: string[] }
+    <items>: Item[] = []
+}
+<tableFor for=Item rows=@items></tableFor>

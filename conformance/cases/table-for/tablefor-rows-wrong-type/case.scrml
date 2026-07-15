@@ -1,0 +1,5 @@
+${
+    import { tableFor } from 'scrml:data'
+    type User:struct = { id: integer, name: string }
+}
+<tableFor for=User rows="notAnArray"></tableFor>

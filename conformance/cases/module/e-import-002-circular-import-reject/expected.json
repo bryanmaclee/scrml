@@ -1,0 +1,8 @@
+{
+  "id": "e-import-002-circular-import-reject",
+  "description": "§21.3 — a 2-file import cycle (case.scrml imports fromA from a.scrml; a.scrml imports fromEntry back from case.scrml) is detected and fires E-IMPORT-002. Uses the `files` convention: a.scrml is an aux sibling forming the cycle.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3 module resolution detects circular imports. case.scrml -> a.scrml -> case.scrml is a cycle; the compiler rejects it E-IMPORT-002 (break the cycle by extracting shared code into a third file).",
+  "expect": { "codes": ["E-IMPORT-002"], "notCodes": [] }
+}

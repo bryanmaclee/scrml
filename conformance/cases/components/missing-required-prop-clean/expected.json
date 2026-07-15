@@ -1,0 +1,11 @@
+{
+  "id": "components-missing-required-prop-clean",
+  "description": "§15.10 clean neg — supplying all required props (`label`, `status`) at the call site SHALL NOT fire E-COMPONENT-010.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10 fires E-COMPONENT-010 only when a required prop is absent at the call site. `<Badge label=\"Inbox\" status=\"open\"/>` supplies both declared props, so the check is satisfied.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-010"]
+  }
+}

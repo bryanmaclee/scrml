@@ -1,0 +1,11 @@
+{
+  "id": "components-slot-targets-non-snippet-clean",
+  "description": "§16.5 clean neg — a `slot=\"name\"` fill targeting a genuinely declared snippet prop SHALL NOT fire E-COMPONENT-033.",
+  "language-version": "1.0",
+  "spec": "§16.5",
+  "rationale": "§16.5 fires the slot-target error only when `slot=\"name\"` names something other than a declared snippet prop. `Card` declares `header: snippet`, and the use site's `slot=\"header\"` matches it exactly.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-033"]
+  }
+}

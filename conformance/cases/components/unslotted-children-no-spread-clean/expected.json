@@ -1,0 +1,11 @@
+{
+  "id": "components-unslotted-children-no-spread-clean",
+  "description": "§16.4 clean neg — a caller passing ONLY slotted children (no unslotted stray content) to a spread-less component body SHALL NOT fire E-COMPONENT-031.",
+  "language-version": "1.0",
+  "spec": "§16.4",
+  "rationale": "§16.4 fires the unslotted-children error only when the caller provides content that is neither slot-assigned nor absorbed by a spread. Every child of this `<Card>` use carries a `slot=\"header\"` attribute, so there is no unslotted content left over.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-031"]
+  }
+}

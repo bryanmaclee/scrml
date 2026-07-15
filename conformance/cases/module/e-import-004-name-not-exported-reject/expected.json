@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-name-not-exported-reject",
+  "description": "§21.3 — importing `{ missing }` from a sibling m.scrml that exports only `present()` fires E-IMPORT-004 (imported name not found in the target's exports). m.scrml is present via the `files` convention, so E-IMPORT-006 does NOT fire — this isolates the name-resolution failure.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: an import binds names against the target module's export set. m.scrml exports `present`, not `missing`, so `import { missing }` is rejected E-IMPORT-004 (add `export missing` or import an available name).",
+  "expect": { "codes": ["E-IMPORT-004"], "notCodes": ["E-IMPORT-006"] }
+}

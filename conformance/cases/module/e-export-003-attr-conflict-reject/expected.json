@@ -1,0 +1,8 @@
+{
+  "id": "e-export-003-attr-conflict-reject",
+  "description": "§21.2 Form 1 — an `export <Card title:string>` whose outer attribute name (`title`) also appears on the body root (`<div title=\"x\">`) fires E-EXPORT-003. The outer and body-root attribute sets must not collide (other than `class`, which merges).",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2 Form 1 desugars by splicing the outer attrs into the body-root opener; a same-named attr on both sides is ambiguous. `title` on both the `<Card>` outer and the `<div>` body root is rejected E-EXPORT-003 (choose one location).",
+  "expect": { "codes": ["E-EXPORT-003"], "notCodes": [] }
+}

@@ -1,0 +1,4 @@
+<program>
+const Known = <span class="known">static</>
+<Known/>
+</program>

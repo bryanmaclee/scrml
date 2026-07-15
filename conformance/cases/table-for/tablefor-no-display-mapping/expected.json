@@ -1,0 +1,11 @@
+{
+  "id": "tablefor-no-display-mapping",
+  "description": "§41.16.6 — a struct field whose declared type has no v1.0 display mapping (array types among them) with no explicit slot override fires E-TABLEFOR-NO-DISPLAY-MAPPING. `Item` has `{ id, tags: string[] }`; `tags` has no slot. Unmappable shapes include function/snippet/Promise/foreign-code/deep-reactive-proxy types, arrays, and arbitrary opaque types. (Incidental W-PROGRAM-001 + W-STDLIB-SEED-FAILCLOSED co-fire, as in the sibling table-for cases; superset match.)",
+  "language-version": "1.0",
+  "spec": "§41.16.6",
+  "rationale": "§41.16.6 E-TABLEFOR-NO-DISPLAY-MAPPING: a field whose declared type has no v1.0 display mapping, with no explicit `<column field=\"X\">` slot override, has no default rendering. Resolution: exclude the field via `omit=[\"tags\"]`, OR provide an explicit slot with adopter-authored rendering, OR refactor the struct to use a renderable type.",
+  "expect": {
+    "codes": ["E-TABLEFOR-NO-DISPLAY-MAPPING"],
+    "notCodes": ["E-TABLEFOR-NESTED-STRUCT-NO-SLOT", "E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1"]
+  }
+}

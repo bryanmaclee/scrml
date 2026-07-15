@@ -1,0 +1,11 @@
+{
+  "id": "components-bind-non-primitive-type-clean",
+  "description": "§15.11.1 clean neg — a `bind` prop declared with a primitive type (`number`) SHALL NOT fire E-COMPONENT-014.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1 fires E-COMPONENT-014 only when a `bind` prop's type is not one of `string`/`number`/`boolean`. `Counter` declares `bind count: number`, a primitive type.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-014"]
+  }
+}

@@ -1,0 +1,6 @@
+<program>
+const TabStrip = <div class="tabs" props={ row: snippet(item: string) }>
+    <div class="row">${render row("a")}</div>
+</div>
+<TabStrip row={ (item) => <span>${item}</span> } />
+</program>

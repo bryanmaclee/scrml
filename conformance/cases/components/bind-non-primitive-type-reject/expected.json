@@ -1,0 +1,10 @@
+{
+  "id": "components-bind-non-primitive-type-reject",
+  "description": "§15.11.1 — a `bind` prop declared with a non-primitive type SHALL fire E-COMPONENT-014. `List` declares `bind data: string[]` (an array type). Def-time check — no call site is needed to trigger it. Reject (pos) half of the E-COMPONENT-014 pin; clean neg is components/bind-non-primitive-type-clean.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: 'Bindable props SHALL be restricted to primitive types (string, number, boolean). Declaring a bind prop with a struct or state type SHALL be a compile error (E-COMPONENT-014).' `string[]` is not one of the three primitive types.",
+  "expect": {
+    "codes": ["E-COMPONENT-014"]
+  }
+}

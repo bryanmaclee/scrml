@@ -1,0 +1,8 @@
+{
+  "id": "e-use-005-use-bad-prefix-reject",
+  "description": "§41 — a `use foo:bar` declaration with an unrecognized protocol prefix (`foo:`) fires E-USE-005. Only `scrml:` (stdlib) and `vendor:` (project-local vendor) are legal `use` prefixes.",
+  "language-version": "1.0",
+  "spec": "§41",
+  "rationale": "§41 (§41 line 21940 + E-USE-005 catalog): a `use` specifier must begin with a recognized prefix. `foo:` is neither `scrml:` nor `vendor:`, so it is rejected E-USE-005.",
+  "expect": { "codes": ["E-USE-005"], "notCodes": [] }
+}

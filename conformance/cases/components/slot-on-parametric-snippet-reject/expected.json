@@ -1,0 +1,10 @@
+{
+  "id": "components-slot-on-parametric-snippet-reject",
+  "description": "§16.6 — using `slot=\"name\"` to fill a PARAMETRIC snippet prop (`snippet(param: Type)`) SHALL fire E-COMPONENT-034. `TabStrip` declares `row: snippet(item: string)`; the use site tries `<div slot=\"row\">x</div>` instead of the required lambda form. Reject (pos) half of the E-COMPONENT-034 pin; clean neg is components/slot-on-parametric-snippet-clean.",
+  "language-version": "1.0",
+  "spec": "§16.6",
+  "rationale": "§16.6: 'Using slot= on a parametric snippet is E-COMPONENT-024 [impl#1: E-COMPONENT-034 — see the sPA-ss68 escalation report for the §16.6-vs-impl code-number divergence]... When a snippet prop accepts a parameter, the caller MUST provide a lambda. slot= desugaring does not apply to parametric snippets.' `row` takes an `item: string` parameter, so `slot=\"row\"` (the zero-parameter desugaring form) is illegal.",
+  "expect": {
+    "codes": ["E-COMPONENT-034"]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "e-export-002-component-multiroot-reject",
+  "description": "§21.2 Form 1 — an `export <Card>` whose body has more than one top-level markup root (`<div>` + `<span>`) fires E-EXPORT-002. A Form-1 component body MUST be single-rooted markup.",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2 Form 1: `export <ComponentName>...</>` desugars to `export const Name = <single-root>...</>`, so the body must be single-rooted. Two sibling roots (`<div>`, `<span>`) are rejected E-EXPORT-002 (wrap them in a container).",
+  "expect": { "codes": ["E-EXPORT-002"], "notCodes": [] }
+}

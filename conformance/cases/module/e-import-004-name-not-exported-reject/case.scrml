@@ -1,0 +1,4 @@
+${
+    import { missing } from './m.scrml'
+}
+<p>${missing}</>

@@ -1,0 +1,7 @@
+${
+    import { tableFor } from 'scrml:data'
+    type Item:struct = { id: integer, name: string }
+}
+<tableFor for=Item rows=[]>
+    <column field="name" sortable/>
+</tableFor>

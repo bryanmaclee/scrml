@@ -1,0 +1,8 @@
+${
+  import { formFor } from 'scrml:data'
+
+  type Role:enum = { Admin, Editor }
+}
+<program>
+  <formFor for=Role/>
+</program>

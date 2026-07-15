@@ -1,0 +1,4 @@
+${
+    import { present pinned } from './m.scrml'
+}
+<p>${present()}</>

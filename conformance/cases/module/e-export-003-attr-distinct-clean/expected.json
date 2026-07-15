@@ -1,0 +1,8 @@
+{
+  "id": "e-export-003-attr-distinct-clean",
+  "description": "§21.2 Form 1 — an `export <Card title:string>` whose outer attr (`title`) differs from the body-root attr (`id`) has no collision; E-EXPORT-003 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.2",
+  "rationale": "§21.2 Form 1: distinct outer and body-root attribute names splice cleanly. `title` (outer) vs `id` (body root) do not collide, so E-EXPORT-003 must not fire — the clean twin of the attr-conflict case.",
+  "expect": { "codes": [], "notCodes": ["E-EXPORT-003"] }
+}

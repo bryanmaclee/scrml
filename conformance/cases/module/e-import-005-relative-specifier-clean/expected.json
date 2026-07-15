@@ -1,0 +1,8 @@
+{
+  "id": "e-import-005-relative-specifier-clean",
+  "description": "§21.3 — a relative import specifier (`import { present } from './m.scrml'`) with the sibling present is a legal specifier form; E-IMPORT-005 stays silent.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: relative `./` specifiers are one of the three legal forms (relative / `scrml:` / `vendor:`). A `./m.scrml` import must not fire E-IMPORT-005 — the clean twin of the bare-specifier case.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-005"], "notCodePrefixes": ["E-IMPORT-"] }
+}

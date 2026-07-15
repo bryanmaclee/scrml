@@ -1,0 +1,3 @@
+${ const dup = 1 }
+${ const dup = 2 }
+<p>hi</>

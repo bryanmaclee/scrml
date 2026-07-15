@@ -1,0 +1,8 @@
+{
+  "id": "e-import-003-import-inside-fn-reject",
+  "description": "§21.3 — an `import` statement nested inside a `function` body fires E-IMPORT-003. Imports must live at file top-level (top of a `${ }` logic preamble), never inside a function/fn declaration.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: `import` is a file-top declaration. An `import { helper } from './m.scrml'` placed inside the body of `build()` is rejected E-IMPORT-003 (import inside a function body, not file top-level).",
+  "expect": { "codes": ["E-IMPORT-003"], "notCodes": [] }
+}

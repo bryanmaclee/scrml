@@ -1,0 +1,10 @@
+{
+  "id": "components-invalid-prop-decl-syntax-reject",
+  "description": "§15.10 — a `props={...}` entry that does not match any of the four accepted prop-decl shapes (`name: type` / `name?: type` / `name: type = default` / `bind name: type`) SHALL fire E-COMPONENT-019. `{ label }` is a bare identifier with no `:` type. Reject (pos) half of the E-COMPONENT-019 pin; clean neg is components/invalid-prop-decl-syntax-clean. Empirical note (impl#1, both parsers): when this malformed entry appears on a component-def root (`const X = <el props={...}>...`), CE's local re-parse of the def body wraps the SAME underlying E-COMPONENT-019 diagnostic into an outer `E-COMPONENT-021` (\"malformed body could not be re-parsed\") rather than surfacing E-COMPONENT-019 as the top-level code — the inner E-COMPONENT-019 text only survives as a quoted substring of the E-COMPONENT-021 message. E-COMPONENT-019 surfaces as an actual top-level `.code` only via the plain (non-component-def) `props=` attribute-parse path used here, per §15.10's own grammar (`prop-decl ::= identifier ':' type-expr | ...`). See the sPA-ss68 escalation report for the full 019-vs-021 wrap finding and the §34 catalog-row mismatch (SPEC.md:18091 mislabels E-COMPONENT-019 as an unrelated '§15.11 callback prop type mismatch').",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10's prop-decl grammar accepts only `identifier ':' type-expr`, `identifier '?' ':' type-expr`, or `identifier ':' type-expr '=' literal` (plus the `bind` prefix form, §15.11.1). A bare `label` with no `:` matches none of these, so the parser SHALL reject it (E-COMPONENT-019) rather than silently treating it as `label: unknown` or similar.",
+  "expect": {
+    "codes": ["E-COMPONENT-019"]
+  }
+}
