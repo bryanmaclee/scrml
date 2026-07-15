@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S256 — 2026-07-15 (bryan; concurrent with S256/Peter-Windows) — V1 coverage audit → tiered freeze plan → campaign fired · SSR security leak (held) · confidentiality architecture ratified
+
+A very large deliberation+execution session. WRAP HELD on the SSR fix's round 3 (bryan: hold+wrap, pick up next session).
+
+- **V1 conformance coverage audit** — the freeze question flipped from "author cases" to "audit whether the 445 pin everything." Verified: the suite is 445/445 green but asserts only **155 of 605 fireable codes**; of the 450-code gap, **247 are real V1-holes** (bidirectional classification via 4 parallel classifiers; 0 orphans). Direction-B runtime-half small. Artifacts: `scrml-support/docs/audits/v1-conformance-coverage-2026-07-15/`.
+- **Freeze-bar RULED tiered, HIGH** (bryan) — T1 = soundness/security/pillar-contract; T2 = config/shape → v1.0.x. **~200 tier-1 + ~45 tier-2.**
+- **Tier-1 loaded into the sPA freeze campaign** (#47: manifest + ss68–77 + Wave-2 extensions). Campaign LIVE: `/spa ss70` (fn-purity) fired → re-integrated (**#49**, conformance 445→459). ss70 refined the audit: E-FN-007 + E-STATE-COMPLETE are source-unreachable (parser-gated), not authorable-holes.
+- **SSR auth-scoped prerender leak** — CONFIRMED cross-user data leak (SSR seed served auth-scoped rows to anon). Fix across 3 rounds (adversarial gate caught real defects R1+R2); **R3 complete + HELD** for next-session re-review (`fix/ssr-auth-scoped-prerender-leak` @ bfed8ecf): auto-omit auth-scoped cells + one `sql-lex.ts` source of truth + per-cell role gating; W-SSR-PRERENDER-UNSCOPED→I-SSR-AUTH-SCOPED-CLIENT-HYDRATED.
+- **Auth-scoped confidentiality architecture RATIFIED** (DD + fork-1 debate + RULING) — THREE colocated mechanisms (column/cell/content) + ONE compile-time `EgressSink × ConfidentialityAxis` coverage type (complete-mediation without a god-object). Premise corrected from git (missing-axis-at-covered-sink, not a forgotten sink). Forks 2/3/4 ratified.
+- **cloud-maps CI beachhead** built (#40/#41/#42/#45/#46) — scheduled nav-map/state regen via PAT-opened auto-merge PR (push one-liner still owed).
+- **flogence dogfood ×3 dispositioned** — 3 confirmed serve=-tool compiler bugs (incl. `g-inferred-async-call-value-position-no-autoawait`, silent-miscompile) + the `<endpoint>` `decode=` ask (fast-follow) + the `--emit-semantic-diff` ask (ledgered, timing next session).
+
 ## v0.7.1 — 2026-06-28 (patch — first semver cut since v0.7.0 [2026-05-30]; bundles ~29 days / 922 commits of fixes)
 
 The cut discipline lapsed after v0.7.0 (S159) as the work shifted from gauntlet bug-clusters (each closed cluster used to earn a patch) to design/meta-system/spec-ahead arcs that produce no natural cut moment. v0.7.1 re-bundles the accumulated month of fixes so adopters can pin to current rather than a stale v0.7.0. Board at cut: **HIGH 0 · MED 6 · LOW 9 · Nominal 7**; full suite 25734/0/211. Per S94 bump-on-tag. (The v0.8 *minor* needs a fresh milestone target — the native-parser-swap peg is stale post-Road-B-freeze; the server-render-time / dynamic-deployment arc is the candidate.)
