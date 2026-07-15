@@ -9,11 +9,12 @@
 #   `pull_request:` trigger has NO path filter → fires on docs-only PRs) and passes (maps/@generated are
 #   docs), then auto-merge stamps it (0 required approvals). NO branch-protection bypass — front door only.
 #
-# WHY A GITHUB APP TOKEN (not default GITHUB_TOKEN): a PR opened by GITHUB_TOKEN does NOT trigger `gate`
+# WHY A PAT (not default GITHUB_TOKEN): a PR opened by GITHUB_TOKEN does NOT trigger `gate`
 #   ("events from GITHUB_TOKEN don't cascade") → auto-merge would wait forever on a gate that never fires.
-#   An App-token-opened PR DOES fire gate. Needs the `scrml-maps-bot` GitHub App + its two secrets
-#   (MAPS_APP_ID / MAPS_APP_PRIVATE_KEY). Until those exist a run reds at the token step — HARMLESS (this
-#   workflow is off the required-checks list, it cannot block a merge).
+#   A PAT-opened PR DOES fire gate. Needs a fine-grained PAT (Contents R/W + Pull-requests R/W on this repo)
+#   as the `MAPS_PAT` secret. Until it exists a run reds at checkout — HARMLESS (this workflow is off the
+#   required-checks list, it cannot block a merge). NB fine-grained PATs expire (≤1yr) → renew MAPS_PAT
+#   before expiry or the bot goes dark.
 #
 # TWO STAGES: (1) deterministic `bun scripts/state.ts --write` (@generated rollup; zero AI cost) then
 #   (2) the `project-mapper` agent (committed at .claude/agents/, force-added since .claude/ is gitignored)
@@ -38,16 +39,9 @@ jobs:
   regen:
     runs-on: ubuntu-latest
     steps:
-      - name: Mint GitHub App token          # identity whose opened PR triggers `gate`
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.MAPS_APP_ID }}
-          private-key: ${{ secrets.MAPS_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v4
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ secrets.MAPS_PAT }}     # identity whose opened PR fires `gate` (GITHUB_TOKEN's wouldn't)
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -68,14 +62,14 @@ jobs:
 
       - name: Open maps/@generated PR + enable auto-merge (only if drift)
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.MAPS_PAT }}
         run: |
           if [ -z "$(git status --porcelain -- .claude/maps master-list.md)" ]; then
             echo "No maps/@generated drift — nothing to land."; exit 0
           fi
           BR="maps/regen-${{ github.run_id }}"
-          git config user.name  "scrml-maps-bot[bot]"
-          git config user.email "scrml-maps-bot[bot]@users.noreply.github.com"
+          git config user.name  "scrml-maps-ci"
+          git config user.email "scrml-maps-ci@users.noreply.github.com"
           git checkout -b "$BR"
           git add .claude/maps master-list.md
           git commit -m "chore(maps): scheduled nav-map + @generated regen"
