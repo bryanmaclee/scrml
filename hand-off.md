@@ -9,67 +9,59 @@
 > entry-norm) in `scrml-support/docs/deep-dives/windows-path-model-canonicalization-2026-07-14.md`.
 > It's security-adjacent (#26) + defines the cross-OS path *contract* → **Bryan-adjacent, own reviewed arc.**
 > Housekeeping: stale remote branch `s254-windows-pathname-fix` (delete needs naming). scrml-support @ `86d5c71`.
-> _(bryan's S255 wrap follows, unchanged.)_
+> _(Peter/S256 is LIVE-concurrent this session — Windows path-model lane, disjoint from bryan/S256's freeze/security lane. Board: active-sessions/S256.md.)_
 
-# scrml — Session 255 (WRAP) — ⭐ Track-A Units 1+2 landed + PA-contract PR-flow migration + advisory review + Windows CI
+# scrml — Session 256 (bryan) — ⭐ V1 coverage audit → tiered freeze plan → campaign fired · SSR security leak caught+hardening · confidentiality architecture ratified
 
-**Date:** 2026-07-14/15. **Profile:** A (`/boot`). A very large multi-arc session: migrated the PA contract to
-the S254 PR-flow model, built the advisory cloud review + the Windows CI, then scoped **Track A
-(server-program-shape)** and landed its first two units — the `emit-server` decouple + the
-`kind="tool" serve=` harness. Coordinated a concurrent Peter (pjoliver11) session that self-merged PR #37.
+**Date:** 2026-07-15. **Profile:** A (`/boot`). Concurrent with **S256(Peter/Windows)** — disjoint surface. A very large deliberation+execution session. **WRAP is HELD on the SSR fix's round 3** (bryan: "when agent comes back, hold and wrap; pick up next session") — the SSR round-3 outcome is captured on its return, NOT landed this session.
 
 ## ⚠️ READ FIRST — state as of close
-- **main = `74e22ea3`**, both repos 0/0, CI `gate` GREEN. PR-flow is the norm (branch → PR → gate → merge).
-- **Track A: Units 1 + 2 LANDED.** A `<program kind="tool" serve=PORT>` now hosts native `<endpoint>`/SSE
-  off a compiler-emitted `Bun.serve`. Units 3-6 remain (see OPEN THREADS).
-- **Advisory review is BROKEN pending a decision** — the `claude-code-action` workflow (PR #33) + its OIDC
-  fix (PR #35) are in, but the run fails: **"Claude Code is not installed on this repository"**. FIX:
-  either bryan installs the **Claude Code GitHub App** (github.com/apps/claude → install on scrml; the clean
-  fix, branded identity) OR add `github_token: ${{ secrets.GITHUB_TOKEN }}` to the workflow to skip the
-  App (PA can PR that; github-actions[bot] identity). Non-blocking (off required checks) — harmless red.
-- **The PA contract is MIGRATED** to PR-flow (overlay v2 + boot manifest + thin read + board banner). Trust
-  the migrated contract now (not the pre-S254 direct-commit/commit-lock language).
+- **main = `85efaf77`** (S256 landings: cloud-maps #40/42/45/46, maps-refresh #41, campaign #47). Both repos synced.
+- **The freeze question flipped from "author cases" to "audit whether 445 pin everything" — and it's quantified.** Audit: `scrml-support/docs/audits/v1-conformance-coverage-2026-07-15/` (SCOPE · FINDINGS · TIER-SPLIT · DIRECTION-B-runtime).
+- **Conformance: 445 → 459** (ss70 fn-purity re-integrated, **PR #49 OPEN** — bryan to merge).
+- **SSR security fix is HELD at round 3.** Do NOT land without re-review (see IN-FLIGHT).
 
-## ✅ LANDED THIS SESSION (all via PR-flow)
-1. **PA-contract → PR-flow migration** — scrml-support `45633d8` (overlay v2 · pa-core · README banner · S255 board) + PR #32 (`.pa-base/profile`). The top S255 task; done.
-2. **Advisory cloud review** — PR #33 (workflow) + PR #35 (OIDC `id-token: write`). Secret set. **Blocked on the App-install decision above.**
-3. **Windows CI** — PR #36: a NON-BLOCKING `windows-latest` job (unit+conformance). Confirmed working: **16061 pass / 926 fail** on Windows (the OS-path gap Peter's been the canary for, now automated). Promote to the blocking `gate` once green.
-4. **Track A Unit 1 (Fork 2A decouple)** — PR #34 (`0bb16591`). `generateServerJs` gains a `programShape` axis; `<endpoint>`/SSE route+fetch emit is program-shape-agnostic; `generateHeadlessServerJs` export. Byte-identical web-app. **3 adversarial review rounds** (see NARRATIVES).
-5. **Track A Unit 2 (Fork 1A serve-harness)** — PR #38 (`74e22ea3`). `serve=`/`cors=` on `kind="tool"`; `Bun.serve` mounting the headless routes; main-optional (§64.3); the cookie-auth guardrail; new §64.9 SPEC + 4 `E-TOOL-SERVE-*` codes + `E-TOOL-ROUTE-NEEDS-SERVE`. **1 fix round** (6 review bugs).
-6. **Peter's PR #37** (concurrent) — his 150-file `.pathname→fileURLToPath` Windows codemod (#25/#26 class) self-merged via PR-flow. Disjoint from our work; the multi-contributor model working as designed.
+## 🎯 THE V1 FREEZE — where we actually are (the session's core finding)
+Audit: the suite is 445/445 green but asserts only **155 of 605 fireable codes**. Of the 450-code gap → **247 real V1-holes** (the rest correctly-not-holes: 75 lint-advisory / 97 off-path+codegen-invariants / 17 Nominal / 10 uncertain / 2 reserved / 2 indirectly-covered). Direction-B runtime-half is small (endpoint/auth/print/channel-feed owed + 1 harness-limit freeze-decision = channel multi-client).
+- **Freeze-bar RULED tiered, HIGH bar (bryan S256 "looks like a good bar"):** T1 = every code verifying a SOUNDNESS/SECURITY/PILLAR-CONTRACT guarantee; T2 = config/shape/ergonomic (v1.0.x coverage-growth). When-in-doubt→T1. **~200 tier-1 + ~45 tier-2.** The high bar keeps freeze a real ~200-case campaign; it defers only the cosmetic long-tail.
+- **~200 tier-1 LOADED into the sPA campaign:** `spa-lists/CAMPAIGN-tier1-freeze.md` + ss68–77 new lists + Wave-2 extensions (PR #47 MERGED). Fire-order: Wave A security+soundness → B pillar-contract → C feature/boundary.
+- **Campaign LIVE + fireable:** `/spa ss70` fired → landed (PR #49). Next disjoint: `/spa ss69/ss71/ss68/ss72`. **HOLD `/spa ss60`** (overlaps the live SSR fix).
+- **Audit REFINEMENT (from ss70):** E-FN-007 + E-STATE-COMPLETE are **source-unreachable** (fire only on synthetic AST; blocked on the inline-state-literal parser) → NOT authorable-holes. Known-gap `g-fn-state-diagnostics-source-unreachable` (file at wrap).
 
-## 📋 OPEN THREADS / FORKS
-1. **Advisory review App-install vs github_token** — decide (above). Non-blocking.
-2. **Track A Units 3-6** (from the DD `server-program-shape-2026-07-12.md`, per SCOPING `docs/changes/server-program-shape-v1/SCOPING.md`):
-   - **Unit 3 — Fork 5A:** `route.header(name)` + `route.frameId` (request-frame access).
-   - **Unit 4 — Fork 4A:** JSON-RPC discriminator + wire-tag remap on `accepts=`.
-   - **Unit 5 — H4 + H1:** GET-discovery (no-`accepts=` endpoint) + notification-204.
-   - **Unit 6 — Fork 6A:** bearer `<guard>` arm (6C `handle()` is the interim). **This is the "headless auth" story deferred all through Units 1+2** — until it lands, a headless serve= program's routes/channels have no auth guard (Unit 2 fail-closes cookie-auth via E-TOOL-SERVE-AUTH-UNSUPPORTED).
-   - **Fork 3 (stdio)** = fast-follow/post-V1 (bryan ruled via flogence inbox this session).
-   - **DoD / merge-blocker:** flogence `fsp-wire-smoke` (11 assertions) re-hosted on the scrml-native server + a conformance case.
-3. **Peter's GitHub issues (all his):** #26 (P0 Windows auth-bypass) **FIXED on main** (`66483cdf`) — **closeable** (was awaiting his Windows sign-off). #25 (nested-pages prefix) **fixed via #37**, closeable. #27 (navigate soft-nav) — navigate Wave-1b landed S251; likely stale, **triage**. #28 (markup `>`→`>=`), #29 (auth example 4 codegen bugs) — **untriaged**.
-4. **2 pre-existing gaps filed** (Unit-1 review surfaced, NOT decouple regressions): `g-currentuser-plain-handler-dangling` + `g-channel-auth-only-authcheck-dangling` (both MED, both real ReferenceErrors). See known-gaps.
+## 🔴 IN-FLIGHT — SSR auth-scoped prerender leak fix (HELD at round 3)
+CONFIRMED cross-user leak: the SSR compose route seeded auth-scoped cells' rows to anonymous viewers (idiomatic code; worse than the gated client-fetch it accelerates). Fix = auto-omit auth-scoped cells from the SSR seed (mirror §14.8.9 protect-floor) + `W-SSR-PRERENDER-UNSCOPED`→`I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (info).
+- **THREE rounds — the adversarial gate caught real defects each time.** R1 self-green→review found 3 residual leaks. R2 closed those but INTRODUCED 4 NEW defects (cross-role priv-escalation via mixed-role callable-gate collapse; public-content regression; 2 SQL-comment-strip bugs). **R3 COMPLETE + looks strong** — agent `aa297740dff01ce07`, worktree branch tip **`bfed8ecf`** (KEEP the worktree). All 4 closed via the structural fix requested: NEW `compiler/src/codegen/sql-lex.ts` `liveSqlInterpolations()` = ONE SQL-lexer source of truth used by BOTH the classifier (collect.ts) AND `extractSqlParams` (rewrite.ts) — they provably can't diverge; `stripSqlComments` deleted. Per-cell role gating in `/__mountHydrate` (no collapse); public/gated per-cell partition. **Bonus:** surfaced+fixed a LATENT pre-existing dangling-loader bug (callable-cell-init callee emitted route-handler-only → runtime ReferenceError; now registered as a called-peer). Gate 20200/0, conformance 450/450 (on its pre-#47 base). +14 tests, no test weakened.
+- **NEXT SESSION (HELD — do NOT skip the re-review; R1+R2 both looked clean and weren't):** re-review R3 (`Workflow code-review high` on the branch vs origin/main) → if clean, file-delta via **merge-base `3b2b5f53`** (pre-#47/#49; EXCLUDE base-drift — `origin/main..agent` shows the whole campaign as spurious deletions; use `merge-base..agent`) → PR → land. If the re-review finds more → round 4 or **go PA-direct**. On land it becomes the `cell` axis's first Coverage record.
+- On land, the SSR fix becomes the **`cell` axis's first Coverage record** in the confidentiality coverage-type.
 
-## 🔬 IRREDUCIBLE NARRATIVES (anomalies + what to watch)
-- **The adversarial gate caught real bugs on BOTH units — twice on MY spec, not just agent error.** Unit 1: 3 rounds (round 1 a dangling auth ref; round 2 an over/under-emit *I* caused with a wrong fix-brief that told the agent to make cookie-auth work in headless — WRONG, headless auth is bearer; round 3 the clean subtractive gate-off-and-defer). Unit 2: 1 round (6 bugs incl. a channel-auth fail-open — my guardrail spec only checked program-level auth). **Lesson: the mandatory `/code-review` is load-bearing; write fix-briefs that gate-OFF-and-defer, don't "make it work."**
-- **Unit 2 agent STALLED during finalization** (stream watchdog, post-commit) — salvaged from the committed branch tip (`8d9f6593`, worktree clean); the work + gate (20176/0) were done before the stall. [[feedback_agent_notification_transient_disconnect_resume]] [[feedback_agent_crash_partial_recovery]].
-- **PR #37 base-drift mid-Unit-2** — Peter self-merged his codemod while Unit 2 ran; main moved under it. Verified zero file overlap (his 150 files, 0 in compiler/src), rebased Unit 2 onto #37, re-ran R26 on the new base. **Watch: a concurrent Peter session can move main any time now.** [[feedback_file_delta_vs_cherry_pick]] [[feedback_parallel_dispatch_shared_test_baseline]].
-- **The wrap stash tangle** — my uncommitted bookkeeping (known-gaps) collided with #37's known-gaps changes; stashed it aside to land Unit 2, popped + 3-way-merged at wrap (both survived). The stash also carried a stale Unit-2 snapshot that conflicted with the landed version → resolved by taking HEAD.
-- **Commit-hook timeouts** — the pre-commit gate now runs ~5min (20176+ tests under load); foreground commits timed out at the 5min wrapper but ALWAYS finalized (verify git STATE, not the exit code). [[feedback_commit_hook_timeout_and_F_flag]].
-- **claude-code-guide was wrong twice** on the advisory setup (id-token commented out; "no App needed"). Verify Claude tooling against actual runs, not just its guidance.
+## 🏛️ RATIFIED — auth-scoped confidentiality architecture (the auth-content arc)
+DD `scrml-support/docs/deep-dives/auth-content-confidentiality-2026-07-15.md` (PARTIALLY-SUPERSEDED) + **RULING** `…-RULING.md` (live decision) + the fork-1 debate (SIBLINGS 8.3/UNIFY 4.4).
+- **Premise corrected mid-debate (verified from git):** the SSR leak was NOT a forgotten sink — the protect-floor DID cover the SSR seed; it was a **missing AXIS at a covered SINK**. A sink-registry is useless; a **sink × axis** obligation is the answer.
+- **RATIFIED (bryan "ratify, I like it"):** (1) THREE colocated mechanisms (column-redact / cell-omit / content-elide) — NO god-object floor. (2) ONE compile-time **`EgressSink × ConfidentialityAxis` coverage TYPE** (exhaustive `switch(sink)` + `never` tail; adding a sink or axis forces coverage = complete-mediation without the merged path). Forks 2/3/4 ratified (auto-omit+hydrate content · static-CDN §58 hard-error · capability-URL per-fetch re-auth). "Content-addressed chunk as confidentiality" KILLED.
+- **Build scoped + KICKED then STOPPED.** Unit 1 = coverage-type spine (retrofit column+cell) — dispatched off the SSR branch, then STOPPED (fired before the SSR re-review verdict; must base on the CLEAN SSR fix). **NEXT SESSION: re-fire Unit 1 off the landed SSR fix; then Unit 2 = content-elide (3rd axis + forks 2/3).**
+
+## 📋 OPEN THREADS
+1. **SSR fix R3** → re-review → land (wrap gate; held).
+2. **Auth-content build** → re-fire Unit 1 (coverage-type) off the landed SSR fix → Unit 2 (content-elide).
+3. **Freeze campaign — RUNNING HOT.** ss70 fn-purity re-integrated (#49). **PENDING RE-INTEGRATION next session** (branches + REINTEGRATE messages in `handOffs/incoming/`): **`spa/ss62`** (equality §45) + **`spa/ss71`** (match §18) LANDED; **`spa/ss66`** (sql-schema) in-flight/pending (branch present, no message yet — check). Re-integration is mechanical per ss70's pattern: for each, file-delta `conformance/cases/<X>/` from `spa/ssN` onto a `chore/reintegrate-ssN` branch → `bun conformance/run.ts` verify → PR → retire the branch. **DO NOT retire spa/ss62/ss66/ss71** (un-re-integrated). Fire more disjoint lists freely (ss68/ss69/ss72…); HOLD ss60 (SSR overlap). Keep the main checkout on `main` when firing `/spa`.
+4. **flogence — 3 messages** (`handOffs/incoming/read/` ×2 replied + 1 UNREAD `…oracle6b…`): (a) 3 serve=-tool dogfood bugs CONFIRMED+replied (`g-inferred-async-call-value-position-no-autoawait` [silent-miscompile, V1] + 2 serve= codegen gaps → file at wrap); (b) `<endpoint>` `decode=` JSON-RPC ask AGREED (A), fast-follow/post-V1, replied; (c) **`--emit-semantic-diff` feasibility ask HELD for bryan's timing read** (his S30 collaboration-layer / semantic-review-wedge direction; v-next no-clock; lean = ledger it, the compiler-only gap [sound cosmetic-vs-behavioral classification] is real+native, weigh post-V1, co-sign giti). **bryan: "discuss timing next session."**
+5. **cloud-maps push one-liner** owed (explicit-token push); daily cron red-fails until landed. Non-blocking.
+6. **Peter/S256 concurrent** — Windows path-model (disjoint). Boards: active-sessions/S256.md + S256-bryan.md.
+
+## 🔬 ANOMALIES / LESSONS
+- **`/spa` reads the list file from the WORKING TREE** → firing while the main checkout is on a fix branch predating the campaign merge = "no sessions to fire." I broke this by parking main on the SSR branch to base Unit 1. **LESSON: keep the main checkout on `main`; do branch work in worktrees** so `/spa` always sees the lists (the auth-content build must NOT park main on a branch).
+- **Base-drift at SSR re-integration** — file-delta via `merge-base..agent`, not `origin/main..agent`. [[feedback_file_delta_vs_cherry_pick]]
+- **Adversarial gate is load-bearing on security codegen** — caught real leaks R1 AND real NEW defects R2 (green-self-reported both). No exceptions. [[feedback_adversarial_verify_not_confirmatory]]
+- **Commit-hook 5-min wrapper timeouts** always finalized (verify git STATE not exit code); `${}` messages need `-F`. [[feedback_commit_hook_timeout_and_F_flag]]
 
 ## 🚦 STATE @ CLOSE
-- git: main `74e22ea3` (Units 1+2 + #37 + all infra), 0/0. scrml-support pushed (contract migration).
-- Conformance 41 categories; full gate 20176/0 (Unit-2 PR). CI `gate` GREEN on main.
-- **Worktrees: 22 agent worktrees exist.** This session's 2 (Unit 1 `agent-a1ef88d0`, Unit 2 `agent-a485f1c4`) cleaned at wrap. **~20 stale from prior sessions — broad sweep still OWED** (S83 disk risk; dry-run first per discipline).
-- **Maps: ~130 commits behind** (stamped `fbb4d9fd`, 2026-07-09). Refresh OWED (navigated by grep all session; a project-mapper refresh is a next-session task).
-- Mechanical state: `handOffs/delta-log.md` `[505]+` + `docs/changelog.md` S255.
+- main `85efaf77`, both repos 0/0. Conformance **459/459** (post-#49, independently verified).
+- **Open PRs:** #49 (ss70 fn conformance — bryan to merge). SSR fix on `fix/ssr-auth-scoped-prerender-leak` (HELD, not PR'd).
+- **Worktree sweep OWED** (broad + this session's spent) — **DO NOT remove the active SSR round-3 worktree `agent-aa297740dff01ce07`**. Retire `spa/ss70`.
+- Mechanical: delta-log + changelog S256; audit/DD/RULING pushed to scrml-support.
 
 ## pa.md directives in force
-R1-R5 · **PR-flow (branch→PR→gate→merge; NO direct main push)** · S239 mandatory adversarial `/code-review` pre-land (caught bugs on both units) · S138 R26 · orchestrate-don't-grind · default-GO · the deliberation ladder · Peter is a live concurrent contributor (PR-flow coordinates).
+R1-R5 · PR-flow · S239 mandatory adversarial review (caught SSR leaks across 3 rounds) · tiered-HIGH freeze bar (S256) · confidentiality = 3 colocated + 1 coverage-type (S256) · keep-main-checkout-on-main-for-/spa · orchestrate-don't-grind · Peter concurrent (disjoint).
 
 ## Tags
-#session-255 #track-a-server-program-shape #unit1-decouple-LANDED #unit2-serve-harness-LANDED
-#pa-contract-pr-flow-MIGRATED #advisory-review-app-install-PENDING #windows-ci-LANDED
-#peter-pr37-concurrent #adversarial-gate-caught-both-units #agent-stall-salvaged #maps-130-behind-owed
-#worktree-sweep-owed #track-a-units-3-6-remain #big-session
+#session-256 #v1-freeze-coverage-audit #tiered-high-bar #campaign-fired-ss70-landed #ssr-prerender-leak-HELD-round3 #confidentiality-architecture-ratified #egresssink-x-axis-coverage-type #auth-content-build-scoped #flogence-dogfood-x3 #semantic-diff-ask-held #concurrent-peter-s256 #wrap-held-on-ssr
