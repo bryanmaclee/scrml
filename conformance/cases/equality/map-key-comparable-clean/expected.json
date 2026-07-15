@@ -1,0 +1,12 @@
+{
+  "id": "equality-map-key-comparable-clean",
+  "description": "§45 / §59.4 clean neg — a map keyed by a struct whose fields are all comparable (`Route:struct = { from: string, to: string }`, `<m>: [Route: int]`) SHALL NOT fire E-EQ-003. Confirms the map-key comparability gate accepts a value-comparable struct key. `notCodes` asserts E-EQ-003 stays silent (mirrors the shipped `maps/struct-key-value-canonical-rt` case).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§59.4: a struct key with only comparable (non-function) fields is §45-comparable and is a valid map key; E-EQ-003 fires only when the key type contains a function-typed field.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EQ-003"]
+  }
+}

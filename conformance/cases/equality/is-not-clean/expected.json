@@ -1,0 +1,12 @@
+{
+  "id": "equality-is-not-clean",
+  "description": "§45 clean neg — the canonical absence check `x is not` SHALL NOT fire E-EQ-002. Same `x: string | not` binding as `equality/eq-not-reject`, but using the correct keyword form instead of `== not`. `notCodes` asserts E-EQ-002 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: `x is not` is the sanctioned absence check; E-EQ-002 fires only on the `== not` / `!= not` mis-form, never on `is not`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EQ-002"]
+  }
+}

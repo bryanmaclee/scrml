@@ -1,0 +1,12 @@
+{
+  "id": "equality-payload-variant-compare-warn",
+  "description": "§45.5/§45.7 — comparing `==` against a payload-variant CONSTRUCTOR reference SHALL emit the warning-level lint W-EQ-PAYLOAD-VARIANT. `@phase == Phase.Serving` where `Serving(angle: int)` carries a payload: `Phase.Serving` is the constructor function, not a value, so the comparison is statically ALWAYS false — silently. Warn-path (pos) half of the pin, plus the cross-stream `severity` assertion (the code is a §34 warning, routed to result.warnings, NOT the fatal stream); clean neg is `equality/unit-variant-compare-clean` (`== Phase.Idle`, a unit variant → silent). Steer: `is .Serving` / `match`.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/eq-payload-variant-lint-ss16-c4.test.js",
+  "spec": "§45.7",
+  "rationale": "§45.7/§45.8: a payload-variant reference (`Phase.Serving` with `Serving(angle: int)`) is a constructor function, not a value; a structural `==`/`!=` against it is statically always-false/always-true. Non-fatal warning W-EQ-PAYLOAD-VARIANT steers to `is .Variant` (§45.5) or `match` (§18). Unit variants are unaffected (they compare as string tags).",
+  "expect": {
+    "codes": ["W-EQ-PAYLOAD-VARIANT"],
+    "severity": { "W-EQ-PAYLOAD-VARIANT": "warning" }
+  }
+}

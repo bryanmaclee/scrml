@@ -1,0 +1,12 @@
+{
+  "id": "equality-equality-operator-clean",
+  "description": "§45 clean neg — the valid single equality operator `==` (`if (a == b)`) SHALL NOT fire E-EQ-004. Same operands as `equality/strict-operator-reject`, but using scrml's canonical `==` instead of `===`. `notCodes` asserts E-EQ-004 stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/gauntlet-s19/equality-diagnostics.test.js",
+  "spec": "§45",
+  "rationale": "§45: `==` (and `!=`) are the sanctioned equality operators; E-EQ-004 fires only on the invalid `===`/`!==` triple-equals forms.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EQ-004"]
+  }
+}
