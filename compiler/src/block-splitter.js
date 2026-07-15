@@ -725,6 +725,42 @@ function scanOpenerBody(source, openerNameEnd) {
 }
 
 /**
+ * Issue #28 — narrows the `g-attr-gte-tagclose` guard so it fires ONLY on the
+ * case it was built for.
+ *
+ * The `>=` early-guard (see `scanAttributes`) keeps a depth-0 `>` adjacent to `=`
+ * from closing the opener, so a stray unquoted comparison operator
+ * (`<p if=@n >= 3>` / jammed `<p if=@n>=3>`) flows into `attrRaw` for the clean
+ * E-ATTR-UNQUOTED-OPERATOR reject instead of shredding into a misleading
+ * E-CTX-001 cascade. But that only holds when the `>=` is genuinely an OPERATOR
+ * — i.e. its left operand is a BARE unquoted attribute value. When the `>` is a
+ * real tag terminator and the element's body TEXT merely begins with `=`
+ * (`<span>= x`, `<span if=(@x)>= x`, `<button disabled>= x`, `<p class="a">= x`),
+ * there is no bare operand, so the `>` MUST close — else the same E-CTX-001
+ * cascade fires on the OUTER tags (the #28 bug).
+ *
+ * Returns true iff the tail of the opener's attribute region is an OPEN bare
+ * unquoted attribute value: the last whitespace-delimited attribute token both
+ * carries an unquoted `=` (so it is a `name=value`, not a bare boolean NAME) and
+ * ends in a bare-operand char (identifier / digit / member-index `]`). A closed
+ * quoted (`class="x"`) or parenthesized (`if=(@x)`) value ends in `"` / `'` / `)`
+ * and returns false; an empty tail or a bare NAME returns false.
+ *
+ * Residual (accepted, documented): a bare atomic value jammed directly against
+ * `>=`-led text — `<p if=@n>= body>` — is inherently ambiguous with the jammed
+ * operator `<p if=@n>=3>` and still reads as the operator. The parenthesized /
+ * quoted / no-attr / bare-name forms (every case in issue #28) are fixed.
+ */
+function openerTailIsBareUnquotedValue(attrRaw) {
+  const trimmed = attrRaw.replace(/[ \t\r\n]+$/, "");
+  const m = /[^ \t\r\n]+$/.exec(trimmed);
+  if (!m) return false; // empty / whitespace-only tail — no operand
+  const tok = m[0];
+  if (!tok.includes("=")) return false; // bare boolean attribute NAME, not a value
+  return /[A-Za-z0-9_$\]]$/.test(tok); // value ends in a bare-operand char (not a closing " ' ))
+}
+
+/**
  * Generic tag-stack scanner for STRUCTURAL_RAW_BODY_ELEMENTS bodies. Starts
  * at `startPos` (immediately after the outer opener's `>`) and runs until
  * one of:
@@ -1318,7 +1354,13 @@ export function splitBlocks(filePath, source) {
           }
           // else: genuine opener close — fall through to the `>` handler below.
         }
-        if (c === ">" && ch(1) === "=") {
+        // Issue #28: fire the `>=` early-guard ONLY when the operator has a bare
+        // unquoted attribute value as its left operand (`if=@n >= 3`). When the
+        // `>` is a genuine tag terminator and the body text merely begins with
+        // `=` (`<span>= x`, `<span if=(@x)>= x`, `<button disabled>= x`), there
+        // is no bare operand, so the `>` must close — else the outer tags
+        // cascade into a misleading E-CTX-001.
+        if (c === ">" && ch(1) === "=" && openerTailIsBareUnquotedValue(attrRaw)) {
           attrRaw += c;
           step();
           continue;
