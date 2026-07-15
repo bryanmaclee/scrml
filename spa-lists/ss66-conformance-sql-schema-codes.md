@@ -50,3 +50,24 @@ Read the README case-format section FIRST.
 
 ## Progress
 `ss66.progress.md`. Land on `spa/ss66`; ping the PA inbox when ready. Do not touch main / do not push.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+BATCH-1/2 above are LANDED (5 authored, 18 GAP/unreachable — see the ss66 outcome note). This section
+adds the tier-1 SQL/schema/CPS-boundary codes the S256 tier split places in tier-1 (server/data
+contract). **HEED the ss66 landed finding: much of §8.6/§39.12 is NOT compile-time code-pinnable via the
+conformance `compile(source)` path** (sub-`compile()` API only, runtime throw, or migration/live-DB time).
+For each code below: probe live FIRST; if it fires on the `compile(source)` path → author pos+neg; if it
+matches a landed ss66 GAP/unreachable finding → do NOT force a case, hand a **known-gap** entry to the PA
+(the SPEC §8.6/§39.12 code table claims a code the compiler never emits = corpus-ahead-of-compiler). Grep
+each code live in `compiler/src` for the exact trigger + reachability.
+
+16. **E-SQL-006** (codes) `[status=probe — landed-note: NOT compile-pinnable]` — `.prepare()` is removed in Bun.SQL — use `.all()/.get()/.run()` or bare `?{}` (§44.3; `codegen/rewrite.ts:362`). ss66 found it fires only via direct `rewriteSqlRefs()`; `compile()` emits a runtime-throwing IIFE. Probe; if still unreachable → known-gap.
+17. **E-SQL-008** (codes) `[status=probe — landed-note: E-CTX-003 fires first]` — an unterminated `?{}` SQL diagnostic (`ast-builder.js:351`). ss66 found unbalanced `?{` trips `E-CTX-003` first. Probe for an isolable trigger; else known-gap.
+18. **E-SQL-009** (codes) `[status=pending]` — an emit-tool SQL error (`codegen/emit-tool.ts:906`). Grep the exact trigger + reachability; pos + neg or known-gap.
+19. **E-SQL-ROW-CONTRACT-MISMATCH** (codes) `[status=pending]` — a SQL projection row passed to a prop mismatches the prop's row contract (`type-system.ts:13090`). Pos + neg (matching row shape → silent). (This one IS compile-time type-checked — likely authorable.)
+20. **E-SCHEMA-004** (codes) `[status=probe — landed-note: GAP zero-emission]` — a schema column error (`gauntlet-phase1-checks.js:781`, "column …"). ss66 found E-SCHEMA-004..009 have zero emission on the string-compile path. Probe; if still zero → known-gap.
+21. **E-CG-006** (codes) `[status=pending]` — a non-client-boundary node found in a client-boundary function body (`codegen/scheduling.ts:462`). Pos (a server-only stmt in a client-boundary fn → E-CG-006) + neg. (Codegen-soundness on the client/server split — verify it's V1-path, not an OFF-V1 codegen invariant.)
+22. **E-BATCH-001** (codes) `[status=probe — landed-note: needs hand-built AST]` — a SQL batch-planner error (`batch-planner.ts:89` union). ss66 found `transaction{}` mis-parses to `E-SCOPE-001`; E-BATCH-001 needs a hand-built AST → `runBatchPlanner`. Probe; if unreachable via `compile(source)` → known-gap. (TIER-SPLIT tier-1 server family; the brief omitted it — added here for coverage.)
+
+**Wave-2 DoD:** the 7 codes each PROBED for compile-path reachability; the authorable ones pinned; the
+unreachable/GAP ones handed to the PA as known-gap entries (NOT forced). run.ts green; divergences ESCALATED.

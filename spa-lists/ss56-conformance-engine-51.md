@@ -29,3 +29,40 @@ The conformance harness (`conformance/run.ts` runner · `conformance/adapters/im
 
 ## Progress
 `spa-lists/ss56.progress.md`. Land per-item on `spa/ss56`; ping the PA inbox (`handOffs/incoming/`) per item with `{item, case-ids, run.ts green?, any impl#1-vs-SPEC divergence}`. Do NOT advance main / push. PA re-integrates via S67 file-delta (`conformance/cases/engine/*` is pure-additive data — clean) + confirms `bun conformance/run.ts` green independently. **ESCALATE (do not decide):** any impl#1-vs-SPEC divergence (a conformance bug OR a spec bug — needs a PA/user ruling, e.g. the §19.9.1 wire precedent); the virtual-clock driver design (the §8/§9 runtime gate). These are NOT on this list.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit)
+Items 1-9 above are LANDED — do NOT touch them (they cover the engine SUB-SURFACES: rule/payload/dispatch/
+history/hierarchy/onTimeout/onIdle). This section pins the remaining tier-1 **`E-ENGINE-*` diagnostic
+codes** the S256 tier split places in tier-1 ("what an engine MEANS" — ~22 codes) + the **replay §51.14**
+codes. Same method + core files as above (read the named §51 subsection per code). Grep each code live in
+`compiler/src` (`symbol-table.ts` + `type-system.ts` + `codegen/emit-machines.ts`) for the exact trigger.
+> **Fuzzy-band:** `E-ENGINE-003` (duplicate machine name) is TIER-SPLIT tier-2 (engine-config) but pulled
+> to tier-1 per this brief — marked `[tier-1?]`, reclassifiable. `E-ENGINE-014/019/020/021/-INITIAL-BOTH-
+> FORMS/-RULE-LEGACY-SYNTAX/-SERVER-WITH-*` stay tier-2 (engine-config edges) — NOT authored here.
+
+10. **E-ENGINE-001** (RT/codes) `[status=pending]` — illegal transition: an assignment to `@machine` that violates the rule set (`codegen/emit-machines.ts:593`, runtime-emitted). Pos + neg. (May overlap landed item-1's `E-ENGINE-INVALID-TRANSITION` — verify the distinct code fires; TIER-SPLIT lists E-ENGINE-001 discretely.)
+11. **E-ENGINE-003** `[tier-1?]` (codes) `[status=pending]` — duplicate machine name (`type-system.ts:5982`). Pos + neg.
+12. **E-ENGINE-004** (codes) `[status=pending]` — a transition rule references an unknown variant (`type-system.ts:2170`). Pos + neg.
+13. **E-ENGINE-005** (codes) `[status=pending]` — a derived-machine constraint (`type-system.ts:6118`, "Derived machine ..."). Pos + neg.
+14. **E-ENGINE-010** (codes) `[status=pending]` — a guard in a type-level transition block (§51; `type-system.ts:2109`). Pos + neg.
+15. **E-ENGINE-013** (codes) `[status=pending]` — a machine constraint (`type-system.ts:6947`, "Machine ..."). Grep exact trigger; pos + neg.
+16. **E-ENGINE-015** (codes) `[status=pending]` — a machine constraint sibling (`type-system.ts:7015`). Grep exact trigger; pos + neg.
+17. **E-ENGINE-016** (codes) `[status=pending]` — a transition side with multiple alternatives (ambiguous; `type-system.ts:6611`). Pos + neg.
+18. **E-ENGINE-017** (codes) `[status=pending]` — a write to a projected (derived) variable (`type-system.ts:6201`). Pos + neg.
+19. **E-ENGINE-018** (codes) `[status=pending]` — a derived-machine constraint (`type-system.ts:6518`). Pos + neg.
+20. **E-ENGINE-INITIAL-INVALID-VARIANT** (codes) `[status=pending]` — `initial=` names a variant not in the enum (`runtime-template.js:4443`). Pos + neg.
+21. **E-ENGINE-INITIAL-CELL-TYPE** (codes) `[status=pending]` — an `initial=` cell type mismatch (`symbol-table.ts:7811`). Pos + neg.
+22. **E-ENGINE-INITIAL-CELL-UNDECLARED** (codes) `[status=pending]` — `initial=` references a non-existent cell (`symbol-table.ts:7803`). Pos + neg.
+23. **E-ENGINE-MOUNT-NOT-ENGINE** (codes) `[status=pending]` — a `mount=` self-closing tag targets a non-engine (`symbol-table.ts:6350`). Pos + neg.
+24. **E-ENGINE-VAR-DUPLICATE** (codes) `[status=pending]` — a duplicate engine-variable name (`symbol-table.ts:6215`). Pos + neg.
+25. **E-ENGINE-RULE-INVALID-VARIANT** (codes) `[status=pending]` — a `rule=` references an invalid variant (`symbol-table.ts:6403`). Pos + neg.
+26. **E-ENGINE-STATE-CHILD-INVALID-VARIANT** (codes) `[status=pending]` — a state-child tag names an invalid variant (`symbol-table.ts:7197`). Pos + neg.
+27. **E-ENGINE-STATE-CHILD-MISSING** (codes) `[status=pending]` — a required state-child is missing (`symbol-table.ts:6394`). Pos + neg.
+28. **E-ONTRANSITION-NO-TARGET** (codes) `[status=pending]` — `<onTransition>` with no target (`symbol-table.ts:11330`). Pos + neg.
+29. **E-REPLAY-001** (codes) `[status=pending]` — §51.14: `@target` is not a machine-bound reactive (`type-system.ts:22959`). Pos + neg.
+30. **E-REPLAY-002** (codes) `[status=pending]` — §51.14: `@log` is not a declared reactive variable (`type-system.ts:22960`). Pos + neg.
+31. **E-REPLAY-003** (codes) `[status=pending]` — §51.14: cross-machine replay rejected (`type-system.ts:23060`). Pos + neg.
+
+**Wave-2 DoD:** all 22 remaining engine/replay codes pinned (codes-half; reject pos + clean neg per code);
+run.ts green; the engine pillar reaches diagnostic-EXHAUSTIVE (modulo tier-2 engine-config edges + the
+timer runtime already tracked). Divergences ESCALATED.

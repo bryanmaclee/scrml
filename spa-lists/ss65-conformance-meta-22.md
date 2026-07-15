@@ -36,3 +36,10 @@ normalized DOM. **Mirror `conformance/cases/error/` + `conformance/cases/block-g
 `ss65.progress.md`. Land on `spa/ss65`; ping the PA inbox when ready. Do not touch main / do not push.
 
 **DONE (sPA ss65).** All 13 items landed on `spa/ss65` (14 cases: item-1 renamed, item-13 a pair). Cases commit `6ff46b6e`; suite 386→400. 0 parked. Re-integration signal in `handOffs/incoming/`.
+
+## Wave-2 — tier-1 code-exhaustive completion (S256 audit) — FOLD-NOTE (no new items)
+The S256 tier split's remaining meta-adjacent tier-1 code is `E-META-EVAL-001` (compile-time meta-eval).
+The brief let me place it here (`^{}` §22 meta) OR in the foreign/meta-eval cluster; it is placed in
+**ss74** (`ss74-conformance-foreign-23.md`, items 7-8) alongside its sibling `E-META-EVAL-002` — meta-EVAL
+is the compile-time evaluation boundary, adjacent to inline-foreign eval, and ss65's 13 items already
+exhaust the `E-META-*` (`^{}`) surface. **No new ss65 items.** The `E-META-EVAL-*` codes are owned by ss74.
