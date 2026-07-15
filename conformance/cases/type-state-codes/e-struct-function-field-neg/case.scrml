@@ -1,0 +1,4 @@
+${
+    type T:struct = { cb: string, label: string }
+}
+<program><p id="p">ok</></>

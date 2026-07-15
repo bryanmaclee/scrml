@@ -1,0 +1,13 @@
+{
+  "id": "e-type-lifecycle-variant-not-transitioned-pos",
+  "description": "Accessing a post-transition variant field after discriminating the source variant but WITHOUT calling transition() fires E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED (§14.12.6.2). The cell `phase` has the variant-progression lifecycle `(.Draft to .Published)`; inside `if (@phase is .Draft)` the source variant is discriminated, but `@phase.publishedAt` reads the post-transition `.Published` field before `transition(phase)` is called, so the type system reports the error. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§14.12.6.2",
+  "rationale": "§14.12.6.2 under a variant-progression lifecycle, discriminating the source variant is not enough to read a post-transition field; `transition(binding)` must be called first, else E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED fires. The top-level (V5-strict) `<phase>: (.Draft to .Published)` declaration form is load-bearing for the reproducer.",
+  "expect": {
+    "codes": ["E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED"],
+    "notCodes": [],
+    "severity": { "E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED": "error" }
+  }
+}

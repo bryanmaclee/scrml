@@ -1,0 +1,12 @@
+{
+  "id": "e-state-terminal-mutation-neg",
+  "description": "Writing a field of a binding in a NON-terminal substate does not fire E-STATE-TERMINAL-MUTATION (§54.6.4). `d` is typed `Draft`, which declares the transition `validate()` (non-terminal), so `d.body = \"x\"` is not a terminal-state mutation and the check stays silent. The clean twin of e-state-terminal-mutation-pos (E-TYPE-UNKNOWN-NAME + W-WHITESPACE-001 co-fire incidentally from the canonical substate syntax and are left out of notCodes).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/transition-decl-terminal.test.js",
+  "spec": "§54.6.4",
+  "rationale": "§54.6.4 terminality is defined by having zero outgoing transitions; a substate with at least one declared transition (`Draft` → `validate()`) is non-terminal, so a field write on it does not fire E-STATE-TERMINAL-MUTATION.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STATE-TERMINAL-MUTATION"]
+  }
+}

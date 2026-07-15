@@ -1,0 +1,13 @@
+{
+  "id": "e-type-041-not-assign-mismatch-pos",
+  "description": "Assigning `not` (the absence sentinel) to a non-optional type fires E-TYPE-041 (§42). `let x: string = not` binds the absence value to a plain `string`, but `not` is only assignable to an optional `T | not`, so the type system reports the mismatch. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/type-system.test.js",
+  "spec": "§42",
+  "rationale": "§42 `not` is the absence value and is assignable ONLY to an optional `T | not` type; assigning it to a non-optional `T` is a compile error (E-TYPE-041).",
+  "expect": {
+    "codes": ["E-TYPE-041"],
+    "notCodes": [],
+    "severity": { "E-TYPE-041": "error" }
+  }
+}

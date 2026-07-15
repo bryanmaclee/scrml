@@ -1,0 +1,13 @@
+{
+  "id": "e-state-transition-illegal-pos",
+  "description": "Calling a transition not declared on a binding's substate fires E-STATE-TRANSITION-ILLEGAL (§54.6.3). `sub` is typed `Draft`, which declares the transition `validate()`; `sub.wrongName()` names no declared transition, so the type system reports E-STATE-TRANSITION-ILLEGAL. The canonical `< Draft body(string)>` substate syntax incidentally co-fires E-TYPE-UNKNOWN-NAME + W-WHITESPACE-001, which are left out of notCodes; W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/transition-decl-illegal.test.js",
+  "spec": "§54.6.3",
+  "rationale": "§54.6.3 a call `binding.method()` where the binding's resolved substate declares transitions but not `method` is a compile error (E-STATE-TRANSITION-ILLEGAL), steering to a typo fix or the expected narrowed substate.",
+  "expect": {
+    "codes": ["E-STATE-TRANSITION-ILLEGAL"],
+    "notCodes": [],
+    "severity": { "E-STATE-TRANSITION-ILLEGAL": "error" }
+  }
+}
