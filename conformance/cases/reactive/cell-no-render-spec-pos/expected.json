@@ -1,0 +1,12 @@
+{
+  "id": "reactive-cell-no-render-spec-pos",
+  "description": "§6.4.1 E-CELL-NO-RENDER-SPEC POSITIVE — render-by-tag `<x/>` is legal ONLY for a Shape 2 decl-with-render-spec cell. Two §6.4.1 table NO-rows in one case: `<count> = 0` is a Shape 1 plain cell and `const <doubled> = @count * 2` is a Shape 3 numeric derived cell; NEITHER carries a render-spec, so both `<count/>` and `<doubled/>` use-sites are E-CELL-NO-RENDER-SPEC. Incidental W-PROGRAM-001 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.4.1",
+  "rationale": "SPEC §5.4:1655 — 'A cell with no render-spec at all yields E-CELL-NO-RENDER-SPEC when used in markup with `<x/>` render-by-tag.' The §6.4.1 legality table makes the two shapes here explicit NO rows: 'Shape 1 plain cell | NO — E-CELL-NO-RENDER-SPEC | Use ${@varname} for value interpolation' (:2315) and 'Shape 3 numeric/string derived | NO — E-CELL-NO-RENDER-SPEC | Use ${@varname} for interpolation' (:2317). §6.2 restates both: '`<count/>` in markup is E-CELL-NO-RENDER-SPEC — this cell has no render-spec; use ${@count} interpolation to display the value' (:2134) and '`<doubled/>` in markup is E-CELL-NO-RENDER-SPEC for numeric/string derived cells — use ${@doubled}' (:2168). §34 catalog (:18130) classifies the code Error.",
+  "expect": {
+    "codes": ["E-CELL-NO-RENDER-SPEC"],
+    "notCodes": [],
+    "severity": { "E-CELL-NO-RENDER-SPEC": "error" }
+  }
+}

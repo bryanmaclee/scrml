@@ -1,0 +1,12 @@
+{
+  "id": "reactive-cell-ambiguous-member-render-pos",
+  "description": "§6.4 E-CELL-AMBIGUOUS-MEMBER-RENDER POSITIVE — a compound-member `<field/>` is valid render-by-tag that resolves through any in-scope compound when EXACTLY one member matches. Here TWO in-scope Variant-C compounds (`<signup>` and `<profile>`) each declare a member with the SAME leaf name `uname`, so the bare `<uname/>` render-by-tag in the sibling `<form>` matches 2 candidates and cannot pick one → fatal E-CELL-AMBIGUOUS-MEMBER-RENDER. Incidental W-PROGRAM-001 / E-DG-002 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.4",
+  "rationale": "SPEC §5.4:1698 (the §6.4 render-by-tag error-code list, NEW S207) — 'E-CELL-AMBIGUOUS-MEMBER-RENDER — a bare `<member/>` render-by-tag where the member leaf name is declared in more than one in-scope Variant-C compound; the bare reference cannot pick one (fatal; the diagnostic lists the candidate qualified paths and suggests rendering inside the compound's block body or renaming). A compound-member `<field/>` IS valid render-by-tag (§6.3) and resolves through any in-scope compound when EXACTLY one member matches; a >1-match is this error.' This case is the >1-match arm: 2 in-scope compounds declare `uname`. The SPEC's word 'fatal' grounds the asserted `error` severity (the code has no §34 catalog row — see the neg case's note).",
+  "expect": {
+    "codes": ["E-CELL-AMBIGUOUS-MEMBER-RENDER"],
+    "notCodes": [],
+    "severity": { "E-CELL-AMBIGUOUS-MEMBER-RENDER": "error" }
+  }
+}

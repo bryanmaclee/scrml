@@ -1,0 +1,12 @@
+{
+  "id": "reactive-name-collides-state-pos",
+  "description": "§6.1.3 V5-strict bare-name discipline (codes): a local declaration may not reuse a registered state-cell name. `<count> = 0` registers the cell; the later `let count = 5` inside a logic-block function shadows that name → E-NAME-COLLIDES-STATE. This is the SPEC's own worked example (SPEC.md:2054-2062) transcribed. Asserted AS an error. Incidental W-PROGRAM-001 / E-DG-002 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§6.1.3",
+  "rationale": "§6.1.3 (SPEC.md:2065): \"E-NAME-COLLIDES-STATE (compile error): A local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names.\" §1.6 (SPEC.md:184) grounds why: \"Bare names in expressions are LOCAL identifiers only. They do NOT resolve to reactive state cells. Local names cannot shadow registered state names.\" A local `count` would shadow access to the cell's name in expression positions, which the compiler refuses (§6.1 / SPEC.md:6000) — the canonical read is `@count`.",
+  "expect": {
+    "codes": ["E-NAME-COLLIDES-STATE"],
+    "notCodes": [],
+    "severity": { "E-NAME-COLLIDES-STATE": "error" }
+  }
+}
