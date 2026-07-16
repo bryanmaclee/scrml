@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-auth-login-missing-neg",
+  "description": "§40.1.1 — an app with no auth gate declares no redirect target, so the login-missing structural-gap check has nothing to resolve and W-AUTH-LOGIN-MISSING does not fire. The clean control: the warning is gated on a gate naming an unresolved redirect.",
+  "language-version": "1.0",
+  "spec": "§40.1.1",
+  "source-test": "compiler/src/auth-graph.ts (W-AUTH-LOGIN-MISSING tier-2 structural-gap site)",
+  "rationale": "§40.1.1: with no auth gate there is no redirect target (firstRedirectGate stays null), so the tier-2 condition `firstRedirectGate != null && !anyResolved && unresolvedTargets.size > 0` is false and W-AUTH-LOGIN-MISSING stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-AUTH-LOGIN-MISSING"]
+  }
+}

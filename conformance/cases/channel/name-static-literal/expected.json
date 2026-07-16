@@ -1,0 +1,12 @@
+{
+  "id": "channel-name-static-literal",
+  "description": "§38.11 clean neg — the identical channel with a fully static `name=\"chat-general\"` (no `${...}`) fires NO E-CHANNEL-* diagnostic. The delta from `channel/name-interpolated` is removing the interpolation marker, which silences E-CHANNEL-007 (VP-3).",
+  "language-version": "1.0",
+  "spec": "§38.11, §38.3",
+  "rationale": "§38.3: a static-literal `name=` is the well-formed form — VP-3 finds no `${` marker, so E-CHANNEL-007 (and the E-CHANNEL-* family) stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-007"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

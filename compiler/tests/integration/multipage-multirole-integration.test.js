@@ -450,8 +450,11 @@ describe("FX-1 — per-role per-page chunk variance", () => {
 
 describe("FX-1 — per-route HTML augmentation (A-4.7)", () => {
   function htmlByFile(result, suffix) {
+    // Normalize native path separators (`\` on Windows) to `/` before the
+    // suffix comparison so the POSIX-shaped `suffix` (e.g. `routes/index.scrml`)
+    // matches the native Map key. No-op on POSIX (paths already use `/`).
     for (const [filePath, out] of result.outputs) {
-      if (out.html && filePath.endsWith(suffix)) return out.html;
+      if (out.html && filePath.replace(/\\/g, "/").endsWith(suffix)) return out.html;
     }
     return undefined;
   }
@@ -539,7 +542,7 @@ describe("FX-1 — tier-1 / tier-2 prefetch wiring", () => {
     const result = compileFx1();
     let html;
     for (const [filePath, out] of result.outputs) {
-      if (out.html && filePath.endsWith("routes/index.scrml")) html = out.html;
+      if (out.html && filePath.replace(/\\/g, "/").endsWith("routes/index.scrml")) html = out.html;
     }
     expect(html).toContain('data-scrml-prefetch="/loads"');
     expect(html).toContain('data-scrml-prefetch="/admin"');
@@ -549,7 +552,7 @@ describe("FX-1 — tier-1 / tier-2 prefetch wiring", () => {
     const result = compileFx1();
     let html;
     for (const [filePath, out] of result.outputs) {
-      if (out.html && filePath.endsWith("routes/loads.scrml")) html = out.html;
+      if (out.html && filePath.replace(/\\/g, "/").endsWith("routes/loads.scrml")) html = out.html;
     }
     expect(html).toContain('data-scrml-prefetch="/"');
   });

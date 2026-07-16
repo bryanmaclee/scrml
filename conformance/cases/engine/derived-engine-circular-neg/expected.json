@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-circular-neg",
+  "description": "§51.0.J negative — the ACYCLIC chained derivation §51.0.J explicitly rules LEGAL. Structurally identical to derived-engine-circular-pos (two chained derived engines) except the chain's ROOT is a plain state cell (`<marioState>: Mario = .Small`) instead of closing back on the first engine: @marioState → @health → @mood is a chain (A → B → C), not a cycle. E-DERIVED-ENGINE-CIRCULAR stays silent. This is the chain-vs-cycle contrast — it proves the DG cycle detector distinguishes depth from circularity and does not simply reject engine-derives-from-engine.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J rules table: 'Chained derivation (A → B → C) | LEGAL.' Only a cycle is rejected — a derived engine deriving from ANOTHER derived engine's variant is the sanctioned composition (§51.0.J: `derived=expr` accepts 'any reactive expression of the engine's type', and 'the compiler subscribes the derived engine to every reactive cell the expression reads'). The whole E-DERIVED-* family stays silent on a well-formed chain.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-ENGINE-CIRCULAR", "E-DERIVED-CIRCULAR-DEP"],
+    "notCodePrefixes": ["E-DERIVED-"]
+  }
+}

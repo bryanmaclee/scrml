@@ -31,7 +31,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   buildAST as buildASTJS,
   runTAB as runTABJS,
@@ -66,6 +66,12 @@ const tokenizerImportPath = resolve(
   dirname(fileURLToPath(new URL(import.meta.url))),
   "../../src/tokenizer.js"
 );
+// Interpolate a file:// URL, NOT the raw native path. On Windows the native
+// path ("C:\Users\...\tokenizer.js") embeds `\t`, `\U`, etc. which become JS
+// string escape sequences inside the generated module source — corrupting the
+// specifier ("C:UserspolivDocuments...") and yielding "Cannot find package".
+// pathToFileURL(...).href is a valid import specifier on both platforms.
+const tokenizerImportUrl = pathToFileURL(tokenizerImportPath).href;
 
 // Strip ^{} blocks from the JS body (they are compile-time imports).
 // These blocks have the form ^{ ... } with potentially nested braces.
@@ -103,7 +109,7 @@ import {
   tokenizeCSS,
   tokenizeError,
   tokenizePassthrough,
-} from "${tokenizerImportPath}";
+} from "${tokenizerImportUrl}";
 ${strippedBody}
 `;
 

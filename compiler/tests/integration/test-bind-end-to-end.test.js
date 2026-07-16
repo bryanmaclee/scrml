@@ -48,8 +48,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -61,9 +62,12 @@ import { spawnSync } from "node:child_process";
  * fixtures into it; the dist/ subdir is the compileScrml output.
  */
 function scratch(slug) {
-  const dir = `/tmp/scrml-a6-5-e2e-${slug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  // os.tmpdir() + mkdtempSync gives a real native temp dir on every platform.
+  // The prior hardcoded `/tmp/...` literal is not a drive-qualified absolute
+  // path on Windows, so it landed under the cwd drive root and the §3 outputs
+  // lookup (a resolve()d absolute-path Map key) never matched. No behavior
+  // change on POSIX (still a unique temp dir).
+  return mkdtempSync(join(tmpdir(), `scrml-a6-5-e2e-${slug}-`));
 }
 
 /**
@@ -217,11 +221,13 @@ describe("test-bind A6-5 §3: 0-byte production cost via compileScrml", () => {
     // Compile twice, once each way.
     const dirA = scratch("0byte-on");
     const { result: rA } = compileFixture(dirA, src, true);
-    const outA = rA.outputs.get(join(dirA, "app.scrml"));
+    // outputs is keyed by the resolve()d absolute input path, so resolve() the
+    // lookup key to match (a no-op on POSIX where join already yields the key).
+    const outA = rA.outputs.get(resolve(join(dirA, "app.scrml")));
 
     const dirB = scratch("0byte-off");
     const { result: rB } = compileFixture(dirB, src, false);
-    const outB = rB.outputs.get(join(dirB, "app.scrml"));
+    const outB = rB.outputs.get(resolve(join(dirB, "app.scrml")));
 
     // Filenames in test/non-test mode differ in dir paths but JS bodies
     // should be IDENTICAL in clientJs and serverJs (the spec guarantee).

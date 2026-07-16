@@ -1,0 +1,10 @@
+{
+  "id": "foreign-crossing-clean-pos",
+  "description": "§23.2.4a positive — the `in:{ x }` crossing name becomes the async-IIFE parameter, and the slice USES `x` (`x + 1`) without redeclaring a top-level binding of the same name. No collision between the crossing parameter and a slice-local, so the crossing-shadow scan stays silent and E-FOREIGN-006 does not fire.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.2.4a",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOREIGN-006"]
+  }
+}

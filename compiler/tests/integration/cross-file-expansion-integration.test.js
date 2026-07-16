@@ -482,8 +482,11 @@ describe("FX-2 — initial-chunk emission + content-addressing", () => {
 
 describe("FX-2 — per-route HTML augmentation", () => {
   function htmlFor(result, suffix) {
+    // Normalize native path separators (`\` on Windows) to `/` before the
+    // suffix comparison so the POSIX-shaped `suffix` (e.g. `cross-file/app.scrml`)
+    // matches the native Map key. No-op on POSIX (paths already use `/`).
     for (const [filePath, out] of result.outputs) {
-      if (out.html && filePath.endsWith(suffix)) return out.html;
+      if (out.html && filePath.replace(/\\/g, "/").endsWith(suffix)) return out.html;
     }
     return undefined;
   }

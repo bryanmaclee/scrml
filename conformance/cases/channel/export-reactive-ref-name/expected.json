@@ -1,0 +1,11 @@
+{
+  "id": "channel-export-reactive-ref-name",
+  "description": "§38.12 — an `export <channel name=@topic>` whose `name=` is a reactive-ref (not a string literal) fires E-CHANNEL-EXPORT-001. A cross-file channel export's wire identity must be compile-time stable, so a `name=@var` form is rejected. (The reactive-ref also raises an incidental E-SCOPE-001 on the unresolved `@topic` after the export is fail-open dropped; the codes-half superset check pins only E-CHANNEL-EXPORT-001.)",
+  "language-version": "1.0",
+  "spec": "§38.12",
+  "rationale": "§38.12: `export <channel ...>` SHALL carry a string-literal `name=\"...\"` — reactive-ref / interpolated forms are unsupported because the wire-layer identity must be compile-time stable. A reactive-ref `name=` on an exported channel SHALL emit E-CHANNEL-EXPORT-001 (P3.A).",
+  "expect": {
+    "codes": ["E-CHANNEL-EXPORT-001"],
+    "severity": { "E-CHANNEL-EXPORT-001": "error" }
+  }
+}

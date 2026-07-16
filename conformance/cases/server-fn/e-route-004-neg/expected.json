@@ -1,0 +1,12 @@
+{
+  "id": "server-fn-e-route-004-nonserializable-param-neg",
+  "description": "§12.3/§12.5 — the same server function with JSON-serializable primitive parameters (`int`, `string`) fires no E-ROUTE-004. The clean control: serializable arguments cross the wire fine.",
+  "language-version": "1.0",
+  "spec": "§12.5",
+  "source-test": "compiler/tests/unit/route-wire-serializability.test.js",
+  "rationale": "§12.5 wire-serializability gate (param direction): primitive param types are JSON-serializable, so the gate finds nothing non-transmittable and E-ROUTE-004 stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ROUTE-004", "E-ROUTE-003"]
+  }
+}

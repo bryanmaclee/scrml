@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-no-initial-neg",
+  "description": "§51.0.J / §51.0.E negative — the SAME derived engine as derived-engine-no-initial-pos with the `initial=` attribute REMOVED, which is the canonical derived-engine form. E-DERIVED-ENGINE-NO-INITIAL stays silent. Load-bearing second assertion: W-ENGINE-INITIAL-MISSING ALSO stays silent — that lint fires only on a NON-derived engine that omits `initial=` (§51.0.E), so a derived engine omitting `initial=` must be clean on BOTH codes. Without this, an impl could 'pass' the POS case while nagging the correct form.",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E lint behavior partitions on derived-ness: 'On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits `W-ENGINE-INITIAL-MISSING` (§34) and DEFAULTS to the FIRST state-child's variant.' — vs — 'On a DERIVED engine (§51.0.J), `initial=` is FORBIDDEN.' Omitting `initial=` on a derived engine is therefore not merely tolerated but REQUIRED, and neither the error nor the non-derived lint may fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-ENGINE-NO-INITIAL", "W-ENGINE-INITIAL-MISSING"],
+    "notCodePrefixes": ["E-DERIVED-ENGINE-"]
+  }
+}

@@ -22,21 +22,32 @@ import path from "node:path";
 // Function re-definitions (mirror stdlib/path/index.scrml logic)
 // ---------------------------------------------------------------------------
 
+// POSIX-normalize native separators (mirrors stdlib/path/index.scrml's
+// toPosixSep). Node emits `\` on Windows; scrml:path output is `/`-separated
+// on every host by contract. On POSIX this is a no-op.
+function toPosixSep(p) {
+    if (p == null) return p
+    return p.split("\\").join("/")
+}
+
 function join(...segments) {
     const filtered = segments.filter(s => s != null)
     if (filtered.length === 0) return "."
-    return path.join(...filtered)
+    return toPosixSep(path.join(...filtered))
 }
 
 function resolve(...segments) {
+    // path.posix.resolve keeps `/`-rooted paths `/`-rooted on Windows (native
+    // path.resolve would drive-root them, e.g. `/usr` → `C:\usr`). Identical to
+    // path.resolve on POSIX. Mirrors stdlib/path/index.scrml.
     const filtered = segments.filter(s => s != null)
-    if (filtered.length === 0) return path.resolve()
-    return path.resolve(...filtered)
+    if (filtered.length === 0) return toPosixSep(path.posix.resolve())
+    return toPosixSep(path.posix.resolve(...filtered))
 }
 
 function dirname(filePath) {
     if (filePath == null) return "."
-    return path.dirname(filePath)
+    return toPosixSep(path.dirname(filePath))
 }
 
 function basename(filePath, ext) {
@@ -53,12 +64,12 @@ function extname(filePath) {
 function relative(from, to) {
     if (from == null) from = "."
     if (to == null) to = "."
-    return path.relative(from, to)
+    return toPosixSep(path.relative(from, to))
 }
 
 function normalize(filePath) {
     if (filePath == null) return "."
-    return path.normalize(filePath)
+    return toPosixSep(path.normalize(filePath))
 }
 
 const sep = "/"
@@ -88,7 +99,10 @@ describe("scrml:path — resolve", () => {
     })
     test("P6: relative segments appended to cwd", () => {
         const result = resolve("src", "index.js")
-        expect(result.startsWith("/")).toBe(true)
+        // OS-portable absolute check: a Windows absolute path is drive-rooted
+        // (`C:/…`), not `/`-rooted, so `startsWith("/")` is a POSIX-only
+        // assertion. path.isAbsolute() is separator- and host-aware.
+        expect(path.isAbsolute(result)).toBe(true)
         expect(result.endsWith("src/index.js")).toBe(true)
     })
     test("P7: later absolute overrides earlier", () => {

@@ -1,0 +1,8 @@
+<program>
+${
+  import { chat } from './channels.scrml'
+  import { chat as alsoChat } from './channels.scrml'
+}
+<chat/>
+<alsoChat/>
+</program>

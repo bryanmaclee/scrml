@@ -1,0 +1,12 @@
+{
+  "id": "reactive-cell-no-render-spec-neg",
+  "description": "§6.4.1 E-CELL-NO-RENDER-SPEC NEGATIVE — the contrast to cell-no-render-spec-pos, proving BOTH legal paths of the §6.4.1 table stay silent. (1) `<userName> = <input type=\"text\"/>` is a Shape 2 decl-with-render-spec cell, so its `<userName/>` render-by-tag use-site is the YES row (expands to the bound input). (2) `<count> = 0` is the SAME Shape 1 plain cell the POS case bare-tags, but here it is read via the spec-prescribed `${@count}` interpolation instead — the markup-as-value path, not render-by-tag — so it does not fire either. Whole E-CELL-* family asserted silent.",
+  "language-version": "1.0",
+  "spec": "§6.4.1",
+  "rationale": "SPEC §6.4.1 (:2316) — 'Shape 2 decl-with-render-spec | YES | Expands to the bound input element with reactive wiring (bind: dispatch per §5)'; §6.4.2 (:2322) walks exactly this expansion for a text-input render-spec. The plain cell fires only on a render-by-tag use: §5.4:1655 scopes the error to 'when used in markup with `<x/>` render-by-tag', and the §6.4.1 NO rows prescribe `${@varname}` as the correct alternative (:2315), which is the form used here. §5.4:1654 confirms the interpolation path is legal for cells that cannot be render-by-tagged — 'the cell can be displayed via ${@x} interpolation (the markup-as-value path, §1.4)'.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CELL-NO-RENDER-SPEC", "E-CELL-RENDER-SPEC-NOT-BINDABLE"],
+    "notCodePrefixes": ["E-CELL-"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "channel-export-string-literal-name",
+  "description": "§38.12 clean neg — an `export <channel name=\"feed\">` with a static string-literal `name=` is the well-formed cross-file export form; E-CHANNEL-EXPORT-001 (and the E-CHANNEL-* family) stays silent. The delta from `channel/export-reactive-ref-name` is reactive-ref vs string-literal name.",
+  "language-version": "1.0",
+  "spec": "§38.12",
+  "rationale": "§38.12: a string-literal `name=` gives the export a compile-time-stable wire identity, so the export is valid — E-CHANNEL-EXPORT-001 does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-EXPORT-001"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

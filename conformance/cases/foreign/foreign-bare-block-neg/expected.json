@@ -1,0 +1,11 @@
+{
+  "id": "foreign-bare-block-neg",
+  "description": "§23.2/§23.2.4 E-FOREIGN-004 — a BARE (non-value-returning) `_={ console.log(1) }=` foreign statement, not bound to `const`/`let` and not `return`ed. Only the inline value-returning form (`const x = _={ … }=` / `return _={ … }=`) is admitted in a library `fn` body (§23.2.4/§23.2.4a); a bare unbound `_={}` statement is NOT admitted, so it fires E-FOREIGN-004 (type-system.ts checkForeignBlocks) regardless of the `<foreign lang>` declaration.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.2.4",
+  "expect": {
+    "codes": ["E-FOREIGN-004"],
+    "notCodes": [],
+    "severity": { "E-FOREIGN-004": "error" }
+  }
+}

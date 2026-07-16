@@ -1,0 +1,8 @@
+${
+    <count> = 2
+    <names> = ["a", "b"]
+    <total> = ${ @names.length }
+    const <doubled> = ${ @count * 2 }
+    const <tripled>: number = ${ @count * 3 }
+}
+<p id="t">Total: ${@total}</>

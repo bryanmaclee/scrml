@@ -1,0 +1,15 @@
+${ type Mario:enum = { Small, Big } }
+${ type Health:enum = { Healthy, AtRisk } }
+${ <sounds> = [] }
+${ function playSound(name) { @sounds = [...@sounds, name] } }
+<marioState>: Mario = .Small
+<engine for=Health derived=match @marioState {
+  .Small :> .Healthy
+  .Big :> .AtRisk
+}>
+  <Healthy/>
+  <AtRisk effect=${ playSound("warning") }>
+    <onTransition from=.Healthy effect=${ playSound("entered") }/>
+  </>
+</>
+<p>x</>

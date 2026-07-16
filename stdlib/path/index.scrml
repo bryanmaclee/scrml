@@ -21,8 +21,25 @@ ${
     // ---------------------------------------------------------------------------
 
     /**
+     * Normalize OS path separators to POSIX forward-slash form.
+     *
+     * Node's `path` module emits NATIVE separators — `\` on Windows, `/` on
+     * POSIX. scrml:path is a deterministic, host-independent path library: its
+     * output is consumed as route keys, import specifiers, and URL fragments,
+     * all of which MUST be `/`-separated regardless of the host OS. Without this
+     * every function silently leaks `\` on Windows (e.g. `join("src","a.js")`
+     * → `src\a.js`), producing non-portable output. On POSIX this is a no-op
+     * (no backslashes to replace). Mirrors the `\`→`/` idiom used across the
+     * compiler (module-resolver.js #26 carve-out, emit-server.ts).
+     */
+    function toPosixSep(p) {
+        if (p is not) return p
+        return p.split("\\").join("/")
+    }
+
+    /**
      * Join path segments into a single path.
-     * Delegates to Node's path.join().
+     * Delegates to Node's path.join(); output is POSIX-normalized.
      *
      * Example:
      *   join("src", "components", "App.js") → "src/components/App.js"
@@ -33,7 +50,7 @@ ${
         const path = require("node:path")
         const filtered = segments.filter(s => s is some)
         if (filtered.length == 0) return "."
-        return path.join(...filtered)
+        return toPosixSep(path.join(...filtered))
     }
 
     /**
@@ -47,10 +64,16 @@ ${
      *   resolve("/a", "/b", "c")           → "/b/c"
      */
     export function resolve(...segments) {
+        // POSIX resolver on every host: native path.resolve() drive-roots a
+        // `/`-leading path on Windows (`/usr` → `C:\usr`), breaking the
+        // documented contract `resolve("/usr","local","bin") → "/usr/local/bin"`.
+        // path.posix.resolve keeps `/`-rooted paths `/`-rooted deterministically;
+        // on POSIX it is identical to path.resolve. toPosixSep flips the native
+        // separators the captured cwd carries when no absolute segment is given.
         const path = require("node:path")
         const filtered = segments.filter(s => s is some)
-        if (filtered.length == 0) return path.resolve()
-        return path.resolve(...filtered)
+        if (filtered.length == 0) return toPosixSep(path.posix.resolve())
+        return toPosixSep(path.posix.resolve(...filtered))
     }
 
     /**
@@ -65,7 +88,7 @@ ${
     export function dirname(filePath) {
         const path = require("node:path")
         if (filePath is not) return "."
-        return path.dirname(filePath)
+        return toPosixSep(path.dirname(filePath))
     }
 
     /**
@@ -114,7 +137,7 @@ ${
         const path = require("node:path")
         if (from is not) from = "."
         if (to is not) to = "."
-        return path.relative(from, to)
+        return toPosixSep(path.relative(from, to))
     }
 
     /**
@@ -130,12 +153,13 @@ ${
     export function normalize(filePath) {
         const path = require("node:path")
         if (filePath is not) return "."
-        return path.normalize(filePath)
+        return toPosixSep(path.normalize(filePath))
     }
 
     /**
-     * Platform path separator.
-     * Always "/" on POSIX (Linux, macOS), "\" on Windows.
+     * Path separator. scrml:path emits POSIX-normalized output on every host
+     * (see toPosixSep), so the separator is ALWAYS "/" — including on Windows.
+     * This is deliberate: scrml:path output is host-independent by contract.
      */
     export const sep = "/"
 

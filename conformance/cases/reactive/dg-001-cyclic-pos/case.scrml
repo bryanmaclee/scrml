@@ -1,0 +1,15 @@
+<program db="postgres://localhost/app">
+
+  function loadOwner(id) {
+    ?{`SELECT id FROM owners WHERE id = ${id}`}.all()
+    loadPet(id)
+  }
+
+  function loadPet(id) {
+    ?{`SELECT id FROM pets WHERE owner_id = ${id}`}.all()
+    loadOwner(id)
+  }
+
+  <button onclick=loadOwner(1)>Load</button>
+
+</program>

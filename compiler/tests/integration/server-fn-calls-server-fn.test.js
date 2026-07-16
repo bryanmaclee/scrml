@@ -31,9 +31,10 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_server_fn_calls");
@@ -44,8 +45,12 @@ beforeAll(() => {
   if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
 });
 
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
+afterAll(async () => {
+  // Close every imported server module's Bun.SQL handle BEFORE removing the
+  // temp dir — on Windows an open DB handle would EBUSY the rmSync. See
+  // helpers/self-host-server-import.js for the full rationale.
+  await closeOpenedDbHandles();
+  safeRmSync(TMP_ROOT);
 });
 
 function compileToFiles(scrmlSource, testName, seedFiles = {}) {
@@ -137,15 +142,10 @@ describe("Issue #1 — server fn calling another server fn", () => {
     const { errors, serverJsPath, tmpDir } = compileToFiles(REPRO_SRC, "runtime", SEED);
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
 
-    // Point the emitted Bun.SQL handle at the absolute seeded DB path.
+    // Point the emitted Bun.SQL handle at the absolute seeded DB path, import,
+    // and register the module so its handle is closed at teardown.
     const absDbPath = resolve(tmpDir, "items.db");
-    const patched = readFileSync(serverJsPath, "utf-8").replace(
-      'const _scrml_sql = new SQL("sqlite:./items.db");',
-      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-    );
-    writeFileSync(serverJsPath, patched);
-
-    const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+    const mod = await patchAndImport(serverJsPath, absDbPath);
     const addRoute = Object.values(mod).find(
       (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("addItem"),
     );
@@ -527,13 +527,7 @@ ${body}
     expect(js).toContain("await norm(name)");
 
     const absDbPath = resolve(tmpDir, "items.db");
-    const patched = js.replace(
-      'const _scrml_sql = new SQL("sqlite:./items.db");',
-      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-    );
-    writeFileSync(serverJsPath, patched);
-
-    const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+    const mod = await patchAndImport(serverJsPath, absDbPath);
     const route = Object.values(mod).find(
       (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("check"),
     );

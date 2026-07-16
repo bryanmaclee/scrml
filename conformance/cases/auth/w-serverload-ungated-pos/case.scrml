@@ -1,0 +1,9 @@
+<program auth="required" db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="catalog">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS catalog (id INTEGER PRIMARY KEY, name TEXT)`}.run()
+    <products server auth="none"> = ?{`SELECT * FROM catalog`}.all()
+  }
+  <main><ul><each in=@products key=@.id><li : @.name></each></ul></main>
+</db>
+</program>

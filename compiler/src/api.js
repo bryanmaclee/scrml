@@ -45,7 +45,8 @@ import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
+import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
@@ -852,8 +853,23 @@ export function compileScrml(options = {}) {
   const GATHER_LIMIT = options.gatherLimit ?? 5000;
   let resolvedInputFiles = inputFiles.map(f => resolve(f));
   if (gatherEnabled && resolvedInputFiles.length > 0) {
-    const seen = new Set(resolvedInputFiles);
-    const queue = [...resolvedInputFiles];
+    // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
+    // compiled VALUE stays uniformly NATIVE — both the explicit entry seed
+    // (`resolve(f)`) and each gathered file (`resolveModulePathNative`, NOT the
+    // posix-keyed `resolveModulePath`). `filePath` must stay native everywhere
+    // (public `outputs`-key contract; posix-folding it caused 474 fails), so
+    // gather must not inject posix filePaths. Before this fix `seen` was a plain
+    // native `Set` compared against the posix `resolveModulePath` result, so a
+    // Windows entry file a SIBLING also imports missed the dedup and compiled
+    // TWICE. Canonical membership + native values (via `queue`, not `[...seen]`)
+    // fixes it while keeping the graph the sole posix-keyed layer.
+    const seen = new PathKeyedSet();
+    const queue = [];
+    for (const f of resolvedInputFiles) {
+      if (seen.has(f)) continue;
+      seen.add(f);
+      queue.push(f);
+    }
     let i = 0;
     let limitExceeded = false;
     while (i < queue.length && !limitExceeded) {
@@ -881,7 +897,7 @@ export function compileScrml(options = {}) {
         // get pulled in by their own consumers; .js imports are not gathered.
         if (!spec.startsWith("./") && !spec.startsWith("../")) continue;
         if (spec.endsWith(".js")) continue;
-        const abs = resolveModulePath(spec, filePath);
+        const abs = resolveModulePathNative(spec, filePath);
         if (!abs.endsWith(".scrml")) continue;
         if (seen.has(abs)) continue;
         // Skip non-existent imports — MOD's existing E-IMPORT-006 check
@@ -904,7 +920,7 @@ export function compileScrml(options = {}) {
         }
       }
     }
-    resolvedInputFiles = [...seen];
+    resolvedInputFiles = queue;
   }
   // Reassign inputFiles so the existing pipeline iterates the gathered set.
   inputFiles = resolvedInputFiles;
@@ -1612,7 +1628,11 @@ export function compileScrml(options = {}) {
   //
   // Build fileASTMap from tabResults BEFORE the CE loop — CE consumes ast.components
   // so the cross-file lookup must use the pre-CE AST.
-  const fileASTMap = new Map();
+  // PathKeyedMap: SET with the native `tabResult.filePath`, GET inside CE
+  // (component-expander) with the posix `absSource` lookupKey — the boundary
+  // bridges the two so cross-file COMPONENT expansion resolves on Windows (else
+  // E-COMPONENT-035: the imported component's AST isn't found → survives CE).
+  const fileASTMap = new PathKeyedMap();
   for (const tabResult of tabResults) {
     if (tabResult.filePath) {
       fileASTMap.set(tabResult.filePath, tabResult);
@@ -1906,17 +1926,24 @@ export function compileScrml(options = {}) {
   //   4. Filter to only exported type names (from exportRegistry)
   //   5. Merge into the importing file's importedTypes map
   // This runs after CE so typeDecls are final (component-expander may hoist them).
-  const ceFileMap = new Map();
+  // PathKeyedMap: `ceFileMap` is SET with the native AST `f.filePath` but GET
+  // with the posix `imp.absSource` (getDepRegistry) — the boundary canonicalizes
+  // both so the cross-file type lookup can't desync (else E-ENGINE-004 /
+  // missing-E-TYPE-020 on Windows: the exact regression the graph-posix change
+  // otherwise reintroduces).
+  const ceFileMap = new PathKeyedMap();
   for (const f of ceResults) {
     if (f.filePath) ceFileMap.set(f.filePath, f);
   }
 
-  const importedTypesByFile = new Map();
+  // SET with the posix key from iterating the (PathKeyedMap) importGraph, GET
+  // with the native `fileAST.filePath` in type-system.ts — PathKeyedMap bridges.
+  const importedTypesByFile = new PathKeyedMap();
 
   // Memoize per-file typeRegistry builds — buildTypeRegistry is pure given
   // typeDecls, so caching by file path is safe and avoids repeated work when
   // many importers reach the same dep.
-  const depRegistryCache = new Map(); // absSource → Map<name, ResolvedType>
+  const depRegistryCache = new PathKeyedMap(); // absSource → Map<name, ResolvedType>
   function getDepRegistry(absSource) {
     if (depRegistryCache.has(absSource)) return depRegistryCache.get(absSource);
     const depFile = ceFileMap.get(absSource);
