@@ -1,0 +1,16 @@
+${
+    <signup>
+        <uname> = <input type="text"/>
+    </>
+    <profile>
+        <uname> = <input type="text"/>
+    </>
+    <contact>
+        <email> = <input type="email"/>
+    </>
+}
+<form>
+    <signup><uname/></>
+    <profile><uname/></>
+    <email/>
+</>
