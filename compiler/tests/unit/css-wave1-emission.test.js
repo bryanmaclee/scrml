@@ -273,6 +273,25 @@ describe("§65.2.5 — :where()-flat wrapping", () => {
     expect(css).toContain(":where(.a), .b::before {");
   });
 
+  test("finding [2]: a component scope rule beats a program-global rule via @layer", () => {
+    const { css } = compileCss(`<program>
+  #{ a { color: red; } }
+  const Link = <a props={}>
+      #{ .link { color: green; } }
+      <a class="link">hi</a>
+  </>
+  <Link/>
+</program>`);
+    // The layer-order declaration + the program-global `@layer global` block.
+    expect(css).toContain("@layer reset, global;");
+    expect(css).toContain("@layer global {");
+    expect(css).toContain("a { color: red; }");
+    // The component scope rule is UNLAYERED (beats the program-global @layer).
+    expect(css).toContain(":where(.link) { color: green; }");
+    // The program-global block is a lower layer than the (unlayered) component scope.
+    expect(css.indexOf("@layer global")).toBeLessThan(css.indexOf("@scope"));
+  });
+
   test("wrapSelectorWhere: unit — never :is(); per-arm pseudo/attr/pseudo-element rules stay unwrapped", () => {
     expect(wrapSelectorWhere(".card")).toBe(":where(.card)");
     expect(wrapSelectorWhere(".a > .b")).toBe(":where(.a > .b)");

@@ -1,0 +1,12 @@
+<program>
+
+  #{ a { color: red; } }              // program-global escape hatch
+
+  const Link = <a props={}>
+      #{ .link { color: green; } }    // component author scope
+      <a class="link">hi</a>
+  </>
+
+  <Link/>
+
+</program>

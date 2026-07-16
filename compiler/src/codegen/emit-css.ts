@@ -306,38 +306,38 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
   const programStyleBlocks = (styleBlocks as CSSBlock[]).filter(b => b._componentScope == null);
   const componentStyleBlocks = (styleBlocks as CSSBlock[]).filter(b => b._componentScope != null);
 
-  const parts: string[] = [];
-
   // Gather theme decls + <program> + declared cell names in ONE AST walk (shared
   // by the theme-CSS, reset, and use-site `@`-lowering paths).
   const themeContext = collectThemeContext(nodes);
 
-  // --- §65.3.4 built-in reset — emitted FIRST so the `reset` @layer is the
-  //     LOWEST layer: an author `@layer` declared later always wins, and an
-  //     unlayered author rule always beats it (§65.3.4 / §65.8). Opt-out via
+  // --- §65.3.4 built-in reset (the `reset` @layer, lowest). Opt-out via
   //     `<program reset="none">`. ---
   const resetCss = emitResetLayer(nodes, themeContext);
-  if (resetCss) parts.push(resetCss);
 
   // --- §65.3.2 / §65.6 <theme> token lowering ---
   // The `:root` custom-property definitions + reactive variant selectors +
   // `@media` auto-binds. `tokenNames` (+ cell names) drive use-site `@ink` →
   // `var(--ink)` lowering across every author rule below.
   const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors, themeContext);
-  if (themeCss) parts.push(themeCss);
 
   const lowerCtx: LowerCtx = { themeTokens: tokenNames, cellNames: themeContext.cellNames, errors };
 
   // --- Program-level CSS (no @scope wrapping, no :where()-flat — the global
-  //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8) ---
+  //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8). §65.5 (bryan
+  //     ruling 2026-07-16): a program-global `#{}` rule goes in the `global`
+  //     @layer, BELOW the component author scope, so a component's own scoped rule
+  //     wins over the program-global escape hatch — deterministic by layer, no
+  //     specificity war (`.link` beats a program-global `a`). ---
+  const programGlobalParts: string[] = [];
   for (const block of programInlineBlocks) {
     const css = renderCssBlock(block, errors, lowerCtx, false);
-    if (css) parts.push(css);
+    if (css) programGlobalParts.push(css);
   }
   for (const block of programStyleBlocks) {
     const body = block.body ?? block.text ?? block.value ?? "";
-    if (body) parts.push(body);
+    if (body) programGlobalParts.push(body);
   }
+  const programGlobalCss = programGlobalParts.join("\n");
 
   // --- Component-scoped CSS (wrapped in @scope, DQ-7 native CSS @scope) ---
   // Flat-declaration #{} blocks (all bare prop:value, no selectors) are skipped —
@@ -366,17 +366,38 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     componentCssMap.get(name)!.push(body);
   }
 
+  const componentScopeBlocks: string[] = [];
   for (const [name, cssParts] of componentCssMap) {
     // DQ-7: native CSS @scope with donut boundary.
     // data-scrml="Name" is the scope root. [data-scrml] (any value) is the donut limit —
     // rules do not bleed into nested constructor boundaries.
-    const scopeBlock = [
+    componentScopeBlocks.push([
       `@scope ([data-scrml="${name}"]) to ([data-scrml]) {`,
       cssParts.join("\n"),
       `}`,
-    ].join("\n");
-    parts.push(scopeBlock);
+    ].join("\n"));
   }
+
+  // ---------------------------------------------------------------------------
+  // Assemble in §65.5 CASCADE-LAYER ORDER (bryan ruling 2026-07-16), lowest →
+  // highest:  `@layer reset`  <  `@layer global` (program-global `#{}`)  <
+  // component author scope (emitted UNLAYERED — an unlayered rule beats every
+  // layered rule, so a component's own scoped rule wins over the program-global
+  // escape hatch, deterministic by LAYER, no specificity war). A leading
+  // `@layer …;` order declaration makes the precedence explicit + robust.
+  // The theme `:root` custom-property definitions are unlayered (they define var
+  // VALUES; `var()` resolves across layers) and compete for nothing.
+  // ---------------------------------------------------------------------------
+  const parts: string[] = [];
+  const layerOrder: string[] = [];
+  if (resetCss) layerOrder.push("reset");
+  if (programGlobalCss) layerOrder.push("global");
+  if (layerOrder.length >= 2) parts.push(`@layer ${layerOrder.join(", ")};`);
+
+  if (resetCss) parts.push(resetCss);                                  // @layer reset — lowest
+  if (themeCss) parts.push(themeCss);                                  // :root tokens — unlayered
+  if (programGlobalCss) parts.push(`@layer global {\n${programGlobalCss}\n}`);  // below component
+  for (const scopeBlock of componentScopeBlocks) parts.push(scopeBlock);        // unlayered — highest
 
   return parts.join("\n");
 }

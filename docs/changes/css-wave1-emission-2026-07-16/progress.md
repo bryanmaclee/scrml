@@ -102,3 +102,25 @@ Coordinator dispatched a bundled fix round: the ratified `@` token sigil (supers
   clearly rank, STOP and ESCALATE — do not guess a cascade semantic"), NOT implemented. Lean: place
   program-global `#{}` in a layer BELOW the component `author` layer (so component wins), pending a
   ruling.
+
+### 2026-07-16 — finding [2] RULED + IMPLEMENTED (component-scope beats program-global)
+bryan ruled: component-scope beats program-global — implement the lean (program-global `#{}` →
+a CSS `@layer` below the component author scope).
+- emit-css.ts: program-global `#{}` now wrapped in `@layer global { … }`; component `@scope` stays
+  UNLAYERED (unlayered > every layer → component wins). Leading `@layer reset, global;` order
+  declaration makes the precedence explicit. Layer order (lowest→highest): reset < global <
+  component-author (unlayered). Theme `:root` stays unlayered (defines var VALUES).
+  - WHY unlayered-component (not `@layer author`): Tailwind CSS is appended UNLAYERED by index.ts
+    (which the brief said to avoid); wrapping component in `@layer author` would make it lose to
+    unlayered Tailwind (violating §65.8 utilities-LOW). Keeping component unlayered fixes [2]
+    (beats program-global @layer) while preserving the existing component-vs-Tailwind behavior;
+    the full §65.8 Tailwind-layer integration is Wave-3.
+- SPEC §65.5: NORMATIVE — the layer order + "a component's scoped rule wins over the program-global
+  escape hatch"; the precedence chain gains the program-global tier; §65.8 gains the `global`-layer
+  reconciliation note.
+- Repro finding2-component-beats-global.scrml: component `:where(.link)` (unlayered) beats
+  program-global `a` (@layer global) — `.link` is green, not red. Verified.
+- NOTE (surfaced): program-global `#{}` is now BELOW unlayered Tailwind too (it was unlayered =
+  specificity-war with Tailwind before). Consistent with "escape hatch = weakest," but a behavior
+  change for any corpus program-global rule that previously beat a utility by specificity. Full
+  suite green.
