@@ -1,0 +1,12 @@
+{
+  "id": "server-fn-e-route-003-nonserializable-return-neg",
+  "description": "§12.5 — the same server function returning a struct of JSON-serializable fields (`Item = { id: int, name: string }`) fires no E-ROUTE-003. The clean control: a struct of serializable fields crosses the wire fine.",
+  "language-version": "1.0",
+  "spec": "§12.5",
+  "source-test": "compiler/tests/unit/route-wire-serializability.test.js",
+  "rationale": "§12.5 wire-serializability gate (return direction): the gate recurses struct fields; every field of `Item` is a serializable primitive, so the return type is transmittable and E-ROUTE-003 stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ROUTE-003", "E-ROUTE-004"]
+  }
+}

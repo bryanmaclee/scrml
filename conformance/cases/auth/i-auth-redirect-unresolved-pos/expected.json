@@ -1,0 +1,12 @@
+{
+  "id": "auth-i-auth-redirect-unresolved-pos",
+  "description": "§40.1.1 — an auth gate whose redirect target (default `/login`) does not match any page URL pattern in the route map fires the per-gate I-AUTH-REDIRECT-UNRESOLVED (info). The quiet per-gate companion to the tier-2 W-AUTH-LOGIN-MISSING structural warning.",
+  "language-version": "1.0",
+  "spec": "§40.1.1",
+  "source-test": "compiler/src/auth-graph.ts (I-AUTH-REDIRECT-UNRESOLVED per-gate site)",
+  "rationale": "§40.1.1: for each gate that names a redirect, if the target is absent from RouteMap.pages' URL patterns the analyzer emits I-AUTH-REDIRECT-UNRESOLVED at info severity (per-gate), pointing at `scrml generate auth`. The default `/login` redirect with no authored login page is the canonical trigger.",
+  "expect": {
+    "codes": ["I-AUTH-REDIRECT-UNRESOLVED"],
+    "severity": { "I-AUTH-REDIRECT-UNRESOLVED": "info" }
+  }
+}
