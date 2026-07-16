@@ -408,6 +408,29 @@ function emitAsyncLibraryFns(
   // vendor primitive, so a fn calling one is colored + its call awaited) UNION the
   // Gap-1 stdlib-Promise seed, then the call-graph fixpoint.
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry);
+
+  // No-silent-leak backstop (bucket c) — run the structural detectors over ALL fns
+  // (NOT just the colored ones): after [4] a raw-verbatim-body async call no longer
+  // COLORS its fn, but it is still an unawaitable async boundary that must fail
+  // closed. A param-default / sync-callback / raw-body async call → fail closed; an
+  // indirect async call via a local alias (finding 6) → fail closed. Deduped
+  // against the shared error stream (both generateLibraryJs and the ss1 path scan
+  // the same fn body). Runs before the emit early-returns so a file whose ONLY
+  // async signal is unawaitable still reports.
+  const pushDeduped = (err: CGError): void => {
+    const es = err.span as { start?: number };
+    const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
+    if (!dup) errors.push(err);
+  };
+  for (const fn of fns) {
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+      pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+    }
+    for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+      pushDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
+    }
+  }
+
   if (asyncFnNames.size === 0) return none;
   // Route only NON-SQL async fns — a `?{}`/transaction body is pruned to
   // `.server.js` by collectSqlFnRemovalRanges (a client-facing raw `?{}` is
@@ -449,33 +472,6 @@ function emitAsyncLibraryFns(
   }
   // E-FOREIGN-006 crossing-shadow diagnostics from lowering an async fn body.
   for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
-  // No-silent-leak backstop (S239) — for EACH async fn, structurally detect every
-  // async call (stdlib-primitive OR transitively-async peer) in a NON-awaitable
-  // position (a sync lambda/callback body, a param default, or a raw escape-hatch
-  // body) and FAIL CLOSED via the shared E-ASYNC-STDLIB-IN-SYNC-CALLBACK. The
-  // structural detector (not the emit-populated sink, which the library const-decl
-  // init path does not reliably reach for a nested lambda) guarantees the axis-i
-  // invariant: a fn colored async ⟹ every async call in it is awaited OR diagnosed.
-  const pushDeduped = (err: CGError): void => {
-    const es = err.span as { start?: number };
-    // Dedup against the SHARED error stream (code+span): a library-with-server
-    // build runs the detectors in BOTH generateLibraryJs and the ss1 path over the
-    // same fn body — report each site once regardless of which runs first.
-    const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
-    if (!dup) errors.push(err);
-  };
-  for (const fn of toEmit) {
-    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
-      pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
-    }
-  }
-  // finding 6 — indirect async calls via a local alias run over ALL fns (the
-  // aliasing fn is NOT colored async — that IS the leak).
-  for (const fn of fns) {
-    for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
-      pushDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
-    }
-  }
   return { removals, lines: outLines };
 }
 

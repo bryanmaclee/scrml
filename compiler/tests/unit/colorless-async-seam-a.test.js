@@ -311,3 +311,17 @@ describe("§10 (finding 6): indirect async call via a local alias fails closed",
     expect(hasAsyncSyncCbErr(errors)).toBe(true);
   });
 });
+
+// §11 (S259 bucket c) — `.sort` with an async comparator is fail-closed (EXCLUDED
+// from the bucket-(a) combinator family; async merge-sort is out of scope).
+describe("§11 (bucket c): `.sort` with an async comparator fails closed", () => {
+  test("`rows.sort((a,b) => verifyPassword(pw,a) ? -1 : 1)` fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const p = fix("c-sort.scrml", `\${
+  import { verifyPassword } from "scrml:auth"
+  export function ranked(rows, pw) { const s = rows.sort((a, b) => verifyPassword(pw, a) ? -1 : 1); return s }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "c-sort", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+});

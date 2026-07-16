@@ -781,16 +781,15 @@ function emitModuleValueExportLines(
       const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
       if (!dup) errors.push(err);
     };
+    // Run BOTH detectors over ALL value-export fns (not just the colored ones): a
+    // raw-verbatim-body async call no longer colors its fn ([4]) but is still an
+    // unawaitable boundary that must fail closed; an indirect alias call likewise.
     for (const fnNode of fnDeclByName.values()) {
       const nm = fnNode?.name as string | undefined;
       if (!nm) continue;
-      if (asyncFnNames.has(nm)) {
-        for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
-          _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
-        }
+      for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
+        _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
       }
-      // finding 6 — indirect async calls via a local alias (the aliasing fn is NOT
-      // colored async — run over ALL value-export fns).
       for (const a of collectAliasedAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
         _pushVeDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
       }

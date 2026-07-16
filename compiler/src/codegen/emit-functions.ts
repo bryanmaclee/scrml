@@ -1157,10 +1157,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // cross-import async locals, THEN computeAsyncFnNames adds the Gap-1 stdlib-
   // Promise seed + propagates over local peer calls. The result drives BOTH the
   // `async` prefix AND the client peer-await (threaded as `clientAsyncFnNames`).
+  const _endpointClientSkipIds = (routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds;
   const _clientFns = fnNodes.filter((fn) => {
     const id = `${filePath}::${(fn.span as ASTNode)?.start}`;
     const r = routeMap.functions.get(id);
     if (r && r.boundary === "server") return false;
+    // S259 bucket (b) client-scope [6] — mirror the client-emit loop's exclusions
+    // so a SERVER-ONLY fn never pollutes the client coloring input: `handle()`
+    // middleware (server-only, no client body) + an `<endpoint>` private server
+    // helper (§61.6, retained server-side, tree-shaken from .client.js).
+    if ((fn as { isHandleEscapeHatch?: boolean }).isHandleEscapeHatch) return false;
+    if (_endpointClientSkipIds && _endpointClientSkipIds.has(id)) return false;
     // A user-source `async function` is FORBIDDEN (§19.9.8, E-ASYNC-NOT-IN-SCRML)
     // — a hard error, not compiler-managed async. Excluded so it neither colors
     // nor peer-awaits: compiler-managed async is INFERRED (stdlib/server/CPS),
@@ -1384,15 +1391,15 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     _clientLeakSeen.add(_key);
     errors.push(err);
   };
+  // Run BOTH detectors over ALL client fns (not just colored ones): a raw-verbatim
+  // body async call no longer colors its fn ([4]) but is still an unawaitable
+  // boundary → fail closed; an indirect alias call likewise.
   for (const fn of _clientFns) {
     const nm = fn.name as string | undefined;
     if (!nm) continue;
-    if (_clientAsyncFnNames.has(nm)) {
-      for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
-        _pushClientLeak(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
-      }
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
+      _pushClientLeak(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
     }
-    // finding 6 — indirect async calls via a local alias (aliasing fn not colored).
     for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
       _pushClientLeak(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
     }

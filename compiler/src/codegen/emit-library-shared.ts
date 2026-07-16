@@ -49,9 +49,15 @@ export function bodyHasForeignOrSql(node: unknown): boolean {
  * Collect the bare-identifier callee names of every call node beneath `node` — a
  * peer-fn call `foo(...)`, represented as either `{kind:"call", name:"foo"}` or
  * `{kind:"call", callee:{kind:"ident", name:"foo"}}`. A METHOD call (`x.foo()`,
- * a `member` callee) is NOT a peer-fn call and is skipped. Structural — never a
- * source-text scan, so a call-shaped token inside a comment or string literal
- * can never register as a call (the S239 fix for the over-matching text regex).
+ * a `member` callee) is NOT a peer-fn call and is skipped.
+ *
+ * STRUCTURAL ONLY (S259 colorless-async-boundaries [4]) — NEVER a source-text
+ * scan. The prior `extractCalleeNames(.raw)` recovery over a block-body lambda /
+ * template `.raw` used the over-matching `\bname\s*\(` regex (matches a call-shaped
+ * token in a string/comment) → false-positive coloring. Dropped: a call buried in
+ * a RAW verbatim body is NOT a coloring signal; that shape is bucket (c)
+ * (fail-closed, structurally detected) or bucket (a) (an array-method callback
+ * routed to the async combinator), never a raw text-scan for coloring.
  */
 function collectCalleeIdents(node: unknown, out: Set<string>): void {
   if (!node || typeof node !== "object") return;
@@ -61,20 +67,6 @@ function collectCalleeIdents(node: unknown, out: Set<string>): void {
     if (typeof n.name === "string") out.add(n.name);
     const callee = n.callee as ASTNode | undefined;
     if (callee && callee.kind === "ident" && typeof callee.name === "string") out.add(callee.name);
-  }
-  // A peer call can also hide in RAW text the parser never structured into `call`
-  // nodes: a BLOCK-BODY lambda/callback (`x => { a() }`) becomes an `escape-hatch`
-  // whose call lives only in `.raw`, and a template-literal interpolation
-  // (`` `${a()}` ``) keeps its call in the `lit` `.raw`. Recover those callees
-  // textually with the SAME shared helper emit-server's peer-emission walk uses
-  // (scheduling.extractCalleeNames) — else a fn reaching an async peer ONLY through
-  // such a callback is left sync and leaks an un-awaited Promise (the shape the old
-  // whole-body source regex caught but a purely structural `call`-node walk misses;
-  // over-recovering a non-async name is harmless — the fixpoint colors on
-  // `async.has(callee)`).
-  if ((n.kind === "escape-hatch" || (n.kind === "lit" && n.litType === "template"))
-      && typeof n.raw === "string") {
-    for (const c of extractCalleeNames(n.raw)) out.add(c);
   }
   for (const key of Object.keys(n)) {
     if (key === "span") continue;

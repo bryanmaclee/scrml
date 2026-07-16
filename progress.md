@@ -154,6 +154,45 @@ Gap 2 (browser/client transitive) — CONFIRMED coloring-alone insufficient (nee
 ### NEXT
 - Final full-gate + conformance verification; report.
 
+## 2026-07-16 — S259 colorless-async-boundaries DD ruling — Phase 1 (precision + coverage)
+
+Read the ratified DD (colorless-async-boundaries-2026-07-16.md). bryan ruled: bucket (a) BUILD
+the combinator transform (FORK 1a), bucket (b) finish coverage, bucket (c) structural fail-closed
+(param-default/non-foreign-raw/.sort), coloring precision [4]/[5].
+
+### DONE this increment (tractable precision + coverage; committed):
+- [4] COLORING PRECISION — dropped the over-matching `\bname\s*\(` raw-text scan from coloring
+  (collectCalleeIdents). Coloring is structural-call-node only. Re-wired the fail-closed detectors
+  (collectNonAwaitableAsyncCalls + collectAliasedAsyncCalls) to run over ALL fns (not just colored
+  ones) BEFORE the emit early-returns, in all 3 paths (library/ss1/client): a raw-verbatim-body
+  async call no longer colors its fn but still fails closed (bucket c). Findings 1/3/6 still fire.
+- [6] client-scope — `_clientFns` coloring input now excludes `isHandleEscapeHatch` (handle()
+  middleware) + `endpointClientSkipIds` (§61.6 private server helpers), mirroring the emit loop.
+- bucket (c) `.sort` async comparator — verified fail-closed via the general lambda-callback
+  detector (an async call in the `.sort` comparator lambda). MUST stay excluded when bucket (a) lands.
+- Tests: colorless-async-seam-a.test.js → 14 (added §11 .sort fail-closed).
+- Unit 16216/0, integration 3071/0, conformance 642/642.
+
+### KEY BLOCKING FINDING — [5] root cause is a PARSER bug, not codegen:
+`sortBy`/`groupBy`/`unique` (scrml:data) fail-closed to isAsync=true because the STDLIB-EXPORT-SEED's
+isolated mini-parse (`splitBlocks`+`buildAST` in api.js `_parseStdlibExports`) returns 0 blocks for
+`stdlib/data/transform.scrml` (block-splitter E-CTX-003 in isolation; the FULL pipeline parses it
+fine via MOD). So the re-export chain index→transform can't resolve sortBy's terminal isAsync=false
+→ fail-closed to async. The Bug-18 SYMPTOM is already fixed (clientAsyncBody gate); the ROOT (a
+mini-parser fragility on transform.scrml) is a parser fix, out of codegen remit — SURFACED.
+
+### REMAINING (large — surfaced with plan):
+- bucket (a) THE COMBINATOR TRANSFORM (flagship): ~9 runtime helpers `_scrml_{some,every,find,
+  findIndex,filter,map,forEach,reduce,flatMap}Async` (sequential for-await, order + early-exit) +
+  emit-expr recognition (async callback → `await _scrml_*Async(coll, asyncCb)`) + detector routing
+  (array-method async callback → combinator, NOT fail-closed; .sort EXCLUDED) + runtime tests.
+- bucket (b) aliasing FULL MULTI-HOP const-propagation (replace the alias fail-closed with coloring
+  + await; note the declaredNames-exclusion issue for awaiting a declared alias).
+- bucket (b) cross-lib async `.scrml` import client await (extend client await beyond local names).
+- bucket (b) operand-family verification (&&/||/??/ternary/obj-array-lit/template/optional-chain).
+- bucket (c) [3] foreign `_={}=` regression: keep foreign-block fns on the §23.6 async-IIFE path,
+  do NOT route them through emitLibraryFnMember.
+
 ## 2026-07-16 — S239 adversarial-review fix round (6 correctness + 3 cleanups)
 
 ROOT CAUSE: coloring was extended but await-emission + fail-closed drain were not, so
