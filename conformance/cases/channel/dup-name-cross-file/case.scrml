@@ -1,0 +1,8 @@
+<program>
+${
+  import { chat as ChatX } from './x.scrml'
+  import { chat as ChatY } from './y.scrml'
+}
+<ChatX/>
+<ChatY/>
+</program>

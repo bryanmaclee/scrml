@@ -1,0 +1,11 @@
+{
+  "id": "channel-dup-name-cross-file",
+  "description": "§38.12.8 — a consumer imports a channel named `chat` from TWO different source files (`./x.scrml` and `./y.scrml`), both declaring `export <channel name=\"chat\">`. The two wire-identical channels would conflict on the same WebSocket route `/_scrml_ws/chat`, so CHX fires E-CHANNEL-008. (Multi-file: `x.scrml` + `y.scrml` are aux import fixtures.)",
+  "language-version": "1.0",
+  "spec": "§38.12.8, §38.12",
+  "rationale": "§38.12.8: cross-file channel imports SHALL have distinct `name=` values — two channels sharing the same wire-name from different source files conflict on one WS route. The consumer importing both SHALL emit E-CHANNEL-008. Resolution: rename the channel in one source file.",
+  "expect": {
+    "codes": ["E-CHANNEL-008"],
+    "severity": { "E-CHANNEL-008": "error" }
+  }
+}

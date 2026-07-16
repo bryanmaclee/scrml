@@ -1,0 +1,12 @@
+{
+  "id": "channel-server-fn-uses-arg",
+  "description": "§38.6.1 clean neg — the same server-escalated channel function broadcasts a value derived from its ARGUMENT (`delta`) instead of reading the channel cell. This is the SPEC-recommended shape (operate on the payload/args), so E-CHANNEL-SERVER-CELL-READ stays silent. The `@count` cell is read only on the CLIENT (`${@count}`), which is permitted. Delta from `channel/server-cell-read`: arg-read vs channel-cell-read in the server function.",
+  "language-version": "1.0",
+  "spec": "§38.4, §38.6.1",
+  "rationale": "§38.6.1: a server-context channel function that operates on its arguments / the message payload (not a channel cell) is well-formed. A client-side read of a channel cell is unaffected. E-CHANNEL-SERVER-CELL-READ does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-SERVER-CELL-READ"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "channel-name-present",
+  "description": "§38.9 clean neg — the identical channel with a static `name=\"counter\"` literal fires NO E-CHANNEL-* diagnostic. The one-token delta (adding the required `name`) that silences E-CHANNEL-001.",
+  "language-version": "1.0",
+  "spec": "§38.9, §38.3",
+  "rationale": "§38.3: a `<channel>` carrying its required static `name` literal is well-formed on the naming contract — E-CHANNEL-001 (and the whole E-CHANNEL-* placement/naming family) stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-001"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}
