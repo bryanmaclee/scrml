@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-004-orphan-else-on-state-opener-pos",
+  "description": "§17.1.1 — a state object opener carrying `else` with NO preceding `if=` element at the same level SHALL fire E-CTRL-004. Pins the STANDALONE (non-chain) path: `< profile else name(string)>` follows a plain `<p>` (not an `if=` element), so no if-chain is ever opened. §17.1.1 rejects `else`/`else-if=` on a state opener 'REGARDLESS' of chain context ('SHALL reject any such usage'). Twins with ctrl-004-else-on-state-opener-pos (the in-chain path, state opener following `if=`): together they pin that E-CTRL-004 fires on a state opener carrying else/else-if in ANY position, exactly once. W-WHITESPACE-001 (deprecated whitespace-opener, the only current-impl form yielding a state-constructor-def AST node) and W-PROGRAM-SPA-INFERRED co-fire incidentally; neither asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on a state object opener. The compiler SHALL reject any such usage (E-CTRL-004).' The rejection is unconditional — it does not depend on the opener being a chain continuation. FIX HISTORY (S239 adversarial review, 2026-07-16): the initial E-CTRL-004 fix lived only inside the collapseIfChains chain-scan loop (reached only after an `if=` element starts a chain), so a STANDALONE state-opener-with-else was still silently accepted — the node-level E-CTRL-001/002/005 checks are all gated on `node.kind === \"markup\"` and a state / state-constructor-def node matches none of them. The fix moved E-CTRL-004 to a single node-level check (kind-agnostic, reads `node.attrs` directly) that fires on any state opener carrying else/else-if regardless of position, covering both the orphan case here and the in-chain case without double-emit. Notably E-CTRL-001 does NOT fire here: that code is the MARKUP orphan-else diagnostic; a state opener's else is E-CTRL-004's territory, not E-CTRL-001's.",
+  "expect": {
+    "codes": ["E-CTRL-004"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003", "E-CTRL-005"],
+    "severity": { "E-CTRL-004": "error" }
+  }
+}

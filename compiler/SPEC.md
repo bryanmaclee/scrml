@@ -18059,7 +18059,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-LOOP-004 | §49.9 | `continue label` — label not found or not a loop | Error |
 | E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
-| E-LOOP-007 | §49.9 | `while` used as expression without `lift`/`~` | Error |
+| E-LOOP-007 | §49.9 | `while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception | Error |
 | W-ASSIGN-001 | §50.4 | `=` in condition position without double parentheses | Warning |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
@@ -25316,10 +25316,13 @@ fn scan() {
 
 ---
 
-### E-LOOP-007: `while` Statement in Expression Position Without `lift`
+### E-LOOP-007: `while` Bound as a Value (Expression-Position `while`)
 
-A `while` statement is used as the right-hand side of an assignment or in another expression
-position without the `lift`/`~` pattern.
+A `while` is bound as a value — its whole loop occupies an expression position, e.g. the
+right-hand side of a decl (`let x = while (...) { ... }`). This fires with or without a
+`lift` in the loop body; the example below has none and is still an Error. The sole exception
+is the §49.6.1 accumulator pattern — a STATEMENT `while` whose lifted values are consumed by a
+following `let result = ~` — where the `while` is a statement, not the bound value.
 
 ```scrml
 let x = while (true) { 5 }   // Error E-LOOP-007
@@ -25341,7 +25344,7 @@ let x = while (true) { 5 }   // Error E-LOOP-007
 | E-LOOP-004 | `continue label` — label not found or not a loop | Error |
 | E-LOOP-005 | `break`/`continue` crosses a function scope boundary | Error |
 | E-LOOP-006 | Duplicate label identifier within the same function scope | Error |
-| E-LOOP-007 | `while` used as an expression without `lift`/`~` pattern | Error |
+| E-LOOP-007 | `while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception | Error |
 
 All E-LOOP errors are reported at the TS stage (Stage 6), after AST construction and scope
 resolution, as part of the loop control flow validation pass.
