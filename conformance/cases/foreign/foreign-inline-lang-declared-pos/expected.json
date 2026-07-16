@@ -1,0 +1,11 @@
+{
+  "id": "foreign-inline-lang-declared-pos",
+  "description": "§23.6 positive — a library file with a top-level `<foreign lang=\"ts\" />` declaration ahead of a bound inline value-returning `_={ 1 + 1 }=` block. `<foreign lang>` resolves the library's foreign-language context (§23.6), so the admitted block's `lang=` resolves to `ts` and the whole E-FOREIGN-* family stays silent (E-FOREIGN-003 no-lang, E-FOREIGN-004 non-admitted-bare, E-FOREIGN-005 unsupported-lang all inapplicable here).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.6",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-FOREIGN-"]
+  }
+}

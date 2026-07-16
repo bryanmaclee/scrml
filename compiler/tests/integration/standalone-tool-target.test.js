@@ -15,7 +15,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { compileScrml, rewriteRelativeImportPaths } from "../../src/api.js";
 import { generateToolJs } from "../../src/codegen/emit-tool.ts";
@@ -508,11 +508,18 @@ function main(args: string[]): number {
 
 describe("§64 tool imports — fix-round hardening (#3/#4/#5/#6-7)", () => {
   test("#3 relocation-skip keys on the compiled-source set (vendored .js still relocates)", () => {
-    const src = "/proj/tool.scrml", out = "/proj/dist";
+    // resolve() the fixture paths so they match how rewriteRelativeImportPaths
+    // keys the compiled-source set: it derives `absImportPath` via
+    // `resolve(sourceDir, relPath)` (NATIVE separators) and looks up the
+    // `.scrml` sibling in `emittedScrmlSources`. Seeding the set with a POSIX
+    // literal ("/proj/libpure.scrml") never matches the native resolved key
+    // ("C:\proj\libpure.scrml") on Windows, so the tree-mirror skip wouldn't
+    // fire and libpure.js would be wrongly relocated. resolve() is a no-op on POSIX.
+    const src = resolve("/proj/tool.scrml"), out = resolve("/proj/dist");
     const js = 'import { addup } from "./libpure.js";\nimport { x } from "./util.js";\n';
     // libpure.scrml WAS compiled (its <base>.js mirrors the tree); util.scrml is
     // an unrelated, uncompiled file next to a genuinely-vendored util.js.
-    const emitted = new Set(["/proj/libpure.scrml"]);
+    const emitted = new Set([resolve("/proj/libpure.scrml")]);
     const rewritten = rewriteRelativeImportPaths(js, src, out, emitted);
     expect(rewritten).toMatch(/from "\.\/libpure\.js"/);  // tree-mirror: unchanged
     expect(rewritten).toMatch(/from "\.\.\/util\.js"/);   // vendored: relocated

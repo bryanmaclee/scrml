@@ -1,0 +1,12 @@
+{
+  "id": "reactive-decl-rhs-interp-wrapped-pos",
+  "description": "§6.2 decl-RHS canonical form (codes): wrapping a declaration RHS in a `${ }` logic block is non-canonical and is compile error E-DECL-RHS-INTERP-WRAPPED. Covers all THREE structural decl forms the SPEC names — plain (`<total> = ${ ... }`), derived (`const <doubled> = ${ ... }`), and typed (`const <tripled>: number = ${ ... }`). Asserted AS an error. E-SCOPE-001 is asserted ABSENT: the SPEC requires this diagnostic to recover by unwrapping rather than cascade a spurious undeclared-`$` error. Incidental W-PROGRAM-001 / E-DG-002 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 (SPEC.md:2217): \"All three RHS shapes take a bare expression as the right-hand side. Wrapping the RHS in a `${ }` logic block is non-canonical and SHALL be compile error E-DECL-RHS-INTERP-WRAPPED\" — with the worked examples `<bad> = ${ @names.length }` and `const <bad> = ${ @names.filter(...) }` and `const <bad>: number = ${ @count * 2 }`. There is ONE canonical RHS form (the bare expression); the `${ }` wrapper belongs to markup/interpolation contexts (§3.3, §10.2), not a declaration RHS — admitting it would be a redundant second form (limit-the-primitive, §14.1.1). SPEC.md:2225 further requires the diagnostic to fire \"for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural declarations\" and to recover \"by unwrapping (so no spurious E-SCOPE-001 on the orphaned `$`)\".",
+  "expect": {
+    "codes": ["E-DECL-RHS-INTERP-WRAPPED"],
+    "notCodes": ["E-SCOPE-001"],
+    "severity": { "E-DECL-RHS-INTERP-WRAPPED": "error" }
+  }
+}

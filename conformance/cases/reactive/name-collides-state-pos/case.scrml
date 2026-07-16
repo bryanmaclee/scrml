@@ -1,0 +1,8 @@
+${
+    <count> = 0
+    function example() {
+        let count = 5
+        return count
+    }
+}
+<button id="b" onclick=example()>go</>

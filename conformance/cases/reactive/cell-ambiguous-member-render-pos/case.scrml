@@ -1,0 +1,11 @@
+${
+    <signup>
+        <uname> = <input type="text"/>
+    </>
+    <profile>
+        <uname> = <input type="text"/>
+    </>
+}
+<form>
+    <uname/>
+</>

@@ -1,0 +1,12 @@
+{
+  "id": "ssr-w-ssr-prerender-unscoped-neg",
+  "description": "§52.15/§52.8 — a per-user row-scoped Pattern-C cell (`SELECT * ... WHERE user_id = ${@currentUser.id}`) fires no W-SSR-PRERENDER-UNSCOPED: each viewer's first paint contains only their own rows, so there is no cross-user leak. The clean control for the unscoped-prerender warning.",
+  "language-version": "1.0",
+  "spec": "§52.15",
+  "source-test": "compiler/tests/integration/server-load-authority.test.js",
+  "rationale": "§52.15: the `${@currentUser.id}` WHERE clause row-scopes the query to the request user, so the SSR pre-render is per-user and W-SSR-PRERENDER-UNSCOPED stays silent (§52.6.5).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-SSR-PRERENDER-UNSCOPED"]
+  }
+}

@@ -20,6 +20,8 @@
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
+import { toPosix } from "../path-canonical.js";
+import { resolveModulePath } from "../module-resolver.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -404,11 +406,13 @@ function isCrossFileLinked(
       }
     }
   }
-  // (b) this file is imported by another `.scrml`?
+  // (b) this file is imported by another `.scrml`? `imp.absSource` is posix
+  // (graph key via resolveModulePath); canonicalize `filePath` once.
+  const fpKey = toPosix(filePath);
   for (const [, entry] of importGraph) {
     if (!entry || !Array.isArray(entry.imports)) continue;
     for (const imp of entry.imports) {
-      if (imp.absSource === filePath) return true;
+      if (imp.absSource === fpKey) return true;
     }
   }
   return false;
@@ -488,12 +492,15 @@ function asyncImportedLocalsOf(
   if (!Array.isArray(imports) || imports.length === 0) return result;
   const filePath = tf?.filePath as string | undefined;
   if (!filePath) return result;
-  const baseDir = dirname(filePath);
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
     if (!imp.source.endsWith(".scrml")) continue;
-    const absSource = resolve(baseDir, imp.source);
-    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    // Shape-aware resolve (posix key, no drive-prepend for a drive-less
+    // importer) so `absSource` keys identically to the graph/AST `filePath`.
+    // A bare `resolve()` drive-prepended on Windows and silently dropped
+    // await-coloring for imported async fns — the #26 failure class.
+    const absSource = resolveModulePath(imp.source, filePath);
+    const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue;
     const asyncNames = asyncExportNamesOf(srcFile, files, memo);
     if (asyncNames.size === 0) continue;
@@ -526,12 +533,15 @@ function checkToolImportsAreImportable(
   const tf = toolFileAST as any;
   const imports = (tf?.ast?.imports ?? tf?.imports ?? []) as any[];
   if (!Array.isArray(imports) || imports.length === 0) return;
-  const toolDir = dirname(filePath);
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
     if (!imp.source.endsWith(".scrml")) continue; // scrml:/vendor handled elsewhere
-    const absSource = resolve(toolDir, imp.source);
-    const srcFile = (files as any[]).find((fa) => fa?.filePath === absSource);
+    // Shape-aware resolve so the E-TOOL-006 importability lookup keys identically
+    // to the graph; a bare `resolve()` drive-prepended a drive-less importer on
+    // Windows, missed `srcFile`, and let the check fail-OPEN (shipping a broken
+    // `import … from "./x.js"`) instead of fail-CLOSED at compile time.
+    const absSource = resolveModulePath(imp.source, filePath);
+    const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue; // not compiled here → MOD E-IMPORT-005 owns this
     if (isLibraryShapedFile(srcFile)) continue; // importable
     const span = imp.span ?? { start: 0, end: 0, line: 1, col: 1 };
@@ -1762,9 +1772,13 @@ export function runCG(input: CgInput): CgOutput {
       const entryFilePath = (entryFile as any).filePath as string;
       const entryOutput = outputs.get(entryFilePath);
       const entryHtml = entryOutput?.html ?? null;
-      const entryBase = entryFilePath
-        ? entryFilePath.replace(/\.scrml$/, "").split("/").pop()
-        : null;
+      // basename(...,".scrml") is exactly what NAMES the emitted asset files
+      // (the <base>.client.js / <base>.css sites), so referencing it here keeps
+      // the shell-composition hrefs matching the actual filenames by
+      // construction. It also fixes the Windows asset-path bug for free: win32
+      // basename splits on `\`, where the previous `.split("/").pop()` returned
+      // the whole native absolute path (baking `C:\...\app` into a browser URL).
+      const entryBase = entryFilePath ? basename(entryFilePath, ".scrml") : null;
 
       // Extract the `<body>...</body>` block from the entry's html. This
       // gives us the rendered shell — header, footer, the `<main>` slot,
@@ -1893,14 +1907,21 @@ export function runCG(input: CgInput): CgOutput {
           // dist root and per-page files may be at dist/X/ —
           // computing the relative path keeps the script ref correct
           // for any depth.
-          const pageDistDir =
-            filePath
-              .replace(/\.scrml$/, "")
-              .replace(/[^/]+$/, "")
-              .replace(/.*\/pages\//, "")
-              .replace(/^pages\//, "") || "";
-          const depth = pageDistDir
-            ? pageDistDir.split("/").filter(Boolean).length
+          //
+          // Derive the page's dist-subdir depth from its source dir RELATIVE to
+          // the entry's dir (node `relative` is platform-correct — win32 splits
+          // on `\`), then drop a leading `pages/` segment (mpa-shell Sub 1 strips
+          // `pages/` from dist paths, so a `pages/X/` source emits at dist `X/`).
+          // Using `relative` instead of raw-path regexes avoids two bugs the old
+          // `/pages/`-hardcoded chain had: leaking a native `\` (or absolute)
+          // prefix into the depth on Windows, and mis-counting a `<page>` file
+          // authored OUTSIDE a `pages/` dir. `pages` alone → depth 0; `pages/X`
+          // → depth 1; a non-`pages/` `admin/x.scrml` → its true relative depth.
+          const pageRelDir = relative(dirname(entryFilePath), dirname(filePath))
+            .replace(/\\/g, "/")
+            .replace(/^pages(?:\/|$)/, "");
+          const depth = pageRelDir
+            ? pageRelDir.split("/").filter(Boolean).length
             : 0;
           const upToRoot = depth > 0 ? "../".repeat(depth) : "";
 
@@ -1916,11 +1937,11 @@ export function runCG(input: CgInput): CgOutput {
               `<script src="${upToRoot}${entryBase}.client.js"></script>`,
             );
           }
-          // Re-add the page's own client.js (was stripped above).
-          const pageBase = filePath
-            .replace(/\.scrml$/, "")
-            .split("/")
-            .pop();
+          // Re-add the page's own client.js (was stripped above). basename
+          // (win32-aware, matches the asset-naming sites) — not a hand-rolled
+          // `.split("/").pop()`, which mis-handles native `\` on Windows and a
+          // literal `\` in a POSIX filename.
+          const pageBase = basename(filePath, ".scrml");
           if (output.clientJs) {
             scriptParts.push(
               `<script src="${pageBase}.client.js"></script>`,

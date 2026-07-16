@@ -1,0 +1,12 @@
+{
+  "id": "channel-inside-program",
+  "description": "§38.1 clean neg — a `<channel>` declared as a child of `<program>` is the canonical v0.3 placement; E-CHANNEL-OUTSIDE-PROGRAM stays silent. The delta from `channel/outside-program` is the channel moving inside the `<program>` body.",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2",
+  "rationale": "§38.1 / §38.2: a `<channel>` at programDepth >= 1 (descendant of `<program>`) is the canonical placement and SHALL NOT fire E-CHANNEL-OUTSIDE-PROGRAM.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-OUTSIDE-PROGRAM"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

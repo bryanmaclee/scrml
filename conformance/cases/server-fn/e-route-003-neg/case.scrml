@@ -1,0 +1,9 @@
+<ul>
+${
+  type Item:struct = { id: int, name: string }
+  server function getItem(id: int) -> Item {
+    return 1
+  }
+}
+<li>x</li>
+</ul>

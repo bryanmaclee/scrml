@@ -1,0 +1,13 @@
+{
+  "id": "protect-e-pa-006-missing-src-neg",
+  "description": "§14.8.7/§44.2 — the same `<db>` block WITH `src=` present resolves its schema source (shadow DB from the `?{}` CREATE TABLE) and fires no E-PA-006. The clean control for the missing-src reject.",
+  "language-version": "1.0",
+  "spec": "§14.8.7",
+  "source-test": "compiler/src/protect-analyzer.ts (E-PA-006 fire site, step 1: src= presence)",
+  "rationale": "protect-analyzer §step1: with `src=` present the analyzer resolves the path and (file absent + CREATE TABLE present) builds the shadow DB from the `?{}` block, so E-PA-006 never fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PA-006"],
+    "notCodePrefixes": ["E-PA-"]
+  }
+}

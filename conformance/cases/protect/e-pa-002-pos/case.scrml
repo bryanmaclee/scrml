@@ -1,0 +1,10 @@
+<program>
+  <db src="nonexistent.db" protect="passwordHash" tables="users">
+    ${
+      function ping() {
+        return 1
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

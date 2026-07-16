@@ -1,0 +1,9 @@
+${
+    <count> = 0
+    function example() {
+        let tally = @count
+        @count = tally + 5
+    }
+}
+<button id="b" onclick=example()>go</>
+<p id="c">Count: ${@count}</>

@@ -1,0 +1,16 @@
+{
+  "id": "engine-derived-engine-no-rules-neg",
+  "description": "§51.0.J negative — the SAME derived engine as derived-engine-no-rules-pos with `rule=` removed, but with the state-child surfaces §51.0.J explicitly rules LEGAL on a derived engine still present: a state-child `effect=${...}` and an `<onTransition from=.Healthy effect=${...}/>`. E-DERIVED-ENGINE-NO-RULES stays silent. Load-bearing: this proves the check is `rule=`-SPECIFIC, not a blanket 'derived engines take no state-child attributes' — E-ENGINE-EFFECT-ON-DERIVED is in notCodes because THAT code is the engine-OPENER boot-effect (§51.0.H Form 3), and a state-child `effect=` on a derived engine must not be confused for it.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J rules table: '`<onTransition>` and `effect=` on state-children | LEGAL — fire on derived state changes (the value changed; transition is real, just initiated by source-cell update, not user code).' Only `rule=` is rejected. The §34 E-ENGINE-EFFECT-ON-DERIVED row scopes itself the same way: '`effect=` used on the opener of a `derived=` engine … NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J.' So the derived engine here — rich state-children, no authored rules — is fully conformant.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-DERIVED-ENGINE-NO-RULES",
+      "E-ENGINE-EFFECT-ON-DERIVED",
+      "E-ENGINE-EFFECT-AMBIGUOUS"
+    ],
+    "notCodePrefixes": ["E-DERIVED-ENGINE-"]
+  }
+}

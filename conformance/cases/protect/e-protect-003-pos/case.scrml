@@ -1,0 +1,18 @@
+<program>
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)`}
+  </schema>
+  <db src="app.db" protect="email" tables="users">
+    ${
+      function loadUsers(rows) {
+        let out = []
+        for (let x of rows) {
+          let u = ?{`SELECT id, email FROM users WHERE id = ${x.id}`}.get()
+          out.push(u)
+        }
+        return out
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>

@@ -1,0 +1,11 @@
+<program db="postgres://localhost/app">
+
+  <room> = "general"
+
+  <channel name="chat-general">
+    <messages> = []
+  </channel>
+
+  <p>Room: ${@room} — ${@messages}</p>
+
+</program>
