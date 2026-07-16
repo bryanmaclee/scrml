@@ -1,0 +1,8 @@
+<foreign lang="ts" />
+<foreign lang="js" />
+${
+  export fn f(x) {
+    const o = _={ in: { x } x }=
+    return o
+  }
+}

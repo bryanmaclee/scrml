@@ -1,0 +1,11 @@
+{
+  "id": "foreign-crossing-shadow-neg",
+  "description": "§23.2.4a E-FOREIGN-006 (crossing-shadow) — the `in:{ x }` crossing name becomes the emitted async-IIFE's parameter, but the slice ALSO declares a top-level `const x = 1` of the same name inside the block. That redeclares the IIFE parameter (`(async (x) => { const x = 1; … })(x)`), invalid JS, so the pre-emit syntactic scan (emit-logic.ts, opacity-preserving per §23.2.3) fires E-FOREIGN-006 naming the shadowed binding, per §23.2.4a.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.2.4a",
+  "expect": {
+    "codes": ["E-FOREIGN-006"],
+    "notCodes": [],
+    "severity": { "E-FOREIGN-006": "error" }
+  }
+}

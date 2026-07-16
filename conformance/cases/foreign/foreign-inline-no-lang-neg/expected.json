@@ -1,0 +1,11 @@
+{
+  "id": "foreign-inline-no-lang-neg",
+  "description": "§23.2/§23.6 E-FOREIGN-003 — a library file (`export fn`s, NO `<program>`) with a bound inline value-returning `_={ 1 + 1 }=` foreign block but NO `<foreign lang=… />` declaration and no ancestor `<program lang=>` either. The admitted (value-returning) block has no `lang=` to resolve in any ancestor, so it fires E-FOREIGN-003 (type-system.ts checkForeignBlocks) per §23.2/§23.6.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.2",
+  "expect": {
+    "codes": ["E-FOREIGN-003"],
+    "notCodes": [],
+    "severity": { "E-FOREIGN-003": "error" }
+  }
+}
