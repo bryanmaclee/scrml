@@ -1,0 +1,6 @@
+/* BEFORE (base 9c27ce9a) — themed-app.scrml emitted CSS.
+   Tokens NEVER lowered (`color: ink` is literal INVALID CSS), no :root,
+   no reset layer, no :where()-flat. This is the confirmed broken emission. */
+@scope ([data-scrml="Card"]) to ([data-scrml]) {
+.card { padding: 16px; color: ink; background: bg; }
+}
