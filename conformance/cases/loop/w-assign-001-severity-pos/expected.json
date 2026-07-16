@@ -1,0 +1,12 @@
+{
+  "id": "loop-w-assign-001-severity-pos",
+  "description": "§34/§50.2.3 SEVERITY pin — W-ASSIGN-001 (a single-paren assignment used as a loop/if condition) is a WARNING, not an error. `do { ... } while (x = 5)` uses a bare single-paren assignment as the condition; the §50.2.3 detector fires W-ASSIGN-001. A do-while is used DELIBERATELY: it routes exclusively through the single-paren-assign detector (type-system.ts `checkSingleParenAssign`, which handles while/if/do-while), isolating the S260 severity fix. The sibling while/if condition-checker already emitted `warning`; the single-paren detector was constructing its TSError with no severity arg, so it defaulted to `error` — this case pins it back to `warning`. Incidental W-PROGRAM-001 / E-DG-002 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§50.2.3",
+  "rationale": "§34 code table: W-ASSIGN-001 is a Warning. §50.2.3: an assignment (`=`) used as a condition without double parens is flagged as a likely `==`/`is` typo, and is suppressed by double parens (`((x = 5))`) to signal deliberate intent. Being advisory (not a hard rejection), it is non-fatal — it emits at severity `warning`, never `error`.",
+  "expect": {
+    "codes": ["W-ASSIGN-001"],
+    "notCodes": [],
+    "severity": { "W-ASSIGN-001": "warning" }
+  }
+}

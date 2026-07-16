@@ -1,0 +1,14 @@
+{
+  "id": "reactive-decl-array-no-rhs-plain-neg",
+  "description": "§6.2 Shape-4 array boundary (the 'don't over-fire' pin for the S260 const-array fix): a PLAIN (non-`const`) reactive cell with an array type annotation and no RHS (`<items>: string[]`) is the canonical Shape-4 form — it synthesizes the type's canonical-empty `[]` and does NOT fire E-DECL-NEEDS-INITIALIZER. Only the `const`-modified form (`const <items>: string[]`, see `reactive/decl-needs-initializer-array-pos`) errors; the plain reactive form still defaults to `[]`. Verified at runtime: `@items` is `[]` and `${@items.length}` renders `0`.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4 table: a no-RHS typed reactive cell defaults to its type's canonical empty (int→0, string→\"\", bool→false, `T[]`→[]). The `const`-derived carve-out (SPEC.md:2213) applies ONLY to `const`-modified cells; a plain reactive `<items>: string[]` is governed by the Shape-4 table and synthesizes `[]`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DECL-NEEDS-INITIALIZER"],
+    "input": [],
+    "state": { "items": [] },
+    "domAnchored": [{ "selector": "#d", "text": "Count: 0" }]
+  }
+}

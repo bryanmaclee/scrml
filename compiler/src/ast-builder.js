@@ -6376,9 +6376,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const isArrayType = /\[\s*\]\s*$/.test(typeAnnotation);
 
         // const-derived no-RHS is NOT Shape 4 (§6.2): a derived cell requires an
-        // expression. (The array form historically synthesizes `[]` even for
-        // const; that behavior is preserved unchanged below.)
-        if (isConst && !isArrayType) {
+        // expression. This is UNCONDITIONAL across scalar AND array forms
+        // (SPEC.md:2213 — "`const <x>: T` with no RHS is a derived-with-no-
+        // expression error, NOT covered by [Shape 4]"; no array carve-out). A
+        // const cell's value IS its expression, so `const <items>: string[]`
+        // with no RHS has nothing to derive `[]` FROM — it errors cleanly,
+        // exactly like the scalar `const <x>: int` case. The `return null` here
+        // exits BEFORE the array `[]`-synthesis branch below, so no `[]` value
+        // is fabricated for the erroring const array. (S260: array carve-out
+        // removed — was `isConst && !isArrayType`.) The plain reactive array
+        // form (`<items>: string[]`, no `const`) is UNAFFECTED and still
+        // synthesizes `[]` via the Shape-4 array branch below.
+        if (isConst) {
           errors.push(new TABError(
             "E-DECL-NEEDS-INITIALIZER",
             `Derived cell \`const <${name}>: ${typeAnnotation}\` has no expression. A derived (\`const\`) cell requires an initializer expression (e.g. \`const <${name}>: ${typeAnnotation} = ...\`); the no-RHS canonical-empty/\`not\` default (§6.2 Shape 4) applies to plain reactive cells only.`,

@@ -1,0 +1,4 @@
+${
+    <items>: string[]
+}
+<p id="d">Count: ${@items.length}</>
