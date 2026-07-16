@@ -2904,3 +2904,19 @@ Surfaced by flogence dogfood. A top-level `let` in a serve= tool's `${}`, refere
 
 ### G-FN-STATE-DIAGNOSTICS-SOURCE-UNREACHABLE — E-FN-007 + E-STATE-COMPLETE fire only on synthetic AST; no scrml SOURCE reaches them — `NEW S256; LOW (audit-refinement); open`
 Surfaced by sPA ss70 (fn-purity conformance authoring). E-FN-007 (§48.4.1, divergent-branch `<state>` return without explicit union type) and E-STATE-COMPLETE (§54.6.1) have correct walkers but no scrml **source** produces the `state-instantiation`/`state-init` nodes they require — inline state-literal field-assignment (`let p = <T> f = v </>`) parses as logic-level assignment, not a state field initializer. Gated on the Phase-3+ inline-state-literal parser (same gate as the `.skip`ped `s48-fn.test.js` CONF-S32-005/006/007). **Audit consequence:** these 2 tier-1 codes are parser-gated, NOT authorable conformance-holes — reclassify in the freeze tier-split. Not an impl-vs-SPEC contradiction (walker + rule are sound; the source→AST path just doesn't reach them). <!-- @gap id=g-fn-state-diagnostics-source-unreachable sev=LOW status=open -->
+
+---
+
+## g-interprocedural-async-colorless — plain functions can't await a Promise-returning host call (colorless async across fn boundaries)
+
+**Severity:** MED (silent Promise-leak, Bug-51 class — a plain `export function` calling `safeCallAsync`/a stdlib-Promise primitive compiles clean but leaks the Promise; `r.ok === undefined`). **Status:** `scoping` → RATIFIED design, Phase-1 ready (S258). **Surfaced:** giti GITI-037.
+
+**Ruling (bryan S258): do it right — complete the "no colored functions" promise across function boundaries.** async-ness is compiler-INFERRED + typed-and-surfaced (read, never written) + derives across higher-order calls from the fn-arg's effect type. Design + research + the two-seam analysis: `../scrml-support/docs/deep-dives/interprocedural-cps-colorless-async-2026-07-15.md` (status: current, RATIFIED).
+
+**Key finding — cheaper than feared:** the ~200-400h "Links territory" estimate was for **Seam B** (from-scratch cross-function body-split CPS) which the corpus does NOT need. The real work is **Seam A** (colorless await-propagation) which is **~80% already built** — the JS host supplies `async`/`await`, and the compiler already emits it + runs transitive async-coloring fixpoints in 4 places.
+
+**Phase 1 (the fix, bounded but foundational — careful dispatch + S239):** unify the 4 async classifiers onto the `computeAsyncFnNames` nucleus (`compiler/src/codegen/emit-library-shared.ts:89-123`) + close 3 seed-holes:
+- Gap 1 — seed on stdlib-Promise calls (`bodyHasForeignOrSql` at `emit-library-shared.ts:102` recognizes only `?{}`/`<foreign>`; reuse `isPromiseReturningStdlibFn`, `module-resolver.js:846`).
+- Gap 2 — make the plain-client-fn classifier transitive (`hasServerCallees`, `scheduling.ts:153-171` is non-transitive).
+- Gap 3 — include `scrml:` vendor imports in the cross-module seed (`codegen/index.ts:494` skips non-`.scrml`).
+GITI-037 = Gaps 1∩3. Owes: the interprocedural S4/S5 soundness extension + the effect-notation design (the surfaced `⟨async⟩` glyph is a placeholder).
