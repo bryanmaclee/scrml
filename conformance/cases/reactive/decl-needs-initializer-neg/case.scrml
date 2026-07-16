@@ -1,0 +1,5 @@
+${
+    <count> = 2
+    const <doubled>: int = @count * 2
+}
+<p id="d">Doubled: ${@doubled}</>

@@ -1,0 +1,13 @@
+<items> = []
+const <activeItems> = @items.filter(i => i.active)
+${
+    function tryAdd(item) {
+        let local = [...@activeItems]
+        local.push(item)
+        @items = [...@items, item]
+    }
+    function describe() {
+        return @activeItems.join(",")
+    }
+}
+<p>x</>

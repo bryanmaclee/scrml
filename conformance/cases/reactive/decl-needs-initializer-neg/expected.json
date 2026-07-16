@@ -1,0 +1,14 @@
+{
+  "id": "reactive-decl-needs-initializer-neg",
+  "description": "§6.2 Shape-4 const-derived negative — the SAME decl as decl-needs-initializer-pos but WITH the initializer expression (`const <doubled>: int = @count * 2`). A derived cell supplied with an expression is the canonical Shape-3 form, so E-DECL-NEEDS-INITIALIZER stays silent. This is the missing-expression-vs-supplied-expression contrast.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 3 (Derived, Read-Only): \"The RHS is an expression marked with `const`. The cell recomputes whenever its dependencies change.\" The §6.2 Shape-4 parenthetical (SPEC.md:2213) makes the const-derived no-RHS form an error precisely because the expression is absent; supplying it satisfies Shape 3 and the diagnostic does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DECL-NEEDS-INITIALIZER"],
+    "input": [],
+    "state": { "count": 2, "doubled": 4 },
+    "domAnchored": [{ "selector": "#d", "text": "Doubled: 4" }]
+  }
+}

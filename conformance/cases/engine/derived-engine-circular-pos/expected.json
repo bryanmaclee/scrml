@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-circular-pos",
+  "description": "§51.0.J E-DERIVED-ENGINE-CIRCULAR — chained derivation that closes into a cycle. `<engine for=Health derived=match @mood {...}>` and `<engine for=Mood derived=match @health {...}>` each derive from the other's auto-declared variable (§51.0.C), forming the engine A → engine B → engine A cycle the §34 catalog row names. Detected at compile time by the dependency-graph machinery (§31) — Stage 7 (DG), not SYM. E-DERIVED-CIRCULAR-DEP is in notCodes: that is the CELL-form cycle (§6.6.10 / §31.5, `const <derived> = expr`), a distinct sibling code — this is the ENGINE-form cycle.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J rules table: 'Chained derivation (A → B → C) | LEGAL. Cycle detection at compile time → `E-DERIVED-ENGINE-CIRCULAR` (§34).' §34 catalog: 'Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle.' §31.5: 'A derived engine whose `derived=expr` depends on the engine's own variant is `E-DERIVED-ENGINE-CIRCULAR` (§34, also cross-ref §51.0.J)' — directly or transitively. The cycle is a compile-time error because it would otherwise form an infinite recompute loop.",
+  "expect": {
+    "codes": ["E-DERIVED-ENGINE-CIRCULAR"],
+    "notCodes": ["E-DERIVED-CIRCULAR-DEP"],
+    "severity": { "E-DERIVED-ENGINE-CIRCULAR": "error" }
+  }
+}
