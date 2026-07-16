@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-auth-content-not-gated-neg",
+  "description": "§40.9.5 — a page with no `<auth role>` content gate (sensitive content is expected to be withheld server-side, not via `<auth role>`) fires no W-AUTH-CONTENT-NOT-GATED. The clean control: the lint keys strictly on role-naming auth-role-block gates.",
+  "language-version": "1.0",
+  "spec": "§40.9.5",
+  "source-test": "compiler/src/auth-graph.ts (flagContentNotGated fire site)",
+  "rationale": "§40.9.5: flagContentNotGated only fires for a gate whose siteKind is auth-role-block AND whose role is non-null. With no such gate present, nothing leaks role-gated markup and the lint stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-AUTH-CONTENT-NOT-GATED"]
+  }
+}

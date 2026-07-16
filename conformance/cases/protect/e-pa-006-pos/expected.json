@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-pa-006-missing-src-pos",
+  "description": "§14.8.7/§44.2 — a `<db>` state block with no `src=` attribute fires E-PA-006. The protect-analyzer needs a database path (or driver URI) to build the shadow DB it validates SQL + protect columns against; without it, it fails closed.",
+  "language-version": "1.0",
+  "spec": "§14.8.7",
+  "source-test": "compiler/src/protect-analyzer.ts (E-PA-006 fire site, step 1: src= presence)",
+  "rationale": "protect-analyzer §step1: a `<db>` block missing the required `src=` attribute cannot resolve a database path, so the shadow-DB build is impossible and E-PA-006 fires (skip-and-return). The confidentiality analysis has no ground truth without a schema source.",
+  "expect": {
+    "codes": ["E-PA-006"],
+    "notCodes": ["E-PA-002", "E-PA-005"]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "server-fn-e-route-003-nonserializable-return-pos",
+  "description": "§12.5 — a server function whose RETURN type is non-JSON-serializable (`snippet`) fires E-ROUTE-003 (error). The return value crosses the server→client network boundary as JSON; a snippet (parameterized markup) cannot be transmitted.",
+  "language-version": "1.0",
+  "spec": "§12.5",
+  "source-test": "compiler/tests/unit/route-wire-serializability.test.js",
+  "rationale": "§12.5 wire-serializability gate (return direction): a `server function` return type resolving to a non-serializable kind cannot be JSON-encoded back to the client, so E-ROUTE-003 fires as a hard error (SPEC §12.5.3 reject, wired at the decl-site type pass).",
+  "expect": {
+    "codes": ["E-ROUTE-003"],
+    "notCodes": ["E-ROUTE-004"],
+    "severity": { "E-ROUTE-003": "error" }
+  }
+}
